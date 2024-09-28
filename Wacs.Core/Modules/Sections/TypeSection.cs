@@ -1,0 +1,26 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using Wacs.Core.Types;
+using Wacs.Core.Utilities;
+
+namespace Wacs.Core
+{
+    public partial class Module
+    {
+        /// <summary>
+        /// @Spec 2.5.2. Types
+        /// </summary>
+        public FunctionType[] Types { get; internal set; }  = null!;
+    }
+    
+    public static partial class ModuleParser
+    {
+        /// <summary>
+        /// @Spec 5.5.4 Type Section
+        /// </summary>
+        private static FunctionType[] ParseTypeSection(BinaryReader reader) => 
+            reader.ParseVector(FunctionType.Parse);
+        
+    }
+}
