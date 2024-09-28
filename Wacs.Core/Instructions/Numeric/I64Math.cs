@@ -1,0 +1,200 @@
+using System;
+using Wacs.Core.Execution;
+using Wacs.Core.OpCodes;
+
+namespace Wacs.Core.Instructions.Numeric
+{
+    public partial class NumericInst
+    {
+        
+        public static readonly NumericInst I64Clz    = new NumericInst(OpCode.I64Clz    , ExecuteI64Clz   );
+        public static readonly NumericInst I64Ctz    = new NumericInst(OpCode.I64Ctz    , ExecuteI64Ctz   );
+        public static readonly NumericInst I64Popcnt = new NumericInst(OpCode.I64Popcnt , ExecuteI64Popcnt);
+        public static readonly NumericInst I64Add    = new NumericInst(OpCode.I64Add    , ExecuteI64Add   );
+        public static readonly NumericInst I64Sub    = new NumericInst(OpCode.I64Sub    , ExecuteI64Sub   );
+        public static readonly NumericInst I64Mul    = new NumericInst(OpCode.I64Mul    , ExecuteI64Mul   );
+        public static readonly NumericInst I64DivS   = new NumericInst(OpCode.I64DivS   , ExecuteI64DivS  );
+        public static readonly NumericInst I64DivU   = new NumericInst(OpCode.I64DivU   , ExecuteI64DivU  );
+        public static readonly NumericInst I64RemS   = new NumericInst(OpCode.I64RemS   , ExecuteI64RemS  );
+        public static readonly NumericInst I64RemU   = new NumericInst(OpCode.I64RemU   , ExecuteI64RemU  );
+        public static readonly NumericInst I64And    = new NumericInst(OpCode.I64And    , ExecuteI64And   );
+        public static readonly NumericInst I64Or     = new NumericInst(OpCode.I64Or     , ExecuteI64Or    );
+        public static readonly NumericInst I64Xor    = new NumericInst(OpCode.I64Xor    , ExecuteI64Xor   );
+        public static readonly NumericInst I64Shl    = new NumericInst(OpCode.I64Shl    , ExecuteI64Shl   );
+        public static readonly NumericInst I64ShrS   = new NumericInst(OpCode.I64ShrS   , ExecuteI64ShrS  );
+        public static readonly NumericInst I64ShrU   = new NumericInst(OpCode.I64ShrU   , ExecuteI64ShrU  );
+        public static readonly NumericInst I64Rotl   = new NumericInst(OpCode.I64Rotl   , ExecuteI64Rotl  );
+        public static readonly NumericInst I64Rotr   = new NumericInst(OpCode.I64Rotr   , ExecuteI64Rotr  );
+        
+        private static void ExecuteI64Add(ExecContext context)
+        {
+            long b = context.Stack.PopI64();
+            long a = context.Stack.PopI64();
+            long result = a + b;
+            context.Stack.PushI64(result);
+        }
+
+        private static void ExecuteI64Clz(ExecContext context)
+        {
+            long value = context.Stack.PopI64();
+            long clz = 0;
+            while (value != 0) 
+            {
+                clz++;
+                value >>= 1;
+            }
+            context.Stack.PushI64(clz);
+        }
+
+        private static void ExecuteI64Ctz(ExecContext context)
+        {
+            long value = context.Stack.PopI64();
+            long ctz = 0;
+            while ((value & 1) == 0) 
+            {
+                ctz++;
+                value >>= 1;
+            }
+            context.Stack.PushI64(ctz);
+        }
+
+        private static void ExecuteI64Popcnt(ExecContext context)
+        {
+            long x = context.Stack.PopI64();
+            long popcnt = 0;
+            while ((x & 1) != 0)
+            {
+                popcnt++;
+                x >>= 1;
+            }
+            context.Stack.PushI64(popcnt);
+        }
+
+        private static void ExecuteI64Sub(ExecContext context)
+        {
+            long b = context.Stack.PopI64();
+            long a = context.Stack.PopI64();
+            long result = a - b;
+            context.Stack.PushI64(result);
+        }
+
+        private static void ExecuteI64Mul(ExecContext context)
+        {
+            long a = context.Stack.PopI64();
+            long b = context.Stack.PopI64();
+            long result = unchecked(a * b);
+            context.Stack.PushI64(result);
+        }
+
+        private static void ExecuteI64DivS(ExecContext context)
+{
+            long dividend = context.Stack.PopI64();
+            long divisor = context.Stack.PopI64();
+            if (divisor == 0) 
+                throw new InvalidOperationException("Cannot divide by zero");
+            long quotient = dividend / divisor;
+            context.Stack.PushI64(quotient);
+    
+        }
+
+        private static void ExecuteI64DivU(ExecContext context)
+        {
+            ulong dividend = context.Stack.PopI64();
+            ulong divisor = context.Stack.PopI64();
+            if (divisor == 0) 
+                throw new InvalidOperationException("Cannot divide by zero");
+            ulong quotient = dividend / divisor;
+            context.Stack.PushI64(quotient);
+        }
+
+        private static void ExecuteI64RemS(ExecContext context)
+        {
+            long dividend = context.Stack.PopI64();
+            long divisor = context.Stack.PopI64();
+            if (divisor == 0) 
+                throw new InvalidOperationException("Cannot divide by zero");
+            long remainder = dividend % divisor;
+            context.Stack.PushI64(remainder);
+        }
+
+        private static void ExecuteI64RemU(ExecContext context)
+        {
+            ulong dividend = context.Stack.PopI64();
+            ulong divisor = context.Stack.PopI64();
+            if (divisor == 0) 
+                throw new InvalidOperationException("Cannot divide by zero");
+            ulong remainder = dividend % divisor;
+            context.Stack.PushI64(remainder);
+        }
+
+        private static void ExecuteI64And(ExecContext context)
+        {
+            ulong a = context.Stack.PopI64();
+            ulong b = context.Stack.PopI64();
+            ulong result = a & b;
+            context.Stack.PushI64(result);
+        }
+
+        private static void ExecuteI64Or(ExecContext context)
+        {
+            ulong a = context.Stack.PopI64();
+            ulong b = context.Stack.PopI64();
+            ulong result = a | b;
+            context.Stack.PushI64(result);
+        }
+
+        private static void ExecuteI64Xor(ExecContext context)
+        {
+            ulong a = context.Stack.PopI64();
+            ulong b = context.Stack.PopI64();
+            ulong result = a ^ b;
+            context.Stack.PushI64(result);
+        }
+
+        private static void ExecuteI64Shl(ExecContext context)
+        {
+            ulong a = context.Stack.PopI64();
+            int b = context.Stack.PopI64() & 0x3F;
+            ulong result = a << b;
+            context.Stack.PushI64((ulong)result);
+        }
+
+        private static void ExecuteI64ShrS(ExecContext context)
+        {
+            long a = context.Stack.PopI64();
+            int b = context.Stack.PopI64() & 0x3F;
+            long result = a >> b;
+            context.Stack.PushI64(result);
+        }
+
+        private static void ExecuteI64ShrU(ExecContext context)
+        {
+            ulong a = context.Stack.PopI64();
+            int b = context.Stack.PopI64()& 0x3F;
+            ulong result = a >> b;
+            context.Stack.PushI64(result);
+        }
+
+        private static void ExecuteI64Rotl(ExecContext context)
+        {
+            ulong x = context.Stack.PopI64();
+            int shiftDistance = context.Stack.PopI64()& 0x3F;
+
+            ulong result = (x << shiftDistance);
+            if (shiftDistance != 0)
+                result |= (x >> (64 - shiftDistance));
+            
+            context.Stack.PushI64(result);
+        }
+
+        private static void ExecuteI64Rotr(ExecContext context)
+        {
+            ulong x = context.Stack.PopI64();
+            int shiftDistance = context.Stack.PopI64() & 0x3F;
+            ulong result = (x >> shiftDistance) | (x << (64 - shiftDistance));
+            context.Stack.PushI64(result);
+        }
+        
+        
+    }
+}
