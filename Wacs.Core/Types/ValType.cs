@@ -93,6 +93,9 @@ namespace Wacs.Core.Types
             ValType.Externref => true,
             _ => false
         };
+
+        public static ResultType SingleResult(this ValType type) => new ResultType(type);
+
     }
         
 

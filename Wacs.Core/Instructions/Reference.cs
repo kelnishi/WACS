@@ -15,9 +15,19 @@ namespace Wacs.Core.Instructions
         
         public ReferenceType Type { get; internal set; }
 
-        public override void Execute(ExecContext context)
-        {
-            throw new NotImplementedException();
+        // @Spec 3.3.2.1. ref.null t
+        // @Spec 4.4.2.1. ref.null t
+        public override void Execute(ExecContext context) {
+            switch (Type) {
+                case ReferenceType.Funcref:
+                    context.Stack.PushFuncref(StackValue.NullFuncRef);
+                    break;
+                case ReferenceType.Externref:
+                    context.Stack.PushExternref(StackValue.NullExternRef);
+                    break;
+                default:
+                    throw new InvalidDataException($"Instruction ref.null had invalid type {Type}"); 
+            }
         }
 
         public override IInstruction Parse(BinaryReader reader)
@@ -32,9 +42,13 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.RefIsNull;
 
+        // @Spec 3.3.2.2. ref.is_null
+        // @Spec 4.4.2.2. ref.is_null
         public override void Execute(ExecContext context)
         {
-            throw new NotImplementedException();
+            StackValue value = context.Stack.PopRefType();
+            int booleanResult = value.IsNullRef ? 1 : 0;
+            context.Stack.PushI32(booleanResult);
         }
 
         public override IInstruction Parse(BinaryReader reader) => this;
@@ -50,9 +64,17 @@ namespace Wacs.Core.Instructions
         
         public UInt32 FunctionIndex { get; internal set; }
         
+        
+        // @Spec 3.3.2.3. ref.func x
+        // @Spec 4.4.2.3. ref.func x
         public override void Execute(ExecContext context)
         {
-            throw new NotImplementedException();
+            context.ValidateContext((ctx) => {
+                if (!(FunctionIndex < ctx.Refs.Count))
+                    throw new InvalidDataException($"Function index {FunctionIndex} is not defined in the context");
+            });
+            
+            context.Stack.PushFuncref(new StackValue(ValType.Funcref, FunctionIndex));
         }
 
         public override IInstruction Parse(BinaryReader reader)

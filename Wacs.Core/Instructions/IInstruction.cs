@@ -1,5 +1,6 @@
 using System.IO;
 using Wacs.Core.Execution;
+using Wacs.Core.OpCodes;
 
 namespace Wacs.Core.Instructions
 {
@@ -8,6 +9,8 @@ namespace Wacs.Core.Instructions
     /// </summary>
     public interface IInstruction
     {
+        public OpCode OpCode { get; }
+        
         /// <summary>
         /// Executes the instruction within the given execution context.
         /// </summary>

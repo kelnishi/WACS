@@ -6,7 +6,7 @@ using Wacs.Core.Utilities;
 namespace Wacs.Core.Types
 {
     /// <summary>
-    /// @Spec 5.3.7 Limits
+    /// @Spec 2.3.7. Limits
     /// Represents the limits of a resizable storage (memory or table) in WebAssembly.
     /// </summary>
     public class Limits
@@ -31,6 +31,9 @@ namespace Wacs.Core.Types
             Maximum = maximum;
         }
         
+        /// <summary>
+        /// @Spec 5.3.7. Limits
+        /// </summary>
         public static Limits Parse(BinaryReader reader) => 
             reader.ReadByte() switch {
                 0x00 => new Limits(reader.ReadLeb128_u32()),

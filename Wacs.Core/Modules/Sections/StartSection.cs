@@ -9,7 +9,7 @@ namespace Wacs.Core
     /// </summary>
     public partial class Module
     {
-        public UInt32 StartIndex { get; internal set; }
+        public UInt32 StartIndex { get; internal set; } = uint.MaxValue;
     }
     
     public static partial class ModuleParser

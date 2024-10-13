@@ -4,6 +4,7 @@ using System.IO;
 using FluentValidation;
 using Wacs.Core.Instructions;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
 {
@@ -45,13 +46,14 @@ namespace Wacs.Core.Types
                 // @Spec 3.2.2.1. typeidx
                 RuleFor(b => b.TypeIndex)
                     .Must((b, index, ctx) =>
-                        index < ((List<FunctionType>)ctx.RootContextData[nameof(Module.Types)]).Count)
+                        index < ctx.GetExecContext().Types.Count)
                     .When(b => b.ValType == ValType.Undefined)
                     .WithMessage("Blocks must have a valid typeidx referenced in Types");
 
-                // @Spec 3.3.3.3. [valtype?]
+                // @Spec 3.2.2.2. [valtype?]
                 RuleFor(b => b.Type)
                     .IsInEnum()
+                    .When(b => b.ValType != ValType.Undefined)
                     .WithMessage("Blocks must have a defined BlockType if not a ValType index");
 
             }

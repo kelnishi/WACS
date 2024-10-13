@@ -45,7 +45,7 @@ namespace Wacs.Core.Instructions.Numeric
                 clz++;
                 value >>= 1;
             }
-            context.Stack.PushI32(clz);
+            context.Stack.PushI32((int)clz);
         }
         
         // @Spec 4.3.2.21 ictz
@@ -58,7 +58,7 @@ namespace Wacs.Core.Instructions.Numeric
                 ctz++;
                 value >>= 1;
             }
-            context.Stack.PushI32(ctz);
+            context.Stack.PushI32((int)ctz);
         }
 
         // @Spec 4.3.2.22 ipopcnt
@@ -71,7 +71,7 @@ namespace Wacs.Core.Instructions.Numeric
                 popcnt++;
                 x >>= 1;
             }
-            context.Stack.PushI32(popcnt);
+            context.Stack.PushI32((int)popcnt);
         }
 
         // @Spec 4.3.2.4. isub
@@ -112,7 +112,7 @@ namespace Wacs.Core.Instructions.Numeric
             if (divisor == 0) 
                 throw new InvalidOperationException("Cannot divide by zero");
             uint quotient = dividend / divisor;
-            context.Stack.PushI32(quotient);
+            context.Stack.PushI32((int)quotient);
         }
 
         // @Spec 4.3.2.8. irem_s
@@ -134,7 +134,7 @@ namespace Wacs.Core.Instructions.Numeric
             if (divisor == 0) 
                 throw new InvalidOperationException("Cannot divide by zero");
             uint remainder = dividend % divisor;
-            context.Stack.PushI32(remainder);
+            context.Stack.PushI32((int)remainder);
         }
 
         // @Spec 4.3.2.11 iand        
@@ -143,7 +143,7 @@ namespace Wacs.Core.Instructions.Numeric
             uint a = context.Stack.PopI32();
             uint b = context.Stack.PopI32();
             uint result = a & b;
-            context.Stack.PushI32(result);
+            context.Stack.PushI32((int)result);
         }
 
         // @Spec 4.3.2.13 ior
@@ -152,7 +152,7 @@ namespace Wacs.Core.Instructions.Numeric
             uint a = context.Stack.PopI32();
             uint b = context.Stack.PopI32();
             uint result = a | b;
-            context.Stack.PushI32(result);
+            context.Stack.PushI32((int)result);
         }
 
         // @Spec 4.3.2.14 ixor
@@ -161,7 +161,7 @@ namespace Wacs.Core.Instructions.Numeric
             uint a = context.Stack.PopI32();
             uint b = context.Stack.PopI32();
             uint result = a ^ b;
-            context.Stack.PushI32(result);
+            context.Stack.PushI32((int)result);
         }
 
         // @Spec 4.3.2.15 ishl
@@ -188,7 +188,7 @@ namespace Wacs.Core.Instructions.Numeric
             uint a = context.Stack.PopI32();
             int b = context.Stack.PopI32()& 0x1F;
             uint result = a >> b;
-            context.Stack.PushI32(result);
+            context.Stack.PushI32((int)result);
         }
 
         // @Spec 4.3.2.18 irotl
@@ -201,7 +201,7 @@ namespace Wacs.Core.Instructions.Numeric
             if (shiftDistance != 0)
                 result |= (x >> (32 - shiftDistance));
             
-            context.Stack.PushI32(result);
+            context.Stack.PushI32((int)result);
         }
 
         // @Spec 4.3.2.19 irotr
@@ -210,7 +210,7 @@ namespace Wacs.Core.Instructions.Numeric
             uint x = context.Stack.PopI32();
             int shiftDistance = context.Stack.PopI32() & 31;
             uint result = (x >> shiftDistance) | (x << (32 - shiftDistance));
-            context.Stack.PushI32(result);
+            context.Stack.PushI32((int)result);
         }
     }
 }
