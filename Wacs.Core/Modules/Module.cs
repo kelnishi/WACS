@@ -84,30 +84,15 @@ namespace Wacs.Core
         /// </summary>
         private static void ParseSection(BinaryReader reader, Module module)
         {
-            var sectionId = reader.ReadByte();
+            var start = reader.BaseStream.Position;
+            var sectionId = (SectionId)reader.ReadByte();
             var payloadLength = reader.ReadLeb128_u32();
-            var payloadEnd = (uint)(reader.BaseStream.Position + payloadLength);
-
+            var payloadStart = reader.BaseStream.Position;
+            var payloadEnd = (uint)(payloadStart + payloadLength);
+            
             // Console.WriteLine($"Section: {(SectionId)sectionId}");
-            
-            // Custom section - skip for now
-            if (sectionId == 0)
-            {
-                //Discard and fast-forward to the end of the section payload
-                var name = reader.ReadUTF8String(); // Name
-                // Console.WriteLine($"   name: {name}");
-                // // Read the bytes from the current position to payloadEnd
-                // byte[] sectionData = reader.ReadBytes((int)(payloadEnd - reader.BaseStream.Position));
-                // // Console.WriteLine(BitConverter.ToString(sectionData).Replace("-", " "));
-                // // Convert section bytes to characters and print
-                // string sectionString = System.Text.Encoding.UTF8.GetString(sectionData);
-                // Console.WriteLine($"    {sectionString}");
-                reader.BaseStream.Position = payloadEnd;
-                return;
-            }
-            
             // @Spec 2.5. Modules
-            switch ((SectionId)sectionId)
+            switch (sectionId)
             {
                 case SectionId.Type: module.Types = ParseTypeSection(reader); break;
                 case SectionId.Import: module.Imports = ParseImportSection(reader); break;
@@ -121,13 +106,41 @@ namespace Wacs.Core
                 case SectionId.DataCount: module.DataCount = ParseDataCountSection(reader); break;
                 case SectionId.Code: PatchFuncSection(module.Funcs, ParseCodeSection(reader)); break;
                 case SectionId.Data: module.Datas = ParseDataSection(reader); break;
+                case SectionId.Custom: break; //Handled below 
                 default:
-                    throw new InvalidDataException($"Unknown section ID: {sectionId} at offset {reader.BaseStream.Position}.");
+                    throw new InvalidDataException($"Unknown section ID: {sectionId} at offset {start}.");
+            }
+            
+            // Custom sections
+            if (sectionId == SectionId.Custom)
+            {
+                var customSectionName = reader.ReadUTF8String();
+                switch (customSectionName)
+                {
+                    case "name":
+                        using (var subreader = reader.GetSubsectionTo((int)payloadEnd)) {
+                            module.Names = ParseNameSection(subreader);
+                        }
+                        break;
+                    default: 
+                        //Skip others
+                        Console.WriteLine($"   name: {customSectionName}");
+                        // // Read the bytes from the current position to payloadEnd
+                        // byte[] sectionData = reader.ReadBytes((int)(payloadEnd - reader.BaseStream.Position));
+                        // // Console.WriteLine(BitConverter.ToString(sectionData).Replace("-", " "));
+                        // // Convert section bytes to characters and print
+                        // string sectionString = System.Text.Encoding.UTF8.GetString(sectionData);
+                        // Console.WriteLine($"    {sectionString}");
+                        
+                        //Discard and fast-forward to the end of the section payload
+                        reader.BaseStream.Position = payloadEnd;
+                        break;
+                }
             }
 
             if (reader.BaseStream.Position != payloadEnd)
             {
-                throw new InvalidDataException($"Section size mismatch. Expected {payloadLength + 4} bytes, but got {payloadEnd - reader.BaseStream.Position}.");
+                throw new InvalidDataException($"Section size mismatch. Expected {payloadLength} bytes, but got {reader.BaseStream.Position - payloadStart}.");
             }
         }
 

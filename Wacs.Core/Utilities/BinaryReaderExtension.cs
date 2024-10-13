@@ -248,6 +248,37 @@ namespace Wacs.Core.Utilities
             }
             return to;
         }
+
+        public static BinaryReader GetSubsectionTo(this BinaryReader reader, int endPosition) => 
+            reader.GetSubsection((int)(endPosition - reader.BaseStream.Position));
         
+        public static BinaryReader GetSubsection(this BinaryReader reader, int length)
+        {
+            var customSectionStream = new MemoryStream();
+            var payloadEnd = reader.BaseStream.Position + length;
+            byte[] buffer = new byte[length];
+            int bytesRead = reader.Read(buffer, 0, length);
+            if (bytesRead != length)
+                throw new InvalidDataException($"BinaryReader did not contain enough bytes for subsection");
+
+            customSectionStream.Write(buffer, 0, bytesRead);
+            customSectionStream.Position = 0;
+            return new BinaryReader(customSectionStream);
+        }
+        
+        public static bool HasMoreBytes(this BinaryReader reader)
+        {
+            var stream = reader.BaseStream;
+
+            // Check if the stream supports seeking
+            if (stream.CanSeek)
+            {
+                // Check if there are more bytes to read
+                return stream.Position < stream.Length;
+            }
+
+            // If the stream does not support seeking, we can't determine
+            return true; // Assuming there might be more bytes, as we can't check
+        }
     }
 }
