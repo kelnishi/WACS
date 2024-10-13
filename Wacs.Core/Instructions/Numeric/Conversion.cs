@@ -67,7 +67,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             uint result = (uint)truncated;
 
-            context.Stack.PushI32(result);
+            context.Stack.PushI32((int)result);
         }
 
         private static void ExecuteI32TruncF64S(ExecContext context)
@@ -97,7 +97,7 @@ namespace Wacs.Core.Instructions.Numeric
                 throw new OverflowException("Integer overflow in i32.trunc_f64_u.");
 
             uint result = (uint)truncated;
-            context.Stack.PushI32(result);
+            context.Stack.PushI32((int)result);
         }
 
         private static void ExecuteI64ExtendI32S(ExecContext context)
@@ -111,7 +111,7 @@ namespace Wacs.Core.Instructions.Numeric
         {
             uint value = context.Stack.PopI32();
             ulong result = value;
-            context.Stack.PushI64(result);
+            context.Stack.PushI64((long)result);
         }
 
         private static void ExecuteI64TruncF32S(ExecContext context)
@@ -141,7 +141,7 @@ namespace Wacs.Core.Instructions.Numeric
                 throw new OverflowException("Integer overflow in i64.trunc_f32_u.");
             
             ulong result = (ulong)truncated;
-            context.Stack.PushI64(result);
+            context.Stack.PushI64((long)result);
         }
 
         private static void ExecuteI64TruncF64S(ExecContext context)
@@ -171,7 +171,7 @@ namespace Wacs.Core.Instructions.Numeric
                 throw new OverflowException("Integer overflow in i64.trunc_f64_u.");
             
             ulong result = (ulong)truncated;
-            context.Stack.PushI64(result);
+            context.Stack.PushI64((long)result);
         }
 
         private static void ExecuteF32ConvertI32S(ExecContext context)

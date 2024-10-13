@@ -22,7 +22,7 @@ namespace Wacs.Core.Instructions.Numeric
             uint result = ((value & ByteSign) != 0) 
                 ? (I32ByteExtend | value) 
                 : (ByteMask & value);
-            context.Stack.PushI32(result);
+            context.Stack.PushI32((int)result);
         }
 
         private const UInt32 ShortSign = 0x8000;
@@ -35,7 +35,7 @@ namespace Wacs.Core.Instructions.Numeric
             uint result = ((value & ShortSign) != 0) 
                 ? (I32ShortExtend | value) 
                 : (ShortMask & value);
-            context.Stack.PushI32(result);
+            context.Stack.PushI32((int)result);
         }
         
         private const UInt64 I64ByteExtend = 0xFFFF_FFFF_FFFF_FF80;
@@ -46,7 +46,7 @@ namespace Wacs.Core.Instructions.Numeric
             ulong result = ((value & ByteSign) != 0) 
                 ? (I64ByteExtend | value) 
                 : (ByteMask & value);
-            context.Stack.PushI64(result);
+            context.Stack.PushI64((long)result);
         }
         
         private const UInt64 I64ShortExtend = 0xFFFF_FFFF_FFFF_8000;
@@ -57,7 +57,7 @@ namespace Wacs.Core.Instructions.Numeric
             ulong result = ((value & ShortSign) != 0) 
                 ? (I64ShortExtend | value) 
                 : (ShortMask & value);
-            context.Stack.PushI64(result);
+            context.Stack.PushI64((long)result);
         }
 
         private const UInt64 WordSign = 0x8000_0000;
@@ -70,7 +70,7 @@ namespace Wacs.Core.Instructions.Numeric
             ulong result = ((value & WordSign) != 0) 
                 ? (WordExtend | value) 
                 : (WordMask & value);
-            context.Stack.PushI64(result);
+            context.Stack.PushI64((long)result);
         }
     }
 }

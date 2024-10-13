@@ -5,7 +5,7 @@ using FluentValidation;
 namespace Wacs.Core.Types
 {
     /// <summary>
-    /// @Spec 5.3.9 Table Types
+    /// @Spec 2.3.9 Table Types
     /// Represents the table type in WebAssembly, defining the element type and its limits.
     /// </summary>
     public class TableType
@@ -23,6 +23,9 @@ namespace Wacs.Core.Types
         private TableType(BinaryReader reader) =>
             (ElementType, Limits) = (ReferenceTypeParser.Parse(reader), Limits.Parse(reader));
         
+        /// <summary>
+        /// @Spec 5.3.9. Table Types
+        /// </summary>
         public static TableType Parse(BinaryReader reader) => new TableType(reader);
 
         /// <summary>

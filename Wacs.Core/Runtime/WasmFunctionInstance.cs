@@ -32,20 +32,21 @@ namespace Wacs.Core.Runtime
         /// <returns>The results returned by the function.</returns>
         public override object[] Invoke(object[] arguments)
         {
-            var context = ExecContext.CreateFunctionContext(this, arguments);
-
-            foreach (var instruction in Definition.Body.Instructions)
-            {
-                instruction.Execute(context);
-            }
-
-            var results = new object[Type.ResultTypes.Length];
-            for (int i = results.Length - 1; i >= 0; i--)
-            {
-                results[i] = context.Stack.Pop();
-            }
-
-            return results;
+            // var context = ExecContext.CreateExecContext(this, arguments);
+            //
+            // foreach (var instruction in Definition.Body.Instructions)
+            // {
+            //     instruction.Execute(context);
+            // }
+            //
+            // var results = new object[Type.ResultType.Length];
+            // for (int i = results.Length - 1; i >= 0; i--)
+            // {
+            //     results[i] = context.Stack.Pop();
+            // }
+            //
+            // return results;
+            return null;
         }
     }
 }

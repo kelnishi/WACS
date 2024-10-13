@@ -12,9 +12,12 @@ namespace Wacs.Core.Instructions
     public class InstDrop : InstructionBase
     {
         public override OpCode OpCode => OpCode.Drop;
+        
+        // @Spec 3.3.4.1. drop
+        // @Spec 4.4.4.1. drop
         public override void Execute(ExecContext context)
         {
-            throw new NotImplementedException();
+            StackValue value = context.Stack.PopAny();
         }
 
         public override IInstruction Parse(BinaryReader reader) => this;
@@ -30,9 +33,39 @@ namespace Wacs.Core.Instructions
         public bool WithTypes { get; internal set; } = false;
         public ValType[] Types { get; internal set; } = Array.Empty<ValType>();
         
+        // @Spec 3.3.4.2. select
+        // @Spec 4.4.4.2. select
         public override void Execute(ExecContext context)
         {
-            throw new NotImplementedException();
+            int c = context.Stack.PopI32();
+            if (WithTypes)
+            {
+                if (Types.Length != 1)
+                    throw new InvalidDataException($"Select instruction type must be of length 1");
+                
+                StackValue val2 = context.Stack.PopAny();
+                StackValue val1 = context.Stack.PopAny();
+                
+                if (val1.Type != Types[0])
+                    throw new InvalidProgramException(
+                        $"Select instruction expected type on the stack: {val1.Type} == {Types[0]}");
+                
+                if (val2.Type != Types[0])
+                    throw new InvalidProgramException(
+                        $"Select instruction expected type on the stack: {val2.Type} == {Types[0]}");
+                
+                context.Stack.PushValue(c != 0 ? val1 : val2);
+            }
+            else
+            {
+                StackValue val2 = context.Stack.PopAny();
+                StackValue val1 = context.Stack.PopAny();
+                if (val1.Type != val2.Type)
+                    throw new InvalidProgramException(
+                        $"Select instruction expected matching types on the stack: {val1.Type} == {val2.Type}");
+                
+                context.Stack.PushValue(c != 0 ? val1 : val2);
+            }
         }
 
         public InstSelect(bool withTypes = false) => WithTypes = withTypes;

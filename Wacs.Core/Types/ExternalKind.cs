@@ -31,6 +31,9 @@ namespace Wacs.Core.Types
 
     public static class ExternalKindParser
     {
+        /// <summary>
+        /// @Spec 5.5.5 Import Section
+        /// </summary>
         public static ExternalKind Parse(BinaryReader reader) =>
             (ExternalKind)(byte)reader.ReadByte() switch
             {

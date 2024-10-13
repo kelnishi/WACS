@@ -1,6 +1,8 @@
 using System.IO;
+using FluentValidation;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core
 {
@@ -23,7 +25,34 @@ namespace Wacs.Core
             private Global(BinaryReader reader) =>
                 (Type, Initializer) = (GlobalType.Parse(reader), Expression.Parse(reader));
 
+            /// <summary>
+            /// @Spec 5.5.9. Global Section
+            /// </summary>
             public static Global Parse(BinaryReader reader) => new Global(reader);
+
+            /// <summary>
+            /// @Spec 3.4.4.1 Globals
+            /// </summary>
+            public class Validator : AbstractValidator<Global>
+            {
+                public Validator()
+                {
+                    RuleFor(g => g.Type).SetValidator(new GlobalType.Validator());
+                    RuleFor(g => g.Initializer)
+                        .Custom((expr, ctx) =>
+                        {
+                            var g = ctx.InstanceToValidate;
+                            var exprValidator = new Expression.Validator(g.Type.ResultType);
+                            var subContext = ctx.GetSubContext(expr);
+                            var result = exprValidator.Validate(subContext);
+                            foreach (var error in result.Errors)
+                            {
+                                ctx.AddFailure($"Sub.{error.PropertyName}", error.ErrorMessage);
+                            }
+                        });
+                }
+            }
+            
         }
     }
     

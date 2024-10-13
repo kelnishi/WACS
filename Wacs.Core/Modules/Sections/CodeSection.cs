@@ -40,11 +40,12 @@ namespace Wacs.Core
             private CodeDesc(UInt32 size, FuncLocalsBody code) => (Size, Code) = (size, code);
             public static CodeDesc Parse(BinaryReader reader)
             {
+                uint size = reader.ReadLeb128_u32();
                 var start = reader.BaseStream.Position;
-                var code = new CodeDesc(reader.ReadLeb128_u32(), FuncLocalsBody.Parse(reader));
-                var end = start + code.Size;
+                var code = new CodeDesc(size, FuncLocalsBody.Parse(reader));
+                var end = start + size;
                 if (reader.BaseStream.Position != end)
-                    throw new InvalidDataException($"Malformed code size: expected {code.Size:X8} bytes, but got {(int)(reader.BaseStream.Position - start):X8}");
+                    throw new InvalidDataException($"Malformed code size: expected {code.Size:x} bytes, but got {(int)(reader.BaseStream.Position - start):x} at {reader.BaseStream.Position:x}");
                 return code;
             }
         }

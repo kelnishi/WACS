@@ -4,6 +4,7 @@ using System.IO;
 using FluentValidation;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core
 {
@@ -56,7 +57,7 @@ namespace Wacs.Core
                         // Only checks that the FunctionType exists, validation happens on the section
                         RuleFor(desc => desc.Index)
                             .Must((desc, index, ctx) =>
-                                index < ((List<FunctionType>)ctx.RootContextData[nameof(Module.Types)]).Count);
+                                index < ctx.GetExecContext().Types.Count);
                     }
                 }
             }

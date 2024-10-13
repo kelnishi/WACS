@@ -19,11 +19,14 @@ namespace Wacs.Core.Types
         /// <summary>
         /// The vec of return types for the function.
         /// </summary>
-        public ResultType ResultTypes { get; internal set; }
+        public ResultType ResultType { get; internal set; }
 
-        private FunctionType(ResultType parameterTypes, ResultType resultTypes) =>
-            (ParameterTypes, ResultTypes) = (parameterTypes, resultTypes);
+        private FunctionType(ResultType parameterTypes, ResultType resultType) =>
+            (ParameterTypes, ResultType) = (parameterTypes, resultType);
 
+        /// <summary>
+        /// @Spec 5.3.6. Function Types
+        /// </summary>
         public static FunctionType Parse(BinaryReader reader) =>
             reader.ReadByte() switch {
                 0x60 => new FunctionType(ResultType.Parse(reader), ResultType.Parse(reader)),

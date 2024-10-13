@@ -1,9 +1,13 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FluentValidation;
+using Wacs.Core.Execution;
 using Wacs.Core.Instructions;
+using Wacs.Core.OpCodes;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
 {
@@ -29,6 +33,18 @@ namespace Wacs.Core.Types
             Instructions = instructions;
             
         public static Expression Empty => new Expression();
+
+        public bool IsConstant() =>
+            !Instructions.Any(inst => inst.OpCode switch {
+                OpCode.I32Const => false,
+                OpCode.I64Const => false,
+                OpCode.F32Const => false,
+                OpCode.F64Const => false,
+                OpCode.GlobalGet => false,
+                OpCode.RefNull => false,
+                OpCode.RefFunc => false,
+                _ => true
+            });
         
         /// <summary>
         /// @Spec 5.4.9 Expressions
@@ -41,10 +57,46 @@ namespace Wacs.Core.Types
         /// </summary>
         public class Validator : AbstractValidator<Expression>
         {
-            public Validator()
+            public ResultType ResultType { get; }
+            private ValType StackType { get; set; }
+            public Validator(ResultType resultType)
             {
+                ResultType = resultType;
                 // @Spec 3.3.9. Instruction Sequences
-                //TODO
+                RuleForEach(e => e.Instructions)
+                    .Custom((inst, ctx) =>
+                    {
+                        try
+                        {
+                            inst.Execute(ctx.GetExecContext());
+                            StackValue resultVal = ctx.GetExecContext().Stack.Peek();
+                            StackType = resultVal.Type;
+                        }
+                        catch (InvalidProgramException exc)
+                        {
+                            ctx.AddFailure(exc.Message);
+                        }
+                        catch (InvalidDataException exc)
+                        {
+                            ctx.AddFailure(exc.Message);
+                        }
+                        catch (NotImplementedException exc)
+                        {
+                            ctx.AddFailure($"WASM Instruction `{inst.OpCode.GetMnemonic()}` is not implemented.");
+                        }
+                    });
+                RuleFor(e => e).Custom((e, ctx) =>
+                {
+                    var execContext = ctx.GetExecContext();
+                    foreach (var eType in ResultType.Types)
+                    {
+                        var rValue = execContext.Stack.PopAny();
+                        if (rValue.Type != eType)
+                        {
+                            ctx.AddFailure($"Expression Result type {rValue.Type} did not match expected {eType}");
+                        }
+                    }
+                });
             }
         }
     }

@@ -19,6 +19,8 @@ namespace Wacs.Core.Types
         /// </summary>
         public ValType ContentType { get; set; }
 
+        public ResultType ResultType => ContentType.SingleResult();
+
         private GlobalType(ValType valtype, Mutability mut) =>
             (ContentType, Mutability) = (valtype, mut);
 

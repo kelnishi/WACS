@@ -4,7 +4,7 @@ using FluentValidation;
 namespace Wacs.Core.Types
 {
     /// <summary>
-    /// @Spec 5.3.8 Memory Types
+    /// @Spec 2.3.8 Memory Types
     /// Represents the memory type in WebAssembly, defining its limits.
     /// </summary>
     public class MemoryType
@@ -21,7 +21,9 @@ namespace Wacs.Core.Types
         private MemoryType(Limits limits) =>
             Limits = limits;
 
-        
+        /// <summary>
+        /// @Spec 5.3.8. Memory Types
+        /// </summary>
         public static MemoryType Parse(BinaryReader reader) => new MemoryType(Limits.Parse(reader));
 
         /// <summary>

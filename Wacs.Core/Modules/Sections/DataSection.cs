@@ -11,7 +11,7 @@ namespace Wacs.Core
         /// </summary>
         public Data[] Datas { get; internal set; } = null!;
 
-        public uint DataCount { get; internal set; }
+        public uint DataCount { get; internal set; } = 0;
         
         /// <summary>
         /// @Spec 2.5.8. Data Segments

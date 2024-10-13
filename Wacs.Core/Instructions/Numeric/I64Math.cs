@@ -104,7 +104,7 @@ namespace Wacs.Core.Instructions.Numeric
             if (divisor == 0) 
                 throw new InvalidOperationException("Cannot divide by zero");
             ulong quotient = dividend / divisor;
-            context.Stack.PushI64(quotient);
+            context.Stack.PushI64((long)quotient);
         }
 
         private static void ExecuteI64RemS(ExecContext context)
@@ -124,7 +124,7 @@ namespace Wacs.Core.Instructions.Numeric
             if (divisor == 0) 
                 throw new InvalidOperationException("Cannot divide by zero");
             ulong remainder = dividend % divisor;
-            context.Stack.PushI64(remainder);
+            context.Stack.PushI64((long)remainder);
         }
 
         private static void ExecuteI64And(ExecContext context)
@@ -132,7 +132,7 @@ namespace Wacs.Core.Instructions.Numeric
             ulong a = context.Stack.PopI64();
             ulong b = context.Stack.PopI64();
             ulong result = a & b;
-            context.Stack.PushI64(result);
+            context.Stack.PushI64((long)result);
         }
 
         private static void ExecuteI64Or(ExecContext context)
@@ -140,7 +140,7 @@ namespace Wacs.Core.Instructions.Numeric
             ulong a = context.Stack.PopI64();
             ulong b = context.Stack.PopI64();
             ulong result = a | b;
-            context.Stack.PushI64(result);
+            context.Stack.PushI64((long)result);
         }
 
         private static void ExecuteI64Xor(ExecContext context)
@@ -148,7 +148,7 @@ namespace Wacs.Core.Instructions.Numeric
             ulong a = context.Stack.PopI64();
             ulong b = context.Stack.PopI64();
             ulong result = a ^ b;
-            context.Stack.PushI64(result);
+            context.Stack.PushI64((long)result);
         }
 
         private static void ExecuteI64Shl(ExecContext context)
@@ -156,7 +156,7 @@ namespace Wacs.Core.Instructions.Numeric
             ulong a = context.Stack.PopI64();
             int b = context.Stack.PopI64() & 0x3F;
             ulong result = a << b;
-            context.Stack.PushI64((ulong)result);
+            context.Stack.PushI64((long)result);
         }
 
         private static void ExecuteI64ShrS(ExecContext context)
@@ -172,7 +172,7 @@ namespace Wacs.Core.Instructions.Numeric
             ulong a = context.Stack.PopI64();
             int b = context.Stack.PopI64()& 0x3F;
             ulong result = a >> b;
-            context.Stack.PushI64(result);
+            context.Stack.PushI64((long)result);
         }
 
         private static void ExecuteI64Rotl(ExecContext context)
@@ -184,7 +184,7 @@ namespace Wacs.Core.Instructions.Numeric
             if (shiftDistance != 0)
                 result |= (x >> (64 - shiftDistance));
             
-            context.Stack.PushI64(result);
+            context.Stack.PushI64((long)result);
         }
 
         private static void ExecuteI64Rotr(ExecContext context)
@@ -192,7 +192,7 @@ namespace Wacs.Core.Instructions.Numeric
             ulong x = context.Stack.PopI64();
             int shiftDistance = context.Stack.PopI64() & 0x3F;
             ulong result = (x >> shiftDistance) | (x << (64 - shiftDistance));
-            context.Stack.PushI64(result);
+            context.Stack.PushI64((long)result);
         }
         
         
