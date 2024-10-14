@@ -14,7 +14,9 @@ namespace Wacs.Core.Execution
 
     public class ExecContext
     {
-        public IOperandStack Stack { get; private set; } = null!;
+        public IOperandStack OpStack { get; private set; } = null!;
+        
+        
 
         public TypesSpace Types { get; private set; } = null!;
         
@@ -30,7 +32,7 @@ namespace Wacs.Core.Execution
         
         // public List<Module.Data> Datas { get; private set; } = null!;
 
-        public List<FunctionRef> Refs { get; private set; } = null!;
+        // public List<FunctionRef> Refs { get; private set; } = null!;
 
         //TODO Move this into a frame or store?
         public List<StackValue> Locals { get; private set; } = new List<StackValue>();
@@ -49,8 +51,8 @@ namespace Wacs.Core.Execution
             
             Elements = module.Elements.ToList(),
             // Datas = module.Datas.ToList(),
-            Refs = BuildFunctionRefs(module),
-            Stack = new ExecStack(),
+            // Refs = BuildFunctionRefs(module),
+            OpStack = new ExecStack(),
         };
 
         /// <summary>
@@ -67,35 +69,10 @@ namespace Wacs.Core.Execution
             
             Elements = module.Elements.ToList(),
             // Datas = module.Datas.ToList(),
-            Refs = BuildFunctionRefs(module),
+            // Refs = BuildFunctionRefs(module),
             Validates = true,
-            Stack = new ValidationStack(),
+            OpStack = new ValidationStack(),
         };
-
-        private static List<FunctionRef> BuildFunctionRefs(Module module)
-        {
-            var result = new List<FunctionRef>();
-
-            foreach (var import in module.Imports)
-            {
-                if (import.Desc is Module.ImportDesc.FuncDesc fdesc)
-                {
-                    result.Add(new FunctionRef());
-                }
-            }
-
-            foreach (var func in module.Funcs)
-            {
-                result.Add(new FunctionRef());
-            }
-
-            // foreach (var table in module.Tables)
-            // {
-            //     
-            // }
-
-            return result;
-        }
         
         public void SetLocals(params IEnumerable<ValType>[] types) =>
             Locals = types

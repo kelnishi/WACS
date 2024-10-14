@@ -6,9 +6,9 @@ using Wacs.Core.Execution;
 
 namespace Wacs.Core.Validation
 {
-    public static class ValidationUtility
+    public static class ValidationContextExtension
     {
-        public static Execution.ExecContext GetExecContext<T>(this ValidationContext<T> context)
+        public static ExecContext GetExecContext<T>(this ValidationContext<T> context)
             where T : class
             => context.RootContextData.TryGetValue(nameof(ExecContext), out var execContextData) && execContextData is ExecContext execContext
                 ? execContext
@@ -24,19 +24,5 @@ namespace Wacs.Core.Validation
                     [nameof(ExecContext)] = parent.GetExecContext()
                 }
             };
-        
-        
-        public static ValidationResult ValidateModule(Module module)
-        {
-            var context = new ValidationContext<Module>(module) {
-                RootContextData = {
-                    [nameof(ExecContext)] = ExecContext.CreateValidationContext(module)
-                }
-            };
-            
-            var validator = new Module.Validator();
-            return validator.Validate(context);
-        }
     }
-
 }

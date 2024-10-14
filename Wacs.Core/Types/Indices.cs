@@ -24,7 +24,7 @@ namespace Wacs.Core.Types
         public static explicit operator FuncIdx(int value) => new FuncIdx(value);
         public static explicit operator FuncIdx(uint value) => new FuncIdx((int)value);
 
-        public static FuncIdx Default = new FuncIdx(-1);
+        public static readonly FuncIdx Default = new FuncIdx(-1);
     }
 
     public readonly struct TableIdx : IEquatable<Index>, IIndex

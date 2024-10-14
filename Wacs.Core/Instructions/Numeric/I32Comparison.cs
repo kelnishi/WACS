@@ -19,86 +19,86 @@ namespace Wacs.Core.Instructions.Numeric
         
         private static void ExecuteI32Eqz(ExecContext context)
         {
-            int i = context.Stack.PopI32();
+            int i = context.OpStack.PopI32();
             int result = (i == 0) ? 1 : 0;
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         private static void ExecuteI32Eq(ExecContext context)
         {
-            int a = context.Stack.PopI32();
-            int b = context.Stack.PopI32();
+            int a = context.OpStack.PopI32();
+            int b = context.OpStack.PopI32();
             int result = (a == b) ? 1 : 0;
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         private static void ExecuteI32Ne(ExecContext context)
         {
-            int a = context.Stack.PopI32();
-            int b = context.Stack.PopI32();
+            int a = context.OpStack.PopI32();
+            int b = context.OpStack.PopI32();
             int result = (a != b) ? 1 : 0;
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         private static void ExecuteI32LtS(ExecContext context)
         {
-            int a = context.Stack.PopI32();
-            int b = context.Stack.PopI32();
+            int a = context.OpStack.PopI32();
+            int b = context.OpStack.PopI32();
             int result = ((a < b) ? 1 : 0);
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteI32LtU(ExecContext context)
         {
-            uint a = context.Stack.PopI32();
-            uint b = context.Stack.PopI32();
+            uint a = context.OpStack.PopI32();
+            uint b = context.OpStack.PopI32();
             int result = ((a < b) ? 1 : 0);
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteI32GtS(ExecContext context)
         {
-            int a = context.Stack.PopI32();
-            int b = context.Stack.PopI32();
+            int a = context.OpStack.PopI32();
+            int b = context.OpStack.PopI32();
             int result = ((a > b) ? 1 : 0);
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteI32GtU(ExecContext context)
         {
-            uint a = context.Stack.PopI32();
-            uint b = context.Stack.PopI32();
+            uint a = context.OpStack.PopI32();
+            uint b = context.OpStack.PopI32();
             int result = ((a > b) ? 1 : 0);
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteI32LeS(ExecContext context)
         {
-            int a = context.Stack.PopI32();
-            int b = context.Stack.PopI32();
+            int a = context.OpStack.PopI32();
+            int b = context.OpStack.PopI32();
             int result = ((a <= b) ? 1 : 0);
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteI32LeU(ExecContext context)
         {
-            uint a = context.Stack.PopI32();
-            uint b = context.Stack.PopI32();
+            uint a = context.OpStack.PopI32();
+            uint b = context.OpStack.PopI32();
             int result = ((a <= b) ? 1 : 0);
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteI32GeS(ExecContext context)
         {
-            int a = context.Stack.PopI32();
-            int b = context.Stack.PopI32();
+            int a = context.OpStack.PopI32();
+            int b = context.OpStack.PopI32();
             int result = ((a >= b) ? 1 : 0);
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteI32GeU(ExecContext context)
         {
-            uint a = context.Stack.PopI32();
-            uint b = context.Stack.PopI32();
+            uint a = context.OpStack.PopI32();
+            uint b = context.OpStack.PopI32();
             int result = ((a >= b) ? 1 : 0);
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
     }
 }
