@@ -65,7 +65,7 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             Block = Block.Parse(reader);
-            Block.Instructions = reader.ParseN(InstructionParser.Parse);
+            Block.Instructions = reader.ParseUntilNull(InstructionParser.Parse);
             return this;
         }
     }
@@ -89,7 +89,7 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             Block = Block.Parse(reader);
-            Block.Instructions = reader.ParseN(InstructionParser.Parse);
+            Block.Instructions = reader.ParseUntilNull(InstructionParser.Parse);
             return this;
         }
     }
@@ -114,7 +114,7 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             IfBlock = Block.Parse(reader);
-            var instructions= reader.ParseN(InstructionParser.Parse);
+            var instructions= reader.ParseUntilNull(InstructionParser.Parse);
             int elseInst = instructions.FindIndex(inst=> inst is InstElse);
             if (elseInst == -1)
             {
@@ -162,7 +162,7 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.Br;
         
-        public uint LabelIndex { get; internal set; }
+        public LabelIdx LabelIndex { get; internal set; }
 
         // @Spec 4.4.8.6. br
         public override void Execute(ExecContext context)
@@ -174,7 +174,7 @@ namespace Wacs.Core.Instructions
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader) {
-            LabelIndex = reader.ReadLeb128_u32();
+            LabelIndex = (LabelIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
@@ -184,7 +184,7 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.BrIf;
         
-        public uint LabelIndex { get; internal set; }
+        public LabelIdx LabelIndex { get; internal set; }
 
         // @Spec 4.4.8.7. br_if
         public override void Execute(ExecContext context)
@@ -196,7 +196,7 @@ namespace Wacs.Core.Instructions
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader) {
-            LabelIndex = reader.ReadLeb128_u32();
+            LabelIndex = (LabelIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
@@ -206,8 +206,8 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.BrTable;
         
-        public uint[] LabelIndices { get; internal set; } = null!;
-        public uint LabelIndex { get; internal set; }
+        public LabelIdx[] LabelIndices { get; internal set; } = null!;
+        public LabelIdx LabelIndex { get; internal set; }
 
         // @Spec 4.4.8.8. br_table
         public override void Execute(ExecContext context)
@@ -215,8 +215,8 @@ namespace Wacs.Core.Instructions
             throw new NotImplementedException();
         }
 
-        private static uint ParseLabelIndex(BinaryReader reader) =>
-            reader.ReadLeb128_u32();
+        private static LabelIdx ParseLabelIndex(BinaryReader reader) =>
+            (LabelIdx)reader.ReadLeb128_u32();
         
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
@@ -224,7 +224,7 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             LabelIndices = reader.ParseVector(ParseLabelIndex);
-            LabelIndex = reader.ReadLeb128_u32();
+            LabelIndex = (LabelIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
@@ -253,7 +253,7 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.Call;
         
-        public uint FunctionIndex { get; internal set; }
+        public FuncIdx FunctionIndex { get; internal set; }
 
         // @Spec 4.4.8.10. call
         public override void Execute(ExecContext context)
@@ -266,7 +266,7 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader)
         {
-            FunctionIndex = reader.ReadLeb128_u32();
+            FunctionIndex = (FuncIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
@@ -276,8 +276,8 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.CallIndirect;
         
-        public uint TypeIndex { get; internal set; }
-        public uint TableIndex { get; internal set; }
+        public TypeIdx TypeIndex { get; internal set; }
+        public TableIdx TableIndex { get; internal set; }
 
         // @Spec 4.4.8.11. call_indirect
         public override void Execute(ExecContext context)
@@ -290,8 +290,8 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader)
         {
-            TypeIndex = reader.ReadLeb128_u32();
-            TableIndex = reader.ReadLeb128_u32();
+            TypeIndex = (TypeIdx)reader.ReadLeb128_u32();
+            TableIndex = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
     }

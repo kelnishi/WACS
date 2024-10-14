@@ -147,15 +147,15 @@ namespace Wacs.Core
         //TODO Warn for missing sections?
         private static void FinalizeModule(Module module)
         {
-            module.Types = module.Types ?? new FunctionType[0];
-            module.Imports = module.Imports ?? new Module.Import[0];
+            module.Types = module.Types ?? new List<FunctionType>();
+            module.Imports = module.Imports ?? Array.Empty<Module.Import>();
             module.Funcs = module.Funcs ?? new List<Module.Function>();
-            module.Tables = module.Tables ?? new TableType[0];
-            module.Memories = module.Memories ?? new MemoryType[0];
-            module.Globals = module.Globals ?? new Module.Global[0];
-            module.Exports = module.Exports ?? new Module.Export[0];
-            module.Elements = module.Elements ?? new Module.ElementSegment[0];
-            module.Datas = module.Datas ?? new Module.Data[0];
+            module.Tables = module.Tables ?? Array.Empty<TableType>();
+            module.Memories = module.Memories ?? Array.Empty<MemoryType>();
+            module.Globals = module.Globals ?? Array.Empty<Module.Global>();
+            module.Exports = module.Exports ?? Array.Empty<Module.Export>();
+            module.Elements = module.Elements ?? Array.Empty<Module.ElementSegment>();
+            module.Datas = module.Datas ?? Array.Empty<Module.Data>();
         }
     }
 }

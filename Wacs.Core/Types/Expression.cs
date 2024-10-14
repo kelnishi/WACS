@@ -50,7 +50,7 @@ namespace Wacs.Core.Types
         /// @Spec 5.4.9 Expressions
         /// </summary>
         public static Expression Parse(BinaryReader reader) =>
-            new Expression(reader.ParseN(InstructionParser.Parse));
+            new Expression(reader.ParseUntilNull(InstructionParser.Parse));
 
         /// <summary>
         /// @Spec 3.3.10. Expressions

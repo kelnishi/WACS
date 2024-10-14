@@ -12,7 +12,7 @@ namespace Wacs.Core.Types
     {
         public BlockType Type { get; internal set; }
 
-        public ValType ValType => Type switch {
+        private ValType ValType => Type switch {
             BlockType.I32 => ValType.I32,
             BlockType.I64 => ValType.I64,
             BlockType.F32 => ValType.F32,
@@ -25,11 +25,11 @@ namespace Wacs.Core.Types
         
         public bool IsEmpty => Type == BlockType.Empty;
 
-        public uint TypeIndex => !Enum.IsDefined(typeof(BlockType), Type) ? (uint)Type : 0;
+        public TypeIdx TypeIndex => !Enum.IsDefined(typeof(BlockType), Type) ? (TypeIdx)(int)Type : (TypeIdx)0;
 
         public List<IInstruction> Instructions { get; set; } = new List<IInstruction>();
 
-        public Block(long v) => Type = (BlockType)v;
+        private Block(long v) => Type = (BlockType)v;
         public Block(BlockType bt) => Type = bt;
 
         public static Block Empty = new Block(BlockType.Empty);
@@ -46,7 +46,7 @@ namespace Wacs.Core.Types
                 // @Spec 3.2.2.1. typeidx
                 RuleFor(b => b.TypeIndex)
                     .Must((b, index, ctx) =>
-                        index < ctx.GetExecContext().Types.Count)
+                        ctx.GetExecContext().Types.Contains(index))
                     .When(b => b.ValType == ValType.Undefined)
                     .WithMessage("Blocks must have a valid typeidx referenced in Types");
 

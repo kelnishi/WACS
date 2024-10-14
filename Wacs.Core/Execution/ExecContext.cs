@@ -16,7 +16,7 @@ namespace Wacs.Core.Execution
     {
         public IOperandStack Stack { get; private set; } = null!;
 
-        public List<FunctionType> Types { get; private set; } = null!;
+        public TypesSpace Types { get; private set; } = null!;
         
         public List<Module.Function> Funcs { get; private set; } = null!;
         
@@ -40,7 +40,7 @@ namespace Wacs.Core.Execution
 
         public static ExecContext CreateExecContext(Module module) => new ExecContext {
             Stack = new ExecStack(),
-            Types = module.Types.ToList(),
+            Types = new TypesSpace(module.Types),
             Funcs = module.Funcs,
             Tables = module.Tables.ToList(),
             Mems = module.Mems,
@@ -55,7 +55,7 @@ namespace Wacs.Core.Execution
         /// </summary>
         public static ExecContext CreateValidationContext(Module module) => new ExecContext {
             Stack = new ValidationStack(),
-            Types = module.Types.ToList(),
+            Types = new TypesSpace(module.Types),
             Funcs = module.Funcs,
             Tables = module.Tables.ToList(),
             Mems = module.Mems,

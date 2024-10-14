@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core
@@ -9,7 +10,7 @@ namespace Wacs.Core
     /// </summary>
     public partial class Module
     {
-        public UInt32 StartIndex { get; internal set; } = uint.MaxValue;
+        public FuncIdx StartIndex { get; internal set; } = FuncIdx.Default;
     }
     
     public static partial class ModuleParser
@@ -17,8 +18,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 5.5.11 Start Section
         /// </summary>
-        private static UInt32 ParseStartSection(BinaryReader reader) =>
-            reader.ReadLeb128_u32();
-
+        private static FuncIdx ParseStartSection(BinaryReader reader) =>
+            (FuncIdx)reader.ReadLeb128_u32();
     }
 }
