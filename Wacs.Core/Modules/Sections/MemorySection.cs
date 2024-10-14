@@ -11,9 +11,8 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.5. Memories
         /// </summary>
-        public MemoryType[] Memories { get; internal set; } = null!;
+        public List<MemoryType> Memories { get; internal set; } = null!;
 
-        public List<MemoryType> Mems => Memories.ToList();
     }
     
     public static partial class ModuleParser
@@ -21,7 +20,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 5.5.8 Memory Section
         /// </summary>
-        private static MemoryType[] ParseMemorySection(BinaryReader reader) =>
-            reader.ParseVector(MemoryType.Parse);
+        private static List<MemoryType> ParseMemorySection(BinaryReader reader) =>
+            reader.ParseList(MemoryType.Parse);
     }
 }

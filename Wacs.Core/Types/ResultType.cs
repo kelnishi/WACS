@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
@@ -11,6 +12,8 @@ namespace Wacs.Core.Types
         public ValType[] Types { get; set; } = null!;
         
         public uint Length => (uint)(Types?.Length?? 0);
+    
+        public string ToNotation() => $"[{string.Join(" ",Types)}]";
         
         private ResultType(BinaryReader reader) =>
             Types = reader.ParseVector(ValueTypeParser.Parse);

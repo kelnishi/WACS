@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using FluentValidation;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
@@ -14,6 +16,34 @@ namespace Wacs.Core
         /// @Spec 2.5.11. Imports
         /// </summary>
         public Import[] Imports { get; internal set; } = null!;
+
+        public ReadOnlyCollection<Function> ImportedFunctions =>
+            Imports
+                .Select(import => import.Desc as ImportDesc.FuncDesc)
+                .Where(funcDesc => funcDesc != null)
+                .Select(funcDesc => new Function { TypeIndex = funcDesc!.TypeIndex, IsImport = true })
+                .ToList().AsReadOnly(); 
+        
+        public ReadOnlyCollection<TableType> ImportedTables =>
+            Imports
+                .Select(import => import.Desc as ImportDesc.TableDesc)
+                .Where(tableDesc => tableDesc != null)
+                .Select(tableDesc => tableDesc!.TableDef)
+                .ToList().AsReadOnly(); 
+        
+        public ReadOnlyCollection<MemoryType> ImportedMems =>
+            Imports
+                .Select(import => import.Desc as ImportDesc.MemDesc)
+                .Where(memDesc => memDesc != null)
+                .Select(memDesc => memDesc!.MemDef)
+                .ToList().AsReadOnly(); 
+        
+        public ReadOnlyCollection<Global> ImportedGlobals =>
+            Imports
+                .Select(import => import.Desc as ImportDesc.GlobalDesc)
+                .Where(globDesc => globDesc != null)
+                .Select(globDesc => new Global(globDesc!.GlobalDef))
+                .ToList().AsReadOnly(); 
         
         /// <summary>
         /// @Spec 2.5.11. Imports
@@ -28,8 +58,7 @@ namespace Wacs.Core
             {
                 public Validator()
                 {
-                    RuleFor(i => i.Desc).SetInheritanceValidator(v =>
-                    {
+                    RuleFor(i => i.Desc).SetInheritanceValidator(v => {
                         v.Add(new ImportDesc.FuncDesc.Validator());
                         v.Add(new ImportDesc.TableDesc.Validator());
                         v.Add(new ImportDesc.MemDesc.Validator());
@@ -43,7 +72,7 @@ namespace Wacs.Core
         {
             public class FuncDesc : ImportDesc
             {
-                public TypeIdx FunctionIndex { get; internal set; }
+                public TypeIdx TypeIndex { get; internal set; }
                 
                 /// <summary>
                 /// @Spec 3.2.7.1. func functype
@@ -51,16 +80,15 @@ namespace Wacs.Core
                 public class Validator : AbstractValidator<FuncDesc> {
                     public Validator() {
                         // Only checks that the FunctionType exists, validation happens on the section
-                        RuleFor(desc => desc.FunctionIndex)
-                            .Must((desc, index, ctx) =>
-                                ctx.GetExecContext().Types.Contains(index));
+                        RuleFor(desc => desc.TypeIndex)
+                            .Must((desc, index, ctx) => ctx.GetExecContext().Types.Contains(index));
                     }
                 }
             }
 
             public class TableDesc : ImportDesc
             {
-                public TableType TableDef { get; internal set; }
+                public TableType TableDef { get; internal set; } = null!;
                 
                 /// <summary>
                 /// @Spec 3.2.7.2. table tabletype
@@ -75,7 +103,7 @@ namespace Wacs.Core
 
             public class MemDesc : ImportDesc
             {
-                public MemoryType MemDef  { get; internal set; }
+                public MemoryType MemDef { get; internal set; } = null!;
                 
                 /// <summary>
                 /// @Spec 3.2.7.3. mem memtype
@@ -90,7 +118,7 @@ namespace Wacs.Core
 
             public class GlobalDesc : ImportDesc
             {
-                public GlobalType GlobalDef { get; internal set; }
+                public GlobalType GlobalDef { get; internal set; } = null!;
                 
                 /// <summary>
                 /// @Spec 3.2.7.4. global globaltype
@@ -109,7 +137,7 @@ namespace Wacs.Core
     {
         private static Module.ImportDesc ParseImportDesc(BinaryReader reader) => 
             ExternalKindParser.Parse(reader) switch {
-                ExternalKind.Function => new Module.ImportDesc.FuncDesc { FunctionIndex = (TypeIdx)reader.ReadLeb128_u32() },
+                ExternalKind.Function => new Module.ImportDesc.FuncDesc { TypeIndex = (TypeIdx)reader.ReadLeb128_u32() },
                 ExternalKind.Table => new Module.ImportDesc.TableDesc { TableDef = TableType.Parse(reader) },
                 ExternalKind.Memory => new Module.ImportDesc.MemDesc { MemDef = MemoryType.Parse(reader) },
                 ExternalKind.Global => new Module.ImportDesc.GlobalDesc { GlobalDef = GlobalType.Parse(reader) },

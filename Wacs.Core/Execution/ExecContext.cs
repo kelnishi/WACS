@@ -18,20 +18,21 @@ namespace Wacs.Core.Execution
 
         public TypesSpace Types { get; private set; } = null!;
         
-        public List<Module.Function> Funcs { get; private set; } = null!;
+        public FunctionsSpace Funcs { get; private set; } = null!;
         
-        public List<TableType> Tables { get; private set; } = null!;
+        public TablesSpace Tables { get; private set; } = null!;
         
-        public List<MemoryType> Mems { get; private set; } = null!;
+        public MemSpace Mems { get; private set; } = null!;
         
-        public List<GlobalType> Globals { get; private set; } = null!;
+        public GlobalsSpace Globals { get; private set; } = null!;
         
         public List<Module.ElementSegment> Elements { get; private set; } = null!;
         
-        public List<Module.Data> Datas { get; private set; } = null!;
+        // public List<Module.Data> Datas { get; private set; } = null!;
 
         public List<FunctionRef> Refs { get; private set; } = null!;
 
+        //TODO Move this into a frame or store?
         public List<StackValue> Locals { get; private set; } = new List<StackValue>();
         public Stack<ResultType> Labels { get; private set; } = new Stack<ResultType>();
         public ResultType? Return { get; private set; } = null;
@@ -39,31 +40,36 @@ namespace Wacs.Core.Execution
         private bool Validates = false;
 
         public static ExecContext CreateExecContext(Module module) => new ExecContext {
-            Stack = new ExecStack(),
-            Types = new TypesSpace(module.Types),
-            Funcs = module.Funcs,
-            Tables = module.Tables.ToList(),
-            Mems = module.Mems,
-            Globals = module.Globals.Select(g => g.Type).ToList(),
+            Types = new TypesSpace(module),
+            
+            Funcs = new FunctionsSpace(module),
+            Tables = new TablesSpace(module),
+            Mems = new MemSpace(module),
+            Globals = new GlobalsSpace(module),
+            
             Elements = module.Elements.ToList(),
-            Datas = module.Datas.ToList(),
+            // Datas = module.Datas.ToList(),
             Refs = BuildFunctionRefs(module),
+            Stack = new ExecStack(),
         };
 
         /// <summary>
         /// @Spec 3.1.1. Contexts
+        /// @Spec 3.4.10. Modules
         /// </summary>
         public static ExecContext CreateValidationContext(Module module) => new ExecContext {
-            Stack = new ValidationStack(),
-            Types = new TypesSpace(module.Types),
-            Funcs = module.Funcs,
-            Tables = module.Tables.ToList(),
-            Mems = module.Mems,
-            Globals = module.Globals.Select(g => g.Type).ToList(),
+            Types = new TypesSpace(module),
+            
+            Funcs = new FunctionsSpace(module),
+            Tables = new TablesSpace(module),
+            Mems = new MemSpace(module),
+            Globals = new GlobalsSpace(module),
+            
             Elements = module.Elements.ToList(),
-            Datas = module.Datas.ToList(),
+            // Datas = module.Datas.ToList(),
             Refs = BuildFunctionRefs(module),
             Validates = true,
+            Stack = new ValidationStack(),
         };
 
         private static List<FunctionRef> BuildFunctionRefs(Module module)
@@ -104,17 +110,23 @@ namespace Wacs.Core.Execution
             Return = type;
 
         //TODO: resolve function Frame
-        public StackValue GetLocal(uint index) =>
-            Locals[(int)index];
+        public StackValue GetLocal(LocalIdx index) =>
+            Locals[(Index)index];
         //TODO: resolve function Frame
-        public void SetLocal(uint index, StackValue value) =>
-            Locals[(int)index] = value;
+        public void SetLocal(LocalIdx index, StackValue value) =>
+            Locals[(Index)index] = value;
 
-        public StackValue GetGlobal(uint index) => StackValue.NullFuncRef;
-            // Globals[(int)index];
+        public StackValue GetGlobal(GlobalIdx index)
+        {
+            throw new NotImplementedException();
+            // return Globals[index];
+        }
 
-        public void SetGlobal(uint index, StackValue value) {}
-            // Globals[(int)index] = value;
+        public void SetGlobal(GlobalIdx index, StackValue value)
+        {
+            throw new NotImplementedException();
+            // Globals[index] = value;
+        }
         
         public delegate void ExecContextDelegate(ExecContext context);
         

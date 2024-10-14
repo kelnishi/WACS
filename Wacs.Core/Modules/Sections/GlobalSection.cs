@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using FluentValidation;
 using Wacs.Core.Types;
@@ -12,7 +13,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.6 Globals
         /// </summary>
-        public Global[] Globals { get; internal set; } = null!;
+        public List<Global> Globals { get; internal set; } = null!;
         
         /// <summary>
         /// @Spec 2.5.6. Globals
@@ -21,6 +22,9 @@ namespace Wacs.Core
         {
             public GlobalType Type;
             public Expression Initializer;
+
+            public Global(GlobalType type) =>
+                (Type, Initializer) = (type, Expression.Empty);
             
             private Global(BinaryReader reader) =>
                 (Type, Initializer) = (GlobalType.Parse(reader), Expression.Parse(reader));
@@ -42,12 +46,12 @@ namespace Wacs.Core
                         .Custom((expr, ctx) =>
                         {
                             var g = ctx.InstanceToValidate;
-                            var exprValidator = new Expression.Validator(g.Type.ResultType);
+                            var exprValidator = new Expression.Validator(g.Type.ResultType, isConstant: true);
                             var subContext = ctx.GetSubContext(expr);
                             var result = exprValidator.Validate(subContext);
                             foreach (var error in result.Errors)
                             {
-                                ctx.AddFailure($"Sub.{error.PropertyName}", error.ErrorMessage);
+                                ctx.AddFailure($"Expression.{error.PropertyName}", error.ErrorMessage);
                             }
                         });
                 }
@@ -61,7 +65,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 5.5.9 Global Section
         /// </summary>
-        private static Module.Global[] ParseGlobalSection(BinaryReader reader) =>
-            reader.ParseVector(Module.Global.Parse);
+        private static List<Module.Global> ParseGlobalSection(BinaryReader reader) =>
+            reader.ParseList(Module.Global.Parse);
     }
 }
