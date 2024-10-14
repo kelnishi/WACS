@@ -20,12 +20,9 @@ namespace Wacs.Core
         /// </summary>
         public class Import
         {
-            public string ModuleName { get; internal set; }
-            public string Name { get; internal set; }
-            public ImportDesc Desc { get; internal set; }
-
-            public Import(string moduleName, string name, ImportDesc desc) =>
-                (ModuleName, Name, Desc) = (moduleName, name, desc);
+            public string ModuleName { get; internal set; } = null!;
+            public string Name { get; internal set; } = null!;
+            public ImportDesc Desc { get; internal set; } = null!;
 
             public class Validator : AbstractValidator<Import>
             {
@@ -46,18 +43,17 @@ namespace Wacs.Core
         {
             public class FuncDesc : ImportDesc
             {
-                public UInt32 Index { get; internal set; } = UInt32.MaxValue;
-                public FuncDesc(UInt32 index) => Index = index;
-
+                public TypeIdx FunctionIndex { get; internal set; }
+                
                 /// <summary>
                 /// @Spec 3.2.7.1. func functype
                 /// </summary>
                 public class Validator : AbstractValidator<FuncDesc> {
                     public Validator() {
                         // Only checks that the FunctionType exists, validation happens on the section
-                        RuleFor(desc => desc.Index)
+                        RuleFor(desc => desc.FunctionIndex)
                             .Must((desc, index, ctx) =>
-                                index < ctx.GetExecContext().Types.Count);
+                                ctx.GetExecContext().Types.Contains(index));
                     }
                 }
             }
@@ -65,7 +61,6 @@ namespace Wacs.Core
             public class TableDesc : ImportDesc
             {
                 public TableType TableDef { get; internal set; }
-                public TableDesc(TableType tableDef) => TableDef = tableDef;
                 
                 /// <summary>
                 /// @Spec 3.2.7.2. table tabletype
@@ -81,7 +76,6 @@ namespace Wacs.Core
             public class MemDesc : ImportDesc
             {
                 public MemoryType MemDef  { get; internal set; }
-                public MemDesc(MemoryType memDef) => MemDef = memDef;
                 
                 /// <summary>
                 /// @Spec 3.2.7.3. mem memtype
@@ -97,7 +91,6 @@ namespace Wacs.Core
             public class GlobalDesc : ImportDesc
             {
                 public GlobalType GlobalDef { get; internal set; }
-                public GlobalDesc(GlobalType globalDef) => GlobalDef = globalDef;
                 
                 /// <summary>
                 /// @Spec 3.2.7.4. global globaltype
@@ -116,19 +109,19 @@ namespace Wacs.Core
     {
         private static Module.ImportDesc ParseImportDesc(BinaryReader reader) => 
             ExternalKindParser.Parse(reader) switch {
-                ExternalKind.Function => new Module.ImportDesc.FuncDesc(reader.ReadLeb128_u32()),
-                ExternalKind.Table => new Module.ImportDesc.TableDesc(TableType.Parse(reader)),
-                ExternalKind.Memory => new Module.ImportDesc.MemDesc(MemoryType.Parse(reader)),
-                ExternalKind.Global => new Module.ImportDesc.GlobalDesc(GlobalType.Parse(reader)),
+                ExternalKind.Function => new Module.ImportDesc.FuncDesc { FunctionIndex = (TypeIdx)reader.ReadLeb128_u32() },
+                ExternalKind.Table => new Module.ImportDesc.TableDesc { TableDef = TableType.Parse(reader) },
+                ExternalKind.Memory => new Module.ImportDesc.MemDesc { MemDef = MemoryType.Parse(reader) },
+                ExternalKind.Global => new Module.ImportDesc.GlobalDesc { GlobalDef = GlobalType.Parse(reader) },
                 var kind => throw new InvalidDataException($"Malformed Module Import section {kind} at {reader.BaseStream.Position}")
             };
         
         private static Module.Import ParseImport(BinaryReader reader) => 
-            new Module.Import (
-                moduleName: reader.ReadString(),
-                name: reader.ReadString(),
-                desc: ParseImportDesc(reader)
-            );
+            new Module.Import {
+                ModuleName = reader.ReadString(),
+                Name = reader.ReadString(),
+                Desc = ParseImportDesc(reader)
+            };
 
         /// <summary>
         /// @Spec 5.5.5 Import Section

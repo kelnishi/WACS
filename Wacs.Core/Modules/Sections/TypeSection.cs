@@ -11,7 +11,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.2. Types
         /// </summary>
-        public FunctionType[] Types { get; internal set; }  = null!;
+        public List<FunctionType> Types { get; internal set; }  = null!;
     }
     
     public static partial class ModuleParser
@@ -19,8 +19,8 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 5.5.4 Type Section
         /// </summary>
-        private static FunctionType[] ParseTypeSection(BinaryReader reader) => 
-            reader.ParseVector(FunctionType.Parse);
+        private static List<FunctionType> ParseTypeSection(BinaryReader reader) => 
+            reader.ParseList(FunctionType.Parse);
         
     }
 }

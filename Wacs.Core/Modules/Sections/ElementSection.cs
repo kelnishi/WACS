@@ -39,14 +39,14 @@ namespace Wacs.Core
                 Mode = mode;
             }
 
-            private ElementSegment(UInt32 tableIndex, Expression e, ReferenceType type, IInstruction[] funcIndices)
+            private ElementSegment(TableIdx tableIndex, Expression e, ReferenceType type, IInstruction[] funcIndices)
             {
                 Type = type;
                 Initializers = funcIndices.Select(inst => new Expression(inst)).ToArray();
                 Mode = new ElementMode.ActiveMode(tableIndex, e);
             }
             
-            private ElementSegment(UInt32 tableIndex, Expression e, ReferenceType type, Expression[] expressions)
+            private ElementSegment(TableIdx tableIndex, Expression e, ReferenceType type, Expression[] expressions)
             {
                 Type = type;
                 Initializers = expressions;
@@ -67,14 +67,14 @@ namespace Wacs.Core
                         throw new InvalidDataException($"Invalid ElementKind {b} at {reader.BaseStream.Position:X4}")
                 };
 
-            private static UInt32 ParseTableIndex(BinaryReader reader) =>
-                reader.ReadLeb128_u32();
+            private static TableIdx ParseTableIndex(BinaryReader reader) =>
+                (TableIdx)reader.ReadLeb128_u32();
                 
             public static ElementSegment Parse(BinaryReader reader) =>
                 (ElementType)reader.ReadLeb128_u32() switch {
                     ElementType.ActiveNoIndexWithElemKind => 
                         new ElementSegment(
-                            0,
+                            (TableIdx)0,
                             Expression.Parse(reader),
                             ReferenceType.Funcref,
                             reader.ParseVector(ParseFuncIdxInstructions)),
@@ -96,7 +96,7 @@ namespace Wacs.Core
                             ElementMode.Declarative),
                     ElementType.ActiveNoIndexWithElemType =>
                         new ElementSegment(
-                            0,
+                            (TableIdx)0,
                             Expression.Parse(reader),
                             ReferenceType.Funcref,
                             reader.ParseVector(Expression.Parse)),
@@ -128,9 +128,9 @@ namespace Wacs.Core
 
             public class ActiveMode : ElementMode
             {
-                public UInt32 TableIndex { get; internal set; }
+                public TableIdx TableIndex { get; internal set; }
                 public Expression Offset { get; internal set; }
-                public ActiveMode(UInt32 idx, Expression offset) => (TableIndex, Offset) = (idx, offset);
+                public ActiveMode(TableIdx idx, Expression offset) => (TableIndex, Offset) = (idx, offset);
             }
             
             public class DeclarativeMode : ElementMode {}

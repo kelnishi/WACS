@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using Wacs.Core.Types;
 
 namespace Wacs.Core.Utilities
 {
@@ -238,8 +239,21 @@ namespace Wacs.Core.Utilities
 
             return vector;
         }
+        
+        public static List<T> ParseList<T>(this BinaryReader reader, Func<BinaryReader, T> elementParser)
+        {
+            uint count = reader.ReadLeb128_u32();
+            List<T> vector = new List<T>((int)count);
+            
+            for (uint i = 0; i < count; i++)
+            {
+                vector.Add(elementParser(reader));
+            }
 
-        public static List<T> ParseN<T>(this BinaryReader reader, Func<BinaryReader, T?> elementParser)
+            return vector;
+        }
+
+        public static List<T> ParseUntilNull<T>(this BinaryReader reader, Func<BinaryReader, T?> elementParser)
         where T : class
         {
             List<T> to = new List<T>();

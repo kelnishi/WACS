@@ -36,9 +36,9 @@ namespace Wacs.Core
                 (DataFlags)reader.ReadLeb128_u32() switch
                 {
                     DataFlags.ActiveDefault => 
-                        new Data(new DataMode.ActiveMode(0, Expression.Parse(reader)), ParseByteVector(reader)),
+                        new Data(new DataMode.ActiveMode((MemIdx)0, Expression.Parse(reader)), ParseByteVector(reader)),
                     DataFlags.ActiveExplicit => 
-                        new Data(new DataMode.ActiveMode(reader.ReadLeb128_u32(), Expression.Parse(reader)), ParseByteVector(reader)),
+                        new Data(new DataMode.ActiveMode((MemIdx)reader.ReadLeb128_u32(), Expression.Parse(reader)), ParseByteVector(reader)),
                     DataFlags.Passive => 
                         new Data(DataMode.Passive, ParseByteVector(reader)),
                     _ => throw new InvalidDataException($"Malformed Data section at {reader.BaseStream.Position}")
@@ -53,10 +53,10 @@ namespace Wacs.Core
 
             public class ActiveMode : DataMode
             {
-                public uint MemoryIdx { get; set; } = 0;
+                public MemIdx MemoryIndex { get; set; }
                 public Expression Offset { get; set; }
 
-                public ActiveMode(uint index, Expression offset) => (MemoryIdx, Offset) = (index, offset);
+                public ActiveMode(MemIdx index, Expression offset) => (MemoryIndex, Offset) = (index, offset);
             }
         }
 

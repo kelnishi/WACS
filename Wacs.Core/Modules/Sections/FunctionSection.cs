@@ -20,7 +20,7 @@ namespace Wacs.Core
         public class Function
         {
             //Function Section only parses the type indices
-            public uint TypeIndex { get; internal set; }
+            public TypeIdx TypeIndex { get; internal set; }
             
             //Locals and Body get parsed in the Code Section
             public ValType[] Locals { get; internal set; } = null!;
@@ -35,19 +35,19 @@ namespace Wacs.Core
                 {
                     // @Spec 3.4.1.1
                     RuleFor(func => func.TypeIndex)
-                        .Must((func, index, ctx) =>
-                            index < ctx.GetExecContext().Types.Count);
+                        .Must((func, index, ctx) => 
+                            ctx.GetExecContext().Types.Contains(index));
                     RuleFor(func => func)
                         .Custom((func, context) =>
                         {
                             var types = context.GetExecContext().Types;
-                            if (!(func.TypeIndex < types.Count))
+                            if (!types.Contains(func.TypeIndex))
                             {
                                 context.AddFailure("Function.TypeIndex not within Module.Types");
                                 return;
                             }
 
-                            var functype = types[(int)func.TypeIndex];
+                            var functype = types[func.TypeIndex];
 
                             context.GetExecContext().SetLocals(functype.ParameterTypes.Types, func.Locals);
                             context.GetExecContext().SetLabels(new[] { functype.ResultType });
@@ -78,7 +78,7 @@ namespace Wacs.Core
     {
         private static Module.Function ParseIndex(BinaryReader reader) =>
             new Module.Function {
-                TypeIndex = reader.ReadLeb128_u32()
+                TypeIndex = (TypeIdx)reader.ReadLeb128_u32()
             };
         
         /// <summary>

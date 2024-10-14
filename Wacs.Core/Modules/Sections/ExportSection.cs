@@ -17,30 +17,59 @@ namespace Wacs.Core
         /// </summary>
         public class Export
         {
-            public string Name { get; internal set; }
-            public ExternalKind Desc { get; internal set; }
+            public string Name { get; internal set; } = null!;
 
-            public UInt32 Index { get; internal set; }
-
-            private Export(BinaryReader reader) =>
-                (Name, Desc, Index) = (
-                    reader.ReadUTF8String(),
-                    (ExternalKind)reader.ReadByte(),
-                    reader.ReadLeb128_u32()
-                );
-
-            public static Export Parse(BinaryReader reader) => new Export(reader);
+            public ExportDesc Desc { get; internal set; } = null!;
         }
         
+        
+        public abstract class ExportDesc
+        {
+            public class FuncDesc : ExportDesc
+            {
+                public FuncIdx FunctionIndex { get; internal set; }
+            }
+
+            public class TableDesc : ExportDesc
+            {
+                public TableIdx TableIndex { get; internal set; }
+            }
+
+            public class MemDesc : ExportDesc
+            {
+                public MemIdx MemoryIndex { get; internal set; }
+            }
+
+            public class GlobalDesc : ExportDesc
+            {
+                public GlobalIdx GlobalIndex { get; internal set; }
+            }
+            
+        }
     }
     
     public static partial class ModuleParser
     {
+        private static Module.ExportDesc ParseExportDesc(BinaryReader reader) =>
+            ExternalKindParser.Parse(reader) switch {
+                ExternalKind.Function => new Module.ExportDesc.FuncDesc { FunctionIndex = (FuncIdx)reader.ReadLeb128_u32()},
+                ExternalKind.Table => new Module.ExportDesc.TableDesc { TableIndex = (TableIdx)reader.ReadLeb128_u32()},
+                ExternalKind.Memory => new Module.ExportDesc.MemDesc { MemoryIndex = (MemIdx)reader.ReadLeb128_u32() },
+                ExternalKind.Global => new Module.ExportDesc.GlobalDesc { GlobalIndex = (GlobalIdx)reader.ReadLeb128_u32()},
+                var kind => throw new InvalidDataException($"Malformed Module Export section {kind} at {reader.BaseStream.Position - 1}")
+            };
+            
+        private static Module.Export ParseExport(BinaryReader reader) =>
+            new Module.Export {
+                Name = reader.ReadUTF8String(),
+                Desc = ParseExportDesc(reader)
+            };
+        
         /// <summary>
         /// @Spec 5.5.10 Export Section
         /// </summary>
         private static Module.Export[] ParseExportSection(BinaryReader reader) =>
-            reader.ParseVector(Module.Export.Parse);
+            reader.ParseVector(ParseExport);
 
     }
 }
