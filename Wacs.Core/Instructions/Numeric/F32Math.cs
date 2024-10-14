@@ -24,20 +24,20 @@ namespace Wacs.Core.Instructions.Numeric
         
         private static void ExecuteF32Abs(ExecContext context)
         {
-            float a = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
             var result = Math.Abs(a);
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Neg(ExecContext context)
         {
-            float a = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
             var result = -a;
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
         private static void ExecuteF32Ceil(ExecContext context)
         {
-            float a = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
             var result = a switch {
                 _ when float.IsNaN(a) => float.NaN,
                 _ when float.IsInfinity(a) => a,
@@ -47,12 +47,12 @@ namespace Wacs.Core.Instructions.Numeric
             if (result == 0.0f && a < 0.0f)
                 result = -0.0f;
             
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Floor(ExecContext context)
         {
-            float a = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
             var result = a switch {
                 _ when float.IsNaN(a) => float.NaN,
                 _ when float.IsInfinity(a) => a,
@@ -62,19 +62,19 @@ namespace Wacs.Core.Instructions.Numeric
             if (result == 0.0f && a < 0.0f)
                 result = -0.0f;
             
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Trunc(ExecContext context)
         {
-            float a = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
             float result = (float)Math.Truncate(a);
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Nearest(ExecContext context)
         {
-            float a = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
             var result = a switch {
                 _ when float.IsNaN(a) => float.NaN,
                 _ when float.IsInfinity(a) => a,
@@ -84,67 +84,67 @@ namespace Wacs.Core.Instructions.Numeric
             if (result == 0.0f && a < 0.0f)
                 result = -0.0f;
             
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Sqrt(ExecContext context)
         {
-            float a = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
             float result = (float)Math.Sqrt(a);
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Add(ExecContext context)
         {
-            float a = context.Stack.PopF32();
-            float b = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
+            float b = context.OpStack.PopF32();
             float result = a + b;
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Sub(ExecContext context)
         {
-            float a = context.Stack.PopF32();
-            float b = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
+            float b = context.OpStack.PopF32();
             float result = a - b;
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Mul(ExecContext context)
         {
-            float a = context.Stack.PopF32();
-            float b = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
+            float b = context.OpStack.PopF32();
             float result = a * b;
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Div(ExecContext context)
         {
-            float a = context.Stack.PopF32();
-            float b = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
+            float b = context.OpStack.PopF32();
             float result = a / b;
             if (float.IsInfinity(result)) 
-                context.Stack.PushF32(float.PositiveInfinity);
+                context.OpStack.PushF32(float.PositiveInfinity);
             else if (float.IsNaN(result))
-                context.Stack.PushF32(float.NaN);
+                context.OpStack.PushF32(float.NaN);
             else
-                context.Stack.PushF32(result);
+                context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Min(ExecContext context)
         {
-            float a = context.Stack.PopF32();
-            float b = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
+            float b = context.OpStack.PopF32();
             float result = Math.Min(a, b);
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Max(ExecContext context)
         {
-            float a = context.Stack.PopF32();
-            float b = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
+            float b = context.OpStack.PopF32();
             float result = Math.Max(a, b);
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
         
         // Mask for the sign bit (most significant bit)
@@ -153,8 +153,8 @@ namespace Wacs.Core.Instructions.Numeric
         
         private static void ExecuteF32Copysign(ExecContext context)
         {
-            float x = context.Stack.PopF32();
-            float y = context.Stack.PopF32();
+            float x = context.OpStack.PopF32();
+            float y = context.OpStack.PopF32();
             // Extract raw integer bits of x and y
             UInt32 xBits = BitConverter.ToUInt32(BitConverter.GetBytes(x), 0);
             UInt32 yBits = BitConverter.ToUInt32(BitConverter.GetBytes(y), 0);
@@ -170,7 +170,7 @@ namespace Wacs.Core.Instructions.Numeric
 
             // Convert the result bits back to float
             float result = BitConverter.ToSingle(BitConverter.GetBytes(resultBits), 0);
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
     }
 }

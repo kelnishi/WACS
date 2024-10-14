@@ -42,7 +42,7 @@ namespace Wacs.Core.Instructions
                 //     throw new InvalidProgramException($"Locals did not contain index {localIndex}");
             });
             var value = context.GetLocal(localIndex);
-            context.Stack.PushValue(value);
+            context.OpStack.PushValue(value);
         }
         
         //0x21
@@ -54,7 +54,7 @@ namespace Wacs.Core.Instructions
                 //     throw new InvalidProgramException($"Locals did not contain index {localIndex}");
             });
 
-            StackValue value = context.Stack.PopAny();
+            StackValue value = context.OpStack.PopAny();
             context.SetLocal(localIndex, value);
         }
         
@@ -63,9 +63,9 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.5.3. local.tee
         private static void ExecuteLocalTee(ExecContext context, LocalIdx localIndex)
         {
-            var value = context.Stack.PopAny();
-            context.Stack.PushValue(value);
-            context.Stack.PushValue(value);
+            var value = context.OpStack.PopAny();
+            context.OpStack.PushValue(value);
+            context.OpStack.PushValue(value);
             ExecuteLocalSet(context, localIndex);
         }
     }
@@ -107,7 +107,7 @@ namespace Wacs.Core.Instructions
             });
 
             var g = context.GetGlobal(globalIndex);
-            context.Stack.PushValue(g);
+            context.OpStack.PushValue(g);
         }
         
         //0x24
@@ -120,7 +120,7 @@ namespace Wacs.Core.Instructions
                     throw new InvalidProgramException($"Globals did not contain index {globalIndex}");
             });
 
-            StackValue value = context.Stack.PopAny();
+            StackValue value = context.OpStack.PopAny();
             context.SetGlobal(globalIndex, value);
         }
         

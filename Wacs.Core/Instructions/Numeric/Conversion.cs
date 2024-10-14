@@ -34,14 +34,14 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI32WrapI64(ExecContext context)
         {
-            long value = context.Stack.PopI64();
+            long value = context.OpStack.PopI64();
             int result = unchecked((int)value);
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteI32TruncF32S(ExecContext context)
         {
-            float value = context.Stack.PopF32();
+            float value = context.OpStack.PopF32();
             if (float.IsNaN(value) || float.IsInfinity(value)) 
                 throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i32.trunc_f32_s.");
             
@@ -51,12 +51,12 @@ namespace Wacs.Core.Instructions.Numeric
                 throw new OverflowException("Integer overflow in i32.trunc_f32_s.");
             
             int result = (int)truncated;
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
 
         private static void ExecuteI32TruncF32U(ExecContext context)
         {
-            float value = context.Stack.PopF32();
+            float value = context.OpStack.PopF32();
             if (float.IsNaN(value) || float.IsInfinity(value))
                 throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i32.trunc_f32_u.");
             
@@ -67,12 +67,12 @@ namespace Wacs.Core.Instructions.Numeric
             
             uint result = (uint)truncated;
 
-            context.Stack.PushI32((int)result);
+            context.OpStack.PushI32((int)result);
         }
 
         private static void ExecuteI32TruncF64S(ExecContext context)
         {
-            double value = context.Stack.PopF64();
+            double value = context.OpStack.PopF64();
             if (double.IsNaN(value) || double.IsInfinity(value))
                 throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i32.trunc_f64_s.");
 
@@ -82,12 +82,12 @@ namespace Wacs.Core.Instructions.Numeric
                 throw new OverflowException("Integer overflow in i32.trunc_f64_s.");
             
             int result = (int)truncated;
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
 
         private static void ExecuteI32TruncF64U(ExecContext context)
         {
-            double value = context.Stack.PopF64();
+            double value = context.OpStack.PopF64();
             if (double.IsNaN(value) || double.IsInfinity(value))
                 throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i32.trunc_f64_u.");
 
@@ -97,26 +97,26 @@ namespace Wacs.Core.Instructions.Numeric
                 throw new OverflowException("Integer overflow in i32.trunc_f64_u.");
 
             uint result = (uint)truncated;
-            context.Stack.PushI32((int)result);
+            context.OpStack.PushI32((int)result);
         }
 
         private static void ExecuteI64ExtendI32S(ExecContext context)
         {
-            int value = context.Stack.PopI32();
+            int value = context.OpStack.PopI32();
             long result = value;
-            context.Stack.PushI64(result);
+            context.OpStack.PushI64(result);
         }
 
         private static void ExecuteI64ExtendI32U(ExecContext context)
         {
-            uint value = context.Stack.PopI32();
+            uint value = context.OpStack.PopI32();
             ulong result = value;
-            context.Stack.PushI64((long)result);
+            context.OpStack.PushI64((long)result);
         }
 
         private static void ExecuteI64TruncF32S(ExecContext context)
         {
-            float value = context.Stack.PopF32();
+            float value = context.OpStack.PopF32();
             if (float.IsNaN(value) || float.IsInfinity(value)) 
                 throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i64.trunc_f32_s.");
             
@@ -126,12 +126,12 @@ namespace Wacs.Core.Instructions.Numeric
                 throw new OverflowException("Integer overflow in i64.trunc_f32_s.");
             
             long result = (long)truncated;
-            context.Stack.PushI64(result);
+            context.OpStack.PushI64(result);
         }
 
         private static void ExecuteI64TruncF32U(ExecContext context)
         {
-            float value = context.Stack.PopF32();
+            float value = context.OpStack.PopF32();
             if (float.IsNaN(value) || float.IsInfinity(value)) 
                 throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i64.trunc_f32_u.");
             
@@ -141,12 +141,12 @@ namespace Wacs.Core.Instructions.Numeric
                 throw new OverflowException("Integer overflow in i64.trunc_f32_u.");
             
             ulong result = (ulong)truncated;
-            context.Stack.PushI64((long)result);
+            context.OpStack.PushI64((long)result);
         }
 
         private static void ExecuteI64TruncF64S(ExecContext context)
         {
-            double value = context.Stack.PopF64();
+            double value = context.OpStack.PopF64();
             if (double.IsNaN(value) || double.IsInfinity(value)) 
                 throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i64.trunc_f64_s.");
             
@@ -156,12 +156,12 @@ namespace Wacs.Core.Instructions.Numeric
                 throw new OverflowException("Integer overflow in i64.trunc_f64_s.");
             
             long result = (long)truncated;
-            context.Stack.PushI64(result);
+            context.OpStack.PushI64(result);
         }
 
         private static void ExecuteI64TruncF64U(ExecContext context)
         {
-            double value = context.Stack.PopF64();
+            double value = context.OpStack.PopF64();
             if (double.IsNaN(value) || double.IsInfinity(value)) 
                 throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i64.trunc_f64_u.");
             
@@ -171,109 +171,109 @@ namespace Wacs.Core.Instructions.Numeric
                 throw new OverflowException("Integer overflow in i64.trunc_f64_u.");
             
             ulong result = (ulong)truncated;
-            context.Stack.PushI64((long)result);
+            context.OpStack.PushI64((long)result);
         }
 
         private static void ExecuteF32ConvertI32S(ExecContext context)
         {
-            int value = context.Stack.PopI32();
+            int value = context.OpStack.PopI32();
             float result = (float)value;
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32ConvertI32U(ExecContext context)
         {
-            uint value = context.Stack.PopI32();
+            uint value = context.OpStack.PopI32();
             float result = value;
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32ConvertI64S(ExecContext context)
         {
-            long value = context.Stack.PopI64();
+            long value = context.OpStack.PopI64();
             float result = value;
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32ConvertI64U(ExecContext context)
         {
-            ulong value = context.Stack.PopI64();
+            ulong value = context.OpStack.PopI64();
             float result = value;
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32DemoteF64(ExecContext context)
         {
-            double value = context.Stack.PopF64();
+            double value = context.OpStack.PopF64();
             float result = (float)value;
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF64ConvertI32S(ExecContext context)
         {
-            int value = context.Stack.PopI32();
+            int value = context.OpStack.PopI32();
             double result = value;
-            context.Stack.PushF64(result);
+            context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64ConvertI32U(ExecContext context)
         {
-            uint value = context.Stack.PopI32();
+            uint value = context.OpStack.PopI32();
             double result = value;
-            context.Stack.PushF64(result);
+            context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64ConvertI64S(ExecContext context)
         {
-            long value = context.Stack.PopI64();
+            long value = context.OpStack.PopI64();
             double result = value;
-            context.Stack.PushF64(result);
+            context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64ConvertI64U(ExecContext context)
         {
-            ulong value = context.Stack.PopI64();
+            ulong value = context.OpStack.PopI64();
             double result = value;
-            context.Stack.PushF64(result);
+            context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64PromoteF32(ExecContext context)
         {
-            float value = context.Stack.PopF32();
+            float value = context.OpStack.PopF32();
             double result = value;
-            context.Stack.PushF64(result);
+            context.OpStack.PushF64(result);
         }
 
         private static void ExecuteI32ReinterpretF32(ExecContext context)
         {
-            float value = context.Stack.PopF32();
+            float value = context.OpStack.PopF32();
             byte[] bytes = BitConverter.GetBytes(value);
             int result = BitConverter.ToInt32(bytes, 0);
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
 
         private static void ExecuteI64ReinterpretF64(ExecContext context)
         {
-            double value = context.Stack.PopF64();
+            double value = context.OpStack.PopF64();
             byte[] bytes = BitConverter.GetBytes(value);
             long result = BitConverter.ToInt64(bytes, 0);
-            context.Stack.PushI64(result);
+            context.OpStack.PushI64(result);
         }
 
         private static void ExecuteF32ReinterpretI32(ExecContext context)
         {
-            int value = context.Stack.PopI32();
+            int value = context.OpStack.PopI32();
             byte[] bytes = BitConverter.GetBytes(value);
             float result = BitConverter.ToSingle(bytes, 0);
-            context.Stack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF64ReinterpretI64(ExecContext context)
         {
-            long value = context.Stack.PopI64();
+            long value = context.OpStack.PopI64();
             byte[] bytes = BitConverter.GetBytes(value);
             double result = BitConverter.ToSingle(bytes, 0);
-            context.Stack.PushF64(result);
+            context.OpStack.PushF64(result);
         }
         
     }

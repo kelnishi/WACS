@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FluentValidation;
+using FluentValidation.Internal;
+using FluentValidation.Results;
+using Wacs.Core.Execution;
 using Wacs.Core.Modules.Sections;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
@@ -26,6 +29,12 @@ namespace Wacs.Core
         {
             public Validator()
             {
+                //Set the validation context
+                RuleFor(module => module)
+                    .Custom((module, ctx) => {
+                        ctx.RootContextData[nameof(ExecContext)] = ExecContext.CreateValidationContext(module);
+                    });
+                
                 RuleForEach(module => module.Types).SetValidator(new FunctionType.Validator());
                 RuleForEach(module => module.Imports).SetValidator(new Import.Validator());
                 RuleForEach(module => module.Funcs).SetValidator(new Module.Function.Validator());
@@ -48,9 +57,19 @@ namespace Wacs.Core
                             ctx.AddFailure($"Invalid Start function with type: {type}");
                         }
                     })
-                    .When(module => module.StartIndex.Value >= 0); //If the Start index is -1, we didn't parse a start section.
+                    .When(module => module.StartIndex.Value >= 0);
+                
+                RuleFor(module => module.StartIndex)
+                    .NotEqual(FuncIdx.Default)
+                    .WithSeverity(Severity.Warning)
+                    .WithMessage($"Module StartIndex was not set");
+
             }
         }
+
+        public ValidationResult Validate() => new Validator().Validate(this);
+        public void ValidateAndThrow() => new Validator().ValidateAndThrow(this);
+        
     }
     
     /// <summary>
@@ -136,7 +155,7 @@ namespace Wacs.Core
                         break;
                     default: 
                         //Skip others
-                        Console.WriteLine($"   name: {customSectionName}");
+                        // Console.WriteLine($"   name: {customSectionName}");
                         // // Read the bytes from the current position to payloadEnd
                         // byte[] sectionData = reader.ReadBytes((int)(payloadEnd - reader.BaseStream.Position));
                         // // Console.WriteLine(BitConverter.ToString(sectionData).Replace("-", " "));

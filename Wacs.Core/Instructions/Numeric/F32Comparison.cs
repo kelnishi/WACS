@@ -15,73 +15,73 @@ namespace Wacs.Core.Instructions.Numeric
         
         private static void ExecuteF32Eq(ExecContext context)
         {
-            float a = context.Stack.PopF32();
-            float b = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
+            float b = context.OpStack.PopF32();
             
             int result = (a == b) ? 1 : 0;
             if (float.IsNaN(a) || float.IsNaN(b))
                 result = 0;
             
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         private static void ExecuteF32Ne(ExecContext context)
         {
-            float a = context.Stack.PopF32();
-            float b = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
+            float b = context.OpStack.PopF32();
             
             int result = (a != b) ? 1 : 0;
             if (float.IsNaN(a) || float.IsNaN(b))
                 result = 0;
             
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteF32Lt(ExecContext context)
         {
-            float a = context.Stack.PopF32();
-            float b = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
+            float b = context.OpStack.PopF32();
             
             int result = (a < b) ? 1 : 0;
             if (float.IsNaN(a) || float.IsNaN(b))
                 result = 0;
             
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteF32Gt(ExecContext context)
         {
-            float a = context.Stack.PopF32();
-            float b = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
+            float b = context.OpStack.PopF32();
             
             int result = (a > b) ? 1 : 0;
             if (float.IsNaN(a) || float.IsNaN(b))
                 result = 0;
             
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteF32Le(ExecContext context)
         {
-            float a = context.Stack.PopF32();
-            float b = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
+            float b = context.OpStack.PopF32();
             
             int result = (a <= b) ? 1 : 0;
             if (float.IsNaN(a) || float.IsNaN(b))
                 result = 0;
             
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteF32Ge(ExecContext context)
         {
-            float a = context.Stack.PopF32();
-            float b = context.Stack.PopF32();
+            float a = context.OpStack.PopF32();
+            float b = context.OpStack.PopF32();
             
             int result = (a >= b) ? 1 : 0;
             if (float.IsNaN(a) || float.IsNaN(b))
                 result = 0;
             
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
     }

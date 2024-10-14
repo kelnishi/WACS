@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using Wacs.Core;
-using Wacs.Core.Validation;
-
 using CommandLine;
+using FluentValidation;
+using Wacs.Core;
+
 
 namespace Wacs.Console
 {
@@ -33,10 +33,18 @@ namespace Wacs.Console
             using (var fileStream = new System.IO.FileStream(wasmFilePath, System.IO.FileMode.Open))
             {
                 var module = ModuleParser.Parse(fileStream);
-                
-                var result = ValidationUtility.ValidateModule(module);
-                
-                System.Console.WriteLine(result);
+                var validationResult = module.Validate();
+                foreach (var error in validationResult.Errors)
+                {
+                    switch (error.Severity)
+                    {
+                        case Severity.Warning:
+                        case Severity.Error:
+                            System.Console.Error.WriteLine($"Validation {error.Severity}: {error.ErrorMessage}");
+                            break;
+                    }
+                    
+                }
             }
         }
     }

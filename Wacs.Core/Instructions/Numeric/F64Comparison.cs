@@ -14,73 +14,73 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF64Eq(ExecContext context)
         {
-            double a = context.Stack.PopF64();
-            double b = context.Stack.PopF64();
+            double a = context.OpStack.PopF64();
+            double b = context.OpStack.PopF64();
             
             int result = (a == b) ? 1 : 0;
             if (double.IsNaN(a) || double.IsNaN(b))
                 result = 0;
             
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         private static void ExecuteF64Ne(ExecContext context)
         {
-            double a = context.Stack.PopF64();
-            double b = context.Stack.PopF64();
+            double a = context.OpStack.PopF64();
+            double b = context.OpStack.PopF64();
             
             int result = (a != b) ? 1 : 0;
             if (double.IsNaN(a) || double.IsNaN(b))
                 result = 0;
             
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteF64Lt(ExecContext context)
         {
-            double a = context.Stack.PopF64();
-            double b = context.Stack.PopF64();
+            double a = context.OpStack.PopF64();
+            double b = context.OpStack.PopF64();
             
             int result = (a < b) ? 1 : 0;
             if (double.IsNaN(a) || double.IsNaN(b))
                 result = 0;
             
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteF64Gt(ExecContext context)
         {
-            double a = context.Stack.PopF64();
-            double b = context.Stack.PopF64();
+            double a = context.OpStack.PopF64();
+            double b = context.OpStack.PopF64();
             
             int result = (a > b) ? 1 : 0;
             if (double.IsNaN(a) || double.IsNaN(b))
                 result = 0;
             
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteF64Le(ExecContext context)
         {
-            double a = context.Stack.PopF64();
-            double b = context.Stack.PopF64();
+            double a = context.OpStack.PopF64();
+            double b = context.OpStack.PopF64();
             
             int result = (a <= b) ? 1 : 0;
             if (double.IsNaN(a) || double.IsNaN(b))
                 result = 0;
             
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
         
         private static void ExecuteF64Ge(ExecContext context)
         {
-            double a = context.Stack.PopF64();
-            double b = context.Stack.PopF64();
+            double a = context.OpStack.PopF64();
+            double b = context.OpStack.PopF64();
             
             int result = (a >= b) ? 1 : 0;
             if (double.IsNaN(a) || double.IsNaN(b))
                 result = 0;
             
-            context.Stack.PushI32(result);
+            context.OpStack.PushI32(result);
         }
     }
 }

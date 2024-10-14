@@ -73,7 +73,7 @@ namespace Wacs.Core.Types
                         try
                         {
                             inst.Execute(ctx.GetExecContext());
-                            StackValue resultVal = ctx.GetExecContext().Stack.Peek();
+                            StackValue resultVal = ctx.GetExecContext().OpStack.Peek();
                             StackType = resultVal.Type;
                         }
                         catch (InvalidProgramException exc)
@@ -84,9 +84,8 @@ namespace Wacs.Core.Types
                         {
                             ctx.AddFailure(exc.Message);
                         }
-                        catch (NotImplementedException exc)
+                        catch (NotImplementedException _)
                         {
-                            Console.WriteLine(exc);
                             ctx.AddFailure($"WASM Instruction `{inst.OpCode.GetMnemonic()}` is not implemented.");
                         }
                     });
@@ -99,7 +98,7 @@ namespace Wacs.Core.Types
                     var execContext = ctx.GetExecContext();
                     foreach (var eType in ResultType.Types)
                     {
-                        var rValue = execContext.Stack.PopAny();
+                        var rValue = execContext.OpStack.PopAny();
                         if (rValue.Type != eType)
                         {
                             ctx.AddFailure($"Expression Result type {rValue.Type} did not match expected {eType}");

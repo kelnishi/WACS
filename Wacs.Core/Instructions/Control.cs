@@ -258,7 +258,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.10. call
         public override void Execute(ExecContext context)
         {
-            throw new NotImplementedException();
+            // throw new NotImplementedException();
         }
         
         /// <summary>
