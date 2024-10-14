@@ -21,6 +21,8 @@ namespace Wacs.Core
         {
             //Function Section only parses the type indices
             public TypeIdx TypeIndex { get; internal set; }
+
+            public bool IsImport = false;
             
             //Locals and Body get parsed in the Code Section
             public ValType[] Locals { get; internal set; } = null!;
@@ -62,7 +64,7 @@ namespace Wacs.Core
                                 {
                                     // Map the child validation failures to the parent context
                                     // Adjust the property name to reflect the path to the child property
-                                    var propertyName = $"{context.PropertyName}.{failure.PropertyName}";
+                                    var propertyName = $"{context.PropertyPath}.{failure.PropertyName}";
                                     context.AddFailure(propertyName, failure.ErrorMessage);
                                 }
                             }

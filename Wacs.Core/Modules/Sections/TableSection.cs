@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
@@ -10,7 +11,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.4. Tables
         /// </summary>
-        public TableType[] Tables { get; internal set; } = null!;
+        public List<TableType> Tables { get; internal set; } = null!;
     }
     
     public static partial class ModuleParser
@@ -18,7 +19,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 5.5.7 Table Section
         /// </summary>
-        private static TableType[] ParseTableSection(BinaryReader reader) =>
-            reader.ParseVector(TableType.Parse);
+        private static List<TableType> ParseTableSection(BinaryReader reader) =>
+            reader.ParseList(TableType.Parse);
     }
 }

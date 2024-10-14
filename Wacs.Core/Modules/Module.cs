@@ -6,6 +6,7 @@ using FluentValidation;
 using Wacs.Core.Modules.Sections;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core
 {
@@ -29,14 +30,25 @@ namespace Wacs.Core
                 RuleForEach(module => module.Imports).SetValidator(new Import.Validator());
                 RuleForEach(module => module.Funcs).SetValidator(new Module.Function.Validator());
                 RuleForEach(module => module.Tables).SetValidator(new TableType.Validator());
-                
-                
                 RuleForEach(module => module.Memories).SetValidator(new MemoryType.Validator());
                 RuleForEach(module => module.Globals).SetValidator(new Global.Validator());
-                // RuleForEach(module => module.Exports).SetValidator(new Export.Validator()); //= module.Exports ?? new Module.Export[0];
-                // RuleForEach(module => module.Elements).SetValidator(new ElementSegment.Validator()); // = module.Elements ?? new Module.ElementSegment[0];
-                // RuleForEach(module => module.Datas).SetValidator(new Data.Validator()); //module.Datas ?? new Module.Data[0];
+                RuleForEach(module => module.Exports).SetValidator(new Export.Validator());
+                RuleForEach(module => module.Elements).SetValidator(new ElementSegment.Validator());
+                RuleForEach(module => module.Datas).SetValidator(new Data.Validator());
 
+                RuleFor(module => module.StartIndex)
+                    .Must((module, idx, ctx) => ctx.GetExecContext().Funcs.Contains(idx))
+                    .Custom((idx, ctx) =>
+                    {
+                        var execContext = ctx.GetExecContext();
+                        var typeIndex = execContext.Funcs[idx].TypeIndex;
+                        var type = execContext.Types[typeIndex];
+                        if (type.ParameterTypes.Length != 0 || type.ResultType.Length != 0)
+                        {
+                            ctx.AddFailure($"Invalid Start function with type: {type}");
+                        }
+                    })
+                    .When(module => module.StartIndex.Value >= 0); //If the Start index is -1, we didn't parse a start section.
             }
         }
     }
@@ -150,12 +162,14 @@ namespace Wacs.Core
             module.Types = module.Types ?? new List<FunctionType>();
             module.Imports = module.Imports ?? Array.Empty<Module.Import>();
             module.Funcs = module.Funcs ?? new List<Module.Function>();
-            module.Tables = module.Tables ?? Array.Empty<TableType>();
-            module.Memories = module.Memories ?? Array.Empty<MemoryType>();
-            module.Globals = module.Globals ?? Array.Empty<Module.Global>();
+            module.Tables = module.Tables ?? new List<TableType>();
+            module.Memories = module.Memories ?? new List<MemoryType>();
+            module.Globals = module.Globals ?? new List<Module.Global>();
             module.Exports = module.Exports ?? Array.Empty<Module.Export>();
             module.Elements = module.Elements ?? Array.Empty<Module.ElementSegment>();
             module.Datas = module.Datas ?? Array.Empty<Module.Data>();
+            
+            PatchNames(module);
         }
     }
 }

@@ -21,6 +21,9 @@ namespace Wacs.Core.Types
         /// </summary>
         public ResultType ResultType { get; internal set; }
 
+        public string ToNotation() =>
+            $"{ParameterTypes.ToNotation()} --> {ResultType.ToNotation()}";
+
         private FunctionType(ResultType parameterTypes, ResultType resultType) =>
             (ParameterTypes, ResultType) = (parameterTypes, resultType);
 

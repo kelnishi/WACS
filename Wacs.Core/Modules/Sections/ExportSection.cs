@@ -1,7 +1,9 @@
 using System;
 using System.IO;
+using FluentValidation;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core
 {
@@ -20,6 +22,22 @@ namespace Wacs.Core
             public string Name { get; internal set; } = null!;
 
             public ExportDesc Desc { get; internal set; } = null!;
+
+            /// <summary>
+            /// @Spec 3.4.8.1.
+            /// </summary>
+            public class Validator : AbstractValidator<Export>
+            {
+                public Validator()
+                {
+                    RuleFor(e => e.Desc).SetInheritanceValidator(v =>
+                    {
+                        v.Add(new ExportDesc.FuncDesc.Validator());
+                        v.Add(new ExportDesc.TableDesc.Validator());
+                        v.Add(new ExportDesc.MemDesc.Validator());
+                    });
+                }
+            }
         }
         
         
@@ -28,21 +46,69 @@ namespace Wacs.Core
             public class FuncDesc : ExportDesc
             {
                 public FuncIdx FunctionIndex { get; internal set; }
+
+                /// <summary>
+                /// @Spec 3.4.8.2. func
+                /// </summary>
+                public class Validator : AbstractValidator<FuncDesc>
+                {
+                    public Validator()
+                    {
+                        RuleFor(fd => fd.FunctionIndex)
+                            .Must((fd, index, ctx) => ctx.GetExecContext().Funcs.Contains(index));
+                    }
+                }
             }
 
             public class TableDesc : ExportDesc
             {
                 public TableIdx TableIndex { get; internal set; }
+                
+                /// <summary>
+                /// @Spec 3.4.8.3. table
+                /// </summary>
+                public class Validator : AbstractValidator<TableDesc>
+                {
+                    public Validator()
+                    {
+                        RuleFor(td => td.TableIndex)
+                            .Must((fd, index, ctx) => ctx.GetExecContext().Tables.Contains(index));
+                    }
+                }
             }
 
             public class MemDesc : ExportDesc
             {
                 public MemIdx MemoryIndex { get; internal set; }
+                
+                /// <summary>
+                /// @Spec 3.4.8.4. mem
+                /// </summary>
+                public class Validator : AbstractValidator<MemDesc>
+                {
+                    public Validator()
+                    {
+                        RuleFor(md => md.MemoryIndex)
+                            .Must((md, index, ctx) => ctx.GetExecContext().Mems.Contains(index));
+                    }
+                }
             }
 
             public class GlobalDesc : ExportDesc
             {
                 public GlobalIdx GlobalIndex { get; internal set; }
+                
+                /// <summary>
+                /// @Spec 3.4.8.5. global
+                /// </summary>
+                public class Validator : AbstractValidator<GlobalDesc>
+                {
+                    public Validator()
+                    {
+                        RuleFor(gd => gd.GlobalIndex)
+                            .Must((gd, index, ctx) => ctx.GetExecContext().Globals.Contains(index));
+                    }
+                }
             }
             
         }

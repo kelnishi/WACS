@@ -59,9 +59,13 @@ namespace Wacs.Core.Types
         {
             public ResultType ResultType { get; }
             private ValType StackType { get; set; }
-            public Validator(ResultType resultType)
+
+            public bool ShouldBeConstant;
+            
+            public Validator(ResultType resultType, bool isConstant = false)
             {
                 ResultType = resultType;
+                ShouldBeConstant = isConstant;
                 // @Spec 3.3.9. Instruction Sequences
                 RuleForEach(e => e.Instructions)
                     .Custom((inst, ctx) =>
@@ -82,11 +86,16 @@ namespace Wacs.Core.Types
                         }
                         catch (NotImplementedException exc)
                         {
+                            Console.WriteLine(exc);
                             ctx.AddFailure($"WASM Instruction `{inst.OpCode.GetMnemonic()}` is not implemented.");
                         }
                     });
                 RuleFor(e => e).Custom((e, ctx) =>
                 {
+                    if (ShouldBeConstant)
+                        if(!e.IsConstant())
+                            ctx.AddFailure($"Expression must be constant");
+                    
                     var execContext = ctx.GetExecContext();
                     foreach (var eType in ResultType.Types)
                     {
