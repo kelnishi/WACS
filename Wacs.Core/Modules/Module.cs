@@ -2,14 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using FluentValidation;
-using FluentValidation.Internal;
-using FluentValidation.Results;
-using Wacs.Core.Execution;
+using System.Text;
 using Wacs.Core.Modules.Sections;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
-using Wacs.Core.Validation;
 
 namespace Wacs.Core
 {
@@ -21,67 +17,18 @@ namespace Wacs.Core
     public partial class Module
     {
         internal Module() {}
-        
-        /// <summary>
-        /// @Spec 3.4. Modules
-        /// </summary>
-        public class Validator : AbstractValidator<Module>
-        {
-            public Validator()
-            {
-                //Set the validation context
-                RuleFor(module => module)
-                    .Custom((module, ctx) => {
-                        ctx.RootContextData[nameof(ExecContext)] = ExecContext.CreateValidationContext(module);
-                    });
-                
-                RuleForEach(module => module.Types).SetValidator(new FunctionType.Validator());
-                RuleForEach(module => module.Imports).SetValidator(new Import.Validator());
-                RuleForEach(module => module.Funcs).SetValidator(new Module.Function.Validator());
-                RuleForEach(module => module.Tables).SetValidator(new TableType.Validator());
-                RuleForEach(module => module.Memories).SetValidator(new MemoryType.Validator());
-                RuleForEach(module => module.Globals).SetValidator(new Global.Validator());
-                RuleForEach(module => module.Exports).SetValidator(new Export.Validator());
-                RuleForEach(module => module.Elements).SetValidator(new ElementSegment.Validator());
-                RuleForEach(module => module.Datas).SetValidator(new Data.Validator());
-
-                RuleFor(module => module.StartIndex)
-                    .Must((module, idx, ctx) => ctx.GetExecContext().Funcs.Contains(idx))
-                    .Custom((idx, ctx) =>
-                    {
-                        var execContext = ctx.GetExecContext();
-                        var typeIndex = execContext.Funcs[idx].TypeIndex;
-                        var type = execContext.Types[typeIndex];
-                        if (type.ParameterTypes.Length != 0 || type.ResultType.Length != 0)
-                        {
-                            ctx.AddFailure($"Invalid Start function with type: {type}");
-                        }
-                    })
-                    .When(module => module.StartIndex.Value >= 0);
-                
-                RuleFor(module => module.StartIndex)
-                    .NotEqual(FuncIdx.Default)
-                    .WithSeverity(Severity.Warning)
-                    .WithMessage($"Module StartIndex was not set");
-
-            }
-        }
-
-        public ValidationResult Validate() => new Validator().Validate(this);
-        public void ValidateAndThrow() => new Validator().ValidateAndThrow(this);
-        
     }
     
     /// <summary>
     /// @Spec 5.5. Modules
     /// </summary>
-    public static partial class ModuleParser
+    public static partial class BinaryModuleParser
     {
         /// <summary>
         /// @Spec 5.5.16. Modules
         /// Parses a WebAssembly module from a binary stream.
         /// </summary>
-        public static Module Parse(Stream stream)
+        public static Module ParseWasm(Stream stream)
         {
             var module = new Module();
             var reader = new BinaryReader(stream);

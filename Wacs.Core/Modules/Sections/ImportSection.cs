@@ -133,7 +133,7 @@ namespace Wacs.Core
         }
     }
     
-    public static partial class ModuleParser
+    public static partial class BinaryModuleParser
     {
         private static Module.ImportDesc ParseImportDesc(BinaryReader reader) => 
             ExternalKindParser.Parse(reader) switch {

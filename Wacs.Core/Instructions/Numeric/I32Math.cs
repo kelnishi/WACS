@@ -1,5 +1,5 @@
 using System;
-using Wacs.Core.Execution;
+using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 

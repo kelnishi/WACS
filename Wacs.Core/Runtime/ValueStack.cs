@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Wacs.Core.Execution
+namespace Wacs.Core.Runtime
 {
     public class ValueStack
     {

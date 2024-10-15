@@ -25,6 +25,12 @@ namespace Wacs.Core.Types
         public static explicit operator FuncIdx(uint value) => new FuncIdx((int)value);
 
         public static readonly FuncIdx Default = new FuncIdx(-1);
+        
+        public static bool operator ==(FuncIdx left, FuncIdx right) => left.Value.Equals(right.Value);
+        public static bool operator !=(FuncIdx left, FuncIdx right) => !left.Value.Equals(right.Value);
+        public override bool Equals(object obj) => obj is FuncIdx other && this == other;
+        public override int GetHashCode() => Value.GetHashCode();
+        
     }
 
     public readonly struct TableIdx : IEquatable<Index>, IIndex

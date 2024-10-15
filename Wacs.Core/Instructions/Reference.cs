@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using Wacs.Core.Execution;
+using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
@@ -20,10 +20,10 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context) {
             switch (Type) {
                 case ReferenceType.Funcref:
-                    context.OpStack.PushFuncref(StackValue.NullFuncRef);
+                    context.OpStack.PushFuncref(Value.NullFuncRef);
                     break;
                 case ReferenceType.Externref:
-                    context.OpStack.PushExternref(StackValue.NullExternRef);
+                    context.OpStack.PushExternref(Value.NullExternRef);
                     break;
                 default:
                     throw new InvalidDataException($"Instruction ref.null had invalid type {Type}"); 
@@ -46,7 +46,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.2.2. ref.is_null
         public override void Execute(ExecContext context)
         {
-            StackValue value = context.OpStack.PopRefType();
+            Value value = context.OpStack.PopRefType();
             int booleanResult = value.IsNullRef ? 1 : 0;
             context.OpStack.PushI32(booleanResult);
         }
@@ -74,7 +74,7 @@ namespace Wacs.Core.Instructions
                     throw new InvalidDataException($"Function index {FunctionIndex} is not defined in the context");
             });
             
-            context.OpStack.PushFuncref(new StackValue(ValType.Funcref, (uint)FunctionIndex.Value));
+            context.OpStack.PushFuncref(new Value(ValType.Funcref, (uint)FunctionIndex.Value));
         }
 
         public override IInstruction Parse(BinaryReader reader)

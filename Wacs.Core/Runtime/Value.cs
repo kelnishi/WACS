@@ -3,10 +3,13 @@ using System.IO;
 using System.Runtime.InteropServices;
 using Wacs.Core.Types;
 
-namespace Wacs.Core.Execution
+namespace Wacs.Core.Runtime
 {
+    /// <summary>
+    /// @Spec 4.2.1. Values
+    /// </summary>
     [StructLayout(LayoutKind.Explicit)]
-    public readonly struct StackValue
+    public readonly struct Value
     {
         [FieldOffset(0)] public readonly ValType Type;
 
@@ -22,32 +25,40 @@ namespace Wacs.Core.Execution
         // 64-bit float
         [FieldOffset(1)] public readonly double Float64;
 
+        // 128-bit vector
         [FieldOffset(1)] public readonly ulong V128_low;
         [FieldOffset(9)] public readonly ulong V128_high;
 
+        // ref funcaddr
+        [FieldOffset(1)] public readonly ulong FuncAddr;
+        
+        // ref.extern externaddr
+        [FieldOffset(1)] public readonly ulong ExternAddr;
+
+
         // Constructors for each type
-        public StackValue(int value)
+        public Value(int value)
         {
             this = default; // Ensure all fields are initialized
             Type = ValType.I32;
             Int32 = value;
         }
 
-        public StackValue(long value)
+        public Value(long value)
         {
             this = default;
             Type = ValType.I64;
             Int64 = value;
         }
 
-        public StackValue(float value)
+        public Value(float value)
         {
             this = default;
             Type = ValType.F32;
             Float32 = value;
         }
 
-        public StackValue(double value)
+        public Value(double value)
         {
             this = default;
             Type = ValType.F64;
@@ -55,7 +66,7 @@ namespace Wacs.Core.Execution
         }
 
         //Default Values
-        public StackValue(ValType type)
+        public Value(ValType type)
         {
             this = default;
             Type = type;
@@ -81,42 +92,42 @@ namespace Wacs.Core.Execution
             }
         }
 
-        public StackValue(ValType type, UInt32 idx)
+        public Value(ValType type, UInt32 idx)
         {
             this = default;
             Type = type;
             Int64 = idx;
         }
 
-        private StackValue(ValType type, Int64 v)
+        private Value(ValType type, Int64 v)
         {
             this = default;
             Type = type;
             Int64 = v;
         }
 
-        public static readonly StackValue NullFuncRef = new StackValue(ValType.Funcref, -1);
-        public static readonly StackValue NullExternRef = new StackValue(ValType.Externref, -1);
+        public static readonly Value NullFuncRef = new Value(ValType.Funcref, -1);
+        public static readonly Value NullExternRef = new Value(ValType.Externref, -1);
 
         public bool IsNullRef => (Type == ValType.Funcref || Type == ValType.Externref) && Int64 == -1;
         
-        public static implicit operator StackValue(int value) => new StackValue(value);
+        public static implicit operator Value(int value) => new Value(value);
         
-        public static implicit operator int(StackValue value) => value.Int32;
-        public static implicit operator uint(StackValue value) => unchecked((uint)value.Int32);
+        public static implicit operator int(Value value) => value.Int32;
+        public static implicit operator uint(Value value) => unchecked((uint)value.Int32);
         
-        public static implicit operator StackValue(long value) => new StackValue(value);
+        public static implicit operator Value(long value) => new Value(value);
         
-        public static implicit operator long(StackValue value) => value.Int64;
-        public static implicit operator ulong(StackValue value) => unchecked((ulong)value.Int64);
+        public static implicit operator long(Value value) => value.Int64;
+        public static implicit operator ulong(Value value) => unchecked((ulong)value.Int64);
         
-        public static implicit operator StackValue(float value) => new StackValue(value);
+        public static implicit operator Value(float value) => new Value(value);
         
-        public static implicit operator float(StackValue value) => value.Float32;
+        public static implicit operator float(Value value) => value.Float32;
         
-        public static implicit operator StackValue(double value) => new StackValue(value);
+        public static implicit operator Value(double value) => new Value(value);
         
-        public static implicit operator double(StackValue value) => value.Float64;
+        public static implicit operator double(Value value) => value.Float64;
         
     }
 }

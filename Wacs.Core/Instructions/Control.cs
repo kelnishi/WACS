@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using Wacs.Core.Execution;
+using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
@@ -258,7 +258,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.10. call
         public override void Execute(ExecContext context)
         {
-            // throw new NotImplementedException();
+            throw new NotImplementedException();
         }
         
         /// <summary>

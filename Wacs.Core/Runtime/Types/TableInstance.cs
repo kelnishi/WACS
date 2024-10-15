@@ -1,26 +1,30 @@
 using System.Collections.Generic;
 using Wacs.Core.Types;
 
-namespace Wacs.Core.Runtime
+namespace Wacs.Core.Runtime.Types
 {
+    /// <summary>
+    /// @Spec 4.2.7. Table Instances
+    /// </summary>
     public class TableInstance
     {
         public TableType Type { get; }
-        public List<object> Elements { get; }
+        
+        //TODO: These should be ref values
+        public List<Value> Elements { get; }
 
         public TableInstance(TableType type)
         {
             Type = type;
-            Elements = new List<object>((int)type.Limits.Minimum);
+            Elements = new List<Value>((int)type.Limits.Minimum);
 
-            // Initialize elements with null references
             for (int i = 0; i < type.Limits.Minimum; i++)
             {
-                Elements.Add(null);
+                Elements.Add(new Value(ValType.Funcref));
             }
         }
 
-        public bool Grow(uint delta, object initialValue)
+        public bool Grow(uint delta, Value initialValue)
         {
             uint newSize = (uint)Elements.Count + delta;
 

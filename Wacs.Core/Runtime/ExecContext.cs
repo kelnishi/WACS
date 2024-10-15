@@ -1,11 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using Wacs.Core.Types;
-using Wacs.Core.Runtime;
 
-namespace Wacs.Core.Execution
+namespace Wacs.Core.Runtime
 {
     public class FunctionRef
     {
@@ -16,8 +14,13 @@ namespace Wacs.Core.Execution
     {
         public IOperandStack OpStack { get; private set; } = null!;
         
+        public LabelStack LabelStack { get; set; }
         
+        public FrameStack CallStack { get; set; }
+            
+        public Store Store { get; private set; } = null!;
 
+        
         public TypesSpace Types { get; private set; } = null!;
         
         public FunctionsSpace Funcs { get; private set; } = null!;
@@ -35,7 +38,7 @@ namespace Wacs.Core.Execution
         // public List<FunctionRef> Refs { get; private set; } = null!;
 
         //TODO Move this into a frame or store?
-        public List<StackValue> Locals { get; private set; } = new List<StackValue>();
+        public List<Value> Locals { get; private set; } = new List<Value>();
         public Stack<ResultType> Labels { get; private set; } = new Stack<ResultType>();
         public ResultType? Return { get; private set; } = null;
 
@@ -77,7 +80,7 @@ namespace Wacs.Core.Execution
         public void SetLocals(params IEnumerable<ValType>[] types) =>
             Locals = types
                 .SelectMany(collection => collection)
-                .Select(t=> new StackValue(t))
+                .Select(t=> new Value(t))
                 .ToList();
 
         public void SetLabels(IEnumerable<ResultType> labels) =>
@@ -87,19 +90,19 @@ namespace Wacs.Core.Execution
             Return = type;
 
         //TODO: resolve function Frame
-        public StackValue GetLocal(LocalIdx index) =>
+        public Value GetLocal(LocalIdx index) =>
             Locals[(Index)index];
         //TODO: resolve function Frame
-        public void SetLocal(LocalIdx index, StackValue value) =>
+        public void SetLocal(LocalIdx index, Value value) =>
             Locals[(Index)index] = value;
 
-        public StackValue GetGlobal(GlobalIdx index)
+        public Value GetGlobal(GlobalIdx index)
         {
             throw new NotImplementedException();
             // return Globals[index];
         }
 
-        public void SetGlobal(GlobalIdx index, StackValue value)
+        public void SetGlobal(GlobalIdx index, Value value)
         {
             throw new NotImplementedException();
             // Globals[index] = value;

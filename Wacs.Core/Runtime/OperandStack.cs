@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Types;
 
-namespace Wacs.Core.Execution
+namespace Wacs.Core.Runtime
 {
     public interface IOperandStack
     {
@@ -11,116 +11,116 @@ namespace Wacs.Core.Execution
         void PushI64(long value);
         void PushF32(float value);
         void PushF64(double value);
-        void PushV128(StackValue value);
-        void PushFuncref(StackValue value);
-        void PushExternref(StackValue value);
+        void PushV128(Value value);
+        void PushFuncref(Value value);
+        void PushExternref(Value value);
 
-        void PushValue(StackValue value);
+        void PushValue(Value value);
         
-        StackValue PopI32();
-        StackValue PopI64();
-        StackValue PopF32();
-        StackValue PopF64();
-        StackValue PopV128();
-        StackValue PopRefType();
-        StackValue PopAny();
-        StackValue Peek();
+        Value PopI32();
+        Value PopI64();
+        Value PopF32();
+        Value PopF64();
+        Value PopV128();
+        Value PopRefType();
+        Value PopAny();
+        Value Peek();
     }
     
     public class ExecStack : IOperandStack
     {
-        private readonly Stack<StackValue> _stack = new Stack<StackValue>();
+        private readonly Stack<Value> _stack = new Stack<Value>();
         public void PushI32(int value) => _stack.Push(value);
         public void PushI64(long value) => _stack.Push(value);
         public void PushF32(float value) => _stack.Push(value);
         public void PushF64(double value) => _stack.Push(value);
-        public void PushV128(StackValue value) => _stack.Push(value);
-        public void PushFuncref(StackValue value) => _stack.Push(value);
-        public void PushExternref(StackValue value) => _stack.Push(value);
+        public void PushV128(Value value) => _stack.Push(value);
+        public void PushFuncref(Value value) => _stack.Push(value);
+        public void PushExternref(Value value) => _stack.Push(value);
 
-        public void PushValue(StackValue value) => _stack.Push(value);
+        public void PushValue(Value value) => _stack.Push(value);
         
-        public StackValue PopI32() => _stack.Pop();
-        public StackValue PopI64() => _stack.Pop();
-        public StackValue PopF32() => _stack.Pop();
-        public StackValue PopF64() => _stack.Pop();
-        public StackValue PopV128() => _stack.Pop();
-        public StackValue PopRefType() => _stack.Pop();
+        public Value PopI32() => _stack.Pop();
+        public Value PopI64() => _stack.Pop();
+        public Value PopF32() => _stack.Pop();
+        public Value PopF64() => _stack.Pop();
+        public Value PopV128() => _stack.Pop();
+        public Value PopRefType() => _stack.Pop();
 
-        public StackValue PopAny() => _stack.Pop();
-        public StackValue Peek() => _stack.Peek();
+        public Value PopAny() => _stack.Pop();
+        public Value Peek() => _stack.Peek();
     }
 
     public class ValidationStack : IOperandStack
     {
-        private readonly Stack<StackValue> _stack = new Stack<StackValue>();
+        private readonly Stack<Value> _stack = new Stack<Value>();
 
         public void PushI32(int i32) {
-            StackValue value = i32; 
+            Value value = i32; 
             if (value.Type != ValType.I32)
                 throw new InvalidDataException($"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.I32}");
             _stack.Push(value);
         }
         public void PushI64(long i64) {
-            StackValue value = i64;
+            Value value = i64;
             if (value.Type != ValType.I64)
                 throw new InvalidDataException($"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.I64}");
             _stack.Push(value);
         }
 
         public void PushF32(float f32) {
-            StackValue value = f32;
+            Value value = f32;
             if (value.Type != ValType.F32)
                 throw new InvalidDataException($"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.F32}");
             _stack.Push(value);
         }
 
         public void PushF64(double f64) {
-            StackValue value = f64;
+            Value value = f64;
             if (value.Type != ValType.F64)
                 throw new InvalidDataException($"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.F64}");
             _stack.Push(value);
         }
 
-        public void PushV128(StackValue value) {
+        public void PushV128(Value value) {
             if (value.Type != ValType.V128)
                 throw new InvalidDataException($"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.V128}");
             _stack.Push(value);
         }
 
-        public void PushFuncref(StackValue value) {
+        public void PushFuncref(Value value) {
             if (value.Type != ValType.Funcref)
                 throw new InvalidDataException($"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.Funcref}");
             _stack.Push(value);
         }
 
-        public void PushExternref(StackValue value) {
+        public void PushExternref(Value value) {
             if (value.Type != ValType.Externref)
                 throw new InvalidDataException($"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.Externref}");
             _stack.Push(value);
         }
 
-        public void PushValue(StackValue value) {
+        public void PushValue(Value value) {
             _stack.Push(value);
         }
 
-        public StackValue PopI32()
+        public Value PopI32()
         {
             if (_stack.Count == 0)
                 throw new InvalidOperationException("Operand stack underflow.");
 
-            StackValue value = _stack.Pop();
+            Value value = _stack.Pop();
             if (value.Type != ValType.I32)
                 throw new InvalidDataException(
                     $"Wrong operand type {value.Type} popped from stack. Expected:{ValType.I32}");
             
             return value;
         }
-        public StackValue PopI64() {
+        public Value PopI64() {
             if (_stack.Count == 0)
                 throw new InvalidOperationException("Operand stack underflow.");
             
-            StackValue value = _stack.Pop();
+            Value value = _stack.Pop();
             if (value.Type != ValType.I64)
                 throw new InvalidDataException(
                     $"Wrong operand type {value.Type} popped from stack. Expected:{ValType.I64}");
@@ -128,11 +128,11 @@ namespace Wacs.Core.Execution
             return value;
         }
 
-        public StackValue PopF32() {
+        public Value PopF32() {
             if (_stack.Count == 0)
                 throw new InvalidOperationException("Operand stack underflow.");
             
-            StackValue value = _stack.Pop();
+            Value value = _stack.Pop();
             if (value.Type != ValType.F32)
                 throw new InvalidDataException(
                     $"Wrong operand type {value.Type} popped from stack. Expected:{ValType.F32}");
@@ -140,11 +140,11 @@ namespace Wacs.Core.Execution
             return value;
         }
 
-        public StackValue PopF64() {
+        public Value PopF64() {
             if (_stack.Count == 0)
                 throw new InvalidOperationException("Operand stack underflow.");
             
-            StackValue value = _stack.Pop();
+            Value value = _stack.Pop();
             if (value.Type != ValType.F64)
                 throw new InvalidDataException(
                     $"Wrong operand type {value.Type} popped from stack. Expected:{ValType.F64}");
@@ -152,11 +152,11 @@ namespace Wacs.Core.Execution
             return value;
         }
 
-        public StackValue PopV128() {
+        public Value PopV128() {
             if (_stack.Count == 0)
                 throw new InvalidOperationException("Operand stack underflow.");
             
-            StackValue value = _stack.Pop();
+            Value value = _stack.Pop();
             if (value.Type != ValType.V128)
                 throw new InvalidDataException(
                     $"Wrong operand type {value.Type} popped from stack. Expected:{ValType.V128}");
@@ -164,11 +164,11 @@ namespace Wacs.Core.Execution
             return value;
         }
 
-        public StackValue PopRefType() {
+        public Value PopRefType() {
             if (_stack.Count == 0)
                 throw new InvalidOperationException("Operand stack underflow.");
             
-            StackValue value = _stack.Pop();
+            Value value = _stack.Pop();
             return value.Type switch
             {
                 ValType.Funcref => value,
@@ -178,7 +178,7 @@ namespace Wacs.Core.Execution
             };
         }
 
-        public StackValue PopAny()
+        public Value PopAny()
         {
             if (_stack.Count == 0)
                 throw new InvalidOperationException("Operand stack underflow.");
@@ -186,7 +186,7 @@ namespace Wacs.Core.Execution
             return _stack.Pop();
         }
 
-        public StackValue Peek()
+        public Value Peek()
         {
             if (_stack.Count == 0)
                 throw new InvalidOperationException("Operand stack underflow.");

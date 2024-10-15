@@ -12,9 +12,11 @@ namespace Wacs.Core
         /// @Spec 2.5.2. Types
         /// </summary>
         public List<FunctionType> Types { get; internal set; }  = null!;
+
+        public FunctionType this[TypeIdx idx] => Types[(Index)idx];
     }
     
-    public static partial class ModuleParser
+    public static partial class BinaryModuleParser
     {
         /// <summary>
         /// @Spec 5.5.4 Type Section

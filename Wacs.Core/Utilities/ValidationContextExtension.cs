@@ -2,7 +2,7 @@ using System;
 using System.Linq;
 using FluentValidation;
 using FluentValidation.Results;
-using Wacs.Core.Execution;
+using Wacs.Core.Runtime;
 
 namespace Wacs.Core.Validation
 {

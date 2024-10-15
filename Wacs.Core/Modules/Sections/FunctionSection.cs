@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FluentValidation;
-using Wacs.Core.Execution;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
@@ -76,7 +76,7 @@ namespace Wacs.Core
         
     }
     
-    public static partial class ModuleParser
+    public static partial class BinaryModuleParser
     {
         private static Module.Function ParseIndex(BinaryReader reader) =>
             new Module.Function {

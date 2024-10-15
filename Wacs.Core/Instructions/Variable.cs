@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using Wacs.Core.Execution;
+using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
@@ -54,7 +54,7 @@ namespace Wacs.Core.Instructions
                 //     throw new InvalidProgramException($"Locals did not contain index {localIndex}");
             });
 
-            StackValue value = context.OpStack.PopAny();
+            Value value = context.OpStack.PopAny();
             context.SetLocal(localIndex, value);
         }
         
@@ -120,7 +120,7 @@ namespace Wacs.Core.Instructions
                     throw new InvalidProgramException($"Globals did not contain index {globalIndex}");
             });
 
-            StackValue value = context.OpStack.PopAny();
+            Value value = context.OpStack.PopAny();
             context.SetGlobal(globalIndex, value);
         }
         

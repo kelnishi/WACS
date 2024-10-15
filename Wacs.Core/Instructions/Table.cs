@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using Wacs.Core.Execution;
+using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Utilities;
 
