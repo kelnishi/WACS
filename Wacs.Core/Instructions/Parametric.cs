@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using Wacs.Core.Execution;
+using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
@@ -17,7 +17,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.4.1. drop
         public override void Execute(ExecContext context)
         {
-            StackValue value = context.OpStack.PopAny();
+            Value value = context.OpStack.PopAny();
         }
 
         public override IInstruction Parse(BinaryReader reader) => this;
@@ -43,8 +43,8 @@ namespace Wacs.Core.Instructions
                 if (Types.Length != 1)
                     throw new InvalidDataException($"Select instruction type must be of length 1");
                 
-                StackValue val2 = context.OpStack.PopAny();
-                StackValue val1 = context.OpStack.PopAny();
+                Value val2 = context.OpStack.PopAny();
+                Value val1 = context.OpStack.PopAny();
                 
                 if (val1.Type != Types[0])
                     throw new InvalidProgramException(
@@ -58,8 +58,8 @@ namespace Wacs.Core.Instructions
             }
             else
             {
-                StackValue val2 = context.OpStack.PopAny();
-                StackValue val1 = context.OpStack.PopAny();
+                Value val2 = context.OpStack.PopAny();
+                Value val1 = context.OpStack.PopAny();
                 if (val1.Type != val2.Type)
                     throw new InvalidProgramException(
                         $"Select instruction expected matching types on the stack: {val1.Type} == {val2.Type}");

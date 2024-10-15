@@ -141,24 +141,25 @@ namespace Wacs.Core
         }
     }
 
-    public static partial class ModuleParser
+    public static partial class BinaryModuleParser
     {
         public static Module.NameSection ParseNameSection(BinaryReader reader) =>
             Module.NameSection.Parse(reader);
 
         public static void PatchNames(Module module)
         {
-            if (module.Names != null)
-            {
-                if (module.Names.FunctionNames != null)
-                {
-                    foreach (var kv in module.Names.FunctionNames.Names.NameAssocMap)
-                    {
-                        
-                        // module.Funcs[]
-                    }
-                }
-            }
+            throw new NotImplementedException();
+            // if (module.Names != null)
+            // {
+            //     if (module.Names.FunctionNames != null)
+            //     {
+            //         foreach (var kv in module.Names.FunctionNames.Names.NameAssocMap)
+            //         {
+            //             
+            //             // module.Funcs[]
+            //         }
+            //     }
+            // }
         }
     }
 }

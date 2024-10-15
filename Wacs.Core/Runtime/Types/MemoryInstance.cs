@@ -1,7 +1,7 @@
 using System;
 using Wacs.Core.Types;
 
-namespace Wacs.Core.Runtime
+namespace Wacs.Core.Runtime.Types
 {
     public class MemoryInstance
     {
@@ -9,7 +9,7 @@ namespace Wacs.Core.Runtime
         private byte[] _data;
         public byte[] Data => _data;
 
-        public const uint PageSize = 65536; // 64 KiB
+        public const uint PageSize = 0x01_00_00; //64Ki
 
         public MemoryInstance(MemoryType type)
         {

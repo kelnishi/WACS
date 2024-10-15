@@ -13,7 +13,7 @@ namespace Wacs.Core
         public FuncIdx StartIndex { get; internal set; } = FuncIdx.Default;
     }
     
-    public static partial class ModuleParser
+    public static partial class BinaryModuleParser
     {
         /// <summary>
         /// @Spec 5.5.11 Start Section

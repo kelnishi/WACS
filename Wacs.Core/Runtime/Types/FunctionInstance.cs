@@ -1,27 +1,33 @@
-using Wacs.Core.Execution;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
-namespace Wacs.Core.Runtime
+namespace Wacs.Core.Runtime.Types
 {
     /// <summary>
+    /// @Spec 4.2.6. Function Instances
     /// Represents a WebAssembly-defined function instance.
     /// </summary>
-    public class WasmFunctionInstance : FunctionInstance
+    public class FunctionInstance : IFunctionInstance
     {
+        public FunctionType Type { get; }
+        
+        public ModuleInstance Module { get; }
+
         /// <summary>
         /// Gets the function definition containing the code and locals.
         /// </summary>
-        public Module.FuncLocalsBody Definition { get; }
+        public Module.Function Definition { get; }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="WasmFunctionInstance"/> class.
+        /// Initializes a new instance of the <see cref="FunctionInstance"/> class.
         /// </summary>
         /// <param name="type">The function type.</param>
         /// <param name="definition">The function definition.</param>
         /// <param name="module">The module instance containing the function.</param>
-        public WasmFunctionInstance(FunctionType type, Module.FuncLocalsBody definition, ModuleInstance module)
-            : base(type, module)
+        public FunctionInstance(FunctionType type, Module.Function definition, ModuleInstance module)
         {
+            Type = type;
+            Module = module;
             Definition = definition;
         }
 
@@ -30,7 +36,7 @@ namespace Wacs.Core.Runtime
         /// </summary>
         /// <param name="arguments">The arguments to pass to the function.</param>
         /// <returns>The results returned by the function.</returns>
-        public override object[] Invoke(object[] arguments)
+        public object[] Invoke(object[] arguments)
         {
             // var context = ExecContext.CreateExecContext(this, arguments);
             //

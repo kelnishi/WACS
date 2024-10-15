@@ -1,26 +1,29 @@
 using System;
 using Wacs.Core.Types;
 
-namespace Wacs.Core.Runtime
+namespace Wacs.Core.Runtime.Types
 {
     /// <summary>
+    /// @Spec 4.2.6. Function Instances
     /// Represents a host (native) function instance provided by the host environment.
     /// </summary>
-    public class HostFunctionInstance : FunctionInstance
+    public class HostFunction : IFunctionInstance
     {
+        public FunctionType Type { get; }
+        
         /// <summary>
         /// The delegate representing the host function implementation.
         /// </summary>
         private readonly Func<object[], object[]> _hostFunction;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="HostFunctionInstance"/> class.
+        /// Initializes a new instance of the <see cref="HostFunction"/> class.
         /// </summary>
         /// <param name="type">The function type.</param>
         /// <param name="hostFunction">The delegate representing the host function.</param>
-        public HostFunctionInstance(FunctionType type, Func<object[], object[]> hostFunction)
-            : base(type, null) // Host functions may not belong to a specific module instance
+        public HostFunction(FunctionType type, Func<object[], object[]> hostFunction)
         {
+            Type = type;
             _hostFunction = hostFunction;
         }
 
@@ -29,7 +32,7 @@ namespace Wacs.Core.Runtime
         /// </summary>
         /// <param name="arguments">The arguments to pass to the function.</param>
         /// <returns>The results returned by the function.</returns>
-        public override object[] Invoke(object[] arguments)
+        public object[] Invoke(object[] arguments)
         {
             return _hostFunction(arguments);
         }

@@ -114,7 +114,7 @@ namespace Wacs.Core
         }
     }
 
-    public static partial class ModuleParser
+    public static partial class BinaryModuleParser
     {
         /// <summary>
         /// @Spec 5.5.14 Data Section

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FluentValidation;
-using Wacs.Core.Execution;
+using Wacs.Core.Runtime;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Utilities;
@@ -73,7 +73,7 @@ namespace Wacs.Core.Types
                         try
                         {
                             inst.Execute(ctx.GetExecContext());
-                            StackValue resultVal = ctx.GetExecContext().OpStack.Peek();
+                            Value resultVal = ctx.GetExecContext().OpStack.Peek();
                             StackType = resultVal.Type;
                         }
                         catch (InvalidProgramException exc)
@@ -86,6 +86,7 @@ namespace Wacs.Core.Types
                         }
                         catch (NotImplementedException _)
                         {
+                            var __ = _;
                             ctx.AddFailure($"WASM Instruction `{inst.OpCode.GetMnemonic()}` is not implemented.");
                         }
                     });
