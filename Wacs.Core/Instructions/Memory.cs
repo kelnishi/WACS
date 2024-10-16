@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
@@ -42,7 +43,7 @@ namespace Wacs.Core.Instructions
         public InstMemoryLoad(ValType type, BitWidth width) => 
             (Type, Width) = (type, width);
         
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -82,7 +83,7 @@ namespace Wacs.Core.Instructions
         public InstMemoryStore(ValType type, BitWidth width) => 
             (Type, Width) = (type, width);
         
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }

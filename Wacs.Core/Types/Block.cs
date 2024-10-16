@@ -46,7 +46,7 @@ namespace Wacs.Core.Types
                 // @Spec 3.2.2.1. typeidx
                 RuleFor(b => b.TypeIndex)
                     .Must((b, index, ctx) =>
-                        ctx.GetExecContext().Types.Contains(index))
+                        ctx.GetValidationContext().Types.Contains(index))
                     .When(b => b.ValType == ValType.Undefined)
                     .WithMessage("Blocks must have a valid typeidx referenced in Types");
 

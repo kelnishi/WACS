@@ -1,6 +1,7 @@
 using System;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Instructions.Numeric
 {
@@ -16,7 +17,7 @@ namespace Wacs.Core.Instructions.Numeric
         private const UInt32 I32ByteExtend = 0xFFFF_FF80;
         private const UInt32 ByteMask = 0xFF;
         
-        private static void ExecuteI32Extend8S(ExecContext context)
+        private static void ExecuteI32Extend8S(IExecContext context)
         {
             uint value = context.OpStack.PopI32();
             uint result = ((value & ByteSign) != 0) 
@@ -29,7 +30,7 @@ namespace Wacs.Core.Instructions.Numeric
         private const UInt32 I32ShortExtend = 0xFFFF_8000;
         private const UInt32 ShortMask = 0xFFFF;
         
-        private static void ExecuteI32Extend16S(ExecContext context)
+        private static void ExecuteI32Extend16S(IExecContext context)
         {
             uint value = context.OpStack.PopI32();
             uint result = ((value & ShortSign) != 0) 
@@ -40,7 +41,7 @@ namespace Wacs.Core.Instructions.Numeric
         
         private const UInt64 I64ByteExtend = 0xFFFF_FFFF_FFFF_FF80;
 
-        private static void ExecuteI64Extend8S(ExecContext context)
+        private static void ExecuteI64Extend8S(IExecContext context)
         {
             ulong value = context.OpStack.PopI64();
             ulong result = ((value & ByteSign) != 0) 
@@ -51,7 +52,7 @@ namespace Wacs.Core.Instructions.Numeric
         
         private const UInt64 I64ShortExtend = 0xFFFF_FFFF_FFFF_8000;
 
-        private static void ExecuteI64Extend16S(ExecContext context)
+        private static void ExecuteI64Extend16S(IExecContext context)
         {
             ulong value = context.OpStack.PopI64();
             ulong result = ((value & ShortSign) != 0) 
@@ -64,7 +65,7 @@ namespace Wacs.Core.Instructions.Numeric
         private const UInt64 WordExtend = 0xFFFF_FFFF_8000_0000;
         private const UInt64 WordMask = 0xFFFF_FFFF;
         
-        private static void ExecuteI64Extend32S(ExecContext context)
+        private static void ExecuteI64Extend32S(IExecContext context)
         {
             ulong value = context.OpStack.PopI64();
             ulong result = ((value & WordSign) != 0) 

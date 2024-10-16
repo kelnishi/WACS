@@ -1,5 +1,6 @@
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Instructions.Numeric
 {
@@ -17,27 +18,27 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I64GeS = new NumericInst(OpCode.I64GeS, ExecuteI64GeS);
         public static readonly NumericInst I64GeU = new NumericInst(OpCode.I64GeU, ExecuteI64GeU);
         
-       private static void ExecuteI64Eqz(ExecContext context)
+       private static void ExecuteI64Eqz(IExecContext context)
         {
             long i = context.OpStack.PopI64();
             int result = (i == 0) ? 1 : 0;
             context.OpStack.PushI32(result);
         }
-        private static void ExecuteI64Eq(ExecContext context)
+        private static void ExecuteI64Eq(IExecContext context)
         {
             long a = context.OpStack.PopI64();
             long b = context.OpStack.PopI64();
             int result = (a == b) ? 1 : 0;
             context.OpStack.PushI32(result);
         }
-        private static void ExecuteI64Ne(ExecContext context)
+        private static void ExecuteI64Ne(IExecContext context)
         {
             long a = context.OpStack.PopI64();
             long b = context.OpStack.PopI64();
             int result = (a != b) ? 1 : 0;
             context.OpStack.PushI32(result);
         }
-        private static void ExecuteI64LtS(ExecContext context)
+        private static void ExecuteI64LtS(IExecContext context)
         {
             long a = context.OpStack.PopI64();
             long b = context.OpStack.PopI64();
@@ -45,7 +46,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI64LtU(ExecContext context)
+        private static void ExecuteI64LtU(IExecContext context)
         {
             ulong a = context.OpStack.PopI64();
             ulong b = context.OpStack.PopI64();
@@ -53,7 +54,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI64GtS(ExecContext context)
+        private static void ExecuteI64GtS(IExecContext context)
         {
             long a = context.OpStack.PopI64();
             long b = context.OpStack.PopI64();
@@ -61,7 +62,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI64GtU(ExecContext context)
+        private static void ExecuteI64GtU(IExecContext context)
         {
             ulong a = context.OpStack.PopI64();
             ulong b = context.OpStack.PopI64();
@@ -69,7 +70,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI64LeS(ExecContext context)
+        private static void ExecuteI64LeS(IExecContext context)
         {
             long a = context.OpStack.PopI64();
             long b = context.OpStack.PopI64();
@@ -77,7 +78,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI64LeU(ExecContext context)
+        private static void ExecuteI64LeU(IExecContext context)
         {
             ulong a = context.OpStack.PopI64();
             ulong b = context.OpStack.PopI64();
@@ -85,7 +86,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI64GeS(ExecContext context)
+        private static void ExecuteI64GeS(IExecContext context)
         {
             long a = context.OpStack.PopI64();
             long b = context.OpStack.PopI64();
@@ -93,7 +94,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI64GeU(ExecContext context)
+        private static void ExecuteI64GeU(IExecContext context)
         {
             ulong a = context.OpStack.PopI64();
             ulong b = context.OpStack.PopI64();

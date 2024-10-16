@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -15,7 +16,7 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(ExecContext context) =>
+        public override void Execute(IExecContext context) =>
             context.OpStack.PushI32(Value);
 
         public override IInstruction Parse(BinaryReader reader) {
@@ -33,7 +34,7 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(ExecContext context) =>
+        public override void Execute(IExecContext context) =>
             context.OpStack.PushI64(Value);
         
         public override IInstruction Parse(BinaryReader reader) {
@@ -51,7 +52,7 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(ExecContext context) =>
+        public override void Execute(IExecContext context) =>
             context.OpStack.PushF32(Value);
         
         public override IInstruction Parse(BinaryReader reader) {
@@ -69,7 +70,7 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(ExecContext context) =>
+        public override void Execute(IExecContext context) =>
             context.OpStack.PushF64(Value);
 
         public override IInstruction Parse(BinaryReader reader) {

@@ -1,18 +1,17 @@
 using System;
-using System.Linq;
 using FluentValidation;
-using FluentValidation.Results;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Validation
 {
     public static class ValidationContextExtension
     {
-        public static ExecContext GetExecContext<T>(this ValidationContext<T> context)
+        public static WasmValidationContext GetValidationContext<T>(this ValidationContext<T> context)
             where T : class
-            => context.RootContextData.TryGetValue(nameof(ExecContext), out var execContextData) && execContextData is ExecContext execContext
+            => context.RootContextData.TryGetValue(nameof(WasmValidationContext), out var execContextData) && execContextData is WasmValidationContext execContext
                 ? execContext
-                : throw new InvalidOperationException($"The ExecContext is not present in the RootContextData.");
+                : throw new InvalidOperationException($"The WasmValidationContext is not present in the RootContextData.");
 
         public static ValidationContext<T> GetSubContext<TP, T>(this ValidationContext<TP> parent, T child)
             where T : class
@@ -21,7 +20,7 @@ namespace Wacs.Core.Validation
             {
                 RootContextData =
                 {
-                    [nameof(ExecContext)] = parent.GetExecContext()
+                    [nameof(WasmValidationContext)] = parent.GetValidationContext()
                 }
             };
     }

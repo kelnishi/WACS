@@ -2,15 +2,17 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using FluentValidation;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime
 {
-    public class HostEnvironment
+    public class Runtime
     {
         public Store Store { get; } = new Store();
-        private Dictionary<string, ModuleInstance> modules = new Dictionary<string, ModuleInstance>();
+        
+        private Dictionary<string, ModuleInstance> _modules = new Dictionary<string, ModuleInstance>();
 
         private Dictionary<(string module, string entity), IAddress> EntityBindings =
             new Dictionary<(string module, string entity), IAddress>(); 
@@ -18,7 +20,7 @@ namespace Wacs.Core.Runtime
 
         public void RegisterModule(string moduleName, ModuleInstance moduleInstance)
         {
-            modules[moduleName] = moduleInstance;
+            _modules[moduleName] = moduleInstance;
 
             //Bind exports
             foreach (var export in moduleInstance.Exports)
@@ -35,25 +37,61 @@ namespace Wacs.Core.Runtime
 
         public ModuleInstance GetModule(string moduleName)
         {
-            if (modules.TryGetValue(moduleName, out var moduleInstance))
+            if (_modules.TryGetValue(moduleName, out var moduleInstance))
             {
                 return moduleInstance;
             }
             throw new Exception($"Module '{moduleName}' not found.");
         }
 
-        public void BindHostFunction(string moduleName, string entityName)
-        {
-            
-        }
-
         private IAddress? GetBoundEntity((string module, string entity) id) =>
             EntityBindings.TryGetValue(id, out IAddress value) ? value : null;
         
-
-        public ModuleInstance InstantiateModule(Module module)
+        public void BindHostFunction(string moduleName, string entityName)
         {
-            var moduleInstance = new ModuleInstance();
+            //TODO
+        }
+
+        /// <summary>
+        /// @Spec 4.5.4. Instantiation
+        /// </summary>
+        public ModuleInstance InstantiateModule(Module module, bool skipModuleValidation = false)
+        {
+            try
+            {
+                //1
+                if (!skipModuleValidation)
+                    module.ValidateAndThrow();
+            }
+            catch (ValidationException exc)
+            {
+                var _ = exc;
+                throw;
+            }
+
+            ModuleInstance moduleInstance;
+            try
+            {
+                //2, 3, 4 Checks if imports are satisfied
+                moduleInstance = AllocateModule(module);
+            }
+            catch (NotSupportedException exc)
+            {
+                var _ = exc;
+                throw;
+            }
+
+            var initFrame = new Frame(moduleInstance);
+            
+
+            return moduleInstance;
+        }
+
+        // @Spec 4.5.3.10. Modules
+        private ModuleInstance AllocateModule(Module module)
+        {
+            //20. Include Types from module
+            var moduleInstance = new ModuleInstance(module.Types);
             
             //Resolve Imports
             foreach (var import in module.Imports)
@@ -62,7 +100,8 @@ namespace Wacs.Core.Runtime
                 switch (import.Desc)
                 {
                     case Module.ImportDesc.FuncDesc funcDesc:
-                        var funcSig = module[funcDesc.TypeIndex];
+                        // @Spec 4.5.3.2. @note: Host Functions must be bound to the environment prior to module instantiation!
+                        var funcSig = moduleInstance[funcDesc.TypeIndex];
                         var funcAddr = GetBoundEntity(entityId) as FuncAddr;
                         if (funcAddr == null)
                             throw new NotSupportedException(
@@ -71,6 +110,7 @@ namespace Wacs.Core.Runtime
                         if (functionInstance.Type != funcSig)
                             throw new NotSupportedException(
                                 $"Type mismatch while importing Function {entityId.module}.{entityId.entity}: expected {funcSig.ToNotation()}, env provided Function {functionInstance.Type.ToNotation()}");
+                        //14. external imported addresses first
                         moduleInstance.FuncAddrs.Add(funcAddr);
                         break;
                     case Module.ImportDesc.TableDesc tableDesc:
@@ -83,6 +123,7 @@ namespace Wacs.Core.Runtime
                         if (tableInstance.Type != tableType)
                             throw new NotSupportedException(
                                 $"Type mismatch while importing Table {entityId.module}.{entityId.entity}: expected {tableType}, env provided Table {tableInstance.Type}");
+                        //15. external imported addresses first
                         moduleInstance.TableAddrs.Add(tableAddr);
                         break;
                     case Module.ImportDesc.MemDesc memDesc:
@@ -95,6 +136,7 @@ namespace Wacs.Core.Runtime
                         if (memInstance.Type != memType)
                             throw new NotSupportedException(
                                 $"Type mismatch while importing Memory {entityId.module}.{entityId.entity}: expected {memType}, env provided Memory {memInstance.Type}");
+                        //16. external imported addresses first
                         moduleInstance.MemAddrs.Add(memAddr);
                         break;
                     case Module.ImportDesc.GlobalDesc globalDesc:
@@ -107,36 +149,52 @@ namespace Wacs.Core.Runtime
                         if (globalInstance.Type != globalType)
                             throw new NotSupportedException(
                                 $"Type mismatch while importing table {entityId.module}.{entityId.entity}: expected {globalType}, env provided table {globalInstance.Type}");
+                        //17. external imported addresses first
                         moduleInstance.GlobalAddrs.Add(globalAddr);
                         break;
                 }
             }
 
-            //Instantiate Functions
-            moduleInstance.FuncAddrs
-                .AddRange(module.Funcs
-                    .Select(func => new FunctionInstance(module[func.TypeIndex], func, moduleInstance))
-                    .Select(functionInstance => Store.AddFunction(functionInstance)));
+            //2. Allocate Functions and capture their addresses in the Store
+            //8. index ordered function addresses
+            foreach (var func in module.Funcs) {
+                moduleInstance.FuncAddrs.Add(AllocateFunc(Store, func, moduleInstance));
+            }
             
-            //Instantiate Tables
-            moduleInstance.TableAddrs
-                .AddRange(module.Tables
-                    .Select(tableType => new TableInstance(tableType))
-                    .Select(tableInstance => Store.AddTable(tableInstance)));
+            //3. Allocate Tables and capture their addresses in the Store
+            //9. index ordered table addresses
+            foreach (var table in module.Tables) {
+                moduleInstance.TableAddrs.Add(AllocateTable(Store, table, Value.RefNull(table.ElementType)));
+            }
+
+            //4. Allocate Memories and capture their addresses in the Store
+            //10. index ordered memory addresses
+            foreach (var mem in module.Memories) {
+                moduleInstance.MemAddrs.Add(AllocateMemory(Store, mem));
+            }
             
-            //Instantiate Memories
-            moduleInstance.MemAddrs
-                .AddRange( module.Memories
-                    .Select(memType => new MemoryInstance(memType))
-                    .Select(memInstance => Store.AddMemory(memInstance)));
+            //5. Allocate Globals and capture their addresses in the Store
+            //11. index ordered global addresses
+            foreach (var global in module.Globals) {
+                var val = EvaluateInitializer(global.Initializer);
+                moduleInstance.GlobalAddrs.Add(AllocateGlobal(Store, global.Type, val));
+            }
             
-            //Instantiate Globals
-            moduleInstance.GlobalAddrs
-                .AddRange( module.Globals
-                    .Select(globalDef => new GlobalInstance(globalDef.Type, EvaluateInitializer(globalDef.Initializer)))
-                    .Select(globalInstance => Store.AddGlobal(globalInstance)));
+            //6. Allocate Elements
+            //12. index ordered element addresses
+            foreach (var elem in module.Elements) {
+                var refs = EvaluateInitializers(elem.Initializers);
+                moduleInstance.ElemAddrs.Add(AllocateElement(Store, elem.Type, refs));
+            }
             
-            //Process Exports
+            //7. Allocate Datas
+            //13. index ordered data addresses
+            foreach (var data in module.Datas) {
+                moduleInstance.DataAddrs.Add(AllocateData(Store, data.Init));
+            }
+            
+            //18. Collect exports
+            //Process Exports, keep them, so they can be bound with a module name and imported by later modules.
             foreach (var export in module.Exports)
             {
                 var desc = export.Desc;
@@ -153,6 +211,7 @@ namespace Wacs.Core.Runtime
                         throw new InvalidDataException($"Invalid Export {desc}")
                 };
                 var exportInstance = new ExportInstance(export.Name, val);
+                //19. indexed export addresses
                 moduleInstance.Exports.Add(exportInstance);
             }
 
@@ -162,6 +221,77 @@ namespace Wacs.Core.Runtime
             return moduleInstance;
         }
 
+        /// <summary>
+        /// @Spec 4.5.3.1. Functions
+        /// </summary>
+        private static FuncAddr AllocateFunc(Store store, Module.Function func, ModuleInstance moduleInst)
+        {
+            var funcType = moduleInst[func.TypeIndex];
+            var funcInst = new FunctionInstance(funcType, moduleInst, func);
+            var funcAddr = store.AddFunction(funcInst);
+            return funcAddr;
+        }
+        
+        /// <summary>
+        /// @Spec 4.5.3.2. Host Functions
+        /// </summary>
+        private static FuncAddr AllocateHostFunc(Store store, FunctionType funcType, HostFunction.HostFunctionDelegate hostFunc)
+        {
+            var funcInst = new HostFunction(funcType, hostFunc);
+            var funcAddr = store.AddFunction(funcInst);
+            return funcAddr;
+        }
+
+        /// <summary>
+        /// @Spec 4.5.3.3. Tables
+        /// </summary>
+        private static TableAddr AllocateTable(Store store, TableType tableType, Value refVal)
+        {
+            var tableInst = new TableInstance(tableType, refVal);
+            var tableAddr = store.AddTable(tableInst);
+            return tableAddr;
+        }
+
+        /// <summary>
+        /// @Spec 4.5.3.4. Memories
+        /// </summary>
+        private static MemAddr AllocateMemory(Store store, MemoryType memType)
+        {
+            var memInst = new MemoryInstance(memType);
+            var memAddr = store.AddMemory(memInst);
+            return memAddr;
+        }
+
+        /// <summary>
+        /// @Spec 4.5.3.5. Globals
+        /// </summary>
+        private static GlobalAddr AllocateGlobal(Store store, GlobalType globalType, Value val)
+        {
+            var globalInst = new GlobalInstance(globalType, val);
+            var globalAddr = store.AddGlobal(globalInst);
+            return globalAddr;
+        }
+
+        /// <summary>
+        /// @Spec 4.5.3.6. Element segments
+        /// </summary>
+        private static ElemAddr AllocateElement(Store store, ReferenceType refType, List<Value> refs)
+        {
+            var elemInst = new ElementInstance(refType, refs);
+            var elemAddr = store.AddElement(elemInst);
+            return elemAddr;
+        }
+
+        /// <summary>
+        /// @Spec 4.5.3.7. Data Segments
+        /// </summary>
+        private static DataAddr AllocateData(Store store, byte[] init)
+        {
+            var dataInst = new DataInstance(init);
+            var dataAddr = store.AddData(dataInst);
+            return dataAddr;
+        }
+        
         private Value EvaluateInitializer(Expression ini)
         {
             throw new NotImplementedException();
@@ -172,6 +302,11 @@ namespace Wacs.Core.Runtime
             }
 
             return Value.NullFuncRef;
+        }
+
+        private List<Value> EvaluateInitializers(Expression[] inis)
+        {
+            return inis.Select(ini => EvaluateInitializer(ini)).ToList();
         }
     }
 }

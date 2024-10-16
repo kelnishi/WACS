@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
@@ -17,7 +18,7 @@ namespace Wacs.Core.Instructions
 
         // @Spec 3.3.2.1. ref.null t
         // @Spec 4.4.2.1. ref.null t
-        public override void Execute(ExecContext context) {
+        public override void Execute(IExecContext context) {
             switch (Type) {
                 case ReferenceType.Funcref:
                     context.OpStack.PushFuncref(Value.NullFuncRef);
@@ -44,7 +45,7 @@ namespace Wacs.Core.Instructions
 
         // @Spec 3.3.2.2. ref.is_null
         // @Spec 4.4.2.2. ref.is_null
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             Value value = context.OpStack.PopRefType();
             int booleanResult = value.IsNullRef ? 1 : 0;
@@ -67,14 +68,14 @@ namespace Wacs.Core.Instructions
         
         // @Spec 3.3.2.3. ref.func x
         // @Spec 4.4.2.3. ref.func x
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             context.ValidateContext((ctx) => {
                 if (!ctx.Funcs.Contains(FunctionIndex))
                     throw new InvalidDataException($"Function index {FunctionIndex} is not defined in the context");
             });
             
-            context.OpStack.PushFuncref(new Value(ValType.Funcref, (uint)FunctionIndex.Value));
+            context.OpStack.PushFuncref(new Value(ValType.Funcref, (long)FunctionIndex.Value));
         }
 
         public override IInstruction Parse(BinaryReader reader)

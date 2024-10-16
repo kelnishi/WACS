@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Utilities;
 
 
@@ -14,7 +15,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.TableGet;
         public uint TableIndex { get; private set; }
 
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             // Fetch the element from the table and push it onto the stack
             throw new NotImplementedException();
@@ -33,7 +34,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.TableSet;
         public uint TableIndex { get; private set; }
 
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             // Set the element in the table, potentially popping the value from the stack
             throw new NotImplementedException();
@@ -53,7 +54,7 @@ namespace Wacs.Core.Instructions
         public uint TableIndex { get; internal set; }
         public uint ElementIndex { get; internal set; } // This may be updated depending on the value type specification
 
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             // Grow the table by the specified number of elements of the specified type
             throw new NotImplementedException();
@@ -73,7 +74,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.ElemDrop;
         public uint ElementIndex { get; internal set; }
 
-        public override void Execute(ExecContext context) {
+        public override void Execute(IExecContext context) {
             throw new NotImplementedException();
         }
 
@@ -90,7 +91,7 @@ namespace Wacs.Core.Instructions
         public uint SrcTableIndex { get; internal set; }
         public uint DstTableIndex { get; internal set; }
 
-        public override void Execute(ExecContext context) {
+        public override void Execute(IExecContext context) {
             throw new NotImplementedException();
         }
 
@@ -107,7 +108,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.TableGrow;
         public uint TableIndex { get; internal set; }
 
-        public override void Execute(ExecContext context) {
+        public override void Execute(IExecContext context) {
             throw new NotImplementedException();
         }
 
@@ -122,7 +123,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.TableSize;
         public uint TableIndex { get; internal set; }
 
-        public override void Execute(ExecContext context) {
+        public override void Execute(IExecContext context) {
             throw new NotImplementedException();
         }
 
@@ -137,7 +138,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.TableFill;
         public uint TableIndex { get; internal set; }
 
-        public override void Execute(ExecContext context) {
+        public override void Execute(IExecContext context) {
             throw new NotImplementedException();
         }
 

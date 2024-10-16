@@ -148,7 +148,7 @@ namespace Wacs.Core
 
         public static void PatchNames(Module module)
         {
-            throw new NotImplementedException();
+            //throw new NotImplementedException();
             // if (module.Names != null)
             // {
             //     if (module.Names.FunctionNames != null)

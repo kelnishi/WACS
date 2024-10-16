@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
@@ -14,11 +15,11 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode { get; }
         public LocalIdx Index { get; internal set; }
         
-        public delegate void ExecuteDelegate(ExecContext context, LocalIdx index);
+        public delegate void ExecuteDelegate(IExecContext context, LocalIdx index);
         private ExecuteDelegate _execute;
         public LocalVariableInst(OpCode opCode, ExecuteDelegate execute) => _execute = execute;
         
-        public override void Execute(ExecContext context) => _execute(context, Index);
+        public override void Execute(IExecContext context) => _execute(context, Index);
         
         public override IInstruction Parse(BinaryReader reader)
         {
@@ -32,37 +33,41 @@ namespace Wacs.Core.Instructions
         
         
         //0x20
-        // @Spec 3.3.5.1. local.get
         // @Spec 4.4.5.1. local.get 
-        private static void ExecuteLocalGet(ExecContext context, LocalIdx localIndex)
+        private static void ExecuteLocalGet(IExecContext context, LocalIdx localIndex)
         {
-            //TODO: Use current frame
+            // @Spec 3.3.5.1. local.get
             context.ValidateContext((ctx) => {
-                // if (!ctx.Locals.Contains(localIndex))
-                //     throw new InvalidProgramException($"Locals did not contain index {localIndex}");
+                if (!ctx.ExecContext.Locals.Contains(localIndex))
+                    throw new InvalidProgramException($"Locals did not contain index {localIndex}");
             });
-            var value = context.GetLocal(localIndex);
+            var value = context.Locals[localIndex];
             context.OpStack.PushValue(value);
         }
         
         //0x21
-        // @Spec 3.3.5.2. local.set
         // @Spec 4.4.5.2. local.set
-        private static void ExecuteLocalSet(ExecContext context, LocalIdx localIndex) {
+        private static void ExecuteLocalSet(IExecContext context, LocalIdx localIndex) 
+        {
+            // @Spec 3.3.5.2. local.set
             context.ValidateContext((ctx) => {
-                // if (!ctx.Locals.Contains(localIndex))
-                //     throw new InvalidProgramException($"Locals did not contain index {localIndex}");
+                if (!ctx.ExecContext.Locals.Contains(localIndex))
+                    throw new InvalidProgramException($"Locals did not contain index {localIndex}");
             });
 
-            Value value = context.OpStack.PopAny();
-            context.SetLocal(localIndex, value);
+            var value = context.OpStack.PopAny();
+            context.Locals[localIndex] = value;
         }
         
         //0x22
-        // @Spec 3.3.5.3. local.tee
         // @Spec 4.4.5.3. local.tee
-        private static void ExecuteLocalTee(ExecContext context, LocalIdx localIndex)
+        private static void ExecuteLocalTee(IExecContext context, LocalIdx localIndex)
         {
+            // @Spec 3.3.5.3. local.tee
+            context.ValidateContext((ctx) => {
+                if (!ctx.ExecContext.Locals.Contains(localIndex))
+                    throw new InvalidProgramException($"Locals did not contain index {localIndex}");
+            });
             var value = context.OpStack.PopAny();
             context.OpStack.PushValue(value);
             context.OpStack.PushValue(value);
@@ -75,11 +80,11 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode { get; }
         public GlobalIdx Index { get; internal set; }
         
-        public delegate void ExecuteDelegate(ExecContext context, GlobalIdx index);
+        public delegate void ExecuteDelegate(IExecContext context, GlobalIdx index);
         private ExecuteDelegate _execute;
         public GlobalVariableInst(OpCode opCode, ExecuteDelegate execute) => _execute = execute;
         
-        public override void Execute(ExecContext context) => _execute(context, Index);
+        public override void Execute(IExecContext context) => _execute(context, Index);
         
         public override IInstruction Parse(BinaryReader reader)
         {
@@ -91,37 +96,29 @@ namespace Wacs.Core.Instructions
         public static GlobalVariableInst CreateInstGlobalSet() => new GlobalVariableInst(OpCode.LocalSet, ExecuteGlobalSet);
         
         //0x23
-        // @Spec 3.3.5.4. global.get
         // @Spec 4.4.5.4. global.get
-        private static void ExecuteGlobalGet(ExecContext context, GlobalIdx globalIndex)
+        private static void ExecuteGlobalGet(IExecContext context, GlobalIdx globalIndex)
         {
+            // @Spec 3.3.5.4. global.get
             context.ValidateContext((ctx) => {
-                //TODO check current frame
-                if (!ctx.Globals.Contains(globalIndex))
+                if (!ctx.ExecContext.Globals.Contains(globalIndex))
                     throw new InvalidProgramException($"Globals did not contain index {globalIndex}");
-                
-                //TODO check current store
-                // ???
-                
-                //TODO: If inside a global, element or data expression, only imported globals are valid.
             });
-
-            var g = context.GetGlobal(globalIndex);
-            context.OpStack.PushValue(g);
+            var value = context.Globals[globalIndex];
+            context.OpStack.PushValue(value);
         }
         
         //0x24
-        // @Spec 3.3.5.5. global.set
         // @Spec 4.4.5.5. global.set
-        private static void ExecuteGlobalSet(ExecContext context, GlobalIdx globalIndex)
+        private static void ExecuteGlobalSet(IExecContext context, GlobalIdx globalIndex)
         {
+            // @Spec 3.3.5.5. global.set
             context.ValidateContext((ctx) => {
-                if (!ctx.Globals.Contains(globalIndex))
+                if (!ctx.ExecContext.Globals.Contains(globalIndex))
                     throw new InvalidProgramException($"Globals did not contain index {globalIndex}");
             });
-
-            Value value = context.OpStack.PopAny();
-            context.SetGlobal(globalIndex, value);
+            var value = context.OpStack.PopAny();
+            context.Globals[globalIndex] = value;
         }
         
     }

@@ -9,7 +9,7 @@ namespace Wacs.Core.Types
     /// @Spec 2.3.7. Limits
     /// Represents the limits of a resizable storage (memory or table) in WebAssembly.
     /// </summary>
-    public class Limits
+    public class Limits : ICloneable
     {
         /// <summary>
         /// The minimum number of units (e.g., pages for memory).
@@ -29,6 +29,11 @@ namespace Wacs.Core.Types
         private Limits(uint minimum, uint? maximum = null) {
             Minimum = minimum;
             Maximum = maximum;
+        }
+
+        public Limits(Limits copy) {
+            Minimum = copy.Minimum;
+            Maximum = copy.Maximum;
         }
         
         /// <summary>
@@ -58,5 +63,7 @@ namespace Wacs.Core.Types
                 
             }
         }
+
+        public object Clone() => new Limits(this);
     }
 }

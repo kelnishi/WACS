@@ -1,5 +1,6 @@
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Instructions.Numeric
 {
@@ -17,27 +18,27 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I32GeS = new NumericInst(OpCode.I32GeS, ExecuteI32GeS);
         public static readonly NumericInst I32GeU = new NumericInst(OpCode.I32GeU, ExecuteI32GeU);
         
-        private static void ExecuteI32Eqz(ExecContext context)
+        private static void ExecuteI32Eqz(IExecContext context)
         {
             int i = context.OpStack.PopI32();
             int result = (i == 0) ? 1 : 0;
             context.OpStack.PushI32(result);
         }
-        private static void ExecuteI32Eq(ExecContext context)
+        private static void ExecuteI32Eq(IExecContext context)
         {
             int a = context.OpStack.PopI32();
             int b = context.OpStack.PopI32();
             int result = (a == b) ? 1 : 0;
             context.OpStack.PushI32(result);
         }
-        private static void ExecuteI32Ne(ExecContext context)
+        private static void ExecuteI32Ne(IExecContext context)
         {
             int a = context.OpStack.PopI32();
             int b = context.OpStack.PopI32();
             int result = (a != b) ? 1 : 0;
             context.OpStack.PushI32(result);
         }
-        private static void ExecuteI32LtS(ExecContext context)
+        private static void ExecuteI32LtS(IExecContext context)
         {
             int a = context.OpStack.PopI32();
             int b = context.OpStack.PopI32();
@@ -45,7 +46,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI32LtU(ExecContext context)
+        private static void ExecuteI32LtU(IExecContext context)
         {
             uint a = context.OpStack.PopI32();
             uint b = context.OpStack.PopI32();
@@ -53,7 +54,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI32GtS(ExecContext context)
+        private static void ExecuteI32GtS(IExecContext context)
         {
             int a = context.OpStack.PopI32();
             int b = context.OpStack.PopI32();
@@ -61,7 +62,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI32GtU(ExecContext context)
+        private static void ExecuteI32GtU(IExecContext context)
         {
             uint a = context.OpStack.PopI32();
             uint b = context.OpStack.PopI32();
@@ -69,7 +70,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI32LeS(ExecContext context)
+        private static void ExecuteI32LeS(IExecContext context)
         {
             int a = context.OpStack.PopI32();
             int b = context.OpStack.PopI32();
@@ -77,7 +78,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI32LeU(ExecContext context)
+        private static void ExecuteI32LeU(IExecContext context)
         {
             uint a = context.OpStack.PopI32();
             uint b = context.OpStack.PopI32();
@@ -85,7 +86,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI32GeS(ExecContext context)
+        private static void ExecuteI32GeS(IExecContext context)
         {
             int a = context.OpStack.PopI32();
             int b = context.OpStack.PopI32();
@@ -93,7 +94,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteI32GeU(ExecContext context)
+        private static void ExecuteI32GeU(IExecContext context)
         {
             uint a = context.OpStack.PopI32();
             uint b = context.OpStack.PopI32();

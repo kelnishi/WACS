@@ -23,6 +23,7 @@ namespace Wacs.Core
         public class ElementSegment
         {
             public ReferenceType Type { get; internal set; }
+            //A vector of (ref.func x) instructions
             public Expression[] Initializers { get; internal set; }
             
             public ElementMode Mode { get; internal set; }
@@ -193,11 +194,11 @@ namespace Wacs.Core
                     {
                         RuleFor(mode => mode.TableIndex)
                             .Must((mode, idx, ctx) =>
-                                ctx.GetExecContext().Tables.Contains(idx));
+                                ctx.GetValidationContext().Tables.Contains(idx));
                         RuleFor(mode => mode)
                             .Custom((mode, ctx) =>
                             {
-                                var tableType = ctx.GetExecContext().Tables[mode.TableIndex];
+                                var tableType = ctx.GetValidationContext().Tables[mode.TableIndex];
                                 
                                 var exprValidator = new Expression.Validator(ValType.I32.SingleResult(), isConstant: true);
                                 var subContext = ctx.GetSubContext(mode.Offset);

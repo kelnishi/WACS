@@ -89,7 +89,7 @@ namespace Wacs.Core
                     public Validator()
                     {
                         RuleFor(mode => mode.MemoryIndex)
-                            .Must((mode, idx, ctx) => ctx.GetExecContext().Mems.Contains(idx));
+                            .Must((mode, idx, ctx) => ctx.GetValidationContext().Mems.Contains(idx));
                         RuleFor(mode => mode.Offset)
                             .Custom((expr, ctx) =>
                             {

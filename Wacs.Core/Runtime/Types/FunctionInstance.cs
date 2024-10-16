@@ -19,12 +19,10 @@ namespace Wacs.Core.Runtime.Types
         public Module.Function Definition { get; }
 
         /// <summary>
+        /// @Spec 4.5.3.1. Functions
         /// Initializes a new instance of the <see cref="FunctionInstance"/> class.
         /// </summary>
-        /// <param name="type">The function type.</param>
-        /// <param name="definition">The function definition.</param>
-        /// <param name="module">The module instance containing the function.</param>
-        public FunctionInstance(FunctionType type, Module.Function definition, ModuleInstance module)
+        public FunctionInstance(FunctionType type, ModuleInstance module, Module.Function definition)
         {
             Type = type;
             Module = module;

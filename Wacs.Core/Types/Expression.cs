@@ -72,8 +72,8 @@ namespace Wacs.Core.Types
                     {
                         try
                         {
-                            inst.Execute(ctx.GetExecContext());
-                            Value resultVal = ctx.GetExecContext().OpStack.Peek();
+                            inst.Execute(ctx.GetValidationContext().ExecContext);
+                            Value resultVal = ctx.GetValidationContext().ExecContext.OpStack.Peek();
                             StackType = resultVal.Type;
                         }
                         catch (InvalidProgramException exc)
@@ -96,10 +96,10 @@ namespace Wacs.Core.Types
                         if(!e.IsConstant())
                             ctx.AddFailure($"Expression must be constant");
                     
-                    var execContext = ctx.GetExecContext();
+                    var validationContext = ctx.GetValidationContext();
                     foreach (var eType in ResultType.Types)
                     {
-                        var rValue = execContext.OpStack.PopAny();
+                        var rValue = validationContext.ExecContext.OpStack.PopAny();
                         if (rValue.Type != eType)
                         {
                             ctx.AddFailure($"Expression Result type {rValue.Type} did not match expected {eType}");

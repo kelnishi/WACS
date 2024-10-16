@@ -1,6 +1,7 @@
 using System;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -27,7 +28,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I32Rotr   = new NumericInst(OpCode.I32Rotr   , ExecuteI32Rotr  );
         
         // @Spec 4.3.2.3. iadd
-        private static void ExecuteI32Add(ExecContext context)
+        private static void ExecuteI32Add(IExecContext context)
         {
             int b = context.OpStack.PopI32();
             int a = context.OpStack.PopI32();
@@ -36,7 +37,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
         
         // @Spec 4.3.2.20 iclz
-        private static void ExecuteI32Clz(ExecContext context)
+        private static void ExecuteI32Clz(IExecContext context)
         {
             int value = context.OpStack.PopI32();
             uint clz = 0;
@@ -49,7 +50,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
         
         // @Spec 4.3.2.21 ictz
-        private static void ExecuteI32Ctz(ExecContext context)
+        private static void ExecuteI32Ctz(IExecContext context)
         {
             int value = context.OpStack.PopI32();
             uint ctz = 0;
@@ -62,7 +63,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.22 ipopcnt
-        private static void ExecuteI32Popcnt(ExecContext context)
+        private static void ExecuteI32Popcnt(IExecContext context)
         {
             int x = context.OpStack.PopI32();
             uint popcnt = 0;
@@ -75,7 +76,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.4. isub
-        private static void ExecuteI32Sub(ExecContext context)
+        private static void ExecuteI32Sub(IExecContext context)
         {
             int b = context.OpStack.PopI32();
             int a = context.OpStack.PopI32();
@@ -84,7 +85,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.5. imul
-        private static void ExecuteI32Mul(ExecContext context)
+        private static void ExecuteI32Mul(IExecContext context)
         {
             int a = context.OpStack.PopI32();
             int b = context.OpStack.PopI32();
@@ -93,7 +94,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.7. idiv_s
-        private static void ExecuteI32DivS(ExecContext context)
+        private static void ExecuteI32DivS(IExecContext context)
 {
             int dividend = context.OpStack.PopI32();
             int divisor = context.OpStack.PopI32();
@@ -105,7 +106,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.6. idiv_u
-        private static void ExecuteI32DivU(ExecContext context)
+        private static void ExecuteI32DivU(IExecContext context)
         {
             uint dividend = context.OpStack.PopI32();
             uint divisor = context.OpStack.PopI32();
@@ -116,7 +117,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.8. irem_s
-        private static void ExecuteI32RemS(ExecContext context)
+        private static void ExecuteI32RemS(IExecContext context)
         {
             int dividend = context.OpStack.PopI32();
             int divisor = context.OpStack.PopI32();
@@ -127,7 +128,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.8. irem_u
-        private static void ExecuteI32RemU(ExecContext context)
+        private static void ExecuteI32RemU(IExecContext context)
         {
             uint dividend = context.OpStack.PopI32();
             uint divisor = context.OpStack.PopI32();
@@ -138,7 +139,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.11 iand        
-        private static void ExecuteI32And(ExecContext context)
+        private static void ExecuteI32And(IExecContext context)
         {
             uint a = context.OpStack.PopI32();
             uint b = context.OpStack.PopI32();
@@ -147,7 +148,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.13 ior
-        private static void ExecuteI32Or(ExecContext context)
+        private static void ExecuteI32Or(IExecContext context)
         {
             uint a = context.OpStack.PopI32();
             uint b = context.OpStack.PopI32();
@@ -156,7 +157,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.14 ixor
-        private static void ExecuteI32Xor(ExecContext context)
+        private static void ExecuteI32Xor(IExecContext context)
         {
             uint a = context.OpStack.PopI32();
             uint b = context.OpStack.PopI32();
@@ -165,7 +166,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.15 ishl
-        private static void ExecuteI32Shl(ExecContext context)
+        private static void ExecuteI32Shl(IExecContext context)
         {
             uint a = context.OpStack.PopI32();
             int b = context.OpStack.PopI32() & 0x1F;
@@ -174,7 +175,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.17 ishr_s
-        private static void ExecuteI32ShrS(ExecContext context)
+        private static void ExecuteI32ShrS(IExecContext context)
         {
             int a = context.OpStack.PopI32();
             int b = context.OpStack.PopI32() & 0x1F;
@@ -183,7 +184,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.16 ishr_u
-        private static void ExecuteI32ShrU(ExecContext context)
+        private static void ExecuteI32ShrU(IExecContext context)
         {
             uint a = context.OpStack.PopI32();
             int b = context.OpStack.PopI32()& 0x1F;
@@ -192,7 +193,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.18 irotl
-        private static void ExecuteI32Rotl(ExecContext context)
+        private static void ExecuteI32Rotl(IExecContext context)
         {
             uint x = context.OpStack.PopI32();
             int shiftDistance = context.OpStack.PopI32()& 0x1F;
@@ -205,7 +206,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.19 irotr
-        private static void ExecuteI32Rotr(ExecContext context)
+        private static void ExecuteI32Rotr(IExecContext context)
         {
             uint x = context.OpStack.PopI32();
             int shiftDistance = context.OpStack.PopI32() & 31;

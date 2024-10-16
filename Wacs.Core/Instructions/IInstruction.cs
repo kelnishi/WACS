@@ -1,6 +1,7 @@
 using System.IO;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Instructions
 {
@@ -15,7 +16,7 @@ namespace Wacs.Core.Instructions
         /// Executes the instruction within the given execution context.
         /// </summary>
         /// <param name="context">The execution context in which to execute the instruction.</param>
-        void Execute(ExecContext context);
+        void Execute(IExecContext context);
         
         /// <summary>
         /// Parses an instruction from a binary reader.

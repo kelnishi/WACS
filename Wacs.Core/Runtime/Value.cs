@@ -29,11 +29,11 @@ namespace Wacs.Core.Runtime
         [FieldOffset(1)] public readonly ulong V128_low;
         [FieldOffset(9)] public readonly ulong V128_high;
 
-        // ref funcaddr
-        [FieldOffset(1)] public readonly ulong FuncAddr;
+        // ref funcIdx
+        [FieldOffset(1)] public readonly ulong FuncIdx;
         
-        // ref.extern externaddr
-        [FieldOffset(1)] public readonly ulong ExternAddr;
+        // ref.extern externIdx
+        [FieldOffset(1)] public readonly ulong ExternIdx;
 
 
         // Constructors for each type
@@ -99,7 +99,7 @@ namespace Wacs.Core.Runtime
             Int64 = idx;
         }
 
-        private Value(ValType type, Int64 v)
+        public Value(ValType type, Int64 v)
         {
             this = default;
             Type = type;
@@ -108,7 +108,12 @@ namespace Wacs.Core.Runtime
 
         public static readonly Value NullFuncRef = new Value(ValType.Funcref, -1);
         public static readonly Value NullExternRef = new Value(ValType.Externref, -1);
-
+        public static Value RefNull(ReferenceType type) => type switch {
+            ReferenceType.Funcref => NullFuncRef,
+            ReferenceType.Externref => NullExternRef,
+            _ => throw new InvalidDataException($"Unsupported RefType: {type}"),
+        };
+        
         public bool IsNullRef => (Type == ValType.Funcref || Type == ValType.Externref) && Int64 == -1;
         
         public static implicit operator Value(int value) => new Value(value);
