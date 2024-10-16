@@ -1,4 +1,5 @@
 using System;
+using FluentValidation;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime.Types
@@ -18,17 +19,35 @@ namespace Wacs.Core.Runtime.Types
             _data = new byte[initialSize];
         }
 
-        public bool Grow(uint deltaPages)
+        /// <summary>
+        /// @Spec 4.5.3.9. Growing memories
+        /// </summary>
+        public bool Grow(uint numPages)
         {
             uint oldSize = (uint)(Data.Length / PageSize);
-            uint newSize = oldSize + deltaPages;
+            uint len = oldSize + numPages;
 
-            if (newSize > Type.Limits.Maximum)
+            if (len > Type.Limits.Maximum)
             {
                 return false; // Cannot grow beyond maximum limit
             }
+            
+            var newLimits = new Limits(Type.Limits) {
+                Minimum = (uint)len
+            };
+            var validator = TableType.Validator.Limits;
+            try
+            {
+                validator.ValidateAndThrow(newLimits);
+            }
+            catch (ValidationException exc)
+            {
+                var _ = exc;
+                return false;
+            }
 
-            Array.Resize(ref _data, (int)(newSize * PageSize));
+            Array.Resize(ref _data, (int)(len * PageSize));
+            
             return true;
         }
     }

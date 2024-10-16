@@ -55,7 +55,7 @@ namespace Wacs.Core
                     public Validator()
                     {
                         RuleFor(fd => fd.FunctionIndex)
-                            .Must((fd, index, ctx) => ctx.GetExecContext().Funcs.Contains(index));
+                            .Must((fd, index, ctx) => ctx.GetValidationContext().Funcs.Contains(index));
                     }
                 }
             }
@@ -72,7 +72,7 @@ namespace Wacs.Core
                     public Validator()
                     {
                         RuleFor(td => td.TableIndex)
-                            .Must((fd, index, ctx) => ctx.GetExecContext().Tables.Contains(index));
+                            .Must((fd, index, ctx) => ctx.GetValidationContext().Tables.Contains(index));
                     }
                 }
             }
@@ -89,7 +89,7 @@ namespace Wacs.Core
                     public Validator()
                     {
                         RuleFor(md => md.MemoryIndex)
-                            .Must((md, index, ctx) => ctx.GetExecContext().Mems.Contains(index));
+                            .Must((md, index, ctx) => ctx.GetValidationContext().Mems.Contains(index));
                     }
                 }
             }
@@ -106,7 +106,7 @@ namespace Wacs.Core
                     public Validator()
                     {
                         RuleFor(gd => gd.GlobalIndex)
-                            .Must((gd, index, ctx) => ctx.GetExecContext().Globals.Contains(index));
+                            .Must((gd, index, ctx) => ctx.GetValidationContext().ExecContext.Globals.Contains(index));
                     }
                 }
             }

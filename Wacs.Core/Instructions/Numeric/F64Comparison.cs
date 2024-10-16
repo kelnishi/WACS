@@ -1,5 +1,6 @@
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Instructions.Numeric
 {
@@ -12,7 +13,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F64Le = new NumericInst(OpCode.F64Le, ExecuteF64Le);
         public static readonly NumericInst F64Ge = new NumericInst(OpCode.F64Ge, ExecuteF64Ge);
 
-        private static void ExecuteF64Eq(ExecContext context)
+        private static void ExecuteF64Eq(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();
@@ -23,7 +24,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             context.OpStack.PushI32(result);
         }
-        private static void ExecuteF64Ne(ExecContext context)
+        private static void ExecuteF64Ne(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();
@@ -35,7 +36,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteF64Lt(ExecContext context)
+        private static void ExecuteF64Lt(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();
@@ -47,7 +48,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteF64Gt(ExecContext context)
+        private static void ExecuteF64Gt(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();
@@ -59,7 +60,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteF64Le(ExecContext context)
+        private static void ExecuteF64Le(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();
@@ -71,7 +72,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteF64Ge(ExecContext context)
+        private static void ExecuteF64Ge(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();

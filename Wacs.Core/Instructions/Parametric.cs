@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
@@ -15,7 +16,7 @@ namespace Wacs.Core.Instructions
         
         // @Spec 3.3.4.1. drop
         // @Spec 4.4.4.1. drop
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             Value value = context.OpStack.PopAny();
         }
@@ -35,7 +36,7 @@ namespace Wacs.Core.Instructions
         
         // @Spec 3.3.4.2. select
         // @Spec 4.4.4.2. select
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             int c = context.OpStack.PopI32();
             if (WithTypes)

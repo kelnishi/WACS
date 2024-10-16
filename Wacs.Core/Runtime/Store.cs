@@ -20,6 +20,7 @@ namespace Wacs.Core.Runtime
         public TableInstance this[TableAddr addr] => Tables[(Index)addr];
         public MemoryInstance this[MemAddr addr] => Mems[(Index)addr];
         public GlobalInstance this[GlobalAddr addr] => Globals[(Index)addr];
+        public ElementInstance this[ElemAddr addr] => Elems[(Index)addr];
         
         public FuncAddr AddFunction(IFunctionInstance func)
         {
@@ -48,8 +49,21 @@ namespace Wacs.Core.Runtime
             Globals.Add(global);
             return addr;
         }
-
         
+        public ElemAddr AddElement(ElementInstance elem)
+        {
+            var addr = new ElemAddr(Elems.Count);
+            Elems.Add(elem);
+            return addr;
+        }
+
+        public DataAddr AddData(DataInstance data)
+        {
+            var addr = new DataAddr(Datas.Count);
+            Datas.Add(data);
+            return addr;
+        }
+
         
     }
 }

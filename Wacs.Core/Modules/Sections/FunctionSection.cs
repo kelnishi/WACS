@@ -38,24 +38,30 @@ namespace Wacs.Core
                     // @Spec 3.4.1.1
                     RuleFor(func => func.TypeIndex)
                         .Must((func, index, ctx) => 
-                            ctx.GetExecContext().Types.Contains(index));
+                            ctx.GetValidationContext().Types.Contains(index));
                     RuleFor(func => func)
                         .Custom((func, context) =>
                         {
-                            var types = context.GetExecContext().Types;
+                            var types = context.GetValidationContext().Types;
                             if (!types.Contains(func.TypeIndex))
                             {
                                 context.AddFailure("Function.TypeIndex not within Module.Types");
                                 return;
                             }
 
-                            var functype = types[func.TypeIndex];
+                            var funcType = types[func.TypeIndex];
 
-                            context.GetExecContext().SetLocals(functype.ParameterTypes.Types, func.Locals);
-                            context.GetExecContext().SetLabels(new[] { functype.ResultType });
-                            context.GetExecContext().SetReturn(functype.ResultType);
+                            // Set the context locals
+                            var frame = new Frame {
+                                Locals = new LocalsSpace(types[func.TypeIndex].ParameterTypes.Types, func.Locals)
+                            };
+                            context.GetValidationContext().ExecContext.PushFrame(frame);
+                            
+                            //TODO Fix function validation
+                            // context.GetExecContext().SetLabels(new[] { funcType.ResultType });
+                            // context.GetExecContext().SetReturn(funcType.ResultType);
 
-                            var exprValidator = new Expression.Validator(functype.ResultType);
+                            var exprValidator = new Expression.Validator(funcType.ResultType);
                             var subcontext = context.GetSubContext(func.Body);
                             var validationResult = exprValidator.Validate(subcontext);
                             if (!validationResult.IsValid)

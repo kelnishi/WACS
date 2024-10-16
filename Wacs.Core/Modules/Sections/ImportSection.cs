@@ -81,7 +81,7 @@ namespace Wacs.Core
                     public Validator() {
                         // Only checks that the FunctionType exists, validation happens on the section
                         RuleFor(desc => desc.TypeIndex)
-                            .Must((desc, index, ctx) => ctx.GetExecContext().Types.Contains(index));
+                            .Must((desc, index, ctx) => ctx.GetValidationContext().Types.Contains(index));
                     }
                 }
             }

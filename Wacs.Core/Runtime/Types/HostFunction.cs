@@ -9,19 +9,22 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class HostFunction : IFunctionInstance
     {
+        public delegate object[] HostFunctionDelegate(object[] arguments);
+        
         public FunctionType Type { get; }
         
         /// <summary>
         /// The delegate representing the host function implementation.
         /// </summary>
-        private readonly Func<object[], object[]> _hostFunction;
+        private readonly HostFunctionDelegate _hostFunction;
 
         /// <summary>
+        /// @Spec 4.5.3.2. Host Functions
         /// Initializes a new instance of the <see cref="HostFunction"/> class.
         /// </summary>
         /// <param name="type">The function type.</param>
         /// <param name="hostFunction">The delegate representing the host function.</param>
-        public HostFunction(FunctionType type, Func<object[], object[]> hostFunction)
+        public HostFunction(FunctionType type, HostFunctionDelegate hostFunction)
         {
             Type = type;
             _hostFunction = hostFunction;

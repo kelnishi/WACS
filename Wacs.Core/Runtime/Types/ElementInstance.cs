@@ -12,5 +12,8 @@ namespace Wacs.Core.Runtime.Types
 
         //Refs
         public List<Value> Elements { get; }
+
+        public ElementInstance(ReferenceType type, List<Value> refs) =>
+            (Type, Elements) = (type, refs);
     }
 }

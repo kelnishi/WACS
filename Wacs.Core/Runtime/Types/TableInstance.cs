@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using FluentValidation;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime.Types
@@ -13,29 +15,48 @@ namespace Wacs.Core.Runtime.Types
         //TODO: These should be ref values
         public List<Value> Elements { get; }
 
-        public TableInstance(TableType type)
+        /// <summary>
+        /// @Spec 4.5.3.3. Tables
+        /// @Spec 4.5.3.10. Modules
+        /// </summary>
+        public TableInstance(TableType type, Value refVal)
         {
-            Type = type;
+            Type = (TableType)type.Clone();
             Elements = new List<Value>((int)type.Limits.Minimum);
-
+            
             for (int i = 0; i < type.Limits.Minimum; i++)
             {
-                Elements.Add(new Value(ValType.Funcref));
+                Elements.Add(refVal);
             }
         }
 
-        public bool Grow(uint delta, Value initialValue)
+        /// <summary>
+        /// @Spec 4.5.3.8. Growing tables
+        /// </summary>
+        public bool Grow( int numEntries, Value refInit)
         {
-            uint newSize = (uint)Elements.Count + delta;
+            long len = (long)Elements.Count + numEntries;
+            if (len > TableType.MaxTableSize)
+                return false;
 
-            if (newSize > Type.Limits.Maximum)
+            var newLimits = new Limits(Type.Limits) {
+                Minimum = (uint)len
+            };
+            var validator = TableType.Validator.Limits;
+            try
             {
-                return false; // Cannot grow beyond maximum limit
+                validator.ValidateAndThrow(newLimits);
+            }
+            catch (ValidationException exc)
+            {
+                var _ = exc;
+                return false;
             }
 
-            for (uint i = 0; i < delta; i++)
+            Type.Limits = newLimits;
+            for (int i = 0; i < numEntries; i++)
             {
-                Elements.Add(initialValue);
+                Elements.Add(refInit);
             }
 
             return true;

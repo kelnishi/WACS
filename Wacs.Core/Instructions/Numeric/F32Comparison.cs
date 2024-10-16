@@ -1,6 +1,7 @@
 using System;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Instructions.Numeric
 {
@@ -13,7 +14,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F32Le = new NumericInst(OpCode.F32Le, ExecuteF32Le);
         public static readonly NumericInst F32Ge = new NumericInst(OpCode.F32Ge, ExecuteF32Ge);
         
-        private static void ExecuteF32Eq(ExecContext context)
+        private static void ExecuteF32Eq(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -24,7 +25,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             context.OpStack.PushI32(result);
         }
-        private static void ExecuteF32Ne(ExecContext context)
+        private static void ExecuteF32Ne(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -36,7 +37,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteF32Lt(ExecContext context)
+        private static void ExecuteF32Lt(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -48,7 +49,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteF32Gt(ExecContext context)
+        private static void ExecuteF32Gt(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -60,7 +61,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteF32Le(ExecContext context)
+        private static void ExecuteF32Le(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -72,7 +73,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteF32Ge(ExecContext context)
+        private static void ExecuteF32Ge(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();

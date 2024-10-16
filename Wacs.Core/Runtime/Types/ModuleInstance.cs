@@ -10,7 +10,7 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class ModuleInstance
     {
-        public List<FunctionType> Types { get; } = new List<FunctionType>();
+        public List<FunctionType> Types { get; }
         public List<FuncAddr> FuncAddrs { get; } = new List<FuncAddr>();
         public List<TableAddr> TableAddrs { get; } = new List<TableAddr>();
         public List<MemAddr> MemAddrs { get; } = new List<MemAddr>();
@@ -19,6 +19,10 @@ namespace Wacs.Core.Runtime.Types
         public List<DataAddr> DataAddrs { get; } = new List<DataAddr>();
         public List<ExportInstance> Exports { get; } = new List<ExportInstance>();
 
+        public ModuleInstance(List<FunctionType> types) =>
+            Types = types;
+
+        public FunctionType this[TypeIdx idx] => Types[(Index)idx];
         public FuncAddr this[FuncIdx idx] => FuncAddrs[(Index)idx];
         public TableAddr this[TableIdx idx] => TableAddrs[(Index)idx];
         public MemAddr this[MemIdx idx] => MemAddrs[(Index)idx];

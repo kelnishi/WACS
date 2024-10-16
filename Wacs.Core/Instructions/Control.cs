@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
@@ -15,7 +16,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.Unreachable;
         
         // @Spec 4.4.8.2. unreachable
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new UnreachableException();
         }
@@ -36,7 +37,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.Nop;
         
         // @Spec 4.4.8.1. nop
-        public override void Execute(ExecContext context) { }
+        public override void Execute(IExecContext context) { }
         
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
@@ -52,7 +53,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.Block;
 
         // @Spec 4.4.8.3. block
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -76,7 +77,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.Loop;
 
         // @Spec 4.4.8.4. loop
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -100,7 +101,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.If;
 
         // @Spec 4.4.8.5. if
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -138,7 +139,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.Else;
         
         // @Spec 4.4.8.5. else
-        public override void Execute(ExecContext context) { }
+        public override void Execute(IExecContext context) { }
 
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
@@ -165,7 +166,7 @@ namespace Wacs.Core.Instructions
         public LabelIdx LabelIndex { get; internal set; }
 
         // @Spec 4.4.8.6. br
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -187,7 +188,7 @@ namespace Wacs.Core.Instructions
         public LabelIdx LabelIndex { get; internal set; }
 
         // @Spec 4.4.8.7. br_if
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -210,7 +211,7 @@ namespace Wacs.Core.Instructions
         public LabelIdx LabelIndex { get; internal set; }
 
         // @Spec 4.4.8.8. br_table
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -235,7 +236,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.Return;
 
         // @Spec 4.4.8.9. return
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -256,7 +257,7 @@ namespace Wacs.Core.Instructions
         public FuncIdx FunctionIndex { get; internal set; }
 
         // @Spec 4.4.8.10. call
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -280,7 +281,7 @@ namespace Wacs.Core.Instructions
         public TableIdx TableIndex { get; internal set; }
 
         // @Spec 4.4.8.11. call_indirect
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }

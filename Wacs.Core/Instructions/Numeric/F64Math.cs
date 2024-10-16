@@ -1,6 +1,7 @@
 using System;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Instructions.Numeric
 {
@@ -21,20 +22,20 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F64Max      = new NumericInst(OpCode.F64Max       , ExecuteF64Max      );
         public static readonly NumericInst F64Copysign = new NumericInst(OpCode.F64Copysign  , ExecuteF64Copysign );
         
-        private static void ExecuteF64Abs(ExecContext context)
+        private static void ExecuteF64Abs(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             var result = Math.Abs(a);
             context.OpStack.PushF64(result);
         }
 
-        private static void ExecuteF64Neg(ExecContext context)
+        private static void ExecuteF64Neg(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             var result = -a;
             context.OpStack.PushF64(result);
         }
-        private static void ExecuteF64Ceil(ExecContext context)
+        private static void ExecuteF64Ceil(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             var result = a switch {
@@ -49,7 +50,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF64(result);
         }
 
-        private static void ExecuteF64Floor(ExecContext context)
+        private static void ExecuteF64Floor(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             var result = a switch {
@@ -64,14 +65,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF64(result);
         }
 
-        private static void ExecuteF64Trunc(ExecContext context)
+        private static void ExecuteF64Trunc(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             var result = Math.Truncate(a);
             context.OpStack.PushF64(result);
         }
 
-        private static void ExecuteF64Nearest(ExecContext context)
+        private static void ExecuteF64Nearest(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             var result = a switch {
@@ -86,14 +87,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF64(result);
         }
 
-        private static void ExecuteF64Sqrt(ExecContext context)
+        private static void ExecuteF64Sqrt(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             var result = Math.Sqrt(a);
             context.OpStack.PushF64(result);
         }
 
-        private static void ExecuteF64Add(ExecContext context)
+        private static void ExecuteF64Add(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();
@@ -101,7 +102,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF64(result);
         }
 
-        private static void ExecuteF64Sub(ExecContext context)
+        private static void ExecuteF64Sub(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();
@@ -109,7 +110,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF64(result);
         }
 
-        private static void ExecuteF64Mul(ExecContext context)
+        private static void ExecuteF64Mul(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();
@@ -117,7 +118,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF64(result);
         }
 
-        private static void ExecuteF64Div(ExecContext context)
+        private static void ExecuteF64Div(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();
@@ -130,7 +131,7 @@ namespace Wacs.Core.Instructions.Numeric
                 context.OpStack.PushF64(result);
         }
 
-        private static void ExecuteF64Min(ExecContext context)
+        private static void ExecuteF64Min(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();
@@ -138,7 +139,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF64(result);
         }
 
-        private static void ExecuteF64Max(ExecContext context)
+        private static void ExecuteF64Max(IExecContext context)
         {
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();
@@ -150,7 +151,7 @@ namespace Wacs.Core.Instructions.Numeric
         private const UInt64 F64SignMask = 0x8000_0000_0000_0000;
         private const UInt64 F64NotSignMask = ~F64SignMask;
         
-        private static void ExecuteF64Copysign(ExecContext context)
+        private static void ExecuteF64Copysign(IExecContext context)
         {
             double x = context.OpStack.PopF64();
             double y = context.OpStack.PopF64();

@@ -1,6 +1,7 @@
 using System;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Instructions.Numeric
 {
@@ -22,20 +23,20 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F32Max      = new NumericInst(OpCode.F32Max       , ExecuteF32Max      );
         public static readonly NumericInst F32Copysign = new NumericInst(OpCode.F32Copysign  , ExecuteF32Copysign );
         
-        private static void ExecuteF32Abs(ExecContext context)
+        private static void ExecuteF32Abs(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             var result = Math.Abs(a);
             context.OpStack.PushF32(result);
         }
 
-        private static void ExecuteF32Neg(ExecContext context)
+        private static void ExecuteF32Neg(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             var result = -a;
             context.OpStack.PushF32(result);
         }
-        private static void ExecuteF32Ceil(ExecContext context)
+        private static void ExecuteF32Ceil(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             var result = a switch {
@@ -50,7 +51,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF32(result);
         }
 
-        private static void ExecuteF32Floor(ExecContext context)
+        private static void ExecuteF32Floor(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             var result = a switch {
@@ -65,14 +66,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF32(result);
         }
 
-        private static void ExecuteF32Trunc(ExecContext context)
+        private static void ExecuteF32Trunc(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float result = (float)Math.Truncate(a);
             context.OpStack.PushF32(result);
         }
 
-        private static void ExecuteF32Nearest(ExecContext context)
+        private static void ExecuteF32Nearest(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             var result = a switch {
@@ -87,14 +88,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF32(result);
         }
 
-        private static void ExecuteF32Sqrt(ExecContext context)
+        private static void ExecuteF32Sqrt(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float result = (float)Math.Sqrt(a);
             context.OpStack.PushF32(result);
         }
 
-        private static void ExecuteF32Add(ExecContext context)
+        private static void ExecuteF32Add(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -102,7 +103,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF32(result);
         }
 
-        private static void ExecuteF32Sub(ExecContext context)
+        private static void ExecuteF32Sub(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -110,7 +111,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF32(result);
         }
 
-        private static void ExecuteF32Mul(ExecContext context)
+        private static void ExecuteF32Mul(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -118,7 +119,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF32(result);
         }
 
-        private static void ExecuteF32Div(ExecContext context)
+        private static void ExecuteF32Div(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -131,7 +132,7 @@ namespace Wacs.Core.Instructions.Numeric
                 context.OpStack.PushF32(result);
         }
 
-        private static void ExecuteF32Min(ExecContext context)
+        private static void ExecuteF32Min(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -139,7 +140,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF32(result);
         }
 
-        private static void ExecuteF32Max(ExecContext context)
+        private static void ExecuteF32Max(IExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -151,7 +152,7 @@ namespace Wacs.Core.Instructions.Numeric
         const UInt32 F32SignMask = 0x8000_0000;
         private const UInt32 F32NotSignMask = ~F32SignMask;
         
-        private static void ExecuteF32Copysign(ExecContext context)
+        private static void ExecuteF32Copysign(IExecContext context)
         {
             float x = context.OpStack.PopF32();
             float y = context.OpStack.PopF32();

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Utilities;
 
 // 5.4.6 Memory Instructions
@@ -14,7 +15,7 @@ namespace Wacs.Core.Instructions
 
         public byte MemoryIndex { get; private set; }
 
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -35,7 +36,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.MemoryGrow;
         public byte MemoryIndex { get; private set; }
         
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -57,7 +58,7 @@ namespace Wacs.Core.Instructions
         public uint DataIndex { get; private set; }
         public byte MemoryIndex { get; private set; }
         
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -80,7 +81,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.DataDrop;
         public uint DataIndex { get; private set; }
         
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -98,7 +99,7 @@ namespace Wacs.Core.Instructions
         public byte SrcMemoryIndex { get; private set; }
         public byte DstMemoryIndex { get; private set; }
         
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -123,7 +124,7 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.MemoryFill;
         public byte MemoryIndex { get; private set; }
         
-        public override void Execute(ExecContext context)
+        public override void Execute(IExecContext context)
         {
             throw new NotImplementedException();
         }

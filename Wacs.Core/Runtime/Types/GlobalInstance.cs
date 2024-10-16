@@ -1,3 +1,4 @@
+using System;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime.Types
@@ -8,12 +9,22 @@ namespace Wacs.Core.Runtime.Types
     public class GlobalInstance
     {
         public GlobalType Type { get; }
-        public Value Val { get; set; }
+
+        private Value _value;
+        public Value Value
+        {
+            get => _value;
+            set {
+                if (Type.Mutability == Mutability.Immutable)
+                    throw new InvalidOperationException("Global is immutable");
+                _value = value;
+            }
+        }
 
         public GlobalInstance(GlobalType type, Value initialValue)
         {
             Type = type;
-            Val = initialValue;
+            Value = initialValue;
         }
     }
 }
