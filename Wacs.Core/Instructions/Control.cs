@@ -8,6 +8,7 @@ using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
 // @Spec 2.4.8. Control Instructions
+// @Spec 5.4.1 Control Instructions
 namespace Wacs.Core.Instructions
 {
     //0x00
@@ -15,18 +16,22 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.Unreachable;
         
+        /// <summary>
+        /// @Spec 3.3.8.2 unreachable
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context)
+        {
+            throw new NotImplementedException();
+        }
+        
         // @Spec 4.4.8.2. unreachable
-        public override void Execute(IExecContext context)
+        public override void Execute(ExecContext context)
         {
             throw new UnreachableException();
         }
         
         public class UnreachableException : Exception { }
-
-        /// <summary>
-        /// @Spec 5.4.1 Control Instructions
-        /// </summary>
-        public override IInstruction Parse(BinaryReader reader) => this;
         
         public static readonly InstUnreachable Inst = new InstUnreachable();
     }
@@ -36,13 +41,17 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.Nop;
         
-        // @Spec 4.4.8.1. nop
-        public override void Execute(IExecContext context) { }
-        
         /// <summary>
-        /// @Spec 5.4.1 Control Instructions
+        /// @Spec 3.3.8.1. nop
         /// </summary>
-        public override IInstruction Parse(BinaryReader reader) => this;
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context)
+        {
+            throw new NotImplementedException();
+        }
+        
+        // @Spec 4.4.8.1. nop
+        public override void Execute(ExecContext context) { }
         
         public static readonly InstNop Inst = new InstNop();
     }
@@ -52,8 +61,17 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.Block;
 
+        /// <summary>
+        /// @Spec 3.3.8.3 block
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context)
+        {
+            throw new NotImplementedException();
+        }
+        
         // @Spec 4.4.8.3. block
-        public override void Execute(IExecContext context)
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -66,7 +84,7 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             Block = Block.Parse(reader);
-            Block.Instructions = reader.ParseUntilNull(InstructionParser.Parse);
+            Block.Instructions = reader.ParseUntil(InstructionParser.Parse, InstructionParser.IsEnd);
             return this;
         }
     }
@@ -76,8 +94,17 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.Loop;
 
+        /// <summary>
+        /// @Spec 3.3.8.4. loop
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context)
+        {
+            throw new NotImplementedException();
+        }
+        
         // @Spec 4.4.8.4. loop
-        public override void Execute(IExecContext context)
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -90,7 +117,7 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             Block = Block.Parse(reader);
-            Block.Instructions = reader.ParseUntilNull(InstructionParser.Parse);
+            Block.Instructions = reader.ParseUntil(InstructionParser.Parse, InstructionParser.IsEnd);
             return this;
         }
     }
@@ -100,8 +127,17 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.If;
 
+        /// <summary>
+        /// @Spec 3.3.8.5 if
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context)
+        {
+            throw new NotImplementedException();
+        }
+        
         // @Spec 4.4.8.5. if
-        public override void Execute(IExecContext context)
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -115,7 +151,7 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             IfBlock = Block.Parse(reader);
-            var instructions= reader.ParseUntilNull(InstructionParser.Parse);
+            var instructions= reader.ParseUntil(InstructionParser.Parse, InstructionParser.IsEnd);
             int elseInst = instructions.FindIndex(inst=> inst is InstElse);
             if (elseInst == -1)
             {
@@ -138,25 +174,25 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.Else;
         
+        // @Spec 3.3.8.5. else
+        public override void Validate(WasmValidationContext context) {}
+        
         // @Spec 4.4.8.5. else
-        public override void Execute(IExecContext context) { }
-
-        /// <summary>
-        /// @Spec 5.4.1 Control Instructions
-        /// </summary>
-        public override IInstruction Parse(BinaryReader reader) => this;
+        public override void Execute(ExecContext context) {}
         
         public static readonly InstElse Inst = new InstElse();
     }
     
     //0x0B
-    // TODO We'll implement this when we need to render WAT.
-    // public class InstEnd : InstructionBase
-    // {
-    //     public override OpCode OpCode => OpCode.End;
-    //     public override void Execute(ExecContext context) { }
-    //     public override IInstruction Parse(BinaryReader reader) => this;
-    // }
+    public class InstEnd : InstructionBase
+    {
+        public override OpCode OpCode => OpCode.End;
+        
+        public override void Validate(WasmValidationContext context) {}
+        public override void Execute(ExecContext context) { }
+        
+        public static readonly InstEnd Inst = new InstEnd();
+    }
     
     //0x0C
     public class InstBranch : InstructionBase
@@ -165,8 +201,17 @@ namespace Wacs.Core.Instructions
         
         public LabelIdx LabelIndex { get; internal set; }
 
+        /// <summary>
+        /// @Spec 3.3.8.6. br
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context)
+        {
+            throw new NotImplementedException();
+        }
+        
         // @Spec 4.4.8.6. br
-        public override void Execute(IExecContext context)
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -187,8 +232,17 @@ namespace Wacs.Core.Instructions
         
         public LabelIdx LabelIndex { get; internal set; }
 
+        /// <summary>
+        /// @Spec 3.3.8.7. br_if
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context)
+        {
+            throw new NotImplementedException();
+        }
+        
         // @Spec 4.4.8.7. br_if
-        public override void Execute(IExecContext context)
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -210,8 +264,19 @@ namespace Wacs.Core.Instructions
         public LabelIdx[] LabelIndices { get; internal set; } = null!;
         public LabelIdx LabelIndex { get; internal set; }
 
-        // @Spec 4.4.8.8. br_table
-        public override void Execute(IExecContext context)
+        /// <summary>
+        /// @Spec 3.3.8.8. br_table
+        /// </summary>
+        public override void Validate(WasmValidationContext context)
+        {
+            throw new NotImplementedException();
+        }
+        
+        /// <summary>
+        /// @Spec 4.4.8.8. br_table
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -235,16 +300,20 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.Return;
 
-        // @Spec 4.4.8.9. return
-        public override void Execute(IExecContext context)
+        /// <summary>
+        /// @Spec 3.3.8.9. return
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context)
         {
             throw new NotImplementedException();
         }
         
-        /// <summary>
-        /// @Spec 5.4.1 Control Instructions
-        /// </summary>
-        public override IInstruction Parse(BinaryReader reader) => this;
+        // @Spec 4.4.8.9. return
+        public override void Execute(ExecContext context)
+        {
+            throw new NotImplementedException();
+        }
 
         public static readonly InstReturn Inst = new InstReturn();
     }
@@ -256,8 +325,17 @@ namespace Wacs.Core.Instructions
         
         public FuncIdx FunctionIndex { get; internal set; }
 
+        /// <summary>
+        /// @Spec 3.3.8.10. call
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context)
+        {
+            throw new NotImplementedException();
+        }
+        
         // @Spec 4.4.8.10. call
-        public override void Execute(IExecContext context)
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -280,8 +358,17 @@ namespace Wacs.Core.Instructions
         public TypeIdx TypeIndex { get; internal set; }
         public TableIdx TableIndex { get; internal set; }
 
+        /// <summary>
+        /// @Spec 3.3.8.11. call_indirect
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context)
+        {
+            throw new NotImplementedException();
+        }
+        
         // @Spec 4.4.8.11. call_indirect
-        public override void Execute(IExecContext context)
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }

@@ -65,6 +65,13 @@ namespace Wacs.Core.Runtime
             Float64 = value;
         }
 
+        public Value((ulong, ulong) value)
+        {
+            this = default;
+            Type = ValType.V128;
+            (V128_low, V128_high) = value;
+        }
+
         //Default Values
         public Value(ValType type)
         {
@@ -113,9 +120,10 @@ namespace Wacs.Core.Runtime
             ReferenceType.Externref => NullExternRef,
             _ => throw new InvalidDataException($"Unsupported RefType: {type}"),
         };
-        
-        public bool IsNullRef => (Type == ValType.Funcref || Type == ValType.Externref) && Int64 == -1;
-        
+
+        public bool IsI32 => Type == ValType.I32;
+        public bool IsRef => Type == ValType.Funcref || Type == ValType.Externref;
+        public bool IsNullRef => IsRef && Int64 == -1;
         public static implicit operator Value(int value) => new Value(value);
         
         public static implicit operator int(Value value) => value.Int32;
@@ -133,6 +141,12 @@ namespace Wacs.Core.Runtime
         public static implicit operator Value(double value) => new Value(value);
         
         public static implicit operator double(Value value) => value.Float64;
-        
+
+        public static implicit operator (ulong, ulong)(Value value) => (value.V128_low, value.V128_high);
+        public static implicit operator Value((ulong, ulong) value) => 
+            value == default ? new Value(DefaultV128) : new Value(value);
+
+        public static readonly (ulong, ulong) DefaultV128 = (0UL, 0UL);
+
     }
 }

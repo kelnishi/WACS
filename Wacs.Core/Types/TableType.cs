@@ -22,6 +22,8 @@ namespace Wacs.Core.Types
         /// </summary>
         public ReferenceType ElementType { get; set; }
 
+
+
         private TableType() { }
 
         private TableType(BinaryReader reader) =>

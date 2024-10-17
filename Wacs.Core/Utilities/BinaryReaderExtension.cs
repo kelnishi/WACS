@@ -252,14 +252,24 @@ namespace Wacs.Core.Utilities
 
             return vector;
         }
-
-        public static List<T> ParseUntilNull<T>(this BinaryReader reader, Func<BinaryReader, T?> elementParser)
-        where T : class
+        
+        public static List<T> ParseUntil<T>(this BinaryReader reader, Func<BinaryReader, T?> elementParser, Func<T, bool> predicate)
+            where T : class
         {
             List<T> to = new List<T>();
-            while (elementParser(reader) is { } value) {
-                to.Add(value); // Add the non-null value to the list
-            }
+            do
+            {
+                var element = elementParser(reader);
+                if (element == null)
+                    break;
+                
+                //Add all the elements, including one that may terminate the list
+                to.Add(element);
+                
+                if (predicate(element))
+                    break;
+            } while (true);
+            
             return to;
         }
 

@@ -50,17 +50,8 @@ namespace Wacs.Core
                             }
 
                             var funcType = types[func.TypeIndex];
-
-                            // Set the context locals
-                            var frame = new Frame {
-                                Locals = new LocalsSpace(types[func.TypeIndex].ParameterTypes.Types, func.Locals)
-                            };
-                            context.GetValidationContext().ExecContext.PushFrame(frame);
+                            context.GetValidationContext().PushFrame(func);
                             
-                            //TODO Fix function validation
-                            // context.GetExecContext().SetLabels(new[] { funcType.ResultType });
-                            // context.GetExecContext().SetReturn(funcType.ResultType);
-
                             var exprValidator = new Expression.Validator(funcType.ResultType);
                             var subcontext = context.GetSubContext(func.Body);
                             var validationResult = exprValidator.Validate(subcontext);
@@ -74,6 +65,10 @@ namespace Wacs.Core
                                     context.AddFailure(propertyName, failure.ErrorMessage);
                                 }
                             }
+                            
+                            context.GetValidationContext().PopFrame();
+                            //TODO: check the OpStack for return values and reset it.
+                            
                         });
 
                 }

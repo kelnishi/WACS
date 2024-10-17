@@ -1,88 +1,45 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
-namespace Wacs.Core.Runtime
+namespace Wacs.Core.Validation
 {
-    public interface IOperandStack
-    {
-        void PushI32(int value);
-        void PushI64(long value);
-        void PushF32(float value);
-        void PushF64(double value);
-        void PushV128(Value value);
-        void PushFuncref(Value value);
-        void PushExternref(Value value);
-
-        void PushValue(Value value);
-        
-        Value PopI32();
-        Value PopI64();
-        Value PopF32();
-        Value PopF64();
-        Value PopV128();
-        Value PopRefType();
-        Value PopAny();
-        Value Peek();
-    }
-    
-    public class ExecStack : IOperandStack
-    {
-        private readonly Stack<Value> _stack = new Stack<Value>();
-        public void PushI32(int value) => _stack.Push(value);
-        public void PushI64(long value) => _stack.Push(value);
-        public void PushF32(float value) => _stack.Push(value);
-        public void PushF64(double value) => _stack.Push(value);
-        public void PushV128(Value value) => _stack.Push(value);
-        public void PushFuncref(Value value) => _stack.Push(value);
-        public void PushExternref(Value value) => _stack.Push(value);
-
-        public void PushValue(Value value) => _stack.Push(value);
-        
-        public Value PopI32() => _stack.Pop();
-        public Value PopI64() => _stack.Pop();
-        public Value PopF32() => _stack.Pop();
-        public Value PopF64() => _stack.Pop();
-        public Value PopV128() => _stack.Pop();
-        public Value PopRefType() => _stack.Pop();
-
-        public Value PopAny() => _stack.Pop();
-        public Value Peek() => _stack.Peek();
-    }
-
-    public class ValidationStack : IOperandStack
+    public class ValidationOpStack
     {
         private readonly Stack<Value> _stack = new Stack<Value>();
 
-        public void PushI32(int i32) {
+        public void PushI32(int i32 = 0) {
             Value value = i32; 
             if (value.Type != ValType.I32)
                 throw new InvalidDataException($"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.I32}");
             _stack.Push(value);
         }
-        public void PushI64(long i64) {
+        public void PushI64(long i64 = 0) {
             Value value = i64;
             if (value.Type != ValType.I64)
                 throw new InvalidDataException($"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.I64}");
             _stack.Push(value);
         }
 
-        public void PushF32(float f32) {
+        public void PushF32(float f32 = 0.0f) {
             Value value = f32;
             if (value.Type != ValType.F32)
                 throw new InvalidDataException($"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.F32}");
             _stack.Push(value);
         }
 
-        public void PushF64(double f64) {
+        public void PushF64(double f64 = 0.0d) {
             Value value = f64;
             if (value.Type != ValType.F64)
                 throw new InvalidDataException($"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.F64}");
             _stack.Push(value);
         }
 
-        public void PushV128(Value value) {
+        public void PushV128((ulong, ulong) lowhigh = default)
+        {
+            Value value = lowhigh;
             if (value.Type != ValType.V128)
                 throw new InvalidDataException($"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.V128}");
             _stack.Push(value);
@@ -100,8 +57,8 @@ namespace Wacs.Core.Runtime
             _stack.Push(value);
         }
 
-        public void PushValue(Value value) {
-            _stack.Push(value);
+        public void PushType(ValType type) {
+            _stack.Push(new Value(type));
         }
 
         public Value PopI32()
@@ -178,6 +135,18 @@ namespace Wacs.Core.Runtime
             };
         }
 
+        public Value PopType(ValType type)
+        {
+            if (_stack.Count == 0)
+                throw new InvalidOperationException("Operand stack underflow.");
+
+            Value value = _stack.Pop();
+            if (value.Type != type)
+                throw new InvalidDataException(
+                    $"Wrong operand type {value.Type} at top of stack. Expected: {type}");
+            return value;
+        }
+
         public Value PopAny()
         {
             if (_stack.Count == 0)
@@ -194,5 +163,4 @@ namespace Wacs.Core.Runtime
             return _stack.Peek();
         }
     }
-    
 }

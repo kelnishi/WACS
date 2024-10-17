@@ -34,13 +34,13 @@ namespace Wacs.Core
             var reader = new BinaryReader(stream);
 
             // Read and validate the magic number and version
-            uint magicNumber = reader.ReadUInt32();
+            uint magicNumber = reader.ReadUInt32(); //Exactly 4bytes, little endian
             if (magicNumber != 0x6D736100) // '\0asm'
             {
                 throw new InvalidDataException("Invalid magic number for WebAssembly module.");
             }
 
-            uint version = reader.ReadUInt32();
+            uint version = reader.ReadUInt32(); //Exactly 4bytes, little endian
             if (version != 1)
             {
                 throw new InvalidDataException($"Unsupported WebAssembly version: {version}");

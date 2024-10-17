@@ -15,11 +15,13 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public abstract OpCode OpCode { get; }
 
+        public abstract void Validate(WasmValidationContext context);
+        
         /// <summary>
         /// Executes the instruction within the given execution context.
         /// </summary>
         /// <param name="context">The execution context in which to execute the instruction.</param>
-        public abstract void Execute(IExecContext context);
+        public abstract void Execute(ExecContext context);
 
         /// <summary>
         /// Instructions are responsible for parsing their binary representation.
@@ -29,6 +31,21 @@ namespace Wacs.Core.Instructions
         /// </summary>
         /// <param name="reader"></param>
         /// <returns>The parsed instruction</returns>
-        public abstract IInstruction Parse(BinaryReader reader);
+        public virtual IInstruction Parse(BinaryReader reader) => this;
+
+        /// <summary>
+        /// When creating Instructions in the runtime, this can be called to load a parameter
+        /// </summary>
+        /// <param name="value"></param>
+        /// <returns>The initialized instruction</returns>
+        public virtual IInstruction Immediate(int value) => this;
+
+        /// <summary>
+        /// When creating Instructions in the runtime, this can be called to load two parameters
+        /// </summary>
+        /// <param name="a"></param>
+        /// <param name="b"></param>
+        /// <returns>The initialized instruction</returns>
+        public virtual IInstruction Immediate(uint a, uint b) => this;
     }
 }

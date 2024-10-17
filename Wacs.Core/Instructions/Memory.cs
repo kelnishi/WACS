@@ -42,8 +42,23 @@ namespace Wacs.Core.Instructions
 
         public InstMemoryLoad(ValType type, BitWidth width) => 
             (Type, Width) = (type, width);
-        
-        public override void Execute(IExecContext context)
+
+        /// <summary>
+        /// @Spec 3.3.7.1. t.load
+        /// @Spec 3.3.7.2. t.loadN_sx
+        /// </summary>
+        public override void Validate(WasmValidationContext context)
+        {
+            context.Assert(context.Mems.Contains((MemIdx)0), 
+                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
+            context.Assert(((2 << ((int)Arg.Align - 1)) <= Width.ByteSize()),
+                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid alignment 2^{Arg.Align} <= {Width}/8");
+            
+            context.OpStack.PopI32();
+            context.OpStack.PushType(Type);
+        }
+
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -82,8 +97,23 @@ namespace Wacs.Core.Instructions
         
         public InstMemoryStore(ValType type, BitWidth width) => 
             (Type, Width) = (type, width);
-        
-        public override void Execute(IExecContext context)
+
+        /// <summary>
+        /// @Spec 3.3.7.3. t.store
+        /// @Spec 3.3.7.4. t.storeN
+        /// </summary>
+        public override void Validate(WasmValidationContext context)
+        {
+            context.Assert(context.Mems.Contains((MemIdx)0), 
+                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
+            context.Assert(((2 << ((int)Arg.Align - 1)) <= Width.ByteSize()),
+                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid alignment 2^{Arg.Align} <= {Width}/8");
+            
+            context.OpStack.PopI32();
+            context.OpStack.PopType(Type);
+        }
+
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
@@ -116,4 +146,21 @@ namespace Wacs.Core.Instructions
         U32 = 32,
         U64 = 64,
     }
+
+    public static class BitWidthHelpers
+    {
+        public static int ByteSize(this BitWidth width) =>
+            width switch
+            {
+                BitWidth.S8 => 1,
+                BitWidth.S16 => 2,
+                BitWidth.S32 => 4,
+                BitWidth.U8 => 1,
+                BitWidth.U16 => 2,
+                BitWidth.U32 => 4,
+                BitWidth.U64 => 8,
+                var bits => (byte)bits/8 
+            };
+    }
+                
 }

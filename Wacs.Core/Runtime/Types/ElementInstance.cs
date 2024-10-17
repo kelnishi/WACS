@@ -15,5 +15,10 @@ namespace Wacs.Core.Runtime.Types
 
         public ElementInstance(ReferenceType type, List<Value> refs) =>
             (Type, Elements) = (type, refs);
+
+        public void Drop()
+        {
+            Elements.Clear();
+        }
     }
 }

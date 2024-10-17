@@ -32,7 +32,7 @@ namespace Wacs.Core.Instructions
             OpCode.Loop              => new InstLoop(),
             OpCode.If                => new InstIf(),
             OpCode.Else              => InstElse.Inst,
-            OpCode.End               => null,
+            OpCode.End               => InstEnd.Inst,
                  
             OpCode.Br                => new InstBranch(),
             OpCode.BrIf              => new InstBranchConditional(),
@@ -272,5 +272,7 @@ namespace Wacs.Core.Instructions
             
             return InstructionFactory.CreateInstruction((OpCode)opcode)?.Parse(reader);            
         }
+
+        public static bool IsEnd(IInstruction inst) => inst.OpCode == OpCode.End;
     }
 }

@@ -7,10 +7,14 @@ namespace Wacs.Core.Runtime
 {
     public class Frame
     {
-        public LocalsSpace Locals { get; set; } = null!;
-        public ModuleInstance? Module { get; }
+        public ModuleInstance Module { get; }
+        
+        public LocalsSpace Locals { get; set; } = new LocalsSpace();
 
-        public Frame(ModuleInstance? moduleInstance = null) =>
+        public ResultType[]? Labels;
+        public ResultType? Return;
+
+        public Frame(ModuleInstance moduleInstance) =>
             Module = moduleInstance;
         
         public int ProgramCounter;

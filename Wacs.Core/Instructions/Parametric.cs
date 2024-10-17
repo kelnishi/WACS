@@ -14,14 +14,22 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.Drop;
         
-        // @Spec 3.3.4.1. drop
-        // @Spec 4.4.4.1. drop
-        public override void Execute(IExecContext context)
+        /// <summary>
+        /// @Spec 3.3.4.1. drop
+        /// </summary>
+        public override void Validate(WasmValidationContext context)
         {
-            Value value = context.OpStack.PopAny();
+            //* Value Polymorphic ignores type
+            context.OpStack.PopAny();
         }
 
-        public override IInstruction Parse(BinaryReader reader) => this;
+        /// <summary>
+        /// @Spec 4.4.4.1. drop
+        /// </summary>
+        public override void Execute(ExecContext context)
+        {
+            Value _ = context.OpStack.PopAny();
+        }
 
         public static readonly InstDrop Inst = new InstDrop();
     }
@@ -33,40 +41,42 @@ namespace Wacs.Core.Instructions
 
         public bool WithTypes { get; internal set; } = false;
         public ValType[] Types { get; internal set; } = Array.Empty<ValType>();
-        
-        // @Spec 3.3.4.2. select
-        // @Spec 4.4.4.2. select
-        public override void Execute(IExecContext context)
+
+        /// <summary>
+        /// @Spec 3.3.4.2. select
+        /// </summary>
+        public override void Validate(WasmValidationContext context)
         {
-            int c = context.OpStack.PopI32();
             if (WithTypes)
             {
-                if (Types.Length != 1)
-                    throw new InvalidDataException($"Select instruction type must be of length 1");
-                
-                Value val2 = context.OpStack.PopAny();
-                Value val1 = context.OpStack.PopAny();
-                
-                if (val1.Type != Types[0])
-                    throw new InvalidProgramException(
-                        $"Select instruction expected type on the stack: {val1.Type} == {Types[0]}");
-                
-                if (val2.Type != Types[0])
-                    throw new InvalidProgramException(
-                        $"Select instruction expected type on the stack: {val2.Type} == {Types[0]}");
-                
-                context.OpStack.PushValue(c != 0 ? val1 : val2);
+                context.Assert(Types.Length == 1,
+                    $"Select instruction type must be of length 1");
+                var type = Types[0];
+                context.OpStack.PopI32();
+                context.OpStack.PopType(type);
+                context.OpStack.PopType(type);
+                context.OpStack.PushType(type);
             }
             else
             {
+                context.OpStack.PopI32();
                 Value val2 = context.OpStack.PopAny();
                 Value val1 = context.OpStack.PopAny();
-                if (val1.Type != val2.Type)
-                    throw new InvalidProgramException(
-                        $"Select instruction expected matching types on the stack: {val1.Type} == {val2.Type}");
-                
-                context.OpStack.PushValue(c != 0 ? val1 : val2);
+                context.Assert(val1.Type == val2.Type,
+                    $"Select instruction expected matching types on the stack: {val1.Type} == {val2.Type}");
+                context.OpStack.PushType(val1.Type);
             }
+        }
+
+        /// <summary>
+        /// @Spec 4.4.4.2. select
+        /// </summary>
+        public override void Execute(ExecContext context)
+        {
+            int c = context.OpStack.PopI32();
+            Value val2 = context.OpStack.PopAny();
+            Value val1 = context.OpStack.PopAny();
+            context.OpStack.PushValue(c != 0 ? val1 : val2);
         }
 
         public InstSelect(bool withTypes = false) => WithTypes = withTypes;

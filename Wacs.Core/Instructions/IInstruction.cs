@@ -11,17 +11,29 @@ namespace Wacs.Core.Instructions
     public interface IInstruction
     {
         public OpCode OpCode { get; }
+
+        void Validate(WasmValidationContext context);
         
         /// <summary>
         /// Executes the instruction within the given execution context.
         /// </summary>
         /// <param name="context">The execution context in which to execute the instruction.</param>
-        void Execute(IExecContext context);
+        void Execute(ExecContext context);
         
         /// <summary>
         /// Parses an instruction from a binary reader.
         /// </summary>
         IInstruction Parse(BinaryReader reader);
+
+        /// <summary>
+        /// Set a hard coded parameter for instructions created by the runtime
+        /// </summary>
+        IInstruction Immediate(int value);
+
+        /// <summary>
+        /// Set two hard coded parameters for instructions created by the runtime
+        /// </summary>
+        IInstruction Immediate(uint a, uint b);
     }
     
 }

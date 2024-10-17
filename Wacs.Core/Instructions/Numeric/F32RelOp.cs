@@ -1,20 +1,20 @@
 using System;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst
     {
-        public static readonly NumericInst F32Eq = new NumericInst(OpCode.F32Eq, ExecuteF32Eq);
-        public static readonly NumericInst F32Ne = new NumericInst(OpCode.F32Ne, ExecuteF32Ne);
-        public static readonly NumericInst F32Lt = new NumericInst(OpCode.F32Lt, ExecuteF32Lt);
-        public static readonly NumericInst F32Gt = new NumericInst(OpCode.F32Gt, ExecuteF32Gt);
-        public static readonly NumericInst F32Le = new NumericInst(OpCode.F32Le, ExecuteF32Le);
-        public static readonly NumericInst F32Ge = new NumericInst(OpCode.F32Ge, ExecuteF32Ge);
+        public static readonly NumericInst F32Eq = new NumericInst(OpCode.F32Eq, ExecuteF32Eq, ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
+        public static readonly NumericInst F32Ne = new NumericInst(OpCode.F32Ne, ExecuteF32Ne, ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
+        public static readonly NumericInst F32Lt = new NumericInst(OpCode.F32Lt, ExecuteF32Lt, ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
+        public static readonly NumericInst F32Gt = new NumericInst(OpCode.F32Gt, ExecuteF32Gt, ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
+        public static readonly NumericInst F32Le = new NumericInst(OpCode.F32Le, ExecuteF32Le, ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
+        public static readonly NumericInst F32Ge = new NumericInst(OpCode.F32Ge, ExecuteF32Ge, ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
         
-        private static void ExecuteF32Eq(IExecContext context)
+        private static void ExecuteF32Eq(ExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -25,7 +25,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             context.OpStack.PushI32(result);
         }
-        private static void ExecuteF32Ne(IExecContext context)
+        private static void ExecuteF32Ne(ExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -37,7 +37,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteF32Lt(IExecContext context)
+        private static void ExecuteF32Lt(ExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -49,7 +49,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteF32Gt(IExecContext context)
+        private static void ExecuteF32Gt(ExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteF32Le(IExecContext context)
+        private static void ExecuteF32Le(ExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
@@ -73,7 +73,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
         
-        private static void ExecuteF32Ge(IExecContext context)
+        private static void ExecuteF32Ge(ExecContext context)
         {
             float a = context.OpStack.PopF32();
             float b = context.OpStack.PopF32();
