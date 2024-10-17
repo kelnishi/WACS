@@ -34,19 +34,5 @@ namespace Wacs.Core.Instructions
         /// <param name="reader"></param>
         /// <returns>The parsed instruction</returns>
         public virtual IInstruction Parse(BinaryReader reader) => this;
-
-        private const string ImmediateExcMessage = "Instruction did not implement Immediate parameter";
-        /// <summary>
-        /// When creating Instructions in the runtime, this can be called to load a parameter
-        /// Prefer strongly typed immediates, throw if not implemented.
-        /// </summary>
-        /// <param name="value"></param>
-        /// <returns>The initialized instruction</returns>
-        public virtual IInstruction ImmediateI32(int value) => throw new InvalidOperationException(ImmediateExcMessage);
-        public virtual IInstruction Immediate(FuncIdx value) => throw new InvalidOperationException(ImmediateExcMessage);
-        public virtual IInstruction Immediate(MemIdx value) => throw new InvalidOperationException(ImmediateExcMessage);
-        public virtual IInstruction Immediate(ElemIdx value) => throw new InvalidOperationException(ImmediateExcMessage);
-        public virtual IInstruction Immediate(DataIdx value) => throw new InvalidOperationException(ImmediateExcMessage);
-        public virtual IInstruction Immediate(TableIdx x, ElemIdx y) => throw new InvalidOperationException(ImmediateExcMessage);
     }
 }

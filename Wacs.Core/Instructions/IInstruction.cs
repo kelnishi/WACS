@@ -25,16 +25,6 @@ namespace Wacs.Core.Instructions
         /// Parses an instruction from a binary reader.
         /// </summary>
         IInstruction Parse(BinaryReader reader);
-
-        /// <summary>
-        /// Set a hard coded parameter for instructions created by the runtime
-        /// </summary>
-        IInstruction ImmediateI32(int value);
-        IInstruction Immediate(FuncIdx value);
-        IInstruction Immediate(MemIdx value);
-        IInstruction Immediate(ElemIdx value);
-        IInstruction Immediate(DataIdx value);
-        IInstruction Immediate(TableIdx x, ElemIdx y);
     }
     
 }
