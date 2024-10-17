@@ -154,13 +154,17 @@ namespace Wacs.Core.Runtime
                     var startAddr = moduleInstance.FuncAddrs[module.StartIndex];
                     if (!Context.Store.Contains(startAddr))
                         throw new InvalidProgramException("Module StartFunction address not found in the Store.");
-                    
+                    //Invoke the function!
                     InstructionFactory.CreateInstruction(OpCode.Call)!.Immediate(module.StartIndex)
                         .Execute(Context);
                 }
             }
+            //18.
+            if (Context.Frame != auxFrame)
+                throw new InvalidProgramException("Execution fault in Module Instantiation.");
+            //19.
+            Context.PopFrame();
             
-
             return moduleInstance;
         }
 
