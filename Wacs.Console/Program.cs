@@ -32,7 +32,7 @@ namespace Wacs.Console
         {
             using (var fileStream = new System.IO.FileStream(wasmFilePath, System.IO.FileMode.Open))
             {
-                var module = ModuleParser.Parse(fileStream);
+                var module = BinaryModuleParser.ParseWasm(fileStream);
                 var validationResult = module.Validate();
                 foreach (var error in validationResult.Errors)
                 {
