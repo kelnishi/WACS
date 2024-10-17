@@ -25,16 +25,16 @@ namespace Wacs.Core.Types
         
         public bool IsEmpty => Type == BlockType.Empty;
 
-        public TypeIdx TypeIndex => !Enum.IsDefined(typeof(BlockType), Type) ? (TypeIdx)(int)Type : (TypeIdx)0;
+        public TypeIdx TypeIndex => !Enum.IsDefined(typeof(BlockType), Type) ? (TypeIdx)(int)Type : (TypeIdx)uint.MaxValue;
 
-        public List<IInstruction> Instructions { get; set; } = new List<IInstruction>();
+        public List<IInstruction> Instructions { get; set; } = new();
 
         private Block(long v) => Type = (BlockType)v;
         public Block(BlockType bt) => Type = bt;
 
-        public static Block Empty = new Block(BlockType.Empty);
+        public static readonly Block Empty = new(BlockType.Empty);
         
-        public static Block Parse(BinaryReader reader) => new Block(reader.ReadLeb128_s33());
+        public static Block Parse(BinaryReader reader) => new(reader.ReadLeb128_s33());
         
         /// <summary>
         /// @Spec 3.2.2. Block Types
@@ -45,7 +45,7 @@ namespace Wacs.Core.Types
             {
                 // @Spec 3.2.2.1. typeidx
                 RuleFor(b => b.TypeIndex)
-                    .Must((b, index, ctx) =>
+                    .Must((_, index, ctx) =>
                         ctx.GetValidationContext().Types.Contains(index))
                     .When(b => b.ValType == ValType.Undefined)
                     .WithMessage("Blocks must have a valid typeidx referenced in Types");

@@ -8,7 +8,7 @@ namespace Wacs.Core.Validation
 {
     public class ValidationOpStack
     {
-        private readonly Stack<Value> _stack = new Stack<Value>();
+        private readonly Stack<Value> _stack = new();
 
         public void PushI32(int i32 = 0) {
             Value value = i32; 
@@ -133,6 +133,24 @@ namespace Wacs.Core.Validation
                 _ => throw new InvalidDataException(
                     $"Wrong operand type {value.Type} at top of stack. Expected: FuncRef or ExternRef")
             };
+        }
+
+        public void PopParameters(ResultType types)
+        {
+            Stack<Value> aside = new Stack<Value>();
+            //Pop vals off the stack
+            for (int i = 0, l = types.Types.Length; i < l; ++i)
+            {
+                var v = PopAny();
+                aside.Push(v);
+            }
+            //Check that they match ResultType
+            foreach (var type in types.Types)
+            {
+                var p = aside.Pop();
+                if (p.Type != type)
+                    throw new InvalidDataException("Invalid parameter resultType");
+            }
         }
 
         public Value PopType(ValType type)

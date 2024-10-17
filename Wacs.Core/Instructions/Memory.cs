@@ -50,9 +50,9 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Mems.Contains((MemIdx)0), 
-                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
+                ()=>$"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
             context.Assert(((2 << ((int)Arg.Align - 1)) <= Width.ByteSize()),
-                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid alignment 2^{Arg.Align} <= {Width}/8");
+                ()=>$"Instruction {this.OpCode.GetMnemonic()} failed with invalid alignment 2^{Arg.Align} <= {Width}/8");
             
             context.OpStack.PopI32();
             context.OpStack.PushType(Type);
@@ -105,9 +105,9 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Mems.Contains((MemIdx)0), 
-                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
+                ()=>$"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
             context.Assert(((2 << ((int)Arg.Align - 1)) <= Width.ByteSize()),
-                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid alignment 2^{Arg.Align} <= {Width}/8");
+                ()=>$"Instruction {this.OpCode.GetMnemonic()} failed with invalid alignment 2^{Arg.Align} <= {Width}/8");
             
             context.OpStack.PopI32();
             context.OpStack.PopType(Type);
@@ -129,7 +129,8 @@ namespace Wacs.Core.Instructions
         public uint Offset;
         public uint Align;
 
-        public static MemArg Parse(BinaryReader reader) => new MemArg {
+        public static MemArg Parse(BinaryReader reader) => new()
+        {
             Align = reader.ReadLeb128_u32(),
             Offset = reader.ReadLeb128_u32(),
         };

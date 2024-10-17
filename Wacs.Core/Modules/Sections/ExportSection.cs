@@ -126,7 +126,8 @@ namespace Wacs.Core
             };
             
         private static Module.Export ParseExport(BinaryReader reader) =>
-            new Module.Export {
+            new()
+            {
                 Name = reader.ReadUTF8String(),
                 Desc = ParseExportDesc(reader)
             };

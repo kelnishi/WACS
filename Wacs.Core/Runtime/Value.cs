@@ -113,8 +113,8 @@ namespace Wacs.Core.Runtime
             Int64 = v;
         }
 
-        public static readonly Value NullFuncRef = new Value(ValType.Funcref, -1);
-        public static readonly Value NullExternRef = new Value(ValType.Externref, -1);
+        public static readonly Value NullFuncRef = new(ValType.Funcref, -1);
+        public static readonly Value NullExternRef = new(ValType.Externref, -1);
         public static Value RefNull(ReferenceType type) => type switch {
             ReferenceType.Funcref => NullFuncRef,
             ReferenceType.Externref => NullExternRef,
@@ -124,21 +124,21 @@ namespace Wacs.Core.Runtime
         public bool IsI32 => Type == ValType.I32;
         public bool IsRef => Type == ValType.Funcref || Type == ValType.Externref;
         public bool IsNullRef => IsRef && Int64 == -1;
-        public static implicit operator Value(int value) => new Value(value);
+        public static implicit operator Value(int value) => new(value);
         
         public static implicit operator int(Value value) => value.Int32;
         public static implicit operator uint(Value value) => unchecked((uint)value.Int32);
         
-        public static implicit operator Value(long value) => new Value(value);
+        public static implicit operator Value(long value) => new(value);
         
         public static implicit operator long(Value value) => value.Int64;
         public static implicit operator ulong(Value value) => unchecked((ulong)value.Int64);
         
-        public static implicit operator Value(float value) => new Value(value);
+        public static implicit operator Value(float value) => new(value);
         
         public static implicit operator float(Value value) => value.Float32;
         
-        public static implicit operator Value(double value) => new Value(value);
+        public static implicit operator Value(double value) => new(value);
         
         public static implicit operator double(Value value) => value.Float64;
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using Wacs.Core.Runtime;
 
@@ -15,9 +16,7 @@ namespace Wacs.Core.Types
         where TIndex : IIndex
         where TType : IAddress
     {
-        private List<TType> _space = new List<TType>();
-
-        public RuntimeIndexSpace() { }
+        private List<TType> _space = new();
 
         public TType this[TIndex idx]
         {
@@ -62,6 +61,20 @@ namespace Wacs.Core.Types
             set => throw new InvalidOperationException(InvalidSetterMessage);
         }
 
+        public FunctionType ResolveBlockType(Block block) =>
+            block.Type switch
+            {
+                BlockType.Empty     => new FunctionType(ResultType.Empty, ResultType.Empty),
+                BlockType.I32       => new FunctionType(ResultType.Empty, new ResultType(ValType.I32)),
+                BlockType.I64       => new FunctionType(ResultType.Empty, new ResultType(ValType.I64)),
+                BlockType.F32       => new FunctionType(ResultType.Empty, new ResultType(ValType.F32)),
+                BlockType.F64       => new FunctionType(ResultType.Empty, new ResultType(ValType.F64)),
+                BlockType.V128      => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
+                BlockType.Funcref   => new FunctionType(ResultType.Empty, new ResultType(ValType.Funcref)),
+                BlockType.Externref => new FunctionType(ResultType.Empty, new ResultType(ValType.Externref)),
+                _ => this.Contains(block.TypeIndex) ? this[block.TypeIndex]:
+                    throw new InvalidDataException($"BlockType for index {block.TypeIndex} could not be resolved")
+            };
     }
 
     public class FunctionsSpace : AbstractIndexSpace<FuncIdx, Module.Function>

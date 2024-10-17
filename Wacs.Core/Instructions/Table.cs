@@ -1,6 +1,7 @@
 using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
@@ -18,7 +19,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(TableIndex),
-                $"Instruction table.get failed to get table {TableIndex} from context");
+                ()=>$"Instruction table.get failed to get table {TableIndex} from context");
             var type = context.Tables[TableIndex];
             context.OpStack.PopI32();
             context.OpStack.PushType(type.ElementType.StackType());
@@ -43,7 +44,7 @@ namespace Wacs.Core.Instructions
             //8.
             if (i >= tab.Elements.Count)
             {
-                //TODO: Trap
+                throw new TrapException("Trap in table.get");
             }
             //9.
             var val = tab.Elements[i];
@@ -69,7 +70,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(TableIndex),
-                $"Instruction table.set failed to get table {TableIndex} from context");
+                ()=>$"Instruction table.set failed to get table {TableIndex} from context");
             var type = context.Tables[TableIndex];
             context.OpStack.PopType(type.ElementType.StackType());
             context.OpStack.PopI32();
@@ -102,7 +103,7 @@ namespace Wacs.Core.Instructions
             //10.
             if (i >= tab.Elements.Count)
             {
-                //TODO: Trap
+                throw new TrapException("Trap in table.set");
             }
             //11.
             tab.Elements[i] = val;
@@ -126,13 +127,13 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(TableIndex),
-                $"Instruction table.init is invalid. Table {TableIndex} not in the Context.");
+                ()=>$"Instruction table.init is invalid. Table {TableIndex} not in the Context.");
             var t1 = context.Tables[TableIndex];
             context.Assert(context.Elements.Contains(ElementIndex),
-                $"Instruction table.init is invalid. Element {ElementIndex} not in the Context.");
+                ()=>$"Instruction table.init is invalid. Element {ElementIndex} not in the Context.");
             var t2 = context.Elements[ElementIndex];
             context.Assert(t1.ElementType == t2.Type,
-                $"Instruction table.init is invalid. Type mismatch {t1.ElementType} != {t2.Type}");
+                ()=>$"Instruction table.init is invalid. Type mismatch {t1.ElementType} != {t2.Type}");
             context.OpStack.PopI32();
             context.OpStack.PopI32();
             context.OpStack.PopI32();
@@ -182,7 +183,7 @@ namespace Wacs.Core.Instructions
             //16.
             if (s + n > elem.Elements.Count || d + n > tab.Elements.Count)
             {
-                //TODO Trap
+                throw new TrapException("Trap in table.init");
             }
             else if (n == 0)
             {
@@ -239,7 +240,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Elements.Contains(ElementIndex),
-                $"Instruction elem.drop is invalid. Element {ElementIndex} was not in the Context");
+                ()=>$"Instruction elem.drop is invalid. Element {ElementIndex} was not in the Context");
         }
 
         public override void Execute(ExecContext context) {
@@ -282,13 +283,13 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(SrcTableIndex),
-                $"Instruction table.copy failed. Table index {SrcTableIndex} does not exist in Context");
+                ()=>$"Instruction table.copy failed. Table index {SrcTableIndex} does not exist in Context");
             var t1 = context.Tables[SrcTableIndex];
             context.Assert(context.Tables.Contains(DstTableIndex),
-                $"Instruction table.copy failed. Table index {DstTableIndex} does not exist in Context");
+                ()=>$"Instruction table.copy failed. Table index {DstTableIndex} does not exist in Context");
             var t2 = context.Tables[DstTableIndex];
             context.Assert(t1.ElementType == t2.ElementType,
-                $"Instruction table.copy failed. Table type mismatch {t1.ElementType} != {t2.ElementType}");
+                ()=>$"Instruction table.copy failed. Table type mismatch {t1.ElementType} != {t2.ElementType}");
             context.OpStack.PopI32();
             context.OpStack.PopI32();
             context.OpStack.PopI32();
@@ -335,7 +336,7 @@ namespace Wacs.Core.Instructions
             //16.
             if (s + n > tabY.Elements.Count || d + n > tabX.Elements.Count)
             {
-                //TODO Trap
+                throw new TrapException("Trap in table.copy");
             }
             //17.
             else if (n == 0)
@@ -399,7 +400,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(TableIndex),
-                $"Instruction table.set failed to get table {TableIndex} from context");
+                ()=>$"Instruction table.set failed to get table {TableIndex} from context");
             var type = context.Tables[TableIndex];
             context.OpStack.PopI32();
             context.OpStack.PopType(type.ElementType.StackType());
@@ -461,7 +462,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(TableIndex),
-                $"Instruction table.set failed to get table {TableIndex} from context");
+                ()=>$"Instruction table.set failed to get table {TableIndex} from context");
             var type = context.Tables[TableIndex];
             context.OpStack.PushI32();
         }
@@ -499,7 +500,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(TableIndex),
-                $"Instruction table.set failed to get table {TableIndex} from context");
+                ()=>$"Instruction table.set failed to get table {TableIndex} from context");
             var type = context.Tables[TableIndex];
             context.OpStack.PopI32();
             context.OpStack.PopType(type.ElementType.StackType());
@@ -539,7 +540,7 @@ namespace Wacs.Core.Instructions
             //12.
             if (i + n > tab.Elements.Count)
             {
-                //TODO Trap
+                throw new TrapException("Trap in table.fill");
             }
             else if (n == 0)
             {

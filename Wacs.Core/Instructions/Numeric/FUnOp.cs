@@ -8,21 +8,21 @@ namespace Wacs.Core.Instructions.Numeric
     public partial class NumericInst
     {
         // @Spec 3.3.1.2. f.unop
-        public static readonly NumericInst F32Abs      = new NumericInst(OpCode.F32Abs       , ExecuteF32Abs     , ValidateOperands(pop: ValType.F32, push: ValType.F32));
-        public static readonly NumericInst F32Neg      = new NumericInst(OpCode.F32Neg       , ExecuteF32Neg     , ValidateOperands(pop: ValType.F32, push: ValType.F32));
-        public static readonly NumericInst F32Ceil     = new NumericInst(OpCode.F32Ceil      , ExecuteF32Ceil    , ValidateOperands(pop: ValType.F32, push: ValType.F32));
-        public static readonly NumericInst F32Floor    = new NumericInst(OpCode.F32Floor     , ExecuteF32Floor   , ValidateOperands(pop: ValType.F32, push: ValType.F32));
-        public static readonly NumericInst F32Trunc    = new NumericInst(OpCode.F32Trunc     , ExecuteF32Trunc   , ValidateOperands(pop: ValType.F32, push: ValType.F32));
-        public static readonly NumericInst F32Nearest  = new NumericInst(OpCode.F32Nearest   , ExecuteF32Nearest , ValidateOperands(pop: ValType.F32, push: ValType.F32));
-        public static readonly NumericInst F32Sqrt     = new NumericInst(OpCode.F32Sqrt      , ExecuteF32Sqrt    , ValidateOperands(pop: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Abs      = new(OpCode.F32Abs       , ExecuteF32Abs     , ValidateOperands(pop: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Neg      = new(OpCode.F32Neg       , ExecuteF32Neg     , ValidateOperands(pop: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Ceil     = new(OpCode.F32Ceil      , ExecuteF32Ceil    , ValidateOperands(pop: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Floor    = new(OpCode.F32Floor     , ExecuteF32Floor   , ValidateOperands(pop: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Trunc    = new(OpCode.F32Trunc     , ExecuteF32Trunc   , ValidateOperands(pop: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Nearest  = new(OpCode.F32Nearest   , ExecuteF32Nearest , ValidateOperands(pop: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Sqrt     = new(OpCode.F32Sqrt      , ExecuteF32Sqrt    , ValidateOperands(pop: ValType.F32, push: ValType.F32));
         
-        public static readonly NumericInst F64Abs      = new NumericInst(OpCode.F64Abs       , ExecuteF64Abs     , ValidateOperands(pop: ValType.F64, push: ValType.F64));
-        public static readonly NumericInst F64Neg      = new NumericInst(OpCode.F64Neg       , ExecuteF64Neg     , ValidateOperands(pop: ValType.F64, push: ValType.F64));
-        public static readonly NumericInst F64Ceil     = new NumericInst(OpCode.F64Ceil      , ExecuteF64Ceil    , ValidateOperands(pop: ValType.F64, push: ValType.F64));
-        public static readonly NumericInst F64Floor    = new NumericInst(OpCode.F64Floor     , ExecuteF64Floor   , ValidateOperands(pop: ValType.F64, push: ValType.F64));
-        public static readonly NumericInst F64Trunc    = new NumericInst(OpCode.F64Trunc     , ExecuteF64Trunc   , ValidateOperands(pop: ValType.F64, push: ValType.F64));
-        public static readonly NumericInst F64Nearest  = new NumericInst(OpCode.F64Nearest   , ExecuteF64Nearest , ValidateOperands(pop: ValType.F64, push: ValType.F64));
-        public static readonly NumericInst F64Sqrt     = new NumericInst(OpCode.F64Sqrt      , ExecuteF64Sqrt    , ValidateOperands(pop: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Abs      = new(OpCode.F64Abs       , ExecuteF64Abs     , ValidateOperands(pop: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Neg      = new(OpCode.F64Neg       , ExecuteF64Neg     , ValidateOperands(pop: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Ceil     = new(OpCode.F64Ceil      , ExecuteF64Ceil    , ValidateOperands(pop: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Floor    = new(OpCode.F64Floor     , ExecuteF64Floor   , ValidateOperands(pop: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Trunc    = new(OpCode.F64Trunc     , ExecuteF64Trunc   , ValidateOperands(pop: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Nearest  = new(OpCode.F64Nearest   , ExecuteF64Nearest , ValidateOperands(pop: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Sqrt     = new(OpCode.F64Sqrt      , ExecuteF64Sqrt    , ValidateOperands(pop: ValType.F64, push: ValType.F64));
         
         
         private static void ExecuteF32Abs(ExecContext context)

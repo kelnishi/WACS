@@ -64,7 +64,7 @@ namespace Wacs.Core
 
         public abstract class DataMode
         {
-            public static PassiveMode Passive = new PassiveMode();
+            public static PassiveMode Passive = new();
 
             public class PassiveMode : DataMode
             {

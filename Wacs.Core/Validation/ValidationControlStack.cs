@@ -6,7 +6,7 @@ namespace Wacs.Core.Validation
 {
     public class ValidationControlStack
     {
-        private readonly Stack<Frame> _stack = new Stack<Frame>();
+        private readonly Stack<Frame> _stack = new();
 
         public void PushFrame(Frame frame) => _stack.Push(frame);
 

@@ -71,7 +71,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         { 
             context.Assert(context.Funcs.Contains(FunctionIndex),
-                $"Instruction ref.func is invalid. Function {FunctionIndex} was not in the context.");
+                ()=>$"Instruction ref.func is invalid. Function {FunctionIndex} was not in the context.");
             //Seems like C.Refs isn't strictly necessary since FunctionSpace collects all the references
             var func = context.Funcs[FunctionIndex];
             context.OpStack.PushFuncref(Value.NullFuncRef);

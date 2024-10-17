@@ -33,9 +33,9 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public static LocalVariableInst CreateInstLocalGet() => new LocalVariableInst(OpCode.LocalGet, ExecuteLocalGet, ValidateLocalGet);
-        public static LocalVariableInst CreateInstLocalSet() => new LocalVariableInst(OpCode.LocalSet, ExecuteLocalSet, ValidateLocalSet);
-        public static LocalVariableInst CreateInstLocalTee() => new LocalVariableInst(OpCode.LocalTee, ExecuteLocalTee, ValidateLocalTee);
+        public static LocalVariableInst CreateInstLocalGet() => new(OpCode.LocalGet, ExecuteLocalGet, ValidateLocalGet);
+        public static LocalVariableInst CreateInstLocalSet() => new(OpCode.LocalSet, ExecuteLocalSet, ValidateLocalSet);
+        public static LocalVariableInst CreateInstLocalTee() => new(OpCode.LocalTee, ExecuteLocalTee, ValidateLocalTee);
         
         
         //0x20
@@ -43,7 +43,7 @@ namespace Wacs.Core.Instructions
         private static void ValidateLocalGet(WasmValidationContext context, LocalIdx localIndex)
         {
             context.Assert(context.Locals.Contains(localIndex),
-                $"Instruction local.get was invalid. Context Locals did not contain {localIndex}");
+                ()=>$"Instruction local.get was invalid. Context Locals did not contain {localIndex}");
             var value = context.Locals[localIndex];
             context.OpStack.PushType(value.Type);
         }
@@ -63,7 +63,7 @@ namespace Wacs.Core.Instructions
         private static void ValidateLocalSet(WasmValidationContext context, LocalIdx localIndex)
         {
             context.Assert(context.Locals.Contains(localIndex),
-                $"Instruction local.set was invalid. Context Locals did not contain {localIndex}");
+                ()=>$"Instruction local.set was invalid. Context Locals did not contain {localIndex}");
             var value = context.Locals[localIndex];
             context.OpStack.PopType(value.Type);
         }
@@ -89,7 +89,7 @@ namespace Wacs.Core.Instructions
         private static void ValidateLocalTee(WasmValidationContext context, LocalIdx localIndex)
         {
             context.Assert(context.Locals.Contains(localIndex),
-                $"Instruction local.tee was invalid. Context Locals did not contain {localIndex}");
+                ()=>$"Instruction local.tee was invalid. Context Locals did not contain {localIndex}");
             var value = context.Locals[localIndex];
             context.OpStack.PushType(value.Type);
             context.OpStack.PopType(value.Type);
@@ -134,15 +134,15 @@ namespace Wacs.Core.Instructions
             return this;
         }
         
-        public static GlobalVariableInst CreateInstGlobalGet() => new GlobalVariableInst(OpCode.LocalGet, ExecuteGlobalGet, ValidateGlobalGet);
-        public static GlobalVariableInst CreateInstGlobalSet() => new GlobalVariableInst(OpCode.LocalSet, ExecuteGlobalSet, ValidateGlobalSet);
+        public static GlobalVariableInst CreateInstGlobalGet() => new(OpCode.LocalGet, ExecuteGlobalGet, ValidateGlobalGet);
+        public static GlobalVariableInst CreateInstGlobalSet() => new(OpCode.LocalSet, ExecuteGlobalSet, ValidateGlobalSet);
         
         //0x23
         // @Spec 3.3.5.4. global.get
         private static void ValidateGlobalGet(WasmValidationContext context, GlobalIdx globalIndex)
         {
             context.Assert(context.Globals.Contains(globalIndex),
-                $"Instruction global.get was invalid. Context Globals did not contain {globalIndex}");
+                ()=>$"Instruction global.get was invalid. Context Globals did not contain {globalIndex}");
             var globalType = context.Globals[globalIndex].Type;
             context.OpStack.PushType(globalType.ContentType);
         }
@@ -170,11 +170,11 @@ namespace Wacs.Core.Instructions
         private static void ValidateGlobalSet(WasmValidationContext context, GlobalIdx globalIndex)
         {
             context.Assert(context.Globals.Contains(globalIndex),
-                $"Instruction global.set was invalid. Context Globals did not contain {globalIndex}");
+                ()=>$"Instruction global.set was invalid. Context Globals did not contain {globalIndex}");
             var global = context.Globals[globalIndex];
             var mut = global.Type.Mutability;
             context.Assert(mut == Mutability.Mutable,
-                $"Instruction global.set was invalid. Trying to set immutable global {globalIndex}");
+                ()=>$"Instruction global.set was invalid. Trying to set immutable global {globalIndex}");
             context.OpStack.PopType(global.Type.ContentType);
 
         }

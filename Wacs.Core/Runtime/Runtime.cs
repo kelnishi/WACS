@@ -16,10 +16,9 @@ namespace Wacs.Core.Runtime
 
         public ExecContext Context { get; }
         
-        private Dictionary<string, ModuleInstance> _modules = new Dictionary<string, ModuleInstance>();
+        private readonly Dictionary<string, ModuleInstance> _modules = new();
 
-        private Dictionary<(string module, string entity), IAddress> EntityBindings =
-            new Dictionary<(string module, string entity), IAddress>();
+        private readonly Dictionary<(string module, string entity), IAddress> _entityBindings = new();
 
         public Runtime()
         {
@@ -34,7 +33,7 @@ namespace Wacs.Core.Runtime
             //Bind exports
             foreach (var export in moduleInstance.Exports)
             {
-                EntityBindings[(moduleName, export.Name)] = export.Value switch {
+                _entityBindings[(moduleName, export.Name)] = export.Value switch {
                     ExternalValue.Function func => func.Address,
                     ExternalValue.Table table => table.Address,
                     ExternalValue.Memory mem => mem.Address,
@@ -54,7 +53,7 @@ namespace Wacs.Core.Runtime
         }
 
         private IAddress? GetBoundEntity((string module, string entity) id) =>
-            EntityBindings.TryGetValue(id, out IAddress value) ? value : null;
+            _entityBindings.GetValueOrDefault(id);
         
         public void BindHostFunction(string moduleName, string entityName)
         {
@@ -74,7 +73,7 @@ namespace Wacs.Core.Runtime
             }
             catch (ValidationException exc)
             {
-                var _ = exc;
+                _ = exc;
                 throw;
             }
 
@@ -86,7 +85,7 @@ namespace Wacs.Core.Runtime
             }
             catch (NotSupportedException exc)
             {
-                var _ = exc;
+                _ = exc;
                 throw;
             }
             
@@ -114,6 +113,7 @@ namespace Wacs.Core.Runtime
                             .Execute(Context);
                         break;
                     case Module.ElementMode.DeclarativeMode declarativeMode:
+                        
                         break;
                 }
             }

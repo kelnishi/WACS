@@ -145,7 +145,8 @@ namespace Wacs.Core
             };
         
         private static Module.Import ParseImport(BinaryReader reader) => 
-            new Module.Import {
+            new()
+            {
                 ModuleName = reader.ReadString(),
                 Name = reader.ReadString(),
                 Desc = ParseImportDesc(reader)

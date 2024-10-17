@@ -9,9 +9,9 @@ namespace Wacs.Core.Runtime
     {
         public ModuleInstance Module { get; }
         
-        public LocalsSpace Locals { get; set; } = new LocalsSpace();
-
-        public ResultType[]? Labels;
+        public LocalsSpace Locals { get; set; } = new();
+        
+        public Stack<Label> Labels = new();
         public ResultType? Return;
 
         public Frame(ModuleInstance moduleInstance) =>
@@ -19,7 +19,8 @@ namespace Wacs.Core.Runtime
         
         public int ProgramCounter;
         public uint StackPointer;
-        public List<IInstruction> Instructions = new List<IInstruction>();
+        public List<IInstruction> Instructions = new();
         public uint Arity;
+
     }
 }
