@@ -77,8 +77,8 @@ namespace Wacs.Core.Instructions
     public class InstMemoryInit : InstructionBase
     {
         public override OpCode OpCode => OpCode.MemoryInit;
-        public DataIdx DataIndex { get; private set; }
-        public MemIdx MemoryIndex { get; private set; }
+        public DataIdx X { get; private set; }
+        public MemIdx Index { get; private set; }
 
         /// <summary>
         /// @Spec 3.3.7.14. memory.init
@@ -88,8 +88,8 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Mems.Contains((MemIdx)0), 
                 ()=>$"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
             
-            context.Assert(context.Datas.Contains(DataIndex), 
-                ()=>$"Instruction {this.OpCode.GetMnemonic()} failed with invalid context data {DataIndex}.");
+            context.Assert(context.Datas.Contains(X), 
+                ()=>$"Instruction {this.OpCode.GetMnemonic()} failed with invalid context data {X}.");
 
             context.OpStack.PopI32();
             context.OpStack.PopI32();
@@ -102,13 +102,19 @@ namespace Wacs.Core.Instructions
         }
 
         public override IInstruction Parse(BinaryReader reader) {
-            DataIndex = (DataIdx)reader.ReadLeb128_u32();
-            MemoryIndex = (MemIdx)reader.ReadByte();
+            X = (DataIdx)reader.ReadLeb128_u32();
+            Index = (MemIdx)reader.ReadByte();
             
-            if (MemoryIndex != 0x00)
+            if (Index != 0x00)
                 throw new InvalidDataException(
-                    $"Invalid memory.init. Multiple memories are not yet supported. memidx:{MemoryIndex}");
+                    $"Invalid memory.init. Multiple memories are not yet supported. memidx:{Index}");
             
+            return this;
+        }
+
+        public override IInstruction Immediate(DataIdx x)
+        {
+            X = x;
             return this;
         }
     }
@@ -117,15 +123,15 @@ namespace Wacs.Core.Instructions
     public class InstDataDrop : InstructionBase
     {
         public override OpCode OpCode => OpCode.DataDrop;
-        public DataIdx DataIndex { get; private set; }
+        public DataIdx X { get; private set; }
 
         /// <summary>
         /// @Spec 3.3.7.15. data.drop
         /// </summary>
         public override void Validate(WasmValidationContext context)
         {
-            context.Assert(context.Datas.Contains(DataIndex), 
-                ()=>$"Instruction {this.OpCode.GetMnemonic()} failed with invalid context data {DataIndex}.");
+            context.Assert(context.Datas.Contains(X), 
+                ()=>$"Instruction {this.OpCode.GetMnemonic()} failed with invalid context data {X}.");
         }
 
         public override void Execute(ExecContext context)
@@ -134,7 +140,13 @@ namespace Wacs.Core.Instructions
         }
 
         public override IInstruction Parse(BinaryReader reader) {
-            DataIndex = (DataIdx)reader.ReadLeb128_u32();
+            X = (DataIdx)reader.ReadLeb128_u32();
+            return this;
+        }
+
+        public override IInstruction Immediate(DataIdx x)
+        {
+            X = x;
             return this;
         }
     }

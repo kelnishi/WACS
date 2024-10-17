@@ -13,19 +13,19 @@ namespace Wacs.Core.Instructions
     public class InstTableGet : InstructionBase
     {
         public override OpCode OpCode => OpCode.TableGet;
-        public TableIdx TableIndex { get; private set; }
+        public TableIdx X { get; private set; }
 
         // @Spec 3.3.6.1. table.get
         public override void Validate(WasmValidationContext context)
         {
-            context.Assert(context.Tables.Contains(TableIndex),
-                ()=>$"Instruction table.get failed to get table {TableIndex} from context");
-            var type = context.Tables[TableIndex];
+            context.Assert(context.Tables.Contains(X),
+                ()=>$"Instruction table.get failed to get table {X} from context");
+            var type = context.Tables[X];
             context.OpStack.PopI32();
             context.OpStack.PushType(type.ElementType.StackType());
         }
         // @Spec 4.4.6.1. table.get 
-        public override void Execute(ExecContext context) => ExecuteInstruction(context, TableIndex);
+        public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
         public static void ExecuteInstruction(ExecContext context, TableIdx tableIndex)
         {
             //2.
@@ -55,7 +55,7 @@ namespace Wacs.Core.Instructions
         // @Spec 5.4.5. Table Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
-            TableIndex = (TableIdx)reader.ReadLeb128_u32();
+            X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
@@ -64,19 +64,19 @@ namespace Wacs.Core.Instructions
     public class InstTableSet : InstructionBase
     {
         public override OpCode OpCode => OpCode.TableSet;
-        public TableIdx TableIndex { get; private set; }
+        public TableIdx X { get; private set; }
 
         // @Spec 3.3.6.2. table.set
         public override void Validate(WasmValidationContext context)
         {
-            context.Assert(context.Tables.Contains(TableIndex),
-                ()=>$"Instruction table.set failed to get table {TableIndex} from context");
-            var type = context.Tables[TableIndex];
+            context.Assert(context.Tables.Contains(X),
+                ()=>$"Instruction table.set failed to get table {X} from context");
+            var type = context.Tables[X];
             context.OpStack.PopType(type.ElementType.StackType());
             context.OpStack.PopI32();
         }
         // @Spec 4.4.6.2. table.set
-        public override void Execute(ExecContext context) => ExecuteInstruction(context, TableIndex);
+        public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
         public static void ExecuteInstruction(ExecContext context, TableIdx tableIndex)
         {
             //2.
@@ -112,7 +112,7 @@ namespace Wacs.Core.Instructions
         // @Spec 5.4.5. Table Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
-            TableIndex = (TableIdx)reader.ReadLeb128_u32();
+            X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
@@ -121,17 +121,18 @@ namespace Wacs.Core.Instructions
     public class InstTableInit : InstructionBase
     {
         public override OpCode OpCode => OpCode.TableInit;
-        public TableIdx TableIndex { get; internal set; }
-        public ElemIdx ElementIndex { get; internal set; } // This may be updated depending on the value type specification
+        public TableIdx X { get; internal set; }
+        public ElemIdx Y { get; internal set; }
 
+        // @Spec 3.3.6.7. table.init x y
         public override void Validate(WasmValidationContext context)
         {
-            context.Assert(context.Tables.Contains(TableIndex),
-                ()=>$"Instruction table.init is invalid. Table {TableIndex} not in the Context.");
-            var t1 = context.Tables[TableIndex];
-            context.Assert(context.Elements.Contains(ElementIndex),
-                ()=>$"Instruction table.init is invalid. Element {ElementIndex} not in the Context.");
-            var t2 = context.Elements[ElementIndex];
+            context.Assert(context.Tables.Contains(X),
+                ()=>$"Instruction table.init is invalid. Table {X} not in the Context.");
+            var t1 = context.Tables[X];
+            context.Assert(context.Elements.Contains(Y),
+                ()=>$"Instruction table.init is invalid. Element {Y} not in the Context.");
+            var t2 = context.Elements[Y];
             context.Assert(t1.ElementType == t2.Type,
                 ()=>$"Instruction table.init is invalid. Type mismatch {t1.ElementType} != {t2.Type}");
             context.OpStack.PopI32();
@@ -142,7 +143,7 @@ namespace Wacs.Core.Instructions
         private const long TwoTo32 = 0x1_0000_0000;
         
         // @Spec 4.4.6.7. table.init x y
-        public override void Execute(ExecContext context) => ExecuteInstruction(context, TableIndex, ElementIndex);
+        public override void Execute(ExecContext context) => ExecuteInstruction(context, X, Y);
         public static void ExecuteInstruction(ExecContext context, TableIdx x, ElemIdx y)
         {
             //2.
@@ -217,15 +218,16 @@ namespace Wacs.Core.Instructions
         // @Spec 5.4.5. Table Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
-            TableIndex = (TableIdx)reader.ReadLeb128_u32();
-            ElementIndex = (ElemIdx)reader.ReadLeb128_u32();
+            //!!! `table.init x y` is parsed y then x
+            Y = (ElemIdx)reader.ReadLeb128_u32();
+            X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
 
-        public override IInstruction Immediate(uint x, uint y)
+        public override IInstruction Immediate(TableIdx x, ElemIdx y)
         {
-            TableIndex = (TableIdx)x;
-            ElementIndex = (ElemIdx)y;
+            X = x;
+            Y = y;
             return this;
         }
     }
@@ -234,21 +236,22 @@ namespace Wacs.Core.Instructions
     public class InstElemDrop : InstructionBase
     {
         public override OpCode OpCode => OpCode.ElemDrop;
-        private ElemIdx ElementIndex { get; set; }
+        private ElemIdx X { get; set; }
 
-        // @Spec 3.3.6.8. elem.drop
+        // @Spec 3.3.6.8. elem.drop x
         public override void Validate(WasmValidationContext context)
         {
-            context.Assert(context.Elements.Contains(ElementIndex),
-                ()=>$"Instruction elem.drop is invalid. Element {ElementIndex} was not in the Context");
+            context.Assert(context.Elements.Contains(X),
+                ()=>$"Instruction elem.drop is invalid. Element {X} was not in the Context");
         }
 
+        // @Spec 4.4.6.8. elem.drop x
         public override void Execute(ExecContext context) {
             //2.
-            context.Assert(context.Frame.Module.ElemAddrs.Contains(ElementIndex),
-                ()=>$"Instruction elem.drop failed. Element {ElementIndex} was not in the context");
+            context.Assert(context.Frame.Module.ElemAddrs.Contains(X),
+                ()=>$"Instruction elem.drop failed. Element {X} was not in the context");
             //3.
-            var a = context.Frame.Module.ElemAddrs[ElementIndex];
+            var a = context.Frame.Module.ElemAddrs[X];
             //4.
             context.Assert(context.Store.Contains(a),
                 ()=>$"Instruction elem.drop failed. Element {a} was not in the Store.");
@@ -259,13 +262,13 @@ namespace Wacs.Core.Instructions
         // @Spec 5.4.5. Table Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
-            ElementIndex = (ElemIdx)reader.ReadLeb128_u32();
+            X = (ElemIdx)reader.ReadLeb128_u32();
             return this;
         }
 
-        public override IInstruction Immediate(int value)
+        public override IInstruction Immediate(ElemIdx value)
         {
-            ElementIndex = (ElemIdx)value;
+            X = value;
             return this;
         }
     }
@@ -274,20 +277,20 @@ namespace Wacs.Core.Instructions
     public class InstTableCopy : InstructionBase
     {
         public override OpCode OpCode => OpCode.TableCopy;
-        public TableIdx SrcTableIndex { get; internal set; }
-        public TableIdx DstTableIndex { get; internal set; }
+        public TableIdx SrcY { get; internal set; }
+        public TableIdx DstX { get; internal set; }
 
         private const long TwoTo32 = 0x1_0000_0000;
         
         // @Spec 3.3.6.6. table.copy
         public override void Validate(WasmValidationContext context)
         {
-            context.Assert(context.Tables.Contains(SrcTableIndex),
-                ()=>$"Instruction table.copy failed. Table index {SrcTableIndex} does not exist in Context");
-            var t1 = context.Tables[SrcTableIndex];
-            context.Assert(context.Tables.Contains(DstTableIndex),
-                ()=>$"Instruction table.copy failed. Table index {DstTableIndex} does not exist in Context");
-            var t2 = context.Tables[DstTableIndex];
+            context.Assert(context.Tables.Contains(DstX),
+                ()=>$"Instruction table.copy failed. Table index {DstX} does not exist in Context");
+            var t1 = context.Tables[DstX];
+            context.Assert(context.Tables.Contains(SrcY),
+                ()=>$"Instruction table.copy failed. Table index {SrcY} does not exist in Context");
+            var t2 = context.Tables[SrcY];
             context.Assert(t1.ElementType == t2.ElementType,
                 ()=>$"Instruction table.copy failed. Table type mismatch {t1.ElementType} != {t2.ElementType}");
             context.OpStack.PopI32();
@@ -295,7 +298,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopI32();
         }
         // @Spec 4.4.6.6. table.copy
-        public override void Execute(ExecContext context) => ExecuteInstruction(context, DstTableIndex, SrcTableIndex);
+        public override void Execute(ExecContext context) => ExecuteInstruction(context, x:DstX, y:SrcY);
         public static void ExecuteInstruction(ExecContext context, TableIdx x, TableIdx y)
         {
             //2.
@@ -377,15 +380,15 @@ namespace Wacs.Core.Instructions
             //20.
             context.OpStack.PushI32(n-1);
             //21.
-            ExecuteInstruction(context, x, y);
+            ExecuteInstruction(context, x:x, y:y);
 
         }
 
         // @Spec 5.4.5. Table Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
-            DstTableIndex = (TableIdx)reader.ReadLeb128_u32();
-            SrcTableIndex = (TableIdx)reader.ReadLeb128_u32();
+            DstX = (TableIdx)reader.ReadLeb128_u32();
+            SrcY = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
@@ -394,26 +397,26 @@ namespace Wacs.Core.Instructions
     public class InstTableGrow : InstructionBase
     {
         public override OpCode OpCode => OpCode.TableGrow;
-        public TableIdx TableIndex { get; internal set; }
+        public TableIdx X { get; internal set; }
 
-        // @Spec 3.3.6.4. table.grow
+        // @Spec 3.3.6.4. table.grow x
         public override void Validate(WasmValidationContext context)
         {
-            context.Assert(context.Tables.Contains(TableIndex),
-                ()=>$"Instruction table.set failed to get table {TableIndex} from context");
-            var type = context.Tables[TableIndex];
+            context.Assert(context.Tables.Contains(X),
+                ()=>$"Instruction table.set failed to get table {X} from context");
+            var type = context.Tables[X];
             context.OpStack.PopI32();
             context.OpStack.PopType(type.ElementType.StackType());
             context.OpStack.PushI32();
         }
 
-        // @Spec 4.4.6.4. table.grow
+        // @Spec 4.4.6.4. table.grow x
         public override void Execute(ExecContext context) {
             //2.
-            context.Assert(context.Frame.Module.TableAddrs.Contains(TableIndex),
-                ()=>$"Instruction table.get could not address table {TableIndex}");
+            context.Assert(context.Frame.Module.TableAddrs.Contains(X),
+                ()=>$"Instruction table.get could not address table {X}");
             //3.
-            var addr = context.Frame.Module.TableAddrs[TableIndex];
+            var addr = context.Frame.Module.TableAddrs[X];
             
             //4.
             context.Assert(context.Store.Contains(addr),
@@ -448,7 +451,7 @@ namespace Wacs.Core.Instructions
         // @Spec 5.4.5. Table Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
-            TableIndex = (TableIdx)reader.ReadLeb128_u32();
+            X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
@@ -456,22 +459,23 @@ namespace Wacs.Core.Instructions
     public class InstTableSize : InstructionBase
     {
         public override OpCode OpCode => OpCode.TableSize;
-        public TableIdx TableIndex { get; internal set; }
+        public TableIdx X { get; internal set; }
 
-        // @Spec 3.3.6.3. table.size
+        // @Spec 3.3.6.3. table.size x
         public override void Validate(WasmValidationContext context)
         {
-            context.Assert(context.Tables.Contains(TableIndex),
-                ()=>$"Instruction table.set failed to get table {TableIndex} from context");
-            var type = context.Tables[TableIndex];
+            context.Assert(context.Tables.Contains(X),
+                ()=>$"Instruction table.set failed to get table {X} from context");
+            var type = context.Tables[X];
             context.OpStack.PushI32();
         }
+        // @Spec 4.4.6.3. table.size x
         public override void Execute(ExecContext context) {
             //2.
-            context.Assert(context.Frame.Module.TableAddrs.Contains(TableIndex),
-                ()=>$"Instruction table.get could not address table {TableIndex}");
+            context.Assert(context.Frame.Module.TableAddrs.Contains(X),
+                ()=>$"Instruction table.get could not address table {X}");
             //3.
-            var addr = context.Frame.Module.TableAddrs[TableIndex];
+            var addr = context.Frame.Module.TableAddrs[X];
             
             //4.
             context.Assert(context.Store.Contains(addr),
@@ -486,7 +490,7 @@ namespace Wacs.Core.Instructions
 
         // @Spec 5.4.5. Table Instructions
         public override IInstruction Parse(BinaryReader reader) {
-            TableIndex = (TableIdx)reader.ReadLeb128_u32();
+            X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
@@ -494,21 +498,21 @@ namespace Wacs.Core.Instructions
     public class InstTableFill : InstructionBase
     {
         public override OpCode OpCode => OpCode.TableFill;
-        public TableIdx TableIndex { get; internal set; }
+        public TableIdx X { get; internal set; }
 
         // @Spec 3.3.6.5. table.fill
         public override void Validate(WasmValidationContext context)
         {
-            context.Assert(context.Tables.Contains(TableIndex),
-                ()=>$"Instruction table.set failed to get table {TableIndex} from context");
-            var type = context.Tables[TableIndex];
+            context.Assert(context.Tables.Contains(X),
+                ()=>$"Instruction table.set failed to get table {X} from context");
+            var type = context.Tables[X];
             context.OpStack.PopI32();
             context.OpStack.PopType(type.ElementType.StackType());
             context.OpStack.PopI32();
         }
         
         // @Spec 4.4.6.5. table.fill
-        public override void Execute(ExecContext context) => ExecuteInstruction(context, TableIndex);
+        public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
         public static void ExecuteInstruction(ExecContext context, TableIdx tableIndex)
         {
             //2.
@@ -564,7 +568,7 @@ namespace Wacs.Core.Instructions
         
         // @Spec 5.4.5. Table Instructions
         public override IInstruction Parse(BinaryReader reader) {
-            TableIndex = (TableIdx)reader.ReadLeb128_u32();
+            X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
     }

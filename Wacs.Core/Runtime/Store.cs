@@ -21,15 +21,17 @@ namespace Wacs.Core.Runtime
         public MemoryInstance this[MemAddr addr] => Mems[(Index)addr];
         public GlobalInstance this[GlobalAddr addr] => Globals[(Index)addr];
         public ElementInstance this[ElemAddr addr] => Elems[(Index)addr];
+        public DataInstance this[DataAddr addr] => Datas[(Index)addr];
 
-        public bool Contains(GlobalAddr addr) =>
-            addr.Value < Globals.Count;
 
-        public bool Contains(TableAddr addr) =>
-            addr.Value < Tables.Count;
+        public bool Contains(FuncAddr addr) => addr.Value < Funcs.Count;
+        public bool Contains(TableAddr addr) => addr.Value < Tables.Count;
+        public bool Contains(MemAddr addr) => addr.Value < Mems.Count;
+        public bool Contains(GlobalAddr addr) => addr.Value < Globals.Count;
+        public bool Contains(ElemAddr addr) => addr.Value < Elems.Count;
+        public bool Contains(DataAddr addr) => addr.Value < Datas.Count;
 
-        public bool Contains(ElemAddr addr) =>
-            addr.Value < Elems.Count;
+
         
         public FuncAddr AddFunction(IFunctionInstance func)
         {
