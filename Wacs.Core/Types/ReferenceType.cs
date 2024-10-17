@@ -33,4 +33,14 @@ namespace Wacs.Core.Types
                 _ => throw new Exception($"Invalid reference type: {reader.ReadSByte():x8}"),
             };
     }
+
+    public static class ReferenceTypeExtensions
+    {
+        public static ValType StackType(this ReferenceType reftype)=> reftype switch
+            {
+                ReferenceType.Funcref => ValType.Funcref,
+                ReferenceType.Externref => ValType.Externref,
+                _ => throw new InvalidDataException($"ReferenceType {reftype} is invalid.")
+            };
+    }
 }

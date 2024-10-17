@@ -3,6 +3,7 @@ using System.IO;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
 // 5.4.6 Memory Instructions
@@ -13,15 +14,25 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.MemorySize;
 
-        public byte MemoryIndex { get; private set; }
+        public MemIdx MemoryIndex { get; private set; }
 
-        public override void Execute(IExecContext context)
+        /// <summary>
+        /// @Spec 3.3.7.10. memory.size
+        /// </summary>
+        public override void Validate(WasmValidationContext context)
+        {
+            context.Assert(context.Mems.Contains((MemIdx)0), 
+                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
+            context.OpStack.PushI32();
+        }
+
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
 
         public override IInstruction Parse(BinaryReader reader) {
-            MemoryIndex = reader.ReadByte();
+            MemoryIndex = (MemIdx)reader.ReadByte();
             if (MemoryIndex != 0x00)
                 throw new InvalidDataException(
                     $"Invalid memory.size. Multiple memories are not yet supported. memidx:{MemoryIndex}");
@@ -34,15 +45,26 @@ namespace Wacs.Core.Instructions
     public class InstMemoryGrow : InstructionBase
     {
         public override OpCode OpCode => OpCode.MemoryGrow;
-        public byte MemoryIndex { get; private set; }
-        
-        public override void Execute(IExecContext context)
+        public MemIdx MemoryIndex { get; private set; }
+
+        /// <summary>
+        /// @Spec 3.3.7.11. memory.grow
+        /// </summary>
+        public override void Validate(WasmValidationContext context)
+        {
+            context.Assert(context.Mems.Contains((MemIdx)0), 
+                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
+            context.OpStack.PopI32();
+            context.OpStack.PushI32();
+        }
+
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
 
         public override IInstruction Parse(BinaryReader reader) {
-            MemoryIndex = reader.ReadByte();
+            MemoryIndex = (MemIdx)reader.ReadByte();
             if (MemoryIndex != 0x00)
                 throw new InvalidDataException(
                     $"Invalid memory.grow. Multiple memories are not yet supported. memidx:{MemoryIndex}");
@@ -55,17 +77,33 @@ namespace Wacs.Core.Instructions
     public class InstMemoryInit : InstructionBase
     {
         public override OpCode OpCode => OpCode.MemoryInit;
-        public uint DataIndex { get; private set; }
-        public byte MemoryIndex { get; private set; }
-        
-        public override void Execute(IExecContext context)
+        public DataIdx DataIndex { get; private set; }
+        public MemIdx MemoryIndex { get; private set; }
+
+        /// <summary>
+        /// @Spec 3.3.7.14. memory.init
+        /// </summary>
+        public override void Validate(WasmValidationContext context)
+        {
+            context.Assert(context.Mems.Contains((MemIdx)0), 
+                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
+            
+            context.Assert(context.Datas.Contains(DataIndex), 
+                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid context data {DataIndex}.");
+
+            context.OpStack.PopI32();
+            context.OpStack.PopI32();
+            context.OpStack.PopI32();
+        }
+
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
 
         public override IInstruction Parse(BinaryReader reader) {
-            DataIndex = reader.ReadLeb128_u32();
-            MemoryIndex = reader.ReadByte();
+            DataIndex = (DataIdx)reader.ReadLeb128_u32();
+            MemoryIndex = (MemIdx)reader.ReadByte();
             
             if (MemoryIndex != 0x00)
                 throw new InvalidDataException(
@@ -79,15 +117,24 @@ namespace Wacs.Core.Instructions
     public class InstDataDrop : InstructionBase
     {
         public override OpCode OpCode => OpCode.DataDrop;
-        public uint DataIndex { get; private set; }
-        
-        public override void Execute(IExecContext context)
+        public DataIdx DataIndex { get; private set; }
+
+        /// <summary>
+        /// @Spec 3.3.7.15. data.drop
+        /// </summary>
+        public override void Validate(WasmValidationContext context)
+        {
+            context.Assert(context.Datas.Contains(DataIndex), 
+                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid context data {DataIndex}.");
+        }
+
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
 
         public override IInstruction Parse(BinaryReader reader) {
-            DataIndex = reader.ReadLeb128_u32();
+            DataIndex = (DataIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
@@ -96,18 +143,31 @@ namespace Wacs.Core.Instructions
     public class InstMemoryCopy : InstructionBase
     {
         public override OpCode OpCode => OpCode.MemoryCopy;
-        public byte SrcMemoryIndex { get; private set; }
-        public byte DstMemoryIndex { get; private set; }
-        
-        public override void Execute(IExecContext context)
+        public MemIdx SrcMemoryIndex { get; private set; }
+        public MemIdx DstMemoryIndex { get; private set; }
+
+        /// <summary>
+        /// @Spec 3.3.7.13. memory.copy
+        /// </summary>
+        public override void Validate(WasmValidationContext context)
+        {
+            context.Assert(context.Mems.Contains((MemIdx)0), 
+                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
+            
+            context.OpStack.PopI32();
+            context.OpStack.PopI32();
+            context.OpStack.PopI32();
+        }
+
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }
 
         public override IInstruction Parse(BinaryReader reader)
         {
-            SrcMemoryIndex = reader.ReadByte();
-            DstMemoryIndex = reader.ReadByte();
+            SrcMemoryIndex = (MemIdx)reader.ReadByte();
+            DstMemoryIndex = (MemIdx)reader.ReadByte();
 
             if (SrcMemoryIndex != 0x00 || DstMemoryIndex != 0x00)
             {
@@ -123,8 +183,21 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.MemoryFill;
         public byte MemoryIndex { get; private set; }
-        
-        public override void Execute(IExecContext context)
+
+        /// <summary>
+        /// @Spec 3.3.7.12. memory.fill
+        /// </summary>
+        public override void Validate(WasmValidationContext context)
+        {
+            context.Assert(context.Mems.Contains((MemIdx)0), 
+                $"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
+            
+            context.OpStack.PopI32();
+            context.OpStack.PopI32();
+            context.OpStack.PopI32();
+        }
+
+        public override void Execute(ExecContext context)
         {
             throw new NotImplementedException();
         }

@@ -9,18 +9,27 @@ namespace Wacs.Core.Runtime
     /// </summary>
     public class Store
     {
-        public List<IFunctionInstance> Funcs { get; } = new List<IFunctionInstance>();
-        public List<TableInstance> Tables { get; } = new List<TableInstance>();
-        public List<MemoryInstance> Mems { get; } = new List<MemoryInstance>();
-        public List<GlobalInstance> Globals { get; } = new List<GlobalInstance>();
-        public List<ElementInstance> Elems { get; } = new List<ElementInstance>();
-        public List<DataInstance> Datas { get; } = new List<DataInstance>();
+        private List<IFunctionInstance> Funcs { get; } = new List<IFunctionInstance>();
+        private List<TableInstance> Tables { get; } = new List<TableInstance>();
+        private List<MemoryInstance> Mems { get; } = new List<MemoryInstance>();
+        private List<GlobalInstance> Globals { get; } = new List<GlobalInstance>();
+        private List<ElementInstance> Elems { get; } = new List<ElementInstance>();
+        private List<DataInstance> Datas { get; } = new List<DataInstance>();
 
         public IFunctionInstance this[FuncAddr addr] => Funcs[(Index)addr];
         public TableInstance this[TableAddr addr] => Tables[(Index)addr];
         public MemoryInstance this[MemAddr addr] => Mems[(Index)addr];
         public GlobalInstance this[GlobalAddr addr] => Globals[(Index)addr];
         public ElementInstance this[ElemAddr addr] => Elems[(Index)addr];
+
+        public bool Contains(GlobalAddr addr) =>
+            addr.Value < Globals.Count;
+
+        public bool Contains(TableAddr addr) =>
+            addr.Value < Tables.Count;
+
+        public bool Contains(ElemAddr addr) =>
+            addr.Value < Elems.Count;
         
         public FuncAddr AddFunction(IFunctionInstance func)
         {

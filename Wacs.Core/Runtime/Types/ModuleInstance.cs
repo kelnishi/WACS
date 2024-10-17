@@ -10,23 +10,18 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class ModuleInstance
     {
-        public List<FunctionType> Types { get; }
-        public List<FuncAddr> FuncAddrs { get; } = new List<FuncAddr>();
-        public List<TableAddr> TableAddrs { get; } = new List<TableAddr>();
-        public List<MemAddr> MemAddrs { get; } = new List<MemAddr>();
-        public List<GlobalAddr> GlobalAddrs { get; } = new List<GlobalAddr>();
-        public List<ElemAddr> ElemAddrs { get; } = new List<ElemAddr>();
+        public TypesSpace Types { get; }
+        public FuncAddrs FuncAddrs { get; } = new FuncAddrs();
+        public TableAddrs TableAddrs { get; } = new TableAddrs();
+        public MemAddrs MemAddrs { get; } = new MemAddrs();
+        public GlobalAddrs GlobalAddrs { get; } = new GlobalAddrs();
+        public ElemAddrs ElemAddrs { get; } = new ElemAddrs();
         public List<DataAddr> DataAddrs { get; } = new List<DataAddr>();
         public List<ExportInstance> Exports { get; } = new List<ExportInstance>();
 
-        public ModuleInstance(List<FunctionType> types) =>
-            Types = types;
-
-        public FunctionType this[TypeIdx idx] => Types[(Index)idx];
-        public FuncAddr this[FuncIdx idx] => FuncAddrs[(Index)idx];
-        public TableAddr this[TableIdx idx] => TableAddrs[(Index)idx];
-        public MemAddr this[MemIdx idx] => MemAddrs[(Index)idx];
-        public GlobalAddr this[GlobalIdx idx] => GlobalAddrs[(Index)idx];
+        public ModuleInstance(Module module) =>
+            Types = new TypesSpace(module);
+        
         
         public FuncAddr? StartFunction { get; set; }
     }

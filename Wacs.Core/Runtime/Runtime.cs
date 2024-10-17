@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FluentValidation;
+using Wacs.Core.Instructions;
+using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
@@ -10,13 +12,20 @@ namespace Wacs.Core.Runtime
 {
     public class Runtime
     {
-        public Store Store { get; } = new Store();
+        public Store Store { get; }
+
+        public ExecContext Context { get; }
         
         private Dictionary<string, ModuleInstance> _modules = new Dictionary<string, ModuleInstance>();
 
         private Dictionary<(string module, string entity), IAddress> EntityBindings =
-            new Dictionary<(string module, string entity), IAddress>(); 
-        
+            new Dictionary<(string module, string entity), IAddress>();
+
+        public Runtime()
+        {
+            Store = new Store();
+            Context = new ExecContext(Store);
+        }
 
         public void RegisterModule(string moduleName, ModuleInstance moduleInstance)
         {
@@ -80,18 +89,48 @@ namespace Wacs.Core.Runtime
                 var _ = exc;
                 throw;
             }
-
-            var initFrame = new Frame(moduleInstance);
+            
+            //12.
+            var auxFrame = new Frame(moduleInstance) { Locals = new LocalsSpace() };
+            //13.
+            Context.PushFrame(auxFrame);
+            
+            //14, 15
+            for (uint i = 0; i < module.Elements.Length; i++)
+            {
+                var elem = module.Elements[i];
+                switch (elem.Mode)
+                {
+                    case Module.ElementMode.ActiveMode activeMode:
+                        var n = elem.Initializers.Length;
+                        activeMode.Offset.Execute(Context);
+                        InstructionFactory.CreateInstruction(OpCode.I32Const)!.Immediate(0)
+                            .Execute(Context);
+                        InstructionFactory.CreateInstruction(OpCode.I32Const)!.Immediate(n)
+                            .Execute(Context);
+                        InstructionFactory.CreateInstruction(OpCode.TableInit)!.Immediate(activeMode.TableIndex.Value, i)
+                            .Execute(Context);
+                        InstructionFactory.CreateInstruction(OpCode.ElemDrop)!.Immediate((int)i)
+                            .Execute(Context);
+                        break;
+                    case Module.ElementMode.DeclarativeMode declarativeMode:
+                        break;
+                }
+            }
+            
             
 
             return moduleInstance;
         }
 
-        // @Spec 4.5.3.10. Modules
+        /// <summary>
+        /// @Spec 4.5.3.10. Modules Allocation
+        /// *We also evaluate globals and elements here, per instantiation
+        /// </summary>
         private ModuleInstance AllocateModule(Module module)
         {
             //20. Include Types from module
-            var moduleInstance = new ModuleInstance(module.Types);
+            var moduleInstance = new ModuleInstance(module);
             
             //Resolve Imports
             foreach (var import in module.Imports)
@@ -101,7 +140,7 @@ namespace Wacs.Core.Runtime
                 {
                     case Module.ImportDesc.FuncDesc funcDesc:
                         // @Spec 4.5.3.2. @note: Host Functions must be bound to the environment prior to module instantiation!
-                        var funcSig = moduleInstance[funcDesc.TypeIndex];
+                        var funcSig = moduleInstance.Types[funcDesc.TypeIndex];
                         var funcAddr = GetBoundEntity(entityId) as FuncAddr;
                         if (funcAddr == null)
                             throw new NotSupportedException(
@@ -173,10 +212,16 @@ namespace Wacs.Core.Runtime
                 moduleInstance.MemAddrs.Add(AllocateMemory(Store, mem));
             }
             
+            // @Spec 4.5.4 Step 7
+            var initFrame = new Frame(moduleInstance) { Locals = new LocalsSpace() };
+            Context.PushFrame(initFrame);
+            
             //5. Allocate Globals and capture their addresses in the Store
             //11. index ordered global addresses
             foreach (var global in module.Globals) {
-                var val = EvaluateInitializer(global.Initializer);
+                var val = EvaluateExpression(global.Initializer);
+                if (Context.Frame != initFrame)
+                    throw new InvalidProgramException($"Call stack was manipulated while initializing globals");
                 moduleInstance.GlobalAddrs.Add(AllocateGlobal(Store, global.Type, val));
             }
             
@@ -186,6 +231,9 @@ namespace Wacs.Core.Runtime
                 var refs = EvaluateInitializers(elem.Initializers);
                 moduleInstance.ElemAddrs.Add(AllocateElement(Store, elem.Type, refs));
             }
+            
+            // @Spec 4.5.4 Step 10
+            Context.PopFrame();
             
             //7. Allocate Datas
             //13. index ordered data addresses
@@ -200,13 +248,13 @@ namespace Wacs.Core.Runtime
                 var desc = export.Desc;
                 ExternalValue val = desc switch {
                     Module.ExportDesc.FuncDesc funcDesc => 
-                        new ExternalValue.Function(moduleInstance[funcDesc.FunctionIndex]),
+                        new ExternalValue.Function(moduleInstance.FuncAddrs[funcDesc.FunctionIndex]),
                     Module.ExportDesc.TableDesc tableDesc => 
-                        new ExternalValue.Table(moduleInstance[tableDesc.TableIndex]),
+                        new ExternalValue.Table(moduleInstance.TableAddrs[tableDesc.TableIndex]),
                     Module.ExportDesc.MemDesc memDesc => 
-                        new ExternalValue.Memory(moduleInstance[memDesc.MemoryIndex]),
+                        new ExternalValue.Memory(moduleInstance.MemAddrs[memDesc.MemoryIndex]),
                     Module.ExportDesc.GlobalDesc globalDesc => 
-                        new ExternalValue.Global(moduleInstance[globalDesc.GlobalIndex]),
+                        new ExternalValue.Global(moduleInstance.GlobalAddrs[globalDesc.GlobalIndex]),
                     _ => 
                         throw new InvalidDataException($"Invalid Export {desc}")
                 };
@@ -215,8 +263,9 @@ namespace Wacs.Core.Runtime
                 moduleInstance.Exports.Add(exportInstance);
             }
 
+            //TODO move this to match the Spec
             //Set the start function, if it exists
-            moduleInstance.StartFunction = module.StartIndex != FuncIdx.Default ? moduleInstance[module.StartIndex] : FuncAddr.Null;
+            moduleInstance.StartFunction = module.StartIndex != FuncIdx.Default ? moduleInstance.FuncAddrs[module.StartIndex] : FuncAddr.Null;
             
             return moduleInstance;
         }
@@ -226,7 +275,7 @@ namespace Wacs.Core.Runtime
         /// </summary>
         private static FuncAddr AllocateFunc(Store store, Module.Function func, ModuleInstance moduleInst)
         {
-            var funcType = moduleInst[func.TypeIndex];
+            var funcType = moduleInst.Types[func.TypeIndex];
             var funcInst = new FunctionInstance(funcType, moduleInst, func);
             var funcAddr = store.AddFunction(funcInst);
             return funcAddr;
@@ -292,21 +341,20 @@ namespace Wacs.Core.Runtime
             return dataAddr;
         }
         
-        private Value EvaluateInitializer(Expression ini)
+        /// <summary>
+        /// @Spec 4.5.4. Instantiation
+        /// Step 8.1
+        /// </summary>
+        private Value EvaluateExpression(Expression ini)
         {
-            throw new NotImplementedException();
-            foreach (var inst in ini.Instructions)
-            {
-                //TODO
-                // inst.Execute();
-            }
-
-            return Value.NullFuncRef;
+            ini.Execute(Context);
+            var value = Context.OpStack.PopAny();
+            return value;
         }
 
         private List<Value> EvaluateInitializers(Expression[] inis)
         {
-            return inis.Select(ini => EvaluateInitializer(ini)).ToList();
+            return inis.Select(ini => EvaluateExpression(ini)).ToList();
         }
     }
 }

@@ -35,6 +35,7 @@ namespace Wacs.Core.Types
         public static Expression Empty => new Expression();
 
         public bool IsConstant() =>
+            Instructions.Count == 1 &&
             !Instructions.Any(inst => inst.OpCode switch {
                 OpCode.I32Const => false,
                 OpCode.I64Const => false,
@@ -45,12 +46,20 @@ namespace Wacs.Core.Types
                 OpCode.RefFunc => false,
                 _ => true
             });
+
+        public void Execute(ExecContext context)
+        {
+            foreach (var inst in Instructions)
+            {
+                inst.Execute(context);
+            }
+        }
         
         /// <summary>
         /// @Spec 5.4.9 Expressions
         /// </summary>
         public static Expression Parse(BinaryReader reader) =>
-            new Expression(reader.ParseUntilNull(InstructionParser.Parse));
+            new Expression(reader.ParseUntil(InstructionParser.Parse, InstructionParser.IsEnd));
 
         /// <summary>
         /// @Spec 3.3.10. Expressions
@@ -72,8 +81,8 @@ namespace Wacs.Core.Types
                     {
                         try
                         {
-                            inst.Execute(ctx.GetValidationContext().ExecContext);
-                            Value resultVal = ctx.GetValidationContext().ExecContext.OpStack.Peek();
+                            inst.Validate(ctx.GetValidationContext());
+                            Value resultVal = ctx.GetValidationContext().OpStack.Peek();
                             StackType = resultVal.Type;
                         }
                         catch (InvalidProgramException exc)
@@ -99,7 +108,7 @@ namespace Wacs.Core.Types
                     var validationContext = ctx.GetValidationContext();
                     foreach (var eType in ResultType.Types)
                     {
-                        var rValue = validationContext.ExecContext.OpStack.PopAny();
+                        var rValue = validationContext.OpStack.PopAny();
                         if (rValue.Type != eType)
                         {
                             ctx.AddFailure($"Expression Result type {rValue.Type} did not match expected {eType}");

@@ -12,15 +12,28 @@ namespace Wacs.Core.Instructions.Numeric
     {
         public override OpCode OpCode => OpCode.I32Const;
         private int Value { get; set; }
+
+        /// <summary>
+        /// @Spec 3.3.1.1 t.const
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context) =>
+            context.OpStack.PushI32(Value);
         
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(IExecContext context) =>
+        public override void Execute(ExecContext context) =>
             context.OpStack.PushI32(Value);
 
         public override IInstruction Parse(BinaryReader reader) {
             Value = reader.ReadLeb128_s32();
+            return this;
+        }
+
+        public override IInstruction Immediate(int value)
+        {
+            Value = value;
             return this;
         }
     }
@@ -32,9 +45,16 @@ namespace Wacs.Core.Instructions.Numeric
         private long Value { get; set; }
         
         /// <summary>
+        /// @Spec 3.3.1.1 t.const
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context) =>
+            context.OpStack.PushI64(Value);
+        
+        /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(IExecContext context) =>
+        public override void Execute(ExecContext context) =>
             context.OpStack.PushI64(Value);
         
         public override IInstruction Parse(BinaryReader reader) {
@@ -50,9 +70,16 @@ namespace Wacs.Core.Instructions.Numeric
         private float Value { get; set; }
         
         /// <summary>
+        /// @Spec 3.3.1.1 t.const
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context) =>
+            context.OpStack.PushF32(Value);
+        
+        /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(IExecContext context) =>
+        public override void Execute(ExecContext context) =>
             context.OpStack.PushF32(Value);
         
         public override IInstruction Parse(BinaryReader reader) {
@@ -68,9 +95,16 @@ namespace Wacs.Core.Instructions.Numeric
         public double Value { get; internal set; }
         
         /// <summary>
+        /// @Spec 3.3.1.1 t.const
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(WasmValidationContext context) =>
+            context.OpStack.PushF64(Value);
+        
+        /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(IExecContext context) =>
+        public override void Execute(ExecContext context) =>
             context.OpStack.PushF64(Value);
 
         public override IInstruction Parse(BinaryReader reader) {

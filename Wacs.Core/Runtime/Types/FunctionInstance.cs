@@ -50,7 +50,7 @@ namespace Wacs.Core.Runtime.Types
             // }
             //
             // return results;
-            return null;
+            return new object[]{};
         }
     }
 }

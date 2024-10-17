@@ -106,7 +106,7 @@ namespace Wacs.Core
                     public Validator()
                     {
                         RuleFor(gd => gd.GlobalIndex)
-                            .Must((gd, index, ctx) => ctx.GetValidationContext().ExecContext.Globals.Contains(index));
+                            .Must((gd, index, ctx) => ctx.GetValidationContext().Globals.Contains(index));
                     }
                 }
             }
