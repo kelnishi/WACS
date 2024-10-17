@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using FluentValidation;
 using Wacs.Core.Instructions;
+using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -104,17 +105,17 @@ namespace Wacs.Core.Runtime
                         var n = elem.Initializers.Length;
                         activeMode.Offset
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction(OpCode.I32Const)!.ImmediateI32(0)
+                        InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(0)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction(OpCode.I32Const)!.ImmediateI32(n)
+                        InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(n)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction(OpCode.TableInit)!.Immediate(activeMode.TableIndex, (ElemIdx)i)
+                        InstructionFactory.CreateInstruction<InstTableInit>(OpCode.TableInit)!.Immediate(activeMode.TableIndex, (ElemIdx)i)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction(OpCode.ElemDrop)!.Immediate((ElemIdx)i)
+                        InstructionFactory.CreateInstruction<InstElemDrop>(OpCode.ElemDrop)!.Immediate((ElemIdx)i)
                             .Execute(Context);
                         break;
                     case Module.ElementMode.DeclarativeMode declarativeMode:
-                        InstructionFactory.CreateInstruction(OpCode.ElemDrop)!.Immediate((ElemIdx)i)
+                        InstructionFactory.CreateInstruction<InstElemDrop>(OpCode.ElemDrop)!.Immediate((ElemIdx)i)
                             .Execute(Context);
                         break;
                 }
@@ -131,13 +132,13 @@ namespace Wacs.Core.Runtime
                         var n = data.Init.Length;
                         activeMode.Offset
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction(OpCode.I32Const)!.ImmediateI32(0)
+                        InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(0)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction(OpCode.I32Const)!.ImmediateI32(n)
+                        InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(n)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction(OpCode.MemoryInit)!.Immediate((DataIdx)i)
+                        InstructionFactory.CreateInstruction<InstMemoryInit>(OpCode.MemoryInit)!.Immediate((DataIdx)i)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction(OpCode.DataDrop)!.Immediate((DataIdx)i)
+                        InstructionFactory.CreateInstruction<InstDataDrop>(OpCode.DataDrop)!.Immediate((DataIdx)i)
                             .Execute(Context);
                         break;
                     case Module.DataMode.PassiveMode: //Do nothing
@@ -155,7 +156,7 @@ namespace Wacs.Core.Runtime
                     if (!Context.Store.Contains(startAddr))
                         throw new InvalidProgramException("Module StartFunction address not found in the Store.");
                     //Invoke the function!
-                    InstructionFactory.CreateInstruction(OpCode.Call)!.Immediate(module.StartIndex)
+                    InstructionFactory.CreateInstruction<InstCall>(OpCode.Call)!.Immediate(module.StartIndex)
                         .Execute(Context);
                 }
             }

@@ -112,7 +112,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override IInstruction Immediate(DataIdx x)
+        public IInstruction Immediate(DataIdx x)
         {
             X = x;
             return this;
@@ -144,7 +144,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override IInstruction Immediate(DataIdx x)
+        public IInstruction Immediate(DataIdx x)
         {
             X = x;
             return this;

@@ -224,7 +224,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override IInstruction Immediate(TableIdx x, ElemIdx y)
+        public IInstruction Immediate(TableIdx x, ElemIdx y)
         {
             X = x;
             Y = y;
@@ -266,7 +266,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override IInstruction Immediate(ElemIdx value)
+        public IInstruction Immediate(ElemIdx value)
         {
             X = value;
             return this;

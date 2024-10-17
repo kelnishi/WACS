@@ -24,6 +24,10 @@ namespace Wacs.Core.Instructions
             _instructionMap[opcode] = constructor;
         }
 
+        public static T? CreateInstruction<T>(OpCode opCode)
+            where T : InstructionBase =>
+            CreateInstruction(opCode) as T;
+        
         public static IInstruction? CreateInstruction(OpCode opcode) => opcode switch {
             //Control Instructions
             OpCode.Unreachable       => InstUnreachable.Inst,

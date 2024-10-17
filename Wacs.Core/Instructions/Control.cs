@@ -350,7 +350,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override IInstruction Immediate(FuncIdx value)
+        public IInstruction Immediate(FuncIdx value)
         {
             FunctionIndex = value;
             return this;
