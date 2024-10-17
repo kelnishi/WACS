@@ -349,6 +349,12 @@ namespace Wacs.Core.Instructions
             FunctionIndex = (FuncIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override IInstruction Immediate(FuncIdx value)
+        {
+            FunctionIndex = value;
+            return this;
+        }
     }
     
     //0x11

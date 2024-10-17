@@ -63,12 +63,12 @@ namespace Wacs.Core.Runtime
         /// <summary>
         /// @Spec 4.5.4. Instantiation
         /// </summary>
-        public ModuleInstance InstantiateModule(Module module, bool skipModuleValidation = false)
+        public ModuleInstance InstantiateModule(Module module, RuntimeOptions options)
         {
             try
             {
                 //1
-                if (!skipModuleValidation)
+                if (!options.SkipModuleValidation)
                     module.ValidateAndThrow();
             }
             catch (ValidationException exc)
@@ -95,29 +95,70 @@ namespace Wacs.Core.Runtime
             Context.PushFrame(auxFrame);
             
             //14, 15
-            for (uint i = 0; i < module.Elements.Length; i++)
+            for (int i = 0, l = module.Elements.Length; i < l; ++i)
             {
                 var elem = module.Elements[i];
                 switch (elem.Mode)
                 {
                     case Module.ElementMode.ActiveMode activeMode:
                         var n = elem.Initializers.Length;
-                        activeMode.Offset.Execute(Context);
-                        InstructionFactory.CreateInstruction(OpCode.I32Const)!.Immediate(0)
+                        activeMode.Offset
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction(OpCode.I32Const)!.Immediate(n)
+                        InstructionFactory.CreateInstruction(OpCode.I32Const)!.ImmediateI32(0)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction(OpCode.TableInit)!.Immediate(activeMode.TableIndex.Value, i)
+                        InstructionFactory.CreateInstruction(OpCode.I32Const)!.ImmediateI32(n)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction(OpCode.ElemDrop)!.Immediate((int)i)
+                        InstructionFactory.CreateInstruction(OpCode.TableInit)!.Immediate(activeMode.TableIndex, (ElemIdx)i)
+                            .Execute(Context);
+                        InstructionFactory.CreateInstruction(OpCode.ElemDrop)!.Immediate((ElemIdx)i)
                             .Execute(Context);
                         break;
                     case Module.ElementMode.DeclarativeMode declarativeMode:
-                        
+                        InstructionFactory.CreateInstruction(OpCode.ElemDrop)!.Immediate((ElemIdx)i)
+                            .Execute(Context);
                         break;
                 }
             }
-            
+            //16.
+            for (int i = 0, l = module.Datas.Length; i < l; ++i)
+            {
+                var data = module.Datas[i];
+                switch (data.Mode)
+                {
+                    case Module.DataMode.ActiveMode activeMode:
+                        if (activeMode.MemoryIndex != 0)
+                            throw new InvalidProgramException("Module could not be instantiated: Multiple Memories are not supported.");
+                        var n = data.Init.Length;
+                        activeMode.Offset
+                            .Execute(Context);
+                        InstructionFactory.CreateInstruction(OpCode.I32Const)!.ImmediateI32(0)
+                            .Execute(Context);
+                        InstructionFactory.CreateInstruction(OpCode.I32Const)!.ImmediateI32(n)
+                            .Execute(Context);
+                        InstructionFactory.CreateInstruction(OpCode.MemoryInit)!.Immediate((DataIdx)i)
+                            .Execute(Context);
+                        InstructionFactory.CreateInstruction(OpCode.DataDrop)!.Immediate((DataIdx)i)
+                            .Execute(Context);
+                        break;
+                    case Module.DataMode.PassiveMode: //Do nothing
+                        break;
+                }
+            }
+            //17. 
+            if (module.StartIndex != FuncIdx.Default)
+            {
+                if (!options.SkipStartFunction)
+                {
+                    if (!moduleInstance.FuncAddrs.Contains(module.StartIndex))
+                        throw new InvalidDataException("Module StartFunction index was invalid");
+                    var startAddr = moduleInstance.FuncAddrs[module.StartIndex];
+                    if (!Context.Store.Contains(startAddr))
+                        throw new InvalidProgramException("Module StartFunction address not found in the Store.");
+                    
+                    InstructionFactory.CreateInstruction(OpCode.Call)!.Immediate(module.StartIndex)
+                        .Execute(Context);
+                }
+            }
             
 
             return moduleInstance;
@@ -262,11 +303,6 @@ namespace Wacs.Core.Runtime
                 //19. indexed export addresses
                 moduleInstance.Exports.Add(exportInstance);
             }
-
-            //TODO move this to match the Spec
-            //Set the start function, if it exists
-            moduleInstance.StartFunction = module.StartIndex != FuncIdx.Default ? moduleInstance.FuncAddrs[module.StartIndex] : FuncAddr.Null;
-            
             return moduleInstance;
         }
 

@@ -2,6 +2,7 @@ using System.IO;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions
 {
@@ -28,12 +29,12 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// Set a hard coded parameter for instructions created by the runtime
         /// </summary>
-        IInstruction Immediate(int value);
-
-        /// <summary>
-        /// Set two hard coded parameters for instructions created by the runtime
-        /// </summary>
-        IInstruction Immediate(uint a, uint b);
+        IInstruction ImmediateI32(int value);
+        IInstruction Immediate(FuncIdx value);
+        IInstruction Immediate(MemIdx value);
+        IInstruction Immediate(ElemIdx value);
+        IInstruction Immediate(DataIdx value);
+        IInstruction Immediate(TableIdx x, ElemIdx y);
     }
     
 }

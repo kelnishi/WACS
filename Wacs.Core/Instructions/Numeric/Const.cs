@@ -31,7 +31,7 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
-        public override IInstruction Immediate(int value)
+        public override IInstruction ImmediateI32(int value)
         {
             Value = value;
             return this;
