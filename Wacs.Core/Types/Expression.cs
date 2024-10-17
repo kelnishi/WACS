@@ -16,8 +16,6 @@ namespace Wacs.Core.Types
     /// </summary>
     public class Expression
     {
-        //Instructions terminate with an explicit END instruction. (omitted here)
-        // !!!Need to output the END instruction when serializing!!!
         public List<IInstruction> Instructions { get; internal set; }
 
         private Expression() =>
@@ -32,7 +30,7 @@ namespace Wacs.Core.Types
         private Expression(List<IInstruction> instructions) =>
             Instructions = instructions;
             
-        public static Expression Empty => new Expression();
+        public static readonly Expression Empty = new();
 
         public bool IsConstant() =>
             Instructions.Count == 1 &&
@@ -59,7 +57,7 @@ namespace Wacs.Core.Types
         /// @Spec 5.4.9 Expressions
         /// </summary>
         public static Expression Parse(BinaryReader reader) =>
-            new Expression(reader.ParseUntil(InstructionParser.Parse, InstructionParser.IsEnd));
+            new(reader.ParseUntil(InstructionParser.Parse, InstructionParser.IsEnd));
 
         /// <summary>
         /// @Spec 3.3.10. Expressions
@@ -67,7 +65,6 @@ namespace Wacs.Core.Types
         public class Validator : AbstractValidator<Expression>
         {
             public ResultType ResultType { get; }
-            private ValType StackType { get; set; }
 
             public bool ShouldBeConstant;
             
@@ -82,8 +79,6 @@ namespace Wacs.Core.Types
                         try
                         {
                             inst.Validate(ctx.GetValidationContext());
-                            Value resultVal = ctx.GetValidationContext().OpStack.Peek();
-                            StackType = resultVal.Type;
                         }
                         catch (InvalidProgramException exc)
                         {
@@ -93,9 +88,9 @@ namespace Wacs.Core.Types
                         {
                             ctx.AddFailure(exc.Message);
                         }
-                        catch (NotImplementedException _)
+                        catch (NotImplementedException exc)
                         {
-                            var __ = _;
+                            _ = exc;
                             ctx.AddFailure($"WASM Instruction `{inst.OpCode.GetMnemonic()}` is not implemented.");
                         }
                     });
@@ -106,6 +101,7 @@ namespace Wacs.Core.Types
                             ctx.AddFailure($"Expression must be constant");
                     
                     var validationContext = ctx.GetValidationContext();
+                    
                     foreach (var eType in ResultType.Types)
                     {
                         var rValue = validationContext.OpStack.PopAny();

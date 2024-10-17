@@ -9,21 +9,21 @@ namespace Wacs.Core.Instructions.Numeric
     public partial class NumericInst
     {
         // @Spec 3.3.1.3. i.binop
-        public static readonly NumericInst I32Add    = new NumericInst(OpCode.I32Add    , ExecuteI32Add  , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32Sub    = new NumericInst(OpCode.I32Sub    , ExecuteI32Sub  , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32Mul    = new NumericInst(OpCode.I32Mul    , ExecuteI32Mul  , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32DivS   = new NumericInst(OpCode.I32DivS   , ExecuteI32DivS , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32DivU   = new NumericInst(OpCode.I32DivU   , ExecuteI32DivU , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32RemS   = new NumericInst(OpCode.I32RemS   , ExecuteI32RemS , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32RemU   = new NumericInst(OpCode.I32RemU   , ExecuteI32RemU , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32And    = new NumericInst(OpCode.I32And    , ExecuteI32And  , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32Or     = new NumericInst(OpCode.I32Or     , ExecuteI32Or   , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32Xor    = new NumericInst(OpCode.I32Xor    , ExecuteI32Xor  , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32Shl    = new NumericInst(OpCode.I32Shl    , ExecuteI32Shl  , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32ShrS   = new NumericInst(OpCode.I32ShrS   , ExecuteI32ShrS , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32ShrU   = new NumericInst(OpCode.I32ShrU   , ExecuteI32ShrU , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32Rotl   = new NumericInst(OpCode.I32Rotl   , ExecuteI32Rotl , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32Rotr   = new NumericInst(OpCode.I32Rotr   , ExecuteI32Rotr , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32Add    = new(OpCode.I32Add    , ExecuteI32Add  , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32Sub    = new(OpCode.I32Sub    , ExecuteI32Sub  , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32Mul    = new(OpCode.I32Mul    , ExecuteI32Mul  , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32DivS   = new(OpCode.I32DivS   , ExecuteI32DivS , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32DivU   = new(OpCode.I32DivU   , ExecuteI32DivU , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32RemS   = new(OpCode.I32RemS   , ExecuteI32RemS , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32RemU   = new(OpCode.I32RemU   , ExecuteI32RemU , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32And    = new(OpCode.I32And    , ExecuteI32And  , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32Or     = new(OpCode.I32Or     , ExecuteI32Or   , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32Xor    = new(OpCode.I32Xor    , ExecuteI32Xor  , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32Shl    = new(OpCode.I32Shl    , ExecuteI32Shl  , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32ShrS   = new(OpCode.I32ShrS   , ExecuteI32ShrS , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32ShrU   = new(OpCode.I32ShrU   , ExecuteI32ShrU , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32Rotl   = new(OpCode.I32Rotl   , ExecuteI32Rotl , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32Rotr   = new(OpCode.I32Rotr   , ExecuteI32Rotr , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
         
         // @Spec 4.3.2.3. iadd
         private static void ExecuteI32Add(ExecContext context)

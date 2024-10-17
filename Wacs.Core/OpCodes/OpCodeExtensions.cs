@@ -9,7 +9,7 @@ namespace Wacs.Core.OpCodes
 {
     public static class OpCodeExtensions
     {
-        private static readonly ConcurrentDictionary<OpCode, string> MnemonicCache = new ConcurrentDictionary<OpCode, string>();
+        private static readonly ConcurrentDictionary<OpCode, string> MnemonicCache = new();
         
         /// <summary>
         /// Retrieves the WAT mnemonic associated with the given opcode.

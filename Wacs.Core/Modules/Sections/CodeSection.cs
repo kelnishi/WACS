@@ -30,7 +30,7 @@ namespace Wacs.Core
                 (reader.ReadLeb128_u32(), ValueTypeParser.Parse(reader));
             
             public static FuncLocalsBody Parse(BinaryReader reader) =>
-                new FuncLocalsBody(reader.ParseVector(ParseCompressedLocal), Expression.Parse(reader));
+                new(reader.ParseVector(ParseCompressedLocal), Expression.Parse(reader));
         }
         
         public class CodeDesc

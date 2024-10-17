@@ -10,10 +10,10 @@ namespace Wacs.Core.Runtime
     public class ExecContext
     {
         public Store Store { get; }
-        public OpStack OpStack { get; private set; } = new OpStack();
-        public Stack<Frame> CallStack { get; private set; } = new Stack<Frame>();
+        public OpStack OpStack { get; private set; } = new();
+        public Stack<Frame> CallStack { get; private set; } = new();
         
-        public Stack<ResultType> Labels { get; private set; } = new Stack<ResultType>();
+        public Stack<ResultType> Labels { get; private set; } = new();
         public ResultType? Return { get; private set; } = null;
         public ExecContext(Store store)
         {
@@ -22,11 +22,10 @@ namespace Wacs.Core.Runtime
 
         public delegate string MessageProducer();
         
-        //TODO: Trap?
         public void Assert(bool factIsTrue, MessageProducer message)
         {
             if (!factIsTrue)
-                throw new InvalidProgramException(message());
+                throw new TrapException(message());
         }
 
         public void PushFrame(Frame frame)

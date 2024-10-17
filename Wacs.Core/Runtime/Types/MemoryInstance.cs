@@ -42,7 +42,7 @@ namespace Wacs.Core.Runtime.Types
             }
             catch (ValidationException exc)
             {
-                var _ = exc;
+                _ = exc;
                 return false;
             }
 

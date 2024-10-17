@@ -12,7 +12,7 @@ namespace Wacs.Core.Runtime.Types
     {
         public TableType Type { get; }
         
-        //TODO: These should be ref values
+        //The actual data array, filled in by InstantiateModule with table.init instructions
         public List<Value> Elements { get; }
 
         /// <summary>
@@ -50,7 +50,7 @@ namespace Wacs.Core.Runtime.Types
             }
             catch (ValidationException exc)
             {
-                var _ = exc;
+                _ = exc;
                 return false;
             }
 

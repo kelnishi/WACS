@@ -9,12 +9,12 @@ namespace Wacs.Core.Runtime
     /// </summary>
     public class Store
     {
-        private List<IFunctionInstance> Funcs { get; } = new List<IFunctionInstance>();
-        private List<TableInstance> Tables { get; } = new List<TableInstance>();
-        private List<MemoryInstance> Mems { get; } = new List<MemoryInstance>();
-        private List<GlobalInstance> Globals { get; } = new List<GlobalInstance>();
-        private List<ElementInstance> Elems { get; } = new List<ElementInstance>();
-        private List<DataInstance> Datas { get; } = new List<DataInstance>();
+        private List<IFunctionInstance> Funcs { get; } = new();
+        private List<TableInstance> Tables { get; } = new();
+        private List<MemoryInstance> Mems { get; } = new();
+        private List<GlobalInstance> Globals { get; } = new();
+        private List<ElementInstance> Elems { get; } = new();
+        private List<DataInstance> Datas { get; } = new();
 
         public IFunctionInstance this[FuncAddr addr] => Funcs[(Index)addr];
         public TableInstance this[TableAddr addr] => Tables[(Index)addr];

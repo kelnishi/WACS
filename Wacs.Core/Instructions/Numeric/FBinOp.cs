@@ -9,21 +9,21 @@ namespace Wacs.Core.Instructions.Numeric
     public partial class NumericInst
     {
         // @Spec 3.3.1.3. f.binop
-        public static readonly NumericInst F32Add      = new NumericInst(OpCode.F32Add       , ExecuteF32Add      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
-        public static readonly NumericInst F32Sub      = new NumericInst(OpCode.F32Sub       , ExecuteF32Sub      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
-        public static readonly NumericInst F32Mul      = new NumericInst(OpCode.F32Mul       , ExecuteF32Mul      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
-        public static readonly NumericInst F32Div      = new NumericInst(OpCode.F32Div       , ExecuteF32Div      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
-        public static readonly NumericInst F32Min      = new NumericInst(OpCode.F32Min       , ExecuteF32Min      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
-        public static readonly NumericInst F32Max      = new NumericInst(OpCode.F32Max       , ExecuteF32Max      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
-        public static readonly NumericInst F32Copysign = new NumericInst(OpCode.F32Copysign  , ExecuteF32Copysign , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Add      = new(OpCode.F32Add       , ExecuteF32Add      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Sub      = new(OpCode.F32Sub       , ExecuteF32Sub      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Mul      = new(OpCode.F32Mul       , ExecuteF32Mul      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Div      = new(OpCode.F32Div       , ExecuteF32Div      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Min      = new(OpCode.F32Min       , ExecuteF32Min      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Max      = new(OpCode.F32Max       , ExecuteF32Max      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
+        public static readonly NumericInst F32Copysign = new(OpCode.F32Copysign  , ExecuteF32Copysign , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
         
-        public static readonly NumericInst F64Add      = new NumericInst(OpCode.F64Add       , ExecuteF64Add      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
-        public static readonly NumericInst F64Sub      = new NumericInst(OpCode.F64Sub       , ExecuteF64Sub      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
-        public static readonly NumericInst F64Mul      = new NumericInst(OpCode.F64Mul       , ExecuteF64Mul      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
-        public static readonly NumericInst F64Div      = new NumericInst(OpCode.F64Div       , ExecuteF64Div      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
-        public static readonly NumericInst F64Min      = new NumericInst(OpCode.F64Min       , ExecuteF64Min      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
-        public static readonly NumericInst F64Max      = new NumericInst(OpCode.F64Max       , ExecuteF64Max      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
-        public static readonly NumericInst F64Copysign = new NumericInst(OpCode.F64Copysign  , ExecuteF64Copysign , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Add      = new(OpCode.F64Add       , ExecuteF64Add      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Sub      = new(OpCode.F64Sub       , ExecuteF64Sub      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Mul      = new(OpCode.F64Mul       , ExecuteF64Mul      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Div      = new(OpCode.F64Div       , ExecuteF64Div      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Min      = new(OpCode.F64Min       , ExecuteF64Min      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Max      = new(OpCode.F64Max       , ExecuteF64Max      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
+        public static readonly NumericInst F64Copysign = new(OpCode.F64Copysign  , ExecuteF64Copysign , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
 
         private static void ExecuteF32Add(ExecContext context)
         {

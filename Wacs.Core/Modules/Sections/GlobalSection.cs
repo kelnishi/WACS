@@ -32,7 +32,7 @@ namespace Wacs.Core
             /// <summary>
             /// @Spec 5.5.9. Global Section
             /// </summary>
-            public static Global Parse(BinaryReader reader) => new Global(reader);
+            public static Global Parse(BinaryReader reader) => new(reader);
 
             /// <summary>
             /// @Spec 3.4.4.1 Globals

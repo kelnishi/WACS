@@ -8,11 +8,11 @@ namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst 
     {
-        public static readonly NumericInst I32Extend8S  = new NumericInst(OpCode.I32Extend8S , ExecuteI32Extend8S , ValidateOperands(pop: ValType.I32, push: ValType.I32));  
-        public static readonly NumericInst I32Extend16S = new NumericInst(OpCode.I32Extend16S, ExecuteI32Extend16S, ValidateOperands(pop: ValType.I32, push: ValType.I32)); 
-        public static readonly NumericInst I64Extend8S  = new NumericInst(OpCode.I64Extend8S , ExecuteI64Extend8S , ValidateOperands(pop: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64Extend16S = new NumericInst(OpCode.I64Extend16S, ExecuteI64Extend16S, ValidateOperands(pop: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64Extend32S = new NumericInst(OpCode.I64Extend32S, ExecuteI64Extend32S, ValidateOperands(pop: ValType.I64, push: ValType.I64));
+        public static readonly NumericInst I32Extend8S  = new(OpCode.I32Extend8S , ExecuteI32Extend8S , ValidateOperands(pop: ValType.I32, push: ValType.I32));  
+        public static readonly NumericInst I32Extend16S = new(OpCode.I32Extend16S, ExecuteI32Extend16S, ValidateOperands(pop: ValType.I32, push: ValType.I32)); 
+        public static readonly NumericInst I64Extend8S  = new(OpCode.I64Extend8S , ExecuteI64Extend8S , ValidateOperands(pop: ValType.I64, push: ValType.I64));
+        public static readonly NumericInst I64Extend16S = new(OpCode.I64Extend16S, ExecuteI64Extend16S, ValidateOperands(pop: ValType.I64, push: ValType.I64));
+        public static readonly NumericInst I64Extend32S = new(OpCode.I64Extend32S, ExecuteI64Extend32S, ValidateOperands(pop: ValType.I64, push: ValType.I64));
 
         private const UInt32 ByteSign = 0x80;
         private const UInt32 I32ByteExtend = 0xFFFF_FF80;

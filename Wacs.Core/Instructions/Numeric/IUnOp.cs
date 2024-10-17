@@ -7,12 +7,12 @@ namespace Wacs.Core.Instructions.Numeric
     public partial class NumericInst
     {
         // @Spec 3.3.1.2. i.unop
-        public static readonly NumericInst I32Clz    = new NumericInst(OpCode.I32Clz    , ExecuteI32Clz    , ValidateOperands(pop: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32Ctz    = new NumericInst(OpCode.I32Ctz    , ExecuteI32Ctz    , ValidateOperands(pop: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I32Popcnt = new NumericInst(OpCode.I32Popcnt , ExecuteI32Popcnt , ValidateOperands(pop: ValType.I32, push: ValType.I32));
-        public static readonly NumericInst I64Clz    = new NumericInst(OpCode.I64Clz    , ExecuteI64Clz    , ValidateOperands(pop: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64Ctz    = new NumericInst(OpCode.I64Ctz    , ExecuteI64Ctz    , ValidateOperands(pop: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64Popcnt = new NumericInst(OpCode.I64Popcnt , ExecuteI64Popcnt , ValidateOperands(pop: ValType.I64, push: ValType.I64));
+        public static readonly NumericInst I32Clz    = new(OpCode.I32Clz    , ExecuteI32Clz    , ValidateOperands(pop: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32Ctz    = new(OpCode.I32Ctz    , ExecuteI32Ctz    , ValidateOperands(pop: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I32Popcnt = new(OpCode.I32Popcnt , ExecuteI32Popcnt , ValidateOperands(pop: ValType.I32, push: ValType.I32));
+        public static readonly NumericInst I64Clz    = new(OpCode.I64Clz    , ExecuteI64Clz    , ValidateOperands(pop: ValType.I64, push: ValType.I64));
+        public static readonly NumericInst I64Ctz    = new(OpCode.I64Ctz    , ExecuteI64Ctz    , ValidateOperands(pop: ValType.I64, push: ValType.I64));
+        public static readonly NumericInst I64Popcnt = new(OpCode.I64Popcnt , ExecuteI64Popcnt , ValidateOperands(pop: ValType.I64, push: ValType.I64));
         
         // @Spec 4.3.2.20 iclz
         private static void ExecuteI32Clz(ExecContext context)

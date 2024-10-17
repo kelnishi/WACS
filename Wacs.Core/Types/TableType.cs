@@ -32,14 +32,14 @@ namespace Wacs.Core.Types
         /// <summary>
         /// @Spec 5.3.9. Table Types
         /// </summary>
-        public static TableType Parse(BinaryReader reader) => new TableType(reader);
+        public static TableType Parse(BinaryReader reader) => new(reader);
 
         /// <summary>
         /// @Spec 3.2.4. Table Types
         /// </summary>
         public class Validator : AbstractValidator<TableType>
         {
-            public static Limits.Validator Limits = new Limits.Validator(MaxTableSize);
+            public static Limits.Validator Limits = new(MaxTableSize);
             
             public Validator() {
                 // @Spec 3.2.4.1. limits reftype

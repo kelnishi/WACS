@@ -94,7 +94,7 @@ namespace Wacs.Core.Types
             _ => false
         };
 
-        public static ResultType SingleResult(this ValType type) => new ResultType(type);
+        public static ResultType SingleResult(this ValType type) => new(type);
 
     }
         

@@ -28,7 +28,7 @@ namespace Wacs.Core.Types
         /// @Spec 5.3.10. Global Types
         /// </summary>
         public static GlobalType Parse(BinaryReader reader) => 
-            new GlobalType(
+            new(
                 valtype: ValueTypeParser.Parse(reader),
                 mut: MutabilityParser.Parse(reader)
             );

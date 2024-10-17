@@ -10,7 +10,7 @@ namespace Wacs.Core.Instructions
 {
     public static class InstructionFactory
     {
-        private static readonly Dictionary<OpCode, Func<IInstruction>> _instructionMap = new Dictionary<OpCode, Func<IInstruction>>();
+        private static readonly Dictionary<OpCode, Func<IInstruction>> _instructionMap = new();
 
         static InstructionFactory()
         {

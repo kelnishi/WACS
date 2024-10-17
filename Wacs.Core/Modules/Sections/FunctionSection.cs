@@ -49,6 +49,7 @@ namespace Wacs.Core
                                 return;
                             }
 
+                            //TODO: use actual execcontext rules
                             var funcType = types[func.TypeIndex];
                             context.GetValidationContext().PushFrame(func);
                             
@@ -80,7 +81,8 @@ namespace Wacs.Core
     public static partial class BinaryModuleParser
     {
         private static Module.Function ParseIndex(BinaryReader reader) =>
-            new Module.Function {
+            new()
+            {
                 TypeIndex = (TypeIdx)reader.ReadLeb128_u32()
             };
         

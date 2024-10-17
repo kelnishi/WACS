@@ -16,24 +16,16 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.Unreachable;
         
-        /// <summary>
-        /// @Spec 3.3.8.2 unreachable
-        /// </summary>
-        /// <param name="context"></param>
-        public override void Validate(WasmValidationContext context)
-        {
-            throw new NotImplementedException();
-        }
+        // @Spec 3.3.8.2 unreachable
+        public override void Validate(WasmValidationContext context) { }
         
         // @Spec 4.4.8.2. unreachable
-        public override void Execute(ExecContext context)
-        {
-            throw new UnreachableException();
-        }
+        public override void Execute(ExecContext context) =>
+            throw new TrapException("unreachable");
         
         public class UnreachableException : Exception { }
         
-        public static readonly InstUnreachable Inst = new InstUnreachable();
+        public static readonly InstUnreachable Inst = new();
     }
     
     //0x01
@@ -41,33 +33,44 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.Nop;
         
-        /// <summary>
-        /// @Spec 3.3.8.1. nop
-        /// </summary>
-        /// <param name="context"></param>
-        public override void Validate(WasmValidationContext context)
-        {
-            throw new NotImplementedException();
-        }
-        
+        // @Spec 3.3.8.1. nop
+        public override void Validate(WasmValidationContext context) { }
         // @Spec 4.4.8.1. nop
         public override void Execute(ExecContext context) { }
         
-        public static readonly InstNop Inst = new InstNop();
+        public static readonly InstNop Inst = new();
     }
     
     //0x02
     public class InstBlock : InstructionBase
     {
         public override OpCode OpCode => OpCode.Block;
+        public Block Block { get; internal set; } = null!;
 
-        /// <summary>
-        /// @Spec 3.3.8.3 block
-        /// </summary>
-        /// <param name="context"></param>
+        // @Spec 3.3.8.3 block
         public override void Validate(WasmValidationContext context)
         {
-            throw new NotImplementedException();
+            var ft = context.Types.ResolveBlockType(Block);
+            var rt = ft.ResultType;
+            try
+            {
+                context.OpStack.PopParameters(ft.ParameterTypes);
+            }
+            catch (InvalidDataException exc)
+            {
+                _ = exc;
+                throw new InvalidDataException($"Instruction block invalid. Stack state does not match parameters");
+            }
+            
+            context.Labels.Push(rt);
+            
+            foreach (var inst in Block.Instructions)
+            {
+                inst.Validate(context);
+            }
+            
+            
+            
         }
         
         // @Spec 4.4.8.3. block
@@ -75,8 +78,6 @@ namespace Wacs.Core.Instructions
         {
             throw new NotImplementedException();
         }
-        
-        public Block Block { get; internal set; } = null!;
 
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
@@ -180,7 +181,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.5. else
         public override void Execute(ExecContext context) {}
         
-        public static readonly InstElse Inst = new InstElse();
+        public static readonly InstElse Inst = new();
     }
     
     //0x0B
@@ -191,7 +192,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context) {}
         public override void Execute(ExecContext context) { }
         
-        public static readonly InstEnd Inst = new InstEnd();
+        public static readonly InstEnd Inst = new();
     }
     
     //0x0C
@@ -315,7 +316,7 @@ namespace Wacs.Core.Instructions
             throw new NotImplementedException();
         }
 
-        public static readonly InstReturn Inst = new InstReturn();
+        public static readonly InstReturn Inst = new();
     }
     
     //0x10

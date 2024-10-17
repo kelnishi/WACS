@@ -12,12 +12,14 @@ namespace Wacs.Core.Runtime
     /// </summary>
     public class WasmValidationContext
     {
-        public ValidationOpStack OpStack { get; private set; } = new ValidationOpStack();
-        public ValidationControlStack ControlStack { get; private set; } = new ValidationControlStack();
+        public ValidationOpStack OpStack { get; private set; } = new();
+        public ValidationControlStack ControlStack { get; private set; } = new();
+
+        public Stack<ResultType> Labels { get; private set; } = new();
         
         private ModuleInstance ValidationModule { get; set; }
-        
-        public TypesSpace Types { get; }
+
+        public TypesSpace Types => ValidationModule.Types;
         public FunctionsSpace Funcs { get; }
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }
@@ -34,8 +36,7 @@ namespace Wacs.Core.Runtime
         /// </summary>
         public WasmValidationContext(Module module)
         {
-            Types = new TypesSpace(module);
-
+            ValidationModule = new ModuleInstance(module);
             Funcs = new FunctionsSpace(module);
             Tables = new TablesSpace(module);
             Mems = new MemSpace(module);
@@ -45,13 +46,14 @@ namespace Wacs.Core.Runtime
 
             Globals = new GlobalValidationSpace(module);
             
-            ValidationModule = new ModuleInstance(module);
         }
+        
+        public delegate string MessageProducer();
 
-        public void Assert(bool factIsTrue, string message)
+        public void Assert(bool factIsTrue, MessageProducer message)
         {
             if (!factIsTrue)
-                throw new InvalidDataException(message);
+                throw new InvalidDataException(message());
         }
 
         
@@ -63,7 +65,6 @@ namespace Wacs.Core.Runtime
             var frame = new Frame(ValidationModule)
             {
                 Locals = locals,
-                Labels = new[] { funcType.ResultType },
                 Return = funcType.ResultType
             };
             ControlStack.PushFrame(frame);

@@ -7,7 +7,7 @@ namespace Wacs.Core.Runtime
 {
     public class OpStack
     {
-        private readonly Stack<Value> _stack = new Stack<Value>();
+        private readonly Stack<Value> _stack = new();
         public void PushI32(int value) => _stack.Push(value);
         public void PushI64(long value) => _stack.Push(value);
         public void PushF32(float value) => _stack.Push(value);

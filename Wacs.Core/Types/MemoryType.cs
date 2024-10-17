@@ -24,7 +24,7 @@ namespace Wacs.Core.Types
         /// <summary>
         /// @Spec 5.3.8. Memory Types
         /// </summary>
-        public static MemoryType Parse(BinaryReader reader) => new MemoryType(Limits.Parse(reader));
+        public static MemoryType Parse(BinaryReader reader) => new(Limits.Parse(reader));
 
         /// <summary>
         /// @Spec 3.2.5. Memory Types

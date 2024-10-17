@@ -16,7 +16,7 @@ namespace Wacs.Core.Validation
         public static ValidationContext<T> GetSubContext<TP, T>(this ValidationContext<TP> parent, T child)
             where T : class
             where TP : class
-            => new ValidationContext<T>(child)
+            => new(child)
             {
                 RootContextData =
                 {
