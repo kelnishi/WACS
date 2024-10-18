@@ -22,19 +22,17 @@ namespace Wacs.Core.Types
             BlockType.Externref => ValType.Externref,
             _ => ValType.Undefined
         };
-        
-        public bool IsEmpty => Type == BlockType.Empty;
 
-        public TypeIdx TypeIndex => !Enum.IsDefined(typeof(BlockType), Type) ? (TypeIdx)(int)Type : (TypeIdx)uint.MaxValue;
+        private TypeIdx TypeIndex => !Enum.IsDefined(typeof(BlockType), Type) ? (TypeIdx)(int)Type : (TypeIdx)uint.MaxValue;
 
-        public List<IInstruction> Instructions { get; set; } = new();
+        public InstructionSequence Instructions { get; set; } = new();
 
-        private Block(long v) => Type = (BlockType)v;
-        public Block(BlockType bt) => Type = bt;
+        public Block(BlockType type) => Type = type;
 
         public static readonly Block Empty = new(BlockType.Empty);
-        
-        public static Block Parse(BinaryReader reader) => new(reader.ReadLeb128_s33());
+        public static BlockType ParseBlockType(BinaryReader reader) => (BlockType)reader.ReadLeb128_s33();
+
+        public bool IsEmpty => Type == BlockType.Empty;
         
         /// <summary>
         /// @Spec 3.2.2. Block Types

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime
@@ -8,6 +9,11 @@ namespace Wacs.Core.Runtime
     public class OpStack
     {
         private readonly Stack<Value> _stack = new();
+
+        public void Push(Stack<Value> vals)
+        {
+            while (vals.Count > 0) _stack.Push(vals.Pop());
+        }
         public void PushI32(int value) => _stack.Push(value);
         public void PushI64(long value) => _stack.Push(value);
         public void PushF32(float value) => _stack.Push(value);
@@ -44,6 +50,31 @@ namespace Wacs.Core.Runtime
         public Value Peek() => _stack.Peek();
 
         public bool HasValue => _stack.Count > 0;
+
+        public int Count => _stack.Count;
+
+        public Stack<Value> PopResults(ResultType type)
+        {
+            var results = new Stack<Value>();
+            for (int i = 0, l = type.Arity; i < l; ++i)
+            {
+                //We could check the types here, but the spec just says to YOLO it.
+                results.Push(PopAny());
+            }
+            return results;
+        }
+
+        public object[] PopScalars(ResultType type)
+        {
+            var results = new Stack<Value>();
+            for (int i = 0, l = type.Arity; i < l; ++i)
+            {
+                //We could check the types here, but the spec just says to YOLO it.
+                results.Push(PopAny());
+            }
+
+            return results.Select(value => value.Scalar).ToArray();
+        }
     }
 
 }

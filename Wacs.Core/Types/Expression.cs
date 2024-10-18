@@ -16,48 +16,40 @@ namespace Wacs.Core.Types
     /// </summary>
     public class Expression
     {
-        public List<IInstruction> Instructions { get; internal set; }
+        public InstructionSequence Instructions { get; }
 
-        private Expression() =>
-            Instructions = new List<IInstruction>();
+        private Expression(InstructionSequence seq) =>
+            Instructions = seq;
         
-        public Expression(IInstruction[] instruction) =>
-            Instructions = instruction.ToList();
+        public Expression(IInstruction single) =>
+            Instructions = new(single);
+        
+        public static readonly Expression Empty = new(InstructionSequence.Empty);
 
-        public Expression(IInstruction single) => 
-            Instructions = new List<IInstruction> { single };
-
-        private Expression(List<IInstruction> instructions) =>
-            Instructions = instructions;
-            
-        public static readonly Expression Empty = new();
-
-        public bool IsConstant() =>
-            Instructions.Count == 1 &&
-            !Instructions.Any(inst => inst.OpCode switch {
-                OpCode.I32Const => false,
-                OpCode.I64Const => false,
-                OpCode.F32Const => false,
-                OpCode.F64Const => false,
-                OpCode.GlobalGet => false,
-                OpCode.RefNull => false,
-                OpCode.RefFunc => false,
-                _ => true
-            });
-
+        public bool IsConstant => Instructions.IsConstant;
+        
+        /// <summary>
+        /// Leaves the result on the OpStack
+        /// </summary>
+        /// <param name="context"></param>
         public void Execute(ExecContext context)
         {
+            var frame = new Frame(context.Frame.Module, FunctionType.Empty);
+            var label = new Label(ResultType.Empty, new InstructionPointer(Instructions, 1), OpCode.Nop);
+            frame.Labels.Push(label);
+            context.PushFrame(frame);
             foreach (var inst in Instructions)
             {
                 inst.Execute(context);
             }
+            context.PopFrame();
         }
         
         /// <summary>
         /// @Spec 5.4.9 Expressions
         /// </summary>
         public static Expression Parse(BinaryReader reader) =>
-            new(reader.ParseUntil(InstructionParser.Parse, InstructionParser.IsEnd));
+            new(new InstructionSequence(reader.ParseUntil(InstructionParser.Parse, InstructionParser.IsEnd)));
 
         /// <summary>
         /// @Spec 3.3.10. Expressions
@@ -72,13 +64,21 @@ namespace Wacs.Core.Types
             {
                 ResultType = resultType;
                 ShouldBeConstant = isConstant;
-                // @Spec 3.3.9. Instruction Sequences
-                RuleForEach(e => e.Instructions)
-                    .Custom((inst, ctx) =>
+
+                RuleFor(e => e).Custom((e, ctx) =>
+                {
+                    if (ShouldBeConstant)
+                        if(!e.IsConstant)
+                            ctx.AddFailure($"Expression must be constant");
+                    
+                    var validationContext = ctx.GetValidationContext();
+
+                    // @Spec 3.3.9. Instruction Sequences
+                    foreach (var inst in e.Instructions)
                     {
                         try
                         {
-                            inst.Validate(ctx.GetValidationContext());
+                            inst.Validate(validationContext);
                         }
                         catch (InvalidProgramException exc)
                         {
@@ -93,14 +93,7 @@ namespace Wacs.Core.Types
                             _ = exc;
                             ctx.AddFailure($"WASM Instruction `{inst.OpCode.GetMnemonic()}` is not implemented.");
                         }
-                    });
-                RuleFor(e => e).Custom((e, ctx) =>
-                {
-                    if (ShouldBeConstant)
-                        if(!e.IsConstant())
-                            ctx.AddFailure($"Expression must be constant");
-                    
-                    var validationContext = ctx.GetValidationContext();
+                    }
                     
                     foreach (var eType in ResultType.Types)
                     {

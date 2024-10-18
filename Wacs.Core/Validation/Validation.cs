@@ -44,7 +44,7 @@ namespace Wacs.Core
                             ctx.AddFailure($"Invalid Start function with type: {type}");
                         }
                     })
-                    .When(module => module.StartIndex.Value >= 0);
+                    .When(module => (int)module.StartIndex.Value >= 0);
                 
                 RuleFor(module => module.StartIndex)
                     .NotEqual(FuncIdx.Default)

@@ -9,7 +9,5 @@ namespace Wacs.Core.Runtime.Types
     public interface IFunctionInstance
     {
         FunctionType Type { get; }
-        
-        object[] Invoke(object[] arguments);
     }
 }

@@ -6,10 +6,42 @@ using Wacs.Core.Types;
 
 namespace Wacs.Core.Validation
 {
-    public class ValidationOpStack
+    public interface IValidationOpStack
+    {
+        public void Clear();
+        void Push(ResultType types);
+        void PushI32(int i32 = 0);
+        void PushI64(long i64 = 0);
+        void PushF32(float f32 = 0.0f);
+        void PushF64(double f64 = 0.0d);
+        void PushV128((ulong, ulong) lowhigh = default);
+        void PushFuncref(Value value);
+        void PushExternref(Value value);
+        void PushType(ValType type);
+        Value PopI32();
+        Value PopI64();
+        Value PopF32();
+        Value PopF64();
+        Value PopV128();
+        Value PopRefType();
+        void ValidateStack(ResultType types, bool keep = true);
+        Value PopType(ValType type);
+        Value PopAny();
+    }
+    
+    public class ValidationOpStack : IValidationOpStack
     {
         private readonly Stack<Value> _stack = new();
 
+        public void Clear() => _stack.Clear();
+
+        public void Push(ResultType types) {
+            foreach (var type in types.Types)
+            {
+                PushType(type);
+            }
+        }
+        
         public void PushI32(int i32 = 0) {
             Value value = i32; 
             if (value.Type != ValType.I32)
@@ -135,7 +167,7 @@ namespace Wacs.Core.Validation
             };
         }
 
-        public void PopParameters(ResultType types)
+        public void ValidateStack(ResultType types, bool keep = true)
         {
             Stack<Value> aside = new Stack<Value>();
             //Pop vals off the stack
@@ -144,12 +176,14 @@ namespace Wacs.Core.Validation
                 var v = PopAny();
                 aside.Push(v);
             }
-            //Check that they match ResultType
+            //Check that they match ResultType and push them back on
             foreach (var type in types.Types)
             {
                 var p = aside.Pop();
                 if (p.Type != type)
-                    throw new InvalidDataException("Invalid parameter resultType");
+                    throw new InvalidDataException("Invalid Operand Stack did not match ResultType");
+                if (keep)
+                    PushType(p.Type);
             }
         }
 
@@ -172,13 +206,31 @@ namespace Wacs.Core.Validation
             
             return _stack.Pop();
         }
+    }
 
-        public Value Peek()
-        {
-            if (_stack.Count == 0)
-                throw new InvalidOperationException("Operand stack underflow.");
-            
-            return _stack.Peek();
-        }
+    public class UnreachableOpStack : IValidationOpStack
+    {
+        public void Clear() { }
+        
+        public void Push(ResultType types) {}
+        public void PushI32(int i32 = 0) {}
+        public void PushI64(long i64 = 0) { }
+        public void PushF32(float f32 = 0) { }
+        public void PushF64(double f64 = 0) { }
+        public void PushV128((ulong, ulong) lowhigh = default) { }
+        public void PushFuncref(Value value) { }
+        public void PushExternref(Value value) { }
+        public void PushType(ValType type) { }
+        public Value PopI32() => new(ValType.I32);
+        public Value PopI64() => new(ValType.I64);
+        public Value PopF32() => new(ValType.F32);
+        public Value PopF64() => new(ValType.F64);
+        public Value PopV128() => new(ValType.V128);
+
+        public Value PopRefType() => Value.NullFuncRef;
+
+        public void ValidateStack(ResultType types, bool keep = true) {}
+        public Value PopType(ValType type) => new(type);
+        public Value PopAny() => new(ValType.I32);
     }
 }

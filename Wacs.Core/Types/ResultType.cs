@@ -11,7 +11,8 @@ namespace Wacs.Core.Types
     {
         public ValType[] Types { get; set; }
         
-        public uint Length => (uint)(Types?.Length?? 0);
+        public uint Length => (uint)(Types?.Length ?? 0);
+        public int Arity => (int)Length;
     
         public string ToNotation() => $"[{string.Join(" ",Types)}]";
 
@@ -21,6 +22,18 @@ namespace Wacs.Core.Types
         private ResultType(BinaryReader reader) =>
             Types = reader.ParseVector(ValueTypeParser.Parse);
 
+        public bool Matches(ResultType other)
+        {
+            if (Types.Length != other.Types.Length)
+                return false;
+            for (int i = 0, l = Types.Length; i < l; ++i)
+            {
+                if (Types[i] != other.Types[i])
+                    return false;
+            }
+
+            return true;
+        }
         
         /// <summary>
         /// @Spec 5.3.5 Result Types
