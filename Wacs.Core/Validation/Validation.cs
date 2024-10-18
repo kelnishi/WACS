@@ -45,12 +45,6 @@ namespace Wacs.Core
                         }
                     })
                     .When(module => (int)module.StartIndex.Value >= 0);
-                
-                RuleFor(module => module.StartIndex)
-                    .NotEqual(FuncIdx.Default)
-                    .WithSeverity(Severity.Warning)
-                    .WithMessage($"Module StartIndex was not set");
-
             }
         }
 
