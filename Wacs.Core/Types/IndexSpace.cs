@@ -61,8 +61,8 @@ namespace Wacs.Core.Types
             set => throw new InvalidOperationException(InvalidSetterMessage);
         }
 
-        public FunctionType ResolveBlockType(Block block) =>
-            block.Type switch
+        public FunctionType ResolveBlockType(BlockType blockType) =>
+            blockType switch
             {
                 BlockType.Empty     => new FunctionType(ResultType.Empty, ResultType.Empty),
                 BlockType.I32       => new FunctionType(ResultType.Empty, new ResultType(ValType.I32)),
@@ -72,8 +72,7 @@ namespace Wacs.Core.Types
                 BlockType.V128      => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
                 BlockType.Funcref   => new FunctionType(ResultType.Empty, new ResultType(ValType.Funcref)),
                 BlockType.Externref => new FunctionType(ResultType.Empty, new ResultType(ValType.Externref)),
-                _ => this.Contains(block.TypeIndex) ? this[block.TypeIndex]:
-                    throw new InvalidDataException($"BlockType for index {block.TypeIndex} could not be resolved")
+                _ => this[(TypeIdx)(int)blockType]
             };
     }
 

@@ -23,7 +23,5 @@ namespace Wacs.Core.Runtime.Types
         public ModuleInstance(Module module) =>
             Types = new TypesSpace(module);
         
-        
-        public FuncAddr? StartFunction { get; set; }
     }
 }

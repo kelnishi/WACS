@@ -29,12 +29,11 @@ namespace Wacs.Core.Runtime
         [FieldOffset(1)] public readonly ulong V128_low;
         [FieldOffset(9)] public readonly ulong V128_high;
 
-        // ref funcIdx
-        [FieldOffset(1)] public readonly ulong FuncIdx;
+        // // ref funcIdx
+        public FuncIdx FuncIdx => (FuncIdx)Int32;
         
         // ref.extern externIdx
         [FieldOffset(1)] public readonly ulong ExternIdx;
-
 
         // Constructors for each type
         public Value(int value)
@@ -99,6 +98,21 @@ namespace Wacs.Core.Runtime
             }
         }
 
+        public Value Default => new Value(Type);
+
+        public object Scalar => Type switch
+        {
+            ValType.I32 => Int32,
+            ValType.I64 => Int64,
+            ValType.F32 => Float32,
+            ValType.F64 => Float64,
+            ValType.V128 => new object[] {V128_low, V128_high},
+            ValType.Funcref => Int64,
+            ValType.Externref => Int64,
+            _ => throw new InvalidCastException($"Cannot cast ValType {Type} to Scalar")
+        };
+        
+        
         public Value(ValType type, UInt32 idx)
         {
             this = default;

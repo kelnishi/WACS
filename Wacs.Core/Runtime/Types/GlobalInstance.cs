@@ -24,7 +24,7 @@ namespace Wacs.Core.Runtime.Types
         public GlobalInstance(GlobalType type, Value initialValue)
         {
             Type = type;
-            Value = initialValue;
+            _value = initialValue;
         }
     }
 }

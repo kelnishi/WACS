@@ -21,12 +21,18 @@ namespace Wacs.Core.Types
         /// </summary>
         public ResultType ResultType { get; internal set; }
 
+        public bool Matches(FunctionType other) =>
+            ParameterTypes.Matches(other.ParameterTypes) &&
+            ResultType.Matches(other.ResultType);
+        
         public string ToNotation() =>
-            $"{ParameterTypes.ToNotation()} --> {ResultType.ToNotation()}";
+            $"{ParameterTypes.ToNotation()} -> {ResultType.ToNotation()}";
 
         public FunctionType(ResultType parameterTypes, ResultType resultType) =>
             (ParameterTypes, ResultType) = (parameterTypes, resultType);
 
+        public static readonly FunctionType Empty = new(ResultType.Empty, ResultType.Empty);
+        
         /// <summary>
         /// @Spec 5.3.6. Function Types
         /// </summary>

@@ -1,17 +1,22 @@
 using Wacs.Core.OpCodes;
+using Wacs.Core.Types;
+
 namespace Wacs.Core.Runtime
 {
     public class Label
     {
-        public uint Arity { get; } // Number of result values the label expects
+        public ResultType Type { get; }
+        public int StackHeight = 0;
+        
+        public int Arity => Type.Arity;
         
         public OpCode Instruction { get; }
-        public int ContinuationAddress { get; } // The instruction index to jump to on branch
+        public InstructionPointer ContinuationAddress { get; } // The instruction index to jump to on branch
         
 
-        public Label(uint arity, int continuationAddress, OpCode inst)
+        public Label(ResultType type, InstructionPointer continuationAddress, OpCode inst)
         {
-            Arity = arity;
+            Type = type;
             ContinuationAddress = continuationAddress;
             Instruction = inst;
         }

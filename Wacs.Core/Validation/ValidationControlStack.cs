@@ -12,7 +12,6 @@ namespace Wacs.Core.Validation
 
         public void PopFrame() => _stack.Pop();
 
-        public Frame Peek() => _stack.Peek();
-
+        public Frame Frame => _stack.Peek();
     }
 }

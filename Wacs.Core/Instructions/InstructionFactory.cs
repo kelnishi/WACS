@@ -278,5 +278,12 @@ namespace Wacs.Core.Instructions
         }
 
         public static bool IsEnd(IInstruction inst) => inst.OpCode == OpCode.End;
+
+        public static bool IsElseOrEnd(IInstruction inst) => inst.OpCode switch
+        {
+            OpCode.Else => true,
+            OpCode.End => true,
+            _ => false
+        };
     }
 }

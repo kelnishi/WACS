@@ -43,7 +43,6 @@ namespace Wacs.Console
                             System.Console.Error.WriteLine($"Validation {error.Severity}: {error.ErrorMessage}");
                             break;
                     }
-                    
                 }
             }
         }

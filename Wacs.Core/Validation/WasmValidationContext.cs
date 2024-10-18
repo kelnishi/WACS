@@ -1,6 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using FluentValidation;
+using Wacs.Core.Instructions;
+using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Validation;
@@ -12,10 +16,12 @@ namespace Wacs.Core.Runtime
     /// </summary>
     public class WasmValidationContext
     {
-        public ValidationOpStack OpStack { get; private set; } = new();
+        private readonly ValidationOpStack _stack = new();
+        private readonly UnreachableOpStack _stackPolymorphic = new();
+        public IValidationOpStack OpStack => Reachability ? _stack : _stackPolymorphic;
         public ValidationControlStack ControlStack { get; private set; } = new();
-
-        public Stack<ResultType> Labels { get; private set; } = new();
+        
+        public ResultType? Return { get; set; } = null;
         
         private ModuleInstance ValidationModule { get; set; }
 
@@ -24,11 +30,22 @@ namespace Wacs.Core.Runtime
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
-        public LocalsSpace Locals => ControlStack.Peek().Locals;
+        public LocalsSpace Locals => ControlStack.Frame.Locals;
         public ElementsSpace Elements { get; private set; }
-        
         public DataValidationSpace Datas { get; private set; }
-        
+
+        private bool _reachability;
+
+        public bool Reachability
+        {
+            get => _reachability;
+            set
+            {
+                if (value && !_reachability)
+                    _stack.Clear();
+                _reachability = value;
+            }
+        }
         
         /// <summary>
         /// @Spec 3.1.1. Contexts
@@ -45,7 +62,8 @@ namespace Wacs.Core.Runtime
             Datas = new DataValidationSpace(module.Datas.Length);
 
             Globals = new GlobalValidationSpace(module);
-            
+
+            Reachability = true;
         }
         
         public delegate string MessageProducer();
@@ -55,23 +73,45 @@ namespace Wacs.Core.Runtime
             if (!factIsTrue)
                 throw new InvalidDataException(message());
         }
-
         
-
         public void PushFrame(Module.Function func)
         {
             var funcType = Types[func.TypeIndex];
             var locals = new LocalsSpace(funcType.ParameterTypes.Types, func.Locals);
-            var frame = new Frame(ValidationModule)
-            {
-                Locals = locals,
-                Return = funcType.ResultType
-            };
+            var frame = new Frame(ValidationModule, funcType) { Locals = locals };
             ControlStack.PushFrame(frame);
         }
 
         public void PopFrame() => ControlStack.PopFrame();
-        
+
+
+        public class InstructionValidator : AbstractValidator<IInstruction>
+        {
+            public InstructionValidator()
+            {
+                RuleFor(inst => inst)
+                    .Custom((inst, ctx) =>
+                    {
+                        try
+                        {
+                            inst.Validate(ctx.GetValidationContext());
+                        }
+                        catch (InvalidProgramException exc)
+                        {
+                            ctx.AddFailure(exc.Message);
+                        }
+                        catch (InvalidDataException exc)
+                        {
+                            ctx.AddFailure(exc.Message);
+                        }
+                        catch (NotImplementedException exc)
+                        {
+                            _ = exc;
+                            ctx.AddFailure($"WASM Instruction `{inst.OpCode.GetMnemonic()}` is not implemented.");
+                        }
+                    });
+            }
+        }
     }
     
 }
