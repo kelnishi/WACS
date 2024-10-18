@@ -3,9 +3,12 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using FluentValidation;
+using FluentValidation.Results;
 using Wacs.Core.Modules.Sections;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core
 {
@@ -17,6 +20,9 @@ namespace Wacs.Core
     public partial class Module
     {
         internal Module() {}
+        
+        public ValidationResult Validate() => new ModuleValidator().Validate(this);
+        public void ValidateAndThrow() => new ModuleValidator().ValidateAndThrow(this);
     }
     
     /// <summary>
@@ -125,15 +131,15 @@ namespace Wacs.Core
         //TODO Warn for missing sections?
         private static void FinalizeModule(Module module)
         {
-            module.Types = module.Types ?? new List<FunctionType>();
-            module.Imports = module.Imports ?? Array.Empty<Module.Import>();
-            module.Funcs = module.Funcs ?? new List<Module.Function>();
-            module.Tables = module.Tables ?? new List<TableType>();
-            module.Memories = module.Memories ?? new List<MemoryType>();
-            module.Globals = module.Globals ?? new List<Module.Global>();
-            module.Exports = module.Exports ?? Array.Empty<Module.Export>();
-            module.Elements = module.Elements ?? Array.Empty<Module.ElementSegment>();
-            module.Datas = module.Datas ?? Array.Empty<Module.Data>();
+            module.Types ??= new();
+            module.Imports ??= Array.Empty<Module.Import>();
+            module.Funcs ??= new();
+            module.Tables ??= new();
+            module.Memories ??= new();
+            module.Globals ??= new();
+            module.Exports ??= Array.Empty<Module.Export>();
+            module.Elements ??= Array.Empty<Module.ElementSegment>();
+            module.Datas ??= Array.Empty<Module.Data>();
             
             PatchNames(module);
         }
