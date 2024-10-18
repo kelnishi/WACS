@@ -131,6 +131,7 @@ namespace Wacs.Core
         //TODO Warn for missing sections?
         private static void FinalizeModule(Module module)
         {
+            // ReSharper disable NullCoalescingConditionIsAlwaysNotNullAccordingToAPIContract
             module.Types ??= new();
             module.Imports ??= Array.Empty<Module.Import>();
             module.Funcs ??= new();
@@ -140,7 +141,7 @@ namespace Wacs.Core
             module.Exports ??= Array.Empty<Module.Export>();
             module.Elements ??= Array.Empty<Module.ElementSegment>();
             module.Datas ??= Array.Empty<Module.Data>();
-            
+            // ReSharper restore All
             PatchNames(module);
         }
     }
