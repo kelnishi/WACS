@@ -1,16 +1,19 @@
 using System;
 using System.IO;
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Runtime.Types;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 // 5.4.6 Memory Instructions
 namespace Wacs.Core.Instructions
 {
     public class InstMemoryLoad : InstructionBase
     {
+        public InstMemoryLoad(ValType type, BitWidth width) => 
+            (Type, Width) = (type, width);
+
         public override OpCode OpCode => Type switch {
             ValType.I32 => Width switch {
                 BitWidth.U32 => OpCode.I32Load,     //0x28
@@ -37,11 +40,8 @@ namespace Wacs.Core.Instructions
 
         private ValType Type { get; }
         private BitWidth Width { get; }
-        
-        public MemArg Arg { get; internal set; }
 
-        public InstMemoryLoad(ValType type, BitWidth width) => 
-            (Type, Width) = (type, width);
+        private MemArg Arg { get; set; }
 
         /// <summary>
         /// @Spec 3.3.7.1. t.load
@@ -71,6 +71,9 @@ namespace Wacs.Core.Instructions
     
     public class InstMemoryStore : InstructionBase
     {
+        public InstMemoryStore(ValType type, BitWidth width) => 
+            (Type, Width) = (type, width);
+
         public override OpCode OpCode => Type switch {
             ValType.I32 => Width switch {
                 BitWidth.U8 => OpCode.I32Store8,    
@@ -92,11 +95,8 @@ namespace Wacs.Core.Instructions
 
         private ValType Type { get; }
         private BitWidth Width { get; }
-        
+
         public MemArg Arg { get; internal set; }
-        
-        public InstMemoryStore(ValType type, BitWidth width) => 
-            (Type, Width) = (type, width);
 
         /// <summary>
         /// @Spec 3.3.7.3. t.store

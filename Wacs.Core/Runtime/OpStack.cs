@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -10,10 +9,15 @@ namespace Wacs.Core.Runtime
     {
         private readonly Stack<Value> _stack = new();
 
+        public bool HasValue => _stack.Count > 0;
+
+        public int Count => _stack.Count;
+
         public void Push(Stack<Value> vals)
         {
             while (vals.Count > 0) _stack.Push(vals.Pop());
         }
+
         public void PushI32(int value) => _stack.Push(value);
         public void PushI64(long value) => _stack.Push(value);
         public void PushF32(float value) => _stack.Push(value);
@@ -30,7 +34,7 @@ namespace Wacs.Core.Runtime
         }
 
         public void PushValue(Value value) => _stack.Push(value);
-        
+
         public Value PopI32() => _stack.Pop();
         public Value PopI64() => _stack.Pop();
         public Value PopF32() => _stack.Pop();
@@ -47,11 +51,8 @@ namespace Wacs.Core.Runtime
                 throw new InvalidDataException($"OperandStack contained wrong type {val.Type} expected {type}");
             return val;
         }
+
         public Value Peek() => _stack.Peek();
-
-        public bool HasValue => _stack.Count > 0;
-
-        public int Count => _stack.Count;
 
         public Stack<Value> PopResults(ResultType type)
         {

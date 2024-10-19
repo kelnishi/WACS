@@ -1,11 +1,9 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using FluentValidation;
-using Wacs.Core.Runtime;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -16,18 +14,18 @@ namespace Wacs.Core.Types
     /// </summary>
     public class Expression
     {
-        public InstructionSequence Instructions { get; }
+        public static readonly Expression Empty = new(InstructionSequence.Empty);
 
         private Expression(InstructionSequence seq) =>
             Instructions = seq;
-        
+
         public Expression(IInstruction single) =>
-            Instructions = new(single);
-        
-        public static readonly Expression Empty = new(InstructionSequence.Empty);
+            Instructions = new InstructionSequence(single);
+
+        public InstructionSequence Instructions { get; }
 
         public bool IsConstant => Instructions.IsConstant;
-        
+
         /// <summary>
         /// Leaves the result on the OpStack
         /// </summary>
@@ -44,7 +42,7 @@ namespace Wacs.Core.Types
             }
             context.PopFrame();
         }
-        
+
         /// <summary>
         /// @Spec 5.4.9 Expressions
         /// </summary>
@@ -56,18 +54,13 @@ namespace Wacs.Core.Types
         /// </summary>
         public class Validator : AbstractValidator<Expression>
         {
-            public ResultType ResultType { get; }
-
-            public bool ShouldBeConstant;
-            
             public Validator(ResultType resultType, bool isConstant = false)
             {
                 ResultType = resultType;
-                ShouldBeConstant = isConstant;
 
                 RuleFor(e => e).Custom((e, ctx) =>
                 {
-                    if (ShouldBeConstant)
+                    if (isConstant)
                         if(!e.IsConstant)
                             ctx.AddFailure($"Expression must be constant");
                     
@@ -105,6 +98,8 @@ namespace Wacs.Core.Types
                     }
                 });
             }
+
+            private ResultType ResultType { get; }
         }
     }
 }

@@ -12,16 +12,6 @@ namespace Wacs.Core.Types
     public class Limits : ICloneable
     {
         /// <summary>
-        /// The minimum number of units (e.g., pages for memory).
-        /// </summary>
-        public uint Minimum { get; set; }
-
-        /// <summary>
-        /// The optional maximum number of units. If MaxValue, there is no specified maximum.
-        /// </summary>
-        public uint? Maximum { get; set; }
-
-        /// <summary>
         /// Initializes a new instance of the <see cref="Limits"/> class with the specified minimum and optional maximum.
         /// </summary>
         /// <param name="minimum">The minimum number of units.</param>
@@ -35,7 +25,19 @@ namespace Wacs.Core.Types
             Minimum = copy.Minimum;
             Maximum = copy.Maximum;
         }
-        
+
+        /// <summary>
+        /// The minimum number of units (e.g., pages for memory).
+        /// </summary>
+        public uint Minimum { get; set; }
+
+        /// <summary>
+        /// The optional maximum number of units. If MaxValue, there is no specified maximum.
+        /// </summary>
+        public uint? Maximum { get; set; }
+
+        public object Clone() => new Limits(this);
+
         /// <summary>
         /// @Spec 5.3.7. Limits
         /// </summary>
@@ -63,7 +65,5 @@ namespace Wacs.Core.Types
                 
             }
         }
-
-        public object Clone() => new Limits(this);
     }
 }

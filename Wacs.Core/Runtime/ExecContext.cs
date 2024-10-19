@@ -1,7 +1,4 @@
-using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
@@ -9,26 +6,34 @@ using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime
 {
+    public class RuntimeAttributes
+    {
+        public double FloatingPointTolerance { get; } = 1e-10;
+    }
+    
     public class ExecContext
     {
-        public Store Store { get; }
-        public OpStack OpStack { get; private set; } = new();
-        public Stack<Frame> CallStack { get; private set; } = new();
+        public delegate string MessageProducer();
+
+        public readonly RuntimeAttributes Attributes;
 
         private InstructionSequence _currentSequence;
         private int _sequenceIndex;
-        
-        public ResultType? Return { get; set; } = null;
-        
-        public ExecContext(Store store, InstructionSequence seq)
+
+        public ExecContext(Store store, InstructionSequence seq, RuntimeAttributes? attributes = default)
         {
             Store = store;
             _currentSequence = seq;
             _sequenceIndex = 0;
+            Attributes = attributes ?? new RuntimeAttributes();
         }
 
-        public delegate string MessageProducer();
-        
+        public Store Store { get; }
+        public OpStack OpStack { get; } = new();
+        public Stack<Frame> CallStack { get; } = new();
+
+        public Frame Frame => CallStack.Peek();
+
         public void Assert(bool factIsTrue, MessageProducer message)
         {
             if (!factIsTrue)
@@ -45,14 +50,12 @@ namespace Wacs.Core.Runtime
             return CallStack.Pop();
         }
 
-        public Frame Frame => CallStack.Peek();
-
-        public void EnterSequence(InstructionSequence seq) =>
+        private void EnterSequence(InstructionSequence seq) =>
             (_currentSequence, _sequenceIndex) = (seq, 0);
 
         public void ResumeSequence(InstructionPointer pointer) =>
             (_currentSequence, _sequenceIndex) = (pointer.Sequence, pointer.Index);
-        
+
         public InstructionPointer GetPointer(int offset = 0) => 
             new(_currentSequence, _sequenceIndex + offset);
 
@@ -65,7 +68,7 @@ namespace Wacs.Core.Runtime
             //Sets the Pointer to the start of the block sequence
             EnterSequence(block.Instructions);
         }
-        
+
         // @Spec 4.4.9.2. Exit Block
         public void ExitBlock()
         {
@@ -96,8 +99,8 @@ namespace Wacs.Core.Runtime
             var funcType = wasmFunc.Type;
             //4.
             var t = wasmFunc.Definition.Locals;
-            //5.
-            var seq = wasmFunc.Definition.Body;
+            //5. *Instructions will be handled in EnterSequence below
+            //var seq = wasmFunc.Definition.Body;
             //6.
             Assert(OpStack.Count >= funcType.ParameterTypes.Arity,
                 ()=>$"Function invocation failed. Operand Stack underflow.");
@@ -129,7 +132,11 @@ namespace Wacs.Core.Runtime
         {
             var funcType = hostFunc.Type;
             var vals = OpStack.PopScalars(funcType.ParameterTypes);
-            hostFunc.Invoke(vals);
+            var results = hostFunc.Invoke(vals);
+            foreach (var result in results)
+            {
+                OpStack.PushValue(new Value(result));
+            }
         }
 
         // @Spec 4.4.10.2. Returning from a function

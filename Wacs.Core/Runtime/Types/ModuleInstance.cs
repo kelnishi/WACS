@@ -1,6 +1,4 @@
-using System;
 using System.Collections.Generic;
-using System.IO;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime.Types
@@ -11,6 +9,9 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class ModuleInstance
     {
+        public ModuleInstance(Module module) =>
+            Types = new TypesSpace(module);
+
         public TypesSpace Types { get; }
         public FuncAddrs FuncAddrs { get; } = new();
         public TableAddrs TableAddrs { get; } = new();
@@ -19,9 +20,5 @@ namespace Wacs.Core.Runtime.Types
         public ElemAddrs ElemAddrs { get; } = new();
         public List<DataAddr> DataAddrs { get; } = new();
         public List<ExportInstance> Exports { get; } = new();
-
-        public ModuleInstance(Module module) =>
-            Types = new TypesSpace(module);
-        
     }
 }

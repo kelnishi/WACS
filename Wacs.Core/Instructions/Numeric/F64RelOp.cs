@@ -1,5 +1,6 @@
-using Wacs.Core.Runtime;
+using System;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -18,24 +19,25 @@ namespace Wacs.Core.Instructions.Numeric
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();
             
-            int result = (a == b) ? 1 : 0;
+            int result = Math.Abs(a - b) < context.Attributes.FloatingPointTolerance ? 1 : 0;
             if (double.IsNaN(a) || double.IsNaN(b))
                 result = 0;
             
             context.OpStack.PushI32(result);
         }
+
         private static void ExecuteF64Ne(ExecContext context)
         {
             double a = context.OpStack.PopF64();
             double b = context.OpStack.PopF64();
             
-            int result = (a != b) ? 1 : 0;
+            int result = Math.Abs(a - b) > context.Attributes.FloatingPointTolerance ? 1 : 0;
             if (double.IsNaN(a) || double.IsNaN(b))
                 result = 0;
             
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteF64Lt(ExecContext context)
         {
             double a = context.OpStack.PopF64();
@@ -47,7 +49,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteF64Gt(ExecContext context)
         {
             double a = context.OpStack.PopF64();
@@ -59,7 +61,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteF64Le(ExecContext context)
         {
             double a = context.OpStack.PopF64();
@@ -71,7 +73,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteF64Ge(ExecContext context)
         {
             double a = context.OpStack.PopF64();

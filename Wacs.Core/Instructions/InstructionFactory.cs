@@ -10,7 +10,7 @@ namespace Wacs.Core.Instructions
 {
     public static class InstructionFactory
     {
-        private static readonly Dictionary<OpCode, Func<IInstruction>> _instructionMap = new();
+        private static readonly Dictionary<OpCode, Func<IInstruction>> InstructionMap = new();
 
         static InstructionFactory()
         {
@@ -21,13 +21,13 @@ namespace Wacs.Core.Instructions
 
         public static void RegisterExtensionInstruction(OpCode opcode, Func<IInstruction> constructor)
         {
-            _instructionMap[opcode] = constructor;
+            InstructionMap[opcode] = constructor;
         }
 
         public static T? CreateInstruction<T>(OpCode opCode)
             where T : InstructionBase =>
             CreateInstruction(opCode) as T;
-        
+
         public static IInstruction? CreateInstruction(OpCode opcode) => opcode switch {
             //Control Instructions
             OpCode.Unreachable       => InstUnreachable.Inst,
@@ -251,7 +251,7 @@ namespace Wacs.Core.Instructions
             OpCode.I64Extend32S      => NumericInst.I64Extend32S,
             
                 
-            _ => _instructionMap.TryGetValue(opcode, out var constructor)
+            _ => InstructionMap.TryGetValue(opcode, out var constructor)
                 ? constructor()
                 : throw new NotSupportedException($"Opcode {opcode} is not supported.")
         };

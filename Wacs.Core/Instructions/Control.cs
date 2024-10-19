@@ -1,12 +1,12 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 // @Spec 2.4.8. Control Instructions
 // @Spec 5.4.1 Control Instructions
@@ -15,38 +15,37 @@ namespace Wacs.Core.Instructions
     //0x00
     public class InstUnreachable : InstructionBase
     {
+        public static readonly InstUnreachable Inst = new();
         public override OpCode OpCode => OpCode.Unreachable;
-        
+
         // @Spec 3.3.8.2 unreachable
         public override void Validate(WasmValidationContext context) { }
-        
+
         // @Spec 4.4.8.2. unreachable
         public override void Execute(ExecContext context) =>
             throw new TrapException("unreachable");
-        
-        public class UnreachableException : Exception { }
-        
-        public static readonly InstUnreachable Inst = new();
+
+        public class UnreachableException : Exception {}
     }
     
     //0x01
     public class InstNop : InstructionBase
     {
+        public static readonly InstNop Inst = new();
         public override OpCode OpCode => OpCode.Nop;
-        
+
         // @Spec 3.3.8.1. nop
         public override void Validate(WasmValidationContext context) { }
+
         // @Spec 4.4.8.1. nop
         public override void Execute(ExecContext context) { }
-        
-        public static readonly InstNop Inst = new();
     }
     
     //0x02
     public class InstBlock : InstructionBase
     {
         public override OpCode OpCode => OpCode.Block;
-        public Block Block { get; internal set; } = null!;
+        private Block Block { get; set; } = null!;
 
         // @Spec 3.3.8.3 block
         public override void Validate(WasmValidationContext context)
@@ -83,9 +82,10 @@ namespace Wacs.Core.Instructions
                     ()=>$"Instruction block was invalid. BlockType {Block.Type} did not exist in the Context.");
             }
         }
-        
+
         // @Spec 4.4.8.3. block
         public override void Execute(ExecContext context) => ExecuteInstruction(context, Block);
+
         public static void ExecuteInstruction(ExecContext context, Block block)
         {
             try
@@ -129,6 +129,8 @@ namespace Wacs.Core.Instructions
     {
         public override OpCode OpCode => OpCode.Loop;
 
+        private Block Block { get; set; } = null!;
+
         // @Spec 3.3.8.4. loop
         public override void Validate(WasmValidationContext context)
         {
@@ -164,7 +166,7 @@ namespace Wacs.Core.Instructions
                     ()=>$"Instruciton loop invalid. BlockType {Block.Type} did not exist in the Context.");
             }
         }
-        
+
         // @Spec 4.4.8.4. loop
         public override void Execute(ExecContext context)
         {
@@ -190,8 +192,6 @@ namespace Wacs.Core.Instructions
                     ()=>$"Instruction loop failed. BlockType {Block.Type} did not exist in the Context.");   
             }
         }
-        
-        public Block Block { get; internal set; } = null!;
 
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
@@ -210,9 +210,9 @@ namespace Wacs.Core.Instructions
     public class InstIf : InstructionBase
     {
         public override OpCode OpCode => OpCode.If;
-        public Block IfBlock { get; internal set; } = Block.Empty;
-        public Block ElseBlock { get; internal set; } = Block.Empty;
-        
+        private Block IfBlock { get; set; } = Block.Empty;
+        private Block ElseBlock { get; set; } = Block.Empty;
+
         // @Spec 3.3.8.5 if
         public override void Validate(WasmValidationContext context)
         {
@@ -276,7 +276,7 @@ namespace Wacs.Core.Instructions
                     ()=>$"Instruciton loop invalid. BlockType {IfBlock.Type} did not exist in the Context.");
             }
         }
-        
+
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
@@ -321,22 +321,22 @@ namespace Wacs.Core.Instructions
     //0x05
     public class InstElse : InstructionBase
     {
+        public static readonly InstElse Inst = new();
         public override OpCode OpCode => OpCode.Else;
-        
+
         // @Spec 3.3.8.5. else
         public override void Validate(WasmValidationContext context) {}
-        
+
         // @Spec 4.4.8.5. else
         public override void Execute(ExecContext context) {}
-        
-        public static readonly InstElse Inst = new();
     }
     
     //0x0B
     public class InstEnd : InstructionBase
     {
+        public static readonly InstEnd Inst = new();
         public override OpCode OpCode => OpCode.End;
-        
+
         public override void Validate(WasmValidationContext context) {}
 
         public override void Execute(ExecContext context)
@@ -352,21 +352,20 @@ namespace Wacs.Core.Instructions
                     context.FunctionReturn();
                     break;
                 default:
+                    //Do nothing
                     break;
             }
 
         }
-        
-        public static readonly InstEnd Inst = new();
     }
     
     //0x0C
     public class InstBranch : InstructionBase
     {
         public override OpCode OpCode => OpCode.Br;
-        
-        public LabelIdx L { get; internal set; }
-        
+
+        private LabelIdx L { get; set; }
+
         // @Spec 3.3.8.6. br l
         public override void Validate(WasmValidationContext context)
         {
@@ -378,9 +377,10 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PopType(type);
             }
         }
-        
+
         // @Spec 4.4.8.6. br l
         public override void Execute(ExecContext context) => ExecuteInstruction(context, L);
+
         public static void ExecuteInstruction(ExecContext context, LabelIdx labelIndex)
         {
             //1.
@@ -426,8 +426,8 @@ namespace Wacs.Core.Instructions
     public class InstBranchConditional : InstructionBase
     {
         public override OpCode OpCode => OpCode.BrIf;
-        
-        public LabelIdx L { get; internal set; }
+
+        private LabelIdx L { get; set; }
 
         // @Spec 3.3.8.7. br_if
         public override void Validate(WasmValidationContext context)
@@ -441,7 +441,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PopType(type);
             }
         }
-        
+
         // @Spec 4.4.8.7. br_if
         public override void Execute(ExecContext context)
         {
@@ -465,9 +465,9 @@ namespace Wacs.Core.Instructions
     public class InstBranchTable : InstructionBase
     {
         public override OpCode OpCode => OpCode.BrTable;
-        
-        public LabelIdx[] Ls { get; internal set; } = null!;
-        public LabelIdx Ln { get; internal set; }
+
+        private LabelIdx[] Ls { get; set; } = null!;
+        private LabelIdx Ln { get; set; }
 
         // @Spec 3.3.8.8. br_table
         public override void Validate(WasmValidationContext context)
@@ -496,7 +496,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PopType(type);
             }
         }
-        
+
         /// <summary>
         /// @Spec 4.4.8.8. br_table
         /// </summary>
@@ -520,7 +520,7 @@ namespace Wacs.Core.Instructions
 
         private static LabelIdx ParseLabelIndex(BinaryReader reader) =>
             (LabelIdx)reader.ReadLeb128_u32();
-        
+
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
@@ -535,17 +535,16 @@ namespace Wacs.Core.Instructions
     //0x0F
     public class InstReturn : InstructionBase
     {
+        public static readonly InstReturn Inst = new();
         public override OpCode OpCode => OpCode.Return;
 
         // @Spec 3.3.8.9. return
         public override void Validate(WasmValidationContext context)
         {
-            context.Assert(context.Return != null,
-                ()=>$"Instruction return was invalid. Return not set in context");
-            var type = context.Return!;
-            context.OpStack.ValidateStack(type, false);
+            var returnType = context.ControlStack.Frame.Type.ResultType;
+            context.OpStack.ValidateStack(returnType, false);
         }
-        
+
         // @Spec 4.4.8.9. return
         public override void Execute(ExecContext context)
         {
@@ -556,16 +555,14 @@ namespace Wacs.Core.Instructions
             var frame = context.PopFrame();
             context.ResumeSequence(frame.ContinuationAddress);
         }
-
-        public static readonly InstReturn Inst = new();
     }
     
     //0x10
     public class InstCall : InstructionBase
     {
         public override OpCode OpCode => OpCode.Call;
-        
-        public FuncIdx X { get; internal set; }
+
+        private FuncIdx X { get; set; }
 
         /// <summary>
         /// @Spec 3.3.8.10. call
@@ -580,7 +577,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.ValidateStack(type.ParameterTypes, false);
             context.OpStack.Push(type.ResultType);
         }
-        
+
         // @Spec 4.4.8.10. call
         public override void Execute(ExecContext context)
         {
@@ -589,7 +586,7 @@ namespace Wacs.Core.Instructions
             var a = context.Frame.Module.FuncAddrs[X];
             context.Invoke(a);
         }
-        
+
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
@@ -610,9 +607,9 @@ namespace Wacs.Core.Instructions
     public class InstCallIndirect  : InstructionBase
     {
         public override OpCode OpCode => OpCode.CallIndirect;
-        
-        public TypeIdx Y { get; internal set; }
-        public TableIdx X { get; internal set; }
+
+        private TypeIdx Y { get; set; }
+        private TableIdx X { get; set; }
 
         /// <summary>
         /// @Spec 3.3.8.11. call_indirect
@@ -633,7 +630,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.ValidateStack(funcType.ParameterTypes, false);
             context.OpStack.Push(funcType.ResultType);
         }
-        
+
         // @Spec 4.4.8.11. call_indirect
         public override void Execute(ExecContext context)
         {
@@ -651,7 +648,7 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Frame.Module.Types.Contains(Y),
                 () => $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
             //7.
-            var ft_expect = context.Frame.Module.Types[Y];
+            var ftExpect = context.Frame.Module.Types[Y];
             //8,9.
             int i = context.OpStack.PopI32();
             //10.
@@ -673,14 +670,14 @@ namespace Wacs.Core.Instructions
             //16.
             var funcInst = context.Store[a];
             //17.
-            var ft_actual = funcInst.Type;
+            var ftActual = funcInst.Type;
             //18.
-            if (!ft_expect.Matches(ft_actual))
+            if (!ftExpect.Matches(ftActual))
                 throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
             //19.
             context.Invoke(a);
         }
-        
+
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>

@@ -16,18 +16,18 @@ namespace Wacs.Core
     public partial class Module
     {
         public NameSection? Names { get; internal set; } = null;
-    
+
         public string Name => Names?.ModuleName?.Name ?? String.Empty;
         public NameMap FuncMap => Names?.FunctionNames?.Names ?? NameMap.Empty;
         public IndirectNameMap LocalMap => Names?.LocalNames?.Names ?? IndirectNameMap.Empty;
-        
+
         public class NameSection
         {
-            public NameSubsection.ModuleNameSubsection? ModuleName { get; internal set; } = null;
-            public NameSubsection.FuncNameSubsection? FunctionNames { get; internal set; } = null;
-            public NameSubsection.LocalNameSubsection? LocalNames { get; internal set; } = null;
+            public NameSubsection.ModuleNameSubsection? ModuleName { get; internal set; }
+            public NameSubsection.FuncNameSubsection? FunctionNames { get; internal set; }
+            public NameSubsection.LocalNameSubsection? LocalNames { get; internal set; }
 
-            
+
             public static NameSection Parse(BinaryReader reader)
             {
                 var nameSection = new NameSection();
@@ -60,7 +60,7 @@ namespace Wacs.Core
                 return nameSection;
             }
         }
-        
+
         public abstract class NameSubsection
         {
             public class ModuleNameSubsection : NameSubsection
@@ -96,19 +96,18 @@ namespace Wacs.Core
                     };
             }
         }
-        
+
         public class NameMap
         {
+            public static readonly NameMap Empty = new() { NameAssocMap = new Dictionary<uint, string>() };
             public Dictionary<uint, string> NameAssocMap { get; internal set; } = null!;
 
             public string this[uint key] => NameAssocMap.TryGetValue(key, out var value) ? value : String.Empty;
-            
-            public static readonly NameMap Empty = new() { NameAssocMap = new Dictionary<uint, string>() };
-            
+
             private static (uint, string) ParseNameAssoc(BinaryReader reader) => 
                 (reader.ReadLeb128_u32(), reader.ReadUTF8String());
 
-            
+
             public static NameMap Parse(BinaryReader reader) =>
                 new()
                 {
@@ -121,17 +120,17 @@ namespace Wacs.Core
 
         public class IndirectNameMap
         {
+            public static readonly IndirectNameMap Empty = 
+                new() { IndirectNameAssocMap = new Dictionary<uint, NameMap>() };
+
             public Dictionary<uint, NameMap> IndirectNameAssocMap { get; internal set; } = null!;
 
             public NameMap this[uint key] => 
                 IndirectNameAssocMap.TryGetValue(key, out var value) ? value : NameMap.Empty;
-            
-            public static readonly IndirectNameMap Empty = 
-                new() { IndirectNameAssocMap = new Dictionary<uint, NameMap>() };
-            
+
             private static (uint, NameMap) ParseIndirectNameAssoc(BinaryReader reader) =>
                 (reader.ReadLeb128_u32(), NameMap.Parse(reader));
-            
+
             public static IndirectNameMap Parse(BinaryReader reader) =>
                 new()
                 {

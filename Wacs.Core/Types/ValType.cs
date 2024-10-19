@@ -85,7 +85,7 @@ namespace Wacs.Core.Types
             ValType.F64 => true,
             _ => false
         };
-        
+
         public static bool IsVector(this ValType type) => type == ValType.V128;
 
         public static bool IsReference(this ValType type) => type switch {
@@ -95,13 +95,14 @@ namespace Wacs.Core.Types
         };
 
         public static ResultType SingleResult(this ValType type) => new(type);
-
     }
         
 
     public static class ValueTypeParser
     {
         public static ValType Parse(BinaryReader reader) =>
+            // _ handles Undefined should throw
+            // ReSharper disable once SwitchExpressionHandlesSomeKnownEnumValuesWithExceptionInDefault
             (ValType)reader.ReadByte() switch {
                 //Numeric Types
                 ValType.I32 => ValType.I32,

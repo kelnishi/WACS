@@ -1,10 +1,10 @@
 using System;
 using System.IO;
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Runtime.Types;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 // 5.4.3 Parametric Instructions
 namespace Wacs.Core.Instructions
@@ -12,8 +12,9 @@ namespace Wacs.Core.Instructions
     //0x1A
     public class InstDrop : InstructionBase
     {
+        public static readonly InstDrop Inst = new();
         public override OpCode OpCode => OpCode.Drop;
-        
+
         /// <summary>
         /// @Spec 3.3.4.1. drop
         /// </summary>
@@ -30,17 +31,18 @@ namespace Wacs.Core.Instructions
         {
             Value _ = context.OpStack.PopAny();
         }
-
-        public static readonly InstDrop Inst = new();
     }
     
     //0x1B
     public class InstSelect : InstructionBase
     {
+        public static readonly InstSelect InstWithoutTypes = new();
+
+        public InstSelect(bool withTypes = false) => WithTypes = withTypes;
         public override OpCode OpCode => OpCode.Select;
 
-        public bool WithTypes { get; internal set; } = false;
-        public ValType[] Types { get; internal set; } = Array.Empty<ValType>();
+        private bool WithTypes { get; }
+        private ValType[] Types { get; set; } = Array.Empty<ValType>();
 
         /// <summary>
         /// @Spec 3.3.4.2. select
@@ -79,8 +81,6 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushValue(c != 0 ? val1 : val2);
         }
 
-        public InstSelect(bool withTypes = false) => WithTypes = withTypes;
-
         public override IInstruction Parse(BinaryReader reader)
         {
             if (WithTypes) {
@@ -88,8 +88,6 @@ namespace Wacs.Core.Instructions
             }
             return this;
         }
-        
-        public static readonly InstSelect InstWithoutTypes = new(false);
     }
     
 }

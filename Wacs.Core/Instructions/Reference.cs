@@ -5,6 +5,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 // 5.4.2 Reference Instructions
 namespace Wacs.Core.Instructions

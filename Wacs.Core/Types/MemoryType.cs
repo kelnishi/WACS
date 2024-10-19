@@ -10,16 +10,16 @@ namespace Wacs.Core.Types
     public class MemoryType
     {
         /// <summary>
-        /// The limits specifying the minimum and optional maximum number of memory pages.
-        /// </summary>
-        public Limits Limits { get; set; }
-
-        /// <summary>
         /// Initializes a new instance of the <see cref="MemoryType"/> class with the specified limits.
         /// </summary>
         /// <param name="limits">The limits of the memory.</param>
         private MemoryType(Limits limits) =>
             Limits = limits;
+
+        /// <summary>
+        /// The limits specifying the minimum and optional maximum number of memory pages.
+        /// </summary>
+        public Limits Limits { get; }
 
         /// <summary>
         /// @Spec 5.3.8. Memory Types
@@ -32,6 +32,7 @@ namespace Wacs.Core.Types
         public class Validator : AbstractValidator<MemoryType>
         {
             private const uint MaxPages = 0x01_00_00; //2^16 64K
+
             public Validator() {
                 // @Spec 3.2.5.1. limits
                 RuleFor(mt => mt.Limits).SetValidator(new Limits.Validator(MaxPages));

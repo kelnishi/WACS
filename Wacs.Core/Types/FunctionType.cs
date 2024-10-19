@@ -1,7 +1,5 @@
-using System;
 using System.IO;
 using FluentValidation;
-using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
 {
@@ -11,28 +9,28 @@ namespace Wacs.Core.Types
     /// </summary>
     public class FunctionType
     {
-        /// <summary>
-        /// The vec of parameter types for the function.
-        /// </summary>
-        public ResultType ParameterTypes { get; internal set; }
-
-        /// <summary>
-        /// The vec of return types for the function.
-        /// </summary>
-        public ResultType ResultType { get; internal set; }
-
-        public bool Matches(FunctionType other) =>
-            ParameterTypes.Matches(other.ParameterTypes) &&
-            ResultType.Matches(other.ResultType);
-        
-        public string ToNotation() =>
-            $"{ParameterTypes.ToNotation()} -> {ResultType.ToNotation()}";
+        public static readonly FunctionType Empty = new(ResultType.Empty, ResultType.Empty);
 
         public FunctionType(ResultType parameterTypes, ResultType resultType) =>
             (ParameterTypes, ResultType) = (parameterTypes, resultType);
 
-        public static readonly FunctionType Empty = new(ResultType.Empty, ResultType.Empty);
-        
+        /// <summary>
+        /// The vec of parameter types for the function.
+        /// </summary>
+        public ResultType ParameterTypes { get; }
+
+        /// <summary>
+        /// The vec of return types for the function.
+        /// </summary>
+        public ResultType ResultType { get; }
+
+        public bool Matches(FunctionType other) =>
+            ParameterTypes.Matches(other.ParameterTypes) &&
+            ResultType.Matches(other.ResultType);
+
+        public string ToNotation() =>
+            $"{ParameterTypes.ToNotation()} -> {ResultType.ToNotation()}";
+
         /// <summary>
         /// @Spec 5.3.6. Function Types
         /// </summary>
@@ -42,11 +40,11 @@ namespace Wacs.Core.Types
                 var form => throw new InvalidDataException(
                     $"Invalid function type form {form} at offset {reader.BaseStream.Position}.")
             };
-        
+
         /// <summary>
         /// 3.2.3. Function Types
         /// Always valid
         /// </summary>
-        public class Validator : AbstractValidator<FunctionType> { }
+        public class Validator : AbstractValidator<FunctionType> {}
     }
 }

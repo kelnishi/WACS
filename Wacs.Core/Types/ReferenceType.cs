@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using FluentValidation;
 
 namespace Wacs.Core.Types
 {

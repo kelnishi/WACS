@@ -5,11 +5,11 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class ExportInstance
     {
-        public string Name { get; }
-        
-        public ExternalValue Value { get; }
-
         public ExportInstance(string name, ExternalValue val) =>
             (Name, Value) = (name, val);
+
+        public string Name { get; }
+
+        public ExternalValue Value { get; }
     }
 }

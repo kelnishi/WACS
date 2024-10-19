@@ -1,5 +1,5 @@
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -13,7 +13,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I64Clz    = new(OpCode.I64Clz    , ExecuteI64Clz    , ValidateOperands(pop: ValType.I64, push: ValType.I64));
         public static readonly NumericInst I64Ctz    = new(OpCode.I64Ctz    , ExecuteI64Ctz    , ValidateOperands(pop: ValType.I64, push: ValType.I64));
         public static readonly NumericInst I64Popcnt = new(OpCode.I64Popcnt , ExecuteI64Popcnt , ValidateOperands(pop: ValType.I64, push: ValType.I64));
-        
+
         // @Spec 4.3.2.20 iclz
         private static void ExecuteI32Clz(ExecContext context)
         {
@@ -26,7 +26,7 @@ namespace Wacs.Core.Instructions.Numeric
             }
             context.OpStack.PushI32((int)clz);
         }
-        
+
         // @Spec 4.3.2.21 ictz
         private static void ExecuteI32Ctz(ExecContext context)
         {
@@ -52,7 +52,7 @@ namespace Wacs.Core.Instructions.Numeric
             }
             context.OpStack.PushI32((int)popcnt);
         }
-        
+
         private static void ExecuteI64Clz(ExecContext context)
         {
             long value = context.OpStack.PopI64();

@@ -8,24 +8,31 @@ namespace Wacs.Core
 {
     public partial class Module
     {
+        public enum DataFlags
+        {
+            ActiveDefault = 0,
+            Passive = 1,
+            ActiveExplicit = 2
+        }
+
         /// <summary>
         /// @Spec 2.5.8. Data Segments
         /// </summary>
         public Data[] Datas { get; internal set; } = null!;
 
-        public uint DataCount { get; internal set; } = 0;
-        
+        public uint DataCount { get; internal set; }
+
         /// <summary>
         /// @Spec 2.5.8. Data Segments
         /// </summary>
         public class Data
         {
-            public DataMode Mode { get; set; }
-            public uint Size { get; set; }
-            public byte[] Init { get; set; }
-
             private Data(DataMode mode, (uint size, byte[] bytes) data) =>
                 (Mode, Size, Init) = (mode, data.size, data.bytes);
+
+            public DataMode Mode { get; }
+            public uint Size { get; }
+            public byte[] Init { get; }
 
             private static (uint size, byte[] bytes) ParseByteVector(BinaryReader reader)
             {
@@ -33,7 +40,7 @@ namespace Wacs.Core
                 var bytes = reader.ReadBytes((int)size);
                 return (size, bytes);
             }
-            
+
             public static Data Parse(BinaryReader reader) =>
                 (DataFlags)reader.ReadLeb128_u32() switch
                 {
@@ -64,23 +71,22 @@ namespace Wacs.Core
 
         public abstract class DataMode
         {
-            public static PassiveMode Passive = new();
+            public static readonly PassiveMode Passive = new();
 
             public class PassiveMode : DataMode
             {
                 /// <summary>
                 /// @Spec 3.4.6.2. passive
                 /// </summary>
-                public class Validator : AbstractValidator<PassiveMode> { }
+                public class Validator : AbstractValidator<PassiveMode> {}
             }
 
             public class ActiveMode : DataMode
             {
-                public MemIdx MemoryIndex { get; set; }
-                public Expression Offset { get; set; }
-
                 public ActiveMode(MemIdx index, Expression offset) => (MemoryIndex, Offset) = (index, offset);
-                
+                public MemIdx MemoryIndex { get; }
+                public Expression Offset { get; }
+
                 /// <summary>
                 /// @Spec 3.4.6.3. active
                 /// </summary>
@@ -89,7 +95,7 @@ namespace Wacs.Core
                     public Validator()
                     {
                         RuleFor(mode => mode.MemoryIndex)
-                            .Must((mode, idx, ctx) => ctx.GetValidationContext().Mems.Contains(idx));
+                            .Must((_, idx, ctx) => ctx.GetValidationContext().Mems.Contains(idx));
                         RuleFor(mode => mode.Offset)
                             .Custom((expr, ctx) =>
                             {
@@ -105,13 +111,6 @@ namespace Wacs.Core
                 }
             }
         }
-
-        public enum DataFlags
-        {
-            ActiveDefault = 0,
-            Passive = 1,
-            ActiveExplicit = 2
-        }
     }
 
     public static partial class BinaryModuleParser
@@ -121,7 +120,7 @@ namespace Wacs.Core
         /// </summary>
         private static Module.Data[] ParseDataSection(BinaryReader reader) =>
             reader.ParseVector(Module.Data.Parse);
-        
+
         /// <summary>
         /// @Spec 2.5.15. Data Count Section
         /// </summary>

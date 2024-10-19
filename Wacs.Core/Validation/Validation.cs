@@ -1,8 +1,5 @@
 using FluentValidation;
-using FluentValidation.Results;
-using Wacs.Core.Runtime;
 using Wacs.Core.Types;
-using Wacs.Core.Validation;
 
 namespace Wacs.Core.Validation
 {
@@ -30,7 +27,7 @@ namespace Wacs.Core.Validation
             RuleForEach(module => module.Datas).SetValidator(new Module.Data.Validator());
 
             RuleFor(module => module.StartIndex)
-                .Must((module, idx, ctx) => ctx.GetValidationContext().Funcs.Contains(idx))
+                .Must((_, idx, ctx) => ctx.GetValidationContext().Funcs.Contains(idx))
                 .Custom((idx, ctx) =>
                 {
                     var execContext = ctx.GetValidationContext();

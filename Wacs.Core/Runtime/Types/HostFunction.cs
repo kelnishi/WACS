@@ -1,4 +1,3 @@
-using System;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime.Types
@@ -10,9 +9,7 @@ namespace Wacs.Core.Runtime.Types
     public class HostFunction : IFunctionInstance
     {
         public delegate object[] HostFunctionDelegate(object[] arguments);
-        
-        public FunctionType Type { get; }
-        
+
         /// <summary>
         /// The delegate representing the host function implementation.
         /// </summary>
@@ -29,6 +26,8 @@ namespace Wacs.Core.Runtime.Types
             Type = type;
             _hostFunction = hostFunction;
         }
+
+        public FunctionType Type { get; }
 
         /// <summary>
         /// Invokes the host function with the given arguments.

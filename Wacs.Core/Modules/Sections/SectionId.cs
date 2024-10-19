@@ -1,4 +1,4 @@
-namespace Wacs.Core.Modules.Sections
+namespace Wacs.Core
 {
     /// <summary>
     /// @Spec 5.5.2 Sections

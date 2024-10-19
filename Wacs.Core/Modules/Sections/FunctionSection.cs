@@ -1,9 +1,6 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using FluentValidation;
-using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
@@ -13,17 +10,17 @@ namespace Wacs.Core
     public partial class Module
     {
         public List<Function> Funcs { get; internal set; } = null!;
-        
+
         /// <summary>
         /// @Spec 2.5.3 Functions
         /// </summary>
         public class Function
         {
+            public bool IsImport = false;
+
             //Function Section only parses the type indices
             public TypeIdx TypeIndex { get; internal set; }
 
-            public bool IsImport = false;
-            
             //Locals and Body get parsed in the Code Section
             public ValType[] Locals { get; internal set; } = null!;
             public Expression Body { get; internal set; } = null!;
@@ -37,7 +34,7 @@ namespace Wacs.Core
                 {
                     // @Spec 3.4.1.1
                     RuleFor(func => func.TypeIndex)
-                        .Must((func, index, ctx) => 
+                        .Must((_, index, ctx) => 
                             ctx.GetValidationContext().Types.Contains(index));
                     RuleFor(func => func)
                         .Custom((func, context) =>
@@ -75,7 +72,6 @@ namespace Wacs.Core
                 }
             }
         }
-        
     }
     
     public static partial class BinaryModuleParser
@@ -85,7 +81,7 @@ namespace Wacs.Core
             {
                 TypeIndex = (TypeIdx)reader.ReadLeb128_u32()
             };
-        
+
         /// <summary>
         /// @Spec 5.5.6 Function Section
         /// </summary>

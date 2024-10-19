@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using FluentValidation;
 using Wacs.Core.Types;
@@ -10,11 +9,6 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class TableInstance
     {
-        public TableType Type { get; }
-        
-        //The actual data array, filled in by InstantiateModule with table.init instructions
-        public List<Value> Elements { get; }
-
         /// <summary>
         /// @Spec 4.5.3.3. Tables
         /// @Spec 4.5.3.10. Modules
@@ -29,6 +23,11 @@ namespace Wacs.Core.Runtime.Types
                 Elements.Add(refVal);
             }
         }
+
+        public TableType Type { get; }
+
+        //The actual data array, filled in by InstantiateModule with table.init instructions
+        public List<Value> Elements { get; }
 
         /// <summary>
         /// @Spec 4.5.3.8. Growing tables

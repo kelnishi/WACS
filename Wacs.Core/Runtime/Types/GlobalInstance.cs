@@ -8,9 +8,16 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class GlobalInstance
     {
+        private Value _value;
+
+        public GlobalInstance(GlobalType type, Value initialValue)
+        {
+            Type = type;
+            _value = initialValue;
+        }
+
         public GlobalType Type { get; }
 
-        private Value _value;
         public Value Value
         {
             get => _value;
@@ -19,12 +26,6 @@ namespace Wacs.Core.Runtime.Types
                     throw new InvalidOperationException("Global is immutable");
                 _value = value;
             }
-        }
-
-        public GlobalInstance(GlobalType type, Value initialValue)
-        {
-            Type = type;
-            _value = initialValue;
         }
     }
 }

@@ -1,4 +1,3 @@
-using System;
 using System.IO;
 using System.Linq;
 using FluentValidation;
@@ -16,18 +15,12 @@ namespace Wacs.Core
         /// @Spec 2.5.7. Element Segments
         /// </summary>
         public ElementSegment[] Elements { get; internal set; } = null!;
-    
+
         /// <summary>
         /// @Spec 2.5.7. Element Segments
         /// </summary>
         public class ElementSegment
         {
-            public ReferenceType Type { get; internal set; }
-            //A vector of (ref.func x) instructions
-            public Expression[] Initializers { get; internal set; }
-            
-            public ElementMode Mode { get; internal set; }
-
             private ElementSegment(ReferenceType type, IInstruction[] funcIndices, ElementMode mode)
             {
                 Type = type;
@@ -51,7 +44,7 @@ namespace Wacs.Core
                 Mode = new ElementMode.ActiveMode(tableIndex, e);
                 Mode.SegmentType = Type;
             }
-            
+
             private ElementSegment(TableIdx tableIndex, Expression e, ReferenceType type, Expression[] expressions)
             {
                 Type = type;
@@ -60,41 +53,13 @@ namespace Wacs.Core
                 Mode.SegmentType = Type;
             }
 
-            /// <summary>
-            /// 3.4.5. Element Segments
-            /// </summary>
-            public class Validator : AbstractValidator<ElementSegment>
-            {
-                public Validator()
-                {
-                    RuleForEach(es => es.Initializers)
-                        .Custom((expr, ctx) =>
-                        {
-                            var es = ctx.InstanceToValidate;
-                            var resultType = es.Type switch {
-                                ReferenceType.Funcref => ValType.Funcref.SingleResult(),
-                                ReferenceType.Externref => ValType.Externref.SingleResult(),
-                                _ => throw new InvalidDataException($"Element Segment has invalid reference type:{es.Type}")
-                            };
-                            
-                            // @Spec 3.4.5.1. base
-                            var exprValidator = new Expression.Validator(resultType, isConstant: true);
-                            var subContext = ctx.GetSubContext(expr);
-                            var result = exprValidator.Validate(subContext);
-                            foreach (var error in result.Errors)
-                            {
-                                ctx.AddFailure($"Expression.{error.PropertyName}", error.ErrorMessage);
-                            }
-                        });
-                    RuleFor(es => es.Mode).SetInheritanceValidator(v =>
-                    {
-                        v.Add(new ElementMode.PassiveMode.Validator());
-                        v.Add(new ElementMode.ActiveMode.Validator());
-                        v.Add(new ElementMode.DeclarativeMode.Validator());
-                    });
-                }
-            }
-            
+            public ReferenceType Type { get; }
+
+            //A vector of (ref.func x) instructions
+            public Expression[] Initializers { get; }
+
+            public ElementMode Mode { get; }
+
 
             /// <summary>
             /// Generate a InstRefFunc for a funcidx
@@ -111,7 +76,7 @@ namespace Wacs.Core
 
             private static TableIdx ParseTableIndex(BinaryReader reader) =>
                 (TableIdx)reader.ReadLeb128_u32();
-                
+
             public static ElementSegment Parse(BinaryReader reader) =>
                 (ElementType)reader.ReadLeb128_u32() switch {
                     ElementType.ActiveNoIndexWithElemKind => 
@@ -160,13 +125,47 @@ namespace Wacs.Core
                             new ElementMode.DeclarativeMode()),
                     _ => throw new InvalidDataException($"Invalid Element at {reader.BaseStream.Position}")
                 };
-            
+
+            /// <summary>
+            /// 3.4.5. Element Segments
+            /// </summary>
+            public class Validator : AbstractValidator<ElementSegment>
+            {
+                public Validator()
+                {
+                    RuleForEach(es => es.Initializers)
+                        .Custom((expr, ctx) =>
+                        {
+                            var es = ctx.InstanceToValidate;
+                            var resultType = es.Type switch {
+                                ReferenceType.Funcref => ValType.Funcref.SingleResult(),
+                                ReferenceType.Externref => ValType.Externref.SingleResult(),
+                                _ => throw new InvalidDataException($"Element Segment has invalid reference type:{es.Type}")
+                            };
+                            
+                            // @Spec 3.4.5.1. base
+                            var exprValidator = new Expression.Validator(resultType, isConstant: true);
+                            var subContext = ctx.GetSubContext(expr);
+                            var result = exprValidator.Validate(subContext);
+                            foreach (var error in result.Errors)
+                            {
+                                ctx.AddFailure($"Expression.{error.PropertyName}", error.ErrorMessage);
+                            }
+                        });
+                    RuleFor(es => es.Mode).SetInheritanceValidator(v =>
+                    {
+                        v.Add(new ElementMode.PassiveMode.Validator());
+                        v.Add(new ElementMode.ActiveMode.Validator());
+                        v.Add(new ElementMode.DeclarativeMode.Validator());
+                    });
+                }
+            }
         }
-        
+
         public abstract class ElementMode
         {
             public ReferenceType SegmentType;
-            
+
             public class PassiveMode : ElementMode
             {
                 // @Spec 3.4.5.2. passive
@@ -183,17 +182,17 @@ namespace Wacs.Core
 
             public class ActiveMode : ElementMode
             {
-                public TableIdx TableIndex { get; internal set; }
-                public Expression Offset { get; internal set; }
                 public ActiveMode(TableIdx idx, Expression offset) => (TableIndex, Offset) = (idx, offset);
-                
+                public TableIdx TableIndex { get; }
+                public Expression Offset { get; }
+
                 // @Spec 3.4.5.3 active
                 public class Validator : AbstractValidator<ActiveMode>
                 {
                     public Validator()
                     {
                         RuleFor(mode => mode.TableIndex)
-                            .Must((mode, idx, ctx) =>
+                            .Must((_, idx, ctx) =>
                                 ctx.GetValidationContext().Tables.Contains(idx));
                         RuleFor(mode => mode)
                             .Custom((mode, ctx) =>
@@ -231,7 +230,6 @@ namespace Wacs.Core
                 }
             }
         }
-        
     }
     
     public static partial class BinaryModuleParser

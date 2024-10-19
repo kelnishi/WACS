@@ -24,11 +24,11 @@ namespace Wacs.Core.Types
         public static explicit operator FuncIdx(int value) => new((uint)value);
         public static explicit operator FuncIdx(uint value) => new(value);
 
-        public static readonly FuncIdx Default = new(UInt32.MaxValue);
+        public static readonly FuncIdx Default = new(uint.MaxValue);
         
         public static bool operator ==(FuncIdx left, FuncIdx right) => left.Value.Equals(right.Value);
         public static bool operator !=(FuncIdx left, FuncIdx right) => !left.Value.Equals(right.Value);
-        public override bool Equals(object obj) => obj is FuncIdx other && this == other;
+        public override bool Equals(object? obj) => obj is FuncIdx other && this == other;
         public override int GetHashCode() => Value.GetHashCode();
         
     }

@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Types;
@@ -12,8 +11,6 @@ namespace Wacs.Core
         /// @Spec 2.5.2. Types
         /// </summary>
         public List<FunctionType> Types { get; internal set; }  = null!;
-
-        public FunctionType this[TypeIdx idx] => Types[(Index)idx];
     }
     
     public static partial class BinaryModuleParser
@@ -23,6 +20,5 @@ namespace Wacs.Core
         /// </summary>
         private static List<FunctionType> ParseTypeSection(BinaryReader reader) => 
             reader.ParseList(FunctionType.Parse);
-        
     }
 }
