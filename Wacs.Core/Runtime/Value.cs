@@ -200,8 +200,8 @@ namespace Wacs.Core.Runtime
             _ => throw new InvalidCastException($"Cannot cast ValType {Type} to Scalar")
         };
 
-        public static readonly Value NullFuncRef = new(ValType.Funcref, -1);
-        public static readonly Value NullExternRef = new(ValType.Externref, -1);
+        public static readonly Value NullFuncRef = new(ValType.Funcref);
+        public static readonly Value NullExternRef = new(ValType.Externref);
 
         public static Value RefNull(ReferenceType type) => type switch
         {

@@ -1,4 +1,3 @@
-using System;
 using System.IO;
 using FluentValidation;
 using Wacs.Core.Instructions;
@@ -40,6 +39,7 @@ namespace Wacs.Core.Types
             {
                 inst.Execute(context);
             }
+
             context.PopFrame();
         }
 
@@ -61,41 +61,24 @@ namespace Wacs.Core.Types
                 RuleFor(e => e).Custom((e, ctx) =>
                 {
                     if (isConstant)
-                        if(!e.IsConstant)
+                        if (!e.IsConstant)
                             ctx.AddFailure($"Expression must be constant");
-                    
+
                     var validationContext = ctx.GetValidationContext();
 
+                    var instructionValidator = new WasmValidationContext.InstructionValidator();
                     // @Spec 3.3.9. Instruction Sequences
                     foreach (var inst in e.Instructions)
                     {
-                        try
+                        var subContext = ctx.GetSubContext(inst);
+                        var result = instructionValidator.Validate(subContext);
+                        foreach (var error in result.Errors)
                         {
-                            inst.Validate(validationContext);
-                        }
-                        catch (InvalidProgramException exc)
-                        {
-                            ctx.AddFailure(exc.Message);
-                        }
-                        catch (InvalidDataException exc)
-                        {
-                            ctx.AddFailure(exc.Message);
-                        }
-                        catch (NotImplementedException exc)
-                        {
-                            _ = exc;
-                            ctx.AddFailure($"WASM Instruction `{inst.OpCode.GetMnemonic()}` is not implemented.");
+                            ctx.AddFailure($"Instruction.{error.PropertyName}", error.ErrorMessage);
                         }
                     }
-                    
-                    foreach (var eType in ResultType.Types)
-                    {
-                        var rValue = validationContext.OpStack.PopAny();
-                        if (rValue.Type != eType)
-                        {
-                            ctx.AddFailure($"Expression Result type {rValue.Type} did not match expected {eType}");
-                        }
-                    }
+
+                    validationContext.OpStack.ValidateStack(resultType);
                 });
             }
 
