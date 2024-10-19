@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using FluentValidation;
 using Wacs.Core.Types;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime.Types
 {
@@ -17,7 +18,7 @@ namespace Wacs.Core.Runtime.Types
         {
             Type = (TableType)type.Clone();
             Elements = new List<Value>((int)type.Limits.Minimum);
-            
+
             for (int i = 0; i < type.Limits.Minimum; i++)
             {
                 Elements.Add(refVal);
@@ -33,13 +34,14 @@ namespace Wacs.Core.Runtime.Types
         /// @Spec 4.5.3.8. Growing tables
         /// </summary>
         /// <returns>true on succes</returns>
-        public bool Grow( int numEntries, Value refInit)
+        public bool Grow(int numEntries, Value refInit)
         {
             long len = (long)Elements.Count + numEntries;
-            if (len > TableType.MaxTableSize)
+            if (len > Constants.MaxTableSize)
                 return false;
 
-            var newLimits = new Limits(Type.Limits) {
+            var newLimits = new Limits(Type.Limits)
+            {
                 Minimum = (uint)len
             };
             var validator = TableType.Validator.Limits;

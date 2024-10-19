@@ -28,12 +28,30 @@ namespace Wacs.Core.Types
         public void Add(TType element) => _space.Add(element);
     }
 
-    public class FuncAddrs : RuntimeIndexSpace<FuncIdx, FuncAddr> {}
-    public class TableAddrs : RuntimeIndexSpace<TableIdx, TableAddr> {}
-    public class MemAddrs : RuntimeIndexSpace<MemIdx, MemAddr> {}
-    public class GlobalAddrs : RuntimeIndexSpace<GlobalIdx, GlobalAddr> {}
-    
-    public class ElemAddrs : RuntimeIndexSpace<ElemIdx, ElemAddr> {}
+    public class FuncAddrs : RuntimeIndexSpace<FuncIdx, FuncAddr>
+    {
+    }
+
+    public class TableAddrs : RuntimeIndexSpace<TableIdx, TableAddr>
+    {
+    }
+
+    public class MemAddrs : RuntimeIndexSpace<MemIdx, MemAddr>
+    {
+    }
+
+    public class GlobalAddrs : RuntimeIndexSpace<GlobalIdx, GlobalAddr>
+    {
+    }
+
+    public class ElemAddrs : RuntimeIndexSpace<ElemIdx, ElemAddr>
+    {
+    }
+
+    public class DataAddrs : RuntimeIndexSpace<DataIdx, DataAddr>
+    {
+    }
+
 
     public abstract class AbstractIndexSpace<TIndex, TType> where TIndex : IIndex
     {
@@ -62,13 +80,13 @@ namespace Wacs.Core.Types
         public FunctionType ResolveBlockType(BlockType blockType) =>
             blockType switch
             {
-                BlockType.Empty     => new FunctionType(ResultType.Empty, ResultType.Empty),
-                BlockType.I32       => new FunctionType(ResultType.Empty, new ResultType(ValType.I32)),
-                BlockType.I64       => new FunctionType(ResultType.Empty, new ResultType(ValType.I64)),
-                BlockType.F32       => new FunctionType(ResultType.Empty, new ResultType(ValType.F32)),
-                BlockType.F64       => new FunctionType(ResultType.Empty, new ResultType(ValType.F64)),
-                BlockType.V128      => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
-                BlockType.Funcref   => new FunctionType(ResultType.Empty, new ResultType(ValType.Funcref)),
+                BlockType.Empty => new FunctionType(ResultType.Empty, ResultType.Empty),
+                BlockType.I32 => new FunctionType(ResultType.Empty, new ResultType(ValType.I32)),
+                BlockType.I64 => new FunctionType(ResultType.Empty, new ResultType(ValType.I64)),
+                BlockType.F32 => new FunctionType(ResultType.Empty, new ResultType(ValType.F32)),
+                BlockType.F64 => new FunctionType(ResultType.Empty, new ResultType(ValType.F64)),
+                BlockType.V128 => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
+                BlockType.Funcref => new FunctionType(ResultType.Empty, new ResultType(ValType.Funcref)),
                 BlockType.Externref => new FunctionType(ResultType.Empty, new ResultType(ValType.Externref)),
                 _ => this[(TypeIdx)(int)blockType]
             };

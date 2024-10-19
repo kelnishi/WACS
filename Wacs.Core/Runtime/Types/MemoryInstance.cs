@@ -1,38 +1,41 @@
 using System;
 using FluentValidation;
 using Wacs.Core.Types;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime.Types
 {
     public class MemoryInstance
     {
-        private const uint PageSize = 0x01_00_00; //64Ki
         private byte[] _data;
 
         public MemoryInstance(MemoryType type)
         {
             Type = type;
-            uint initialSize = type.Limits.Minimum * PageSize;
+            uint initialSize = type.Limits.Minimum * Constants.PageSize;
             _data = new byte[initialSize];
         }
 
         public MemoryType Type { get; }
-        private byte[] Data => _data;
+        public byte[] Data => _data;
+
+        public long Size => _data.Length / Constants.PageSize;
 
         /// <summary>
         /// @Spec 4.5.3.9. Growing memories
         /// </summary>
         public bool Grow(uint numPages)
         {
-            uint oldSize = (uint)(Data.Length / PageSize);
+            uint oldSize = (uint)(Data.Length / Constants.PageSize);
             uint len = oldSize + numPages;
 
             if (len > Type.Limits.Maximum)
             {
                 return false; // Cannot grow beyond maximum limit
             }
-            
-            var newLimits = new Limits(Type.Limits) {
+
+            var newLimits = new Limits(Type.Limits)
+            {
                 Minimum = len
             };
             var validator = TableType.Validator.Limits;
@@ -46,8 +49,8 @@ namespace Wacs.Core.Runtime.Types
                 return false;
             }
 
-            Array.Resize(ref _data, (int)(len * PageSize));
-            
+            Array.Resize(ref _data, (int)(len * Constants.PageSize));
+
             return true;
         }
     }

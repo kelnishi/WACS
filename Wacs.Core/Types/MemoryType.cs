@@ -1,5 +1,6 @@
 using System.IO;
 using FluentValidation;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
 {
@@ -31,11 +32,10 @@ namespace Wacs.Core.Types
         /// </summary>
         public class Validator : AbstractValidator<MemoryType>
         {
-            private const uint MaxPages = 0x01_00_00; //2^16 64K
-
-            public Validator() {
+            public Validator()
+            {
                 // @Spec 3.2.5.1. limits
-                RuleFor(mt => mt.Limits).SetValidator(new Limits.Validator(MaxPages));
+                RuleFor(mt => mt.Limits).SetValidator(new Limits.Validator(Constants.MaxPages));
             }
         }
     }

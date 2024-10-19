@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using FluentValidation;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
 {
@@ -10,10 +11,9 @@ namespace Wacs.Core.Types
     /// </summary>
     public class TableType : ICloneable
     {
-        public const uint MaxTableSize = 0xFFFF_FFFF; //2^32 - 1
-
-
-        private TableType() { }
+        private TableType()
+        {
+        }
 
         private TableType(BinaryReader reader) =>
             (ElementType, Limits) = (ReferenceTypeParser.Parse(reader), Limits.Parse(reader));
@@ -28,8 +28,10 @@ namespace Wacs.Core.Types
         /// </summary>
         public ReferenceType ElementType { get; private set; }
 
-        public object Clone() {
-            return new TableType {
+        public object Clone()
+        {
+            return new TableType
+            {
                 Limits = (Limits)Limits.Clone(), // Assuming Limits implements ICloneable
                 ElementType = ElementType // Assuming ElementType is a value type or has a suitable copy method
             };
@@ -45,9 +47,10 @@ namespace Wacs.Core.Types
         /// </summary>
         public class Validator : AbstractValidator<TableType>
         {
-            public static readonly Limits.Validator Limits = new(MaxTableSize);
+            public static readonly Limits.Validator Limits = new(Constants.MaxTableSize);
 
-            public Validator() {
+            public Validator()
+            {
                 // @Spec 3.2.4.1. limits reftype
                 RuleFor(tt => tt.Limits).SetValidator(Limits);
                 RuleFor(tt => tt.ElementType).IsInEnum();
