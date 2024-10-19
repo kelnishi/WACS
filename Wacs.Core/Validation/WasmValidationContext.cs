@@ -38,12 +38,12 @@ namespace Wacs.Core.Validation
 
             Globals = new GlobalValidationSpace(module);
 
-            _rootContext = rootContext;
+            RootContext = rootContext;
 
             Reachability = true;
         }
 
-        private ValidationContext<Module> _rootContext { get; }
+        private ValidationContext<Module> RootContext { get; }
 
         public IValidationOpStack OpStack => Reachability ? _stack : _stackPolymorphic;
         public ValidationControlStack ControlStack { get; } = new();
@@ -93,21 +93,21 @@ namespace Wacs.Core.Validation
         public void ValidateBlock(Block instructionBlock)
         {
             var blockValidator = new Block.Validator();
-            var blockContext = _rootContext.GetSubContext(instructionBlock);
+            var blockContext = RootContext.GetSubContext(instructionBlock);
             var blockResult = blockValidator.Validate(blockContext);
             foreach (var error in blockResult.Errors)
             {
-                _rootContext.AddFailure($"Block.{error.PropertyName}", error.ErrorMessage);
+                RootContext.AddFailure($"Block.{error.PropertyName}", error.ErrorMessage);
             }
 
             var instructionValidator = new InstructionValidator();
             foreach (var inst in instructionBlock.Instructions)
             {
-                var subContext = _rootContext.GetSubContext(inst);
+                var subContext = RootContext.GetSubContext(inst);
                 var result = instructionValidator.Validate(subContext);
                 foreach (var error in result.Errors)
                 {
-                    _rootContext.AddFailure($"Block Instruction.{error.PropertyName}", error.ErrorMessage);
+                    RootContext.AddFailure($"Block Instruction.{error.PropertyName}", error.ErrorMessage);
                 }
             }
         }

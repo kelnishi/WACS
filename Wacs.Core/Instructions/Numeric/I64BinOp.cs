@@ -8,21 +8,50 @@ namespace Wacs.Core.Instructions.Numeric
     public partial class NumericInst
     {
         // @Spec 3.3.1.3. i.binop
-        public static readonly NumericInst I64Add    = new(OpCode.I64Add    , ExecuteI64Add  , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64Sub    = new(OpCode.I64Sub    , ExecuteI64Sub  , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64Mul    = new(OpCode.I64Mul    , ExecuteI64Mul  , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64DivS   = new(OpCode.I64DivS   , ExecuteI64DivS , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64DivU   = new(OpCode.I64DivU   , ExecuteI64DivU , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64RemS   = new(OpCode.I64RemS   , ExecuteI64RemS , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64RemU   = new(OpCode.I64RemU   , ExecuteI64RemU , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64And    = new(OpCode.I64And    , ExecuteI64And  , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64Or     = new(OpCode.I64Or     , ExecuteI64Or   , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64Xor    = new(OpCode.I64Xor    , ExecuteI64Xor  , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64Shl    = new(OpCode.I64Shl    , ExecuteI64Shl  , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64ShrS   = new(OpCode.I64ShrS   , ExecuteI64ShrS , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64ShrU   = new(OpCode.I64ShrU   , ExecuteI64ShrU , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64Rotl   = new(OpCode.I64Rotl   , ExecuteI64Rotl , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        public static readonly NumericInst I64Rotr   = new(OpCode.I64Rotr   , ExecuteI64Rotr , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+        public static readonly NumericInst I64Add = new(OpCode.I64Add, ExecuteI64Add,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64Sub = new(OpCode.I64Sub, ExecuteI64Sub,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64Mul = new(OpCode.I64Mul, ExecuteI64Mul,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64DivS = new(OpCode.I64DivS, ExecuteI64DivS,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64DivU = new(OpCode.I64DivU, ExecuteI64DivU,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64RemS = new(OpCode.I64RemS, ExecuteI64RemS,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64RemU = new(OpCode.I64RemU, ExecuteI64RemU,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64And = new(OpCode.I64And, ExecuteI64And,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64Or = new(OpCode.I64Or, ExecuteI64Or,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64Xor = new(OpCode.I64Xor, ExecuteI64Xor,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64Shl = new(OpCode.I64Shl, ExecuteI64Shl,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64ShrS = new(OpCode.I64ShrS, ExecuteI64ShrS,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64ShrU = new(OpCode.I64ShrU, ExecuteI64ShrU,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64Rotl = new(OpCode.I64Rotl, ExecuteI64Rotl,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+
+        public static readonly NumericInst I64Rotr = new(OpCode.I64Rotr, ExecuteI64Rotr,
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
 
         private static void ExecuteI64Add(ExecContext context)
         {
@@ -49,21 +78,20 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         private static void ExecuteI64DivS(ExecContext context)
-{
+        {
             long dividend = context.OpStack.PopI64();
             long divisor = context.OpStack.PopI64();
-            if (divisor == 0) 
+            if (divisor == 0)
                 throw new InvalidOperationException("Cannot divide by zero");
             long quotient = dividend / divisor;
             context.OpStack.PushI64(quotient);
-    
         }
 
         private static void ExecuteI64DivU(ExecContext context)
         {
             ulong dividend = context.OpStack.PopI64();
             ulong divisor = context.OpStack.PopI64();
-            if (divisor == 0) 
+            if (divisor == 0)
                 throw new InvalidOperationException("Cannot divide by zero");
             ulong quotient = dividend / divisor;
             context.OpStack.PushI64((long)quotient);
@@ -73,7 +101,7 @@ namespace Wacs.Core.Instructions.Numeric
         {
             long dividend = context.OpStack.PopI64();
             long divisor = context.OpStack.PopI64();
-            if (divisor == 0) 
+            if (divisor == 0)
                 throw new InvalidOperationException("Cannot divide by zero");
             long remainder = dividend % divisor;
             context.OpStack.PushI64(remainder);
@@ -83,7 +111,7 @@ namespace Wacs.Core.Instructions.Numeric
         {
             ulong dividend = context.OpStack.PopI64();
             ulong divisor = context.OpStack.PopI64();
-            if (divisor == 0) 
+            if (divisor == 0)
                 throw new InvalidOperationException("Cannot divide by zero");
             ulong remainder = dividend % divisor;
             context.OpStack.PushI64((long)remainder);
@@ -132,7 +160,7 @@ namespace Wacs.Core.Instructions.Numeric
         private static void ExecuteI64ShrU(ExecContext context)
         {
             ulong a = context.OpStack.PopI64();
-            int b = context.OpStack.PopI64()& 0x3F;
+            int b = context.OpStack.PopI64() & 0x3F;
             ulong result = a >> b;
             context.OpStack.PushI64((long)result);
         }
@@ -140,12 +168,12 @@ namespace Wacs.Core.Instructions.Numeric
         private static void ExecuteI64Rotl(ExecContext context)
         {
             ulong x = context.OpStack.PopI64();
-            int shiftDistance = context.OpStack.PopI64()& 0x3F;
+            int shiftDistance = context.OpStack.PopI64() & 0x3F;
 
-            ulong result = (x << shiftDistance);
+            ulong result = x << shiftDistance;
             if (shiftDistance != 0)
-                result |= (x >> (64 - shiftDistance));
-            
+                result |= x >> (64 - shiftDistance);
+
             context.OpStack.PushI64((long)result);
         }
 

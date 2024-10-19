@@ -71,6 +71,7 @@ namespace Wacs.Core.Utilities
                     {
                         result |= -1L << shift;
                     }
+
                     break;
                 }
 
@@ -112,6 +113,7 @@ namespace Wacs.Core.Utilities
                     {
                         result |= -1L << shift;
                     }
+
                     break;
                 }
 
@@ -211,14 +213,15 @@ namespace Wacs.Core.Utilities
                 }
 
                 // Convert to double
-                result = (double)(Math.Pow(-1, sign) * Math.Pow(2, exponent) * (1 + (double)fraction / (double)(1ul << 52)));
+                result = (double)(Math.Pow(-1, sign) * Math.Pow(2, exponent) *
+                                  (1 + (double)fraction / (double)(1ul << 52)));
             }
 
             return result;
         }
 
 
-        public static string ReadUTF8String(this BinaryReader reader)
+        public static string ReadUtf8String(this BinaryReader reader)
         {
             uint length = ReadLeb128_u32(reader);
             byte[] bytes = reader.ReadBytes((int)length);
@@ -242,7 +245,7 @@ namespace Wacs.Core.Utilities
         {
             uint count = reader.ReadLeb128_u32();
             var vector = new List<T>((int)count);
-            
+
             for (uint i = 0; i < count; i++)
             {
                 vector.Add(elementParser(reader));
@@ -251,7 +254,8 @@ namespace Wacs.Core.Utilities
             return vector;
         }
 
-        public static List<T> ParseUntil<T>(this BinaryReader reader, Func<BinaryReader, T?> elementParser, Func<T, bool> predicate)
+        public static List<T> ParseUntil<T>(this BinaryReader reader, Func<BinaryReader, T?> elementParser,
+            Func<T, bool> predicate)
             where T : class
         {
             var to = new List<T>();
@@ -260,24 +264,24 @@ namespace Wacs.Core.Utilities
                 var element = elementParser(reader);
                 if (element == null)
                     break;
-                
+
                 //Add all the elements, including one that may terminate the list
                 to.Add(element);
-                
+
                 if (predicate(element))
                     break;
             } while (true);
-            
+
             return to;
         }
 
-        public static BinaryReader GetSubsectionTo(this BinaryReader reader, int endPosition) => 
+        public static BinaryReader GetSubsectionTo(this BinaryReader reader, int endPosition) =>
             reader.GetSubsection((int)(endPosition - reader.BaseStream.Position));
 
         public static BinaryReader GetSubsection(this BinaryReader reader, int length)
         {
             var customSectionStream = new MemoryStream();
-            var payloadEnd = reader.BaseStream.Position + length;
+            // var payloadEnd = reader.BaseStream.Position + length;
             byte[] buffer = new byte[length];
             int bytesRead = reader.Read(buffer, 0, length);
             if (bytesRead != length)

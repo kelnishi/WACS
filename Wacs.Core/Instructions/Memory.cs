@@ -54,10 +54,10 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Mems.Contains((MemIdx)0),
-                () => $"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(((2 << ((int)M.Align - 1)) <= WidthN.ByteSize()),
+                () => $"Instruction {OpCode.GetMnemonic()} failed with invalid context memory 0.");
+            context.Assert(2 << ((int)M.Align - 1) <= WidthN.ByteSize(),
                 () =>
-                    $"Instruction {this.OpCode.GetMnemonic()} failed with invalid alignment 2^{M.Align} <= {WidthN}/8");
+                    $"Instruction {OpCode.GetMnemonic()} failed with invalid alignment 2^{M.Align} <= {WidthN}/8");
 
             context.OpStack.PopI32();
             context.OpStack.PushType(Type);
@@ -76,7 +76,10 @@ namespace Wacs.Core.Instructions
                 () => $"Instruction {OpCode.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             //5.
             var mem = context.Store[a];
-            //6,7
+            //6.
+            context.Assert(context.OpStack.Peek().IsI32,
+                () => $"Instruction {OpCode.GetMnemonic()} failed. Wrong type on stack.");
+            //7.
             int i = context.OpStack.PopI32();
             //8.
             int ea = i + (int)M.Offset;
@@ -90,50 +93,55 @@ namespace Wacs.Core.Instructions
             // var bs = mem.Data[ea..WidthN.ByteSize()];
             var bs = mem.Data.AsSpan(ea, WidthN.ByteSize());
             //12,13,14
-            if (Type == ValType.F32)
+            switch (Type)
             {
-                float cF32 = BitConverter.ToSingle(bs);
-                context.OpStack.PushF32(cF32);
-            }
-            else if (Type == ValType.F64)
-            {
-                double cF64 = BitConverter.ToDouble(bs);
-                context.OpStack.PushF64(cF64);
-            }
-            else
-            {
-                switch (WidthN)
+                case ValType.F32:
                 {
-                    case BitWidth.S8:
-                        int cS8 = (sbyte)bs[0];
-                        context.OpStack.PushValue(new Value(Type, cS8));
-                        break;
-                    case BitWidth.S16:
-                        int cS16 = BitConverter.ToInt16(bs);
-                        context.OpStack.PushValue(new Value(Type, cS16));
-                        break;
-                    case BitWidth.S32:
-                        int cS32 = BitConverter.ToInt32(bs);
-                        context.OpStack.PushValue(new Value(Type, cS32));
-                        break;
-                    case BitWidth.U8:
-                        uint cU8 = bs[0];
-                        context.OpStack.PushValue(new Value(Type, cU8));
-                        break;
-                    case BitWidth.U16:
-                        uint cU16 = BitConverter.ToUInt16(bs);
-                        context.OpStack.PushValue(new Value(Type, cU16));
-                        break;
-                    case BitWidth.U32:
-                        uint cU32 = BitConverter.ToUInt32(bs);
-                        context.OpStack.PushValue(new Value(Type, cU32));
-                        break;
-                    case BitWidth.U64:
-                        ulong cU64 = BitConverter.ToUInt64(bs);
-                        context.OpStack.PushValue(new Value(Type, cU64));
-                        break;
-                    default: throw new ArgumentOutOfRangeException();
+                    float cF32 = BitConverter.ToSingle(bs);
+                    context.OpStack.PushF32(cF32);
+                    break;
                 }
+                case ValType.F64:
+                {
+                    double cF64 = BitConverter.ToDouble(bs);
+                    context.OpStack.PushF64(cF64);
+                    break;
+                }
+                default:
+                    switch (WidthN)
+                    {
+                        case BitWidth.S8:
+                            int cS8 = (sbyte)bs[0];
+                            context.OpStack.PushValue(new Value(Type, cS8));
+                            break;
+                        case BitWidth.S16:
+                            int cS16 = BitConverter.ToInt16(bs);
+                            context.OpStack.PushValue(new Value(Type, cS16));
+                            break;
+                        case BitWidth.S32:
+                            int cS32 = BitConverter.ToInt32(bs);
+                            context.OpStack.PushValue(new Value(Type, cS32));
+                            break;
+                        case BitWidth.U8:
+                            uint cU8 = bs[0];
+                            context.OpStack.PushValue(new Value(Type, cU8));
+                            break;
+                        case BitWidth.U16:
+                            uint cU16 = BitConverter.ToUInt16(bs);
+                            context.OpStack.PushValue(new Value(Type, cU16));
+                            break;
+                        case BitWidth.U32:
+                            uint cU32 = BitConverter.ToUInt32(bs);
+                            context.OpStack.PushValue(new Value(Type, cU32));
+                            break;
+                        case BitWidth.U64:
+                            ulong cU64 = BitConverter.ToUInt64(bs);
+                            context.OpStack.PushValue(new Value(Type, cU64));
+                            break;
+                        default: throw new ArgumentOutOfRangeException();
+                    }
+
+                    break;
             }
         }
 
@@ -194,10 +202,10 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Mems.Contains((MemIdx)0),
-                () => $"Instruction {this.OpCode.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(((2 << ((int)M.Align - 1)) <= WidthN.ByteSize()),
+                () => $"Instruction {OpCode.GetMnemonic()} failed with invalid context memory 0.");
+            context.Assert(2 << ((int)M.Align - 1) <= WidthN.ByteSize(),
                 () =>
-                    $"Instruction {this.OpCode.GetMnemonic()} failed with invalid alignment 2^{M.Align} <= {WidthN}/8");
+                    $"Instruction {OpCode.GetMnemonic()} failed with invalid alignment 2^{M.Align} <= {WidthN}/8");
 
             context.OpStack.PopI32();
             context.OpStack.PopType(Type);
@@ -217,9 +225,15 @@ namespace Wacs.Core.Instructions
                 () => $"Instruction {OpCode.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             //5.
             var mem = context.Store[a];
-            //6,7
+            //6.
+            context.Assert(context.OpStack.Peek().Type == Type,
+                () => $"Instruction {OpCode.GetMnemonic()} failed. Wrong type on stack.");
+            //7.
             var c = context.OpStack.PopType(Type);
-            //8,9
+            //8.
+            context.Assert(context.OpStack.Peek().IsI32,
+                () => $"Instruction {OpCode.GetMnemonic()} failed. Wrong type on stack.");
+            //9.
             int i = context.OpStack.PopI32();
             //10.
             int ea = i + (int)M.Offset;
@@ -304,7 +318,7 @@ namespace Wacs.Core.Instructions
                 BitWidth.U16 => 2,
                 BitWidth.U32 => 4,
                 BitWidth.U64 => 8,
-                var bits => (byte)bits / 8
+                _ => (byte)width / 8
             };
 
         public static bool IsSigned(this BitWidth width) =>

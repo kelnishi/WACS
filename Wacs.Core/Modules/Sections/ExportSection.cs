@@ -112,22 +112,27 @@ namespace Wacs.Core
             }
         }
     }
-    
+
     public static partial class BinaryModuleParser
     {
         private static Module.ExportDesc ParseExportDesc(BinaryReader reader) =>
-            ExternalKindParser.Parse(reader) switch {
-                ExternalKind.Function => new Module.ExportDesc.FuncDesc { FunctionIndex = (FuncIdx)reader.ReadLeb128_u32()},
-                ExternalKind.Table => new Module.ExportDesc.TableDesc { TableIndex = (TableIdx)reader.ReadLeb128_u32()},
+            ExternalKindParser.Parse(reader) switch
+            {
+                ExternalKind.Function => new Module.ExportDesc.FuncDesc
+                    { FunctionIndex = (FuncIdx)reader.ReadLeb128_u32() },
+                ExternalKind.Table => new Module.ExportDesc.TableDesc
+                    { TableIndex = (TableIdx)reader.ReadLeb128_u32() },
                 ExternalKind.Memory => new Module.ExportDesc.MemDesc { MemoryIndex = (MemIdx)reader.ReadLeb128_u32() },
-                ExternalKind.Global => new Module.ExportDesc.GlobalDesc { GlobalIndex = (GlobalIdx)reader.ReadLeb128_u32()},
-                var kind => throw new InvalidDataException($"Malformed Module Export section {kind} at {reader.BaseStream.Position - 1}")
+                ExternalKind.Global => new Module.ExportDesc.GlobalDesc
+                    { GlobalIndex = (GlobalIdx)reader.ReadLeb128_u32() },
+                var kind => throw new InvalidDataException(
+                    $"Malformed Module Export section {kind} at {reader.BaseStream.Position - 1}")
             };
 
         private static Module.Export ParseExport(BinaryReader reader) =>
             new()
             {
-                Name = reader.ReadUTF8String(),
+                Name = reader.ReadUtf8String(),
                 Desc = ParseExportDesc(reader)
             };
 

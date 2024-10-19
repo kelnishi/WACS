@@ -10,7 +10,7 @@ namespace Wacs.Core.Runtime
     {
         public double FloatingPointTolerance { get; } = 1e-10;
     }
-    
+
     public class ExecContext
     {
         public delegate string MessageProducer();
@@ -30,7 +30,7 @@ namespace Wacs.Core.Runtime
 
         public Store Store { get; }
         public OpStack OpStack { get; } = new();
-        public Stack<Frame> CallStack { get; } = new();
+        private Stack<Frame> CallStack { get; } = new();
 
         public Frame Frame => CallStack.Peek();
 
@@ -56,7 +56,7 @@ namespace Wacs.Core.Runtime
         public void ResumeSequence(InstructionPointer pointer) =>
             (_currentSequence, _sequenceIndex) = (pointer.Sequence, pointer.Index);
 
-        public InstructionPointer GetPointer(int offset = 0) => 
+        public InstructionPointer GetPointer(int offset = 0) =>
             new(_currentSequence, _sequenceIndex + offset);
 
         // @Spec 4.4.9.1. Enter Block
@@ -83,13 +83,17 @@ namespace Wacs.Core.Runtime
         {
             //1.
             Assert(Store.Contains(addr),
-                ()=>$"Failure in Function Invocation. Address does not exist {addr}");
+                () => $"Failure in Function Invocation. Address does not exist {addr}");
             //2.
             var funcInst = Store[addr];
             switch (funcInst)
             {
-                case FunctionInstance wasmFunc: Invoke(wasmFunc); return;
-                case HostFunction hostFunc: Invoke(hostFunc); break;
+                case FunctionInstance wasmFunc:
+                    Invoke(wasmFunc);
+                    return;
+                case HostFunction hostFunc:
+                    Invoke(hostFunc);
+                    break;
             }
         }
 
@@ -103,11 +107,12 @@ namespace Wacs.Core.Runtime
             //var seq = wasmFunc.Definition.Body;
             //6.
             Assert(OpStack.Count >= funcType.ParameterTypes.Arity,
-                ()=>$"Function invocation failed. Operand Stack underflow.");
+                () => $"Function invocation failed. Operand Stack underflow.");
             //7.
             var vals = OpStack.PopResults(funcType.ParameterTypes);
             //8.
-            var frame = new Frame(wasmFunc.Module, funcType) {
+            var frame = new Frame(wasmFunc.Module, funcType)
+            {
                 ContinuationAddress = GetPointer(),
                 Locals = new LocalsSpace(t)
             };
@@ -117,6 +122,7 @@ namespace Wacs.Core.Runtime
                 frame.Locals[(LocalIdx)li] = vals.Pop().Default;
                 li += 1;
             }
+
             //9.
             PushFrame(frame);
             //10.
@@ -144,7 +150,7 @@ namespace Wacs.Core.Runtime
         {
             //3.
             Assert(OpStack.Count >= Frame.Arity,
-                ()=>$"Function Return failed. Stack did not contain return values");
+                () => $"Function Return failed. Stack did not contain return values");
             //4. Since we have a split stack, we can leave the results in place.
             // var vals = OpStack.PopResults(Frame.Type.ResultType);
             //5.
@@ -162,9 +168,8 @@ namespace Wacs.Core.Runtime
 
             if (_sequenceIndex >= _currentSequence.Count)
                 return null;
-            
+
             return _currentSequence[_sequenceIndex++];
         }
     }
-    
 }

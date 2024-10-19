@@ -26,10 +26,6 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.2. unreachable
         public override void Execute(ExecContext context) =>
             throw new TrapException("unreachable");
-
-        public class UnreachableException : Exception
-        {
-        }
     }
 
     //0x01
@@ -63,7 +59,7 @@ namespace Wacs.Core.Instructions
             try
             {
                 var funcType = context.Types.ResolveBlockType(Block.Type);
-                var label = new Label(funcType.ResultType, new(), OpCode.Block);
+                var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
 
                 //Check the parameters [t1*]
@@ -121,7 +117,7 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader)
         {
-            Block = new(type: Block.ParseBlockType(reader))
+            Block = new Block(type: Block.ParseBlockType(reader))
             {
                 Instructions = new InstructionSequence(reader.ParseUntil(InstructionParser.Parse,
                     InstructionParser.IsEnd))
@@ -143,7 +139,7 @@ namespace Wacs.Core.Instructions
             try
             {
                 var funcType = context.Types.ResolveBlockType(Block.Type);
-                var label = new Label(funcType.ResultType, new(), OpCode.Block);
+                var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
 
                 //Check the parameters [t1*]
@@ -199,7 +195,7 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader)
         {
-            Block = new(type: Block.ParseBlockType(reader))
+            Block = new Block(type: Block.ParseBlockType(reader))
             {
                 Instructions = new InstructionSequence(reader.ParseUntil(InstructionParser.Parse,
                     InstructionParser.IsEnd))
@@ -224,7 +220,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PopI32();
 
                 var funcType = context.Types.ResolveBlockType(IfBlock.Type);
-                var label = new Label(funcType.ResultType, new(), OpCode.Block);
+                var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
 
                 //Check the parameters [t1*]
@@ -292,7 +288,7 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader)
         {
-            IfBlock = new(type: Block.ParseBlockType(reader))
+            IfBlock = new Block(type: Block.ParseBlockType(reader))
             {
                 Instructions = new InstructionSequence(reader.ParseUntil(InstructionParser.Parse,
                     InstructionParser.IsElseOrEnd))
@@ -305,7 +301,7 @@ namespace Wacs.Core.Instructions
             else if (IfBlock.Instructions.EndsWithElse)
             {
                 IfBlock.Instructions.SwapElseEnd();
-                ElseBlock = new(type: IfBlock.Type)
+                ElseBlock = new Block(type: IfBlock.Type)
                 {
                     Instructions = new InstructionSequence(reader.ParseUntil(InstructionParser.Parse,
                         InstructionParser.IsEnd))
@@ -656,7 +652,10 @@ namespace Wacs.Core.Instructions
                 () => $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
             //7.
             var ftExpect = context.Frame.Module.Types[Y];
-            //8,9.
+            //8.
+            context.Assert(context.OpStack.Peek().IsI32,
+                () => $"Instruction {OpCode.GetMnemonic()} failed. Wrong type on stack.");
+            //9.
             int i = context.OpStack.PopI32();
             //10.
             if (i >= tab.Elements.Count)

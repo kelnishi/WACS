@@ -7,7 +7,7 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class DataInstance
     {
-        public static readonly DataInstance Empty = new DataInstance(Array.Empty<byte>());
+        public static readonly DataInstance Empty = new(Array.Empty<byte>());
 
         public readonly byte[] Data;
 
