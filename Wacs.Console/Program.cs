@@ -47,14 +47,14 @@ namespace Wacs.Console
             }
 
             var runtime = new WasmRuntime();
-            runtime.BindHostFunction("env","sayc", (scalars) =>
+            runtime.BindHostFunction("env", "sayc", (scalars) =>
             {
                 char c = Convert.ToChar(scalars[0]);
                 System.Console.Write(c);
                 return Array.Empty<object>();
             });
-                
-            var modInst = runtime.InstantiateModule(module, new(){SkipModuleValidation = true});
+
+            var modInst = runtime.InstantiateModule(module, new() { SkipModuleValidation = true });
             runtime.RegisterModule("hello", modInst);
 
             var mainAddr = runtime.GetExportedFunction("hello", "main");
@@ -66,11 +66,9 @@ namespace Wacs.Console
                 {
                     steps += 1;
                 }
+
                 System.Console.WriteLine($"Process used {steps} gas.");
             }
-                
-                
-            System.Console.WriteLine(modInst);
         }
     }
 }

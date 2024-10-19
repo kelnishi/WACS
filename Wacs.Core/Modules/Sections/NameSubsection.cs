@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -6,18 +5,18 @@ using Wacs.Core.Utilities;
 
 namespace Wacs.Core
 {
-    enum NameSubsectionId : byte
+    internal enum NameSubsectionId : byte
     {
         ModuleName = 0,
         FuncName = 1,
         LocalName = 2,
     }
-    
+
     public partial class Module
     {
-        public NameSection? Names { get; internal set; } = null;
+        public NameSection? Names { get; internal set; }
 
-        public string Name => Names?.ModuleName?.Name ?? String.Empty;
+        public string Name => Names?.ModuleName?.Name ?? string.Empty;
         public NameMap FuncMap => Names?.FunctionNames?.Names ?? NameMap.Empty;
         public IndirectNameMap LocalMap => Names?.LocalNames?.Names ?? IndirectNameMap.Empty;
 
@@ -70,7 +69,7 @@ namespace Wacs.Core
                 public static ModuleNameSubsection Parse(BinaryReader reader) =>
                     new()
                     {
-                        Name = reader.ReadUTF8String()
+                        Name = reader.ReadUtf8String()
                     };
             }
 
@@ -102,30 +101,30 @@ namespace Wacs.Core
             public static readonly NameMap Empty = new() { NameAssocMap = new Dictionary<uint, string>() };
             public Dictionary<uint, string> NameAssocMap { get; internal set; } = null!;
 
-            public string this[uint key] => NameAssocMap.TryGetValue(key, out var value) ? value : String.Empty;
+            public string this[uint key] => NameAssocMap.TryGetValue(key, out var value) ? value : string.Empty;
 
-            private static (uint, string) ParseNameAssoc(BinaryReader reader) => 
-                (reader.ReadLeb128_u32(), reader.ReadUTF8String());
+            private static (uint, string) ParseNameAssoc(BinaryReader reader) =>
+                (reader.ReadLeb128_u32(), reader.ReadUtf8String());
 
 
             public static NameMap Parse(BinaryReader reader) =>
                 new()
                 {
-                    NameAssocMap = 
+                    NameAssocMap =
                         reader
-                        .ParseVector(ParseNameAssoc)
-                        .ToDictionary(pair => pair.Item1, pair => pair.Item2)
+                            .ParseVector(ParseNameAssoc)
+                            .ToDictionary(pair => pair.Item1, pair => pair.Item2)
                 };
         }
 
         public class IndirectNameMap
         {
-            public static readonly IndirectNameMap Empty = 
+            public static readonly IndirectNameMap Empty =
                 new() { IndirectNameAssocMap = new Dictionary<uint, NameMap>() };
 
             public Dictionary<uint, NameMap> IndirectNameAssocMap { get; internal set; } = null!;
 
-            public NameMap this[uint key] => 
+            public NameMap this[uint key] =>
                 IndirectNameAssocMap.TryGetValue(key, out var value) ? value : NameMap.Empty;
 
             private static (uint, NameMap) ParseIndirectNameAssoc(BinaryReader reader) =>

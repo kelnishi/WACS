@@ -19,14 +19,15 @@ namespace Wacs.Core.OpCodes
             {
                 var type = typeof(OpCode);
                 var memberInfo = type.GetMember(op.ToString());
-                if (memberInfo.Length > 0)
+                if (memberInfo.Length <= 0)
+                    throw new InvalidDataException($"Cannot convert opcode {opcode} to mnemonic text");
+
+                var attributes = memberInfo[0].GetCustomAttributes(typeof(OpCodeAttribute), false);
+                if (attributes.Length > 0)
                 {
-                    var attributes = memberInfo[0].GetCustomAttributes(typeof(OpCodeAttribute), false);
-                    if (attributes.Length > 0)
-                    {
-                        return ((OpCodeAttribute)attributes[0]).Mnemonic;
-                    }
+                    return ((OpCodeAttribute)attributes[0]).Mnemonic;
                 }
+
                 throw new InvalidDataException($"Cannot convert opcode {opcode} to mnemonic text");
             });
         }

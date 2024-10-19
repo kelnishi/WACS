@@ -16,7 +16,7 @@ namespace Wacs.Core.Runtime
         public bool SkipModuleValidation = false;
         public bool SkipStartFunction = false;
     }
-    
+
     public class WasmRuntime
     {
         private readonly Dictionary<(string module, string entity), IAddress> _entityBindings = new();
@@ -40,7 +40,8 @@ namespace Wacs.Core.Runtime
             //Bind exports
             foreach (var export in moduleInstance.Exports)
             {
-                _entityBindings[(moduleName, export.Name)] = export.Value switch {
+                _entityBindings[(moduleName, export.Name)] = export.Value switch
+                {
                     ExternalValue.Function func => func.Address,
                     ExternalValue.Table table => table.Address,
                     ExternalValue.Memory mem => mem.Address,
@@ -56,6 +57,7 @@ namespace Wacs.Core.Runtime
             {
                 return moduleInstance;
             }
+
             throw new Exception($"Module '{moduleName}' not found.");
         }
 
@@ -90,7 +92,7 @@ namespace Wacs.Core.Runtime
             var comp = Context.Next();
             if (comp == null)
                 return false;
-            
+
             comp.Execute(Context);
             return true;
         }
@@ -103,7 +105,7 @@ namespace Wacs.Core.Runtime
         {
             //20. Include Types from module
             var moduleInstance = new ModuleInstance(module);
-            
+
             //Resolve Imports
             foreach (var import in module.Imports)
             {
@@ -164,72 +166,80 @@ namespace Wacs.Core.Runtime
 
             //2. Allocate Functions and capture their addresses in the Store
             //8. index ordered function addresses
-            foreach (var func in module.Funcs) {
+            foreach (var func in module.Funcs)
+            {
                 moduleInstance.FuncAddrs.Add(AllocateFunc(Store, func, moduleInstance));
             }
-            
+
             //3. Allocate Tables and capture their addresses in the Store
             //9. index ordered table addresses
-            foreach (var table in module.Tables) {
+            foreach (var table in module.Tables)
+            {
                 moduleInstance.TableAddrs.Add(AllocateTable(Store, table, Value.RefNull(table.ElementType)));
             }
 
             //4. Allocate Memories and capture their addresses in the Store
             //10. index ordered memory addresses
-            foreach (var mem in module.Memories) {
+            foreach (var mem in module.Memories)
+            {
                 moduleInstance.MemAddrs.Add(AllocateMemory(Store, mem));
             }
-            
+
             // @Spec 4.5.4 Step 7
             var initFrame = new Frame(moduleInstance, FunctionType.Empty) { Locals = new LocalsSpace() };
             Context.PushFrame(initFrame);
-            
+
             //5. Allocate Globals and capture their addresses in the Store
             //11. index ordered global addresses
-            foreach (var global in module.Globals) {
+            foreach (var global in module.Globals)
+            {
                 var val = EvaluateExpression(global.Initializer);
                 if (Context.Frame != initFrame)
                     throw new InvalidProgramException($"Call stack was manipulated while initializing globals");
                 moduleInstance.GlobalAddrs.Add(AllocateGlobal(Store, global.Type, val));
             }
-            
+
             //6. Allocate Elements
             //12. index ordered element addresses
-            foreach (var elem in module.Elements) {
+            foreach (var elem in module.Elements)
+            {
                 var refs = EvaluateInitializers(elem.Initializers);
                 moduleInstance.ElemAddrs.Add(AllocateElement(Store, elem.Type, refs));
             }
-            
+
             // @Spec 4.5.4 Step 10
             Context.PopFrame();
-            
+
             //7. Allocate Datas
             //13. index ordered data addresses
-            foreach (var data in module.Datas) {
+            foreach (var data in module.Datas)
+            {
                 moduleInstance.DataAddrs.Add(AllocateData(Store, data.Init));
             }
-            
+
             //18. Collect exports
             //Process Exports, keep them, so they can be bound with a module name and imported by later modules.
             foreach (var export in module.Exports)
             {
                 var desc = export.Desc;
-                ExternalValue val = desc switch {
-                    Module.ExportDesc.FuncDesc funcDesc => 
+                ExternalValue val = desc switch
+                {
+                    Module.ExportDesc.FuncDesc funcDesc =>
                         new ExternalValue.Function(moduleInstance.FuncAddrs[funcDesc.FunctionIndex]),
-                    Module.ExportDesc.TableDesc tableDesc => 
+                    Module.ExportDesc.TableDesc tableDesc =>
                         new ExternalValue.Table(moduleInstance.TableAddrs[tableDesc.TableIndex]),
-                    Module.ExportDesc.MemDesc memDesc => 
+                    Module.ExportDesc.MemDesc memDesc =>
                         new ExternalValue.Memory(moduleInstance.MemAddrs[memDesc.MemoryIndex]),
-                    Module.ExportDesc.GlobalDesc globalDesc => 
+                    Module.ExportDesc.GlobalDesc globalDesc =>
                         new ExternalValue.Global(moduleInstance.GlobalAddrs[globalDesc.GlobalIndex]),
-                    _ => 
+                    _ =>
                         throw new InvalidDataException($"Invalid Export {desc}")
                 };
                 var exportInstance = new ExportInstance(export.Name, val);
                 //19. indexed export addresses
                 moduleInstance.Exports.Add(exportInstance);
             }
+
             return moduleInstance;
         }
 
@@ -262,12 +272,12 @@ namespace Wacs.Core.Runtime
                 _ = exc;
                 throw;
             }
-            
+
             //12.
             var auxFrame = new Frame(moduleInstance, FunctionType.Empty) { Locals = new LocalsSpace() };
             //13.
             Context.PushFrame(auxFrame);
-            
+
             //14, 15
             for (int i = 0, l = module.Elements.Length; i < l; ++i)
             {
@@ -282,17 +292,20 @@ namespace Wacs.Core.Runtime
                             .Execute(Context);
                         InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(n)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction<InstTableInit>(OpCode.TableInit)!.Immediate(activeMode.TableIndex, (ElemIdx)i)
+                        InstructionFactory.CreateInstruction<InstTableInit>(OpCode.TableInit)!
+                            .Immediate(activeMode.TableIndex, (ElemIdx)i)
                             .Execute(Context);
                         InstructionFactory.CreateInstruction<InstElemDrop>(OpCode.ElemDrop)!.Immediate((ElemIdx)i)
                             .Execute(Context);
                         break;
                     case Module.ElementMode.DeclarativeMode declarativeMode:
+                        _ = declarativeMode;
                         InstructionFactory.CreateInstruction<InstElemDrop>(OpCode.ElemDrop)!.Immediate((ElemIdx)i)
                             .Execute(Context);
                         break;
                 }
             }
+
             //16.
             for (int i = 0, l = module.Datas.Length; i < l; ++i)
             {
@@ -301,7 +314,8 @@ namespace Wacs.Core.Runtime
                 {
                     case Module.DataMode.ActiveMode activeMode:
                         if (activeMode.MemoryIndex != 0)
-                            throw new InvalidProgramException("Module could not be instantiated: Multiple Memories are not supported.");
+                            throw new InvalidProgramException(
+                                "Module could not be instantiated: Multiple Memories are not supported.");
                         var n = data.Init.Length;
                         activeMode.Offset
                             .Execute(Context);
@@ -318,6 +332,7 @@ namespace Wacs.Core.Runtime
                         break;
                 }
             }
+
             //17. 
             if (module.StartIndex != FuncIdx.Default)
             {
@@ -333,12 +348,13 @@ namespace Wacs.Core.Runtime
                         .Execute(Context);
                 }
             }
+
             //18.
             if (Context.Frame != auxFrame)
                 throw new InvalidProgramException("Execution fault in Module Instantiation.");
             //19.
             Context.PopFrame();
-            
+
             return moduleInstance;
         }
 
@@ -357,7 +373,8 @@ namespace Wacs.Core.Runtime
         /// <summary>
         /// @Spec 4.5.3.2. Host Functions
         /// </summary>
-        private static FuncAddr AllocateHostFunc(Store store, FunctionType funcType, HostFunction.HostFunctionDelegate hostFunc)
+        private static FuncAddr AllocateHostFunc(Store store, FunctionType funcType,
+            HostFunction.HostFunctionDelegate hostFunc)
         {
             var funcInst = new HostFunction(funcType, hostFunc);
             var funcAddr = store.AddFunction(funcInst);
