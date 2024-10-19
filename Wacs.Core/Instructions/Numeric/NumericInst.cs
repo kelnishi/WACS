@@ -1,29 +1,31 @@
 using System;
-using System.IO;
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Runtime.Types;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst : InstructionBase
     {
+        private delegate void ExecuteDelegate(ExecContext context);
+
+        private delegate void ValidationDelegate(WasmValidationContext context);
+
+        private readonly ExecuteDelegate _execute;
+
+        private readonly ValidationDelegate _validate;
+
+        private NumericInst(OpCode opCode, ExecuteDelegate execute, ValidationDelegate validate) => 
+            (OpCode, _execute, _validate) = (opCode, execute, validate);
+
         public override OpCode OpCode { get; }
-
-        public delegate void ValidationDelegate(WasmValidationContext context);
-        public delegate void ExecuteDelegate(ExecContext context);
-
-        private ValidationDelegate _validate;
-        private ExecuteDelegate _execute;
-        public NumericInst(OpCode opCode, ExecuteDelegate execute, ValidationDelegate validate) => 
-            (_execute, _validate) = (execute, validate);
 
         public override void Validate(WasmValidationContext context) => _validate(context);
         public override void Execute(ExecContext context) => _execute(context);
-        
+
         // [pop] -> [push]
-        public static ValidationDelegate ValidateOperands(ValType pop, ValType push)
+        private static ValidationDelegate ValidateOperands(ValType pop, ValType push)
         {
             return (context) => {
                 switch (pop) {
@@ -42,9 +44,9 @@ namespace Wacs.Core.Instructions.Numeric
                 }
             };
         }
-        
+
         // [pop2 pop2] -> [push]
-        public static ValidationDelegate ValidateOperands(ValType pop1, ValType pop2, ValType push)
+        private static ValidationDelegate ValidateOperands(ValType pop1, ValType pop2, ValType push)
         {
             return (context) => {
                 switch (pop2) {

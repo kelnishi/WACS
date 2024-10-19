@@ -1,7 +1,10 @@
 using System;
 using System.IO;
+using System.Numerics;
 using System.Runtime.InteropServices;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime
 {
@@ -93,13 +96,34 @@ namespace Wacs.Core.Runtime
                 case ValType.Externref:
                     Int64 = -1;
                     break;
+                case ValType.Undefined:
                 default:
                     throw new InvalidDataException($"Cannot define StackValue of type {type}");
             }
         }
 
+        public Value(object externalValue)
+        {
+            this = default;
+            switch (externalValue)
+            {
+                case int i: Int32 = i; break;
+                case uint ui: Int32 = (int)ui; break;
+                case long l: Int64 = l; break;
+                case ulong ul: Int64 = (long)ul; break;
+                
+                case BigInteger bi: (V128_low, V128_high) = bi.ToV128(); break;
+                
+                default:
+                    throw new InvalidDataException(
+                        $"Cannot convert object to stack value of type {typeof(ExternalValue)}");
+            }
+        }
+
         public Value Default => new Value(Type);
 
+        
+        
         public object Scalar => Type switch
         {
             ValType.I32 => Int32,
@@ -113,14 +137,14 @@ namespace Wacs.Core.Runtime
         };
         
         
-        public Value(ValType type, UInt32 idx)
+        public Value(ValType type, uint idx)
         {
             this = default;
             Type = type;
             Int64 = idx;
         }
 
-        public Value(ValType type, Int64 v)
+        public Value(ValType type, long v)
         {
             this = default;
             Type = type;

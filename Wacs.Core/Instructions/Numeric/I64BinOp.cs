@@ -1,6 +1,6 @@
 using System;
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -23,7 +23,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I64ShrU   = new(OpCode.I64ShrU   , ExecuteI64ShrU , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
         public static readonly NumericInst I64Rotl   = new(OpCode.I64Rotl   , ExecuteI64Rotl , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
         public static readonly NumericInst I64Rotr   = new(OpCode.I64Rotr   , ExecuteI64Rotr , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
-        
+
         private static void ExecuteI64Add(ExecContext context)
         {
             long b = context.OpStack.PopI64();
@@ -156,7 +156,5 @@ namespace Wacs.Core.Instructions.Numeric
             ulong result = (x >> shiftDistance) | (x << (64 - shiftDistance));
             context.OpStack.PushI64((long)result);
         }
-        
-        
     }
 }

@@ -1,8 +1,6 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using FluentValidation;
-using Wacs.Core.Instructions;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -10,7 +8,10 @@ namespace Wacs.Core.Types
 {
     public class Block
     {
-        public BlockType Type { get; internal set; }
+        public static readonly Block Empty = new(BlockType.Empty);
+
+        public Block(BlockType type) => Type = type;
+        public BlockType Type { get; }
 
         private ValType ValType => Type switch {
             BlockType.I32 => ValType.I32,
@@ -27,18 +28,15 @@ namespace Wacs.Core.Types
 
         public InstructionSequence Instructions { get; set; } = new();
 
-        public Block(BlockType type) => Type = type;
-
-        public static readonly Block Empty = new(BlockType.Empty);
+        public bool IsEmpty => Type == BlockType.Empty;
         public static BlockType ParseBlockType(BinaryReader reader) => (BlockType)reader.ReadLeb128_s33();
 
-        public bool IsEmpty => Type == BlockType.Empty;
-        
         /// <summary>
         /// @Spec 3.2.2. Block Types
         /// </summary>
         public class Validator : AbstractValidator<Block>
         {
+            //TODO: Hook up Block Validation
             public Validator()
             {
                 // @Spec 3.2.2.1. typeidx

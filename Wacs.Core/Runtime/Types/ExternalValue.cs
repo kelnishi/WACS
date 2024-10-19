@@ -11,30 +11,30 @@ namespace Wacs.Core.Runtime.Types
 
         public class Function : ExternalValue
         {
+            public Function(FuncAddr address) => Address = address;
             public override ExternalKind Type => ExternalKind.Function;
             public FuncAddr Address { get; }
-            public Function(FuncAddr address) => Address = address;
         }
 
         public class Table : ExternalValue
         {
+            public Table(TableAddr address) => Address = address;
             public override ExternalKind Type => ExternalKind.Table;
             public TableAddr Address { get; }
-            public Table(TableAddr address) => Address = address;
         }
 
         public class Memory : ExternalValue
         {
+            public Memory(MemAddr address) => Address = address;
             public override ExternalKind Type => ExternalKind.Memory;
             public MemAddr Address { get; }
-            public Memory(MemAddr address) => Address = address;
         }
 
         public class Global : ExternalValue
         {
+            public Global(GlobalAddr address) => Address = address;
             public override ExternalKind Type => ExternalKind.Global;
             public GlobalAddr Address { get; }
-            public Global(GlobalAddr address) => Address = address;
         }
     }
 }

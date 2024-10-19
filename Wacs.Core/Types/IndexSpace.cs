@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.IO;
 using System.Linq;
 using Wacs.Core.Runtime;
 
@@ -16,7 +15,7 @@ namespace Wacs.Core.Types
         where TIndex : IIndex
         where TType : IAddress
     {
-        private List<TType> _space = new();
+        private readonly List<TType> _space = new();
 
         public TType this[TIndex idx]
         {
@@ -29,28 +28,24 @@ namespace Wacs.Core.Types
         public void Add(TType element) => _space.Add(element);
     }
 
-    public class FuncAddrs : RuntimeIndexSpace<FuncIdx, FuncAddr> { }
-    public class TableAddrs : RuntimeIndexSpace<TableIdx, TableAddr> { }
-    public class MemAddrs : RuntimeIndexSpace<MemIdx, MemAddr> { }
-    public class GlobalAddrs : RuntimeIndexSpace<GlobalIdx, GlobalAddr> { }
+    public class FuncAddrs : RuntimeIndexSpace<FuncIdx, FuncAddr> {}
+    public class TableAddrs : RuntimeIndexSpace<TableIdx, TableAddr> {}
+    public class MemAddrs : RuntimeIndexSpace<MemIdx, MemAddr> {}
+    public class GlobalAddrs : RuntimeIndexSpace<GlobalIdx, GlobalAddr> {}
     
-    public class ElemAddrs : RuntimeIndexSpace<ElemIdx, ElemAddr> { }
+    public class ElemAddrs : RuntimeIndexSpace<ElemIdx, ElemAddr> {}
 
     public abstract class AbstractIndexSpace<TIndex, TType> where TIndex : IIndex
     {
-        public abstract bool Contains(TIndex idx);
+        protected const string InvalidSetterMessage = "There's no crying in Baseball!";
 
         public abstract TType this[TIndex idx] { get; set; }
-        
-        public const string InvalidSetterMessage = "There's no crying in Baseball!";
+        public abstract bool Contains(TIndex idx);
     }
 
     public class TypesSpace : AbstractIndexSpace<TypeIdx, FunctionType>
     {
         private readonly ReadOnlyCollection<FunctionType> _moduleTypes;
-
-        public override bool Contains(TypeIdx idx) =>
-            idx.Value < _moduleTypes.Count;
 
         public TypesSpace(Module module) =>
             _moduleTypes = module.Types.AsReadOnly();
@@ -60,6 +55,9 @@ namespace Wacs.Core.Types
             get => _moduleTypes[(Index)idx];
             set => throw new InvalidOperationException(InvalidSetterMessage);
         }
+
+        public override bool Contains(TypeIdx idx) =>
+            idx.Value < _moduleTypes.Count;
 
         public FunctionType ResolveBlockType(BlockType blockType) =>
             blockType switch
@@ -78,11 +76,8 @@ namespace Wacs.Core.Types
 
     public class FunctionsSpace : AbstractIndexSpace<FuncIdx, Module.Function>
     {
-        private readonly ReadOnlyCollection<Module.Function> _imports;
         private readonly ReadOnlyCollection<Module.Function> _funcs;
-
-        public override bool Contains(FuncIdx idx) =>
-            idx.Value < (_imports.Count + _funcs.Count);
+        private readonly ReadOnlyCollection<Module.Function> _imports;
 
         public FunctionsSpace(Module module) =>
             (_imports, _funcs) = (module.ImportedFunctions, module.Funcs.AsReadOnly());
@@ -92,15 +87,15 @@ namespace Wacs.Core.Types
             get => idx.Value < _imports.Count ? _imports[(Index)idx] : _funcs[(int)(idx.Value - _imports.Count)];
             set => throw new InvalidOperationException(InvalidSetterMessage);
         }
+
+        public override bool Contains(FuncIdx idx) =>
+            idx.Value < _imports.Count + _funcs.Count;
     }
 
     public class TablesSpace : AbstractIndexSpace<TableIdx, TableType>
     {
         private readonly ReadOnlyCollection<TableType> _imports;
         private readonly ReadOnlyCollection<TableType> _tableTypes;
-
-        public override bool Contains(TableIdx idx) =>
-            idx.Value < (_imports.Count + _tableTypes.Count);
 
         public TablesSpace(Module module) =>
             (_imports, _tableTypes) = (module.ImportedTables, module.Tables.AsReadOnly());
@@ -110,15 +105,15 @@ namespace Wacs.Core.Types
             get => idx.Value < _imports.Count ? _imports[(Index)idx] : _tableTypes[(int)(idx.Value - _imports.Count)];
             set => throw new InvalidOperationException(InvalidSetterMessage);
         }
+
+        public override bool Contains(TableIdx idx) =>
+            idx.Value < _imports.Count + _tableTypes.Count;
     }
 
     public class MemSpace : AbstractIndexSpace<MemIdx, MemoryType>
     {
         private readonly ReadOnlyCollection<MemoryType> _imports;
         private readonly ReadOnlyCollection<MemoryType> _memoryTypes;
-
-        public override bool Contains(MemIdx idx) =>
-            idx.Value < (_imports.Count + _memoryTypes.Count);
 
         public MemSpace(Module module) =>
             (_imports, _memoryTypes) = (module.ImportedMems, module.Memories.AsReadOnly());
@@ -128,15 +123,15 @@ namespace Wacs.Core.Types
             get => idx.Value < _imports.Count ? _imports[(Index)idx] : _memoryTypes[(int)(idx.Value - _imports.Count)];
             set => throw new InvalidOperationException(InvalidSetterMessage);
         }
+
+        public override bool Contains(MemIdx idx) =>
+            idx.Value < _imports.Count + _memoryTypes.Count;
     }
 
     public class GlobalValidationSpace : AbstractIndexSpace<GlobalIdx, Module.Global>
     {
-        private readonly ReadOnlyCollection<Module.Global> _imports;
         private readonly ReadOnlyCollection<Module.Global> _globals;
-
-        public override bool Contains(GlobalIdx idx) =>
-            idx.Value < (_imports.Count + _globals.Count);
+        private readonly ReadOnlyCollection<Module.Global> _imports;
 
         public GlobalValidationSpace(Module module)
         {
@@ -149,22 +144,22 @@ namespace Wacs.Core.Types
             get => idx.Value < _imports.Count ? _imports[(Index)idx] : _globals[(Index)(idx.Value - _imports.Count)];
             set => throw new InvalidOperationException(InvalidSetterMessage);
         }
+
+        public override bool Contains(GlobalIdx idx) =>
+            idx.Value < _imports.Count + _globals.Count;
     }
 
     public class LocalsSpace : AbstractIndexSpace<LocalIdx, Value>
     {
-        private readonly ReadOnlyCollection<ValType> _locals;
         private readonly List<Value> _data;
-
-        public override bool Contains(LocalIdx idx) =>
-            idx.Value < _locals.Count;
+        private readonly ReadOnlyCollection<ValType> _locals;
 
         public LocalsSpace()
         {
             _locals = Array.Empty<ValType>().ToList().AsReadOnly();
             _data = Array.Empty<Value>().ToList();
         }
-        
+
         public LocalsSpace(params IEnumerable<ValType>[] types)
         {
             _locals = types.SelectMany(collection => collection).ToList().AsReadOnly();
@@ -176,6 +171,9 @@ namespace Wacs.Core.Types
             get => _data[(Index)idx];
             set => _data[(Index)idx] = value;
         }
+
+        public override bool Contains(LocalIdx idx) =>
+            idx.Value < _locals.Count;
     }
 
     public class ElementsSpace : AbstractIndexSpace<ElemIdx, Module.ElementSegment>
@@ -184,30 +182,30 @@ namespace Wacs.Core.Types
 
         public ElementsSpace(List<Module.ElementSegment> segments) =>
             _segments = segments;
-        
-        public override bool Contains(ElemIdx idx) =>
-            idx.Value < _segments.Count;
 
         public override Module.ElementSegment this[ElemIdx idx]
         {
             get => _segments[(Index)idx];
             set => _segments[(Index)idx] = value;
         }
+
+        public override bool Contains(ElemIdx idx) =>
+            idx.Value < _segments.Count;
     }
 
     public class DataValidationSpace : AbstractIndexSpace<DataIdx, bool>
     {
-        private readonly int Size;
+        private readonly int _size;
 
         public DataValidationSpace(int size) =>
-            Size = size;
+            _size = size;
 
-        public override bool Contains(DataIdx idx) => idx.Value < Size;
-        
         public override bool this[DataIdx idx]
         {
             get => Contains(idx);
             set => throw new InvalidOperationException(InvalidSetterMessage);
         }
+
+        public override bool Contains(DataIdx idx) => idx.Value < _size;
     }
 }

@@ -1,6 +1,5 @@
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Runtime.Types;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -18,7 +17,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I32LeU = new(OpCode.I32LeU, ExecuteI32LeU, ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
         public static readonly NumericInst I32GeS = new(OpCode.I32GeS, ExecuteI32GeS, ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
         public static readonly NumericInst I32GeU = new(OpCode.I32GeU, ExecuteI32GeU, ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        
+
         private static void ExecuteI32Eq(ExecContext context)
         {
             int a = context.OpStack.PopI32();
@@ -26,6 +25,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = (a == b) ? 1 : 0;
             context.OpStack.PushI32(result);
         }
+
         private static void ExecuteI32Ne(ExecContext context)
         {
             int a = context.OpStack.PopI32();
@@ -33,6 +33,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = (a != b) ? 1 : 0;
             context.OpStack.PushI32(result);
         }
+
         private static void ExecuteI32LtS(ExecContext context)
         {
             int a = context.OpStack.PopI32();
@@ -40,7 +41,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a < b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI32LtU(ExecContext context)
         {
             uint a = context.OpStack.PopI32();
@@ -48,7 +49,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a < b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI32GtS(ExecContext context)
         {
             int a = context.OpStack.PopI32();
@@ -56,7 +57,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a > b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI32GtU(ExecContext context)
         {
             uint a = context.OpStack.PopI32();
@@ -64,7 +65,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a > b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI32LeS(ExecContext context)
         {
             int a = context.OpStack.PopI32();
@@ -72,7 +73,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a <= b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI32LeU(ExecContext context)
         {
             uint a = context.OpStack.PopI32();
@@ -80,7 +81,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a <= b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI32GeS(ExecContext context)
         {
             int a = context.OpStack.PopI32();
@@ -88,7 +89,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a >= b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI32GeU(ExecContext context)
         {
             uint a = context.OpStack.PopI32();

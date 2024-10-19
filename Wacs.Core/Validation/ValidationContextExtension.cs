@@ -1,7 +1,5 @@
 using System;
 using FluentValidation;
-using Wacs.Core.Runtime;
-using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Validation
 {

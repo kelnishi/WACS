@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using Wacs.Core.Types;
 
 namespace Wacs.Core.Utilities
 {
@@ -46,16 +45,16 @@ namespace Wacs.Core.Utilities
 
             return result;
         }
-        
+
         public static long ReadLeb128_s64(this BinaryReader reader)
         {
             long result = 0;
             int shift = 0;
-            int byteValue;
 
             while (true)
             {
-                byteValue = reader.ReadByte();
+                //TODO Fix LEB128 S64 decoding!
+                int byteValue = reader.ReadByte();
                 if (byteValue == -1)
                     throw new EndOfStreamException("Unexpected end of stream while decoding s64.");
 
@@ -81,17 +80,17 @@ namespace Wacs.Core.Utilities
 
             return result;
         }
-        
-        
+
+
         public static long ReadLeb128_s33(this BinaryReader reader)
         {
             long result = 0;
             int shift = 0;
-            int byteValue;
 
             while (true)
             {
-                byteValue = reader.ReadByte();
+                //TODO Fix LEB128 S33 decoding!
+                int byteValue = reader.ReadByte();
                 if (byteValue == -1)
                     throw new EndOfStreamException("Unexpected end of stream while decoding s33.");
 
@@ -122,7 +121,7 @@ namespace Wacs.Core.Utilities
             }
 
             // Mask the result to 33 bits to ensure it's within the s33 range
-            long mask = (1L << 33) - 1;
+            const long mask = (1L << 33) - 1;
             result &= mask;
 
             // Sign-extend to 64 bits if the sign bit is set
@@ -133,7 +132,7 @@ namespace Wacs.Core.Utilities
 
             return result;
         }
-        
+
         public static float Read_f32(this BinaryReader reader)
         {
             byte[] bytes = reader.ReadBytes(4);
@@ -175,7 +174,7 @@ namespace Wacs.Core.Utilities
 
             return result;
         }
-        
+
         public static double Read_f64(this BinaryReader reader)
         {
             byte[] bytes = reader.ReadBytes(8);
@@ -212,13 +211,12 @@ namespace Wacs.Core.Utilities
                 }
 
                 // Convert to double
-                result = (double)(Math.Pow(-1, sign) * Math.Pow(2, exponent) * (1 + (double)fraction / (double)(1 << 52)));
+                result = (double)(Math.Pow(-1, sign) * Math.Pow(2, exponent) * (1 + (double)fraction / (double)(1ul << 52)));
             }
 
             return result;
         }
-        
-        
+
 
         public static string ReadUTF8String(this BinaryReader reader)
         {
@@ -230,7 +228,7 @@ namespace Wacs.Core.Utilities
         public static T[] ParseVector<T>(this BinaryReader reader, Func<BinaryReader, T> elementParser)
         {
             uint count = reader.ReadLeb128_u32();
-            T[] vector = new T[count]; // Initialize the array to hold vector elements
+            var vector = new T[count]; // Initialize the array to hold vector elements
 
             for (uint i = 0; i < count; i++)
             {
@@ -239,11 +237,11 @@ namespace Wacs.Core.Utilities
 
             return vector;
         }
-        
+
         public static List<T> ParseList<T>(this BinaryReader reader, Func<BinaryReader, T> elementParser)
         {
             uint count = reader.ReadLeb128_u32();
-            List<T> vector = new List<T>((int)count);
+            var vector = new List<T>((int)count);
             
             for (uint i = 0; i < count; i++)
             {
@@ -252,11 +250,11 @@ namespace Wacs.Core.Utilities
 
             return vector;
         }
-        
+
         public static List<T> ParseUntil<T>(this BinaryReader reader, Func<BinaryReader, T?> elementParser, Func<T, bool> predicate)
             where T : class
         {
-            List<T> to = new List<T>();
+            var to = new List<T>();
             do
             {
                 var element = elementParser(reader);
@@ -275,7 +273,7 @@ namespace Wacs.Core.Utilities
 
         public static BinaryReader GetSubsectionTo(this BinaryReader reader, int endPosition) => 
             reader.GetSubsection((int)(endPosition - reader.BaseStream.Position));
-        
+
         public static BinaryReader GetSubsection(this BinaryReader reader, int length)
         {
             var customSectionStream = new MemoryStream();
@@ -289,7 +287,7 @@ namespace Wacs.Core.Utilities
             customSectionStream.Position = 0;
             return new BinaryReader(customSectionStream);
         }
-        
+
         public static bool HasMoreBytes(this BinaryReader reader)
         {
             var stream = reader.BaseStream;

@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
 
 namespace Wacs.Core.Validation
 {
@@ -8,10 +7,10 @@ namespace Wacs.Core.Validation
     {
         private readonly Stack<Frame> _stack = new();
 
+        public Frame Frame => _stack.Peek();
+
         public void PushFrame(Frame frame) => _stack.Push(frame);
 
         public void PopFrame() => _stack.Pop();
-
-        public Frame Frame => _stack.Peek();
     }
 }

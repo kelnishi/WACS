@@ -1,8 +1,7 @@
 using System.IO;
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Runtime.Types;
-using Wacs.Core.Types;
+using Wacs.Core.Runtime;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions
 {
@@ -14,13 +13,13 @@ namespace Wacs.Core.Instructions
         public OpCode OpCode { get; }
 
         void Validate(WasmValidationContext context);
-        
+
         /// <summary>
         /// Executes the instruction within the given execution context.
         /// </summary>
         /// <param name="context">The execution context in which to execute the instruction.</param>
         void Execute(ExecContext context);
-        
+
         /// <summary>
         /// Parses an instruction from a binary reader.
         /// </summary>

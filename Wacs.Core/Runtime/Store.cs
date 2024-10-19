@@ -29,7 +29,7 @@ namespace Wacs.Core.Runtime
         public bool Contains(GlobalAddr addr) => addr.Value < Globals.Count;
         public bool Contains(ElemAddr addr) => addr.Value < Elems.Count;
         public bool Contains(DataAddr addr) => addr.Value < Datas.Count;
-        
+
         public FuncAddr AddFunction(IFunctionInstance func)
         {
             var addr = new FuncAddr(Funcs.Count);
@@ -43,21 +43,21 @@ namespace Wacs.Core.Runtime
             Tables.Add(table);
             return addr;
         }
-        
+
         public MemAddr AddMemory(MemoryInstance mem)
         {
             var addr = new MemAddr(Mems.Count);
             Mems.Add(mem);
             return addr;
         }
-        
+
         public GlobalAddr AddGlobal(GlobalInstance global)
         {
             var addr = new GlobalAddr(Globals.Count);
             Globals.Add(global);
             return addr;
         }
-        
+
         public ElemAddr AddElement(ElementInstance elem)
         {
             var addr = new ElemAddr(Elems.Count);
@@ -71,7 +71,5 @@ namespace Wacs.Core.Runtime
             Datas.Add(data);
             return addr;
         }
-
-        
     }
 }

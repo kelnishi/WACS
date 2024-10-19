@@ -1,5 +1,5 @@
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -8,7 +8,7 @@ namespace Wacs.Core.Instructions.Numeric
     {
         // @Spec 3.3.1.5. i.relop
         public static readonly NumericInst I64Eq  = new(OpCode.I64Eq,  ExecuteI64Eq , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
-        public static readonly NumericInst I64Ne  = new(OpCode.I64Ne,  ExecuteI64Ne , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32)); 
+        public static readonly NumericInst I64Ne  = new(OpCode.I64Ne,  ExecuteI64Ne , ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
         public static readonly NumericInst I64LtS = new(OpCode.I64LtS, ExecuteI64LtS, ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
         public static readonly NumericInst I64LtU = new(OpCode.I64LtU, ExecuteI64LtU, ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
         public static readonly NumericInst I64GtS = new(OpCode.I64GtS, ExecuteI64GtS, ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
@@ -25,6 +25,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = (a == b) ? 1 : 0;
             context.OpStack.PushI32(result);
         }
+
         private static void ExecuteI64Ne(ExecContext context)
         {
             long a = context.OpStack.PopI64();
@@ -32,6 +33,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = (a != b) ? 1 : 0;
             context.OpStack.PushI32(result);
         }
+
         private static void ExecuteI64LtS(ExecContext context)
         {
             long a = context.OpStack.PopI64();
@@ -39,7 +41,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a < b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI64LtU(ExecContext context)
         {
             ulong a = context.OpStack.PopI64();
@@ -47,7 +49,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a < b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI64GtS(ExecContext context)
         {
             long a = context.OpStack.PopI64();
@@ -55,7 +57,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a > b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI64GtU(ExecContext context)
         {
             ulong a = context.OpStack.PopI64();
@@ -63,7 +65,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a > b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI64LeS(ExecContext context)
         {
             long a = context.OpStack.PopI64();
@@ -71,7 +73,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a <= b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI64LeU(ExecContext context)
         {
             ulong a = context.OpStack.PopI64();
@@ -79,7 +81,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a <= b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI64GeS(ExecContext context)
         {
             long a = context.OpStack.PopI64();
@@ -87,7 +89,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = ((a >= b) ? 1 : 0);
             context.OpStack.PushI32(result);
         }
-        
+
         private static void ExecuteI64GeU(ExecContext context)
         {
             ulong a = context.OpStack.PopI64();

@@ -1,13 +1,21 @@
 using System;
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Runtime.Types;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst
     {
+        // Mask for the sign bit (most significant bit)
+        const UInt32 F32SignMask = 0x8000_0000;
+        private const UInt32 F32NotSignMask = ~F32SignMask;
+
+        // Mask for the sign bit (most significant bit)
+        private const UInt64 F64SignMask = 0x8000_0000_0000_0000;
+
+        private const UInt64 F64NotSignMask = ~F64SignMask;
+
         // @Spec 3.3.1.3. f.binop
         public static readonly NumericInst F32Add      = new(OpCode.F32Add       , ExecuteF32Add      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
         public static readonly NumericInst F32Sub      = new(OpCode.F32Sub       , ExecuteF32Sub      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
@@ -16,7 +24,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F32Min      = new(OpCode.F32Min       , ExecuteF32Min      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
         public static readonly NumericInst F32Max      = new(OpCode.F32Max       , ExecuteF32Max      , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
         public static readonly NumericInst F32Copysign = new(OpCode.F32Copysign  , ExecuteF32Copysign , ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
-        
+
         public static readonly NumericInst F64Add      = new(OpCode.F64Add       , ExecuteF64Add      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
         public static readonly NumericInst F64Sub      = new(OpCode.F64Sub       , ExecuteF64Sub      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
         public static readonly NumericInst F64Mul      = new(OpCode.F64Mul       , ExecuteF64Mul      , ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
@@ -77,11 +85,7 @@ namespace Wacs.Core.Instructions.Numeric
             float result = Math.Max(a, b);
             context.OpStack.PushF32(result);
         }
-        
-        // Mask for the sign bit (most significant bit)
-        const UInt32 F32SignMask = 0x8000_0000;
-        private const UInt32 F32NotSignMask = ~F32SignMask;
-        
+
         private static void ExecuteF32Copysign(ExecContext context)
         {
             float x = context.OpStack.PopF32();
@@ -103,8 +107,8 @@ namespace Wacs.Core.Instructions.Numeric
             float result = BitConverter.ToSingle(BitConverter.GetBytes(resultBits), 0);
             context.OpStack.PushF32(result);
         }
-        
-        
+
+
         private static void ExecuteF64Add(ExecContext context)
         {
             double a = context.OpStack.PopF64();
@@ -157,11 +161,7 @@ namespace Wacs.Core.Instructions.Numeric
             var result = Math.Max(a, b);
             context.OpStack.PushF64(result);
         }
-        
-        // Mask for the sign bit (most significant bit)
-        private const UInt64 F64SignMask = 0x8000_0000_0000_0000;
-        private const UInt64 F64NotSignMask = ~F64SignMask;
-        
+
         private static void ExecuteF64Copysign(ExecContext context)
         {
             double x = context.OpStack.PopF64();

@@ -1,9 +1,9 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Types;
 
 namespace Wacs.Core
 {
@@ -14,16 +14,17 @@ namespace Wacs.Core
     /// </summary>
     public class InstructionSequence : IEnumerable<IInstruction>
     {
+        public static readonly InstructionSequence Empty = new();
         private readonly List<IInstruction> _instructions = new();
 
         public InstructionSequence() {}
-        
+
         public InstructionSequence(IList<IInstruction> list) =>
             _instructions.AddRange(list);
 
         public InstructionSequence(IInstruction single) =>
             _instructions.Add(single);
-        
+
         public bool IsConstant =>
             (_instructions.Count - (HasExplicitEnd ? 1 : 0)) == 1 &&
             !_instructions.Any(inst => inst.OpCode switch {
@@ -38,22 +39,11 @@ namespace Wacs.Core
                 _ => true
             });
 
-        public static readonly InstructionSequence Empty = new();
-
         public bool HasExplicitEnd => _instructions[^1].OpCode == OpCode.End;
         public bool EndsWithElse => _instructions[^1].OpCode == OpCode.Else;
         public bool IsEmpty => _instructions.Count == 0;
 
         public int Count => _instructions.Count;
-        
-        public void SwapElseEnd()
-        {
-            _instructions[^1] = InstEnd.Inst;
-        }
-        
-        public IEnumerator<IInstruction> GetEnumerator() => _instructions.GetEnumerator();
-
-        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 
         public IInstruction this[int index]
         {
@@ -64,6 +54,15 @@ namespace Wacs.Core
                         $"Instruction sequence index {index} exceeds range [0,{_instructions.Count}]");
                 return _instructions[index];
             }
+        }
+
+        public IEnumerator<IInstruction> GetEnumerator() => _instructions.GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public void SwapElseEnd()
+        {
+            _instructions[^1] = InstEnd.Inst;
         }
     }
 }

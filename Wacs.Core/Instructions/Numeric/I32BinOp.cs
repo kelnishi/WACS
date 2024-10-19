@@ -1,7 +1,6 @@
 using System;
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Runtime.Types;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -24,7 +23,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I32ShrU   = new(OpCode.I32ShrU   , ExecuteI32ShrU , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
         public static readonly NumericInst I32Rotl   = new(OpCode.I32Rotl   , ExecuteI32Rotl , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
         public static readonly NumericInst I32Rotr   = new(OpCode.I32Rotr   , ExecuteI32Rotr , ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
-        
+
         // @Spec 4.3.2.3. iadd
         private static void ExecuteI32Add(ExecContext context)
         {
@@ -33,7 +32,7 @@ namespace Wacs.Core.Instructions.Numeric
             int result = a + b;
             context.OpStack.PushI32(result);
         }
-        
+
         // @Spec 4.3.2.4. isub
         private static void ExecuteI32Sub(ExecContext context)
         {

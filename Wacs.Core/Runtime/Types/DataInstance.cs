@@ -7,7 +7,7 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class DataInstance
     {
-        public byte[] Data;
+        public readonly byte[] Data;
 
         public DataInstance(byte[] buf)
         {

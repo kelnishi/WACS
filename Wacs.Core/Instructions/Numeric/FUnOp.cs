@@ -1,6 +1,6 @@
 using System;
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -15,7 +15,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F32Trunc    = new(OpCode.F32Trunc     , ExecuteF32Trunc   , ValidateOperands(pop: ValType.F32, push: ValType.F32));
         public static readonly NumericInst F32Nearest  = new(OpCode.F32Nearest   , ExecuteF32Nearest , ValidateOperands(pop: ValType.F32, push: ValType.F32));
         public static readonly NumericInst F32Sqrt     = new(OpCode.F32Sqrt      , ExecuteF32Sqrt    , ValidateOperands(pop: ValType.F32, push: ValType.F32));
-        
+
         public static readonly NumericInst F64Abs      = new(OpCode.F64Abs       , ExecuteF64Abs     , ValidateOperands(pop: ValType.F64, push: ValType.F64));
         public static readonly NumericInst F64Neg      = new(OpCode.F64Neg       , ExecuteF64Neg     , ValidateOperands(pop: ValType.F64, push: ValType.F64));
         public static readonly NumericInst F64Ceil     = new(OpCode.F64Ceil      , ExecuteF64Ceil    , ValidateOperands(pop: ValType.F64, push: ValType.F64));
@@ -23,8 +23,8 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F64Trunc    = new(OpCode.F64Trunc     , ExecuteF64Trunc   , ValidateOperands(pop: ValType.F64, push: ValType.F64));
         public static readonly NumericInst F64Nearest  = new(OpCode.F64Nearest   , ExecuteF64Nearest , ValidateOperands(pop: ValType.F64, push: ValType.F64));
         public static readonly NumericInst F64Sqrt     = new(OpCode.F64Sqrt      , ExecuteF64Sqrt    , ValidateOperands(pop: ValType.F64, push: ValType.F64));
-        
-        
+
+
         private static void ExecuteF32Abs(ExecContext context)
         {
             float a = context.OpStack.PopF32();
@@ -38,6 +38,7 @@ namespace Wacs.Core.Instructions.Numeric
             var result = -a;
             context.OpStack.PushF32(result);
         }
+
         private static void ExecuteF32Ceil(ExecContext context)
         {
             float a = context.OpStack.PopF32();
@@ -96,7 +97,7 @@ namespace Wacs.Core.Instructions.Numeric
             float result = (float)Math.Sqrt(a);
             context.OpStack.PushF32(result);
         }
-        
+
         private static void ExecuteF64Abs(ExecContext context)
         {
             double a = context.OpStack.PopF64();
@@ -110,6 +111,7 @@ namespace Wacs.Core.Instructions.Numeric
             var result = -a;
             context.OpStack.PushF64(result);
         }
+
         private static void ExecuteF64Ceil(ExecContext context)
         {
             double a = context.OpStack.PopF64();

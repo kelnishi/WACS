@@ -4,6 +4,7 @@ using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 
 // 2.4.6 Table Instructions
@@ -13,7 +14,7 @@ namespace Wacs.Core.Instructions
     public class InstTableGet : InstructionBase
     {
         public override OpCode OpCode => OpCode.TableGet;
-        public TableIdx X { get; private set; }
+        private TableIdx X { get; set; }
 
         // @Spec 3.3.6.1. table.get
         public override void Validate(WasmValidationContext context)
@@ -24,8 +25,10 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopI32();
             context.OpStack.PushType(type.ElementType.StackType());
         }
+
         // @Spec 4.4.6.1. table.get 
         public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
+
         public static void ExecuteInstruction(ExecContext context, TableIdx tableIndex)
         {
             //2.
@@ -64,7 +67,7 @@ namespace Wacs.Core.Instructions
     public class InstTableSet : InstructionBase
     {
         public override OpCode OpCode => OpCode.TableSet;
-        public TableIdx X { get; private set; }
+        private TableIdx X { get; set; }
 
         // @Spec 3.3.6.2. table.set
         public override void Validate(WasmValidationContext context)
@@ -75,8 +78,10 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopType(type.ElementType.StackType());
             context.OpStack.PopI32();
         }
+
         // @Spec 4.4.6.2. table.set
         public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
+
         public static void ExecuteInstruction(ExecContext context, TableIdx tableIndex)
         {
             //2.
@@ -120,9 +125,10 @@ namespace Wacs.Core.Instructions
     // 0xFC0C
     public class InstTableInit : InstructionBase
     {
+        private const long TwoTo32 = 0x1_0000_0000;
         public override OpCode OpCode => OpCode.TableInit;
-        public TableIdx X { get; internal set; }
-        public ElemIdx Y { get; internal set; }
+        private TableIdx X { get; set; }
+        private ElemIdx Y { get; set; }
 
         // @Spec 3.3.6.7. table.init x y
         public override void Validate(WasmValidationContext context)
@@ -139,11 +145,10 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopI32();
             context.OpStack.PopI32();
         }
-        
-        private const long TwoTo32 = 0x1_0000_0000;
-        
+
         // @Spec 4.4.6.7. table.init x y
         public override void Execute(ExecContext context) => ExecuteInstruction(context, X, Y);
+
         public static void ExecuteInstruction(ExecContext context, TableIdx x, ElemIdx y)
         {
             //2.
@@ -276,12 +281,11 @@ namespace Wacs.Core.Instructions
     // 0xFC0E
     public class InstTableCopy : InstructionBase
     {
-        public override OpCode OpCode => OpCode.TableCopy;
-        public TableIdx SrcY { get; internal set; }
-        public TableIdx DstX { get; internal set; }
-
         private const long TwoTo32 = 0x1_0000_0000;
-        
+        public override OpCode OpCode => OpCode.TableCopy;
+        private TableIdx SrcY { get; set; }
+        private TableIdx DstX { get; set; }
+
         // @Spec 3.3.6.6. table.copy
         public override void Validate(WasmValidationContext context)
         {
@@ -297,8 +301,10 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopI32();
             context.OpStack.PopI32();
         }
+
         // @Spec 4.4.6.6. table.copy
         public override void Execute(ExecContext context) => ExecuteInstruction(context, x:DstX, y:SrcY);
+
         public static void ExecuteInstruction(ExecContext context, TableIdx x, TableIdx y)
         {
             //2.
@@ -397,7 +403,7 @@ namespace Wacs.Core.Instructions
     public class InstTableGrow : InstructionBase
     {
         public override OpCode OpCode => OpCode.TableGrow;
-        public TableIdx X { get; internal set; }
+        private TableIdx X { get; set; }
 
         // @Spec 3.3.6.4. table.grow x
         public override void Validate(WasmValidationContext context)
@@ -459,16 +465,16 @@ namespace Wacs.Core.Instructions
     public class InstTableSize : InstructionBase
     {
         public override OpCode OpCode => OpCode.TableSize;
-        public TableIdx X { get; internal set; }
+        private TableIdx X { get; set; }
 
         // @Spec 3.3.6.3. table.size x
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
                 ()=>$"Instruction table.set failed to get table {X} from context");
-            var type = context.Tables[X];
             context.OpStack.PushI32();
         }
+
         // @Spec 4.4.6.3. table.size x
         public override void Execute(ExecContext context) {
             //2.
@@ -498,7 +504,7 @@ namespace Wacs.Core.Instructions
     public class InstTableFill : InstructionBase
     {
         public override OpCode OpCode => OpCode.TableFill;
-        public TableIdx X { get; internal set; }
+        private TableIdx X { get; set; }
 
         // @Spec 3.3.6.5. table.fill
         public override void Validate(WasmValidationContext context)
@@ -510,9 +516,10 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopType(type.ElementType.StackType());
             context.OpStack.PopI32();
         }
-        
+
         // @Spec 4.4.6.5. table.fill
         public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
+
         public static void ExecuteInstruction(ExecContext context, TableIdx tableIndex)
         {
             //2.
@@ -565,7 +572,7 @@ namespace Wacs.Core.Instructions
             //19.
             ExecuteInstruction(context, tableIndex);
         }
-        
+
         // @Spec 5.4.5. Table Instructions
         public override IInstruction Parse(BinaryReader reader) {
             X = (TableIdx)reader.ReadLeb128_u32();

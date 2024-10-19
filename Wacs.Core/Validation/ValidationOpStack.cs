@@ -41,13 +41,14 @@ namespace Wacs.Core.Validation
                 PushType(type);
             }
         }
-        
+
         public void PushI32(int i32 = 0) {
             Value value = i32; 
             if (value.Type != ValType.I32)
                 throw new InvalidDataException($"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.I32}");
             _stack.Push(value);
         }
+
         public void PushI64(long i64 = 0) {
             Value value = i64;
             if (value.Type != ValType.I64)
@@ -105,6 +106,7 @@ namespace Wacs.Core.Validation
             
             return value;
         }
+
         public Value PopI64() {
             if (_stack.Count == 0)
                 throw new InvalidOperationException("Operand stack underflow.");
@@ -169,7 +171,7 @@ namespace Wacs.Core.Validation
 
         public void ValidateStack(ResultType types, bool keep = true)
         {
-            Stack<Value> aside = new Stack<Value>();
+            var aside = new Stack<Value>();
             //Pop vals off the stack
             for (int i = 0, l = types.Types.Length; i < l; ++i)
             {
@@ -211,7 +213,7 @@ namespace Wacs.Core.Validation
     public class UnreachableOpStack : IValidationOpStack
     {
         public void Clear() { }
-        
+
         public void Push(ResultType types) {}
         public void PushI32(int i32 = 0) {}
         public void PushI64(long i64 = 0) { }

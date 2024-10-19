@@ -6,11 +6,8 @@ namespace Wacs.Core.Runtime.Types
 {
     public class MemoryInstance
     {
-        public MemoryType Type { get; }
+        private const uint PageSize = 0x01_00_00; //64Ki
         private byte[] _data;
-        public byte[] Data => _data;
-
-        public const uint PageSize = 0x01_00_00; //64Ki
 
         public MemoryInstance(MemoryType type)
         {
@@ -18,6 +15,9 @@ namespace Wacs.Core.Runtime.Types
             uint initialSize = type.Limits.Minimum * PageSize;
             _data = new byte[initialSize];
         }
+
+        public MemoryType Type { get; }
+        private byte[] Data => _data;
 
         /// <summary>
         /// @Spec 4.5.3.9. Growing memories
@@ -33,7 +33,7 @@ namespace Wacs.Core.Runtime.Types
             }
             
             var newLimits = new Limits(Type.Limits) {
-                Minimum = (uint)len
+                Minimum = len
             };
             var validator = TableType.Validator.Limits;
             try

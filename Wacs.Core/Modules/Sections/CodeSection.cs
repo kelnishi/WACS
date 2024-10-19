@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -14,30 +13,30 @@ namespace Wacs.Core
         /// </summary>
         public class FuncLocalsBody
         {
+            private FuncLocalsBody((uint Number, ValType Type)[] compressedLocals, Expression expr) => 
+                (CompressedLocals, Body) = (compressedLocals, expr);
+
             private (uint Number, ValType Type)[] CompressedLocals { get; }
             public Expression Body { get; }
-            
+
             public ValType[] Locals => 
                 CompressedLocals
                     .SelectMany(local => Enumerable.Repeat(local.Type, (int)local.Number))
                     .ToArray();
-            
-            
-            private FuncLocalsBody((uint Number, ValType Type)[] compressedLocals, Expression expr) => 
-                (CompressedLocals, Body) = (compressedLocals, expr);
 
             private static (uint Number, ValType Type) ParseCompressedLocal(BinaryReader reader) =>
                 (reader.ReadLeb128_u32(), ValueTypeParser.Parse(reader));
-            
+
             public static FuncLocalsBody Parse(BinaryReader reader) =>
                 new(reader.ParseVector(ParseCompressedLocal), Expression.Parse(reader));
         }
-        
+
         public class CodeDesc
         {
-            public UInt32 Size { get; internal set; }
-            public FuncLocalsBody Code { get; internal set; }
-            private CodeDesc(UInt32 size, FuncLocalsBody code) => (Size, Code) = (size, code);
+            private CodeDesc(uint size, FuncLocalsBody code) => (Size, Code) = (size, code);
+            private uint Size { get; }
+            public FuncLocalsBody Code { get; }
+
             public static CodeDesc Parse(BinaryReader reader)
             {
                 uint size = reader.ReadLeb128_u32();

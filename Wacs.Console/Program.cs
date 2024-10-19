@@ -1,17 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using CommandLine;
 using FluentValidation;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 
-
 namespace Wacs.Console
 {
+    // ReSharper disable once ClassNeverInstantiated.Global
     public class Options
     {
         [Value(0, Required = true, HelpText = "Path to the WebAssembly (.wasm) file.")]
-        public string WasmFilePath { get; set; }
+        public string WasmFilePath { get; init; } = "";
     }
 
     public class Program
@@ -19,8 +20,8 @@ namespace Wacs.Console
         public static void Main(string[] args)
         {
             Parser.Default.ParseArguments<Options>(args)
-                .WithParsed<Options>(options => new Program().Run(options.WasmFilePath))
-                .WithNotParsed(errors => HandleParseError(errors));
+                .WithParsed(options => new Program().Run(options.WasmFilePath))
+                .WithNotParsed(HandleParseError);
         }
 
         private static void HandleParseError(IEnumerable<Error> errors)
@@ -31,47 +32,45 @@ namespace Wacs.Console
 
         private void Run(string wasmFilePath)
         {
-            using (var fileStream = new System.IO.FileStream(wasmFilePath, System.IO.FileMode.Open))
+            using var fileStream = new FileStream(wasmFilePath, FileMode.Open);
+            var module = BinaryModuleParser.ParseWasm(fileStream);
+            var validationResult = module.Validate();
+            foreach (var error in validationResult.Errors)
             {
-                var module = BinaryModuleParser.ParseWasm(fileStream);
-                var validationResult = module.Validate();
-                foreach (var error in validationResult.Errors)
+                switch (error.Severity)
                 {
-                    switch (error.Severity)
-                    {
-                        case Severity.Warning:
-                        case Severity.Error:
-                            System.Console.Error.WriteLine($"Validation {error.Severity}: {error.ErrorMessage}");
-                            break;
-                    }
+                    case Severity.Warning:
+                    case Severity.Error:
+                        System.Console.Error.WriteLine($"Validation {error.Severity}: {error.ErrorMessage}");
+                        break;
                 }
-
-                var runtime = new WasmRuntime();
-                runtime.BindHostFunction("env","sayc", (scalars) =>
-                {
-                    char c = Convert.ToChar(scalars[0]);
-                    System.Console.Write(c);
-                    return Array.Empty<object>();
-                });
-                
-                var modInst = runtime.InstantiateModule(module, new(){SkipModuleValidation = true});
-                runtime.RegisterModule("hello", modInst);
-
-                var mainAddr = runtime.GetExportedFunction("hello", "main");
-                if (mainAddr != null)
-                {
-                    runtime.Invoke(mainAddr);
-                    int steps = 0;
-                    while (runtime.ProcessThread())
-                    {
-                        steps += 1;
-                    }
-                    System.Console.WriteLine($"Process used {steps} gas.");
-                }
-                
-                
-                System.Console.WriteLine(modInst);
             }
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction("env","sayc", (scalars) =>
+            {
+                char c = Convert.ToChar(scalars[0]);
+                System.Console.Write(c);
+                return Array.Empty<object>();
+            });
+                
+            var modInst = runtime.InstantiateModule(module, new(){SkipModuleValidation = true});
+            runtime.RegisterModule("hello", modInst);
+
+            var mainAddr = runtime.GetExportedFunction("hello", "main");
+            if (mainAddr != null)
+            {
+                runtime.Invoke(mainAddr);
+                int steps = 0;
+                while (runtime.ProcessThread())
+                {
+                    steps += 1;
+                }
+                System.Console.WriteLine($"Process used {steps} gas.");
+            }
+                
+                
+            System.Console.WriteLine(modInst);
         }
     }
 }

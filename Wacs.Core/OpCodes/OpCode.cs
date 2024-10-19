@@ -1,4 +1,3 @@
-using System;
 using Wacs.Core.Attributes;
 
 namespace Wacs.Core.OpCodes
@@ -289,6 +288,7 @@ namespace Wacs.Core.OpCodes
         // GC Proposal Operators
         // =========================
         
+        // ReSharper disable once InconsistentNaming
         GCPrefix = 0xFB,
         
         // =========================
@@ -324,6 +324,7 @@ namespace Wacs.Core.OpCodes
         // For brevity, only a few examples are included.
 
         // Prefix: 0xFD
+        // ReSharper disable once InconsistentNaming
         SIMDPrefix = 0xFD,
         [OpCode("v128.load")] V128Load = 0xFD00,
         [OpCode("v128.store")] V128Store = 0xFD01,

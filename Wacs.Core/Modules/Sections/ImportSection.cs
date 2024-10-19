@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
@@ -22,29 +20,29 @@ namespace Wacs.Core
                 .Select(import => import.Desc as ImportDesc.FuncDesc)
                 .Where(funcDesc => funcDesc != null)
                 .Select(funcDesc => new Function { TypeIndex = funcDesc!.TypeIndex, IsImport = true })
-                .ToList().AsReadOnly(); 
-        
+                .ToList().AsReadOnly();
+
         public ReadOnlyCollection<TableType> ImportedTables =>
             Imports
                 .Select(import => import.Desc as ImportDesc.TableDesc)
                 .Where(tableDesc => tableDesc != null)
                 .Select(tableDesc => tableDesc!.TableDef)
-                .ToList().AsReadOnly(); 
-        
+                .ToList().AsReadOnly();
+
         public ReadOnlyCollection<MemoryType> ImportedMems =>
             Imports
                 .Select(import => import.Desc as ImportDesc.MemDesc)
                 .Where(memDesc => memDesc != null)
                 .Select(memDesc => memDesc!.MemDef)
-                .ToList().AsReadOnly(); 
-        
+                .ToList().AsReadOnly();
+
         public ReadOnlyCollection<Global> ImportedGlobals =>
             Imports
                 .Select(import => import.Desc as ImportDesc.GlobalDesc)
                 .Where(globDesc => globDesc != null)
                 .Select(globDesc => new Global(globDesc!.GlobalDef))
-                .ToList().AsReadOnly(); 
-        
+                .ToList().AsReadOnly();
+
         /// <summary>
         /// @Spec 2.5.11. Imports
         /// </summary>
@@ -67,13 +65,13 @@ namespace Wacs.Core
                 }
             }
         }
-        
+
         public abstract class ImportDesc
         {
             public class FuncDesc : ImportDesc
             {
                 public TypeIdx TypeIndex { get; internal set; }
-                
+
                 /// <summary>
                 /// @Spec 3.2.7.1. func functype
                 /// </summary>
@@ -81,7 +79,7 @@ namespace Wacs.Core
                     public Validator() {
                         // Only checks that the FunctionType exists, validation happens on the section
                         RuleFor(desc => desc.TypeIndex)
-                            .Must((desc, index, ctx) => ctx.GetValidationContext().Types.Contains(index));
+                            .Must((_, index, ctx) => ctx.GetValidationContext().Types.Contains(index));
                     }
                 }
             }
@@ -89,7 +87,7 @@ namespace Wacs.Core
             public class TableDesc : ImportDesc
             {
                 public TableType TableDef { get; internal set; } = null!;
-                
+
                 /// <summary>
                 /// @Spec 3.2.7.2. table tabletype
                 /// </summary>
@@ -104,7 +102,7 @@ namespace Wacs.Core
             public class MemDesc : ImportDesc
             {
                 public MemoryType MemDef { get; internal set; } = null!;
-                
+
                 /// <summary>
                 /// @Spec 3.2.7.3. mem memtype
                 /// </summary>
@@ -119,7 +117,7 @@ namespace Wacs.Core
             public class GlobalDesc : ImportDesc
             {
                 public GlobalType GlobalDef { get; internal set; } = null!;
-                
+
                 /// <summary>
                 /// @Spec 3.2.7.4. global globaltype
                 /// </summary>
@@ -143,7 +141,7 @@ namespace Wacs.Core
                 ExternalKind.Global => new Module.ImportDesc.GlobalDesc { GlobalDef = GlobalType.Parse(reader) },
                 var kind => throw new InvalidDataException($"Malformed Module Import section {kind} at {reader.BaseStream.Position}")
             };
-        
+
         private static Module.Import ParseImport(BinaryReader reader) => 
             new()
             {
@@ -157,7 +155,6 @@ namespace Wacs.Core
         /// </summary>
         private static Module.Import[] ParseImportSection(BinaryReader reader) =>
             reader.ParseVector(ParseImport);
-        
     }
 
 }

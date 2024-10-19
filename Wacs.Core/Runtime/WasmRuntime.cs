@@ -11,21 +11,27 @@ using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime
 {
+    public class RuntimeOptions
+    {
+        public bool SkipModuleValidation = false;
+        public bool SkipStartFunction = false;
+    }
+    
     public class WasmRuntime
     {
-        public Store Store { get; }
-
-        public ExecContext Context { get; }
-        
-        private readonly Dictionary<string, ModuleInstance> _modules = new();
-
         private readonly Dictionary<(string module, string entity), IAddress> _entityBindings = new();
+
+        private readonly Dictionary<string, ModuleInstance> _modules = new();
 
         public WasmRuntime()
         {
             Store = new Store();
             Context = new ExecContext(Store, InstructionSequence.Empty);
         }
+
+        private Store Store { get; }
+
+        private ExecContext Context { get; }
 
         public void RegisterModule(string moduleName, ModuleInstance moduleInstance)
         {
@@ -55,8 +61,7 @@ namespace Wacs.Core.Runtime
 
         public FuncAddr? GetExportedFunction(string moduleName, string entityName)
         {
-            var addr = GetBoundEntity((moduleName, entityName)) as FuncAddr;
-            if (addr != null)
+            if (GetBoundEntity((moduleName, entityName)) is FuncAddr addr)
             {
                 return addr;
             }
@@ -66,13 +71,12 @@ namespace Wacs.Core.Runtime
 
         private IAddress? GetBoundEntity((string module, string entity) id) =>
             _entityBindings.GetValueOrDefault(id);
-        
+
         public void BindHostFunction(string moduleName, string entityName, HostFunction.HostFunctionDelegate func)
         {
             //TODO: Use reflection or some shit to figure out the type
             var type = new FunctionType(new ResultType(ValType.I32), ResultType.Empty);
-            var hostFunc = new HostFunction(type, func);
-            var funcAddr = Store.AddFunction(hostFunc);
+            var funcAddr = AllocateHostFunc(Store, type, func);
             _entityBindings[(moduleName, entityName)] = funcAddr;
         }
 
@@ -80,7 +84,7 @@ namespace Wacs.Core.Runtime
         {
             Context.Invoke(funcAddr);
         }
-        
+
         public bool ProcessThread()
         {
             var comp = Context.Next();
@@ -109,8 +113,7 @@ namespace Wacs.Core.Runtime
                     case Module.ImportDesc.FuncDesc funcDesc:
                         // @Spec 4.5.3.2. @note: Host Functions must be bound to the environment prior to module instantiation!
                         var funcSig = moduleInstance.Types[funcDesc.TypeIndex];
-                        var funcAddr = GetBoundEntity(entityId) as FuncAddr;
-                        if (funcAddr == null)
+                        if (GetBoundEntity(entityId) is not FuncAddr funcAddr)
                             throw new NotSupportedException(
                                 $"The imported Function was not provided by the environment: {entityId.module}.{entityId.entity} {funcSig.ToNotation()}");
                         var functionInstance = Store[funcAddr];
@@ -122,8 +125,7 @@ namespace Wacs.Core.Runtime
                         break;
                     case Module.ImportDesc.TableDesc tableDesc:
                         var tableType = tableDesc.TableDef;
-                        var tableAddr = GetBoundEntity(entityId) as TableAddr;
-                        if (tableAddr == null)
+                        if (GetBoundEntity(entityId) is not TableAddr tableAddr)
                             throw new NotSupportedException(
                                 $"The imported Table was not provided by the environment: {entityId.module}.{entityId.entity}");
                         var tableInstance = Store[tableAddr];
@@ -135,8 +137,7 @@ namespace Wacs.Core.Runtime
                         break;
                     case Module.ImportDesc.MemDesc memDesc:
                         var memType = memDesc.MemDef;
-                        var memAddr = GetBoundEntity(entityId) as MemAddr;
-                        if (memAddr == null)
+                        if (GetBoundEntity(entityId) is not MemAddr memAddr)
                             throw new NotSupportedException(
                                 $"The imported Memory was not provided by the environment: {entityId.module}.{entityId.entity}");
                         var memInstance = Store[memAddr];
@@ -148,8 +149,7 @@ namespace Wacs.Core.Runtime
                         break;
                     case Module.ImportDesc.GlobalDesc globalDesc:
                         var globalType = globalDesc.GlobalDef;
-                        var globalAddr = GetBoundEntity(entityId) as GlobalAddr;
-                        if (globalAddr == null)
+                        if (GetBoundEntity(entityId) is not GlobalAddr globalAddr)
                             throw new NotSupportedException(
                                 $"The imported Global was not provided by the environment: {entityId.module}.{entityId.entity}");
                         var globalInstance = Store[globalAddr];
@@ -232,12 +232,13 @@ namespace Wacs.Core.Runtime
             }
             return moduleInstance;
         }
+
         /// <summary>
         /// @Spec 4.5.4. Instantiation
         /// </summary>
         public ModuleInstance InstantiateModule(Module module, RuntimeOptions? options = default)
         {
-            options = options ?? new RuntimeOptions();
+            options ??= new RuntimeOptions();
             try
             {
                 //1
@@ -352,7 +353,7 @@ namespace Wacs.Core.Runtime
             var funcAddr = store.AddFunction(funcInst);
             return funcAddr;
         }
-        
+
         /// <summary>
         /// @Spec 4.5.3.2. Host Functions
         /// </summary>
@@ -412,7 +413,7 @@ namespace Wacs.Core.Runtime
             var dataAddr = store.AddData(dataInst);
             return dataAddr;
         }
-        
+
         /// <summary>
         /// @Spec 4.5.4. Instantiation
         /// Step 8.1
@@ -427,7 +428,7 @@ namespace Wacs.Core.Runtime
 
         private List<Value> EvaluateInitializers(Expression[] inis)
         {
-            return inis.Select(ini => EvaluateExpression(ini)).ToList();
+            return inis.Select(EvaluateExpression).ToList();
         }
     }
 }

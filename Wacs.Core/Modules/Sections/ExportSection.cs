@@ -1,4 +1,3 @@
-using System;
 using System.IO;
 using FluentValidation;
 using Wacs.Core.Types;
@@ -35,12 +34,13 @@ namespace Wacs.Core
                         v.Add(new ExportDesc.FuncDesc.Validator());
                         v.Add(new ExportDesc.TableDesc.Validator());
                         v.Add(new ExportDesc.MemDesc.Validator());
+                        v.Add(new ExportDesc.GlobalDesc.Validator());
                     });
                 }
             }
         }
-        
-        
+
+
         public abstract class ExportDesc
         {
             public class FuncDesc : ExportDesc
@@ -55,7 +55,7 @@ namespace Wacs.Core
                     public Validator()
                     {
                         RuleFor(fd => fd.FunctionIndex)
-                            .Must((fd, index, ctx) => ctx.GetValidationContext().Funcs.Contains(index));
+                            .Must((_, index, ctx) => ctx.GetValidationContext().Funcs.Contains(index));
                     }
                 }
             }
@@ -63,7 +63,7 @@ namespace Wacs.Core
             public class TableDesc : ExportDesc
             {
                 public TableIdx TableIndex { get; internal set; }
-                
+
                 /// <summary>
                 /// @Spec 3.4.8.3. table
                 /// </summary>
@@ -72,7 +72,7 @@ namespace Wacs.Core
                     public Validator()
                     {
                         RuleFor(td => td.TableIndex)
-                            .Must((fd, index, ctx) => ctx.GetValidationContext().Tables.Contains(index));
+                            .Must((_, index, ctx) => ctx.GetValidationContext().Tables.Contains(index));
                     }
                 }
             }
@@ -80,7 +80,7 @@ namespace Wacs.Core
             public class MemDesc : ExportDesc
             {
                 public MemIdx MemoryIndex { get; internal set; }
-                
+
                 /// <summary>
                 /// @Spec 3.4.8.4. mem
                 /// </summary>
@@ -89,7 +89,7 @@ namespace Wacs.Core
                     public Validator()
                     {
                         RuleFor(md => md.MemoryIndex)
-                            .Must((md, index, ctx) => ctx.GetValidationContext().Mems.Contains(index));
+                            .Must((_, index, ctx) => ctx.GetValidationContext().Mems.Contains(index));
                     }
                 }
             }
@@ -97,7 +97,7 @@ namespace Wacs.Core
             public class GlobalDesc : ExportDesc
             {
                 public GlobalIdx GlobalIndex { get; internal set; }
-                
+
                 /// <summary>
                 /// @Spec 3.4.8.5. global
                 /// </summary>
@@ -106,11 +106,10 @@ namespace Wacs.Core
                     public Validator()
                     {
                         RuleFor(gd => gd.GlobalIndex)
-                            .Must((gd, index, ctx) => ctx.GetValidationContext().Globals.Contains(index));
+                            .Must((_, index, ctx) => ctx.GetValidationContext().Globals.Contains(index));
                     }
                 }
             }
-            
         }
     }
     
@@ -124,19 +123,18 @@ namespace Wacs.Core
                 ExternalKind.Global => new Module.ExportDesc.GlobalDesc { GlobalIndex = (GlobalIdx)reader.ReadLeb128_u32()},
                 var kind => throw new InvalidDataException($"Malformed Module Export section {kind} at {reader.BaseStream.Position - 1}")
             };
-            
+
         private static Module.Export ParseExport(BinaryReader reader) =>
             new()
             {
                 Name = reader.ReadUTF8String(),
                 Desc = ParseExportDesc(reader)
             };
-        
+
         /// <summary>
         /// @Spec 5.5.10 Export Section
         /// </summary>
         private static Module.Export[] ParseExportSection(BinaryReader reader) =>
             reader.ParseVector(ParseExport);
-
     }
 }

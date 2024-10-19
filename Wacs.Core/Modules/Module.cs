@@ -1,12 +1,8 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using FluentValidation;
 using FluentValidation.Results;
-using Wacs.Core.Modules.Sections;
-using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -20,7 +16,7 @@ namespace Wacs.Core
     public partial class Module
     {
         internal Module() {}
-        
+
         public ValidationResult Validate() => new ModuleValidator().Validate(this);
         public void ValidateAndThrow() => new ModuleValidator().ValidateAndThrow(this);
     }
@@ -62,7 +58,7 @@ namespace Wacs.Core
 
             return module;
         }
-        
+
         /// <summary>
         /// @Spec 5.5.2. Sections
         /// </summary>

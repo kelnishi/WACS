@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.IO;
-using Wacs.Core.Instructions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
@@ -8,10 +7,13 @@ namespace Wacs.Core.Runtime
 {
     public class Frame
     {
+        public readonly Stack<Label> Labels = new();
+
+        public Frame(ModuleInstance moduleInstance, FunctionType type) =>
+            (Module, Type) = (moduleInstance, type);
+
         public ModuleInstance Module { get; }
         public LocalsSpace Locals { get; set; } = new();
-        
-        public Stack<Label> Labels = new();
 
         public InstructionPointer ContinuationAddress { get; set; } = InstructionPointer.Nil;
 
@@ -31,19 +33,14 @@ namespace Wacs.Core.Runtime
                 return result;
             }
         }
-        
-        public bool Contains(LabelIdx index) =>
-            index.Value < Labels.Count;
 
         public Label Label => Labels.Peek();
-        
-        public FunctionType Type { get; set; }
+
+        public FunctionType Type { get; }
 
         public int Arity => (int)Type.ResultType.Length;
 
-        public Frame(ModuleInstance moduleInstance, FunctionType type) =>
-            (Module, Type) = (moduleInstance, type);
-        
-
+        public bool Contains(LabelIdx index) =>
+            index.Value < Labels.Count;
     }
 }

@@ -1,9 +1,7 @@
-using System;
 using System.IO;
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Runtime.Types;
-using Wacs.Core.Types;
+using Wacs.Core.Runtime;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions
 {
@@ -18,7 +16,7 @@ namespace Wacs.Core.Instructions
         public abstract OpCode OpCode { get; }
 
         public abstract void Validate(WasmValidationContext context);
-        
+
         /// <summary>
         /// Executes the instruction within the given execution context.
         /// </summary>

@@ -9,20 +9,20 @@ namespace Wacs.Core.Types
     /// </summary>
     public class GlobalType
     {
+        private GlobalType(ValType valtype, Mutability mut) =>
+            (ContentType, Mutability) = (valtype, mut);
+
         /// <summary>
         /// The mutability of the global variable (immutable or mutable).
         /// </summary>
-        public Mutability Mutability { get; set; }
-        
+        public Mutability Mutability { get; }
+
         /// <summary>
         /// The value type of the global variable.
         /// </summary>
-        public ValType ContentType { get; set; }
+        public ValType ContentType { get; }
 
         public ResultType ResultType => ContentType.SingleResult();
-
-        private GlobalType(ValType valtype, Mutability mut) =>
-            (ContentType, Mutability) = (valtype, mut);
 
         /// <summary>
         /// @Spec 5.3.10. Global Types
@@ -44,7 +44,6 @@ namespace Wacs.Core.Types
                 RuleFor(gt => gt.ContentType).IsInEnum();
             }
         }
-            
     }
 
     /// <summary>

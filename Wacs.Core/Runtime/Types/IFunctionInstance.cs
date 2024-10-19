@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime.Types

@@ -9,18 +9,21 @@ namespace Wacs.Core.Types
     /// </summary>
     public class ResultType
     {
-        public ValType[] Types { get; set; }
-        
-        public uint Length => (uint)(Types?.Length ?? 0);
-        public int Arity => (int)Length;
-    
-        public string ToNotation() => $"[{string.Join(" ",Types)}]";
+        public static readonly ResultType Empty = new();
 
         private ResultType() => Types = Array.Empty<ValType>();
         public ResultType(ValType single) => Types = new[] { single };
-        
+
         private ResultType(BinaryReader reader) =>
             Types = reader.ParseVector(ValueTypeParser.Parse);
+
+        public ValType[] Types { get; }
+
+        // ReSharper disable once ConditionalAccessQualifierIsNonNullableAccordingToAPIContract
+        public uint Length => (uint)(Types?.Length ?? 0);
+        public int Arity => (int)Length;
+
+        public string ToNotation() => $"[{string.Join(" ",Types)}]";
 
         public bool Matches(ResultType other)
         {
@@ -34,12 +37,10 @@ namespace Wacs.Core.Types
 
             return true;
         }
-        
+
         /// <summary>
         /// @Spec 5.3.5 Result Types
         /// </summary>
         public static ResultType Parse(BinaryReader reader) => new(reader);
-
-        public static readonly ResultType Empty = new();
     }
 }

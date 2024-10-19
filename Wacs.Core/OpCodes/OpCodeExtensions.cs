@@ -1,16 +1,13 @@
-using System;
 using System.Collections.Concurrent;
 using System.IO;
-using System.Reflection;
 using Wacs.Core.Attributes;
-using Wacs.Core.OpCodes;
 
 namespace Wacs.Core.OpCodes
 {
     public static class OpCodeExtensions
     {
         private static readonly ConcurrentDictionary<OpCode, string> MnemonicCache = new();
-        
+
         /// <summary>
         /// Retrieves the WAT mnemonic associated with the given opcode.
         /// </summary>

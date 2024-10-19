@@ -14,18 +14,18 @@ namespace Wacs.Core
         /// @Spec 2.5.6 Globals
         /// </summary>
         public List<Global> Globals { get; internal set; } = null!;
-        
+
         /// <summary>
         /// @Spec 2.5.6. Globals
         /// </summary>
         public class Global
         {
-            public GlobalType Type;
-            public Expression Initializer;
+            public readonly Expression Initializer;
+            public readonly GlobalType Type;
 
             public Global(GlobalType type) =>
                 (Type, Initializer) = (type, Expression.Empty);
-            
+
             private Global(BinaryReader reader) =>
                 (Type, Initializer) = (GlobalType.Parse(reader), Expression.Parse(reader));
 
@@ -56,7 +56,6 @@ namespace Wacs.Core
                         });
                 }
             }
-            
         }
     }
     

@@ -1,9 +1,6 @@
-using System;
-using System.Data;
-
 namespace Wacs.Core.Types
 {
-    public enum ElementType: UInt32
+    public enum ElementType: uint
     {
         /// <summary>
         /// **Flag Value 0 (0x00)**:

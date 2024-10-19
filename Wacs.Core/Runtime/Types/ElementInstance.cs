@@ -8,13 +8,13 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class ElementInstance
     {
+        public ElementInstance(ReferenceType type, List<Value> refs) =>
+            (Type, Elements) = (type, refs);
+
         public ReferenceType Type { get; }
 
         //Refs
         public List<Value> Elements { get; }
-
-        public ElementInstance(ReferenceType type, List<Value> refs) =>
-            (Type, Elements) = (type, refs);
 
         public void Drop()
         {
