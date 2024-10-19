@@ -18,7 +18,7 @@ namespace Wacs.Core.Runtime.Types
         public MemAddrs MemAddrs { get; } = new();
         public GlobalAddrs GlobalAddrs { get; } = new();
         public ElemAddrs ElemAddrs { get; } = new();
-        public List<DataAddr> DataAddrs { get; } = new();
+        public DataAddrs DataAddrs { get; } = new();
         public List<ExportInstance> Exports { get; } = new();
     }
 }

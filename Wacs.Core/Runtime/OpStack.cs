@@ -19,6 +19,7 @@ namespace Wacs.Core.Runtime
         }
 
         public void PushI32(int value) => _stack.Push(value);
+        public void PushI32(uint value) => _stack.Push(value);
         public void PushI64(long value) => _stack.Push(value);
         public void PushF32(float value) => _stack.Push(value);
         public void PushF64(double value) => _stack.Push(value);
@@ -62,6 +63,7 @@ namespace Wacs.Core.Runtime
                 //We could check the types here, but the spec just says to YOLO it.
                 results.Push(PopAny());
             }
+
             return results;
         }
 
@@ -77,5 +79,4 @@ namespace Wacs.Core.Runtime
             return results.Select(value => value.Scalar).ToArray();
         }
     }
-
 }

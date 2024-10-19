@@ -71,5 +71,10 @@ namespace Wacs.Core.Runtime
             Datas.Add(data);
             return addr;
         }
+
+        public void DropData(DataAddr addr)
+        {
+            Datas[(Index)addr] = DataInstance.Empty;
+        }
     }
 }

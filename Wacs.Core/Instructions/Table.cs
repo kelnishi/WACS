@@ -20,7 +20,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                ()=>$"Instruction table.get failed to get table {X} from context");
+                () => $"Instruction table.get failed to get table {X} from context");
             var type = context.Tables[X];
             context.OpStack.PopI32();
             context.OpStack.PushType(type.ElementType.StackType());
@@ -33,13 +33,13 @@ namespace Wacs.Core.Instructions
         {
             //2.
             context.Assert(context.Frame.Module.TableAddrs.Contains(tableIndex),
-                ()=>$"Instruction table.get could not address table {tableIndex}");
+                () => $"Instruction table.get could not address table {tableIndex}");
             //3.
             var a = context.Frame.Module.TableAddrs[tableIndex];
-            
+
             //4.
             context.Assert(context.Store.Contains(a),
-                ()=>$"Instruction table.get failed to get table at address {a} from Store");
+                () => $"Instruction table.get failed to get table at address {a} from Store");
             //5.
             var tab = context.Store[a];
             //6,7
@@ -49,6 +49,7 @@ namespace Wacs.Core.Instructions
             {
                 throw new TrapException("Trap in table.get");
             }
+
             //9.
             var val = tab.Elements[i];
             //10.
@@ -73,7 +74,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                ()=>$"Instruction table.set failed to get table {X} from context");
+                () => $"Instruction table.set failed to get table {X} from context");
             var type = context.Tables[X];
             context.OpStack.PopType(type.ElementType.StackType());
             context.OpStack.PopI32();
@@ -86,23 +87,23 @@ namespace Wacs.Core.Instructions
         {
             //2.
             context.Assert(context.Frame.Module.TableAddrs.Contains(tableIndex),
-                ()=>$"Instruction table.get could not address table {tableIndex}");
+                () => $"Instruction table.get could not address table {tableIndex}");
             //3.
             var a = context.Frame.Module.TableAddrs[tableIndex];
-            
+
             //4.
             context.Assert(context.Store.Contains(a),
-                ()=>$"Instruction table.set failed to get table at address {a} from Store");
+                () => $"Instruction table.set failed to get table at address {a} from Store");
             //5.
             var tab = context.Store[a];
             //6.
             context.Assert(context.OpStack.Peek().IsRef,
-                ()=>$"Instruction table.set found non reftype on top of the Stack");
+                () => $"Instruction table.set found non reftype on top of the Stack");
             //7.
             var val = context.OpStack.PopRefType();
             //8.
             context.Assert(context.OpStack.Peek().IsI32,
-                ()=>$"Instruction table.set found incorrect type on top of the Stack");
+                () => $"Instruction table.set found incorrect type on top of the Stack");
             //9.
             int i = context.OpStack.PopI32();
             //10.
@@ -110,6 +111,7 @@ namespace Wacs.Core.Instructions
             {
                 throw new TrapException("Trap in table.set");
             }
+
             //11.
             tab.Elements[i] = val;
         }
@@ -125,7 +127,6 @@ namespace Wacs.Core.Instructions
     // 0xFC0C
     public class InstTableInit : InstructionBase
     {
-        private const long TwoTo32 = 0x1_0000_0000;
         public override OpCode OpCode => OpCode.TableInit;
         private TableIdx X { get; set; }
         private ElemIdx Y { get; set; }
@@ -134,13 +135,13 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                ()=>$"Instruction table.init is invalid. Table {X} not in the Context.");
+                () => $"Instruction table.init is invalid. Table {X} not in the Context.");
             var t1 = context.Tables[X];
             context.Assert(context.Elements.Contains(Y),
-                ()=>$"Instruction table.init is invalid. Element {Y} not in the Context.");
+                () => $"Instruction table.init is invalid. Element {Y} not in the Context.");
             var t2 = context.Elements[Y];
             context.Assert(t1.ElementType == t2.Type,
-                ()=>$"Instruction table.init is invalid. Type mismatch {t1.ElementType} != {t2.Type}");
+                () => $"Instruction table.init is invalid. Type mismatch {t1.ElementType} != {t2.Type}");
             context.OpStack.PopI32();
             context.OpStack.PopI32();
             context.OpStack.PopI32();
@@ -153,37 +154,37 @@ namespace Wacs.Core.Instructions
         {
             //2.
             context.Assert(context.Frame.Module.TableAddrs.Contains(x),
-                ()=>$"Instruction table.init failed. Table address not found in the context.");
+                () => $"Instruction table.init failed. Table address not found in the context.");
             //3.
             var ta = context.Frame.Module.TableAddrs[x];
             //4.
             context.Assert(context.Store.Contains(ta),
-                ()=>$"Instruction table.init failed. Invalid table address.");
+                () => $"Instruction table.init failed. Invalid table address.");
             //5.
             var tab = context.Store[ta];
             //6.
             context.Assert(context.Frame.Module.ElemAddrs.Contains(y),
-                ()=>$"Instruction table.init failed. Element address not found in the context.");
+                () => $"Instruction table.init failed. Element address not found in the context.");
             //7.
             var ea = context.Frame.Module.ElemAddrs[y];
             //8.
             context.Assert(context.Store.Contains(ea),
-                ()=>$"Instruction table.init failed. Invalid element address");
+                () => $"Instruction table.init failed. Invalid element address");
             //9.
             var elem = context.Store[ea];
             //10.
-            context.Assert(context.OpStack.Peek().IsI32, 
-                ()=>$"Instruction table.init failed. Expected i32 on top of the stack.");
+            context.Assert(context.OpStack.Peek().IsI32,
+                () => $"Instruction table.init failed. Expected i32 on top of the stack.");
             //11.
             int n = context.OpStack.PopI32();
             //12.
-            context.Assert(context.OpStack.Peek().IsI32, 
-                ()=>$"Instruction table.init failed. Expected i32 on top of the stack.");
+            context.Assert(context.OpStack.Peek().IsI32,
+                () => $"Instruction table.init failed. Expected i32 on top of the stack.");
             //13.
             int s = context.OpStack.PopI32();
             //14.
-            context.Assert(context.OpStack.Peek().IsI32, 
-                ()=>$"Instruction table.init failed. Expected i32 on top of the stack.");
+            context.Assert(context.OpStack.Peek().IsI32,
+                () => $"Instruction table.init failed. Expected i32 on top of the stack.");
             //15.
             int d = context.OpStack.PopI32();
             //16.
@@ -195,6 +196,7 @@ namespace Wacs.Core.Instructions
             {
                 return;
             }
+
             //18.
             var val = elem.Elements[s];
             //19.
@@ -205,19 +207,19 @@ namespace Wacs.Core.Instructions
             InstTableSet.ExecuteInstruction(context, x);
             //22.
             long check = (long)d + 1;
-            context.Assert(check < TwoTo32,
-                ()=>$"Instruction table.init failed. Invalid table size");
+            context.Assert(check < Constants.TwoTo32,
+                () => $"Instruction table.init failed. Invalid table size");
             //23.
-            context.OpStack.PushI32(d+1);
+            context.OpStack.PushI32(d + 1);
             //24.
             check = (long)s + 1;
-            context.Assert(check < TwoTo32,
-                ()=>$"Instruction table.init failed. Invalid table size");
+            context.Assert(check < Constants.TwoTo32,
+                () => $"Instruction table.init failed. Invalid table size");
             //25.
-            context.OpStack.PushI32(s+1);
+            context.OpStack.PushI32(s + 1);
             //26.
-            context.OpStack.PushI32(n-1);
-            ExecuteInstruction(context,x,y);
+            context.OpStack.PushI32(n - 1);
+            ExecuteInstruction(context, x, y);
         }
 
         // @Spec 5.4.5. Table Instructions
@@ -236,7 +238,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
     }
-    
+
     // 0xFC0F
     public class InstElemDrop : InstructionBase
     {
@@ -247,19 +249,20 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Elements.Contains(X),
-                ()=>$"Instruction elem.drop is invalid. Element {X} was not in the Context");
+                () => $"Instruction elem.drop is invalid. Element {X} was not in the Context");
         }
 
         // @Spec 4.4.6.8. elem.drop x
-        public override void Execute(ExecContext context) {
+        public override void Execute(ExecContext context)
+        {
             //2.
             context.Assert(context.Frame.Module.ElemAddrs.Contains(X),
-                ()=>$"Instruction elem.drop failed. Element {X} was not in the context");
+                () => $"Instruction elem.drop failed. Element {X} was not in the context");
             //3.
             var a = context.Frame.Module.ElemAddrs[X];
             //4.
             context.Assert(context.Store.Contains(a),
-                ()=>$"Instruction elem.drop failed. Element {a} was not in the Store.");
+                () => $"Instruction elem.drop failed. Element {a} was not in the Store.");
             //5.
             context.Store[a].Drop();
         }
@@ -277,11 +280,10 @@ namespace Wacs.Core.Instructions
             return this;
         }
     }
-    
+
     // 0xFC0E
     public class InstTableCopy : InstructionBase
     {
-        private const long TwoTo32 = 0x1_0000_0000;
         public override OpCode OpCode => OpCode.TableCopy;
         private TableIdx SrcY { get; set; }
         private TableIdx DstX { get; set; }
@@ -290,56 +292,56 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(DstX),
-                ()=>$"Instruction table.copy failed. Table index {DstX} does not exist in Context");
+                () => $"Instruction table.copy failed. Table index {DstX} does not exist in Context");
             var t1 = context.Tables[DstX];
             context.Assert(context.Tables.Contains(SrcY),
-                ()=>$"Instruction table.copy failed. Table index {SrcY} does not exist in Context");
+                () => $"Instruction table.copy failed. Table index {SrcY} does not exist in Context");
             var t2 = context.Tables[SrcY];
             context.Assert(t1.ElementType == t2.ElementType,
-                ()=>$"Instruction table.copy failed. Table type mismatch {t1.ElementType} != {t2.ElementType}");
+                () => $"Instruction table.copy failed. Table type mismatch {t1.ElementType} != {t2.ElementType}");
             context.OpStack.PopI32();
             context.OpStack.PopI32();
             context.OpStack.PopI32();
         }
 
         // @Spec 4.4.6.6. table.copy
-        public override void Execute(ExecContext context) => ExecuteInstruction(context, x:DstX, y:SrcY);
+        public override void Execute(ExecContext context) => ExecuteInstruction(context, x: DstX, y: SrcY);
 
         public static void ExecuteInstruction(ExecContext context, TableIdx x, TableIdx y)
         {
             //2.
             context.Assert(context.Frame.Module.TableAddrs.Contains(x),
-                ()=>$"Instruction table.copy did not find source table {x} in the Context");
+                () => $"Instruction table.copy did not find source table {x} in the Context");
             //3.
             var taX = context.Frame.Module.TableAddrs[x];
             //4.
             context.Assert(context.Store.Contains(taX),
-                ()=>$"Instruction table.copy failed. Address was not present in the Store.");
+                () => $"Instruction table.copy failed. Address was not present in the Store.");
             //5.
             var tabX = context.Store[taX];
             //6.
             context.Assert(context.Frame.Module.TableAddrs.Contains(y),
-                ()=>$"Instruction table.copy did not find destination table {y} in the Context");
+                () => $"Instruction table.copy did not find destination table {y} in the Context");
             //7.
             var taY = context.Frame.Module.TableAddrs[y];
             //8.
             context.Assert(context.Store.Contains(taY),
-                ()=>$"Instruction table.copy failed. Address was not present in the Store.");
+                () => $"Instruction table.copy failed. Address was not present in the Store.");
             //9.
             var tabY = context.Store[taY];
             //10.
             context.Assert(context.OpStack.Peek().IsI32,
-                ()=>$"Instruction table.copy failed. Expected i32 on top of the stack.");
+                () => $"Instruction table.copy failed. Expected i32 on top of the stack.");
             //11.
             int n = context.OpStack.PopI32();
             //12.
             context.Assert(context.OpStack.Peek().IsI32,
-                ()=>$"Instruction table.copy failed. Expected i32 on top of the stack.");
+                () => $"Instruction table.copy failed. Expected i32 on top of the stack.");
             //13.
             int s = context.OpStack.PopI32();
             //14.
             context.Assert(context.OpStack.Peek().IsI32,
-                ()=>$"Instruction table.copy failed. Expected i32 on top of the stack.");
+                () => $"Instruction table.copy failed. Expected i32 on top of the stack.");
             //15.
             int d = context.OpStack.PopI32();
             //16.
@@ -352,6 +354,7 @@ namespace Wacs.Core.Instructions
             {
                 return;
             }
+
             //18.
             if (d <= s)
             {
@@ -360,34 +363,34 @@ namespace Wacs.Core.Instructions
                 InstTableGet.ExecuteInstruction(context, y);
                 InstTableSet.ExecuteInstruction(context, x);
                 long check = (long)d + 1;
-                context.Assert(check < TwoTo32,
-                    ()=>"Intruction table.copy failed. Table size overflow");
-                context.OpStack.PushI32(d+1);
+                context.Assert(check < Constants.TwoTo32,
+                    () => "Intruction table.copy failed. Table size overflow");
+                context.OpStack.PushI32(d + 1);
                 // context.Assert((long)s+1 < TwoTo32,
                 //     "Intruction table.copy failed. Table size overflow");
-                context.OpStack.PushI32(s+1);
+                context.OpStack.PushI32(s + 1);
             }
             //19.
             else
             {
                 long check = (long)d + n - 1;
-                context.Assert(check < TwoTo32,
-                    ()=>"Intruction table.copy failed. Table size overflow");
-                context.OpStack.PushI32(d+n-1);
+                context.Assert(check < Constants.TwoTo32,
+                    () => "Intruction table.copy failed. Table size overflow");
+                context.OpStack.PushI32(d + n - 1);
                 check = (long)s + n - 1;
-                context.Assert(check < TwoTo32,
-                    ()=>"Intruction table.copy failed. Table size overflow");
-                context.OpStack.PushI32(s+n-1);
+                context.Assert(check < Constants.TwoTo32,
+                    () => "Intruction table.copy failed. Table size overflow");
+                context.OpStack.PushI32(s + n - 1);
                 InstTableGet.ExecuteInstruction(context, y);
                 InstTableSet.ExecuteInstruction(context, x);
                 context.OpStack.PushI32(d);
                 context.OpStack.PushI32(s);
             }
-            //20.
-            context.OpStack.PushI32(n-1);
-            //21.
-            ExecuteInstruction(context, x:x, y:y);
 
+            //20.
+            context.OpStack.PushI32(n - 1);
+            //21.
+            ExecuteInstruction(context, x: x, y: y);
         }
 
         // @Spec 5.4.5. Table Instructions
@@ -398,7 +401,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
     }
-    
+
     // 0xFC0F
     public class InstTableGrow : InstructionBase
     {
@@ -409,7 +412,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                ()=>$"Instruction table.set failed to get table {X} from context");
+                () => $"Instruction table.set failed to get table {X} from context");
             var type = context.Tables[X];
             context.OpStack.PopI32();
             context.OpStack.PopType(type.ElementType.StackType());
@@ -417,28 +420,29 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.4. table.grow x
-        public override void Execute(ExecContext context) {
+        public override void Execute(ExecContext context)
+        {
             //2.
             context.Assert(context.Frame.Module.TableAddrs.Contains(X),
-                ()=>$"Instruction table.get could not address table {X}");
+                () => $"Instruction table.get could not address table {X}");
             //3.
             var addr = context.Frame.Module.TableAddrs[X];
-            
+
             //4.
             context.Assert(context.Store.Contains(addr),
-                ()=>$"Instruction table.set failed to get table at address {addr} from Store");
+                () => $"Instruction table.set failed to get table at address {addr} from Store");
             //5.
             var tab = context.Store[addr];
             //6.
             int sz = tab.Elements.Count;
             //7.
             context.Assert(context.OpStack.Peek().IsI32,
-                ()=>"Instruction table.grow found incorrect type on top of the Stack");
+                () => "Instruction table.grow found incorrect type on top of the Stack");
             //8.
             int n = context.OpStack.PopI32();
             //9.
             context.Assert(context.OpStack.Peek().IsRef,
-                ()=>"Instruction table.grow found incorrect type on top of the Stack");
+                () => "Instruction table.grow found incorrect type on top of the Stack");
             //10.
             var val = context.OpStack.PopRefType();
             //12, 13. TODO: implement optional constraints on table.grow
@@ -461,6 +465,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
     }
+
     // 0xFC10
     public class InstTableSize : InstructionBase
     {
@@ -471,21 +476,22 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                ()=>$"Instruction table.set failed to get table {X} from context");
+                () => $"Instruction table.set failed to get table {X} from context");
             context.OpStack.PushI32();
         }
 
         // @Spec 4.4.6.3. table.size x
-        public override void Execute(ExecContext context) {
+        public override void Execute(ExecContext context)
+        {
             //2.
             context.Assert(context.Frame.Module.TableAddrs.Contains(X),
-                ()=>$"Instruction table.get could not address table {X}");
+                () => $"Instruction table.get could not address table {X}");
             //3.
             var addr = context.Frame.Module.TableAddrs[X];
-            
+
             //4.
             context.Assert(context.Store.Contains(addr),
-                ()=>$"Instruction table.set failed to get table at address {addr} from Store");
+                () => $"Instruction table.set failed to get table at address {addr} from Store");
             //5.
             var tab = context.Store[addr];
             //6.
@@ -495,11 +501,13 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 5.4.5. Table Instructions
-        public override IInstruction Parse(BinaryReader reader) {
+        public override IInstruction Parse(BinaryReader reader)
+        {
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
+
     // 0xFC11
     public class InstTableFill : InstructionBase
     {
@@ -510,7 +518,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                ()=>$"Instruction table.set failed to get table {X} from context");
+                () => $"Instruction table.set failed to get table {X} from context");
             var type = context.Tables[X];
             context.OpStack.PopI32();
             context.OpStack.PopType(type.ElementType.StackType());
@@ -524,28 +532,28 @@ namespace Wacs.Core.Instructions
         {
             //2.
             context.Assert(context.Frame.Module.TableAddrs.Contains(tableIndex),
-                ()=>$"Instruction table.get could not address table {tableIndex}");
+                () => $"Instruction table.get could not address table {tableIndex}");
             //3.
             var addr = context.Frame.Module.TableAddrs[tableIndex];
-            
+
             //4.
             context.Assert(context.Store.Contains(addr),
-                ()=>$"Instruction table.set failed to get table at address {addr} from Store");
+                () => $"Instruction table.set failed to get table at address {addr} from Store");
             //5.
             var tab = context.Store[addr];
             //6.
             context.Assert(context.OpStack.Peek().IsI32,
-                ()=>"Instruction table.grow found incorrect type on top of the Stack");
+                () => "Instruction table.grow found incorrect type on top of the Stack");
             //7.
             int n = context.OpStack.PopI32();
             //8.
             context.Assert(context.OpStack.Peek().IsRef,
-                ()=>"Instruction table.grow found incorrect type on top of the Stack");
+                () => "Instruction table.grow found incorrect type on top of the Stack");
             //9.
             var val = context.OpStack.PopRefType();
             //10.
             context.Assert(context.OpStack.Peek().IsI32,
-                ()=>"Instruction table.grow found incorrect type on top of the Stack");
+                () => "Instruction table.grow found incorrect type on top of the Stack");
             //11.
             int i = context.OpStack.PopI32();
             //12.
@@ -557,6 +565,7 @@ namespace Wacs.Core.Instructions
             {
                 return;
             }
+
             //13.
             context.OpStack.PushI32(i);
             //14.
@@ -564,20 +573,20 @@ namespace Wacs.Core.Instructions
             //15.
             InstTableSet.ExecuteInstruction(context, tableIndex);
             //16.
-            context.OpStack.PushI32(i+1);
+            context.OpStack.PushI32(i + 1);
             //17.
             context.OpStack.PushValue(val);
             //18.
-            context.OpStack.PushI32(n-1);
+            context.OpStack.PushI32(n - 1);
             //19.
             ExecuteInstruction(context, tableIndex);
         }
 
         // @Spec 5.4.5. Table Instructions
-        public override IInstruction Parse(BinaryReader reader) {
+        public override IInstruction Parse(BinaryReader reader)
+        {
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
-    
 }
