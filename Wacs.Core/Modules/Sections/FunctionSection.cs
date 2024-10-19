@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.IO;
 using FluentValidation;
+using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
@@ -34,22 +36,24 @@ namespace Wacs.Core
                 {
                     // @Spec 3.4.1.1
                     RuleFor(func => func.TypeIndex)
-                        .Must((_, index, ctx) => 
+                        .Must((_, index, ctx) =>
                             ctx.GetValidationContext().Types.Contains(index));
                     RuleFor(func => func)
                         .Custom((func, context) =>
                         {
-                            var types = context.GetValidationContext().Types;
+                            var vContext = context.GetValidationContext();
+                            var types = vContext.Types;
                             if (!types.Contains(func.TypeIndex))
                             {
                                 context.AddFailure("Function.TypeIndex not within Module.Types");
-                                return;
                             }
 
-                            //TODO: use actual execcontext rules
                             var funcType = types[func.TypeIndex];
-                            context.GetValidationContext().PushFrame(func);
-                            
+                            vContext.PushFrame(func);
+                            var retType = vContext.Return;
+                            var label = new Label(retType, InstructionPointer.Nil, OpCode.Nop);
+                            vContext.Frame.Labels.Push(label);
+
                             var exprValidator = new Expression.Validator(funcType.ResultType);
                             var subcontext = context.GetSubContext(func.Body);
                             var validationResult = exprValidator.Validate(subcontext);
@@ -63,17 +67,15 @@ namespace Wacs.Core
                                     context.AddFailure(propertyName, failure.ErrorMessage);
                                 }
                             }
-                            
-                            context.GetValidationContext().PopFrame();
-                            //TODO: check the OpStack for return values and reset it.
-                            
-                        });
 
+                            vContext.PopFrame();
+                            vContext.OpStack.ValidateStack(retType);
+                        });
                 }
             }
         }
     }
-    
+
     public static partial class BinaryModuleParser
     {
         private static Module.Function ParseIndex(BinaryReader reader) =>
@@ -88,5 +90,4 @@ namespace Wacs.Core
         private static Module.Function[] ParseFunctionSection(BinaryReader reader) =>
             reader.ParseVector(ParseIndex);
     }
-
 }

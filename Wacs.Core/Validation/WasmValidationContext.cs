@@ -26,7 +26,7 @@ namespace Wacs.Core.Validation
         /// @Spec 3.1.1. Contexts
         /// @Spec 3.4.10. Modules
         /// </summary>
-        public WasmValidationContext(Module module)
+        public WasmValidationContext(Module module, ValidationContext<Module> rootContext)
         {
             ValidationModule = new ModuleInstance(module);
             Funcs = new FunctionsSpace(module);
@@ -38,11 +38,19 @@ namespace Wacs.Core.Validation
 
             Globals = new GlobalValidationSpace(module);
 
+            _rootContext = rootContext;
+
             Reachability = true;
         }
 
+        private ValidationContext<Module> _rootContext { get; }
+
         public IValidationOpStack OpStack => Reachability ? _stack : _stackPolymorphic;
         public ValidationControlStack ControlStack { get; } = new();
+
+        public Frame Frame => ControlStack.Frame;
+
+        public ResultType Return => Frame.Type.ResultType;
 
         private ModuleInstance ValidationModule { get; }
 
@@ -82,8 +90,28 @@ namespace Wacs.Core.Validation
 
         public void PopFrame() => ControlStack.PopFrame();
 
+        public void ValidateBlock(Block instructionBlock)
+        {
+            var blockValidator = new Block.Validator();
+            var blockContext = _rootContext.GetSubContext(instructionBlock);
+            var blockResult = blockValidator.Validate(blockContext);
+            foreach (var error in blockResult.Errors)
+            {
+                _rootContext.AddFailure($"Block.{error.PropertyName}", error.ErrorMessage);
+            }
 
-        //TODO: Centralize Instruction validation here, use in Expression, Block, etc...
+            var instructionValidator = new InstructionValidator();
+            foreach (var inst in instructionBlock.Instructions)
+            {
+                var subContext = _rootContext.GetSubContext(inst);
+                var result = instructionValidator.Validate(subContext);
+                foreach (var error in result.Errors)
+                {
+                    _rootContext.AddFailure($"Block Instruction.{error.PropertyName}", error.ErrorMessage);
+                }
+            }
+        }
+
         public class InstructionValidator : AbstractValidator<IInstruction>
         {
             public InstructionValidator()
@@ -112,5 +140,4 @@ namespace Wacs.Core.Validation
             }
         }
     }
-    
 }

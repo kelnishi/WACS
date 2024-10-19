@@ -12,10 +12,11 @@ namespace Wacs.Core.Validation
         {
             //Set the validation context
             RuleFor(module => module)
-                .Custom((module, ctx) => {
-                    ctx.RootContextData[nameof(WasmValidationContext)] = new WasmValidationContext(module);
+                .Custom((module, ctx) =>
+                {
+                    ctx.RootContextData[nameof(WasmValidationContext)] = new WasmValidationContext(module, ctx);
                 });
-                
+
             RuleForEach(module => module.Types).SetValidator(new FunctionType.Validator());
             RuleForEach(module => module.Imports).SetValidator(new Module.Import.Validator());
             RuleForEach(module => module.Funcs).SetValidator(new Module.Function.Validator());
@@ -41,5 +42,4 @@ namespace Wacs.Core.Validation
                 .When(module => (int)module.StartIndex.Value >= 0);
         }
     }
-
 }

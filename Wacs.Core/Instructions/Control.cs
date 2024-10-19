@@ -19,15 +19,19 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.Unreachable;
 
         // @Spec 3.3.8.2 unreachable
-        public override void Validate(WasmValidationContext context) { }
+        public override void Validate(WasmValidationContext context)
+        {
+        }
 
         // @Spec 4.4.8.2. unreachable
         public override void Execute(ExecContext context) =>
             throw new TrapException("unreachable");
 
-        public class UnreachableException : Exception {}
+        public class UnreachableException : Exception
+        {
+        }
     }
-    
+
     //0x01
     public class InstNop : InstructionBase
     {
@@ -35,12 +39,16 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.Nop;
 
         // @Spec 3.3.8.1. nop
-        public override void Validate(WasmValidationContext context) { }
+        public override void Validate(WasmValidationContext context)
+        {
+        }
 
         // @Spec 4.4.8.1. nop
-        public override void Execute(ExecContext context) { }
+        public override void Execute(ExecContext context)
+        {
+        }
     }
-    
+
     //0x02
     public class InstBlock : InstructionBase
     {
@@ -50,20 +58,18 @@ namespace Wacs.Core.Instructions
         // @Spec 3.3.8.3 block
         public override void Validate(WasmValidationContext context)
         {
+            //TODO Validate the Block
+
             try
             {
                 var funcType = context.Types.ResolveBlockType(Block.Type);
                 var label = new Label(funcType.ResultType, new(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
-                
+
                 //Check the parameters [t1*]
                 context.OpStack.ValidateStack(funcType.ParameterTypes);
-                
-                //Advance through the instructions
-                foreach (var inst in Block.Instructions)
-                {
-                    inst.Validate(context);
-                }
+
+                context.ValidateBlock(Block);
 
                 if (context.Reachability)
                 {
@@ -79,7 +85,7 @@ namespace Wacs.Core.Instructions
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    ()=>$"Instruction block was invalid. BlockType {Block.Type} did not exist in the Context.");
+                    () => $"Instruction block was invalid. BlockType {Block.Type} did not exist in the Context.");
             }
         }
 
@@ -96,18 +102,17 @@ namespace Wacs.Core.Instructions
                 var label = new Label(funcType.ResultType, context.GetPointer(1), OpCode.Block);
                 //5.
                 context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Length,
-                    ()=>$"Instruction block failed. Operand Stack underflow.");
+                    () => $"Instruction block failed. Operand Stack underflow.");
                 //6. 
                 var vals = context.OpStack.PopResults(funcType.ParameterTypes);
                 //7.
                 context.EnterBlock(label, block, vals);
-
             }
             catch (IndexOutOfRangeException exc)
             {
                 _ = exc;
                 context.Assert(false,
-                    ()=>$"Instruction block failed. BlockType {block.Type} did not exist in the Context.");   
+                    () => $"Instruction block failed. BlockType {block.Type} did not exist in the Context.");
             }
         }
 
@@ -116,14 +121,15 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader)
         {
-            Block = new(type:Block.ParseBlockType(reader)) {
+            Block = new(type: Block.ParseBlockType(reader))
+            {
                 Instructions = new InstructionSequence(reader.ParseUntil(InstructionParser.Parse,
                     InstructionParser.IsEnd))
             };
             return this;
         }
     }
-    
+
     //0x03
     public class InstLoop : InstructionBase
     {
@@ -139,15 +145,11 @@ namespace Wacs.Core.Instructions
                 var funcType = context.Types.ResolveBlockType(Block.Type);
                 var label = new Label(funcType.ResultType, new(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
-                
+
                 //Check the parameters [t1*]
                 context.OpStack.ValidateStack(funcType.ParameterTypes);
-                
-                //Advance through the instructions
-                foreach (var inst in Block.Instructions)
-                {
-                    inst.Validate(context);
-                }
+
+                context.ValidateBlock(Block);
 
                 if (context.Reachability)
                 {
@@ -163,7 +165,7 @@ namespace Wacs.Core.Instructions
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    ()=>$"Instruciton loop invalid. BlockType {Block.Type} did not exist in the Context.");
+                    () => $"Instruciton loop invalid. BlockType {Block.Type} did not exist in the Context.");
             }
         }
 
@@ -178,18 +180,17 @@ namespace Wacs.Core.Instructions
                 var label = new Label(funcType.ResultType, context.GetPointer(), OpCode.Block);
                 //5.
                 context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Length,
-                    ()=>$"Instruction loop failed. Operand Stack underflow.");
+                    () => $"Instruction loop failed. Operand Stack underflow.");
                 //6. 
                 var vals = context.OpStack.PopResults(funcType.ParameterTypes);
                 //7.
                 context.EnterBlock(label, Block, vals);
-
             }
             catch (IndexOutOfRangeException exc)
             {
                 _ = exc;
                 context.Assert(false,
-                    ()=>$"Instruction loop failed. BlockType {Block.Type} did not exist in the Context.");   
+                    () => $"Instruction loop failed. BlockType {Block.Type} did not exist in the Context.");
             }
         }
 
@@ -198,14 +199,15 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader)
         {
-            Block = new(type:Block.ParseBlockType(reader)) {
+            Block = new(type: Block.ParseBlockType(reader))
+            {
                 Instructions = new InstructionSequence(reader.ParseUntil(InstructionParser.Parse,
                     InstructionParser.IsEnd))
             };
             return this;
         }
     }
-    
+
     //0x04
     public class InstIf : InstructionBase
     {
@@ -220,19 +222,15 @@ namespace Wacs.Core.Instructions
             {
                 //Pop the predicate
                 context.OpStack.PopI32();
-                
+
                 var funcType = context.Types.ResolveBlockType(IfBlock.Type);
                 var label = new Label(funcType.ResultType, new(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
-                
+
                 //Check the parameters [t1*]
                 context.OpStack.ValidateStack(funcType.ParameterTypes);
-                
-                //Advance through the instructions
-                foreach (var inst in IfBlock.Instructions)
-                {
-                    inst.Validate(context);
-                }
+
+                context.ValidateBlock(IfBlock);
 
                 if (context.Reachability)
                 {
@@ -251,13 +249,10 @@ namespace Wacs.Core.Instructions
                     context.Reachability = true;
                 }
 
-                if (ElseBlock.IsEmpty) 
+                if (ElseBlock.IsEmpty)
                     return;
-                
-                foreach (var inst in ElseBlock.Instructions)
-                {
-                    inst.Validate(context);
-                }
+
+                context.ValidateBlock(ElseBlock);
 
                 if (context.Reachability)
                 {
@@ -273,7 +268,7 @@ namespace Wacs.Core.Instructions
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    ()=>$"Instruciton loop invalid. BlockType {IfBlock.Type} did not exist in the Context.");
+                    () => $"Instruciton loop invalid. BlockType {IfBlock.Type} did not exist in the Context.");
             }
         }
 
@@ -297,7 +292,8 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader)
         {
-            IfBlock = new(type: Block.ParseBlockType(reader)) {
+            IfBlock = new(type: Block.ParseBlockType(reader))
+            {
                 Instructions = new InstructionSequence(reader.ParseUntil(InstructionParser.Parse,
                     InstructionParser.IsElseOrEnd))
             };
@@ -309,11 +305,13 @@ namespace Wacs.Core.Instructions
             else if (IfBlock.Instructions.EndsWithElse)
             {
                 IfBlock.Instructions.SwapElseEnd();
-                ElseBlock = new(type: IfBlock.Type) {
+                ElseBlock = new(type: IfBlock.Type)
+                {
                     Instructions = new InstructionSequence(reader.ParseUntil(InstructionParser.Parse,
                         InstructionParser.IsEnd))
                 };
             }
+
             return this;
         }
     }
@@ -325,19 +323,25 @@ namespace Wacs.Core.Instructions
         public override OpCode OpCode => OpCode.Else;
 
         // @Spec 3.3.8.5. else
-        public override void Validate(WasmValidationContext context) {}
+        public override void Validate(WasmValidationContext context)
+        {
+        }
 
         // @Spec 4.4.8.5. else
-        public override void Execute(ExecContext context) {}
+        public override void Execute(ExecContext context)
+        {
+        }
     }
-    
+
     //0x0B
     public class InstEnd : InstructionBase
     {
         public static readonly InstEnd Inst = new();
         public override OpCode OpCode => OpCode.End;
 
-        public override void Validate(WasmValidationContext context) {}
+        public override void Validate(WasmValidationContext context)
+        {
+        }
 
         public override void Execute(ExecContext context)
         {
@@ -355,10 +359,9 @@ namespace Wacs.Core.Instructions
                     //Do nothing
                     break;
             }
-
         }
     }
-    
+
     //0x0C
     public class InstBranch : InstructionBase
     {
@@ -370,7 +373,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.ControlStack.Frame.Contains(L),
-                ()=>$"Instruction br invalid. Context did not contain Label {L}");
+                () => $"Instruction br invalid. Context did not contain Label {L}");
             var label = context.ControlStack.Frame[L];
             foreach (var type in label.Type.Types.Reverse())
             {
@@ -385,14 +388,14 @@ namespace Wacs.Core.Instructions
         {
             //1.
             context.Assert(context.Frame.Labels.Count > (int)labelIndex.Value,
-                ()=>$"Instruction br failed. Context did not contain Label {labelIndex}");
+                () => $"Instruction br failed. Context did not contain Label {labelIndex}");
             //2.
             var label = context.Frame[labelIndex];
             //3.
             int n = label.Arity;
             //4.
             context.Assert(context.OpStack.Count >= n,
-                ()=>$"Instruction br failed. Not enough values on the stack.");
+                () => $"Instruction br failed. Not enough values on the stack.");
             //5.
             var vals = context.OpStack.PopResults(label.Type);
             //6.
@@ -400,13 +403,15 @@ namespace Wacs.Core.Instructions
             {
                 context.OpStack.PopAny();
             }
+
             Label? sl = null;
             for (int i = -1, l = (int)labelIndex.Value; i < l; ++i)
             {
                 sl = context.Frame.Labels.Pop();
             }
+
             context.Assert(label == sl,
-                ()=>$"Instruction br failed. Failure in stack management.");
+                () => $"Instruction br failed. Failure in stack management.");
             //7.
             context.OpStack.Push(vals);
             //8.
@@ -416,12 +421,13 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
-        public override IInstruction Parse(BinaryReader reader) {
+        public override IInstruction Parse(BinaryReader reader)
+        {
             L = (LabelIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
-    
+
     //0x0D
     public class InstBranchConditional : InstructionBase
     {
@@ -434,7 +440,7 @@ namespace Wacs.Core.Instructions
         {
             context.OpStack.PopI32();
             context.Assert(context.ControlStack.Frame.Contains(L),
-                ()=>$"Instruction br_if invalid. Context did not contain Label {L}");
+                () => $"Instruction br_if invalid. Context did not contain Label {L}");
             var label = context.ControlStack.Frame[L];
             foreach (var type in label.Type.Types.Reverse())
             {
@@ -455,12 +461,13 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
-        public override IInstruction Parse(BinaryReader reader) {
+        public override IInstruction Parse(BinaryReader reader)
+        {
             L = (LabelIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
-    
+
     //0x0E
     public class InstBranchTable : InstructionBase
     {
@@ -474,11 +481,11 @@ namespace Wacs.Core.Instructions
         {
             context.OpStack.PopI32();
             context.Assert(context.ControlStack.Frame.Contains(Ln),
-                ()=>$"Instruction br_table invalid. Context did not contain Label {Ln}");
+                () => $"Instruction br_table invalid. Context did not contain Label {Ln}");
             foreach (var lidx in Ls)
             {
                 context.Assert(context.ControlStack.Frame.Contains(lidx),
-                    ()=>$"Instruction br_table invalid. Context did not contain Label {lidx}");
+                    () => $"Instruction br_table invalid. Context did not contain Label {lidx}");
             }
 
             var labelN = context.ControlStack.Frame[Ln];
@@ -488,9 +495,9 @@ namespace Wacs.Core.Instructions
                 var label = context.ControlStack.Frame[lidx];
                 var type = label.Type;
                 context.Assert(typeN.Matches(type),
-                    ()=>$"Instruction br_table failed. Table types are incongruent.");
+                    () => $"Instruction br_table failed. Table types are incongruent.");
             }
-            
+
             foreach (var type in labelN.Type.Types.Reverse())
             {
                 context.OpStack.PopType(type);
@@ -531,7 +538,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
     }
-    
+
     //0x0F
     public class InstReturn : InstructionBase
     {
@@ -549,14 +556,14 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             context.Assert(context.OpStack.Count >= context.Frame.Arity,
-                ()=>$"Instruction return failed. Operand stack underflow");
+                () => $"Instruction return failed. Operand stack underflow");
             //We're managing separate stacks, so we won't need to shift the operands
             // var vals = context.OpStack.PopResults(context.Frame.Type.ResultType);
             var frame = context.PopFrame();
             context.ResumeSequence(frame.ContinuationAddress);
         }
     }
-    
+
     //0x10
     public class InstCall : InstructionBase
     {
@@ -571,7 +578,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Funcs.Contains(X),
-                ()=>$"Instruction call was invalid. Function {X} was not in the Context.");
+                () => $"Instruction call was invalid. Function {X} was not in the Context.");
             var func = context.Funcs[X];
             var type = context.Types[func.TypeIndex];
             context.OpStack.ValidateStack(type.ParameterTypes, false);
@@ -582,7 +589,7 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             context.Assert(context.Frame.Module.FuncAddrs.Contains(X),
-                ()=>$"Instruction call failed. Function address for {X} was not in the Context.");
+                () => $"Instruction call failed. Function address for {X} was not in the Context.");
             var a = context.Frame.Module.FuncAddrs[X];
             context.Invoke(a);
         }
@@ -602,9 +609,9 @@ namespace Wacs.Core.Instructions
             return this;
         }
     }
-    
+
     //0x11
-    public class InstCallIndirect  : InstructionBase
+    public class InstCallIndirect : InstructionBase
     {
         public override OpCode OpCode => OpCode.CallIndirect;
 
@@ -618,10 +625,10 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                ()=>$"Instruction call_indirect was invalid. Table {X} was not in the Context.");
+                () => $"Instruction call_indirect was invalid. Table {X} was not in the Context.");
             var tableType = context.Tables[X];
             context.Assert(tableType.ElementType == ReferenceType.Funcref,
-                ()=>$"Instruction call_indirect was invalid. Table type was not funcref");
+                () => $"Instruction call_indirect was invalid. Table type was not funcref");
             context.Assert(context.Types.Contains(Y),
                 () => $"Instruction call_indirect was invalid. Function type {Y} was not in the Context.");
             var funcType = context.Types[Y];
@@ -636,12 +643,12 @@ namespace Wacs.Core.Instructions
         {
             //2.
             context.Assert(context.Frame.Module.TableAddrs.Contains(X),
-                ()=>$"Instruction call_indirect failed. Table {X} was not in the Context.");
+                () => $"Instruction call_indirect failed. Table {X} was not in the Context.");
             //3.
             var ta = context.Frame.Module.TableAddrs[X];
             //4.
             context.Assert(context.Store.Contains(ta),
-                ()=>$"Instruction call_indirect failed. TableInstance {ta} was not in the Store.");
+                () => $"Instruction call_indirect failed. TableInstance {ta} was not in the Store.");
             //5.
             var tab = context.Store[ta];
             //6.
@@ -661,12 +668,12 @@ namespace Wacs.Core.Instructions
                 throw new TrapException($"Instruction call_indirect NullReference.");
             //13.
             context.Assert(r.Type == ValType.Funcref,
-                ()=>$"Instruction call_indirect failed. Element was not a FuncRef");
+                () => $"Instruction call_indirect failed. Element was not a FuncRef");
             //14. ???
             var a = context.Frame.Module.FuncAddrs[r.FuncIdx];
             //15.
             context.Assert(context.Store.Contains(a),
-                ()=>$"Instruction call_indirect failed. Validation of table mutation failed.");
+                () => $"Instruction call_indirect failed. Validation of table mutation failed.");
             //16.
             var funcInst = context.Store[a];
             //17.
