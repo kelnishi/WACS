@@ -30,18 +30,18 @@ namespace Wacs.Core.OpCodes
         [OpCode("call_indirect")] CallIndirect = 0x11,
         
         // Exception Handling (Proposal)
-        [OpCode("try")] Try = 0x06,
-        [OpCode("catch")] Catch = 0x07,
-        [OpCode("throw")] Throw = 0x08,
-        [OpCode("rethrow")] Rethrow = 0x09,
-        [OpCode("br_on_exn")] BrOnExn = 0x0A,
+        [OpCode("try")]           Try          = 0x06,
+        [OpCode("catch")]         Catch        = 0x07,
+        [OpCode("throw")]         Throw        = 0x08,
+        [OpCode("rethrow")]       Rethrow      = 0x09,
+        [OpCode("br_on_exn")]     BrOnExn      = 0x0A,
         
         // Tail Calls proposal
-        [OpCode("return_call")] ReturnCall = 0x12,           
+        [OpCode("return_call")]   ReturnCall   = 0x12,           
         [OpCode("return_call_indirect")] ReturnCallIndirect = 0x13,
 
         // Reference Types extension
-        [OpCode("call_ref")] CallRef = 0x14,         
+        [OpCode("call_ref")]      CallRef      = 0x14,         
         
         // =========================
         // Reference Types
@@ -71,6 +71,7 @@ namespace Wacs.Core.OpCodes
         
         [OpCode("table.get")]  TableGet  = 0x25,
         [OpCode("table.set")]  TableSet  = 0x26,
+        
         [OpCode("table.init")] TableInit = 0xFC0C,  //12
         [OpCode("elem.drop")]  ElemDrop  = 0xFC0D,  //13
         [OpCode("table.copy")] TableCopy = 0xFC0E,  //14
@@ -314,43 +315,12 @@ namespace Wacs.Core.OpCodes
 
         // Prefix: 0xFC
         [OpCode("memory.init")] MemoryInit = 0xFC08,
-        [OpCode("data.drop")] DataDrop = 0xFC09,
+        [OpCode("data.drop")]   DataDrop   = 0xFC09,
         [OpCode("memory.copy")] MemoryCopy = 0xFC0A,
         [OpCode("memory.fill")] MemoryFill = 0xFC0B,
 
-        // =========================
-        // SIMD Extension (Proposal)
-        // =========================
-
-        // Note: SIMD opcodes have the prefix 0xFD and are numerous.
-        // For brevity, only a few examples are included.
-
-        // Prefix: 0xFD
-        // ReSharper disable once InconsistentNaming
         SIMDPrefix = 0xFD,
-        [OpCode("v128.load")] V128Load = 0xFD00,
-        [OpCode("v128.store")] V128Store = 0xFD01,
-        [OpCode("v128.const")] V128Const = 0xFD02,
-
-        // ... (additional SIMD opcodes)
-
-        // =========================
-        // Atomic Instructions (Threads Extension)
-        // =========================
-
-        // Prefix: 0xFE
         ThreadsPrefix = 0xFE,
-        [OpCode("atomic.notify")] AtomicNotify = 0xFE00,
-        [OpCode("i32.atomic.wait")] I32AtomicWait = 0xFE01,
-        [OpCode("i64.atomic.wait")] I64AtomicWait = 0xFE02,
-        [OpCode("atomic.fence")] AtomicFence = 0xFE03,
-
-        // ... (additional atomic opcodes)
-
-        // =========================
-        // Future Extensions
-        // =========================
-
-        // Placeholders for future opcodes or extensions can be added here.
+        
     }
 }
