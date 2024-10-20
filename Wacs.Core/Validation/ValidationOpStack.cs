@@ -14,7 +14,7 @@ namespace Wacs.Core.Validation
         void PushI64(long i64 = 0);
         void PushF32(float f32 = 0.0f);
         void PushF64(double f64 = 0.0d);
-        void PushV128((ulong, ulong) lowhigh = default);
+        void PushV128(V128 v128 = default);
         void PushFuncref(Value value);
         void PushExternref(Value value);
         void PushType(ValType type);
@@ -79,9 +79,9 @@ namespace Wacs.Core.Validation
             _stack.Push(value);
         }
 
-        public void PushV128((ulong, ulong) lowhigh = default)
+        public void PushV128(V128 v128 = default)
         {
-            Value value = lowhigh;
+            Value value = v128;
             if (value.Type != ValType.V128)
                 throw new InvalidDataException(
                     $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.V128}");
@@ -248,7 +248,7 @@ namespace Wacs.Core.Validation
         {
         }
 
-        public void PushV128((ulong, ulong) lowhigh = default)
+        public void PushV128(V128 v128 = default)
         {
         }
 
