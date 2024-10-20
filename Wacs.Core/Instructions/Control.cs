@@ -54,8 +54,6 @@ namespace Wacs.Core.Instructions
         // @Spec 3.3.8.3 block
         public override void Validate(WasmValidationContext context)
         {
-            //TODO Validate the Block
-
             try
             {
                 var funcType = context.Types.ResolveBlockType(Block.Type);
@@ -69,6 +67,7 @@ namespace Wacs.Core.Instructions
 
                 if (context.Reachability)
                 {
+                    //Check the result [t2*]
                     context.OpStack.ValidateStack(funcType.ResultType);
                 }
                 else

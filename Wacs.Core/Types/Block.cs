@@ -36,7 +36,6 @@ namespace Wacs.Core.Types
         /// </summary>
         public class Validator : AbstractValidator<Block>
         {
-            //TODO: Hook up Block Validation
             public Validator()
             {
                 // @Spec 3.2.2.1. typeidx
