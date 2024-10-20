@@ -119,8 +119,8 @@ namespace Wacs.Core.Instructions
         {
             Block = new Block(type: Block.ParseBlockType(reader))
             {
-                Instructions = new InstructionSequence(reader.ParseUntil(InstructionParser.Parse,
-                    InstructionParser.IsEnd))
+                Instructions = new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
+                    IInstruction.IsEnd))
             };
             return this;
         }
@@ -197,8 +197,8 @@ namespace Wacs.Core.Instructions
         {
             Block = new Block(type: Block.ParseBlockType(reader))
             {
-                Instructions = new InstructionSequence(reader.ParseUntil(InstructionParser.Parse,
-                    InstructionParser.IsEnd))
+                Instructions = new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
+                    IInstruction.IsEnd))
             };
             return this;
         }
@@ -290,8 +290,8 @@ namespace Wacs.Core.Instructions
         {
             IfBlock = new Block(type: Block.ParseBlockType(reader))
             {
-                Instructions = new InstructionSequence(reader.ParseUntil(InstructionParser.Parse,
-                    InstructionParser.IsElseOrEnd))
+                Instructions = new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
+                    IInstruction.IsElseOrEnd))
             };
 
             if (IfBlock.Instructions.HasExplicitEnd)
@@ -303,8 +303,9 @@ namespace Wacs.Core.Instructions
                 IfBlock.Instructions.SwapElseEnd();
                 ElseBlock = new Block(type: IfBlock.Type)
                 {
-                    Instructions = new InstructionSequence(reader.ParseUntil(InstructionParser.Parse,
-                        InstructionParser.IsEnd))
+                    
+                    Instructions = new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
+                        IInstruction.IsEnd))
                 };
             }
 

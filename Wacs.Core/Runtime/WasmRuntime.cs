@@ -23,15 +23,17 @@ namespace Wacs.Core.Runtime
 
         private readonly Dictionary<string, ModuleInstance> _modules = new();
 
-        public WasmRuntime()
+        public WasmRuntime(RuntimeAttributes? attributes = null)
         {
             Store = new Store();
-            Context = new ExecContext(Store, InstructionSequence.Empty);
+            Context = new ExecContext(Store, InstructionSequence.Empty, attributes);
         }
 
         private Store Store { get; }
 
         private ExecContext Context { get; }
+
+        public IInstructionFactory InstructionFactory => Context.InstructionFactory;
 
         public void RegisterModule(string moduleName, ModuleInstance moduleInstance)
         {
@@ -288,19 +290,19 @@ namespace Wacs.Core.Runtime
                         var n = elem.Initializers.Length;
                         activeMode.Offset
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(0)
+                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(0)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(n)
+                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(n)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction<InstTableInit>(ExtCode.TableInit)!
+                        Context.InstructionFactory.CreateInstruction<InstTableInit>(ExtCode.TableInit)!
                             .Immediate(activeMode.TableIndex, (ElemIdx)i)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)!.Immediate((ElemIdx)i)
+                        Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)!.Immediate((ElemIdx)i)
                             .Execute(Context);
                         break;
                     case Module.ElementMode.DeclarativeMode declarativeMode:
                         _ = declarativeMode;
-                        InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)!.Immediate((ElemIdx)i)
+                        Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)!.Immediate((ElemIdx)i)
                             .Execute(Context);
                         break;
                 }
@@ -319,13 +321,13 @@ namespace Wacs.Core.Runtime
                         var n = data.Init.Length;
                         activeMode.Offset
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(0)
+                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(0)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(n)
+                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(n)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction<InstMemoryInit>(ExtCode.MemoryInit)!.Immediate((DataIdx)i)
+                        Context.InstructionFactory.CreateInstruction<InstMemoryInit>(ExtCode.MemoryInit)!.Immediate((DataIdx)i)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction<InstDataDrop>(ExtCode.DataDrop)!.Immediate((DataIdx)i)
+                        Context.InstructionFactory.CreateInstruction<InstDataDrop>(ExtCode.DataDrop)!.Immediate((DataIdx)i)
                             .Execute(Context);
                         break;
                     case Module.DataMode.PassiveMode: //Do nothing
@@ -344,7 +346,7 @@ namespace Wacs.Core.Runtime
                     if (!Context.Store.Contains(startAddr))
                         throw new InvalidProgramException("Module StartFunction address not found in the Store.");
                     //Invoke the function!
-                    InstructionFactory.CreateInstruction<InstCall>(OpCode.Call)!.Immediate(module.StartIndex)
+                    Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Call)!.Immediate(module.StartIndex)
                         .Execute(Context);
                 }
             }

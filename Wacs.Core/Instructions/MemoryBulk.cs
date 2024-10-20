@@ -199,7 +199,7 @@ namespace Wacs.Core.Instructions
                 //20.
                 context.OpStack.PushI32(b);
                 //21.
-                InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8)!.Immediate(new MemArg(0, 0))
+                context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8)!.Immediate(new MemArg(0, 0))
                     .Execute(context);
                 //22.
                 long check = d + 1;
@@ -355,9 +355,9 @@ namespace Wacs.Core.Instructions
                 {
                     context.OpStack.PushI32(d);
                     context.OpStack.PushI32(s);
-                    InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U)!.Immediate(new MemArg(0, 0))
+                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U)!.Immediate(new MemArg(0, 0))
                         .Execute(context);
-                    InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8)!.Immediate(new MemArg(0, 0))
+                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8)!.Immediate(new MemArg(0, 0))
                         .Execute(context);
                     check = d + 1;
                     context.Assert(check < Constants.TwoTo32,
@@ -379,9 +379,9 @@ namespace Wacs.Core.Instructions
                     context.Assert(check < Constants.TwoTo32,
                         () => $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
                     context.OpStack.PushI32(s + n - 1);
-                    InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U)!.Immediate(new MemArg(0, 0))
+                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U)!.Immediate(new MemArg(0, 0))
                         .Execute(context);
-                    InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8)!.Immediate(new MemArg(0, 0))
+                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8)!.Immediate(new MemArg(0, 0))
                         .Execute(context);
                     context.OpStack.PushI32(d);
                     context.OpStack.PushI32(s);
@@ -468,7 +468,8 @@ namespace Wacs.Core.Instructions
                 //15.
                 context.OpStack.PushValue(val);
                 //16.
-                InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8)!.Immediate(new MemArg(0, 0))
+                
+                context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8)!.Immediate(new MemArg(0, 0))
                     .Execute(context);
                 //17.
                 long check = d + 1;
