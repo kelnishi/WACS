@@ -29,8 +29,7 @@ namespace Wacs.Core.Runtime
         [FieldOffset(1)] public readonly double Float64;
 
         // 128-bit vector
-        [FieldOffset(1)] public readonly ulong V128_low;
-        [FieldOffset(9)] public readonly ulong V128_high;
+        [FieldOffset(1)] public readonly V128 V128;
 
         // // ref funcIdx
         public FuncIdx FuncIdx => (FuncIdx)Int32;
@@ -74,11 +73,11 @@ namespace Wacs.Core.Runtime
             Float64 = value;
         }
 
-        public Value((ulong, ulong) value)
+        public Value(V128 value)
         {
             this = default;
             Type = ValType.V128;
-            (V128_low, V128_high) = value;
+            V128 = value;
         }
 
         public Value(ValType type, int idx)
@@ -141,10 +140,8 @@ namespace Wacs.Core.Runtime
                 case ValType.F64:
                     Float64 = 0.0d;
                     break;
-
                 case ValType.V128:
-                    V128_high = 0u;
-                    V128_low = 0u;
+                    V128 = (0L, 0L);
                     break;
                 case ValType.Funcref:
                     Int64 = -1;
@@ -175,11 +172,12 @@ namespace Wacs.Core.Runtime
                 case ulong ul:
                     Int64 = (long)ul;
                     break;
-
                 case BigInteger bi:
-                    (V128_low, V128_high) = bi.ToV128();
+                    V128 = bi.ToV128();
                     break;
-
+                case V128 v128:
+                    V128 = v128;
+                    break;
                 default:
                     throw new InvalidDataException(
                         $"Cannot convert object to stack value of type {typeof(ExternalValue)}");
@@ -194,7 +192,7 @@ namespace Wacs.Core.Runtime
             ValType.I64 => Int64,
             ValType.F32 => Float32,
             ValType.F64 => Float64,
-            ValType.V128 => new object[] { V128_low, V128_high },
+            ValType.V128 => V128,
             ValType.Funcref => Int64,
             ValType.Externref => Int64,
             _ => throw new InvalidCastException($"Cannot cast ValType {Type} to Scalar")
@@ -232,11 +230,8 @@ namespace Wacs.Core.Runtime
 
         public static implicit operator double(Value value) => value.Float64;
 
-        public static implicit operator (ulong, ulong)(Value value) => (value.V128_low, value.V128_high);
+        public static implicit operator Value(V128 v128) => new(v128);
 
-        public static implicit operator Value((ulong, ulong) value) =>
-            value == default ? new Value(DefaultV128) : new Value(value);
-
-        public static readonly (ulong, ulong) DefaultV128 = (0UL, 0UL);
+        
     }
 }
