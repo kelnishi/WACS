@@ -2,6 +2,10 @@ using Wacs.Core.Attributes;
 
 namespace Wacs.Core.OpCodes
 {
+    /// <summary>
+    /// Represents all WebAssembly opcodes for the FB prefix
+    /// Theoretically, these could be u32, but I'll keep them as bytes so long as they fit.
+    /// </summary>
     public enum GcCode : byte
     {
         [OpCode("struct.new")]          StructNew           = 0x00,

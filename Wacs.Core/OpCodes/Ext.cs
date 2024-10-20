@@ -2,6 +2,10 @@ using Wacs.Core.Attributes;
 
 namespace Wacs.Core.OpCodes
 {
+    /// <summary>
+    /// Represents all WebAssembly opcodes from Extensions (FC prefix)
+    /// see WebAssembly Specification Release 2.0 (Draft 2024-09-26)
+    /// </summary>
     public enum ExtCode : byte
     {
         [OpCode("i32.trunc_sat_f32_s")] I32TruncSatF32S = 0x00,
@@ -14,16 +18,16 @@ namespace Wacs.Core.OpCodes
         [OpCode("i64.trunc_sat_f64_u")] I64TruncSatF64U = 0x07,
     
         [OpCode("memory.init")]         MemoryInit = 0x08,
-        [OpCode("data.drop")]           DataDrop = 0x09,
+        [OpCode("data.drop")]           DataDrop   = 0x09,
         [OpCode("memory.copy")]         MemoryCopy = 0x0A,
         [OpCode("memory.fill")]         MemoryFill = 0x0B,
    
-        [OpCode("table.init")]          TableInit = 0x0C,
-        [OpCode("elem.drop")]           ElemDrop = 0x0D,
-        [OpCode("table.copy")]          TableCopy = 0x0E,
-        [OpCode("table.grow")]          TableGrow = 0x0F,
-        [OpCode("table.size")]          TableSize = 0x10,
-        [OpCode("table.fill")]          TableFill = 0x11
+        [OpCode("table.init")]          TableInit = 0x0C, //12
+        [OpCode("elem.drop")]           ElemDrop  = 0x0D, //13
+        [OpCode("table.copy")]          TableCopy = 0x0E, //14
+        [OpCode("table.grow")]          TableGrow = 0x0F, //15
+        [OpCode("table.size")]          TableSize = 0x10, //16
+        [OpCode("table.fill")]          TableFill = 0x11, //17
     }
 
 }

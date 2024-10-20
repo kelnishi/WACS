@@ -29,21 +29,22 @@ namespace Wacs.Core
 
         public bool IsConstant =>
             _instructions.Count - (HasExplicitEnd ? 1 : 0) == 1 &&
-            !_instructions.Any(inst => inst.OpCode switch
+            !_instructions.Any(inst => inst.Op switch
             {
-                OpCode.I32Const => false,
-                OpCode.I64Const => false,
-                OpCode.F32Const => false,
-                OpCode.F64Const => false,
-                OpCode.GlobalGet => false,
-                OpCode.RefNull => false,
-                OpCode.RefFunc => false,
-                OpCode.End => false,
+                { x00: OpCode.I32Const } => false,
+                { x00: OpCode.I64Const } => false,
+                { x00: OpCode.F32Const } => false,
+                { x00: OpCode.F64Const } => false,
+                { x00: OpCode.GlobalGet } => false,
+                { x00: OpCode.RefNull } => false,
+                { x00: OpCode.RefFunc } => false,
+                { xFD: SimdCode.V128Const } => false,
+                { x00: OpCode.End } => false,
                 _ => true
             });
 
-        public bool HasExplicitEnd => _instructions[^1].OpCode == OpCode.End;
-        public bool EndsWithElse => _instructions[^1].OpCode == OpCode.Else;
+        public bool HasExplicitEnd => _instructions[^1].Op == OpCode.End;
+        public bool EndsWithElse => _instructions[^1].Op == OpCode.Else;
         public bool IsEmpty => _instructions.Count == 0;
 
         public int Count => _instructions.Count;

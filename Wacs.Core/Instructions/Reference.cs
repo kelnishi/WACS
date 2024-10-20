@@ -13,7 +13,7 @@ namespace Wacs.Core.Instructions
     //0xD0
     public class InstRefNull : InstructionBase
     {
-        public override OpCode OpCode => OpCode.RefNull;
+        public override ByteCode Op => OpCode.RefNull;
         
         public ReferenceType Type { get; internal set; }
 
@@ -38,7 +38,7 @@ namespace Wacs.Core.Instructions
     //0xD1
     public class InstRefIsNull  : InstructionBase
     {
-        public override OpCode OpCode => OpCode.RefIsNull;
+        public override ByteCode Op => OpCode.RefIsNull;
 
         // @Spec 3.3.2.2. ref.is_null
         public override void Validate(WasmValidationContext context)
@@ -64,7 +64,7 @@ namespace Wacs.Core.Instructions
     //0xD2
     public class InstRefFunc : InstructionBase
     {
-        public override OpCode OpCode => OpCode.RefFunc;
+        public override ByteCode Op => OpCode.RefFunc;
         
         public FuncIdx FunctionIndex { get; internal set; }
         

@@ -10,7 +10,7 @@ namespace Wacs.Core.Instructions
     /// </summary>
     public interface IInstruction
     {
-        public OpCode OpCode { get; }
+        public ByteCode Op { get; }
 
         void Validate(WasmValidationContext context);
 

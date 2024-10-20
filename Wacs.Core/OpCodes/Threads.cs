@@ -2,7 +2,11 @@ using Wacs.Core.Attributes;
 
 namespace Wacs.Core.OpCodes
 {
-    public enum ThreadsCode : byte
+    /// <summary>
+    /// Represents all WebAssembly opcodes for the FE prefix
+    /// Theoretically, these could be u32, but I'll keep them as bytes so long as they fit.
+    /// </summary>
+    public enum AtomCode : byte
     {
         [OpCode("memory.atomic.notify")]       MemoryAtomicNotify     = 0x00,
         [OpCode("memory.atomic.wait32")]       MemoryAtomicWait32     = 0x01,

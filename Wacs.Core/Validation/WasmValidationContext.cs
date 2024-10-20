@@ -134,7 +134,7 @@ namespace Wacs.Core.Validation
                         catch (NotImplementedException exc)
                         {
                             _ = exc;
-                            ctx.AddFailure($"WASM Instruction `{inst.OpCode.GetMnemonic()}` is not implemented.");
+                            ctx.AddFailure($"WASM Instruction `{inst.Op.GetMnemonic()}` is not implemented.");
                         }
                     });
             }

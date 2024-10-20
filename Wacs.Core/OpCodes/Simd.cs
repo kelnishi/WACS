@@ -3,6 +3,10 @@ using Wacs.Core.Attributes;
 // ReSharper disable InconsistentNaming
 namespace Wacs.Core.OpCodes
 {
+    /// <summary>
+    /// Represents all WebAssembly opcodes for SIMD (FD prefix)
+    /// Theoretically, these could be u32, but I'll keep them as bytes so long as they fit.
+    /// </summary>
     // https://www.w3.org/TR/2024/WD-wasm-core-2-20240911/#a7-index-of-instructions
     public enum SimdCode : byte
     {

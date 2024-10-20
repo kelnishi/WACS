@@ -13,7 +13,7 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// Gets the opcode associated with the instruction.
         /// </summary>
-        public abstract OpCode OpCode { get; }
+        public abstract ByteCode Op { get; }
 
         public abstract void Validate(WasmValidationContext context);
 
