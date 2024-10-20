@@ -64,8 +64,8 @@ namespace Wacs.Core
             /// <summary>
             /// Generate a InstRefFunc for a funcidx
             /// </summary>
-            private static IInstruction ParseFuncIdxInstructions(BinaryReader reader) => 
-                InstructionFactory.CreateInstruction(OpCode.RefFunc)!.Parse(reader);
+            private static IInstruction ParseFuncIdxInstructions(BinaryReader reader) =>
+                BinaryModuleParser.InstructionFactory.CreateInstruction(OpCode.RefFunc)!.Parse(reader);
 
             private static ReferenceType ParseElementKind(BinaryReader reader) =>
                 reader.ReadByte() switch {

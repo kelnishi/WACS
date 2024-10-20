@@ -8,7 +8,8 @@ namespace Wacs.Core.Runtime
 {
     public class RuntimeAttributes
     {
-        public double FloatingPointTolerance { get; } = 1e-10;
+        public IInstructionFactory InstructionFactory { get; set; } = ReferenceFactory.Factory;
+        public double FloatingPointTolerance { get; set; } = 1e-10;
     }
 
     public class ExecContext
@@ -27,6 +28,8 @@ namespace Wacs.Core.Runtime
             _sequenceIndex = 0;
             Attributes = attributes ?? new RuntimeAttributes();
         }
+
+        public IInstructionFactory InstructionFactory => Attributes.InstructionFactory;
 
         public Store Store { get; }
         public OpStack OpStack { get; } = new();

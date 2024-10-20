@@ -1,34 +1,25 @@
 using System;
-using System.Collections.Generic;
-using System.IO;
 using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
-using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Instructions
 {
-    public static partial class InstructionFactory
+    public partial class ReferenceFactory : IInstructionFactory
     {
-        private static readonly Dictionary<ByteCode, Func<IInstruction>> InstructionMap = new();
+        public static readonly ReferenceFactory Factory = new();
+        public ReferenceFactory() {}
 
-        static InstructionFactory()
-        {
-            // Register additional instructions
-            // _instructionMap[OpCode.I32Sub] = () => new Numeric.I32SubInstruction();
-            // Extensions are registered via the ExtensionLoader
-        }
-
-        public static void RegisterExtensionInstruction(ByteCode opcode, Func<IInstruction> constructor)
-        {
-            InstructionMap[opcode] = constructor;
-        }
-
-        public static T? CreateInstruction<T>(ByteCode code)
+        public T? CreateInstruction<T>(ByteCode code)
             where T : InstructionBase =>
             CreateInstruction(code) as T;
 
-        public static IInstruction? CreateInstruction(ByteCode opcode) => opcode.x00 switch {
+        public IInstruction? CreateInstruction(ByteCode opcode) => opcode.x00 switch {
+            OpCode.FB                => CreateInstruction(opcode.xFB),
+            OpCode.FC                => CreateInstruction(opcode.xFC),
+            OpCode.FD                => CreateInstruction(opcode.xFD),
+            OpCode.FE                => CreateInstruction(opcode.xFE),
+            
             //Control Instructions
             OpCode.Unreachable       => InstUnreachable.Inst,
             OpCode.Nop               => InstNop.Inst,
@@ -241,41 +232,7 @@ namespace Wacs.Core.Instructions
             OpCode.I64Extend16S      => NumericInst.I64Extend16S,
             OpCode.I64Extend32S      => NumericInst.I64Extend32S,
             
-            OpCode.FB                => CreateInstruction(opcode.xFB),
-            OpCode.FC                => CreateInstruction(opcode.xFC),
-            OpCode.FD                => CreateInstruction(opcode.xFD),
-            OpCode.FE                => CreateInstruction(opcode.xFE),
-            
             _ => throw new NotSupportedException($"Opcode {opcode} is not supported.")
-        };
-    }
-    
-    public static class InstructionParser
-    {
-        /// <summary>
-        /// @Spec 5.4 Instructions
-        /// Parse an instruction sequence, return null for End (0x0B)
-        /// </summary>
-        public static IInstruction? Parse(BinaryReader reader)
-        {
-            //Splice another byte if the first byte is a prefix
-            var opcode = (OpCode)reader.ReadByte() switch {
-                OpCode.FB => new ByteCode((GcCode)reader.ReadLeb128_u32()), 
-                OpCode.FC => new ByteCode((ExtCode)reader.ReadLeb128_u32()),
-                OpCode.FD => new ByteCode((SimdCode)reader.ReadLeb128_u32()),
-                OpCode.FE => new ByteCode((AtomCode)reader.ReadLeb128_u32()),
-                var b => new ByteCode(b)
-            };
-            return InstructionFactory.CreateInstruction(opcode)?.Parse(reader);            
-        }
-
-        public static bool IsEnd(IInstruction inst) => inst.Op.x00 == OpCode.End;
-
-        public static bool IsElseOrEnd(IInstruction inst) => inst.Op.x00 switch
-        {
-            OpCode.Else => true,
-            OpCode.End => true,
-            _ => false
         };
     }
 }

@@ -29,6 +29,7 @@ namespace Wacs.Core.Validation
         public WasmValidationContext(Module module, ValidationContext<Module> rootContext)
         {
             ValidationModule = new ModuleInstance(module);
+
             Funcs = new FunctionsSpace(module);
             Tables = new TablesSpace(module);
             Mems = new MemSpace(module);

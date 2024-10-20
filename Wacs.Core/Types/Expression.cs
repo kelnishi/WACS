@@ -47,7 +47,7 @@ namespace Wacs.Core.Types
         /// @Spec 5.4.9 Expressions
         /// </summary>
         public static Expression Parse(BinaryReader reader) =>
-            new(new InstructionSequence(reader.ParseUntil(InstructionParser.Parse, InstructionParser.IsEnd)));
+            new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd)));
 
         /// <summary>
         /// @Spec 3.3.10. Expressions

@@ -32,8 +32,13 @@ namespace Wacs.Console
 
         private void Run(string wasmFilePath)
         {
+            var runtime = new WasmRuntime();
+            
+            //Parse the module
             using var fileStream = new FileStream(wasmFilePath, FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
+            
+            //If you just want to do validation without a runtime, you could do it like this
             var validationResult = module.Validate();
             foreach (var error in validationResult.Errors)
             {
@@ -45,8 +50,8 @@ namespace Wacs.Console
                         break;
                 }
             }
-
-            var runtime = new WasmRuntime();
+            
+            //Bind module dependencies prior to instantiation
             runtime.BindHostFunction("env", "sayc", (scalars) =>
             {
                 char c = Convert.ToChar(scalars[0]);
@@ -54,7 +59,8 @@ namespace Wacs.Console
                 return Array.Empty<object>();
             });
 
-            var modInst = runtime.InstantiateModule(module, new() { SkipModuleValidation = true });
+            //Validation normally happens after instantiation, but you can skip it if you did it after parsing
+            var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true });
             runtime.RegisterModule("hello", modInst);
 
             var mainAddr = runtime.GetExportedFunction("hello", "main");

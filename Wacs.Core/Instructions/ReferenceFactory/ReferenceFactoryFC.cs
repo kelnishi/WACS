@@ -4,7 +4,7 @@ using Wacs.Core.OpCodes;
 
 namespace Wacs.Core.Instructions
 {
-    public static partial class InstructionFactory
+    public partial class ReferenceFactory
     {
         public static IInstruction? CreateInstruction(ExtCode opcode) => opcode switch
         {

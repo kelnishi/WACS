@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using FluentValidation;
 using FluentValidation.Results;
+using Wacs.Core.Instructions;
+using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
@@ -30,6 +32,12 @@ namespace Wacs.Core
     /// </summary>
     public static partial class BinaryModuleParser
     {
+        private static IInstructionFactory _instructionFactory = ReferenceFactory.Factory;
+        public static IInstructionFactory InstructionFactory => _instructionFactory;
+
+        public static void UseInstructionFactory(IInstructionFactory factory) =>
+            _instructionFactory = factory;
+
         /// <summary>
         /// @Spec 5.5.16. Modules
         /// Parses a WebAssembly module from a binary stream.
@@ -153,6 +161,23 @@ namespace Wacs.Core
                 throw new InvalidDataException(
                     $"Section size mismatch. Expected {payloadLength} bytes, but got {reader.BaseStream.Position - payloadStart}.");
             }
+        }
+
+        /// <summary>
+        /// @Spec 5.4 Instructions
+        /// Parse an instruction sequence, return null for End (0x0B)
+        /// </summary>
+        public static IInstruction? ParseInstruction(BinaryReader reader)
+        {
+            //Splice another byte if the first byte is a prefix
+            var opcode = (OpCode)reader.ReadByte() switch {
+                OpCode.FB => new ByteCode((GcCode)reader.ReadLeb128_u32()), 
+                OpCode.FC => new ByteCode((ExtCode)reader.ReadLeb128_u32()),
+                OpCode.FD => new ByteCode((SimdCode)reader.ReadLeb128_u32()),
+                OpCode.FE => new ByteCode((AtomCode)reader.ReadLeb128_u32()),
+                var b => new ByteCode(b)
+            };
+            return _instructionFactory.CreateInstruction(opcode)?.Parse(reader);            
         }
 
         //TODO Warn for missing sections?

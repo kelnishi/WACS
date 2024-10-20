@@ -24,6 +24,15 @@ namespace Wacs.Core.Instructions
         /// Parses an instruction from a binary reader.
         /// </summary>
         IInstruction Parse(BinaryReader reader);
+
+        public static bool IsEnd(IInstruction inst) => inst.Op.x00 == OpCode.End;
+
+        public static bool IsElseOrEnd(IInstruction inst) => inst.Op.x00 switch
+        {
+            OpCode.Else => true,
+            OpCode.End => true,
+            _ => false
+        };
     }
     
 }
