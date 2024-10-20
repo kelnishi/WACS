@@ -13,7 +13,7 @@ namespace Wacs.Core.Instructions
     public class InstDrop : InstructionBase
     {
         public static readonly InstDrop Inst = new();
-        public override OpCode OpCode => OpCode.Drop;
+        public override ByteCode Op => OpCode.Drop;
 
         /// <summary>
         /// @Spec 3.3.4.1. drop
@@ -39,7 +39,7 @@ namespace Wacs.Core.Instructions
         public static readonly InstSelect InstWithoutTypes = new();
 
         public InstSelect(bool withTypes = false) => WithTypes = withTypes;
-        public override OpCode OpCode => OpCode.Select;
+        public override ByteCode Op => OpCode.Select;
 
         private bool WithTypes { get; }
         private ValType[] Types { get; set; } = Array.Empty<ValType>();

@@ -9,7 +9,7 @@ namespace Wacs.Core.Instructions.Numeric
     //0x41
     public class InstI32Const : InstructionBase
     {
-        public override OpCode OpCode => OpCode.I32Const;
+        public override ByteCode Op => OpCode.I32Const;
         private int Value { get; set; }
 
         /// <summary>
@@ -40,7 +40,7 @@ namespace Wacs.Core.Instructions.Numeric
     //0x42
     public class InstI64Const : InstructionBase
     {
-        public override OpCode OpCode => OpCode.I64Const;
+        public override ByteCode Op => OpCode.I64Const;
         private long Value { get; set; }
 
         /// <summary>
@@ -65,7 +65,7 @@ namespace Wacs.Core.Instructions.Numeric
     //0x43
     public class InstF32Const : InstructionBase
     {
-        public override OpCode OpCode => OpCode.F32Const;
+        public override ByteCode Op => OpCode.F32Const;
         private float Value { get; set; }
 
         /// <summary>
@@ -90,7 +90,7 @@ namespace Wacs.Core.Instructions.Numeric
     //0x44
     public class InstF64Const : InstructionBase
     {
-        public override OpCode OpCode => OpCode.F64Const;
+        public override ByteCode Op => OpCode.F64Const;
         private double Value { get; set; }
 
         /// <summary>

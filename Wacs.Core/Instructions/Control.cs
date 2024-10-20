@@ -16,7 +16,7 @@ namespace Wacs.Core.Instructions
     public class InstUnreachable : InstructionBase
     {
         public static readonly InstUnreachable Inst = new();
-        public override OpCode OpCode => OpCode.Unreachable;
+        public override ByteCode Op => OpCode.Unreachable;
 
         // @Spec 3.3.8.2 unreachable
         public override void Validate(WasmValidationContext context)
@@ -32,7 +32,7 @@ namespace Wacs.Core.Instructions
     public class InstNop : InstructionBase
     {
         public static readonly InstNop Inst = new();
-        public override OpCode OpCode => OpCode.Nop;
+        public override ByteCode Op => OpCode.Nop;
 
         // @Spec 3.3.8.1. nop
         public override void Validate(WasmValidationContext context)
@@ -48,7 +48,7 @@ namespace Wacs.Core.Instructions
     //0x02
     public class InstBlock : InstructionBase
     {
-        public override OpCode OpCode => OpCode.Block;
+        public override ByteCode Op => OpCode.Block;
         private Block Block { get; set; } = null!;
 
         // @Spec 3.3.8.3 block
@@ -129,7 +129,7 @@ namespace Wacs.Core.Instructions
     //0x03
     public class InstLoop : InstructionBase
     {
-        public override OpCode OpCode => OpCode.Loop;
+        public override ByteCode Op => OpCode.Loop;
 
         private Block Block { get; set; } = null!;
 
@@ -207,7 +207,7 @@ namespace Wacs.Core.Instructions
     //0x04
     public class InstIf : InstructionBase
     {
-        public override OpCode OpCode => OpCode.If;
+        public override ByteCode Op => OpCode.If;
         private Block IfBlock { get; set; } = Block.Empty;
         private Block ElseBlock { get; set; } = Block.Empty;
 
@@ -316,7 +316,7 @@ namespace Wacs.Core.Instructions
     public class InstElse : InstructionBase
     {
         public static readonly InstElse Inst = new();
-        public override OpCode OpCode => OpCode.Else;
+        public override ByteCode Op => OpCode.Else;
 
         // @Spec 3.3.8.5. else
         public override void Validate(WasmValidationContext context)
@@ -333,7 +333,7 @@ namespace Wacs.Core.Instructions
     public class InstEnd : InstructionBase
     {
         public static readonly InstEnd Inst = new();
-        public override OpCode OpCode => OpCode.End;
+        public override ByteCode Op => OpCode.End;
 
         public override void Validate(WasmValidationContext context)
         {
@@ -361,7 +361,7 @@ namespace Wacs.Core.Instructions
     //0x0C
     public class InstBranch : InstructionBase
     {
-        public override OpCode OpCode => OpCode.Br;
+        public override ByteCode Op => OpCode.Br;
 
         private LabelIdx L { get; set; }
 
@@ -427,7 +427,7 @@ namespace Wacs.Core.Instructions
     //0x0D
     public class InstBranchConditional : InstructionBase
     {
-        public override OpCode OpCode => OpCode.BrIf;
+        public override ByteCode Op => OpCode.BrIf;
 
         private LabelIdx L { get; set; }
 
@@ -467,7 +467,7 @@ namespace Wacs.Core.Instructions
     //0x0E
     public class InstBranchTable : InstructionBase
     {
-        public override OpCode OpCode => OpCode.BrTable;
+        public override ByteCode Op => OpCode.BrTable;
 
         private LabelIdx[] Ls { get; set; } = null!;
         private LabelIdx Ln { get; set; }
@@ -539,7 +539,7 @@ namespace Wacs.Core.Instructions
     public class InstReturn : InstructionBase
     {
         public static readonly InstReturn Inst = new();
-        public override OpCode OpCode => OpCode.Return;
+        public override ByteCode Op => OpCode.Return;
 
         // @Spec 3.3.8.9. return
         public override void Validate(WasmValidationContext context)
@@ -563,7 +563,7 @@ namespace Wacs.Core.Instructions
     //0x10
     public class InstCall : InstructionBase
     {
-        public override OpCode OpCode => OpCode.Call;
+        public override ByteCode Op => OpCode.Call;
 
         private FuncIdx X { get; set; }
 
@@ -609,7 +609,7 @@ namespace Wacs.Core.Instructions
     //0x11
     public class InstCallIndirect : InstructionBase
     {
-        public override OpCode OpCode => OpCode.CallIndirect;
+        public override ByteCode Op => OpCode.CallIndirect;
 
         private TypeIdx Y { get; set; }
         private TableIdx X { get; set; }
@@ -654,7 +654,7 @@ namespace Wacs.Core.Instructions
             var ftExpect = context.Frame.Module.Types[Y];
             //8.
             context.Assert(context.OpStack.Peek().IsI32,
-                () => $"Instruction {OpCode.GetMnemonic()} failed. Wrong type on stack.");
+                () => $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
             int i = context.OpStack.PopI32();
             //10.

@@ -8,9 +8,9 @@ using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Instructions
 {
-    public static class InstructionFactory
+    public static partial class InstructionFactory
     {
-        private static readonly Dictionary<OpCode, Func<IInstruction>> InstructionMap = new();
+        private static readonly Dictionary<ByteCode, Func<IInstruction>> InstructionMap = new();
 
         static InstructionFactory()
         {
@@ -19,16 +19,16 @@ namespace Wacs.Core.Instructions
             // Extensions are registered via the ExtensionLoader
         }
 
-        public static void RegisterExtensionInstruction(OpCode opcode, Func<IInstruction> constructor)
+        public static void RegisterExtensionInstruction(ByteCode opcode, Func<IInstruction> constructor)
         {
             InstructionMap[opcode] = constructor;
         }
 
-        public static T? CreateInstruction<T>(OpCode opCode)
+        public static T? CreateInstruction<T>(ByteCode code)
             where T : InstructionBase =>
-            CreateInstruction(opCode) as T;
+            CreateInstruction(code) as T;
 
-        public static IInstruction? CreateInstruction(OpCode opcode) => opcode switch {
+        public static IInstruction? CreateInstruction(ByteCode opcode) => opcode.x00 switch {
             //Control Instructions
             OpCode.Unreachable       => InstUnreachable.Inst,
             OpCode.Nop               => InstNop.Inst,
@@ -66,13 +66,7 @@ namespace Wacs.Core.Instructions
             //Table Instructions
             OpCode.TableGet          => new InstTableGet(),
             OpCode.TableSet          => new InstTableSet(),
-            OpCode.TableInit         => new InstTableInit(),
-            OpCode.ElemDrop          => new InstElemDrop(),
-            OpCode.TableCopy         => new InstTableCopy(),
-            OpCode.TableGrow         => new InstTableGrow(),
-            OpCode.TableSize         => new InstTableSize(),
-            OpCode.TableFill         => new InstTableFill(),
-                 
+
             //Memory Instructions 
             OpCode.I32Load           => new InstMemoryLoad(ValType.I32, BitWidth.U32),
             OpCode.I64Load           => new InstMemoryLoad(ValType.I64, BitWidth.U64),
@@ -101,10 +95,6 @@ namespace Wacs.Core.Instructions
             
             OpCode.MemorySize        => new InstMemorySize(),
             OpCode.MemoryGrow        => new InstMemoryGrow(),
-            OpCode.MemoryInit        => new InstMemoryInit(),
-            OpCode.DataDrop          => new InstDataDrop(),
-            OpCode.MemoryCopy        => new InstMemoryCopy(),
-            OpCode.MemoryFill        => new InstMemoryFill(),
                  
             // Numeric Instructions 
             OpCode.I32Const          => new InstI32Const(),
@@ -243,15 +233,7 @@ namespace Wacs.Core.Instructions
             OpCode.I64ReinterpretF64 => NumericInst.I64ReinterpretF64,
             OpCode.F32ReinterpretI32 => NumericInst.F32ReinterpretI32,
             OpCode.F64ReinterpretI64 => NumericInst.F64ReinterpretI64,
-            //Non-Trapping
-            OpCode.I32TruncSatF32S   => NumericInst.I32TruncSatF32S,
-            OpCode.I32TruncSatF32U   => NumericInst.I32TruncSatF32U,
-            OpCode.I32TruncSatF64S   => NumericInst.I32TruncSatF64S,
-            OpCode.I32TruncSatF64U   => NumericInst.I32TruncSatF64U,
-            OpCode.I64TruncSatF32S   => NumericInst.I64TruncSatF32S,
-            OpCode.I64TruncSatF32U   => NumericInst.I64TruncSatF32U,
-            OpCode.I64TruncSatF64S   => NumericInst.I64TruncSatF64S,
-            OpCode.I64TruncSatF64U   => NumericInst.I64TruncSatF64U,
+            
             //Sign-Extension
             OpCode.I32Extend8S       => NumericInst.I32Extend8S,
             OpCode.I32Extend16S      => NumericInst.I32Extend16S,
@@ -259,10 +241,12 @@ namespace Wacs.Core.Instructions
             OpCode.I64Extend16S      => NumericInst.I64Extend16S,
             OpCode.I64Extend32S      => NumericInst.I64Extend32S,
             
-                
-            _ => InstructionMap.TryGetValue(opcode, out var constructor)
-                ? constructor()
-                : throw new NotSupportedException($"Opcode {opcode} is not supported.")
+            OpCode.FB                => CreateInstruction(opcode.xFB),
+            OpCode.FC                => CreateInstruction(opcode.xFC),
+            OpCode.FD                => CreateInstruction(opcode.xFD),
+            OpCode.FE                => CreateInstruction(opcode.xFE),
+            
+            _ => throw new NotSupportedException($"Opcode {opcode} is not supported.")
         };
     }
     
@@ -276,19 +260,18 @@ namespace Wacs.Core.Instructions
         {
             //Splice another byte if the first byte is a prefix
             var opcode = (OpCode)reader.ReadByte() switch {
-                OpCode.GCPrefix         => (ushort)(0xFB00 | reader.ReadLeb128_u32()), 
-                OpCode.ExtensionPrefix  => (ushort)(0xFC00 | reader.ReadLeb128_u32()),
-                OpCode.SIMDPrefix       => (ushort)(0xFD00 | reader.ReadLeb128_u32()),
-                OpCode.ThreadsPrefix    => (ushort)(0xFE00 | reader.ReadLeb128_u32()),
-                var u8           => (ushort)u8,
+                OpCode.FB => new ByteCode((GcCode)reader.ReadLeb128_u32()), 
+                OpCode.FC => new ByteCode((ExtCode)reader.ReadLeb128_u32()),
+                OpCode.FD => new ByteCode((SimdCode)reader.ReadLeb128_u32()),
+                OpCode.FE => new ByteCode((AtomCode)reader.ReadLeb128_u32()),
+                var b => new ByteCode(b)
             };
-            
-            return InstructionFactory.CreateInstruction((OpCode)opcode)?.Parse(reader);            
+            return InstructionFactory.CreateInstruction(opcode)?.Parse(reader);            
         }
 
-        public static bool IsEnd(IInstruction inst) => inst.OpCode == OpCode.End;
+        public static bool IsEnd(IInstruction inst) => inst.Op.x00 == OpCode.End;
 
-        public static bool IsElseOrEnd(IInstruction inst) => inst.OpCode switch
+        public static bool IsElseOrEnd(IInstruction inst) => inst.Op.x00 switch
         {
             OpCode.Else => true,
             OpCode.End => true,

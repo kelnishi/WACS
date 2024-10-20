@@ -7,28 +7,28 @@ namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst
     {
-        public static readonly NumericInst I32TruncSatF32S = new(OpCode.I32TruncSatF32S, ExecuteI32TruncSatF32S,
+        public static readonly NumericInst I32TruncSatF32S = new(ExtCode.I32TruncSatF32S, ExecuteI32TruncSatF32S,
             ValidateOperands(pop: ValType.F32, push: ValType.I32));
 
-        public static readonly NumericInst I32TruncSatF32U = new(OpCode.I32TruncSatF32U, ExecuteI32TruncSatF32U,
+        public static readonly NumericInst I32TruncSatF32U = new(ExtCode.I32TruncSatF32U, ExecuteI32TruncSatF32U,
             ValidateOperands(pop: ValType.F32, push: ValType.I32));
 
-        public static readonly NumericInst I32TruncSatF64S = new(OpCode.I32TruncSatF64S, ExecuteI32TruncSatF64S,
+        public static readonly NumericInst I32TruncSatF64S = new(ExtCode.I32TruncSatF64S, ExecuteI32TruncSatF64S,
             ValidateOperands(pop: ValType.F64, push: ValType.I32));
 
-        public static readonly NumericInst I32TruncSatF64U = new(OpCode.I32TruncSatF64U, ExecuteI32TruncSatF64U,
+        public static readonly NumericInst I32TruncSatF64U = new(ExtCode.I32TruncSatF64U, ExecuteI32TruncSatF64U,
             ValidateOperands(pop: ValType.F64, push: ValType.I32));
 
-        public static readonly NumericInst I64TruncSatF32S = new(OpCode.I64TruncSatF32S, ExecuteI64TruncSatF32S,
+        public static readonly NumericInst I64TruncSatF32S = new(ExtCode.I64TruncSatF32S, ExecuteI64TruncSatF32S,
             ValidateOperands(pop: ValType.F32, push: ValType.I64));
 
-        public static readonly NumericInst I64TruncSatF32U = new(OpCode.I64TruncSatF32U, ExecuteI64TruncSatF32U,
+        public static readonly NumericInst I64TruncSatF32U = new(ExtCode.I64TruncSatF32U, ExecuteI64TruncSatF32U,
             ValidateOperands(pop: ValType.F32, push: ValType.I64));
 
-        public static readonly NumericInst I64TruncSatF64S = new(OpCode.I64TruncSatF64S, ExecuteI64TruncSatF64S,
+        public static readonly NumericInst I64TruncSatF64S = new(ExtCode.I64TruncSatF64S, ExecuteI64TruncSatF64S,
             ValidateOperands(pop: ValType.F64, push: ValType.I64));
 
-        public static readonly NumericInst I64TruncSatF64U = new(OpCode.I64TruncSatF64U, ExecuteI64TruncSatF64U,
+        public static readonly NumericInst I64TruncSatF64U = new(ExtCode.I64TruncSatF64U, ExecuteI64TruncSatF64U,
             ValidateOperands(pop: ValType.F64, push: ValType.I64));
 
         // https://github.com/WebAssembly/spec/blob/master/proposals/nontrapping-float-to-int-conversion/Overview.md

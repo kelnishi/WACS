@@ -5,10 +5,10 @@ using Wacs.Core.Attributes;
 namespace Wacs.Core.OpCodes
 {
     /// <summary>
-    /// Represents all WebAssembly opcodes, including core instructions and those from extensions and proposals.
+    /// Represents all WebAssembly opcodes, including core instructions.
     /// see WebAssembly Specification Release 2.0 (Draft 2024-09-26)
     /// </summary>
-    public enum OpCode : ushort
+    public enum OpCode : byte
     {
         // =========================
         // Control Instructions
@@ -29,19 +29,19 @@ namespace Wacs.Core.OpCodes
         [OpCode("call")]          Call         = 0x10,
         [OpCode("call_indirect")] CallIndirect = 0x11,
         
+        // Tail Calls proposal
+        [OpCode("return_call")]   ReturnCall   = 0x12,           
+        [OpCode("return_call_indirect")] ReturnCallIndirect = 0x13,
+        
+        // Reference Types extension
+        [OpCode("call_ref")]      CallRef      = 0x14,
+        
         // Exception Handling (Proposal)
         [OpCode("try")]           Try          = 0x06,
         [OpCode("catch")]         Catch        = 0x07,
         [OpCode("throw")]         Throw        = 0x08,
         [OpCode("rethrow")]       Rethrow      = 0x09,
         [OpCode("br_on_exn")]     BrOnExn      = 0x0A,
-        
-        // Tail Calls proposal
-        [OpCode("return_call")]   ReturnCall   = 0x12,           
-        [OpCode("return_call_indirect")] ReturnCallIndirect = 0x13,
-
-        // Reference Types extension
-        [OpCode("call_ref")]      CallRef      = 0x14,         
         
         // =========================
         // Reference Types
@@ -72,13 +72,6 @@ namespace Wacs.Core.OpCodes
         [OpCode("table.get")]  TableGet  = 0x25,
         [OpCode("table.set")]  TableSet  = 0x26,
         
-        [OpCode("table.init")] TableInit = 0xFC0C,  //12
-        [OpCode("elem.drop")]  ElemDrop  = 0xFC0D,  //13
-        [OpCode("table.copy")] TableCopy = 0xFC0E,  //14
-        [OpCode("table.grow")] TableGrow = 0xFC0F,  //15
-        [OpCode("table.size")] TableSize = 0xFC10,  //16
-        [OpCode("table.fill")] TableFill = 0xFC11,  //17
-
         // =========================
         // Memory Instructions
         // =========================
@@ -287,40 +280,14 @@ namespace Wacs.Core.OpCodes
         [OpCode("i64.extend16_s")] I64Extend16S = 0xC3,
         [OpCode("i64.extend32_s")] I64Extend32S = 0xC4,
 
-        // =========================
-        // GC Proposal Operators
-        // =========================
-        
-        // ReSharper disable once InconsistentNaming
-        GCPrefix = 0xFB,
-        
-        // =========================
-        // Non-Trapping Float-to-Int Conversions
-        // =========================
-
-        // Prefix: 0xFC
-        ExtensionPrefix = 0xFC,
-        [OpCode("i32.trunc_sat_f32_s")] I32TruncSatF32S = 0xFC00,
-        [OpCode("i32.trunc_sat_f32_u")] I32TruncSatF32U = 0xFC01,
-        [OpCode("i32.trunc_sat_f64_s")] I32TruncSatF64S = 0xFC02,
-        [OpCode("i32.trunc_sat_f64_u")] I32TruncSatF64U = 0xFC03,
-        [OpCode("i64.trunc_sat_f32_s")] I64TruncSatF32S = 0xFC04,
-        [OpCode("i64.trunc_sat_f32_u")] I64TruncSatF32U = 0xFC05,
-        [OpCode("i64.trunc_sat_f64_s")] I64TruncSatF64S = 0xFC06,
-        [OpCode("i64.trunc_sat_f64_u")] I64TruncSatF64U = 0xFC07,
-
-        // =========================
-        // Bulk Memory Operations
-        // =========================
-
-        // Prefix: 0xFC
-        [OpCode("memory.init")] MemoryInit = 0xFC08,
-        [OpCode("data.drop")]   DataDrop   = 0xFC09,
-        [OpCode("memory.copy")] MemoryCopy = 0xFC0A,
-        [OpCode("memory.fill")] MemoryFill = 0xFC0B,
-
-        SIMDPrefix = 0xFD,
-        ThreadsPrefix = 0xFE,
+        // Prefix GC
+        FB = 0xFB,
+        // Prefix Ext
+        FC = 0xFC,
+        // Prefix Simd
+        FD = 0xFD,
+        // Prefix Threads
+        FE = 0xFE,
         
     }
 }

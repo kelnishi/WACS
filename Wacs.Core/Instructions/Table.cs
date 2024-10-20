@@ -13,7 +13,7 @@ namespace Wacs.Core.Instructions
     // 0x25
     public class InstTableGet : InstructionBase
     {
-        public override OpCode OpCode => OpCode.TableGet;
+        public override ByteCode Op => OpCode.TableGet;
         private TableIdx X { get; set; }
 
         // @Spec 3.3.6.1. table.get
@@ -70,7 +70,7 @@ namespace Wacs.Core.Instructions
     // 0x26
     public class InstTableSet : InstructionBase
     {
-        public override OpCode OpCode => OpCode.TableSet;
+        public override ByteCode Op => OpCode.TableSet;
         private TableIdx X { get; set; }
 
         // @Spec 3.3.6.2. table.set
@@ -130,7 +130,7 @@ namespace Wacs.Core.Instructions
     // 0xFC0C
     public class InstTableInit : InstructionBase
     {
-        public override OpCode OpCode => OpCode.TableInit;
+        public override ByteCode Op => ExtCode.TableInit;
         private TableIdx X { get; set; }
         private ElemIdx Y { get; set; }
 
@@ -244,7 +244,7 @@ namespace Wacs.Core.Instructions
     // 0xFC0F
     public class InstElemDrop : InstructionBase
     {
-        public override OpCode OpCode => OpCode.ElemDrop;
+        public override ByteCode Op => ExtCode.ElemDrop;
         private ElemIdx X { get; set; }
 
         // @Spec 3.3.6.8. elem.drop x
@@ -286,7 +286,7 @@ namespace Wacs.Core.Instructions
     // 0xFC0E
     public class InstTableCopy : InstructionBase
     {
-        public override OpCode OpCode => OpCode.TableCopy;
+        public override ByteCode Op => ExtCode.TableCopy;
         private TableIdx SrcY { get; set; }
         private TableIdx DstX { get; set; }
 
@@ -410,7 +410,7 @@ namespace Wacs.Core.Instructions
     // 0xFC0F
     public class InstTableGrow : InstructionBase
     {
-        public override OpCode OpCode => OpCode.TableGrow;
+        public override ByteCode Op => ExtCode.TableGrow;
         private TableIdx X { get; set; }
 
         // @Spec 3.3.6.4. table.grow x
@@ -474,7 +474,7 @@ namespace Wacs.Core.Instructions
     // 0xFC10
     public class InstTableSize : InstructionBase
     {
-        public override OpCode OpCode => OpCode.TableSize;
+        public override ByteCode Op => ExtCode.TableSize;
         private TableIdx X { get; set; }
 
         // @Spec 3.3.6.3. table.size x
@@ -516,7 +516,7 @@ namespace Wacs.Core.Instructions
     // 0xFC11
     public class InstTableFill : InstructionBase
     {
-        public override OpCode OpCode => OpCode.TableFill;
+        public override ByteCode Op => ExtCode.TableFill;
         private TableIdx X { get; set; }
 
         // @Spec 3.3.6.5. table.fill

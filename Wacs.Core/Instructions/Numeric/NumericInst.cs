@@ -12,10 +12,10 @@ namespace Wacs.Core.Instructions.Numeric
 
         private readonly ValidationDelegate _validate;
 
-        private NumericInst(OpCode opCode, ExecuteDelegate execute, ValidationDelegate validate) =>
-            (OpCode, _execute, _validate) = (opCode, execute, validate);
+        private NumericInst(ByteCode op, ExecuteDelegate execute, ValidationDelegate validate) =>
+            (Op, _execute, _validate) = (op, execute, validate);
 
-        public override OpCode OpCode { get; }
+        public override ByteCode Op { get; }
 
         public override void Validate(WasmValidationContext context) => _validate(context);
         public override void Execute(ExecContext context) => _execute(context);

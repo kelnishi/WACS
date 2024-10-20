@@ -10,18 +10,14 @@ namespace Wacs.Core.Instructions
 {
     public class LocalVariableInst : InstructionBase
     {
-        private delegate void ExecuteDelegate(ExecContext context, LocalIdx localIndex);
-
-        private delegate void ValidationDelegate(WasmValidationContext context, LocalIdx localIndex);
-
         private readonly ExecuteDelegate _execute;
 
         private readonly ValidationDelegate _validate;
 
-        private LocalVariableInst(OpCode opCode, ExecuteDelegate execute, ValidationDelegate validate) =>
-            (OpCode, _execute, _validate) = (opCode, execute, validate);
+        private LocalVariableInst(ByteCode op, ExecuteDelegate execute, ValidationDelegate validate) =>
+            (Op, _execute, _validate) = (op, execute, validate);
 
-        public override OpCode OpCode { get; }
+        public override ByteCode Op { get; }
         private LocalIdx Index { get; set; }
 
         public override void Validate(WasmValidationContext context) => _validate(context, Index);
@@ -113,22 +109,22 @@ namespace Wacs.Core.Instructions
             //5.
             ExecuteLocalSet(context, localIndex);
         }
+
+        private delegate void ExecuteDelegate(ExecContext context, LocalIdx localIndex);
+
+        private delegate void ValidationDelegate(WasmValidationContext context, LocalIdx localIndex);
     }
     
     public class GlobalVariableInst : InstructionBase
     {
-        private delegate void ExecuteDelegate(ExecContext context, GlobalIdx index);
-
-        private delegate void ValidationDelegate(WasmValidationContext context, GlobalIdx index);
-
         private readonly ExecuteDelegate _execute;
 
         private readonly ValidationDelegate _validate;
 
-        private GlobalVariableInst(OpCode opCode, ExecuteDelegate execute, ValidationDelegate validate) => 
-            (OpCode, _execute, _validate) = (opCode, execute, validate);
+        private GlobalVariableInst(ByteCode op, ExecuteDelegate execute, ValidationDelegate validate) => 
+            (Op, _execute, _validate) = (op, execute, validate);
 
-        public override OpCode OpCode { get; }
+        public override ByteCode Op { get; }
         private GlobalIdx Index { get; set; }
 
         public override void Validate(WasmValidationContext context) => _validate(context, Index);
@@ -208,6 +204,10 @@ namespace Wacs.Core.Instructions
             glob.Value = val;
 
         }
+
+        private delegate void ExecuteDelegate(ExecContext context, GlobalIdx index);
+
+        private delegate void ValidationDelegate(WasmValidationContext context, GlobalIdx index);
     }
     
 }

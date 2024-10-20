@@ -292,15 +292,15 @@ namespace Wacs.Core.Runtime
                             .Execute(Context);
                         InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(n)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction<InstTableInit>(OpCode.TableInit)!
+                        InstructionFactory.CreateInstruction<InstTableInit>(ExtCode.TableInit)!
                             .Immediate(activeMode.TableIndex, (ElemIdx)i)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction<InstElemDrop>(OpCode.ElemDrop)!.Immediate((ElemIdx)i)
+                        InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)!.Immediate((ElemIdx)i)
                             .Execute(Context);
                         break;
                     case Module.ElementMode.DeclarativeMode declarativeMode:
                         _ = declarativeMode;
-                        InstructionFactory.CreateInstruction<InstElemDrop>(OpCode.ElemDrop)!.Immediate((ElemIdx)i)
+                        InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)!.Immediate((ElemIdx)i)
                             .Execute(Context);
                         break;
                 }
@@ -323,9 +323,9 @@ namespace Wacs.Core.Runtime
                             .Execute(Context);
                         InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(n)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction<InstMemoryInit>(OpCode.MemoryInit)!.Immediate((DataIdx)i)
+                        InstructionFactory.CreateInstruction<InstMemoryInit>(ExtCode.MemoryInit)!.Immediate((DataIdx)i)
                             .Execute(Context);
-                        InstructionFactory.CreateInstruction<InstDataDrop>(OpCode.DataDrop)!.Immediate((DataIdx)i)
+                        InstructionFactory.CreateInstruction<InstDataDrop>(ExtCode.DataDrop)!.Immediate((DataIdx)i)
                             .Execute(Context);
                         break;
                     case Module.DataMode.PassiveMode: //Do nothing
