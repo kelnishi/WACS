@@ -8,7 +8,7 @@ namespace Wacs.Core.Runtime
         public int StackHeight = 0;
 
 
-        public Label(ResultType type, InstructionPointer continuationAddress, OpCode inst)
+        public Label(ResultType type, InstructionPointer continuationAddress, ByteCode inst)
         {
             Type = type;
             ContinuationAddress = continuationAddress;
@@ -19,7 +19,7 @@ namespace Wacs.Core.Runtime
 
         public int Arity => Type.Arity;
 
-        public OpCode Instruction { get; }
+        public ByteCode Instruction { get; }
         public InstructionPointer ContinuationAddress { get; } // The instruction index to jump to on branch
     }
 }

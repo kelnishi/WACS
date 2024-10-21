@@ -154,33 +154,73 @@ namespace Wacs.Core.Runtime
                     throw new InvalidDataException($"Cannot define StackValue of type {type}");
             }
         }
-
+        
         public Value(object externalValue)
         {
             this = default;
             switch (externalValue)
             {
                 case int i:
+                    Type = ValType.I32;
                     Int32 = i;
                     break;
                 case uint ui:
+                    Type = ValType.I32;
                     Int32 = (int)ui;
                     break;
                 case long l:
+                    Type = ValType.I64;
                     Int64 = l;
                     break;
                 case ulong ul:
+                    Type = ValType.I64;
                     Int64 = (long)ul;
                     break;
                 case BigInteger bi:
+                    Type = ValType.V128;
                     V128 = bi.ToV128();
                     break;
                 case V128 v128:
+                    Type = ValType.V128;
                     V128 = v128;
                     break;
                 default:
                     throw new InvalidDataException(
                         $"Cannot convert object to stack value of type {typeof(ExternalValue)}");
+            }
+        }
+        
+        
+        public Value(ValType type, object externalValue)
+        {
+            this = default;
+            Type = type;
+            switch (Type)
+            {
+                case ValType.I32:
+                    Int32 = (int)externalValue;
+                    break;
+                case ValType.I64:
+                    Int64 = (long)externalValue;
+                    break;
+                case ValType.F32:
+                    Float32 = (float)externalValue;
+                    break;
+                case ValType.F64:
+                    Float64 = (double)externalValue;
+                    break;
+                case ValType.V128:
+                    V128 = new V128((byte[])externalValue);
+                    break;
+                case ValType.Funcref:
+                    Int64 = (int)externalValue;
+                    break;
+                case ValType.Externref:
+                    Int64 = (int)externalValue;
+                    break;
+                case ValType.Undefined:
+                default:
+                    throw new InvalidDataException($"Cannot define StackValue of type {type}");
             }
         }
 

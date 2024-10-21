@@ -87,24 +87,23 @@ namespace Wacs.Core.Utilities
         {
             long result = 0;
             int shift = 0;
-
+            
             while (true)
             {
-                //TODO Fix LEB128 S33 decoding!
-                int byteValue = reader.ReadByte();
+                int byteValue = reader.ReadSByte();
                 if (byteValue == -1)
                     throw new EndOfStreamException("Unexpected end of stream while decoding s33.");
-
+            
                 // Extract the lower 7 bits and add them to the result
                 byte lower7Bits = (byte)(byteValue & 0x7F);
                 result |= (long)lower7Bits << shift;
-
+            
                 // Increment the shift for the next 7 bits
                 shift += 7;
-
+            
                 // Check if this is the last byte
                 bool moreBytes = (byteValue & 0x80) != 0;
-
+            
                 // If it's the last byte, check the sign bit and perform sign extension if necessary
                 if (!moreBytes)
                 {
@@ -113,25 +112,25 @@ namespace Wacs.Core.Utilities
                     {
                         result |= -1L << shift;
                     }
-
+            
                     break;
                 }
-
+            
                 // Prevent shift overflow
                 if (shift >= 64)
                     throw new OverflowException("Shift count exceeds 64 bits while decoding s33.");
             }
-
+            
             // Mask the result to 33 bits to ensure it's within the s33 range
             const long mask = (1L << 33) - 1;
             result &= mask;
-
+            
             // Sign-extend to 64 bits if the sign bit is set
             if ((result & (1L << 32)) != 0)
             {
                 result |= -1L << 33;
             }
-
+            
             return result;
         }
 

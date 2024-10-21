@@ -13,6 +13,7 @@ namespace Wacs.Core.Types
 
         private ResultType() => Types = Array.Empty<ValType>();
         public ResultType(ValType single) => Types = new[] { single };
+        public ResultType(ValType[] types) => Types = types;
 
         private ResultType(BinaryReader reader) =>
             Types = reader.ParseVector(ValueTypeParser.Parse);
