@@ -84,9 +84,32 @@ namespace Wacs.Core.Runtime
             _entityBindings[(moduleName, entityName)] = funcAddr;
         }
 
-        public void Invoke(FuncAddr funcAddr)
+        public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr)
+        where TDelegate : Delegate
         {
-            Context.Invoke(funcAddr);
+            var funcInst = Context.Store[funcAddr];
+            var funcType = funcInst.Type;
+            
+            Delegates.ValidateFunctionTypeCompatibility(funcType, typeof(TDelegate));
+            var genericDelegate = Delegates.CreateAnonymousFunctionFromFunctionType(funcType, args => {
+                Context.OpStack.PushScalars(funcType.ParameterTypes, args);
+                
+                
+                Context.Invoke(funcAddr);
+                
+                int steps = 0;
+                while (ProcessThread())
+                {
+                    steps += 1;
+                }
+                Console.WriteLine($"Process used {steps} gas.");
+                
+                var results = Context.OpStack.PopScalars(funcType.ResultType);
+                //TODO: Multiple result values?
+                return results[0];
+            });
+         
+            return (TDelegate)Delegates.CreateTypedDelegate(genericDelegate, typeof(TDelegate));
         }
 
         public bool ProcessThread()
@@ -94,6 +117,9 @@ namespace Wacs.Core.Runtime
             var comp = Context.Next();
             if (comp == null)
                 return false;
+            
+            //Trace execution
+            Console.WriteLine($"Instruction: {comp.Op.GetMnemonic()}");
 
             comp.Execute(Context);
             return true;

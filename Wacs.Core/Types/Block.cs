@@ -14,6 +14,7 @@ namespace Wacs.Core.Types
         public BlockType Type { get; }
 
         private ValType ValType => Type switch {
+            BlockType.Empty => ValType.Nil,
             BlockType.I32 => ValType.I32,
             BlockType.I64 => ValType.I64,
             BlockType.F32 => ValType.F32,
@@ -57,7 +58,7 @@ namespace Wacs.Core.Types
 
     public enum BlockType : long
     {
-        Empty = 0x40,
+        Empty = -64, //0x40,
         
         // =========================
         // Numeric Types

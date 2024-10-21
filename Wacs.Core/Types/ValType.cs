@@ -61,6 +61,8 @@ namespace Wacs.Core.Types
 
         // Additional types from future extensions can be added here.
         
+        
+        Nil = 0xFE,
         Undefined = 0xFF,
     }
 

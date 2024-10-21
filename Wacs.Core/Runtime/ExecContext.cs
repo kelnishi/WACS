@@ -117,13 +117,20 @@ namespace Wacs.Core.Runtime
             var frame = new Frame(wasmFunc.Module, funcType)
             {
                 ContinuationAddress = GetPointer(),
-                Locals = new LocalsSpace(t)
+                Locals = new LocalsSpace(funcType.ParameterTypes.Types, t)
             };
             int li = 0;
+            int localCount = funcType.ParameterTypes.Arity + t.Length;
+            //Load parameters
             while (vals.Count > 0)
             {
-                frame.Locals[(LocalIdx)li] = vals.Pop().Default;
+                frame.Locals[(LocalIdx)li] = vals.Pop();
                 li += 1;
+            }
+            //Set the Locals to default
+            for (int ti = 0; li < localCount; ++li, ++ti)
+            {
+                frame.Locals[(LocalIdx)li] = new Value(t[ti]);
             }
 
             //9.

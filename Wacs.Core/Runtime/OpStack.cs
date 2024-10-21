@@ -78,5 +78,13 @@ namespace Wacs.Core.Runtime
 
             return results.Select(value => value.Scalar).ToArray();
         }
+
+        public void PushScalars(ResultType type, object[] scalars)
+        {
+            for (int i = 0, l = type.Arity; i < l; ++i)
+            {
+                PushValue((Value)scalars[i]);
+            }
+        }
     }
 }

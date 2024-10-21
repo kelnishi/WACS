@@ -77,7 +77,7 @@ namespace Wacs.Core.Instructions.Numeric
             int a = context.OpStack.PopI32();
             int b = context.OpStack.PopI32();
             int result = unchecked(a * b);
-            context.OpStack.PushI64(result);
+            context.OpStack.PushI32(result);
         }
 
         // @Spec 4.3.2.7. idiv_s

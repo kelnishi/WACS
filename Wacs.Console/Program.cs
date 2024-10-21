@@ -63,17 +63,13 @@ namespace Wacs.Console
             var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true });
             runtime.RegisterModule("hello", modInst);
 
-            var mainAddr = runtime.GetExportedFunction("hello", "main");
+            var mainAddr = runtime.GetExportedFunction("hello", "iterFact");
             if (mainAddr != null)
             {
-                runtime.Invoke(mainAddr);
-                int steps = 0;
-                while (runtime.ProcessThread())
-                {
-                    steps += 1;
-                }
-
-                System.Console.WriteLine($"Process used {steps} gas.");
+                var caller = runtime.CreateInvoker<Delegates.WasmFunc<int, int>>(mainAddr);
+                int result = caller(7);
+                
+                System.Console.WriteLine($"Result was: {result}");
             }
         }
     }

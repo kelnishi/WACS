@@ -94,7 +94,7 @@ namespace Wacs.Core.Instructions
                 //2,3
                 var funcType = context.Frame.Module.Types.ResolveBlockType(block.Type);
                 //4.
-                var label = new Label(funcType.ResultType, context.GetPointer(1), OpCode.Block);
+                var label = new Label(funcType.ResultType, context.GetPointer(), OpCode.Block);
                 //5.
                 context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Length,
                     () => $"Instruction block failed. Operand Stack underflow.");
@@ -172,7 +172,7 @@ namespace Wacs.Core.Instructions
                 //2,3
                 var funcType = context.Frame.Module.Types.ResolveBlockType(Block.Type);
                 //4.
-                var label = new Label(funcType.ResultType, context.GetPointer(), OpCode.Block);
+                var label = new Label(funcType.ResultType, context.GetPointer(-1), OpCode.Loop);
                 //5.
                 context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Length,
                     () => $"Instruction loop failed. Operand Stack underflow.");
@@ -342,7 +342,7 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             var label = context.Frame.Label;
-            switch (label.Instruction)
+            switch (label.Instruction.x00)
             {
                 case OpCode.Block:
                 case OpCode.Loop:
