@@ -67,17 +67,17 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             //2.
-            context.Assert(context.Frame.Module.MemAddrs.Contains((MemIdx)0),
+            context.Assert(() => context.Frame.Module.MemAddrs.Contains((MemIdx)0),
                 () => $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
             //3.
             var a = context.Frame.Module.MemAddrs[(MemIdx)0];
             //4.
-            context.Assert(context.Store.Contains(a),
+            context.Assert(() => context.Store.Contains(a),
                 () => $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             //5.
             var mem = context.Store[a];
             //6.
-            context.Assert(context.OpStack.Peek().IsI32,
+            context.Assert(() => context.OpStack.Peek().IsI32,
                 () => $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
             int i = context.OpStack.PopI32();
@@ -216,22 +216,22 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             //2.
-            context.Assert(context.Frame.Module.MemAddrs.Contains((MemIdx)0),
+            context.Assert(() => context.Frame.Module.MemAddrs.Contains((MemIdx)0),
                 () => $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
             //3.
             var a = context.Frame.Module.MemAddrs[(MemIdx)0];
             //4.
-            context.Assert(context.Store.Contains(a),
+            context.Assert(() => context.Store.Contains(a),
                 () => $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             //5.
             var mem = context.Store[a];
             //6.
-            context.Assert(context.OpStack.Peek().Type == Type,
+            context.Assert(() => context.OpStack.Peek().Type == Type,
                 () => $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
             var c = context.OpStack.PopType(Type);
             //8.
-            context.Assert(context.OpStack.Peek().IsI32,
+            context.Assert(() => context.OpStack.Peek().IsI32,
                 () => $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
             int i = context.OpStack.PopI32();
