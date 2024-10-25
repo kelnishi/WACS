@@ -15,6 +15,8 @@ namespace Wacs.Core.Runtime
 
     public class ExecContext
     {
+        public delegate bool FactProducer();
+
         public delegate string MessageProducer();
 
         public readonly RuntimeAttributes Attributes;
@@ -38,10 +40,17 @@ namespace Wacs.Core.Runtime
 
         public Frame Frame => CallStack.Peek();
 
+        // [Conditional("STRICT_EXECUTION")]
+        // public void Assert(bool factIsTrue, MessageProducer message)
+        // {
+        //     if (!factIsTrue)
+        //         throw new TrapException(message());
+        // }
+
         [Conditional("STRICT_EXECUTION")]
-        public void Assert(bool factIsTrue, MessageProducer message)
+        public void Assert(FactProducer assertion, MessageProducer message)
         {
-            if (!factIsTrue)
+            if (!assertion())
                 throw new TrapException(message());
         }
 
@@ -87,7 +96,7 @@ namespace Wacs.Core.Runtime
         public void Invoke(FuncAddr addr)
         {
             //1.
-            Assert(Store.Contains(addr),
+            Assert(() => Store.Contains(addr),
                 () => $"Failure in Function Invocation. Address does not exist {addr}");
             //2.
             var funcInst = Store[addr];
@@ -111,7 +120,7 @@ namespace Wacs.Core.Runtime
             //5. *Instructions will be handled in EnterSequence below
             //var seq = wasmFunc.Definition.Body;
             //6.
-            Assert(OpStack.Count >= funcType.ParameterTypes.Arity,
+            Assert(() => OpStack.Count >= funcType.ParameterTypes.Arity,
                 () => $"Function invocation failed. Operand Stack underflow.");
             //7.
             var vals = OpStack.PopResults(funcType.ParameterTypes);
@@ -157,7 +166,7 @@ namespace Wacs.Core.Runtime
         public void FunctionReturn()
         {
             //3.
-            Assert(OpStack.Count >= Frame.Arity,
+            Assert(() => OpStack.Count >= Frame.Arity,
                 () => $"Function Return failed. Stack did not contain return values");
             //4. Since we have a split stack, we can leave the results in place.
             // var vals = OpStack.PopResults(Frame.Type.ResultType);

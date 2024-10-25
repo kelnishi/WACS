@@ -50,7 +50,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.2.2. ref.is_null
         public override void Execute(ExecContext context)
         {
-            context.Assert(context.OpStack.Peek().IsRef,
+            context.Assert(() => context.OpStack.Peek().IsRef,
                 ()=>$"Instruction ref.is_null failed. Expected reftype on top of the stack.");
             Value val = context.OpStack.PopRefType();
             int booleanResult = val.IsNullRef ? 1 : 0;
@@ -81,7 +81,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.2.3. ref.func x
         public override void Execute(ExecContext context)
         {
-            context.Assert(context.Frame.Module.FuncAddrs.Contains(FunctionIndex),
+            context.Assert(() => context.Frame.Module.FuncAddrs.Contains(FunctionIndex),
                 ()=>$"Instruction ref.func failed. Could not find function address in the context");
             var a = context.Frame.Module.FuncAddrs[FunctionIndex];
             context.OpStack.PushFuncref(new Value(ValType.Funcref, a.Value));

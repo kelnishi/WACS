@@ -96,7 +96,7 @@ namespace Wacs.Core.Instructions
                 //4.
                 var label = new Label(funcType.ResultType, context.GetPointer(), OpCode.Block);
                 //5.
-                context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Length,
+                context.Assert(() => context.OpStack.Count >= funcType.ParameterTypes.Length,
                     () => $"Instruction block failed. Operand Stack underflow.");
                 //6. 
                 var vals = context.OpStack.PopResults(funcType.ParameterTypes);
@@ -106,7 +106,7 @@ namespace Wacs.Core.Instructions
             catch (IndexOutOfRangeException exc)
             {
                 _ = exc;
-                context.Assert(false,
+                context.Assert(() => false,
                     () => $"Instruction block failed. BlockType {block.Type} did not exist in the Context.");
             }
         }
@@ -174,7 +174,7 @@ namespace Wacs.Core.Instructions
                 //4.
                 var label = new Label(funcType.ResultType, context.GetPointer(-1), OpCode.Loop);
                 //5.
-                context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Length,
+                context.Assert(() => context.OpStack.Count >= funcType.ParameterTypes.Length,
                     () => $"Instruction loop failed. Operand Stack underflow.");
                 //6. 
                 var vals = context.OpStack.PopResults(funcType.ParameterTypes);
@@ -184,7 +184,7 @@ namespace Wacs.Core.Instructions
             catch (IndexOutOfRangeException exc)
             {
                 _ = exc;
-                context.Assert(false,
+                context.Assert(() => false,
                     () => $"Instruction loop failed. BlockType {Block.Type} did not exist in the Context.");
             }
         }
@@ -383,14 +383,14 @@ namespace Wacs.Core.Instructions
         public static void ExecuteInstruction(ExecContext context, LabelIdx labelIndex)
         {
             //1.
-            context.Assert(context.Frame.Labels.Count > (int)labelIndex.Value,
+            context.Assert(() => context.Frame.Labels.Count > (int)labelIndex.Value,
                 () => $"Instruction br failed. Context did not contain Label {labelIndex}");
             //2.
             var label = context.Frame[labelIndex];
             //3.
             int n = label.Arity;
             //4.
-            context.Assert(context.OpStack.Count >= n,
+            context.Assert(() => context.OpStack.Count >= n,
                 () => $"Instruction br failed. Not enough values on the stack.");
             //5.
             var vals = context.OpStack.PopResults(label.Type);
@@ -406,7 +406,7 @@ namespace Wacs.Core.Instructions
                 sl = context.Frame.Labels.Pop();
             }
 
-            context.Assert(label == sl,
+            context.Assert(() => label == sl,
                 () => $"Instruction br failed. Failure in stack management.");
             //7.
             context.OpStack.Push(vals);
@@ -551,7 +551,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.9. return
         public override void Execute(ExecContext context)
         {
-            context.Assert(context.OpStack.Count >= context.Frame.Arity,
+            context.Assert(() => context.OpStack.Count >= context.Frame.Arity,
                 () => $"Instruction return failed. Operand stack underflow");
             //We're managing separate stacks, so we won't need to shift the operands
             // var vals = context.OpStack.PopResults(context.Frame.Type.ResultType);
@@ -584,7 +584,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.10. call
         public override void Execute(ExecContext context)
         {
-            context.Assert(context.Frame.Module.FuncAddrs.Contains(X),
+            context.Assert(() => context.Frame.Module.FuncAddrs.Contains(X),
                 () => $"Instruction call failed. Function address for {X} was not in the Context.");
             var a = context.Frame.Module.FuncAddrs[X];
             context.Invoke(a);
@@ -638,22 +638,22 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             //2.
-            context.Assert(context.Frame.Module.TableAddrs.Contains(X),
+            context.Assert(() => context.Frame.Module.TableAddrs.Contains(X),
                 () => $"Instruction call_indirect failed. Table {X} was not in the Context.");
             //3.
             var ta = context.Frame.Module.TableAddrs[X];
             //4.
-            context.Assert(context.Store.Contains(ta),
+            context.Assert(() => context.Store.Contains(ta),
                 () => $"Instruction call_indirect failed. TableInstance {ta} was not in the Store.");
             //5.
             var tab = context.Store[ta];
             //6.
-            context.Assert(context.Frame.Module.Types.Contains(Y),
+            context.Assert(() => context.Frame.Module.Types.Contains(Y),
                 () => $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
             //7.
             var ftExpect = context.Frame.Module.Types[Y];
             //8.
-            context.Assert(context.OpStack.Peek().IsI32,
+            context.Assert(() => context.OpStack.Peek().IsI32,
                 () => $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
             int i = context.OpStack.PopI32();
@@ -666,12 +666,12 @@ namespace Wacs.Core.Instructions
             if (r.IsNullRef)
                 throw new TrapException($"Instruction call_indirect NullReference.");
             //13.
-            context.Assert(r.Type == ValType.Funcref,
+            context.Assert(() => r.Type == ValType.Funcref,
                 () => $"Instruction call_indirect failed. Element was not a FuncRef");
             //14. ???
             var a = context.Frame.Module.FuncAddrs[r.FuncIdx];
             //15.
-            context.Assert(context.Store.Contains(a),
+            context.Assert(() => context.Store.Contains(a),
                 () => $"Instruction call_indirect failed. Validation of table mutation failed.");
             //16.
             var funcInst = context.Store[a];
