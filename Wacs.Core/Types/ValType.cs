@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 
 namespace Wacs.Core.Types
@@ -98,9 +99,25 @@ namespace Wacs.Core.Types
 
         public static ResultType SingleResult(this ValType type) => new(type);
     }
-        
 
-    public static class ValueTypeParser
+    public static class ValTypeUtilities
+    {
+        public static ValType ToValType(this Type type) =>
+            type switch {
+                { } t when t == typeof(int) => ValType.I32,
+                { } t when t == typeof(long) => ValType.I64,
+                { } t when t == typeof(float) => ValType.F32,
+                { } t when t == typeof(double) => ValType.F64,
+                { } t when t == typeof(void) => ValType.Nil,
+                // { } t when t == typeof(System.Numerics.Vector128<byte>) ||
+                //            t == typeof(System.Numerics.Vector128<float>) ||
+                //            t == typeof(System.Numerics.Vector128<int>) ||
+                //            t == typeof(System.Numerics.Vector128<long>) => ValType.V128,
+                _ => throw new InvalidCastException($"Unsupported type: {type.FullName}")
+            };
+    }
+
+    public static class ValTypeParser
     {
         public static ValType Parse(BinaryReader reader) =>
             // _ handles Undefined should throw

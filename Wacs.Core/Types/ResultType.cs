@@ -16,13 +16,15 @@ namespace Wacs.Core.Types
         public ResultType(ValType[] types) => Types = types;
 
         private ResultType(BinaryReader reader) =>
-            Types = reader.ParseVector(ValueTypeParser.Parse);
+            Types = reader.ParseVector(ValTypeParser.Parse);
 
         public ValType[] Types { get; }
 
         // ReSharper disable once ConditionalAccessQualifierIsNonNullableAccordingToAPIContract
         public uint Length => (uint)(Types?.Length ?? 0);
         public int Arity => (int)Length;
+
+        public bool IsEmpty => Arity == 0;
 
         public string ToNotation() => $"[{string.Join(" ",Types)}]";
 

@@ -93,7 +93,7 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public static Delegate CreateAnonymousFunctionFromFunctionType(FunctionType functionType, GenericFunc implementation)
+        public static Delegate AnonymousFunctionFromType(FunctionType functionType, GenericFunc implementation)
         {
             var paramTypes = functionType.ParameterTypes.Types;
             var resultTypes = functionType.ResultType.Types;
@@ -106,12 +106,12 @@ namespace Wacs.Core.Runtime
             return (paramTypes.Length, resultTypes.Length) switch
             {
                 (0, 0) => new WasmAction(() => { implementation(); }),
-                (0, 1) => CreateWasmFunc<object>(resultTypes[0], implementation),
                 (1, 0) => CreateWasmAction<object>(paramTypes[0], implementation),
-                (1, 1) => CreateWasmFunc<object, object>(paramTypes[0], resultTypes[0], implementation),
                 (2, 0) => CreateWasmAction<object, object>(paramTypes[0], paramTypes[1], implementation),
-                (2, 1) => CreateWasmFunc<object, object, object>(paramTypes[0], paramTypes[1], resultTypes[0], implementation),
                 (3, 0) => CreateWasmAction<object, object, object>(paramTypes[0], paramTypes[1], paramTypes[2], implementation),
+                (0, 1) => CreateWasmFunc<object>(resultTypes[0], implementation),
+                (1, 1) => CreateWasmFunc<object, object>(paramTypes[0], resultTypes[0], implementation),
+                (2, 1) => CreateWasmFunc<object, object, object>(paramTypes[0], paramTypes[1], resultTypes[0], implementation),
                 (3, 1) => CreateWasmFunc<object, object, object, object>(paramTypes[0], paramTypes[1], paramTypes[2], resultTypes[0], implementation),
                 _ => throw new NotSupportedException($"Unsupported function signature: ({string.Join(", ", paramTypes)}) -> ({string.Join(", ", resultTypes)})")
             };

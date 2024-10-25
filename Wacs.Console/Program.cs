@@ -52,25 +52,24 @@ namespace Wacs.Console
             }
             
             //Bind module dependencies prior to instantiation
-            runtime.BindHostFunction("env", "sayc", (scalars) =>
+            runtime.BindHostFunction<Action<int>>(("env", "sayc"), p =>
             {
-                char c = Convert.ToChar(scalars[0]);
+                char c = Convert.ToChar(p);
                 System.Console.Write(c);
-                return Array.Empty<object>();
             });
+
 
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing
             var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true });
             runtime.RegisterModule("hello", modInst);
 
-            var mainAddr = runtime.GetExportedFunction("hello", "iterFact");
-            if (mainAddr != null)
-            {
-                var caller = runtime.CreateInvoker<Delegates.WasmFunc<int, int>>(mainAddr);
-                int result = caller(7);
+            var mainAddr = runtime.GetExportedFunction(("hello", "main"));
+            if (mainAddr == null) return;
+            
+            var caller = runtime.CreateInvoker<Delegates.WasmFunc<int>>(mainAddr);
+            int result = caller();
                 
-                System.Console.WriteLine($"Result was: {result}");
-            }
+            System.Console.WriteLine($"Result was: {result}");
         }
     }
 }

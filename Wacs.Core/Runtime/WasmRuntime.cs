@@ -6,6 +6,7 @@ using FluentValidation;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
@@ -15,6 +16,13 @@ namespace Wacs.Core.Runtime
     {
         public bool SkipModuleValidation = false;
         public bool SkipStartFunction = false;
+    }
+
+    public class InvokerOptions
+    {
+        public readonly int GasLimit = 0;
+        public readonly bool LogGas = false;
+        public readonly bool LogInstructions = false;
     }
 
     public class WasmRuntime
@@ -63,9 +71,9 @@ namespace Wacs.Core.Runtime
             throw new Exception($"Module '{moduleName}' not found.");
         }
 
-        public FuncAddr? GetExportedFunction(string moduleName, string entityName)
+        public FuncAddr? GetExportedFunction((string module, string entity) id)
         {
-            if (GetBoundEntity((moduleName, entityName)) is FuncAddr addr)
+            if (GetBoundEntity(id) is FuncAddr addr)
             {
                 return addr;
             }
@@ -76,33 +84,55 @@ namespace Wacs.Core.Runtime
         private IAddress? GetBoundEntity((string module, string entity) id) =>
             _entityBindings.GetValueOrDefault(id);
 
-        public void BindHostFunction(string moduleName, string entityName, HostFunction.HostFunctionDelegate func)
-        {
-            //TODO: Use reflection or some shit to figure out the type
-            var type = new FunctionType(new ResultType(ValType.I32), ResultType.Empty);
-            var funcAddr = AllocateHostFunc(Store, type, func);
-            _entityBindings[(moduleName, entityName)] = funcAddr;
-        }
-
-        public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr)
+        //TODO Use Linq expression trees to bind types at runtime
+        public void BindHostFunction<TDelegate>((string module, string entity) id, TDelegate func)
         where TDelegate : Delegate
         {
+            var funcType = func.GetType();
+            var parameters = funcType.GetMethod("Invoke")?.GetParameters();
+            var paramTypes = parameters?.Select(p => p.ParameterType).ToArray() ?? Array.Empty<Type>();
+            var returnType = funcType.GetMethod("Invoke")?.ReturnType;
+            
+            var paramValTypes = new ResultType(paramTypes.Select(t => t.ToValType()).ToArray());
+            var valType = returnType?.ToValType() ?? ValType.Nil;
+            var returnValType = valType == ValType.Nil
+                ? ResultType.Empty
+                : new ResultType(valType);
+            
+            var type = new FunctionType(paramValTypes, returnValType);
+            var funcAddr = AllocateHostFunc(Store, type, funcType, func);
+            _entityBindings[id] = funcAddr;
+        }
+
+        //TODO: Use TDelegate to define the delegate rather than relying on CreateAnonymousFunctionFromFunctionType's switch.
+        public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr, InvokerOptions? options = default)
+        where TDelegate : Delegate
+        {
+            options ??= new InvokerOptions();
             var funcInst = Context.Store[funcAddr];
             var funcType = funcInst.Type;
             
             Delegates.ValidateFunctionTypeCompatibility(funcType, typeof(TDelegate));
-            var genericDelegate = Delegates.CreateAnonymousFunctionFromFunctionType(funcType, args => {
+            var genericDelegate = Delegates.AnonymousFunctionFromType(funcType, args => {
                 Context.OpStack.PushScalars(funcType.ParameterTypes, args);
-                
                 
                 Context.Invoke(funcAddr);
                 
                 int steps = 0;
-                while (ProcessThread())
+                while (ProcessThread(options.LogInstructions))
                 {
                     steps += 1;
+
+                    if (options.GasLimit > 0)
+                    {
+                        if (steps >= options.GasLimit)
+                        {
+                            throw new InsufficientGasException($"Invocation ran out of gas (limit:{options.GasLimit}).");
+                        }
+                    }
                 }
-                Console.WriteLine($"Process used {steps} gas.");
+                if (options.LogGas)
+                    Console.WriteLine($"Process used {steps} gas.");
                 
                 var results = Context.OpStack.PopScalars(funcType.ResultType);
                 //TODO: Multiple result values?
@@ -112,14 +142,15 @@ namespace Wacs.Core.Runtime
             return (TDelegate)Delegates.CreateTypedDelegate(genericDelegate, typeof(TDelegate));
         }
 
-        public bool ProcessThread()
+        public bool ProcessThread(bool logInstructions = false)
         {
             var comp = Context.Next();
             if (comp == null)
                 return false;
             
             //Trace execution
-            Console.WriteLine($"Instruction: {comp.Op.GetMnemonic()}");
+            if (logInstructions)
+                Console.WriteLine($"Instruction: {comp.Op.GetMnemonic()}");
 
             comp.Execute(Context);
             return true;
@@ -401,10 +432,9 @@ namespace Wacs.Core.Runtime
         /// <summary>
         /// @Spec 4.5.3.2. Host Functions
         /// </summary>
-        private static FuncAddr AllocateHostFunc(Store store, FunctionType funcType,
-            HostFunction.HostFunctionDelegate hostFunc)
+        private static FuncAddr AllocateHostFunc(Store store, FunctionType funcType, Type delType, Delegate hostFunc)
         {
-            var funcInst = new HostFunction(funcType, hostFunc);
+            var funcInst = new HostFunction(funcType, delType, hostFunc);
             var funcAddr = store.AddFunction(funcInst);
             return funcAddr;
         }

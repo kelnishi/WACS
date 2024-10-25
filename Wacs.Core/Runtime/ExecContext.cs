@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
@@ -37,6 +38,7 @@ namespace Wacs.Core.Runtime
 
         public Frame Frame => CallStack.Peek();
 
+        [Conditional("STRICT_EXECUTION")]
         public void Assert(bool factIsTrue, MessageProducer message)
         {
             if (!factIsTrue)
@@ -148,11 +150,13 @@ namespace Wacs.Core.Runtime
         {
             var funcType = hostFunc.Type;
             var vals = OpStack.PopScalars(funcType.ParameterTypes);
-            var results = hostFunc.Invoke(vals);
-            foreach (var result in results)
-            {
-                OpStack.PushValue(new Value(result));
-            }
+            hostFunc.Invoke(vals, OpStack);
+            // OpStack.PushValue(result);
+            // var results = hostFunc.Invoke(vals);
+            // foreach (var result in results)
+            // {
+            //     OpStack.PushValue(new Value(result));
+            // }
         }
 
         // @Spec 4.4.10.2. Returning from a function
