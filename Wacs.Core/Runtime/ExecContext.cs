@@ -26,7 +26,7 @@ namespace Wacs.Core.Runtime
         {
             Store = store;
             _currentSequence = seq;
-            _sequenceIndex = 0;
+            _sequenceIndex = -1;
             Attributes = attributes ?? new RuntimeAttributes();
         }
 
@@ -56,7 +56,7 @@ namespace Wacs.Core.Runtime
         }
 
         private void EnterSequence(InstructionSequence seq) =>
-            (_currentSequence, _sequenceIndex) = (seq, 0);
+            (_currentSequence, _sequenceIndex) = (seq, -1);
 
         public void ResumeSequence(InstructionPointer pointer) =>
             (_currentSequence, _sequenceIndex) = (pointer.Sequence, pointer.Index);
@@ -151,12 +151,6 @@ namespace Wacs.Core.Runtime
             var funcType = hostFunc.Type;
             var vals = OpStack.PopScalars(funcType.ParameterTypes);
             hostFunc.Invoke(vals, OpStack);
-            // OpStack.PushValue(result);
-            // var results = hostFunc.Invoke(vals);
-            // foreach (var result in results)
-            // {
-            //     OpStack.PushValue(new Value(result));
-            // }
         }
 
         // @Spec 4.4.10.2. Returning from a function
@@ -180,10 +174,13 @@ namespace Wacs.Core.Runtime
             if (_currentSequence.IsEmpty)
                 return null;
 
+            //Advance to the next instruction first.
+            ++_sequenceIndex;
+            
             if (_sequenceIndex >= _currentSequence.Count)
                 return null;
 
-            return _currentSequence[_sequenceIndex++];
+            return _currentSequence[_sequenceIndex];
         }
     }
 }

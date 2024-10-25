@@ -71,14 +71,14 @@ namespace Wacs.Core.Runtime
             throw new Exception($"Module '{moduleName}' not found.");
         }
 
-        public FuncAddr? GetExportedFunction((string module, string entity) id)
+        public FuncAddr GetExportedFunction((string module, string entity) id)
         {
             if (GetBoundEntity(id) is FuncAddr addr)
             {
                 return addr;
             }
 
-            return null;
+            throw new UnboundEntityException($"Function {id} was not exported from any modules currently loaded in the runtime.");
         }
 
         private IAddress? GetBoundEntity((string module, string entity) id) =>

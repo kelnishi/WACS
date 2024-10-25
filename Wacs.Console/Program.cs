@@ -63,12 +63,11 @@ namespace Wacs.Console
             var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true });
             runtime.RegisterModule("hello", modInst);
 
-            var mainAddr = runtime.GetExportedFunction(("hello", "main"));
-            if (mainAddr == null) return;
+            var mainAddr = runtime.GetExportedFunction(("hello", "iterFact"));
             
-            var caller = runtime.CreateInvoker<Delegates.WasmFunc<int>>(mainAddr);
-            int result = caller();
-                
+            var caller = runtime.CreateInvoker<Delegates.WasmFunc<int,int>>(mainAddr);
+            int result = caller(9);
+            
             System.Console.WriteLine($"Result was: {result}");
         }
     }
