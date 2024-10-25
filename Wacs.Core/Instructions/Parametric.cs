@@ -84,7 +84,7 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             if (WithTypes) {
-                Types = reader.ParseVector(ValueTypeParser.Parse);
+                Types = reader.ParseVector(ValTypeParser.Parse);
             }
             return this;
         }

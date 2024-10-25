@@ -25,7 +25,7 @@ namespace Wacs.Core
                     .ToArray();
 
             private static (uint Number, ValType Type) ParseCompressedLocal(BinaryReader reader) =>
-                (reader.ReadLeb128_u32(), ValueTypeParser.Parse(reader));
+                (reader.ReadLeb128_u32(), ValTypeParser.Parse(reader));
 
             public static FuncLocalsBody Parse(BinaryReader reader) =>
                 new(reader.ParseVector(ParseCompressedLocal), Expression.Parse(reader));
