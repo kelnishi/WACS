@@ -40,6 +40,8 @@ namespace Wacs.Core.Runtime
 
         public Frame Frame => CallStack.Peek();
 
+        public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[(MemIdx)0]];
+
         // [Conditional("STRICT_EXECUTION")]
         // public void Assert(bool factIsTrue, MessageProducer message)
         // {
@@ -159,7 +161,8 @@ namespace Wacs.Core.Runtime
         {
             var funcType = hostFunc.Type;
             var vals = OpStack.PopScalars(funcType.ParameterTypes);
-            hostFunc.Invoke(vals, OpStack);
+            
+            hostFunc.Invoke(this, vals, OpStack);
         }
 
         // @Spec 4.4.10.2. Returning from a function

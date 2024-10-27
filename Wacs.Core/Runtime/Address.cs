@@ -31,6 +31,7 @@ namespace Wacs.Core.Runtime
         public MemAddr(int value) => Value = (uint)value;
         public uint Value { get; }
         public static implicit operator Index(MemAddr addr) => new((int)addr.Value);
+        public static explicit operator MemAddr(int addr) => new MemAddr(addr);
     }
 
     public class GlobalAddr : IAddress
