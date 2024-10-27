@@ -2,6 +2,8 @@ using System;
 using System.Security.Cryptography;
 using Wacs.Core.Runtime;
 using Wacs.WASIp1.Types;
+using ptr = System.Int32;
+using size = System.Int32;
 
 namespace Wacs.WASIp1
 {
@@ -13,16 +15,16 @@ namespace Wacs.WASIp1
         public void BindToRuntime(WasmRuntime runtime)
         {
             string module = "wasi_snapshot_preview1";
-            runtime.BindHostFunction<Func<ExecContext,int,int,ErrNo>>((module, "random_get"), RandomGet);
+            runtime.BindHostFunction<Func<ExecContext,ptr,size,ErrNo>>((module, "random_get"), RandomGet);
         }
 
-        public ErrNo RandomGet(ExecContext ctx, int bufOffset, int bufLen)
+        public ErrNo RandomGet(ExecContext ctx, ptr bufOffsetPtr, size bufLen)
         {
             var mem = ctx.DefaultMemory;
-            if (!mem.Contains(bufOffset, bufLen))
+            if (!mem.Contains(bufOffsetPtr, bufLen))
                 return ErrNo.Fault;
             
-            var buf = mem[bufOffset..(bufOffset + bufLen)];
+            var buf = mem[bufOffsetPtr..(bufOffsetPtr + bufLen)];
             
             // Fill the span with cryptographically secure random data.
             RandomNumberGenerator.Fill(buf);

@@ -2,6 +2,8 @@ using System;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.WASIp1.Types;
+using exitcode = System.UInt32;
+using signal = System.Int32;
 
 namespace Wacs.WASIp1
 {
@@ -14,14 +16,14 @@ namespace Wacs.WASIp1
         public void BindToRuntime(WasmRuntime runtime)
         {
             string module = "wasi_snapshot_preview1";
-            runtime.BindHostFunction<Action<Signal>>((module, "proc_exit"), ProcExit);
-            runtime.BindHostFunction<Func<Signal,ErrNo>>((module, "proc_raise"), ProcRaise);
+            runtime.BindHostFunction<Action<exitcode>>((module, "proc_exit"), ProcExit);
+            runtime.BindHostFunction<Func<signal,ErrNo>>((module, "proc_raise"), ProcRaise);
             runtime.BindHostFunction<Func<ExecContext,ErrNo>>((module, "sched_yield"), SchedYield);
         }
 
-        private void ProcExit(Signal exitCode)
+        private void ProcExit(exitcode exitCode)
         {
-            _state.ExitCode = exitCode;
+            _state.ExitCode = (Signal)exitCode;
             throw new SignalException((int)exitCode);
         }
 
@@ -35,8 +37,9 @@ namespace Wacs.WASIp1
         /// Returns 0 (<see cref="ErrNo.Success"/>) on success,
         /// or a non-zero WASI error code on failure.
         /// </returns>
-        public ErrNo ProcRaise(Signal signal)
+        public ErrNo ProcRaise(signal sig)
         {
+            Signal signal = (Signal)sig;
             // Handle common signals as per WASI specification.
             switch (signal)
             {

@@ -6,16 +6,17 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Wacs.Core.Runtime;
-using Wacs.Core.Utilities;
 using Wacs.WASIp1.Types;
+using ptr = System.Int32;
 using size = System.UInt32;
+
+using timestamp = System.UInt64;
 
 namespace Wacs.WASIp1
 {
     public class Poll : IBindable
     {
         private static readonly int SubSize = Marshal.SizeOf<Subscription>();
-        private static readonly int EvtSize = Marshal.SizeOf<Event>();
         private readonly State _state;
 
         public Poll(State state) => _state = state;
@@ -23,7 +24,7 @@ namespace Wacs.WASIp1
         public void BindToRuntime(WasmRuntime runtime)
         {
             string module = "wasi_snapshot_preview1";
-            runtime.BindHostFunction<Func<ExecContext, int, int, size, int, ErrNo>>((module, "poll_oneoff"), PollOneoff);
+            runtime.BindHostFunction<Func<ExecContext, ptr, ptr, size, ptr, ErrNo>>((module, "poll_oneoff"), PollOneoff);
         }
 
         /// <summary>
@@ -37,7 +38,7 @@ namespace Wacs.WASIp1
         /// <param name="nsubscriptions"></param>
         /// <param name="neventsPtr"></param>
         /// <returns></returns>
-        public ErrNo PollOneoff(ExecContext ctx, int inPtr, int outPtr, size nsubscriptions, int neventsPtr)
+        public ErrNo PollOneoff(ExecContext ctx, ptr inPtr, ptr outPtr, size nsubscriptions, ptr neventsPtr)
         {
             if (nsubscriptions == 0)
                 return ErrNo.Inval; // Invalid argument.
@@ -64,13 +65,11 @@ namespace Wacs.WASIp1
                 //Write the events back to memory
                 foreach (var evt in events)
                 {
-                    var outMem = mem[outPtr..(outPtr + EvtSize)];
                     Event vevt = evt;
-                    MemoryMarshal.Write(outMem, ref vevt);
-                    outPtr += EvtSize;
+                    int size = mem.WriteStruct(outPtr, ref vevt);
+                    outPtr += size;
                 }
-                var neventsMem = mem[neventsPtr..(neventsPtr + 4)];
-                neventsMem.WriteInt32(events.Count);
+                mem.WriteInt32(neventsPtr, events.Count);
             }
             catch (Exception)
             {
@@ -84,7 +83,7 @@ namespace Wacs.WASIp1
         {
             // Create tasks for all subscriptions
             var tasks = new List<Task<Event?>>();
-            var now = (ulong)DateTime.UtcNow.Ticks;
+            var now = (timestamp)DateTime.UtcNow.Ticks;
 
             foreach (var sub in subscriptions)
             {
@@ -117,10 +116,10 @@ namespace Wacs.WASIp1
             return 0;
         }
 
-        private async Task<Event?> CreateClockTask(Subscription sub, ulong now)
+        private async Task<Event?> CreateClockTask(Subscription sub, timestamp now)
         {
             var clockSub = sub.U.Clock;
-            ulong targetTime;
+            timestamp targetTime;
 
             if ((clockSub.Flags & SubclockFlags.SubscriptionClockAbstime) != 0)
             {
@@ -215,7 +214,7 @@ namespace Wacs.WASIp1
             }
         }
 
-        private int PeekAvailableBytes(Stream stream)
+        private static long PeekAvailableBytes(Stream stream)
         {
             if (!stream.CanRead)
                 return 0;
@@ -236,7 +235,7 @@ namespace Wacs.WASIp1
             // For regular streams where we can check position and length
             try
             {
-                return (int)(stream.Length - stream.Position);
+                return stream.Length - stream.Position;
             }
             catch
             {

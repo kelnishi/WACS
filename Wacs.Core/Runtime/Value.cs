@@ -16,6 +16,10 @@ namespace Wacs.Core.Runtime
     {
         [FieldOffset(0)] public readonly ValType Type;
 
+        [FieldOffset(1)] public readonly byte U8;
+        
+        [FieldOffset(1)] public readonly short Int16;
+        
         // 32-bit integer
         [FieldOffset(1)] public readonly int Int32;
 
@@ -160,6 +164,22 @@ namespace Wacs.Core.Runtime
             this = default;
             switch (externalValue)
             {
+                case byte b:
+                    Type = ValType.I32;
+                    U8 = b;
+                    break;
+                case sbyte sb:
+                    Type = ValType.I32;
+                    Int32 = sb;
+                    break;
+                case short s:
+                    Type = ValType.I32;
+                    Int32 = s;
+                    break;
+                case ushort us:
+                    Type = ValType.I32;
+                    Int32 = us;
+                    break;
                 case int i:
                     Type = ValType.I32;
                     Int32 = i;
