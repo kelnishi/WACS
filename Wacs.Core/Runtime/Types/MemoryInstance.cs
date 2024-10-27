@@ -21,6 +21,16 @@ namespace Wacs.Core.Runtime.Types
 
         public long Size => _data.Length / Constants.PageSize;
 
+        public Span<byte> this[Range range]
+        {
+            get
+            {
+                var (start, length) = range.GetOffsetAndLength(_data.Length);
+                Span<byte> span = _data[start..(start+length)];
+                return span;
+            }
+        }
+
         /// <summary>
         /// @Spec 4.5.3.9. Growing memories
         /// </summary>
@@ -53,5 +63,8 @@ namespace Wacs.Core.Runtime.Types
 
             return true;
         }
+
+        public bool Contains(int offset, int width) => 
+            offset >= 0 && (offset + width) <= _data.Length;
     }
 }

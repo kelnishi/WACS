@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Console", "Wacs.Consol
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Tests", "Wacs.Tests\Wacs.Tests.csproj", "{A3F6773E-43D9-4F08-8369-8B2CD93F36FD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASIp1", "Wacs.WASIp1\Wacs.WASIp1.csproj", "{A7D87353-CC96-4718-8A86-454F27F5BB72}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +32,9 @@ Global
 		{A3F6773E-43D9-4F08-8369-8B2CD93F36FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A3F6773E-43D9-4F08-8369-8B2CD93F36FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A3F6773E-43D9-4F08-8369-8B2CD93F36FD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A7D87353-CC96-4718-8A86-454F27F5BB72}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A7D87353-CC96-4718-8A86-454F27F5BB72}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A7D87353-CC96-4718-8A86-454F27F5BB72}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A7D87353-CC96-4718-8A86-454F27F5BB72}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

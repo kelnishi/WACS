@@ -90,7 +90,7 @@ namespace Wacs.Core.Runtime
         {
             var funcType = func.GetType();
             var parameters = funcType.GetMethod("Invoke")?.GetParameters();
-            var paramTypes = parameters?.Select(p => p.ParameterType).ToArray() ?? Array.Empty<Type>();
+            var paramTypes = parameters?.Select(p => p.ParameterType).Where(t=> t != typeof(Store)).ToArray() ?? Array.Empty<Type>();
             var returnType = funcType.GetMethod("Invoke")?.ReturnType;
             
             var paramValTypes = new ResultType(paramTypes.Select(t => t.ToValType()).ToArray());
@@ -98,9 +98,11 @@ namespace Wacs.Core.Runtime
             var returnValType = valType == ValType.Nil
                 ? ResultType.Empty
                 : new ResultType(valType);
+
+            bool passCtx = parameters is { Length: > 0 } && parameters[0].ParameterType == typeof(ExecContext);
             
             var type = new FunctionType(paramValTypes, returnValType);
-            var funcAddr = AllocateHostFunc(Store, type, funcType, func);
+            var funcAddr = AllocateHostFunc(Store, type, funcType, func, passCtx);
             _entityBindings[id] = funcAddr;
         }
 
@@ -432,9 +434,9 @@ namespace Wacs.Core.Runtime
         /// <summary>
         /// @Spec 4.5.3.2. Host Functions
         /// </summary>
-        private static FuncAddr AllocateHostFunc(Store store, FunctionType funcType, Type delType, Delegate hostFunc)
+        private static FuncAddr AllocateHostFunc(Store store, FunctionType funcType, Type delType, Delegate hostFunc, bool passCtx)
         {
-            var funcInst = new HostFunction(funcType, delType, hostFunc);
+            var funcInst = new HostFunction(funcType, delType, hostFunc, passCtx);
             var funcAddr = store.AddFunction(funcInst);
             return funcAddr;
         }
