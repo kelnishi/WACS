@@ -135,7 +135,7 @@ namespace Wacs.WASIp1
             var fileStat = new FileStat
             {
                 Device = 0, // Device ID - can be set later if available
-                Ino = 0, // Inode number - can be set later if available
+                Ino = FileUtil.GenerateInode(fileInfo),
                 Mode = fileDescriptor.Type,
                 NLink = 1, // Number of hard links - can be adjusted as needed
                 Size = (filesize)fileInfo.Length,
@@ -255,7 +255,7 @@ namespace Wacs.WASIp1
             
             Prestat prestat = new Prestat
             {
-                Type = PrestatType.Dir,
+                Tag = PrestatTag.Dir,
                 Dir = new PrestatDir
                 {
                     NameLen = (uint)utf8Name.Length
@@ -336,7 +336,7 @@ namespace Wacs.WASIp1
             var fileStat = new FileStat
             {
                 Device = 0, // Device ID - can be set later if available
-                Ino = 0, // Inode number - can be set later if available
+                Ino = FileUtil.GenerateInode(fileInfo),
                 Mode = fileDescriptor.Type,
                 NLink = 1, // Number of hard links - can be adjusted as needed
                 Size = (filesize)fileInfo.Length,

@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
 using Wacs.Core.Runtime;
 using Wacs.WASIp1.Types;
 using ptr = System.UInt32;
@@ -16,6 +19,8 @@ namespace Wacs.WASIp1
 {
     public partial class Filesystem
     {
+        private static readonly ulong DirEntSize = (ulong)Marshal.SizeOf<DirEnt>();
+
         /// <summary>
         /// Provides advice on file usage for the specified file descriptor.
         /// This function interacts with the file system to provide advisory information
@@ -354,7 +359,77 @@ namespace Wacs.WASIp1
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdReaddir(ExecContext ctx, fd fd, ptr bufPtr, size bufLen, dircookie cookie, ptr bufUsedPtr)
         {
-            // TODO: Implement this function
+            FileDescriptor fileDescriptor;
+            try
+            {
+                fileDescriptor = GetFD(fd);
+            }
+            catch (ArgumentException)
+            {
+                return ErrNo.NoEnt; // The file descriptor does not exist.
+            }
+
+            if (fileDescriptor.Type != Filetype.Directory)
+                return ErrNo.NotDir;
+
+            var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
+            var entries = Directory.EnumerateFileSystemEntries(hostPath);
+
+            List<(dircookie, DirEnt, byte[])> array = new();
+            dircookie runningCookie = 0;
+            foreach (var entry in entries)
+            {
+                dircookie mycookie = runningCookie;
+                
+                var entryPath = Path.Combine(hostPath, entry);
+                var entryInfo = new FileInfo(entryPath);
+                byte[] name = Encoding.UTF8.GetBytes(entry);
+                ulong nameLen = (ulong)name.Length;
+
+                runningCookie += DirEntSize + nameLen; 
+                
+                DirEnt dirent = new DirEnt
+                {
+                    DNext = runningCookie,
+                    DIno = FileUtil.GenerateInode(entryInfo),
+                    DNamlen = (uint)nameLen,
+                    DType = FileUtil.FiletypeFromInfo(entryInfo),
+                };
+                
+                array.Add((mycookie, dirent, name));
+            }
+
+            byte[] buf = new byte[runningCookie];
+            var window = buf.AsSpan();
+            foreach (var (cook, struc, name) in array)
+            {
+                int start = (int)cook;
+                int delim = (int)(cook + DirEntSize);
+                int end = delim + name.Length;
+                var entryTarget = window[start..delim];
+                var nameTarget = window[delim..end];
+                var dirEnt = struc;
+                MemoryMarshal.Write(entryTarget, ref dirEnt);
+                name.CopyTo(nameTarget);
+            }
+
+            var mem = ctx.DefaultMemory;
+
+            //TODO: is this the correct behavior?
+            //We're clamping to available buffer space
+            var requested = window[(int)cookie..(int)(cookie + bufLen)];
+            int available = requested.Length;
+            var bufTarget = mem[(int)bufPtr..(int)(bufPtr + available)];
+            if (available > bufTarget.Length)
+            {
+                available = bufTarget.Length;
+                requested = window[(int)cookie..((int)cookie + available)];
+            }
+            
+            requested.CopyTo(bufTarget);
+            
+            mem.WriteInt32(bufUsedPtr, available);
+
             return ErrNo.Success;
         }
 
@@ -363,12 +438,32 @@ namespace Wacs.WASIp1
         /// This function provides a way to perform this operation in a thread-safe manner.
         /// </summary>
         /// <param name="ctx">The execution context.</param>
-        /// <param name="from">The file descriptor to overwrite.</param>
-        /// <param name="to">The file descriptor to be replaced.</param>
+        /// <param name="from">The file descriptor to move.</param>
+        /// <param name="to">The file descriptor to be overwrite.</param>
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdRenumber(ExecContext ctx, fd from, fd to)
         {
-            // TODO: Implement this function
+            try
+            {
+                //Check if both exist
+                var fromFD = GetFD(from);
+                var toFD = GetFD(to);
+                
+                // Close the "to" file descriptor if it is open
+                RemoveFD(to);
+                
+                // Assign the "to" file descriptor to the same underlying resources of the "from" fd
+                MoveFD(from, to);
+            }
+            catch (ArgumentException)
+            {
+                return ErrNo.NoEnt; // One of the file descriptors does not exist.
+            }
+            catch (Exception)
+            {
+                return ErrNo.IO; // Return a generic I/O error indicating the operation failed.
+            }
+            
             return ErrNo.Success;
         }
 
@@ -381,9 +476,44 @@ namespace Wacs.WASIp1
         /// <param name="offset">The number of bytes to move.</param>
         /// <param name="whence">The base from which the offset is relative.</param>
         /// <returns>An error code indicating success or failure.</returns>
-        public ErrNo FdSeek(ExecContext ctx, fd fd, filedelta offset, whence whence)
+        public ErrNo FdSeek(ExecContext ctx, fd fd, filedelta offset, whence whenc)
         {
-            // TODO: Implement this function
+            FileDescriptor fileDescriptor;
+            try
+            {
+                fileDescriptor = GetFD(fd);
+            }
+            catch (ArgumentException)
+            {
+                return ErrNo.NoEnt; // The file descriptor does not exist.
+            }
+            
+            if (fileDescriptor.Type == Filetype.Directory)
+                return ErrNo.IsDir;
+
+            long newPosition;
+            Whence whence = (Whence)whenc;
+            switch (whence)
+            {
+                case Whence.Set:
+                    newPosition = offset;
+                    break;
+                case Whence.Cur:
+                    newPosition = fileDescriptor.Stream.Position + offset;
+                    break;
+                case Whence.End:
+                    newPosition = fileDescriptor.Stream.Length + offset;
+                    break;
+                default:
+                    return ErrNo.Inval;
+            }
+
+            if (newPosition < 0)
+            {
+                return ErrNo.Inval; // Negative offset.
+            }
+
+            fileDescriptor.Stream.Seek(newPosition, SeekOrigin.Begin);
             return ErrNo.Success;
         }
 
@@ -396,7 +526,21 @@ namespace Wacs.WASIp1
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdSync(ExecContext ctx, fd fd)
         {
-            // TODO: Implement this function
+            FileDescriptor fileDescriptor;
+            try
+            {
+                fileDescriptor = GetFD(fd);
+            }
+            catch (ArgumentException)
+            {
+                return ErrNo.NoEnt; // The file descriptor does not exist.
+            }
+
+            if (fileDescriptor.Type == Filetype.Directory)
+                return ErrNo.IsDir;
+
+            fileDescriptor.Stream.Flush();
+            
             return ErrNo.Success;
         }
 
@@ -410,7 +554,25 @@ namespace Wacs.WASIp1
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdTell(ExecContext ctx, fd fd, ptr offsetPtr)
         {
-            // TODO: Implement this function
+            var mem = ctx.DefaultMemory;
+            try
+            {
+                var fileDescriptor = GetFD(fd);
+                if (fileDescriptor.Type == Filetype.Directory)
+                    return ErrNo.IsDir;
+
+                filesize currentPosition = (filesize)fileDescriptor.Stream.Position;
+                mem.WriteInt64(offsetPtr, currentPosition);
+            }
+            catch (ArgumentException)
+            {
+                return ErrNo.NoEnt;
+            }
+            catch (Exception)
+            {
+                return ErrNo.IO;
+            }
+            
             return ErrNo.Success;
         }
 
@@ -426,7 +588,40 @@ namespace Wacs.WASIp1
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdWrite(ExecContext ctx, fd fd, ptr iovsPtr, size iovsLen, ptr nwrittenPtr)
         {
-            // TODO: Implement this function
+            FileDescriptor fileDescriptor;
+            try
+            {
+                fileDescriptor = GetFD(fd);
+            }
+            catch (ArgumentException)
+            {
+                return ErrNo.NoEnt; // The file descriptor does not exist.
+            }
+
+            if (fileDescriptor.Type == Filetype.Directory)
+                return ErrNo.IsDir;
+
+            if (!fileDescriptor.Stream.CanWrite)
+                return ErrNo.IO;
+
+            var mem = ctx.DefaultMemory;
+
+            IoVec[] iovs = mem.ReadStructs<IoVec>(iovsPtr, iovsLen);
+            int totalWritten = 0;
+
+            foreach (var iov in iovs)
+            {
+                var src = mem[(int)iov.bufPtr..(int)(iov.bufPtr + iov.bufLen)];
+                fileDescriptor.Stream.Write(src.ToArray(), 0, src.Length);
+                totalWritten += src.Length;
+
+                // Check for full write
+                if (src.Length < iov.bufLen)
+                    break;
+            }
+
+            mem.WriteInt32(nwrittenPtr, totalWritten);
+            
             return ErrNo.Success;
         }
     }
