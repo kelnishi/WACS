@@ -1,3 +1,6 @@
+using System;
+using System.IO;
+using System.Linq;
 using Wacs.Core.Runtime;
 using Wacs.WASIp1.Types;
 using ptr = System.UInt32;
@@ -24,13 +27,57 @@ namespace Wacs.WASIp1
         /// <param name="fd">File descriptor referencing an open file.</param>
         /// <param name="offset">The offset within the file to which the advisory applies.</param>
         /// <param name="len">The length of the region to which the advisory applies.</param>
-        /// <param name="advice">The advisory information indicating how to handle the file.</param>
+        /// <param name="adv">The advisory information indicating how to handle the file.</param>
         /// <returns>Returns an ErrNo indicating success or specific error code.</returns>
-        public ErrNo FdAdvise(ExecContext ctx, fd fd, filesize offset, filesize len, advice advice)
+        public ErrNo FdAdvise(ExecContext ctx, fd fd, filesize offset, filesize len, advice adv)
         {
-            // TODO: Implement this function
+            FileDescriptor fileDescriptor;
+            try
+            {
+                fileDescriptor = GetFD(fd);
+            }
+            catch (ArgumentException)
+            {
+                return ErrNo.NoEnt; // The file descriptor does not exist.
+            }
+            
+            if (offset + len > (filesize)fileDescriptor.Stream.Length)
+            {
+                return ErrNo.Inval; // Invalid offset or length.
+            }
+
+            Advice advice = (Advice)adv;
+            switch (advice)
+            {
+                case Advice.Normal:
+                    // No special handling needed; we can ignore this.
+                    break;
+                case Advice.Sequential:
+                    // Optionally implement strategies for sequential access optimization.
+                    // For example, prefetching data in anticipation.
+                    break;
+                case Advice.Random:
+                    // Handle potential optimizations for random access patterns, though
+                    // most implementations may ignore this advice.
+                    break;
+                case Advice.WillNeed:
+                    // This indicates the application will access this data; we might
+                    // mark it for caching if there were caching mechanisms.
+                    break;
+                case Advice.DontNeed:
+                    // Indicate to evict or ignore this data from caches if applicable.
+                    break;
+                case Advice.NoReuse:
+                    // Handle advice for data that will not be reused.
+                    break;
+                default:
+                    return ErrNo.Inval; // Unrecognized advice type.
+            }
+
+            //HACK We're not that fancy...
             return ErrNo.Success;
         }
+
 
         /// <summary>
         /// Forces the allocation of space in the file for the specified file descriptor.
@@ -46,7 +93,28 @@ namespace Wacs.WASIp1
         /// <returns>Returns an ErrNo indicating success or specific error code.</returns>
         public ErrNo FdAllocate(ExecContext ctx, fd fd, filesize offset, filesize len)
         {
-            // TODO: Implement this function
+            FileDescriptor fileDescriptor;
+            try
+            {
+                fileDescriptor = GetFD(fd);
+            }
+            catch (ArgumentException)
+            {
+                return ErrNo.NoEnt; // The file descriptor does not exist.
+            }
+
+            long newLen = (long)(offset + len); 
+
+            if (newLen > _config.MaxFileSize)
+            {
+                return ErrNo.Inval; // Invalid offset or length.
+            }
+
+            // Ensure the file is extended if needed.
+            fileDescriptor.Stream.SetLength(Math.Max(fileDescriptor.Stream.Length, newLen));
+
+            return ErrNo.Success;
+            
             return ErrNo.Success;
         }
 
@@ -61,9 +129,18 @@ namespace Wacs.WASIp1
         /// <returns>Returns an ErrNo indicating success or specific error code.</returns>
         public ErrNo FdClose(ExecContext ctx, fd fd)
         {
-            // TODO: Implement this function
-            return ErrNo.Success;
+            try
+            {
+                RemoveFD(fd);
+            }
+            catch (Exception ex)
+            {
+                return ErrNo.IO; // Return a generic I/O error indicating the closure failed.
+            }
+
+            return ErrNo.Success; // Successfully closed the file descriptor.
         }
+
 
         /// <summary>
         /// Synchronizes the data of a file represented by a file descriptor to disk.
@@ -76,7 +153,19 @@ namespace Wacs.WASIp1
         /// <returns>Returns an ErrNo indicating success or specific error code.</returns>
         public ErrNo FdDatasync(ExecContext ctx, fd fd)
         {
-            // TODO: Implement this function
+            FileDescriptor fileDescriptor;
+            try
+            {
+                fileDescriptor = GetFD(fd);
+            }
+            catch (ArgumentException)
+            {
+                return ErrNo.NoEnt; // The file descriptor does not exist.
+            }
+
+            // Ensure data is written to disk
+            fileDescriptor.Stream.Flush();
+
             return ErrNo.Success;
         }
 
@@ -95,7 +184,52 @@ namespace Wacs.WASIp1
         /// <returns>Returns an ErrNo indicating success or specific error code.</returns>
         public ErrNo FdPread(ExecContext ctx, fd fd, ptr iovsPtr, size iovsLen, filesize offset, ptr nreadPtr)
         {
-            // TODO: Implement this function
+            FileDescriptor fileDescriptor;
+            try
+            {
+                fileDescriptor = GetFD(fd);
+            }
+            catch (ArgumentException)
+            {
+                return ErrNo.NoEnt; // The file descriptor does not exist.
+            }
+
+            if (fileDescriptor.Type == Filetype.Directory)
+                return ErrNo.IsDir;
+
+            if (!fileDescriptor.Stream.CanRead)
+                return ErrNo.IO;
+
+            var mem = ctx.DefaultMemory;
+            
+            var origin = fileDescriptor.Stream.Position;
+
+            // Set the position in the file for reading
+            fileDescriptor.Stream.Seek((long)offset, SeekOrigin.Begin);
+
+            IoVec[] iovs = mem.ReadStructs<IoVec>(iovsPtr, iovsLen);
+            var largest = iovs.Max(iov => iov.bufLen);
+            byte[] buf = new byte[largest];
+            
+            int totalRead = 0;
+            foreach (var iov in iovs)
+            {
+                var dest = mem[(int)iov.bufPtr..(int)(iov.bufPtr + iov.bufLen)];
+                int read = fileDescriptor.Stream.Read(buf, 0, (int)iov.bufLen);
+                totalRead += read;
+                var data = buf.AsSpan(0, read);
+                data.CopyTo(dest);
+
+                //No more data
+                if (read < iov.bufLen)
+                    break;
+            }
+
+            //Reset the offset
+            fileDescriptor.Stream.Seek(origin, SeekOrigin.Begin);
+            
+            mem.WriteInt32(nreadPtr, totalRead);
+            
             return ErrNo.Success;
         }
 
@@ -111,7 +245,48 @@ namespace Wacs.WASIp1
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdPwrite(ExecContext ctx, fd fd, ptr iovsPtr, size iovsLen, filesize offset, ptr nwrittenPtr)
         {
-            // TODO: Implement this function
+            FileDescriptor fileDescriptor;
+            try
+            {
+                fileDescriptor = GetFD(fd);
+            }
+            catch (ArgumentException)
+            {
+                return ErrNo.NoEnt; // The file descriptor does not exist.
+            }
+
+            if (fileDescriptor.Type == Filetype.Directory)
+                return ErrNo.IsDir;
+
+            if (!fileDescriptor.Stream.CanWrite)
+                return ErrNo.IO;
+
+            var mem = ctx.DefaultMemory;
+
+            var origin = fileDescriptor.Stream.Position;
+
+            // Set the position in the file for writing
+            fileDescriptor.Stream.Seek((long)offset, SeekOrigin.Begin);
+
+            IoVec[] iovs = mem.ReadStructs<IoVec>(iovsPtr, iovsLen);
+            int totalWritten = 0;
+
+            foreach (var iov in iovs)
+            {
+                var src = mem[(int)iov.bufPtr..(int)(iov.bufPtr + iov.bufLen)];
+                fileDescriptor.Stream.Write(src.ToArray(), 0, src.Length);
+                totalWritten += src.Length;
+
+                // Check for full write
+                if (src.Length < iov.bufLen)
+                    break;
+            }
+
+            // Reset the offset
+            fileDescriptor.Stream.Seek(origin, SeekOrigin.Begin);
+            
+            mem.WriteInt32(nwrittenPtr, totalWritten);
+            
             return ErrNo.Success;
         }
 
@@ -127,7 +302,41 @@ namespace Wacs.WASIp1
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdRead(ExecContext ctx, fd fd, ptr iovsPtr, size iovsLen, ptr nreadPtr)
         {
-            // TODO: Implement this function
+            FileDescriptor fileDescriptor;
+            try
+            {
+                fileDescriptor = GetFD(fd);
+            }
+            catch (ArgumentException)
+            {
+                return ErrNo.NoEnt; // The file descriptor does not exist.
+            }
+
+            if (fileDescriptor.Type == Filetype.Directory)
+                return ErrNo.IsDir;
+
+            if (!fileDescriptor.Stream.CanRead)
+                return ErrNo.IO;
+
+            var mem = ctx.DefaultMemory;
+
+            // Read data into the specified buffers
+            IoVec[] iovs = mem.ReadStructs<IoVec>(iovsPtr, iovsLen);
+            int totalRead = 0;
+
+            foreach (var iov in iovs)
+            {
+                var dest = mem[(int)iov.bufPtr..(int)(iov.bufPtr + iov.bufLen)];
+                int read = fileDescriptor.Stream.Read(dest.ToArray(), 0, (int)iov.bufLen);
+                totalRead += read;
+
+                // Check if we have read all requested bytes
+                if (read < iov.bufLen)
+                    break;
+            }
+
+            mem.WriteInt32(nreadPtr, totalRead);
+            
             return ErrNo.Success;
         }
 

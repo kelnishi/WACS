@@ -207,6 +207,19 @@ namespace Wacs.WASIp1
             return fd;
         }
 
+        /// <summary>
+        /// Closes the Stream and removes the FileDescriptor
+        /// </summary>
+        /// <param name="fd"></param>
+        private void RemoveFD(fd fd)
+        {
+            if (_state.FileDescriptors.TryRemove(fd, out var fileDescriptor))
+            {
+                if (fileDescriptor.Type == Filetype.RegularFile)
+                    fileDescriptor.Stream.Close();
+            }
+        }
+
         private void UnbindFile(string guestPath)
         {
             var entry = _state.FileDescriptors.Values

@@ -5,26 +5,26 @@ namespace Wacs.WASIp1.Types
     /// <summary>
     /// A region of memory for scatter/gather reads.
     /// </summary>
-    [StructLayout(LayoutKind.Explicit)]
+    [StructLayout(LayoutKind.Explicit, Size = 8)]
     public struct IoVec
     {
         [FieldOffset(0)]
-        private uint bufPtr;
+        public uint bufPtr;
         
         [FieldOffset(4)]
-        private uint bufLen;
+        public uint bufLen;
     }
     
     /// <summary>
     /// A region of memory for scatter/gather writes.
     /// </summary>
-    [StructLayout(LayoutKind.Explicit)]
+    [StructLayout(LayoutKind.Explicit, Size = 8)]
     public struct CIoVec
     {
         [FieldOffset(0)]
-        private uint bufPtr;
+        public uint bufPtr;
         
         [FieldOffset(4)]
-        private uint bufLen;
+        public uint bufLen;
     }
 }
