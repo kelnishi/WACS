@@ -1,3 +1,6 @@
+using Wacs.Core.Attributes;
+using Wacs.Core.Types;
+
 namespace Wacs.WASIp1.Types
 {
     /// <summary>
@@ -5,6 +8,7 @@ namespace Wacs.WASIp1.Types
     /// Represents standard POSIX-style error numbers.
     /// https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md#variant-cases-1
     /// </summary>
+    [WasmType(nameof(ValType.I32))]
     public enum ErrNo : ushort
     {
         /// <summary>

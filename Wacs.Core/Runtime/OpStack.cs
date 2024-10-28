@@ -72,6 +72,10 @@ namespace Wacs.Core.Runtime
             var results = new Stack<Value>();
             for (int i = 0, l = type.Arity; i < l; ++i)
             {
+                //Skip ExecContext
+                if (type.Types[i] == ValType.ExecContext)
+                    continue;
+                
                 //We could check the types here, but the spec just says to YOLO it.
                 results.Push(PopAny());
             }

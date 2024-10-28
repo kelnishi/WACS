@@ -9,10 +9,6 @@ using fd = System.UInt32;
 using filesize = System.UInt64;
 using size = System.UInt32;
 using timestamp = System.UInt64;
-using fdflags = System.UInt16;
-using rights = System.UInt64;
-using fstflags = System.UInt16;
-using lookupflags = System.UInt32;
 
 namespace Wacs.WASIp1
 {
@@ -87,7 +83,7 @@ namespace Wacs.WASIp1
         /// <param name="fd">The file descriptor whose flags are to be adjusted.</param>
         /// <param name="flags">The desired values of the file descriptor flags.</param>
         /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo FdFdstatSetFlags(ExecContext ctx, fd fd, fdflags flags)
+        public ErrNo FdFdstatSetFlags(ExecContext ctx, fd fd, FdFlags flags)
         {
             return ErrNo.NotSup;
         }
@@ -101,7 +97,7 @@ namespace Wacs.WASIp1
         /// <param name="fs_rights_base">The desired rights of the file descriptor.</param>
         /// <param name="fs_rights_inheriting">The maximum set of rights that may be installed on new file descriptors created through this file descriptor.</param>
         /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo FdFdstatSetRights(ExecContext ctx, fd fd, rights fs_rights_base, rights fs_rights_inheriting)
+        public ErrNo FdFdstatSetRights(ExecContext ctx, fd fd, Rights fs_rights_base, Rights fs_rights_inheriting)
         {
             return ErrNo.NotSup;
         }
@@ -180,17 +176,15 @@ namespace Wacs.WASIp1
         /// <param name="fd">The file descriptor of the file or directory.</param>
         /// <param name="atim">The desired value of the data access timestamp.</param>
         /// <param name="mtim">The desired value of the data modification timestamp.</param>
-        /// <param name="fstFlags">A bitmask indicating which timestamps to adjust.</param>
+        /// <param name="flags">A bitmask indicating which timestamps to adjust.</param>
         /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo FdFilestatSetTimes(ExecContext ctx, fd fd, timestamp atim, timestamp mtim, fstflags fstFlags)
+        public ErrNo FdFilestatSetTimes(ExecContext ctx, fd fd, timestamp atim, timestamp mtim, FstFlags flags)
         {
             try
             {
                 var fileDescriptor = GetFD(fd);
                 var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
                 var fileInfo = new FileInfo(hostPath);
-
-                FstFlags flags = (FstFlags)fstFlags;
 
                 if ((flags & FstFlags.ATim) != 0)
                 {
@@ -314,7 +308,7 @@ namespace Wacs.WASIp1
         /// <param name="pathLen">The length of the path.</param>
         /// <param name="buf">Pointer to the buffer where the attributes will be stored.</param>
         /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo PathFilestatGet(ExecContext ctx, fd fd, lookupflags flags, ptr pathPtr, size pathLen, ptr buf)
+        public ErrNo PathFilestatGet(ExecContext ctx, fd fd, LookupFlags flags, ptr pathPtr, size pathLen, ptr buf)
         {
             var mem = ctx.DefaultMemory;
             if (!mem.Contains((int)buf, FileStatSize))
@@ -363,8 +357,8 @@ namespace Wacs.WASIp1
         /// <param name="stMtim">The desired value of the data modification timestamp.</param>
         /// <param name="fstFlags">A bitmask indicating which timestamps to adjust.</param>
         /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo PathFilestatSetTimes(ExecContext ctx, fd fd, lookupflags flags, ptr pathPtr, size pathLen, timestamp stAtim, timestamp stMtim,
-            fstflags fstFlags)
+        public ErrNo PathFilestatSetTimes(ExecContext ctx, fd fd, LookupFlags flags, ptr pathPtr, size pathLen, timestamp stAtim, timestamp stMtim,
+            FstFlags fstFlags)
         {
             var mem = ctx.DefaultMemory;
             if (!mem.Contains((int)pathPtr, (int)pathLen))
@@ -380,26 +374,23 @@ namespace Wacs.WASIp1
                 return ErrNo.NoEnt;
             }
             
-            LookupFlags lookupFlags = (LookupFlags)flags;
-            FstFlags fstflags = (FstFlags)fstFlags;
-
             var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
             var fileInfo = new FileInfo(hostPath);
             
 
-            if ((fstflags & FstFlags.ATim) != 0)
+            if ((fstFlags & FstFlags.ATim) != 0)
             {
                 fileInfo.LastAccessTimeUtc = Clock.ToDateTimeUtc(stAtim);
             }
-            if ((fstflags & FstFlags.MTim) != 0)
+            if ((fstFlags & FstFlags.MTim) != 0)
             {
                 fileInfo.LastWriteTimeUtc = Clock.ToDateTimeUtc(stMtim);
             }
-            if ((fstflags & FstFlags.ATimNow) != 0)
+            if ((fstFlags & FstFlags.ATimNow) != 0)
             {
                 fileInfo.LastAccessTimeUtc = DateTime.UtcNow;
             }
-            if ((fstflags & FstFlags.MTimNow) != 0)
+            if ((fstFlags & FstFlags.MTimNow) != 0)
             {
                 fileInfo.LastWriteTimeUtc = DateTime.UtcNow;
             }

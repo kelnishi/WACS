@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
@@ -161,8 +162,14 @@ namespace Wacs.Core.Runtime
         {
             var funcType = hostFunc.Type;
             var vals = OpStack.PopScalars(funcType.ParameterTypes);
+
+            //Prepend the context if it's needed
+            if (funcType.ParameterTypes.Types[0] == ValType.ExecContext)
+            {
+                vals = new object[] { this }.Concat(vals).ToArray();
+            }
             
-            hostFunc.Invoke(this, vals, OpStack);
+            hostFunc.Invoke(vals, OpStack);
         }
 
         // @Spec 4.4.10.2. Returning from a function
