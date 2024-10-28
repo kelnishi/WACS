@@ -5,10 +5,6 @@ using Wacs.WASIp1.Types;
 using ptr = System.UInt32;
 using fd = System.UInt32;
 using size = System.UInt32;
-using lookupflags = System.UInt32;
-using rights = System.UInt64;
-using oflags = System.UInt16;
-using fdflags = System.UInt16;
 
 namespace Wacs.WASIp1
 {
@@ -71,7 +67,7 @@ namespace Wacs.WASIp1
         /// <param name="newPathPtr">Pointer to the destination path at which to create the hard link.</param>
         /// <param name="newPathLen">Length of the destination path.</param>
         /// <returns>An error code indicating the result of the operation.</returns>
-        public ErrNo PathLink(ExecContext ctx, fd oldFd, lookupflags oldFlags, ptr oldPathPtr, size oldPathLen, fd newFd, ptr newPathPtr, size newPathLen)
+        public ErrNo PathLink(ExecContext ctx, fd oldFd, LookupFlags oldFlags, ptr oldPathPtr, size oldPathLen, fd newFd, ptr newPathPtr, size newPathLen)
         {
             if (!_config.AllowHardLinks)
                 return ErrNo.NotSup;
@@ -126,8 +122,8 @@ namespace Wacs.WASIp1
         /// <param name="fsFlags">Desired values of the file descriptor flags.</param>
         /// <param name="fdPtr">Pointer to store the newly created file descriptor.</param>
         /// <returns>An error code indicating the result of the operation.</returns>
-        public ErrNo PathOpen(ExecContext ctx, fd dirFd, lookupflags dirFlags, ptr pathPtr, size pathLen, oflags oFlags, rights fsRightsBase,
-            rights fsRightsInheriting, fdflags fsFlags, ptr fdPtr)
+        public ErrNo PathOpen(ExecContext ctx, fd dirFd, LookupFlags dirFlags, ptr pathPtr, size pathLen, OFlags oFlags, Rights fsRightsBase,
+            Rights fsRightsInheriting, FdFlags fsFlags, ptr fdPtr)
         {
             var mem = ctx.DefaultMemory;
             if (!mem.Contains((int)pathPtr, (int)pathLen))
@@ -158,7 +154,7 @@ namespace Wacs.WASIp1
                 }
                 else
                 {
-                    var fileStream = new FileStream(hostPath, (FileMode)oFlags, (FileAccess)(fsRightsBase & 0xFFFF), FileShare.None);
+                    var fileStream = new FileStream(hostPath, oFlags.ToFileMode(), fsRightsBase.FileAccess, FileShare.None);
                     fd newFd = BindFile(guestPath, fileStream, dirFileDescriptor.Access);
                     var file = GetFD(newFd);
                     file.SetFileRights(fileInfo);

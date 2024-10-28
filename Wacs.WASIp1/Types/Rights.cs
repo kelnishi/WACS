@@ -1,9 +1,15 @@
+using System;
+using System.IO;
 using System.Runtime.InteropServices;
+using Wacs.Core.Attributes;
+using Wacs.Core.Runtime;
+using Wacs.Core.Types;
 
 namespace Wacs.WASIp1.Types
 {
     [StructLayout(LayoutKind.Explicit, Size = 8)]
-    public struct Rights
+    [WasmType(nameof(ValType.I64))]
+    public struct Rights : ITypeConvertable
     {
         [FieldOffset(0)] private ulong _flags;
 
@@ -255,6 +261,24 @@ namespace Wacs.WASIp1.Types
         {
             get => this[1];
             set => this[1] = value;
+        }
+
+        public FileAccess FileAccess =>
+            (fd_read ? FileAccess.Read : 0) | (fd_write ? FileAccess.Write : 0);
+        
+
+        public void FromWasmValue(object value)
+        {
+            ulong bits = (ulong)value;
+            byte[] bytes = BitConverter.GetBytes(bits);
+            this = MemoryMarshal.Cast<byte, Rights>(bytes.AsSpan())[0];
+        }
+
+        public Value ToWasmType()
+        {
+            byte[] bytes = new byte[8];
+            MemoryMarshal.Write(bytes, ref this);
+            return MemoryMarshal.Read<ulong>(bytes);
         }
     }
 

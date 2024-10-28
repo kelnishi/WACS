@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using Wacs.Core.Attributes;
+using Wacs.Core.Runtime;
 
 namespace Wacs.Core.Types
 {
@@ -62,7 +64,8 @@ namespace Wacs.Core.Types
 
         // Additional types from future extensions can be added here.
         
-        
+        //Special types
+        ExecContext = 0xFD,
         Nil = 0xFE,
         Undefined = 0xFF,
     }
@@ -104,11 +107,20 @@ namespace Wacs.Core.Types
     {
         public static ValType ToValType(this Type type) =>
             type switch {
+                { } t when t == typeof(sbyte) => ValType.I32,
+                { } t when t == typeof(byte) => ValType.I32,
+                { } t when t == typeof(char) => ValType.I32,
+                { } t when t == typeof(short) => ValType.I64,
+                { } t when t == typeof(ushort) => ValType.I64,
                 { } t when t == typeof(int) => ValType.I32,
+                { } t when t == typeof(uint) => ValType.I32,
                 { } t when t == typeof(long) => ValType.I64,
+                { } t when t == typeof(ulong) => ValType.I64,
                 { } t when t == typeof(float) => ValType.F32,
                 { } t when t == typeof(double) => ValType.F64,
                 { } t when t == typeof(void) => ValType.Nil,
+                { } t when t == typeof(ExecContext) => ValType.ExecContext,
+                { } t when t.GetWasmType() is { } wasmType => wasmType,
                 // { } t when t == typeof(System.Numerics.Vector128<byte>) ||
                 //            t == typeof(System.Numerics.Vector128<float>) ||
                 //            t == typeof(System.Numerics.Vector128<int>) ||

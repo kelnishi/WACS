@@ -9,15 +9,8 @@ using fd = System.UInt32;
 using filesize = System.UInt64;
 using size = System.UInt32;
 using timestamp = System.UInt64;
-using advice = System.Byte;
-using fdflags = System.UInt16;
-using rights = System.UInt64;
-using fstflags = System.UInt16;
 using dircookie = System.UInt64;
 using filedelta = System.Int64;
-using whence = System.Byte;
-using lookupflags = System.UInt32;
-using oflags = System.UInt16;
 
 namespace Wacs.WASIp1
 {
@@ -41,13 +34,13 @@ namespace Wacs.WASIp1
                 (module, "environ_get"), PathCreateDirectory);
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ErrNo>>(
                 (module, "path_create_directory"), PathCreateDirectory);
-            runtime.BindHostFunction<Func<ExecContext, fd, lookupflags, ptr, size, ptr, ErrNo>>(
+            runtime.BindHostFunction<Func<ExecContext, fd, LookupFlags, ptr, size, ptr, ErrNo>>(
                 (module, "path_filestat_get"), PathFilestatGet);
-            runtime.BindHostFunction<Func<ExecContext, fd, lookupflags, ptr, size, timestamp, timestamp, fstflags, ErrNo>>(
+            runtime.BindHostFunction<Func<ExecContext, fd, LookupFlags, ptr, size, timestamp, timestamp, FstFlags, ErrNo>>(
                 (module, "path_filestat_set_times"), PathFilestatSetTimes);
-            runtime.BindHostFunction<Func<ExecContext, fd, lookupflags, ptr, size, fd, ptr, size, ErrNo>>(
+            runtime.BindHostFunction<Func<ExecContext, fd, LookupFlags, ptr, size, fd, ptr, size, ErrNo>>(
                 (module, "path_link"), PathLink);
-            runtime.BindHostFunction<Func<ExecContext, fd, lookupflags, ptr, size, oflags, rights, rights, fdflags, ptr, ErrNo>>(
+            runtime.BindHostFunction<Func<ExecContext, fd, LookupFlags, ptr, size, OFlags, Rights, Rights, FdFlags, ptr, ErrNo>>(
                 (module, "path_open"), PathOpen);
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ptr, size, ptr, ErrNo>>(
                 (module, "path_readlink"), PathReadlink);
@@ -59,7 +52,7 @@ namespace Wacs.WASIp1
                 (module, "path_symlink"), PathSymlink);
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ErrNo>>(
                 (module, "path_unlink_file"), PathUnlinkFile);
-            runtime.BindHostFunction<Func<ExecContext, fd, filesize, filesize, advice, ErrNo>>(
+            runtime.BindHostFunction<Func<ExecContext, fd, filesize, filesize, Advice, ErrNo>>(
                 (module, "fd_advise"), FdAdvise);
             runtime.BindHostFunction<Func<ExecContext, fd, filesize, filesize, ErrNo>>(
                 (module, "fd_allocate"), FdAllocate);
@@ -69,15 +62,15 @@ namespace Wacs.WASIp1
                 (module, "fd_datasync"), FdDatasync);
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, ErrNo>>(
                 (module, "fd_fdstat_get"), FdFdstatGet);
-            runtime.BindHostFunction<Func<ExecContext, fd, fdflags, ErrNo>>(
+            runtime.BindHostFunction<Func<ExecContext, fd, FdFlags, ErrNo>>(
                 (module, "fd_fdstat_set_flags"), FdFdstatSetFlags);
-            runtime.BindHostFunction<Func<ExecContext, fd, rights, rights, ErrNo>>(
+            runtime.BindHostFunction<Func<ExecContext, fd, Rights, Rights, ErrNo>>(
                 (module, "fd_fdstat_set_rights"), FdFdstatSetRights);
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, ErrNo>>(
                 (module, "fd_filestat_get"), FdFilestatGet);
             runtime.BindHostFunction<Func<ExecContext, fd, filesize, ErrNo>>(
                 (module, "fd_filestat_set_size"), FdFilestatSetSize);
-            runtime.BindHostFunction<Func<ExecContext, fd, timestamp, timestamp, fstflags, ErrNo>>(
+            runtime.BindHostFunction<Func<ExecContext, fd, timestamp, timestamp, FstFlags, ErrNo>>(
                 (module, "fd_filestat_set_times"), FdFilestatSetTimes);
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, filesize, ptr, ErrNo>>(
                 (module, "fd_pread"), FdPread);
@@ -93,7 +86,7 @@ namespace Wacs.WASIp1
                 (module, "fd_readdir"), FdReaddir);
             runtime.BindHostFunction<Func<ExecContext, fd, fd, ErrNo>>(
                 (module, "fd_renumber"), FdRenumber);
-            runtime.BindHostFunction<Func<ExecContext, fd, filedelta, whence, ErrNo>>(
+            runtime.BindHostFunction<Func<ExecContext, fd, filedelta, Whence, ErrNo>>(
                 (module, "fd_seek"), FdSeek);
             runtime.BindHostFunction<Func<ExecContext, fd, ErrNo>>(
                 (module, "fd_sync"), FdSync);

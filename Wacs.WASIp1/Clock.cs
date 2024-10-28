@@ -3,7 +3,6 @@ using System.Diagnostics;
 using Wacs.Core.Runtime;
 using Wacs.WASIp1.Types;
 using ptr = System.Int32;
-using clockid = System.Int32;
 
 using timestamp = System.UInt64;
 
@@ -17,8 +16,8 @@ namespace Wacs.WASIp1
         public void BindToRuntime(WasmRuntime runtime)
         {
             string module = "wasi_snapshot_preview1";
-            runtime.BindHostFunction<Func<ExecContext,clockid,ptr,ErrNo>>((module, "clock_res_get"), ClockGetRes);
-            runtime.BindHostFunction<Func<ExecContext,clockid,timestamp,ptr,ErrNo>>((module, "clock_time_get"), ClockTimeGet);
+            runtime.BindHostFunction<Func<ExecContext,ClockId,ptr,ErrNo>>((module, "clock_res_get"), ClockGetRes);
+            runtime.BindHostFunction<Func<ExecContext,ClockId,timestamp,ptr,ErrNo>>((module, "clock_time_get"), ClockTimeGet);
         }
 
         /// <summary>
@@ -26,15 +25,14 @@ namespace Wacs.WASIp1
         /// clocks. For unsupported clocks, return errno::inval. Note: This is similar to clock_getres in POSIX.
         /// </summary>
         /// <param name="ctx"></param>
-        /// <param name="clockid">The clock for which to return the resolution.</param>
+        /// <param name="clockId">The clock for which to return the resolution.</param>
         /// <param name="resolutionPtr"></param>
         /// <returns></returns>
-        public ErrNo ClockGetRes(ExecContext ctx, clockid clockid, ptr resolutionPtr)
+        public ErrNo ClockGetRes(ExecContext ctx, ClockId clockId, ptr resolutionPtr)
         {
             if (!_config.AllowTimeAccess)
                 return ErrNo.NoSys; // Function not supported
             
-            ClockId clockId = (ClockId)clockid;
             var mem = ctx.DefaultMemory;
             if (!mem.Contains(resolutionPtr, 8))
                 return ErrNo.Fault;
@@ -70,12 +68,11 @@ namespace Wacs.WASIp1
         /// <param name="precision">The maximum lag (exclusive) that the returned time value may have, compared to its actual value.</param>
         /// <param name="timestampPtrPtr">Pointer where the retrieved timestamp will be stored.</param>
         /// <returns></returns>
-        public ErrNo ClockTimeGet(ExecContext ctx, clockid clockid, timestamp precision, ptr timestampPtr)
+        public ErrNo ClockTimeGet(ExecContext ctx, ClockId clockId, timestamp precision, ptr timestampPtr)
         {
             if (!_config.AllowTimeAccess)
                 return ErrNo.NoSys; // Function not supported
             
-            ClockId clockId = (ClockId)clockid;
             var mem = ctx.DefaultMemory;
             
             //HACK: We're ignoring precision.

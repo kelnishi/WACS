@@ -9,7 +9,6 @@ using Wacs.Core.Runtime;
 using Wacs.WASIp1.Types;
 using ptr = System.Int32;
 using size = System.UInt32;
-
 using timestamp = System.UInt64;
 
 namespace Wacs.WASIp1

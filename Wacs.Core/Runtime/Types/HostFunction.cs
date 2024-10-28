@@ -1,6 +1,6 @@
 using System;
-using System.Linq;
 using System.Reflection;
+using Wacs.Core.Attributes;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime.Types
@@ -18,7 +18,8 @@ namespace Wacs.Core.Runtime.Types
 
         private readonly MethodInfo _invoker;
 
-        private readonly bool _passCtx;
+        private ConversionHelper?[] _parameterConversions = null!;
+        private ConversionHelper?[] _resultConversions = null!;
 
         /// <summary>
         /// @Spec 4.5.3.2. Host Functions
@@ -28,32 +29,136 @@ namespace Wacs.Core.Runtime.Types
         /// <param name="delType">The System.Type of the delegate must match type.</param>
         /// <param name="hostFunction">The delegate representing the host function.</param>
         /// <param name="passCtx">True if the specified function type had Store as the first type</param>
-        public HostFunction(FunctionType type, Type delType, Delegate hostFunction, bool passCtx)
+        public HostFunction(FunctionType type, Type delType, Delegate hostFunction)
         {
             Type = type;
             _hostFunction = hostFunction;
             _invoker = delType.GetMethod("Invoke")!;
-            _passCtx = passCtx;
+            BuildConversionHelpers();
         }
 
         public FunctionType Type { get; }
+
+        private void BuildConversionHelpers()
+        {
+            var parameters = _invoker.GetParameters();
+            _parameterConversions = new ConversionHelper?[parameters.Length];
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                var paramType = parameters[i].ParameterType;
+
+                _parameterConversions[i] = paramType switch
+                {
+                    { } t when t == typeof(char) => wasmValue => (char)(int)wasmValue,
+                    { } t when t == typeof(byte) => wasmValue => (byte)(int)wasmValue,
+                    { } t when t == typeof(sbyte) => wasmValue => (sbyte)(int)wasmValue,
+                    { } t when t == typeof(ushort) => wasmValue => (ushort)(int)wasmValue,
+                    { } t when t == typeof(short) => wasmValue => (short)(int)wasmValue,
+                    { } t when t.GetWasmType() is { } wasmType => CreateConversionHelper(t),
+                    _ => null
+                };
+            }
+            
+            _resultConversions = new ConversionHelper?[_invoker.ReturnParameter == null ? 0 : 1];
+            if (_invoker.ReturnParameter != null)
+            {
+                var returnType = _invoker.ReturnParameter.ParameterType;
+
+                _resultConversions[0] = returnType switch
+                {
+                    { } t when t == typeof(char) => hostValue => (int)hostValue,
+                    { } t when t == typeof(byte) => hostValue => (int)hostValue,
+                    { } t when t == typeof(sbyte) => hostValue => (int)hostValue,
+                    { } t when t == typeof(ushort) => hostValue => (int)hostValue,
+                    { } t when t == typeof(short) => hostValue => (int)hostValue,
+                    { } t when t.GetWasmType() is { } wasmType => CreateReturnHelper(t),
+                    _ => null
+                };
+            }
+            
+        }
+
+        private static ConversionHelper CreateConversionHelper(Type hostType)
+        {
+            if (hostType.IsEnum)
+            {
+                Type baseType = Enum.GetUnderlyingType(hostType);
+                return wasmValue => baseType switch
+                {
+                    { } t when t == typeof(sbyte) => Enum.ToObject(hostType, (sbyte)(int)wasmValue),
+                    { } t when t == typeof(byte) => Enum.ToObject(hostType, (byte)(int)wasmValue),
+                    { } t when t == typeof(short) => Enum.ToObject(hostType, (short)(int)wasmValue),
+                    { } t when t == typeof(ushort) => Enum.ToObject(hostType, (ushort)(int)wasmValue),
+                    { } t when t == typeof(int) => Enum.ToObject(hostType, (int)wasmValue),
+                    { } t when t == typeof(uint) => Enum.ToObject(hostType, (uint)wasmValue),
+                    _ => throw new ArgumentException($"Unsupported underlying type: {baseType} for enum type {hostType}")
+                };
+            }
+            if (hostType.IsValueType && typeof(ITypeConvertable).IsAssignableFrom(hostType))
+            {
+                return wasmValue =>
+                {
+                    var instance = Activator.CreateInstance(hostType);
+                    ((ITypeConvertable)instance).FromWasmValue(wasmValue);
+                    return instance;
+                }; 
+            }
+
+            throw new ArgumentException($"Runtime cannot automatically convert value to host type {hostType}");
+        }
+
+        private static ConversionHelper CreateReturnHelper(Type hostType)
+        {
+            if (hostType.IsEnum)
+            {
+                Type baseType = Enum.GetUnderlyingType(hostType);
+                return hostValue => baseType switch
+                {
+                    { } t when t == typeof(sbyte) => (sbyte)hostValue,
+                    { } t when t == typeof(byte) => (byte)hostValue,
+                    { } t when t == typeof(short) => (short)hostValue,
+                    { } t when t == typeof(ushort) => (ushort)hostValue,
+                    { } t when t == typeof(int) => (int)hostValue,
+                    { } t when t == typeof(uint) => (uint)hostValue,
+                    _ => throw new ArgumentException($"Unsupported underlying type: {baseType} for enum type {hostType}")
+                };
+            }
+            if (hostType.IsValueType && typeof(ITypeConvertable).IsAssignableFrom(hostType))
+            {
+                return hostValue => ((ITypeConvertable)hostValue).ToWasmType();
+            }
+
+            throw new ArgumentException($"Runtime cannot automatically convert host value to wasm type {hostType}");
+        }
+
 
         /// <summary>
         /// Invokes the host function with the given arguments.
         /// Pushes any results onto the passed OpStack.
         /// </summary>
-        /// <param name="mem">The default memory for the module</param>
         /// <param name="args">The arguments to pass to the function.</param>
         /// <param name="opStack">The Operand Stack to push results onto.</param>
-        public void Invoke(ExecContext ctx, object[] args, OpStack opStack)
+        public void Invoke(object[] args, OpStack opStack)
         {
-            if (_passCtx)
-                args = new object[] { ctx }.Concat(args).ToArray();
+            for (int i = 0; i < _parameterConversions.Length; ++i)
+            {
+                args[i] = _parameterConversions[i]?.Invoke(args[i]) ?? args[i];
+            }
             
             var result = _invoker.Invoke(_hostFunction, args);
             if (!Type.ResultType.IsEmpty)
             {
+                for (int i = 0; i < _resultConversions.Length; )
+                {
+                    if (_resultConversions[i] != null)
+                        result = _resultConversions[i]?.Invoke(result) ?? result;
+
+                    break;
+                }
+                
                 opStack.PushValue(new Value(result));
+                
+                //TODO: Maybe support multiple return values someday...
                 // if (result is Array resultArray)
                 // {
                 //     foreach (var item in resultArray)
@@ -64,5 +169,7 @@ namespace Wacs.Core.Runtime.Types
             }
             
         }
+
+        delegate object ConversionHelper(object value);
     }
 }

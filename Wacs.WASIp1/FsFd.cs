@@ -10,10 +10,9 @@ using ptr = System.UInt32;
 using fd = System.UInt32;
 using filesize = System.UInt64;
 using size = System.UInt32;
-using advice = System.Byte;
 using dircookie = System.UInt64;
 using filedelta = System.Int64;
-using whence = System.Byte;
+
 
 namespace Wacs.WASIp1
 {
@@ -32,9 +31,9 @@ namespace Wacs.WASIp1
         /// <param name="fd">File descriptor referencing an open file.</param>
         /// <param name="offset">The offset within the file to which the advisory applies.</param>
         /// <param name="len">The length of the region to which the advisory applies.</param>
-        /// <param name="adv">The advisory information indicating how to handle the file.</param>
+        /// <param name="advice">The advisory information indicating how to handle the file.</param>
         /// <returns>Returns an ErrNo indicating success or specific error code.</returns>
-        public ErrNo FdAdvise(ExecContext ctx, fd fd, filesize offset, filesize len, advice adv)
+        public ErrNo FdAdvise(ExecContext ctx, fd fd, filesize offset, filesize len, Advice advice)
         {
             FileDescriptor fileDescriptor;
             try
@@ -50,8 +49,7 @@ namespace Wacs.WASIp1
             {
                 return ErrNo.Inval; // Invalid offset or length.
             }
-
-            Advice advice = (Advice)adv;
+            
             switch (advice)
             {
                 case Advice.Normal:
@@ -476,7 +474,7 @@ namespace Wacs.WASIp1
         /// <param name="offset">The number of bytes to move.</param>
         /// <param name="whence">The base from which the offset is relative.</param>
         /// <returns>An error code indicating success or failure.</returns>
-        public ErrNo FdSeek(ExecContext ctx, fd fd, filedelta offset, whence whenc)
+        public ErrNo FdSeek(ExecContext ctx, fd fd, filedelta offset, Whence whence)
         {
             FileDescriptor fileDescriptor;
             try
@@ -492,7 +490,6 @@ namespace Wacs.WASIp1
                 return ErrNo.IsDir;
 
             long newPosition;
-            Whence whence = (Whence)whenc;
             switch (whence)
             {
                 case Whence.Set:

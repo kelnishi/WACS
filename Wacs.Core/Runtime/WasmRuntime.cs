@@ -99,10 +99,17 @@ namespace Wacs.Core.Runtime
                 ? ResultType.Empty
                 : new ResultType(valType);
 
-            bool passCtx = parameters is { Length: > 0 } && parameters[0].ParameterType == typeof(ExecContext);
+            for (int i = 0, l = paramValTypes.Types.Length; i < l; ++i)
+            {
+                if (paramValTypes.Types[i] == ValType.ExecContext && i > 0)
+                {
+                    throw new ArgumentException(
+                        "ExecContext may only be the first parameter of a bound host function.");
+                }
+            }
             
             var type = new FunctionType(paramValTypes, returnValType);
-            var funcAddr = AllocateHostFunc(Store, type, funcType, func, passCtx);
+            var funcAddr = AllocateHostFunc(Store, type, funcType, func);
             _entityBindings[id] = funcAddr;
         }
 
@@ -434,9 +441,9 @@ namespace Wacs.Core.Runtime
         /// <summary>
         /// @Spec 4.5.3.2. Host Functions
         /// </summary>
-        private static FuncAddr AllocateHostFunc(Store store, FunctionType funcType, Type delType, Delegate hostFunc, bool passCtx)
+        private static FuncAddr AllocateHostFunc(Store store, FunctionType funcType, Type delType, Delegate hostFunc)
         {
-            var funcInst = new HostFunction(funcType, delType, hostFunc, passCtx);
+            var funcInst = new HostFunction(funcType, delType, hostFunc);
             var funcAddr = store.AddFunction(funcInst);
             return funcAddr;
         }
