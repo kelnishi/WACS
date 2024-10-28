@@ -133,5 +133,27 @@ namespace Wacs.Core.Runtime.Types
             buf[6] = (byte)((x >> 48) & 0xFF);
             buf[7] = (byte)((x >> 56) & 0xFF);
         }
+
+        public T[] ReadStructs<T>(uint iovsPtr, uint iovsLen)
+            where T : struct
+        {
+            int size = Marshal.SizeOf<T>();
+    
+            long span = size * iovsLen;
+            if (span > int.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(nameof(iovsLen), "Resulting array size exceeds maximum allowed size.");
+            }
+
+            int byteCount = (int)span;
+
+            // Ensure access is within bounds here (for example, check if (iovsPtr + byteCount) is within allowed range)
+            var bytes = this[(int)iovsPtr..(int)(iovsPtr + byteCount)];
+    
+            // Use MemoryMarshal to cast the byte array to an array of T
+            var array = MemoryMarshal.Cast<byte, T>(bytes).ToArray();
+    
+            return array;
+        }
     }
 }

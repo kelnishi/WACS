@@ -21,7 +21,6 @@ namespace Wacs.WASIp1.Types
 
         public Rights Rights { get; set; }
 
-
         public Rights InheritedRights { get; set; }
 
         public void SetFileRights(FileInfo fileInfo)
