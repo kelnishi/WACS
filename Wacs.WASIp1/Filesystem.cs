@@ -220,6 +220,18 @@ namespace Wacs.WASIp1
             }
         }
 
+        private void MoveFD(fd from, fd to)
+        {
+            if (_state.FileDescriptors.ContainsKey(to))
+                throw new IOException($"Cannot overwrite existing file descriptor {to}");
+            
+            if (_state.FileDescriptors.TryRemove(from, out var fileDescriptor))
+            {
+                fileDescriptor.Fd = to;
+                _state.FileDescriptors[to] = fileDescriptor;
+            }
+        }
+
         private void UnbindFile(string guestPath)
         {
             var entry = _state.FileDescriptors.Values

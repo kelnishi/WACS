@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Wacs.WASIp1.Types
 {
-    public enum PrestatType : byte
+    public enum PrestatTag : byte
     {
         Dir = 0,
     }
@@ -16,7 +16,7 @@ namespace Wacs.WASIp1.Types
     [StructLayout(LayoutKind.Explicit, Size = 8)]
     public struct Prestat
     {
-        [FieldOffset(0)] public PrestatType Type;
+        [FieldOffset(0)] public PrestatTag Tag;
 
         [FieldOffset(4)] public PrestatDir Dir;
     }

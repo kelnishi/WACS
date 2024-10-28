@@ -28,7 +28,8 @@ namespace Wacs.Core.Runtime.Types
             get
             {
                 var (start, length) = range.GetOffsetAndLength(_data.Length);
-                Span<byte> span = _data[start..(start+length)];
+                int end = Math.Min(start + length, _data.Length);
+                Span<byte> span = _data[start..end];
                 return span;
             }
         }

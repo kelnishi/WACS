@@ -87,7 +87,7 @@ namespace Wacs.WASIp1
 
             foreach (var sub in subscriptions)
             {
-                switch (sub.Type)
+                switch (sub.Union.Tag)
                 {
                     case EventType.Clock:
                         tasks.Add(CreateClockTask(sub, now));
@@ -118,7 +118,7 @@ namespace Wacs.WASIp1
 
         private async Task<Event?> CreateClockTask(Subscription sub, timestamp now)
         {
-            var clockSub = sub.U.Clock;
+            var clockSub = sub.Union.Clock;
             timestamp targetTime;
 
             if ((clockSub.Flags & SubclockFlags.SubscriptionClockAbstime) != 0)
@@ -152,7 +152,7 @@ namespace Wacs.WASIp1
 
         private async Task<Event?> CreateFdTask(Subscription sub)
         {
-            var fdSub = sub.U.FdReadWrite;
+            var fdSub = sub.Union.FdReadWrite;
         
             
             if (!_state.FileDescriptors.TryGetValue(fdSub.Fd, out var fd))
@@ -161,13 +161,13 @@ namespace Wacs.WASIp1
                 {
                     UserData = sub.UserData,
                     Error = ErrNo.Badf,
-                    Type = sub.Type
+                    Type = sub.Union.Tag
                 };
             }
 
             try
             {
-                if (sub.Type == EventType.FdRead)
+                if (sub.Union.Tag == EventType.FdRead)
                 {
                     // // For read readiness, create a buffer and try to peek
                     // var buffer = new byte[1];
@@ -209,7 +209,7 @@ namespace Wacs.WASIp1
                 {
                     UserData = sub.UserData,
                     Error = ErrNo.IO,
-                    Type = sub.Type
+                    Type = sub.Union.Tag
                 };
             }
         }

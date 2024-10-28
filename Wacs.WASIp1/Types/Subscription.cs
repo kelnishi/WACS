@@ -27,15 +27,15 @@ namespace Wacs.WASIp1.Types
     {
         [FieldOffset(0)] public uint Fd;
     }
-
     
     [StructLayout(LayoutKind.Explicit, Size = 40)]
     public struct SubscriptionUnion
     {
-        [FieldOffset(0)] public SubscriptionClock Clock;
-        [FieldOffset(0)] public SubscriptionFdReadWrite FdRead;
-        [FieldOffset(0)] public SubscriptionFdReadWrite FdWrite;
-        [FieldOffset(0)] public SubscriptionFdReadWrite FdReadWrite;
+        [FieldOffset(0)] public EventType Tag;
+        [FieldOffset(8)] public SubscriptionClock Clock;
+        [FieldOffset(8)] public SubscriptionFdReadWrite FdRead;
+        [FieldOffset(8)] public SubscriptionFdReadWrite FdWrite;
+        [FieldOffset(8)] public SubscriptionFdReadWrite FdReadWrite;
     }
     
     [StructLayout(LayoutKind.Explicit, Size = 48)]
@@ -45,9 +45,6 @@ namespace Wacs.WASIp1.Types
         public ulong UserData;
     
         [FieldOffset(8)]
-        public EventType Type;
-    
-        [FieldOffset(16)]
-        public SubscriptionUnion U;
+        public SubscriptionUnion Union;
     }
 }

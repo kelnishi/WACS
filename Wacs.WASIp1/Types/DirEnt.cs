@@ -12,6 +12,6 @@ namespace Wacs.WASIp1.Types
         [FieldOffset(0)] public dircookie DNext;
         [FieldOffset(8)] public inode DIno;
         [FieldOffset(16)] public dirnamlen DNamlen;
-        [FieldOffset(24)] public Filetype DType;
+        [FieldOffset(20)] public Filetype DType;
     }
 }
