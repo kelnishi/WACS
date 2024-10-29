@@ -8,10 +8,10 @@ namespace Wacs.Core.Instructions.Numeric
     {
         // @Spec 3.3.1.4 i.testop
         public static readonly NumericInst I32Eqz = new(OpCode.I32Eqz, ExecuteI32Eqz,
-            ValidateOperands(push: ValType.I32, pop: ValType.I32));
+            ValidateOperands(pop: ValType.I32, push: ValType.I32));
 
         public static readonly NumericInst I64Eqz = new(OpCode.I64Eqz, ExecuteI64Eqz,
-            ValidateOperands(push: ValType.I64, pop: ValType.I32));
+            ValidateOperands(pop: ValType.I64, push: ValType.I32));
 
         private static void ExecuteI32Eqz(ExecContext context)
         {
