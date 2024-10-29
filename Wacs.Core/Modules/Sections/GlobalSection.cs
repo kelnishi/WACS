@@ -45,14 +45,19 @@ namespace Wacs.Core
                     RuleFor(g => g.Initializer)
                         .Custom((expr, ctx) =>
                         {
+                            var validationContext = ctx.GetValidationContext();
+                            var subContext = validationContext.PushSubContext(expr);
+                            
                             var g = ctx.InstanceToValidate;
                             var exprValidator = new Expression.Validator(g.Type.ResultType, isConstant: true);
-                            var subContext = ctx.GetSubContext(expr);
+                            
                             var result = exprValidator.Validate(subContext);
                             foreach (var error in result.Errors)
                             {
                                 ctx.AddFailure($"Expression.{error.PropertyName}", error.ErrorMessage);
                             }
+                            
+                            validationContext.PopValidationContext();
                         });
                 }
             }

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using FluentValidation;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -12,6 +13,9 @@ namespace Wacs.Core
     public partial class Module
     {
         public List<Function> Funcs { get; internal set; } = null!;
+
+        public List<Function> ValidationFuncs => ImportedFunctions.Concat(Funcs).ToList();
+
 
         /// <summary>
         /// @Spec 2.5.3 Functions
@@ -41,6 +45,9 @@ namespace Wacs.Core
                     RuleFor(func => func)
                         .Custom((func, ctx) =>
                         {
+                            if (func.IsImport)
+                                return;
+                            
                             var vContext = ctx.GetValidationContext();
                             var types = vContext.Types;
                             if (!types.Contains(func.TypeIndex))
@@ -55,7 +62,7 @@ namespace Wacs.Core
                             vContext.Frame.Labels.Push(label);
 
                             var exprValidator = new Expression.Validator(funcType.ResultType);
-                            var subcontext = ctx.GetSubContext(func.Body);
+                            var subcontext = vContext.PushSubContext(func.Body);
                             var validationResult = exprValidator.Validate(subcontext);
                             if (!validationResult.IsValid)
                             {
@@ -67,6 +74,7 @@ namespace Wacs.Core
                                     ctx.AddFailure(propertyName, failure.ErrorMessage);
                                 }
                             }
+                            vContext.PopValidationContext();
 
                             vContext.PopFrame();
                             try

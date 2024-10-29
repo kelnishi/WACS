@@ -65,17 +65,21 @@ namespace Wacs.Core.Types
                             ctx.AddFailure($"Expression must be constant");
 
                     var validationContext = ctx.GetValidationContext();
-
+                    int instIdx = 0;
+                    
                     var instructionValidator = new WasmValidationContext.InstructionValidator();
                     // @Spec 3.3.9. Instruction Sequences
                     foreach (var inst in e.Instructions)
                     {
-                        var subContext = ctx.GetSubContext(inst);
+                        var subContext = validationContext.PushSubContext(inst, instIdx++);
+                        
                         var result = instructionValidator.Validate(subContext);
                         foreach (var error in result.Errors)
                         {
                             ctx.AddFailure($"Instruction.{error.PropertyName}", error.ErrorMessage);
                         }
+                        
+                        validationContext.PopValidationContext();
                     }
 
                     try

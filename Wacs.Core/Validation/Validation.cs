@@ -19,7 +19,8 @@ namespace Wacs.Core.Validation
 
             RuleForEach(module => module.Types).SetValidator(new FunctionType.Validator());
             RuleForEach(module => module.Imports).SetValidator(new Module.Import.Validator());
-            RuleForEach(module => module.Funcs).SetValidator(new Module.Function.Validator());
+            RuleForEach(module => module.ValidationFuncs)
+                .SetValidator(new Module.Function.Validator()).OverridePropertyName("Function");
             RuleForEach(module => module.Tables).SetValidator(new TableType.Validator());
             RuleForEach(module => module.Memories).SetValidator(new MemoryType.Validator());
             RuleForEach(module => module.Globals).SetValidator(new Module.Global.Validator());
