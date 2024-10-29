@@ -29,28 +29,22 @@ namespace Wacs.Core.Types
     }
 
     public class FuncAddrs : RuntimeIndexSpace<FuncIdx, FuncAddr>
-    {
-    }
+    {}
 
     public class TableAddrs : RuntimeIndexSpace<TableIdx, TableAddr>
-    {
-    }
+    {}
 
     public class MemAddrs : RuntimeIndexSpace<MemIdx, MemAddr>
-    {
-    }
+    {}
 
     public class GlobalAddrs : RuntimeIndexSpace<GlobalIdx, GlobalAddr>
-    {
-    }
+    {}
 
     public class ElemAddrs : RuntimeIndexSpace<ElemIdx, ElemAddr>
-    {
-    }
+    {}
 
     public class DataAddrs : RuntimeIndexSpace<DataIdx, DataAddr>
-    {
-    }
+    {}
 
 
     public abstract class AbstractIndexSpace<TIndex, TType> where TIndex : IIndex
@@ -77,7 +71,7 @@ namespace Wacs.Core.Types
         public override bool Contains(TypeIdx idx) =>
             idx.Value < _moduleTypes.Count;
 
-        public FunctionType ResolveBlockType(BlockType blockType) =>
+        public FunctionType? ResolveBlockType(BlockType blockType) =>
             blockType switch
             {
                 BlockType.Empty => new FunctionType(ResultType.Empty, ResultType.Empty),
@@ -88,6 +82,7 @@ namespace Wacs.Core.Types
                 BlockType.V128 => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
                 BlockType.Funcref => new FunctionType(ResultType.Empty, new ResultType(ValType.Funcref)),
                 BlockType.Externref => new FunctionType(ResultType.Empty, new ResultType(ValType.Externref)),
+                _ when (int)blockType < 0 => null,
                 _ => this[(TypeIdx)(int)blockType]
             };
     }

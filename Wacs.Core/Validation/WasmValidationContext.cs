@@ -78,7 +78,7 @@ namespace Wacs.Core.Validation
         public void Assert(bool factIsTrue, MessageProducer message)
         {
             if (!factIsTrue)
-                throw new InvalidDataException(message());
+                throw new ValidationException(message());
         }
 
         public void PushFrame(Module.Function func)
@@ -104,7 +104,9 @@ namespace Wacs.Core.Validation
             var instructionValidator = new InstructionValidator();
             foreach (var inst in instructionBlock.Instructions)
             {
+                
                 var subContext = RootContext.GetSubContext(inst);
+                
                 var result = instructionValidator.Validate(subContext);
                 foreach (var error in result.Errors)
                 {
@@ -124,18 +126,18 @@ namespace Wacs.Core.Validation
                         {
                             inst.Validate(ctx.GetValidationContext());
                         }
-                        catch (InvalidProgramException exc)
+                        catch (ValidationException exc)
                         {
-                            ctx.AddFailure(exc.Message);
+                            ctx.AddFailure($"vInstruction Validation failure at {ctx.PropertyPath}: {exc.Message}");
                         }
                         catch (InvalidDataException exc)
                         {
-                            ctx.AddFailure(exc.Message);
+                            ctx.AddFailure($"dInstruction Validation failure at {ctx.PropertyPath}: {exc.Message}");
                         }
                         catch (NotImplementedException exc)
                         {
                             _ = exc;
-                            ctx.AddFailure($"WASM Instruction `{inst.Op.GetMnemonic()}` is not implemented.");
+                            ctx.AddFailure($"Instruction Validation failure at {ctx.PropertyPath}: WASM Instruction `{inst.Op.GetMnemonic()}` is not implemented.");
                         }
                     });
             }

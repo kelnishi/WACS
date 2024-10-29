@@ -99,12 +99,17 @@ namespace Wacs.Core.Runtime
                 ? ResultType.Empty
                 : new ResultType(valType);
 
-            for (int i = 0, l = paramValTypes.Types.Length; i < l; ++i)
+            for (int i = paramValTypes.Types.Length - 1; i >= 0; --i)
             {
-                if (paramValTypes.Types[i] == ValType.ExecContext && i > 0)
+                if (paramValTypes.Types[i] == ValType.ExecContext)
                 {
-                    throw new ArgumentException(
-                        "ExecContext may only be the first parameter of a bound host function.");
+                    if (i > 0)
+                    {
+                        throw new ArgumentException(
+                            "ExecContext may only be the first parameter of a bound host function.");
+                    }
+                    //If it's the first, just unshift it.
+                    paramValTypes = new ResultType(paramValTypes.Types.Skip(1).ToArray());
                 }
             }
             
@@ -263,7 +268,7 @@ namespace Wacs.Core.Runtime
             {
                 var val = EvaluateExpression(global.Initializer);
                 if (Context.Frame != initFrame)
-                    throw new InvalidProgramException($"Call stack was manipulated while initializing globals");
+                    throw new TrapException($"Call stack was manipulated while initializing globals");
                 moduleInstance.GlobalAddrs.Add(AllocateGlobal(Store, global.Type, val));
             }
 
@@ -382,7 +387,7 @@ namespace Wacs.Core.Runtime
                 {
                     case Module.DataMode.ActiveMode activeMode:
                         if (activeMode.MemoryIndex != 0)
-                            throw new InvalidProgramException(
+                            throw new NotSupportedException(
                                 "Module could not be instantiated: Multiple Memories are not supported.");
                         var n = data.Init.Length;
                         activeMode.Offset
@@ -407,10 +412,10 @@ namespace Wacs.Core.Runtime
                 if (!options.SkipStartFunction)
                 {
                     if (!moduleInstance.FuncAddrs.Contains(module.StartIndex))
-                        throw new InvalidDataException("Module StartFunction index was invalid");
+                        throw new EntryPointNotFoundException("Module StartFunction index was invalid");
                     var startAddr = moduleInstance.FuncAddrs[module.StartIndex];
                     if (!Context.Store.Contains(startAddr))
-                        throw new InvalidProgramException("Module StartFunction address not found in the Store.");
+                        throw new EntryPointNotFoundException("Module StartFunction address not found in the Store.");
                     //Invoke the function!
                     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Call)!.Immediate(module.StartIndex)
                         .Execute(Context);
@@ -419,7 +424,7 @@ namespace Wacs.Core.Runtime
 
             //18.
             if (Context.Frame != auxFrame)
-                throw new InvalidProgramException("Execution fault in Module Instantiation.");
+                throw new WasmRuntimeException("Execution fault in Module Instantiation.");
             //19.
             Context.PopFrame();
 
@@ -515,4 +520,6 @@ namespace Wacs.Core.Runtime
             return inis.Select(EvaluateExpression).ToList();
         }
     }
+
+   
 }

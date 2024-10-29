@@ -22,6 +22,9 @@ namespace Wacs.Core.Runtime
         
         // 32-bit integer
         [FieldOffset(1)] public readonly int Int32;
+        
+        // Ref Address
+        [FieldOffset(1)] public readonly int Ptr;
 
         // 64-bit integer
         [FieldOffset(1)] public readonly long Int64;
@@ -96,6 +99,12 @@ namespace Wacs.Core.Runtime
                 case ValType.I64:
                     Int64 = idx;
                     break;
+                case ValType.Funcref:
+                    Ptr = idx;
+                    break;
+                case ValType.Externref:
+                    Ptr = idx;
+                    break;
                 default:
                     throw new InvalidDataException($"Cannot define StackValue of type {type}");
             }
@@ -112,6 +121,12 @@ namespace Wacs.Core.Runtime
                     break;
                 case ValType.I64:
                     Int64 = idx;
+                    break;
+                case ValType.Funcref:
+                    Ptr = (int)idx;
+                    break;
+                case ValType.Externref:
+                    Ptr = (int)idx;
                     break;
                 default:
                     throw new InvalidDataException($"Cannot define StackValue of type {type}");
@@ -148,10 +163,10 @@ namespace Wacs.Core.Runtime
                     V128 = (0L, 0L);
                     break;
                 case ValType.Funcref:
-                    Int64 = -1;
+                    Ptr = -1;
                     break;
                 case ValType.Externref:
-                    Int64 = -1;
+                    Ptr = -1;
                     break;
                 case ValType.Undefined:
                 default:
@@ -233,10 +248,10 @@ namespace Wacs.Core.Runtime
                     V128 = new V128((byte[])externalValue);
                     break;
                 case ValType.Funcref:
-                    Int64 = (int)externalValue;
+                    Ptr = (int)externalValue;
                     break;
                 case ValType.Externref:
-                    Int64 = (int)externalValue;
+                    Ptr = (int)externalValue;
                     break;
                 case ValType.Undefined:
                 default:
@@ -253,8 +268,8 @@ namespace Wacs.Core.Runtime
             ValType.F32 => Float32,
             ValType.F64 => Float64,
             ValType.V128 => V128,
-            ValType.Funcref => Int64,
-            ValType.Externref => Int64,
+            ValType.Funcref => Ptr,
+            ValType.Externref => Ptr,
             _ => throw new InvalidCastException($"Cannot cast ValType {Type} to Scalar")
         };
 
@@ -270,7 +285,7 @@ namespace Wacs.Core.Runtime
 
         public bool IsI32 => Type == ValType.I32;
         public bool IsRef => Type == ValType.Funcref || Type == ValType.Externref;
-        public bool IsNullRef => IsRef && Int64 == -1;
+        public bool IsNullRef => IsRef && Ptr == -1;
         public static implicit operator Value(int value) => new(value);
         public static implicit operator Value(uint value) => new(value);
 

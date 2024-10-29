@@ -30,8 +30,6 @@ namespace Wacs.WASIp1
         public void BindToRuntime(WasmRuntime runtime)
         {
             string module = "wasi_snapshot_preview1";
-            runtime.BindHostFunction<Func<ExecContext,fd,ptr,size,ErrNo>>(
-                (module, "environ_get"), PathCreateDirectory);
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ErrNo>>(
                 (module, "path_create_directory"), PathCreateDirectory);
             runtime.BindHostFunction<Func<ExecContext, fd, LookupFlags, ptr, size, ptr, ErrNo>>(
@@ -86,7 +84,7 @@ namespace Wacs.WASIp1
                 (module, "fd_readdir"), FdReaddir);
             runtime.BindHostFunction<Func<ExecContext, fd, fd, ErrNo>>(
                 (module, "fd_renumber"), FdRenumber);
-            runtime.BindHostFunction<Func<ExecContext, fd, filedelta, Whence, ErrNo>>(
+            runtime.BindHostFunction<Func<ExecContext, fd, filedelta, Whence, ptr, ErrNo>>(
                 (module, "fd_seek"), FdSeek);
             runtime.BindHostFunction<Func<ExecContext, fd, ErrNo>>(
                 (module, "fd_sync"), FdSync);
