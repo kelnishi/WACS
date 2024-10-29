@@ -100,12 +100,14 @@ namespace Wacs.Core
                             .Custom((expr, ctx) =>
                             {
                                 var exprValidator = new Expression.Validator(ValType.I32.SingleResult(), isConstant: true);
-                                var subContext = ctx.GetSubContext(expr);
+                                var validationContext = ctx.GetValidationContext();
+                                var subContext = validationContext.PushSubContext(expr);
                                 var result = exprValidator.Validate(subContext);
                                 foreach (var error in result.Errors)
                                 {
                                     ctx.AddFailure($"Expression.{error.PropertyName}", error.ErrorMessage);
                                 }
+                                validationContext.PopValidationContext();
                             });
                     }
                 }

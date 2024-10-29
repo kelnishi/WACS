@@ -144,13 +144,15 @@ namespace Wacs.Core
                             };
                             
                             // @Spec 3.4.5.1. base
+                            var validationContext = ctx.GetValidationContext();
                             var exprValidator = new Expression.Validator(resultType, isConstant: true);
-                            var subContext = ctx.GetSubContext(expr);
+                            var subContext = validationContext.PushSubContext(expr);
                             var result = exprValidator.Validate(subContext);
                             foreach (var error in result.Errors)
                             {
                                 ctx.AddFailure($"Expression.{error.PropertyName}", error.ErrorMessage);
                             }
+                            validationContext.PopValidationContext();
                         });
                     RuleFor(es => es.Mode).SetInheritanceValidator(v =>
                     {
@@ -198,14 +200,15 @@ namespace Wacs.Core
                             .Custom((mode, ctx) =>
                             {
                                 var tableType = ctx.GetValidationContext().Tables[mode.TableIndex];
-                                
+                                var validationContext = ctx.GetValidationContext();
                                 var exprValidator = new Expression.Validator(ValType.I32.SingleResult(), isConstant: true);
-                                var subContext = ctx.GetSubContext(mode.Offset);
+                                var subContext = validationContext.PushSubContext(mode.Offset);
                                 var result = exprValidator.Validate(subContext);
                                 foreach (var error in result.Errors)
                                 {
                                     ctx.AddFailure($"Expression.{error.PropertyName}", error.ErrorMessage);
                                 }
+                                validationContext.PopValidationContext();
                                 
                                 if (mode.SegmentType != tableType.ElementType)
                                 {

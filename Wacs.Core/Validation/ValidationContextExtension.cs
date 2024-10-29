@@ -1,25 +1,39 @@
 using System;
 using FluentValidation;
+using FluentValidation.Internal;
 
 namespace Wacs.Core.Validation
 {
     public static class ValidationContextExtension
     {
-        public static WasmValidationContext GetValidationContext<T>(this ValidationContext<T> context)
-            where T : class
+        public static WasmValidationContext GetValidationContext(this IValidationContext context)
             => context.RootContextData.TryGetValue(nameof(WasmValidationContext), out var execContextData) && execContextData is WasmValidationContext execContext
                 ? execContext
                 : throw new InvalidOperationException($"The WasmValidationContext is not present in the RootContextData.");
 
-        public static ValidationContext<T> GetSubContext<TP, T>(this ValidationContext<TP> parent, T child)
+        public static PropertyChain Append(this PropertyChain chain, object obj)
+        {
+            var subchain = new PropertyChain(chain);
+            var name = obj.GetType().Name;
+            subchain.Add(name);
+            return subchain;
+        }
+
+        public static PropertyChain AppendIndex(this PropertyChain chain, object obj)
+        {
+            if ((int)obj == -1)
+                return chain;
+            
+            var subchain = new PropertyChain(chain);
+            subchain.AddIndexer(obj);
+            return subchain;
+        }
+
+        public static ValidationContext<T> GetSubContext<T>(this IValidationContext parent, T child, int index = -1)
             where T : class
-            where TP : class
-            => new(child)
+            => new(child, parent.PropertyChain.AppendIndex(index).Append(child), new DefaultValidatorSelector())
             {
-                RootContextData =
-                {
-                    [nameof(WasmValidationContext)] = parent.GetValidationContext()
-                }
+                RootContextData = { [nameof(WasmValidationContext)] = parent.GetValidationContext() }
             };
     }
 }

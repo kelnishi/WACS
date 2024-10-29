@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FluentValidation;
@@ -20,6 +21,9 @@ namespace Wacs.Core.Validation
         private readonly ValidationOpStack _stack = new();
         private readonly UnreachableOpStack _stackPolymorphic = new();
 
+
+        private Stack<IValidationContext> _contextStack = new();
+
         private bool _reachability;
 
         /// <summary>
@@ -40,7 +44,8 @@ namespace Wacs.Core.Validation
             Globals = new GlobalValidationSpace(module);
 
             RootContext = rootContext;
-
+            _contextStack.Push(rootContext);
+            
             Reachability = true;
         }
 
@@ -75,6 +80,16 @@ namespace Wacs.Core.Validation
             }
         }
 
+        public ValidationContext<T> PushSubContext<T>(T child, int index = -1)
+        where T : class
+        {
+            var subctx = _contextStack.Peek().GetSubContext(child, index);
+            _contextStack.Push(subctx);
+            return subctx;
+        }
+
+        public void PopValidationContext() => _contextStack.Pop();
+
         public void Assert(bool factIsTrue, MessageProducer message)
         {
             if (!factIsTrue)
@@ -93,8 +108,9 @@ namespace Wacs.Core.Validation
 
         public void ValidateBlock(Block instructionBlock)
         {
+            var blockContext = PushSubContext(instructionBlock);
+            
             var blockValidator = new Block.Validator();
-            var blockContext = RootContext.GetSubContext(instructionBlock);
             var blockResult = blockValidator.Validate(blockContext);
             foreach (var error in blockResult.Errors)
             {
@@ -102,17 +118,21 @@ namespace Wacs.Core.Validation
             }
 
             var instructionValidator = new InstructionValidator();
+            int instIdx = 0;
             foreach (var inst in instructionBlock.Instructions)
             {
-                
-                var subContext = RootContext.GetSubContext(inst);
+                var subContext = PushSubContext(inst, instIdx++);
                 
                 var result = instructionValidator.Validate(subContext);
                 foreach (var error in result.Errors)
                 {
                     RootContext.AddFailure($"Block Instruction.{error.PropertyName}", error.ErrorMessage);
                 }
+                
+                PopValidationContext();
             }
+            
+            PopValidationContext();
         }
 
         public class InstructionValidator : AbstractValidator<IInstruction>
@@ -128,16 +148,16 @@ namespace Wacs.Core.Validation
                         }
                         catch (ValidationException exc)
                         {
-                            ctx.AddFailure($"vInstruction Validation failure at {ctx.PropertyPath}: {exc.Message}");
+                            ctx.AddFailure($"{ctx.PropertyPath}: Validation Failure; {exc.Message}");
                         }
                         catch (InvalidDataException exc)
                         {
-                            ctx.AddFailure($"dInstruction Validation failure at {ctx.PropertyPath}: {exc.Message}");
+                            ctx.AddFailure($"{ctx.PropertyPath}: Invalid instruction data; {exc.Message}");
                         }
                         catch (NotImplementedException exc)
                         {
                             _ = exc;
-                            ctx.AddFailure($"Instruction Validation failure at {ctx.PropertyPath}: WASM Instruction `{inst.Op.GetMnemonic()}` is not implemented.");
+                            ctx.AddFailure($"{ctx.PropertyPath}: WASM Instruction `{inst.Op.GetMnemonic()}` is not implemented.");
                         }
                     });
             }
