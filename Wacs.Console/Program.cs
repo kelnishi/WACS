@@ -51,7 +51,7 @@ namespace Wacs.Console
                         {
                             var parts = error.ErrorMessage.Split(":");
                             var path = parts[0];
-                            var msg = string.Join("",parts[1..]);
+                            var msg = string.Join(":",parts[1..]);
 
                             int line = module.CalculateLine(path, false, out var code);
                             if (!string.IsNullOrWhiteSpace(code))
@@ -88,12 +88,12 @@ namespace Wacs.Console
             var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true });
             runtime.RegisterModule("hello", modInst);
 
-            var mainAddr = runtime.GetExportedFunction(("hello", "main"));
+            var mainAddr = runtime.GetExportedFunction(("hello", "_start"));
             
-            var caller = runtime.CreateInvoker<Delegates.WasmFunc<int>>(mainAddr);
-            int result = caller();
+            var caller = runtime.CreateInvoker<Delegates.WasmAction>(mainAddr);
             
-            System.Console.WriteLine($"Result was: {result}");
+            caller();
+            // System.Console.WriteLine($"Result was: {result}");
         }
     }
 }
