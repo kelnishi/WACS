@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using FluentValidation;
+using Wacs.Core.Attributes;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
@@ -9,7 +10,7 @@ namespace Wacs.Core.Types
     /// @Spec 2.3.9 Table Types
     /// Represents the table type in WebAssembly, defining the element type and its limits.
     /// </summary>
-    public class TableType : ICloneable
+    public class TableType : ICloneable, IRenderable
     {
         private TableType()
         {
@@ -28,6 +29,8 @@ namespace Wacs.Core.Types
         /// </summary>
         public ReferenceType ElementType { get; private set; }
 
+        public string Id { get; set; } = "";
+
         public object Clone()
         {
             return new TableType
@@ -35,6 +38,15 @@ namespace Wacs.Core.Types
                 Limits = (Limits)Limits.Clone(), // Assuming Limits implements ICloneable
                 ElementType = ElementType // Assuming ElementType is a value type or has a suitable copy method
             };
+        }
+
+        public void RenderText(StreamWriter writer, Module module, string indent)
+        {
+            var id = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
+            var tableType = $"{Limits.ToWat()} {ElementType.ToWat()}";
+            var tableText = $"{indent}(table{id} {tableType})";
+            
+            writer.WriteLine(tableText);
         }
 
         /// <summary>

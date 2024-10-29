@@ -19,6 +19,7 @@ namespace Wacs.Core
         /// @Spec 5.5.4 Type Section
         /// </summary>
         private static List<FunctionType> ParseTypeSection(BinaryReader reader) => 
-            reader.ParseList(FunctionType.Parse);
+            reader.ParseList(FunctionType.Parse,
+                postProcess: AnnotateWhileParsing ? (i, newType) => newType.Id = $"{i}" : null);
     }
 }

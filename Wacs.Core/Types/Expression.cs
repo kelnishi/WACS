@@ -51,6 +51,18 @@ namespace Wacs.Core.Types
         public static Expression Parse(BinaryReader reader) =>
             new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd)));
 
+
+        /// <summary>
+        /// For Single instruction renders (globals, elements)
+        /// </summary>
+        /// <returns></returns>
+        public string ToWat()
+        {
+            var inst = this.Instructions[0];
+            var instText = $" ({inst.RenderText(0)})";
+            return instText;
+        }
+
         /// <summary>
         /// @Spec 3.3.10. Expressions
         /// </summary>

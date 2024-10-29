@@ -1,6 +1,7 @@
 using System.IO;
 using System.Linq;
 using FluentValidation;
+using Wacs.Core.Attributes;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
@@ -19,7 +20,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.7. Element Segments
         /// </summary>
-        public class ElementSegment
+        public class ElementSegment : IRenderable
         {
             private ElementSegment(ReferenceType type, IInstruction[] funcIndices, ElementMode mode)
             {
@@ -60,6 +61,42 @@ namespace Wacs.Core
 
             public ElementMode Mode { get; }
 
+            public string Id { get; set; } = "";
+
+            public void RenderText(StreamWriter writer, Module module, string indent)
+            {
+                var id = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
+                var modeText = Mode switch
+                {
+                    ElementMode.PassiveMode => "",
+                    ElementMode.ActiveMode { TableIndex: { Value: 0 }, Offset: { Instructions: { IsConstant: true } } } am =>
+                        $"{ am.Offset.ToWat() }",
+                    ElementMode.ActiveMode am => $" (table {am.TableIndex.Value}) (offset{am.Offset.ToWat()})",
+                    ElementMode.DeclarativeMode dm => $" declare",
+                };
+                string elemListText = "";
+                
+                if (Type == ReferenceType.Funcref && IsAllRefFunc())
+                {
+                    var listElems = Initializers
+                        .Select(expr => expr.Instructions[0] as InstRefFunc)
+                        .Select(rf => rf!.FunctionIndex.Value);
+                    var listText = string.Join(" ", listElems);
+                    elemListText = $" func {listText}";
+                }
+                else
+                {
+                    var listElems = Initializers
+                        .Select(expr => expr.ToWat())
+                        .Select(item => $" (item {item})");
+                    var listText = string.Join("", listElems);
+                    elemListText = $" {Type.ToWat()}{listText}";
+                }
+                
+                var elemText = $"{indent}(elem{id}{modeText}{elemListText})";
+            
+                writer.WriteLine(elemText);
+            }
 
             /// <summary>
             /// Generate a InstRefFunc for a funcidx
@@ -125,6 +162,13 @@ namespace Wacs.Core
                             new ElementMode.DeclarativeMode()),
                     _ => throw new InvalidDataException($"Invalid Element at {reader.BaseStream.Position}")
                 };
+
+            private bool IsAllRefFunc()
+            {
+                return Initializers
+                    .Select(expr => expr.Instructions[0] as InstRefFunc)
+                    .All(inst => inst != null);
+            }
 
             /// <summary>
             /// 3.4.5. Element Segments

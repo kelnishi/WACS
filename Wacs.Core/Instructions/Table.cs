@@ -65,6 +65,8 @@ namespace Wacs.Core.Instructions
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
     }
 
     // 0x26
@@ -125,6 +127,8 @@ namespace Wacs.Core.Instructions
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
     }
 
     // 0xFC0C
@@ -239,6 +243,8 @@ namespace Wacs.Core.Instructions
             Y = y;
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value} {Y.Value}";
     }
 
     // 0xFC0F
@@ -281,6 +287,8 @@ namespace Wacs.Core.Instructions
             X = value;
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
     }
 
     // 0xFC0E
@@ -405,6 +413,8 @@ namespace Wacs.Core.Instructions
             SrcY = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {DstX.Value} {SrcY.Value}";
     }
 
     // 0xFC0F
@@ -469,6 +479,8 @@ namespace Wacs.Core.Instructions
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
     }
 
     // 0xFC10
@@ -511,6 +523,8 @@ namespace Wacs.Core.Instructions
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
     }
 
     // 0xFC11
@@ -595,5 +609,7 @@ namespace Wacs.Core.Instructions
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
     }
 }

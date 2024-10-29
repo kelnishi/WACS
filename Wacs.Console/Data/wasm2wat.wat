@@ -104,7 +104,7 @@
       local.tee 0
       i32.add
       local.set 5
-      block  ;; label = @2 [17]
+      block  ;; label = @2
         local.get 2
         i32.const 1
         i32.and
@@ -335,7 +335,7 @@
         local.get 1
         i32.store offset=24
       end
-      local.get 3 ;; [18]
+      local.get 3
       local.get 5
       i32.ge_u
       br_if 0 (;@1;)
@@ -346,7 +346,7 @@
       i32.and
       i32.eqz
       br_if 0 (;@1;)
-      block  ;; label = @2 [29]
+      block  ;; label = @2
         block  ;; label = @3
           block  ;; label = @4
             block  ;; label = @5
@@ -631,7 +631,7 @@
         i32.store
         return
       end
-      local.get 0 ;; [30]
+      local.get 0
       i32.const 255
       i32.le_u
       if  ;; label = @2
@@ -685,7 +685,7 @@
       local.get 0
       i32.const 16777215
       i32.le_u
-      if  ;; label = @2 [39]
+      if  ;; label = @2
         local.get 0
         i32.const 38
         local.get 0
@@ -710,7 +710,7 @@
       i32.store offset=28
       local.get 3
       i64.const 0
-      i64.store offset=16 align=4 ;; [45]
+      i64.store offset=16 align=4
       local.get 1
       i32.const 2
       i32.shl

@@ -16,11 +16,26 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.10. Exports
         /// </summary>
-        public class Export
+        public class Export : IRenderable
         {
             public string Name { get; internal set; } = null!;
 
             public ExportDesc Desc { get; internal set; } = null!;
+
+            public void RenderText(StreamWriter writer, Module module, string indent)
+            {
+                var nameText = $" \"{Name}\"";
+                var expText = Desc switch
+                {
+                    ExportDesc.FuncDesc fd => $" (func {fd.FunctionIndex.Value})",
+                    ExportDesc.TableDesc td => $" (table {td.TableIndex.Value})",
+                    ExportDesc.MemDesc md => $" (memory {md.MemoryIndex.Value})",
+                    ExportDesc.GlobalDesc gd => $" (global {gd.GlobalIndex.Value})"
+                };
+                var tableText = $"{indent}(export{nameText}{expText})";
+            
+                writer.WriteLine(tableText);
+            }
 
             /// <summary>
             /// @Spec 3.4.8.1.

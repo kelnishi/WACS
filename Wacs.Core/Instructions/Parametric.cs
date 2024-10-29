@@ -88,6 +88,8 @@ namespace Wacs.Core.Instructions
             }
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)}{(WithTypes ? $" {new ResultType(Types).ToResults()}" : "")}";
     }
     
 }

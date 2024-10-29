@@ -7,12 +7,17 @@ namespace Wacs.Core.Types
     /// @Spec 2.3.6 Function Types
     /// Represents the type signature of a WebAssembly function, including parameter and return types.
     /// </summary>
-    public class FunctionType
+    public class FunctionType : IRenderable
     {
         public static readonly FunctionType Empty = new(ResultType.Empty, ResultType.Empty);
 
         public FunctionType(ResultType parameterTypes, ResultType resultType) =>
             (ParameterTypes, ResultType) = (parameterTypes, resultType);
+
+        /// <summary>
+        /// For rendering/debugging
+        /// </summary>
+        public string Id { get; set; } = "";
 
         /// <summary>
         /// The vec of parameter types for the function.
@@ -23,6 +28,16 @@ namespace Wacs.Core.Types
         /// The vec of return types for the function.
         /// </summary>
         public ResultType ResultType { get; }
+
+        public void RenderText(StreamWriter writer, Module module, string indent)
+        {
+            var symbol = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
+            var parameters = ParameterTypes.ToParameters();
+            var results = ResultType.ToResults();
+            var func = $" (func{parameters}{results})";
+            
+            writer.WriteLine($"{indent}(type{symbol}{func})");
+        }
 
         public bool Matches(FunctionType other) =>
             ParameterTypes.Matches(other.ParameterTypes) &&

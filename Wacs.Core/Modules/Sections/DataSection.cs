@@ -25,7 +25,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.8. Data Segments
         /// </summary>
-        public class Data
+        public class Data : IRenderable
         {
             private Data(DataMode mode, (uint size, byte[] bytes) data) =>
                 (Mode, Size, Init) = (mode, data.size, data.bytes);
@@ -33,6 +33,23 @@ namespace Wacs.Core
             public DataMode Mode { get; }
             public uint Size { get; }
             public byte[] Init { get; }
+
+            public string Id { get; set; } = "";
+
+            public void RenderText(StreamWriter writer, Module module, string indent)
+            {
+                var id = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
+                var datastring = BytesEncoder.EncodeToWatString(Init);
+                var data = Mode switch
+                {
+                    DataMode.PassiveMode => datastring,
+                    DataMode.ActiveMode { MemoryIndex: { Value: 0 }, Offset: { IsConstant: true } } am => $"{am.Offset.ToWat()} {datastring}",
+                    DataMode.ActiveMode am => $" (memory {am.MemoryIndex.Value}) (offset{am.Offset.ToWat()}) {datastring}",
+                };
+                var dataText = $"{indent}(data{id}{data})";
+            
+                writer.Write(dataText);
+            }
 
             private static (uint size, byte[] bytes) ParseByteVector(BinaryReader reader)
             {

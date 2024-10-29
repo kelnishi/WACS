@@ -32,6 +32,9 @@ namespace Wacs.Core
     /// </summary>
     public static partial class BinaryModuleParser
     {
+        //Add Ids to objects while parsing
+        public static bool AnnotateWhileParsing = true;
+
         private static IInstructionFactory _instructionFactory = ReferenceFactory.Factory;
         public static IInstructionFactory InstructionFactory => _instructionFactory;
 
@@ -94,15 +97,47 @@ namespace Wacs.Core
                     break;
                 case SectionId.Function:
                     module.Funcs = ParseFunctionSection(reader).ToList();
+                    if (AnnotateWhileParsing)
+                    {
+                        int idx = module.ImportedFunctions.Count;
+                        foreach (var func in module.Funcs)
+                        {
+                            func.Id = $"{idx++}";
+                        }
+                    }
                     break;
                 case SectionId.Table:
                     module.Tables = ParseTableSection(reader);
+                    if (AnnotateWhileParsing)
+                    {
+                        int idx = module.ImportedTables.Count;
+                        foreach (var table in module.Tables)
+                        {
+                            table.Id = $"{idx++}";
+                        }
+                    }
                     break;
                 case SectionId.Memory:
                     module.Memories = ParseMemorySection(reader);
+                    if (AnnotateWhileParsing)
+                    {
+                        int idx = module.ImportedMems.Count;
+                        foreach (var mem in module.Memories)
+                        {
+                            mem.Id = $"{idx++}";
+                        }
+                    }
                     break;
                 case SectionId.Global:
                     module.Globals = ParseGlobalSection(reader);
+                    if (AnnotateWhileParsing)
+                    {
+                        int idx = module.ImportedGlobals.Count;
+                        foreach (var glob in module.Globals)
+                        {
+                            glob.Id = $"{idx++}";
+                        }
+                    }
                     break;
                 case SectionId.Export:
                     module.Exports = ParseExportSection(reader);
@@ -112,6 +147,14 @@ namespace Wacs.Core
                     break;
                 case SectionId.Element:
                     module.Elements = ParseElementSection(reader);
+                    if (AnnotateWhileParsing)
+                    {
+                        int idx = 0;
+                        foreach (var elem in module.Elements)
+                        {
+                            elem.Id = $"{idx++}";
+                        }
+                    }
                     break;
                 case SectionId.DataCount:
                     module.DataCount = ParseDataCountSection(reader);
@@ -121,6 +164,14 @@ namespace Wacs.Core
                     break;
                 case SectionId.Data:
                     module.Datas = ParseDataSection(reader);
+                    if (AnnotateWhileParsing)
+                    {
+                        int idx = 0;
+                        foreach (var data in module.Datas)
+                        {
+                            data.Id = $"{idx++}";
+                        }
+                    }
                     break;
                 case SectionId.Custom: break; //Handled below 
                 default:
