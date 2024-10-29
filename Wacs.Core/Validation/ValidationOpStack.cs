@@ -116,7 +116,7 @@ namespace Wacs.Core.Validation
             Value value = _stack.Pop();
             if (value.Type != ValType.I32)
                 throw new ValidationException(
-                    $"Wrong operand type {value.Type} popped from stack. Expected:{ValType.I32}");
+                    $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.I32}");
         }
 
         public void PopI64()
@@ -127,7 +127,7 @@ namespace Wacs.Core.Validation
             Value value = _stack.Pop();
             if (value.Type != ValType.I64)
                 throw new ValidationException(
-                    $"Wrong operand type {value.Type} popped from stack. Expected:{ValType.I64}");
+                    $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.I64}");
         }
 
         public void PopF32()
@@ -138,7 +138,7 @@ namespace Wacs.Core.Validation
             Value value = _stack.Pop();
             if (value.Type != ValType.F32)
                 throw new ValidationException(
-                    $"Wrong operand type {value.Type} popped from stack. Expected:{ValType.F32}");
+                    $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.F32}");
         }
 
         public void PopF64()
@@ -149,7 +149,7 @@ namespace Wacs.Core.Validation
             Value value = _stack.Pop();
             if (value.Type != ValType.F64)
                 throw new ValidationException(
-                    $"Wrong operand type {value.Type} popped from stack. Expected:{ValType.F64}");
+                    $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.F64}");
         }
 
         public void PopV128()
@@ -160,7 +160,7 @@ namespace Wacs.Core.Validation
             Value value = _stack.Pop();
             if (value.Type != ValType.V128)
                 throw new ValidationException(
-                    $"Wrong operand type {value.Type} popped from stack. Expected:{ValType.V128}");
+                    $"Wrong operand type {value.Type} popped from stack. Expected {ValType.V128}");
         }
 
         public void PopRefType()
