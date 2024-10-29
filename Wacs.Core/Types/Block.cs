@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using FluentValidation;
-using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
@@ -15,7 +14,6 @@ namespace Wacs.Core.Types
 
         private ValType ValType => Type switch {
             BlockType.Empty => ValType.Nil,
-            BlockType.Void => ValType.Nil,
             BlockType.I32 => ValType.I32,
             BlockType.I64 => ValType.I64,
             BlockType.F32 => ValType.F32,
@@ -33,7 +31,60 @@ namespace Wacs.Core.Types
         public int Size => Instructions.Size;
 
         public bool IsEmpty => Type == BlockType.Empty;
-        public static BlockType ParseBlockType(BinaryReader reader) => (BlockType)reader.ReadLeb128_s33();
+
+        public static BlockType ParseBlockType(BinaryReader reader)
+        {
+            byte byteValue = reader.ReadByte();
+            if (Enum.IsDefined(typeof(BlockType), (uint)byteValue))
+                return (BlockType)byteValue;
+            
+            //Continue parsing as LEB128_S33
+            long result = 0;
+            int shift = 0;
+            bool moreBytes = true;
+
+            while (moreBytes)
+            {
+                // Extract the lower 7 bits and add them to the result
+                byte lower7Bits = (byte)(byteValue & 0x7F);
+                result |= (long)lower7Bits << shift;
+
+                // Increment the shift for the next 7 bits
+                shift += 7;
+
+                // Check if this is the last byte
+                moreBytes = (byteValue & 0x80) != 0;
+
+                // If it's the last byte, check the sign bit and perform sign extension if necessary
+                if (!moreBytes)
+                {
+                    // If the sign bit of the last byte is set and shift is less than 33, sign-extend the result
+                    if ((byteValue & 0x40) != 0 && shift < 33)
+                    {
+                        result |= -1L << shift;
+                    }
+
+                    break;
+                }
+
+                // Prevent shift overflow
+                if (shift >= 64)
+                    throw new InvalidDataException("Shift count exceeds 64 bits while decoding s33.");
+
+                byteValue = reader.ReadByte();
+                if (byteValue == 0xFF)
+                    throw new InvalidDataException("Unexpected end of stream while decoding s33.");
+            }
+
+            if (result < 0)
+                throw new InvalidDataException($"BlockType Index {result} was negative");
+            
+            //Just take the U32 bits since the unset sign bit is 33.
+            uint data = (uint)(result & 0xFFFF_FFFF);
+
+            return (BlockType)data;
+        }
+
 
         /// <summary>
         /// @Spec 3.2.2. Block Types
@@ -59,17 +110,12 @@ namespace Wacs.Core.Types
         }
     }
 
-    public enum BlockType : long
+    public enum BlockType : uint
     {
         /// <summary>
         /// Block is empty
         /// </summary>
-        Empty = -64, //0x40
-        
-        /// <summary>
-        /// Block does not return any values
-        /// </summary>
-        Void = -1,
+        Empty = 0x40, //0x40
         
         // =========================
         // Numeric Types returned
