@@ -62,7 +62,7 @@ namespace Wacs.Core
                         
                             if (print)
                                 Console.WriteLine($"{indent}Function[{index}]:{line}");
-                        
+                            
                             if (Funcs[index].Locals.Length > 0)
                                 line += 1;
 
@@ -90,6 +90,9 @@ namespace Wacs.Core
                                     line += 1;
                                 }
                             }
+                            
+                            line += 1;
+                            
                             if (print)
                                 Console.WriteLine($"{indent}{strata}[{index}]:{line}");
                         
