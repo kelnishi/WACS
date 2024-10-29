@@ -234,6 +234,8 @@ namespace Wacs.Core.Instructions
             X = x;
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
     }
 
     //0xFC_09
@@ -277,6 +279,8 @@ namespace Wacs.Core.Instructions
             X = x;
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
     }
 
     //0xFC_0A

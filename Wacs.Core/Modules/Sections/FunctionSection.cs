@@ -1,9 +1,8 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 using FluentValidation;
+using Wacs.Core.Attributes;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -19,118 +18,13 @@ namespace Wacs.Core
 
         public List<Function> ValidationFuncs => ImportedFunctions.Concat(Funcs).ToList();
 
-        //Function[100].Expression[34].NumericInst
-        public int CalculateLine(string validationPath, bool print, out string instruction)
-        {
-            int line = 1;
-            line += Types.Count;
-            line += Imports.Length;
-            //Start of functions
-            var parts = validationPath.Split(".");
-            instruction = "";
-
-            IBlockInstruction pointerInst = null;
-            InstructionSequence seq = null;
-            string indent = "";
-            foreach (var part in parts)
-            {
-                indent += " ";
-                //Skip instruction strata
-                if (!part.EndsWith("]"))
-                {
-                    line += 1;
-                    break;
-                }
-                
-                var regex = new Regex(@"(\w+)\[(\d+)\]");
-                var match = regex.Match(part);
-                if (match.Success)
-                {
-                    int index = int.Parse(match.Groups[2].Value);
-                    string strata = match.Groups[1].Value;
-                    switch (strata)
-                    {
-                        case "Function":
-                        {
-                            index -= Imports.Length;
-                            for (int i = 0; i < index; ++i)
-                            {
-                                line += Funcs[i].Size;
-                            }
-
-                            line += 1;
-                        
-                            if (print)
-                                Console.WriteLine($"{indent}Function[{index}]:{line}");
-                            
-                            if (Funcs[index].Locals.Length > 0)
-                                line += 1;
-
-                            instruction = "func";
-
-                            seq = Funcs[index].Body.Instructions;
-                            break;
-                        }
-                        case "Expression":
-                        case "Block":
-                        {
-                            if (seq == null)
-                                throw new ArgumentException("Validation path was invalid.");
-                        
-                            //Fast-forward through instructions
-                            for (int i = 0; i < index; ++i)
-                            {
-                                var inst = seq[i];
-                                if (inst is IBlockInstruction blockInstruction)
-                                {
-                                    line += blockInstruction.Size;
-                                }
-                                else
-                                {
-                                    line += 1;
-                                }
-                            }
-                            
-                            line += 1;
-                            
-                            if (print)
-                                Console.WriteLine($"{indent}{strata}[{index}]:{line}");
-                        
-                            var term = seq[index];
-                            if (term is IBlockInstruction blTerm)
-                            {
-                                pointerInst = blTerm;
-                            }
-                            instruction = term.Op.GetMnemonic();
-                            break;
-                        }
-                        case "InstBlock":
-                        case "InstIf":
-                        case "InstLoop":
-                        {
-                            if (pointerInst == null)
-                                throw new ArgumentException("Validation path was invalid.");
-                        
-                            if (print)
-                                Console.WriteLine($"{indent}{strata}[{index}]:{line}");
-                        
-                            seq = pointerInst.GetBlock(index);
-                            break;
-                        }
-                    }
-                }
-            }
-
-            return line;
-        }
-
-
         /// <summary>
         /// @Spec 2.5.3 Functions
         /// </summary>
-        public class Function
+        public class Function : IRenderable
         {
             public bool IsImport = false;
+            public string Id { get; set; } = "";
 
             //Function Section only parses the type indices
             public TypeIdx TypeIndex { get; internal set; }
@@ -140,6 +34,106 @@ namespace Wacs.Core
             public Expression Body { get; internal set; } = null!;
 
             public int Size => (Locals.Length > 0?1:0) + Body.Size;
+
+            public void RenderText(StreamWriter writer, Module module, string indent)
+            {
+                var id = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
+                var type = $" (type {TypeIndex.Value})";
+                var functionType = module.Types[(int)TypeIndex.Value];
+                var param = functionType.ParameterTypes.Length > 0
+                    ? functionType.ParameterTypes.ToParameters()
+                    : "";
+                var result = functionType.ResultType.Length > 0
+                    ? functionType.ResultType.ToResults()
+                    : "";
+                
+                var head = $"{indent}(func{id}{type}{param}{result}";
+                
+                writer.Write(head);
+                indent += ModuleRenderer.Indent2Space;
+                if (Locals.Length > 0)
+                {
+                    var localtypes = string.Join(" ", Locals.Select(v => v.ToWat()));
+                    var locals = $"{indent}(local {localtypes})";
+                    writer.WriteLine();
+                    writer.Write(locals);
+                }
+
+                RenderInstructions(writer, indent, 0, module, Body.Instructions);
+                
+                writer.WriteLine(")");
+            }
+
+            private void RenderInstructions(StreamWriter writer, string indent, int depth, Module module, InstructionSequence seq)
+            {
+                foreach (var inst in seq)
+                {
+                    switch (inst)
+                    {
+                        case InstElse:
+                        case InstEnd:
+                            //Skip and handle in block rendering
+                            break;
+                        case IBlockInstruction blockInst:
+                        {
+                            depth += 1;
+
+                            var mnemonic = inst.Op.GetMnemonic();
+                            var funcType = ComputeBlockType(blockInst.Type, module);
+                            var blockParams = funcType.ParameterTypes.Length > 0
+                                ? funcType.ParameterTypes.ToParameters()
+                                : "";
+                            var blockResults = funcType.ResultType.Length > 0
+                                ? funcType.ResultType.ToResults()
+                                : "";
+                            var label = $"  ;; label = @{depth}";
+                            var instText = $"{indent}{mnemonic}{blockParams}{blockResults}{label}";
+                            writer.WriteLine();
+                            writer.Write(instText);
+
+                            var blockIndent = indent + ModuleRenderer.Indent2Space;
+                        
+                            for (int b = 0; b < blockInst.Count; ++b)
+                            {
+                                var blockSeq = blockInst.GetBlock(b);
+                                RenderInstructions(writer, blockIndent, depth, module, blockSeq);
+
+                                var lastInst = blockSeq.LastInstruction;
+                                if (IInstruction.IsElseOrEnd(lastInst))
+                                {
+                                    var subText = $"{indent}{lastInst.RenderText(depth)}";
+                                    writer.WriteLine();
+                                    writer.Write(subText);
+                                }
+                            }
+                            
+                            depth -= 1;
+                            break;
+                        }
+                        default:
+                        {
+                            var instText = $"{indent}{inst.RenderText(depth)}";
+                            writer.WriteLine();
+                            writer.Write(instText);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            private FunctionType ComputeBlockType(BlockType type, Module module) =>
+                type switch
+                {
+                    BlockType.Empty => new FunctionType(ResultType.Empty, ResultType.Empty),
+                    BlockType.I32 => new FunctionType(ResultType.Empty, new ResultType(ValType.I32)),
+                    BlockType.F32 => new FunctionType(ResultType.Empty, new ResultType(ValType.F32)),
+                    BlockType.F64 => new FunctionType(ResultType.Empty, new ResultType(ValType.F64)),
+                    BlockType.I64 => new FunctionType(ResultType.Empty, new ResultType(ValType.I64)),
+                    BlockType.V128 => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
+                    BlockType.Funcref => new FunctionType(ResultType.Empty, new ResultType(ValType.Funcref)),
+                    BlockType.Externref => new FunctionType(ResultType.Empty, new ResultType(ValType.Externref)),
+                    _ => module.Types[(int)((TypeIdx)(uint)type).Value]
+                };
 
             /// <summary>
             /// @Spec 3.4.1. Functions
@@ -204,9 +198,8 @@ namespace Wacs.Core
     public static partial class BinaryModuleParser
     {
         private static Module.Function ParseIndex(BinaryReader reader) =>
-            new()
-            {
-                TypeIndex = (TypeIdx)reader.ReadLeb128_u32()
+            new() {
+                TypeIndex = (TypeIdx)reader.ReadLeb128_u32(),
             };
 
         /// <summary>

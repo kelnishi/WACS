@@ -29,6 +29,8 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {Index.Value}";
+
         public static LocalVariableInst CreateInstLocalGet() => new(OpCode.LocalGet, ExecuteLocalGet, ValidateLocalGet);
         public static LocalVariableInst CreateInstLocalSet() => new(OpCode.LocalSet, ExecuteLocalSet, ValidateLocalSet);
         public static LocalVariableInst CreateInstLocalTee() => new(OpCode.LocalTee, ExecuteLocalTee, ValidateLocalTee);
@@ -136,8 +138,10 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public static GlobalVariableInst CreateInstGlobalGet() => new(OpCode.LocalGet, ExecuteGlobalGet, ValidateGlobalGet);
-        public static GlobalVariableInst CreateInstGlobalSet() => new(OpCode.LocalSet, ExecuteGlobalSet, ValidateGlobalSet);
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {Index.Value}";
+
+        public static GlobalVariableInst CreateInstGlobalGet() => new(OpCode.GlobalGet, ExecuteGlobalGet, ValidateGlobalGet);
+        public static GlobalVariableInst CreateInstGlobalSet() => new(OpCode.GlobalSet, ExecuteGlobalSet, ValidateGlobalSet);
 
         //0x23
         // @Spec 3.3.5.4. global.get

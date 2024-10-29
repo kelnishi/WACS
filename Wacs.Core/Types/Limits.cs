@@ -48,6 +48,8 @@ namespace Wacs.Core.Types
                 var flag => throw new InvalidDataException($"Invalid Limits flag {flag} at offset {reader.BaseStream.Position}.")
             };
 
+        public string ToWat() => Maximum != null ? $"{Minimum} {Maximum}" : $"{Minimum}";
+
         /// <summary>
         /// @Spec 3.2.1. Limits
         /// </summary>

@@ -51,6 +51,10 @@ namespace Wacs.Core.Instructions
         public override ByteCode Op => OpCode.Block;
         private Block Block { get; set; } = null!;
 
+        public BlockType Type => Block.Type;
+
+        public int Count => 1;
+
         public int Size => 1 + Block.Size;
         public InstructionSequence GetBlock(int idx) => Block.Instructions;
 
@@ -134,8 +138,11 @@ namespace Wacs.Core.Instructions
     public class InstLoop : InstructionBase, IBlockInstruction
     {
         public override ByteCode Op => OpCode.Loop;
-
         private Block Block { get; set; } = null!;
+
+        public BlockType Type => Block.Type;
+
+        public int Count => 1;
 
         public int Size => 1 + Block.Size;
         public InstructionSequence GetBlock(int idx) => Block.Instructions;
@@ -219,6 +226,10 @@ namespace Wacs.Core.Instructions
         public override ByteCode Op => OpCode.If;
         private Block IfBlock { get; set; } = Block.Empty;
         private Block ElseBlock { get; set; } = Block.Empty;
+
+        public BlockType Type => IfBlock.Type;
+
+        public int Count => ElseBlock.IsEmpty ? 1 : 2;
 
         public int Size => 1 + IfBlock.Size + (ElseBlock.IsEmpty ? 0 : ElseBlock.Size);
         public InstructionSequence GetBlock(int idx) => idx == 0 ? IfBlock.Instructions : ElseBlock.Instructions;
@@ -314,10 +325,8 @@ namespace Wacs.Core.Instructions
             }
             else if (IfBlock.Instructions.EndsWithElse)
             {
-                IfBlock.Instructions.SwapElseEnd();
                 ElseBlock = new Block(type: IfBlock.Type)
                 {
-                    
                     Instructions = new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
                         IInstruction.IsEnd))
                 };
@@ -328,20 +337,10 @@ namespace Wacs.Core.Instructions
     }
 
     //0x05
-    public class InstElse : InstructionBase
+    public class InstElse : InstEnd
     {
-        public static readonly InstElse Inst = new();
+        public new static readonly InstElse Inst = new();
         public override ByteCode Op => OpCode.Else;
-
-        // @Spec 3.3.8.5. else
-        public override void Validate(WasmValidationContext context)
-        {
-        }
-
-        // @Spec 4.4.8.5. else
-        public override void Execute(ExecContext context)
-        {
-        }
     }
 
     //0x0B
@@ -374,11 +373,11 @@ namespace Wacs.Core.Instructions
     }
 
     //0x0C
-    public class InstBranch : InstructionBase
+    public class InstBranch : InstructionBase, IBranchInstruction
     {
         public override ByteCode Op => OpCode.Br;
 
-        private LabelIdx L { get; set; }
+        public LabelIdx L { get; internal set; }
 
         // @Spec 3.3.8.6. br l
         public override void Validate(WasmValidationContext context)
@@ -437,14 +436,16 @@ namespace Wacs.Core.Instructions
             L = (LabelIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {L.Value} (;@{depth - L.Value};)";
     }
 
     //0x0D
-    public class InstBranchConditional : InstructionBase
+    public class InstBranchConditional : InstructionBase, IBranchInstruction
     {
         public override ByteCode Op => OpCode.BrIf;
 
-        private LabelIdx L { get; set; }
+        public LabelIdx L { get; internal set; }
 
         // @Spec 3.3.8.7. br_if
         public override void Validate(WasmValidationContext context)
@@ -477,10 +478,12 @@ namespace Wacs.Core.Instructions
             L = (LabelIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {L.Value} (;@{depth - L.Value};)";
     }
 
     //0x0E
-    public class InstBranchTable : InstructionBase
+    public class InstBranchTable : InstructionBase, IBranchInstruction
     {
         public override ByteCode Op => OpCode.BrTable;
 
@@ -548,6 +551,9 @@ namespace Wacs.Core.Instructions
             Ln = (LabelIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override string RenderText(int depth) => 
+            $"{base.RenderText(depth)} {string.Join(" ", Ls.Select(idx => idx.Value).Select(v => $"{v} (;@{depth - v};)"))} {Ln.Value} (;@{depth - Ln.Value};)";
     }
 
     //0x0F
@@ -619,6 +625,8 @@ namespace Wacs.Core.Instructions
             X = value;
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
     }
 
     //0x11
@@ -708,5 +716,8 @@ namespace Wacs.Core.Instructions
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override string RenderText(int depth) => 
+            $"{base.RenderText(depth)}{(X.Value == 0 ? "" : $" {X.Value}")} (type {Y.Value})";
     }
 }

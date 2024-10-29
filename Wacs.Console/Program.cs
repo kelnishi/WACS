@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.RegularExpressions;
 using CommandLine;
 using FluentValidation;
 using Wacs.Core;
@@ -30,6 +31,30 @@ namespace Wacs.Console
             System.Console.WriteLine("Error occurred while parsing arguments.");
         }
 
+        private static Dictionary<int, int> FindFuncs(string path)
+        {
+            var wat = path.Replace(".wasm", ".wat");
+            using var fileStream = new FileStream(wat, FileMode.Open);
+            
+            using var reader = new StreamReader(fileStream);
+            string line;
+            int lineNumber = 0;
+            var result = new Dictionary<int, int>();
+            while ((line = reader.ReadLine()) != null)
+            {
+                lineNumber++;
+                var regex = new Regex(@"\(func\s+\(;(\d+);");
+                var match = regex.Match(line);
+                if (match.Success)
+                {
+                    int funcId = int.Parse(match.Groups[1].Value);
+                    result[funcId] = lineNumber;
+                }
+            }
+
+            return result;
+        }
+
         private void Run(string wasmFilePath)
         {
             var runtime = new WasmRuntime();
@@ -37,6 +62,28 @@ namespace Wacs.Console
             //Parse the module
             using var fileStream = new FileStream(wasmFilePath, FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
+
+            using var outputStream = new FileStream("output.wat", FileMode.Create);
+            ModuleRenderer.RenderWatToStream(outputStream, module);
+
+            return;
+            
+            // var funcLines = FindFuncs(wasmFilePath);
+            // int importFuncs = module.ImportedFunctions.Count;
+            // for (int i = 320-importFuncs; i < 1000; ++i)
+            // {
+            //     int f = i + importFuncs;
+            //     int s = module.Funcs[i].Size;
+            //     bool l = module.Funcs[i].Locals.Length > 0;
+            //     int c = module.CalculateLine($"Function[{f}]", false, out var code);
+            //     int tline = funcLines[f];
+            //     if (c != tline)
+            //         System.Console.WriteLine($"#{f} Calc'd {c} != {tline} observed\t{s} {l}");
+            //     else
+            //     {
+            //         System.Console.WriteLine($"     #{f} Calc'd {c} == {tline} observed\t{s} {l}");
+            //     }
+            // }
             
             //If you just want to do validation without a runtime, you could do it like this
             var validationResult = module.Validate();

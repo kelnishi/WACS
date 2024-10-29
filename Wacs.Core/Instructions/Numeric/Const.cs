@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -35,6 +36,8 @@ namespace Wacs.Core.Instructions.Numeric
             Value = value;
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {Value}";
     }
     
     //0x42
@@ -60,6 +63,8 @@ namespace Wacs.Core.Instructions.Numeric
             Value = reader.ReadLeb128_s64();
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {Value}";
     }
     
     //0x43
@@ -85,6 +90,16 @@ namespace Wacs.Core.Instructions.Numeric
             Value = reader.Read_f32();
             return this;
         }
+
+        public override string RenderText(int depth)
+        {
+            var sourceText = Value.ToString(CultureInfo.InvariantCulture).ToLower();
+            if (sourceText.Contains("e-") || sourceText.Contains("e+") || sourceText.Length > 5)
+                sourceText = Value.ToString("0.#####e+00");
+            var floatText = FloatFormatter.FormatFloat(Value);
+            return
+                $"{base.RenderText(depth)} {floatText} (;={sourceText};)";
+        }
     }
     
     //0x44
@@ -109,6 +124,16 @@ namespace Wacs.Core.Instructions.Numeric
         public override IInstruction Parse(BinaryReader reader) {
             Value = reader.Read_f64();
             return this;
+        }
+
+        public override string RenderText(int depth)
+        {
+            var sourceText = Value.ToString(CultureInfo.InvariantCulture).ToLower();
+            if (sourceText.Contains("e-") || sourceText.Contains("e+") || sourceText.Length > 5)
+                sourceText = Value.ToString("0.#####e+00");
+            var doubleText = FloatFormatter.FormatDouble(Value);
+            return
+                $"{base.RenderText(depth)} {doubleText} (;={sourceText};)";
         }
     }
 }

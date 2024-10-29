@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using Wacs.Core.Attributes;
 
 namespace Wacs.Core.Types
 {
@@ -12,14 +13,21 @@ namespace Wacs.Core.Types
         /// <summary>
         /// Function reference.
         /// </summary>
-        Funcref = 0x70,
+        [WatToken("funcref")] Funcref = 0x70,
 
         /// <summary>
         /// External reference.
         /// </summary>
-        Externref = 0x6F,
+        [WatToken("externref")] Externref = 0x6F,
 
         // Additional reference types from future proposals can be added here.
+    }
+
+    public enum HeapType : byte
+    {
+        [WatToken("func")] Funcref = ReferenceType.Funcref,
+        
+        [WatToken("extern")] Externref = ReferenceType.Externref,
     }
     
     public static class ReferenceTypeParser

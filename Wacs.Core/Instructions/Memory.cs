@@ -156,6 +156,8 @@ namespace Wacs.Core.Instructions
             M = MemArg.Parse(reader);
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)}{M.ToWat(WidthN)}";
     }
 
     public class InstMemoryStore : InstructionBase
@@ -275,6 +277,8 @@ namespace Wacs.Core.Instructions
             M = MemArg.Parse(reader);
             return this;
         }
+
+        public override string RenderText(int depth) => $"{base.RenderText(depth)}{M.ToWat(WidthN)}";
     }
 
     public struct MemArg
@@ -290,9 +294,16 @@ namespace Wacs.Core.Instructions
 
         public static MemArg Parse(BinaryReader reader) => new()
         {
-            Align = reader.ReadLeb128_u32(),
+            Align = (uint)(1 << (int)reader.ReadLeb128_u32()),
             Offset = reader.ReadLeb128_u32(),
         };
+
+        public string ToWat(BitWidth naturalAlign)
+        {
+            var offset = Offset != 0 ? $" offset={Offset}" : "";
+            var align = Align != naturalAlign.ByteSize() ? $" align={Align}" : "";
+            return $"{offset}{align}";
+        }
     }
 
     public enum BitWidth : sbyte

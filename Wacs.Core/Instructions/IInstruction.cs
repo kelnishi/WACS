@@ -25,6 +25,11 @@ namespace Wacs.Core.Instructions
         /// </summary>
         IInstruction Parse(BinaryReader reader);
 
+        /// <summary>
+        /// Render the instruction at a given label stack depth
+        /// </summary>
+        string RenderText(int depth);
+
         public static bool IsEnd(IInstruction inst) => inst.Op.x00 == OpCode.End;
 
         public static bool IsElseOrEnd(IInstruction inst) => inst.Op.x00 switch

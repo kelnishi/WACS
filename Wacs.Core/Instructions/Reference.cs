@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using Wacs.Core.Attributes;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
@@ -33,6 +34,8 @@ namespace Wacs.Core.Instructions
             Type = ReferenceTypeParser.Parse(reader);
             return this;
         }
+        
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {((HeapType)Type).ToWat()}";
     }
     
     //0xD1
@@ -92,6 +95,8 @@ namespace Wacs.Core.Instructions
             FunctionIndex = (FuncIdx)reader.ReadLeb128_u32();
             return this;
         }
+        
+        public override string RenderText(int depth) => $"{base.RenderText(depth)} {FunctionIndex.Value}";
     }
     
 }

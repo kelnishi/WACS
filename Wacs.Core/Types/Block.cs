@@ -24,7 +24,7 @@ namespace Wacs.Core.Types
             _ => ValType.Undefined
         };
 
-        private TypeIdx TypeIndex => !Enum.IsDefined(typeof(BlockType), Type) ? (TypeIdx)(int)Type : (TypeIdx)uint.MaxValue;
+        private TypeIdx TypeIndex => !Enum.IsDefined(typeof(BlockType), Type) ? (TypeIdx)(uint)Type : (TypeIdx)uint.MaxValue;
 
         public InstructionSequence Instructions { get; set; } = new();
 

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using FluentValidation;
+using Wacs.Core.Attributes;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
@@ -18,7 +19,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.6. Globals
         /// </summary>
-        public class Global
+        public class Global : IRenderable
         {
             public readonly Expression Initializer;
             public readonly GlobalType Type;
@@ -28,6 +29,22 @@ namespace Wacs.Core
 
             private Global(BinaryReader reader) =>
                 (Type, Initializer) = (GlobalType.Parse(reader), Expression.Parse(reader));
+
+            public string Id { get; set; } = "";
+
+            public void RenderText(StreamWriter writer, Module module, string indent)
+            {
+                var id = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
+                
+                var globalType = Type.Mutability == Mutability.Mutable
+                    ? $" (mut {Type.ContentType.ToWat()})"
+                    : $" {Type.ContentType.ToWat()}";
+                
+                var expr = Initializer.ToWat();
+                var globalText = $"{indent}(global{id}{globalType}{expr})";
+            
+                writer.WriteLine(globalText);
+            }
 
             /// <summary>
             /// @Spec 5.5.9. Global Section

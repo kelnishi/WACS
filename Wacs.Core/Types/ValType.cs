@@ -18,22 +18,22 @@ namespace Wacs.Core.Types
         /// <summary>
         /// 32-bit integer
         /// </summary>
-        I32 = 0x7F,
+        [WatToken("i32")] I32 = 0x7F,
 
         /// <summary>
         /// 64-bit integer
         /// </summary>
-        I64 = 0x7E,
+        [WatToken("i64")] I64 = 0x7E,
 
         /// <summary>
         /// 32-bit floating point
         /// </summary>
-        F32 = 0x7D,
+        [WatToken("f32")] F32 = 0x7D,
 
         /// <summary>
         /// 64-bit floating point
         /// </summary>
-        F64 = 0x7C,
+        [WatToken("f64")] F64 = 0x7C,
 
         // =========================
         // Vector Types (SIMD)
@@ -42,7 +42,7 @@ namespace Wacs.Core.Types
         /// <summary>
         /// 128-bit vector
         /// </summary>
-        V128 = 0x7B, // (SIMD extension)
+        [WatToken("v128")] V128 = 0x7B, // (SIMD extension)
 
         // =========================
         // Reference Types
@@ -51,12 +51,12 @@ namespace Wacs.Core.Types
         /// <summary>
         /// Function reference
         /// </summary>
-        Funcref = 0x70,
+        [WatToken("funcref")] Funcref = 0x70,
 
         /// <summary>
         /// External reference
         /// </summary>
-        Externref = 0x6F,
+        [WatToken("externref")] Externref = 0x6F,
 
         // =========================
         // Future Types

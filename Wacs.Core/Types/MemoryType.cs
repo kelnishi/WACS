@@ -8,7 +8,7 @@ namespace Wacs.Core.Types
     /// @Spec 2.3.8 Memory Types
     /// Represents the memory type in WebAssembly, defining its limits.
     /// </summary>
-    public class MemoryType
+    public class MemoryType : IRenderable
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="MemoryType"/> class with the specified limits.
@@ -21,6 +21,17 @@ namespace Wacs.Core.Types
         /// The limits specifying the minimum and optional maximum number of memory pages.
         /// </summary>
         public Limits Limits { get; }
+
+        public string Id { get; set; }
+
+        public void RenderText(StreamWriter writer, Module module, string indent)
+        {
+            var id = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
+            var memType = $"{Limits.ToWat()}";
+            var memText = $"{indent}(memory{id} {memType})";
+            
+            writer.WriteLine(memText);
+        }
 
         /// <summary>
         /// @Spec 5.3.8. Memory Types

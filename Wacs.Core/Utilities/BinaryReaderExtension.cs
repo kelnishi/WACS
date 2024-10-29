@@ -7,6 +7,8 @@ namespace Wacs.Core.Utilities
 {
     public static class BinaryReaderExtension
     {
+        public delegate void PostProcess<in T>(int index, T parsedObj);
+
         // Helper methods for parsing LEB128, strings, etc.
         public static uint ReadLeb128_u32(this BinaryReader reader)
         {
@@ -175,27 +177,30 @@ namespace Wacs.Core.Utilities
             return Encoding.UTF8.GetString(bytes);
         }
 
-        public static T[] ParseVector<T>(this BinaryReader reader, Func<BinaryReader, T> elementParser)
+        public static T[] ParseVector<T>(this BinaryReader reader, Func<BinaryReader, T> elementParser, PostProcess<T>? postProcess = null)
         {
             uint count = reader.ReadLeb128_u32();
             var vector = new T[count]; // Initialize the array to hold vector elements
 
-            for (uint i = 0; i < count; i++)
+            for (int i = 0; i < count; i++)
             {
                 vector[i] = elementParser(reader); // Use the provided lambda function to parse each element
+                postProcess?.Invoke(i, vector[i]);
             }
 
             return vector;
         }
 
-        public static List<T> ParseList<T>(this BinaryReader reader, Func<BinaryReader, T> elementParser)
+        public static List<T> ParseList<T>(this BinaryReader reader, Func<BinaryReader, T> elementParser, PostProcess<T>? postProcess = null)
         {
             uint count = reader.ReadLeb128_u32();
             var vector = new List<T>((int)count);
 
-            for (uint i = 0; i < count; i++)
+            for (int i = 0; i < count; i++)
             {
-                vector.Add(elementParser(reader));
+                var element = elementParser(reader);
+                postProcess?.Invoke(i, element);
+                vector.Add(element);
             }
 
             return vector;

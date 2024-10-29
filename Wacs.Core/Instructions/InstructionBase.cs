@@ -32,5 +32,7 @@ namespace Wacs.Core.Instructions
         /// <param name="reader"></param>
         /// <returns>The parsed instruction</returns>
         public virtual IInstruction Parse(BinaryReader reader) => this;
+
+        public virtual string RenderText(int depth) => Op.GetMnemonic();
     }
 }

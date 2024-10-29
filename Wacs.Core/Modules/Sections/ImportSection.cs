@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using FluentValidation;
+using Wacs.Core.Attributes;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
@@ -46,11 +47,40 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.11. Imports
         /// </summary>
-        public class Import
+        public class Import : IRenderable
         {
             public string ModuleName { get; internal set; } = null!;
             public string Name { get; internal set; } = null!;
             public ImportDesc Desc { get; internal set; } = null!;
+
+            public void RenderText(StreamWriter writer, Module module, string indent)
+            {
+                var import = " ";
+                var id = string.IsNullOrWhiteSpace(Desc.Id) ? "" : $" (;{Desc.Id};)";
+                switch (Desc)
+                {
+                    case ImportDesc.FuncDesc fd:
+                        var funcType = $" (type {fd.TypeIndex.Value})";
+                        import = $" (func{id}{funcType})";
+                        break;
+                    case ImportDesc.TableDesc td:
+                        var tableLimits = $" {td.TableDef.Limits.ToWat()}";
+                        var tableRefType = $" {td.TableDef.ElementType.ToWat()}";
+                        import = $" (table{id}{tableLimits}{tableRefType})";
+                        break;
+                    case ImportDesc.MemDesc md:
+                        var memLimits = $" {md.MemDef.Limits.ToWat()}";
+                        import = $" (mem{id}{memLimits})";
+                        break;
+                    case ImportDesc.GlobalDesc gd:
+                        var globalType = gd.GlobalDef.Mutability == Mutability.Mutable
+                            ? $" (mut {gd.GlobalDef.ContentType.ToWat()})"
+                            : $" {gd.GlobalDef.ContentType.ToWat()}";
+                        import = $" (global{id}{globalType})";
+                        break;
+                }
+                writer.WriteLine($"{indent}(import \"{ModuleName}\" \"{Name}\"{import})"); 
+            }
 
             public class Validator : AbstractValidator<Import>
             {
@@ -68,6 +98,8 @@ namespace Wacs.Core
 
         public abstract class ImportDesc
         {
+            public string Id { get; set; } = "";
+
             public class FuncDesc : ImportDesc
             {
                 public TypeIdx TypeIndex { get; internal set; }
@@ -153,8 +185,32 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 5.5.5 Import Section
         /// </summary>
-        private static Module.Import[] ParseImportSection(BinaryReader reader) =>
-            reader.ParseVector(ParseImport);
+        private static Module.Import[] ParseImportSection(BinaryReader reader)
+        {
+            var imports = reader.ParseVector(ParseImport);
+            if (!AnnotateWhileParsing) return imports;
+            
+            int fIdx = 0, tIdx = 0, mIdx = 0, gIdx = 0;
+            foreach (var import in imports)
+            {
+                switch (import.Desc)
+                {
+                    case Module.ImportDesc.FuncDesc fd:
+                        fd.Id = $"{fIdx++}";
+                        break;
+                    case Module.ImportDesc.TableDesc td:
+                        td.Id = $"{tIdx++}";
+                        break;
+                    case Module.ImportDesc.MemDesc md:
+                        md.Id = $"{mIdx++}";
+                        break;
+                    case Module.ImportDesc.GlobalDesc gd:
+                        gd.Id = $"{gIdx++}";
+                        break;
+                }    
+            }
+            return imports;
+        }
     }
 
 }

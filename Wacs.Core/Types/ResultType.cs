@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Linq;
+using Wacs.Core.Attributes;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
@@ -27,6 +29,10 @@ namespace Wacs.Core.Types
         public bool IsEmpty => Arity == 0;
 
         public string ToNotation() => $"[{string.Join(" ",Types)}]";
+        public string ToTypes() => string.Join("", Types.Select(t => $" {t.ToWat()}"));
+        public string ToParameters() => Types.Length == 0 ? "" : $" (param{ToTypes()})";
+        public string ToResults() => Types.Length == 0 ? "" : $" (result{ToTypes()})";
+
 
         public bool Matches(ResultType other)
         {
