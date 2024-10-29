@@ -23,6 +23,8 @@ namespace Wacs.Core.Types
 
         public InstructionSequence Instructions { get; }
 
+        public int Size => Instructions.Size;
+
         public bool IsConstant => Instructions.IsConstant;
 
         /// <summary>
@@ -88,7 +90,7 @@ namespace Wacs.Core.Types
                     }
                     catch (ValidationException exc)
                     {
-                        ctx.AddFailure($"Expression Validation failure in {ctx.PropertyPath}: {exc.Message}");
+                        ctx.AddFailure($"{ctx.PropertyPath}: {exc.Message}");
                     }
                 });
             }

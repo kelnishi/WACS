@@ -1,7 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using FluentValidation;
+using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -15,6 +18,108 @@ namespace Wacs.Core
         public List<Function> Funcs { get; internal set; } = null!;
 
         public List<Function> ValidationFuncs => ImportedFunctions.Concat(Funcs).ToList();
+
+        //Function[100].Expression[34].NumericInst
+        public int CalculateLine(string validationPath, bool print, out string instruction)
+        {
+            int line = 1;
+            line += Types.Count;
+            line += Imports.Length;
+            //Start of functions
+            var parts = validationPath.Split(".");
+            instruction = "";
+
+            IBlockInstruction pointerInst = null;
+            InstructionSequence seq = null;
+            string indent = "";
+            foreach (var part in parts)
+            {
+                indent += " ";
+                //Skip instruction strata
+                if (!part.EndsWith("]"))
+                {
+                    line += 1;
+                    break;
+                }
+                
+                var regex = new Regex(@"(\w+)\[(\d+)\]");
+                var match = regex.Match(part);
+                if (match.Success)
+                {
+                    int index = int.Parse(match.Groups[2].Value);
+                    string strata = match.Groups[1].Value;
+                    switch (strata)
+                    {
+                        case "Function":
+                        {
+                            index -= Imports.Length;
+                            for (int i = 0; i < index; ++i)
+                            {
+                                line += Funcs[i].Size;
+                            }
+
+                            line += 1;
+                        
+                            if (print)
+                                Console.WriteLine($"{indent}Function[{index}]:{line}");
+                        
+                            if (Funcs[index].Locals.Length > 0)
+                                line += 1;
+
+                            instruction = "func";
+
+                            seq = Funcs[index].Body.Instructions;
+                            break;
+                        }
+                        case "Expression":
+                        case "Block":
+                        {
+                            if (seq == null)
+                                throw new ArgumentException("Validation path was invalid.");
+                        
+                            //Fast-forward through instructions
+                            for (int i = 0; i < index; ++i)
+                            {
+                                var inst = seq[i];
+                                if (inst is IBlockInstruction blockInstruction)
+                                {
+                                    line += blockInstruction.Size;
+                                }
+                                else
+                                {
+                                    line += 1;
+                                }
+                            }
+                            if (print)
+                                Console.WriteLine($"{indent}{strata}[{index}]:{line}");
+                        
+                            var term = seq[index];
+                            if (term is IBlockInstruction blTerm)
+                            {
+                                pointerInst = blTerm;
+                            }
+                            instruction = term.Op.GetMnemonic();
+                            break;
+                        }
+                        case "InstBlock":
+                        case "InstIf":
+                        case "InstLoop":
+                        {
+                            if (pointerInst == null)
+                                throw new ArgumentException("Validation path was invalid.");
+                        
+                            if (print)
+                                Console.WriteLine($"{indent}{strata}[{index}]:{line}");
+                        
+                            seq = pointerInst.GetBlock(index);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            return line;
+        }
 
 
         /// <summary>
@@ -30,6 +135,8 @@ namespace Wacs.Core
             //Locals and Body get parsed in the Code Section
             public ValType[] Locals { get; internal set; } = null!;
             public Expression Body { get; internal set; } = null!;
+
+            public int Size => (Locals.Length > 0?1:0) + Body.Size;
 
             /// <summary>
             /// @Spec 3.4.1. Functions
@@ -52,7 +159,7 @@ namespace Wacs.Core
                             var types = vContext.Types;
                             if (!types.Contains(func.TypeIndex))
                             {
-                                ctx.AddFailure($"Function validation failure at {ctx.PropertyPath}: Function.TypeIndex not within Module.Types");
+                                ctx.AddFailure($"{ctx.PropertyPath}: Function.TypeIndex not within Module.Types");
                             }
 
                             var funcType = types[func.TypeIndex];
@@ -83,7 +190,7 @@ namespace Wacs.Core
                             }
                             catch (ValidationException exc)
                             {
-                                ctx.AddFailure($"Function validation failure at {ctx.PropertyPath}: {exc.Message}");
+                                ctx.AddFailure($"{ctx.PropertyPath}: {exc.Message}");
                             }
                         });
                 }

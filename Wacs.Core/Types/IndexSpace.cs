@@ -75,6 +75,7 @@ namespace Wacs.Core.Types
             blockType switch
             {
                 BlockType.Empty => new FunctionType(ResultType.Empty, ResultType.Empty),
+                BlockType.Void => new FunctionType(ResultType.Empty, ResultType.Empty),
                 BlockType.I32 => new FunctionType(ResultType.Empty, new ResultType(ValType.I32)),
                 BlockType.I64 => new FunctionType(ResultType.Empty, new ResultType(ValType.I64)),
                 BlockType.F32 => new FunctionType(ResultType.Empty, new ResultType(ValType.F32)),

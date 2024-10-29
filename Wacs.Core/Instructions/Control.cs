@@ -46,10 +46,13 @@ namespace Wacs.Core.Instructions
     }
 
     //0x02
-    public class InstBlock : InstructionBase
+    public class InstBlock : InstructionBase, IBlockInstruction
     {
         public override ByteCode Op => OpCode.Block;
         private Block Block { get; set; } = null!;
+
+        public int Size => 1 + Block.Size;
+        public InstructionSequence GetBlock(int idx) => Block.Instructions;
 
         // @Spec 3.3.8.3 block
         public override void Validate(WasmValidationContext context)
@@ -128,11 +131,14 @@ namespace Wacs.Core.Instructions
     }
 
     //0x03
-    public class InstLoop : InstructionBase
+    public class InstLoop : InstructionBase, IBlockInstruction
     {
         public override ByteCode Op => OpCode.Loop;
 
         private Block Block { get; set; } = null!;
+
+        public int Size => 1 + Block.Size;
+        public InstructionSequence GetBlock(int idx) => Block.Instructions;
 
         // @Spec 3.3.8.4. loop
         public override void Validate(WasmValidationContext context)
@@ -208,11 +214,14 @@ namespace Wacs.Core.Instructions
     }
 
     //0x04
-    public class InstIf : InstructionBase
+    public class InstIf : InstructionBase, IBlockInstruction
     {
         public override ByteCode Op => OpCode.If;
         private Block IfBlock { get; set; } = Block.Empty;
         private Block ElseBlock { get; set; } = Block.Empty;
+
+        public int Size => 1 + IfBlock.Size + (ElseBlock.IsEmpty ? 0 : ElseBlock.Size);
+        public InstructionSequence GetBlock(int idx) => idx == 0 ? IfBlock.Instructions : ElseBlock.Instructions;
 
         // @Spec 3.3.8.5 if
         public override void Validate(WasmValidationContext context)
@@ -231,7 +240,7 @@ namespace Wacs.Core.Instructions
                 //Check the parameters [t1*]
                 context.OpStack.ValidateStack(funcType.ParameterTypes);
 
-                context.ValidateBlock(IfBlock);
+                context.ValidateBlock(IfBlock, 0);
 
                 if (context.Reachability)
                 {
@@ -253,7 +262,7 @@ namespace Wacs.Core.Instructions
                 if (ElseBlock.IsEmpty)
                     return;
 
-                context.ValidateBlock(ElseBlock);
+                context.ValidateBlock(ElseBlock, 1);
 
                 if (context.Reachability)
                 {

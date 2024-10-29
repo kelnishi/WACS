@@ -106,9 +106,9 @@ namespace Wacs.Core.Validation
 
         public void PopFrame() => ControlStack.PopFrame();
 
-        public void ValidateBlock(Block instructionBlock)
+        public void ValidateBlock(Block instructionBlock, int index = 0)
         {
-            var blockContext = PushSubContext(instructionBlock);
+            var blockContext = PushSubContext(instructionBlock, index);
             
             var blockValidator = new Block.Validator();
             var blockResult = blockValidator.Validate(blockContext);
@@ -148,7 +148,7 @@ namespace Wacs.Core.Validation
                         }
                         catch (ValidationException exc)
                         {
-                            ctx.AddFailure($"{ctx.PropertyPath}: Validation Failure; {exc.Message}");
+                            ctx.AddFailure($"{ctx.PropertyPath}: {exc.Message}");
                         }
                         catch (InvalidDataException exc)
                         {

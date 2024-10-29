@@ -46,7 +46,23 @@ namespace Wacs.Console
                 {
                     case Severity.Warning:
                     case Severity.Error:
-                        System.Console.Error.WriteLine($"Validation {error.Severity}: {error.ErrorMessage}");
+                        
+                        if (error.ErrorMessage.StartsWith("Function["))
+                        {
+                            var parts = error.ErrorMessage.Split(":");
+                            var path = parts[0];
+                            var msg = string.Join("",parts[1..]);
+
+                            int line = module.CalculateLine(path, false, out var code);
+                            if (!string.IsNullOrWhiteSpace(code))
+                                code = $" ({code})";
+                            System.Console.Error.WriteLine($"Validation {error.Severity}.{msg}");
+                            System.Console.Error.WriteLine($"    at{code} in {wasmFilePath}:line {line}\n");
+                        }
+                        else
+                        {
+                            System.Console.Error.WriteLine($"Validation {error.Severity}: {error.ErrorMessage}");
+                        }
                         break;
                 }
             }
