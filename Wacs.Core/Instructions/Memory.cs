@@ -207,8 +207,9 @@ namespace Wacs.Core.Instructions
                 () =>
                     $"Instruction {Op.GetMnemonic()} failed with invalid alignment 2^{M.Align} <= {WidthN}/8");
 
-            context.OpStack.PopI32();
+            //Pop parameters from right to left
             context.OpStack.PopType(Type);
+            context.OpStack.PopI32();
         }
 
         // @Spec 4.4.7.6. t.store

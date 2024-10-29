@@ -15,6 +15,7 @@ namespace Wacs.Core.Types
 
         private ValType ValType => Type switch {
             BlockType.Empty => ValType.Nil,
+            BlockType.Void => ValType.Nil,
             BlockType.I32 => ValType.I32,
             BlockType.I64 => ValType.I64,
             BlockType.F32 => ValType.F32,
@@ -28,6 +29,8 @@ namespace Wacs.Core.Types
         private TypeIdx TypeIndex => !Enum.IsDefined(typeof(BlockType), Type) ? (TypeIdx)(int)Type : (TypeIdx)uint.MaxValue;
 
         public InstructionSequence Instructions { get; set; } = new();
+
+        public int Size => Instructions.Size;
 
         public bool IsEmpty => Type == BlockType.Empty;
         public static BlockType ParseBlockType(BinaryReader reader) => (BlockType)reader.ReadLeb128_s33();
@@ -58,10 +61,18 @@ namespace Wacs.Core.Types
 
     public enum BlockType : long
     {
-        Empty = -64, //0x40,
+        /// <summary>
+        /// Block is empty
+        /// </summary>
+        Empty = -64, //0x40
+        
+        /// <summary>
+        /// Block does not return any values
+        /// </summary>
+        Void = -1,
         
         // =========================
-        // Numeric Types
+        // Numeric Types returned
         // =========================
         I32 = 0x7F,
         I64 = 0x7E,
@@ -69,12 +80,12 @@ namespace Wacs.Core.Types
         F64 = 0x7C,
 
         // =========================
-        // Vector Types (SIMD)
+        // Vector Types (SIMD) returned
         // =========================
         V128 = 0x7B, // (SIMD extension)
 
         // =========================
-        // Reference Types
+        // Reference Types returned
         // =========================
         Funcref = 0x70,
         Externref = 0x6F,
