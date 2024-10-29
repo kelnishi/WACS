@@ -27,21 +27,21 @@ namespace Wacs.Core.OpCodes
         public ByteCode(ExtCode b)
         {
             this = default;
-            x00 = OpCode.FB;
+            x00 = OpCode.FC;
             xFC = b;
         }
         
         public ByteCode(SimdCode b)
         {
             this = default;
-            x00 = OpCode.FB;
+            x00 = OpCode.FD;
             xFD = b;
         }
         
         public ByteCode(AtomCode b)
         {
             this = default;
-            x00 = OpCode.FB;
+            x00 = OpCode.FE;
             xFE = b;
         }
         
