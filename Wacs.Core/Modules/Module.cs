@@ -57,7 +57,7 @@ namespace Wacs.Core
             uint version = reader.ReadUInt32(); //Exactly 4bytes, little endian
             if (version != 1)
             {
-                throw new InvalidDataException($"Unsupported WebAssembly version: {version}");
+                throw new NotSupportedException($"Unsupported WebAssembly version: {version}");
             }
 
             // Parse sections

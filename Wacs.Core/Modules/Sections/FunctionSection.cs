@@ -39,13 +39,13 @@ namespace Wacs.Core
                         .Must((_, index, ctx) =>
                             ctx.GetValidationContext().Types.Contains(index));
                     RuleFor(func => func)
-                        .Custom((func, context) =>
+                        .Custom((func, ctx) =>
                         {
-                            var vContext = context.GetValidationContext();
+                            var vContext = ctx.GetValidationContext();
                             var types = vContext.Types;
                             if (!types.Contains(func.TypeIndex))
                             {
-                                context.AddFailure("Function.TypeIndex not within Module.Types");
+                                ctx.AddFailure($"Function validation failure at {ctx.PropertyPath}: Function.TypeIndex not within Module.Types");
                             }
 
                             var funcType = types[func.TypeIndex];
@@ -55,7 +55,7 @@ namespace Wacs.Core
                             vContext.Frame.Labels.Push(label);
 
                             var exprValidator = new Expression.Validator(funcType.ResultType);
-                            var subcontext = context.GetSubContext(func.Body);
+                            var subcontext = ctx.GetSubContext(func.Body);
                             var validationResult = exprValidator.Validate(subcontext);
                             if (!validationResult.IsValid)
                             {
@@ -63,13 +63,20 @@ namespace Wacs.Core
                                 {
                                     // Map the child validation failures to the parent context
                                     // Adjust the property name to reflect the path to the child property
-                                    var propertyName = $"{context.PropertyPath}.{failure.PropertyName}";
-                                    context.AddFailure(propertyName, failure.ErrorMessage);
+                                    var propertyName = $"{ctx.PropertyPath}.{failure.PropertyName}";
+                                    ctx.AddFailure(propertyName, failure.ErrorMessage);
                                 }
                             }
 
                             vContext.PopFrame();
-                            vContext.OpStack.ValidateStack(retType);
+                            try
+                            {
+                                vContext.OpStack.ValidateStack(retType);
+                            }
+                            catch (ValidationException exc)
+                            {
+                                ctx.AddFailure($"Function validation failure at {ctx.PropertyPath}: {exc.Message}");
+                            }
                         });
                 }
             }

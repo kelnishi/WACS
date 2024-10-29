@@ -473,8 +473,9 @@ namespace Wacs.WASIp1
         /// <param name="fd">The file descriptor to seek on.</param>
         /// <param name="offset">The number of bytes to move.</param>
         /// <param name="whence">The base from which the offset is relative.</param>
+        /// <param name="newoffsetPtr">A pointer to where the new offset will be reported</param>
         /// <returns>An error code indicating success or failure.</returns>
-        public ErrNo FdSeek(ExecContext ctx, fd fd, filedelta offset, Whence whence)
+        public ErrNo FdSeek(ExecContext ctx, fd fd, filedelta offset, Whence whence, ptr newoffsetPtr)
         {
             FileDescriptor fileDescriptor;
             try
@@ -511,6 +512,10 @@ namespace Wacs.WASIp1
             }
 
             fileDescriptor.Stream.Seek(newPosition, SeekOrigin.Begin);
+
+            var mem = ctx.DefaultMemory;
+            mem.WriteInt32(newoffsetPtr, (int)newPosition);
+            
             return ErrNo.Success;
         }
 

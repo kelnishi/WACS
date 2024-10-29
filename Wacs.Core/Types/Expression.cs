@@ -78,7 +78,14 @@ namespace Wacs.Core.Types
                         }
                     }
 
-                    validationContext.OpStack.ValidateStack(resultType);
+                    try
+                    {
+                        validationContext.OpStack.ValidateStack(resultType);
+                    }
+                    catch (ValidationException exc)
+                    {
+                        ctx.AddFailure($"Expression Validation failure in {ctx.PropertyPath}: {exc.Message}");
+                    }
                 });
             }
 

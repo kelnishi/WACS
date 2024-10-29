@@ -57,6 +57,11 @@ namespace Wacs.Console
                 System.Console.Write(c);
             });
 
+            runtime.BindHostFunction<Action<int>>(("env", "emscripten_notify_memory_growth"), p =>
+            {
+                System.Console.WriteLine($"Emscripten notify memory growth {p}");
+            });
+            
             
             var wasi = new WASIp1.Wasi(Wasi.GetDefaultWasiConfiguration());
             wasi.BindToRuntime(runtime);

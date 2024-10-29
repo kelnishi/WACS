@@ -57,6 +57,8 @@ namespace Wacs.Core.Instructions
             try
             {
                 var funcType = context.Types.ResolveBlockType(Block.Type);
+                context.Assert(funcType != null, () => $"Invalid BlockType: {Block.Type}");
+                
                 var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
 
@@ -138,6 +140,8 @@ namespace Wacs.Core.Instructions
             try
             {
                 var funcType = context.Types.ResolveBlockType(Block.Type);
+                context.Assert(funcType != null, () => $"Invalid BlockType: {Block.Type}");
+
                 var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
 
@@ -219,6 +223,8 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PopI32();
 
                 var funcType = context.Types.ResolveBlockType(IfBlock.Type);
+                context.Assert(funcType != null, () => $"Invalid BlockType: {IfBlock.Type}");
+
                 var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
 
