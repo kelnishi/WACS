@@ -1,11 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text.RegularExpressions;
+using System.Linq;
 using CommandLine;
 using FluentValidation;
 using Wacs.Core;
 using Wacs.Core.Runtime;
+using Wacs.Core.Types;
 
 namespace Wacs.Console
 {
@@ -22,37 +23,11 @@ namespace Wacs.Console
         {
             Parser.Default.ParseArguments<Options>(args)
                 .WithParsed(options => new Program().Run(options.WasmFilePath))
-                .WithNotParsed(HandleParseError);
-        }
-
-        private static void HandleParseError(IEnumerable<Error> errors)
-        {
-            // Handle errors (e.g., log them or display a message)
-            System.Console.WriteLine("Error occurred while parsing arguments.");
-        }
-
-        private static Dictionary<int, int> FindFuncs(string path)
-        {
-            var wat = path.Replace(".wasm", ".wat");
-            using var fileStream = new FileStream(wat, FileMode.Open);
-            
-            using var reader = new StreamReader(fileStream);
-            string line;
-            int lineNumber = 0;
-            var result = new Dictionary<int, int>();
-            while ((line = reader.ReadLine()) != null)
-            {
-                lineNumber++;
-                var regex = new Regex(@"\(func\s+\(;(\d+);");
-                var match = regex.Match(line);
-                if (match.Success)
+                .WithNotParsed(errors =>
                 {
-                    int funcId = int.Parse(match.Groups[1].Value);
-                    result[funcId] = lineNumber;
-                }
-            }
-
-            return result;
+                    var messages = string.Join("|",errors.Select(e=> e.ToString()));
+                    System.Console.WriteLine($"Error occurred while parsing arguments. {messages}");
+                });
         }
 
         private void Run(string wasmFilePath)
@@ -62,12 +37,13 @@ namespace Wacs.Console
             //Parse the module
             using var fileStream = new FileStream(wasmFilePath, FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
-
+            
             // using var outputStream = new FileStream("output.wat", FileMode.Create);
             // ModuleRenderer.RenderWatToStream(outputStream, module);
             
             //If you just want to do validation without a runtime, you could do it like this
             var validationResult = module.Validate();
+            var funcsToRender = new HashSet<(FuncIdx, string)>();
             foreach (var error in validationResult.Errors)
             {
                 switch (error.Severity)
@@ -81,11 +57,18 @@ namespace Wacs.Console
                             var path = parts[0];
                             var msg = string.Join(":",parts[1..]);
 
-                            int line = module.CalculateLine(path, false, out var code);
-                            if (!string.IsNullOrWhiteSpace(code))
-                                code = $" ({code})";
+                            var (line, code) = module.CalculateLine(path);
+                            if (!string.IsNullOrWhiteSpace(code)) code = $" ({code})";
+                            var (fline, fcode) = module.CalculateLine(path, functionRelative: true);
+                            
                             System.Console.Error.WriteLine($"Validation {error.Severity}.{msg}");
-                            System.Console.Error.WriteLine($"    at{code} in {wasmFilePath}:line {line}\n");
+                            System.Console.Error.WriteLine($"    {path}");
+                            System.Console.Error.WriteLine($"    at{code} in {wasmFilePath}:line {line} ({fline})");
+                            System.Console.Error.WriteLine();
+
+                            FuncIdx fIdx = ModuleRenderer.GetFuncIdx(path);
+                            string funcId = ModuleRenderer.ChopFunctionId(path);
+                            funcsToRender.Add((fIdx, funcId));
                         }
                         else
                         {
@@ -94,6 +77,16 @@ namespace Wacs.Console
                         break;
                 }
             }
+
+            foreach (var (fIdx, funcId) in funcsToRender)
+            {
+                string funcString = ModuleRenderer.RenderFunctionWat(module, fIdx, "", true);
+                using var outputFileStream = new FileStream($"{funcId}.part.wat", FileMode.Create);
+                using var outputStreamWriter = new StreamWriter(outputFileStream);
+                outputStreamWriter.Write(funcString);
+                outputStreamWriter.Close();
+            }
+            
             
             //Bind module dependencies prior to instantiation
             runtime.BindHostFunction<Action<char>>(("env", "sayc"), c =>
@@ -109,7 +102,6 @@ namespace Wacs.Console
             
             var wasi = new WASIp1.Wasi(Wasi.GetDefaultWasiConfiguration());
             wasi.BindToRuntime(runtime);
-            
             
 
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing

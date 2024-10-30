@@ -17,7 +17,7 @@ namespace Wacs.Core.Instructions.Numeric
         /// @Spec 3.3.1.1 t.const
         /// </summary>
         /// <param name="context"></param>
-        public override void Validate(WasmValidationContext context) =>
+        public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushI32(Value);
 
         /// <summary>
@@ -50,7 +50,7 @@ namespace Wacs.Core.Instructions.Numeric
         /// @Spec 3.3.1.1 t.const
         /// </summary>
         /// <param name="context"></param>
-        public override void Validate(WasmValidationContext context) =>
+        public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushI64(Value);
 
         /// <summary>
@@ -77,7 +77,7 @@ namespace Wacs.Core.Instructions.Numeric
         /// @Spec 3.3.1.1 t.const
         /// </summary>
         /// <param name="context"></param>
-        public override void Validate(WasmValidationContext context) =>
+        public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushF32(Value);
 
         /// <summary>
@@ -112,7 +112,7 @@ namespace Wacs.Core.Instructions.Numeric
         /// @Spec 3.3.1.1 t.const
         /// </summary>
         /// <param name="context"></param>
-        public override void Validate(WasmValidationContext context) =>
+        public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushF64(Value);
 
         /// <summary>

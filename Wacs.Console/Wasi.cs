@@ -19,7 +19,7 @@ namespace Wacs.Console
                 
                 EnvironmentVariables = Environment.GetEnvironmentVariables()
                     .Cast<DictionaryEntry>()
-                    .ToDictionary(de => de.Key.ToString(), de => de.Value!.ToString()),
+                    .ToDictionary(de => de.Key.ToString()!, de => de.Value?.ToString()??""),
                 
                 HostRootDirectory = Directory.GetCurrentDirectory(),
             };

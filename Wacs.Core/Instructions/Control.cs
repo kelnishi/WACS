@@ -19,7 +19,7 @@ namespace Wacs.Core.Instructions
         public override ByteCode Op => OpCode.Unreachable;
 
         // @Spec 3.3.8.2 unreachable
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
         }
 
@@ -35,7 +35,7 @@ namespace Wacs.Core.Instructions
         public override ByteCode Op => OpCode.Nop;
 
         // @Spec 3.3.8.1. nop
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
         }
 
@@ -59,7 +59,7 @@ namespace Wacs.Core.Instructions
         public InstructionSequence GetBlock(int idx) => Block.Instructions;
 
         // @Spec 3.3.8.3 block
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             try
             {
@@ -149,7 +149,7 @@ namespace Wacs.Core.Instructions
         public InstructionSequence GetBlock(int idx) => Block.Instructions;
 
         // @Spec 3.3.8.4. loop
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             try
             {
@@ -237,7 +237,7 @@ namespace Wacs.Core.Instructions
         public InstructionSequence GetBlock(int idx) => idx == 0 ? IfBlock.Instructions : ElseBlock.Instructions;
 
         // @Spec 3.3.8.5 if
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             try
             {
@@ -360,7 +360,7 @@ namespace Wacs.Core.Instructions
         public static readonly InstEnd Inst = new();
         public override ByteCode Op => OpCode.End;
 
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
         }
 
@@ -391,7 +391,7 @@ namespace Wacs.Core.Instructions
         public LabelIdx L { get; internal set; }
 
         // @Spec 3.3.8.6. br l
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.ControlStack.Frame.Contains(L),
                 () => $"Instruction br invalid. Context did not contain Label {L}");
@@ -459,7 +459,7 @@ namespace Wacs.Core.Instructions
         public LabelIdx L { get; internal set; }
 
         // @Spec 3.3.8.7. br_if
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.OpStack.PopI32();
             context.Assert(context.ControlStack.Frame.Contains(L),
@@ -501,7 +501,7 @@ namespace Wacs.Core.Instructions
         private LabelIdx Ln { get; set; }
 
         // @Spec 3.3.8.8. br_table
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.OpStack.PopI32();
             context.Assert(context.ControlStack.Frame.Contains(Ln),
@@ -570,7 +570,7 @@ namespace Wacs.Core.Instructions
         public override ByteCode Op => OpCode.Return;
 
         // @Spec 3.3.8.9. return
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             var returnType = context.ControlStack.Frame.Type.ResultType;
             //keep the results for the block or function to validate
@@ -607,7 +607,7 @@ namespace Wacs.Core.Instructions
         /// @Spec 3.3.8.10. call
         /// </summary>
         /// <param name="context"></param>
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Funcs.Contains(X),
                 () => $"Instruction call was invalid. Function {X} was not in the Context.");
@@ -656,7 +656,7 @@ namespace Wacs.Core.Instructions
         /// @Spec 3.3.8.11. call_indirect
         /// </summary>
         /// <param name="context"></param>
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
                 () => $"Instruction call_indirect was invalid. Table {X} was not in the Context.");

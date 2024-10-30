@@ -168,6 +168,9 @@ namespace Wacs.Core.Runtime
                 case ValType.Externref:
                     Ptr = -1;
                     break;
+                case ValType.Nil:
+                    Ptr = -1;
+                    break;
                 case ValType.Undefined:
                 default:
                     throw new InvalidDataException($"Cannot define StackValue of type {type}");

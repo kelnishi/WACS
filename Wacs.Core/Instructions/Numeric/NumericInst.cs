@@ -16,7 +16,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         public override ByteCode Op { get; }
 
-        public override void Validate(WasmValidationContext context) => _validate(context);
+        public override void Validate(IWasmValidationContext context) => _validate(context);
         public override void Execute(ExecContext context) => _execute(context);
 
         // [pop] -> [push]
@@ -46,6 +46,6 @@ namespace Wacs.Core.Instructions.Numeric
 
         private delegate void ExecuteDelegate(ExecContext context);
 
-        private delegate void ValidationDelegate(WasmValidationContext context);
+        private delegate void ValidationDelegate(IWasmValidationContext context);
     }
 }

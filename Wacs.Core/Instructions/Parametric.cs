@@ -18,7 +18,7 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 3.3.4.1. drop
         /// </summary>
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             //* Value Polymorphic ignores type
             context.OpStack.PopAny();
@@ -47,7 +47,7 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 3.3.4.2. select
         /// </summary>
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             if (WithTypes)
             {
