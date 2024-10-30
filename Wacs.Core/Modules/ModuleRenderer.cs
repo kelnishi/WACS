@@ -19,15 +19,15 @@ namespace Wacs.Core
         //Function[100].Expression[34].NumericInst
         public int CalculateLine(string validationPath, bool print, out string instruction)
         {
-            int line = 2;
+            int line = 1;
             line += Types.Count;
             line += Imports.Length;
             //Start of functions
             var parts = validationPath.Split(".");
             instruction = "";
 
-            IBlockInstruction pointerInst = null;
-            InstructionSequence seq = null;
+            IBlockInstruction pointerInst = null!;
+            InstructionSequence seq = null!;
             bool addLocals = false;
             string indent = "";
             foreach (var part in parts)

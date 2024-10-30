@@ -24,11 +24,11 @@ namespace Wacs.Core.Runtime
                     throw new InvalidDataException($"Label stack underflow");
                 
                 var aside = new Stack<Label>();
-                for (int i = 0, l = (int)index.Value; i <= l; ++i)
+                for (int i = 0, l = (int)index.Value; i < l; ++i)
                 {
                     aside.Push(Labels.Pop());
                 }
-                var result = aside.Peek();
+                var result = Labels.Peek();
                 while (aside.Count > 0) Labels.Push(aside.Pop());
                 return result;
             }

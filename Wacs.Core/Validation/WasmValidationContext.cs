@@ -49,7 +49,7 @@ namespace Wacs.Core.Validation
             Reachability = true;
         }
 
-        private ValidationContext<Module> RootContext { get; }
+        public ValidationContext<Module> RootContext { get; }
 
         public IValidationOpStack OpStack => Reachability ? _stack : _stackPolymorphic;
         public ValidationControlStack ControlStack { get; } = new();

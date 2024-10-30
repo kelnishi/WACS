@@ -30,7 +30,8 @@ namespace Wacs.Core
                     ExportDesc.FuncDesc fd => $" (func {fd.FunctionIndex.Value})",
                     ExportDesc.TableDesc td => $" (table {td.TableIndex.Value})",
                     ExportDesc.MemDesc md => $" (memory {md.MemoryIndex.Value})",
-                    ExportDesc.GlobalDesc gd => $" (global {gd.GlobalIndex.Value})"
+                    ExportDesc.GlobalDesc gd => $" (global {gd.GlobalIndex.Value})",
+                    _ => throw new InvalidDataException($"Unknown Export type:{Desc}")
                 };
                 var tableText = $"{indent}(export{nameText}{expText})";
             

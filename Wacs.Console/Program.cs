@@ -63,27 +63,8 @@ namespace Wacs.Console
             using var fileStream = new FileStream(wasmFilePath, FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
 
-            using var outputStream = new FileStream("output.wat", FileMode.Create);
-            ModuleRenderer.RenderWatToStream(outputStream, module);
-
-            return;
-            
-            // var funcLines = FindFuncs(wasmFilePath);
-            // int importFuncs = module.ImportedFunctions.Count;
-            // for (int i = 320-importFuncs; i < 1000; ++i)
-            // {
-            //     int f = i + importFuncs;
-            //     int s = module.Funcs[i].Size;
-            //     bool l = module.Funcs[i].Locals.Length > 0;
-            //     int c = module.CalculateLine($"Function[{f}]", false, out var code);
-            //     int tline = funcLines[f];
-            //     if (c != tline)
-            //         System.Console.WriteLine($"#{f} Calc'd {c} != {tline} observed\t{s} {l}");
-            //     else
-            //     {
-            //         System.Console.WriteLine($"     #{f} Calc'd {c} == {tline} observed\t{s} {l}");
-            //     }
-            // }
+            // using var outputStream = new FileStream("output.wat", FileMode.Create);
+            // ModuleRenderer.RenderWatToStream(outputStream, module);
             
             //If you just want to do validation without a runtime, you could do it like this
             var validationResult = module.Validate();

@@ -91,6 +91,8 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Locals.Contains(localIndex),
                 ()=>$"Instruction local.tee was invalid. Context Locals did not contain {localIndex}");
             var value = context.Locals[localIndex];
+            context.OpStack.PopType(value.Type);
+            context.OpStack.PushType(value.Type);
             context.OpStack.PushType(value.Type);
             context.OpStack.PopType(value.Type);
         }
