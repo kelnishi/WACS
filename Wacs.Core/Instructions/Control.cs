@@ -229,9 +229,9 @@ namespace Wacs.Core.Instructions
 
         public BlockType Type => IfBlock.Type;
 
-        public int Count => ElseBlock.IsEmpty ? 1 : 2;
+        public int Count => ElseBlock.Size == 0 ? 1 : 2;
 
-        public int Size => 1 + IfBlock.Size + (ElseBlock.IsEmpty ? 0 : ElseBlock.Size);
+        public int Size => 1 + IfBlock.Size + ElseBlock.Size;
         public InstructionSequence GetBlock(int idx) => idx == 0 ? IfBlock.Instructions : ElseBlock.Instructions;
 
         // @Spec 3.3.8.5 if
@@ -255,9 +255,9 @@ namespace Wacs.Core.Instructions
 
                 if (context.Reachability)
                 {
-                    context.OpStack.ValidateStack(funcType.ResultType, keep: ElseBlock.IsEmpty);
+                    context.OpStack.ValidateStack(funcType.ResultType, keep: ElseBlock.IsEmptyType);
 
-                    if (!ElseBlock.IsEmpty)
+                    if (!ElseBlock.IsEmptyType)
                     {
                         foreach (var type in funcType.ParameterTypes.Types)
                         {
@@ -270,7 +270,7 @@ namespace Wacs.Core.Instructions
                     context.Reachability = true;
                 }
 
-                if (ElseBlock.IsEmpty)
+                if (ElseBlock.Size == 0)
                     return;
 
                 context.ValidateBlock(ElseBlock, 1);
@@ -330,6 +330,12 @@ namespace Wacs.Core.Instructions
                     Instructions = new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
                         IInstruction.IsEnd))
                 };
+                if (ElseBlock.Size == 0)
+                    throw new InvalidDataException($"Explicit Else block contained no instructions.");
+            }
+            else
+            {
+                throw new InvalidDataException($"If block did not terminate correctly.");
             }
 
             return this;

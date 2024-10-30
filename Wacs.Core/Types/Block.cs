@@ -30,7 +30,7 @@ namespace Wacs.Core.Types
 
         public int Size => Instructions.Size;
 
-        public bool IsEmpty => Type == BlockType.Empty;
+        public bool IsEmptyType => Type == BlockType.Empty;
 
         public static BlockType ParseBlockType(BinaryReader reader)
         {
