@@ -134,8 +134,8 @@ namespace Wacs.Core
         public static void RenderWatToStream(Stream output, Module module)
         {
             string indent = "";
-            using var writer = new StreamWriter(output, new UTF8Encoding(true), -1, true);
-
+            using var writer = new StreamWriter(output, new UTF8Encoding(false), -1, true);
+            
             module.RenderText(writer, module, indent);
             
             indent += Indent2Space;
@@ -209,6 +209,9 @@ namespace Wacs.Core
                 }
             }
             writer.WriteLine(")");
+            
+            writer.Flush();
+            writer.Close();
         }
     }
 }
