@@ -164,7 +164,8 @@ namespace Wacs.Core
                             var retType = vContext.Return;
                             var label = new Label(retType, InstructionPointer.Nil, OpCode.Nop);
                             vContext.Frame.Labels.Push(label);
-
+                            
+                            //*Expression Validator also validates result types
                             var exprValidator = new Expression.Validator(funcType.ResultType);
                             var subcontext = vContext.PushSubContext(func.Body);
                             var validationResult = exprValidator.Validate(subcontext);
@@ -179,16 +180,8 @@ namespace Wacs.Core
                                 }
                             }
                             vContext.PopValidationContext();
-
                             vContext.PopFrame();
-                            try
-                            {
-                                vContext.OpStack.ValidateStack(retType);
-                            }
-                            catch (ValidationException exc)
-                            {
-                                ctx.AddFailure($"{ctx.PropertyPath}: {exc.Message}");
-                            }
+                            vContext.ClearOpStacks();
                         });
                 }
             }

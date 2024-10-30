@@ -7,7 +7,6 @@ namespace Wacs.Core.Runtime
     {
         public int StackHeight = 0;
 
-
         public Label(ResultType type, InstructionPointer continuationAddress, ByteCode inst)
         {
             Type = type;

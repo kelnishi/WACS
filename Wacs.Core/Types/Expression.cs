@@ -98,7 +98,7 @@ namespace Wacs.Core.Types
 
                     try
                     {
-                        validationContext.OpStack.ValidateStack(resultType);
+                        validationContext.OpStack.ValidateStack(resultType, keep: false);
                     }
                     catch (ValidationException exc)
                     {
