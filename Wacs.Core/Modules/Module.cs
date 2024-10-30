@@ -41,6 +41,8 @@ namespace Wacs.Core
         public static void UseInstructionFactory(IInstructionFactory factory) =>
             _instructionFactory = factory;
 
+        public static int InstructionsParsed = 0;
+
         /// <summary>
         /// @Spec 5.5.16. Modules
         /// Parses a WebAssembly module from a binary stream.
@@ -50,6 +52,8 @@ namespace Wacs.Core
             var module = new Module();
             var reader = new BinaryReader(stream);
 
+            InstructionsParsed = 0;
+            
             // Read and validate the magic number and version
             uint magicNumber = reader.ReadUInt32(); //Exactly 4bytes, little endian
             if (magicNumber != 0x6D736100) // '\0asm'
@@ -228,7 +232,13 @@ namespace Wacs.Core
                 OpCode.FE => new ByteCode((AtomCode)reader.ReadLeb128_u32()),
                 var b => new ByteCode(b)
             };
-            return _instructionFactory.CreateInstruction(opcode)?.Parse(reader);            
+            var inst = _instructionFactory.CreateInstruction(opcode)?.Parse(reader);
+            
+            //Raw tracking for debugging purposes
+            // if (inst != null)
+            //     InstructionsParsed += 1;
+            
+            return inst;
         }
 
         //TODO Warn for missing sections?
