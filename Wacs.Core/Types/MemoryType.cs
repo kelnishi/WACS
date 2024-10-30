@@ -22,7 +22,7 @@ namespace Wacs.Core.Types
         /// </summary>
         public Limits Limits { get; }
 
-        public string Id { get; set; }
+        public string Id { get; set; } = "";
 
         public void RenderText(StreamWriter writer, Module module, string indent)
         {

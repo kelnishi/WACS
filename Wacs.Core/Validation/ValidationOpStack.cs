@@ -17,14 +17,14 @@ namespace Wacs.Core.Validation
         void PushFuncref(Value value);
         void PushExternref(Value value);
         void PushType(ValType type);
-        void PopI32();
-        void PopI64();
-        void PopF32();
-        void PopF64();
-        void PopV128();
-        void PopRefType();
+        Value PopI32();
+        Value PopI64();
+        Value PopF32();
+        Value PopF64();
+        Value PopV128();
+        Value PopRefType();
         void ValidateStack(ResultType types, bool keep = true);
-        void PopType(ValType type);
+        Value PopType(ValType type);
         Value PopAny();
     }
 
@@ -108,7 +108,7 @@ namespace Wacs.Core.Validation
             _stack.Push(new Value(type));
         }
 
-        public void PopI32()
+        public Value PopI32()
         {
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow.");
@@ -117,9 +117,10 @@ namespace Wacs.Core.Validation
             if (value.Type != ValType.I32)
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.I32}");
+            return value;
         }
 
-        public void PopI64()
+        public Value PopI64()
         {
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow.");
@@ -128,9 +129,10 @@ namespace Wacs.Core.Validation
             if (value.Type != ValType.I64)
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.I64}");
+            return value;
         }
 
-        public void PopF32()
+        public Value PopF32()
         {
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow.");
@@ -139,9 +141,10 @@ namespace Wacs.Core.Validation
             if (value.Type != ValType.F32)
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.F32}");
+            return value;
         }
 
-        public void PopF64()
+        public Value PopF64()
         {
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow.");
@@ -150,9 +153,10 @@ namespace Wacs.Core.Validation
             if (value.Type != ValType.F64)
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.F64}");
+            return value;
         }
 
-        public void PopV128()
+        public Value PopV128()
         {
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow.");
@@ -161,9 +165,10 @@ namespace Wacs.Core.Validation
             if (value.Type != ValType.V128)
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected {ValType.V128}");
+            return value;
         }
 
-        public void PopRefType()
+        public Value PopRefType()
         {
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow.");
@@ -173,7 +178,7 @@ namespace Wacs.Core.Validation
             {
                 case ValType.Funcref:
                 case ValType.Externref:
-                    return;
+                    return value;
                 default:
                     throw new ValidationException(
                         $"Wrong operand type {value.Type} at top of stack. Expected: FuncRef or ExternRef");
@@ -201,7 +206,7 @@ namespace Wacs.Core.Validation
             }
         }
 
-        public void PopType(ValType type)
+        public Value PopType(ValType type)
         {
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow.");
@@ -210,6 +215,8 @@ namespace Wacs.Core.Validation
             if (value.Type != type)
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} at top of stack. Expected: {type}");
+            
+            return value;
         }
 
         public Value PopAny()
@@ -263,37 +270,23 @@ namespace Wacs.Core.Validation
         {
         }
 
-        public void PopI32()
-        {
-        }
+        public Value PopI32() => new(ValType.I32);
 
-        public void PopI64()
-        {
-        }
+        public Value PopI64() => new(ValType.I64);
 
-        public void PopF32()
-        {
-        }
+        public Value PopF32() => new(ValType.F32);
 
-        public void PopF64()
-        {
-        }
+        public Value PopF64() => new(ValType.F64);
 
-        public void PopV128()
-        {
-        }
+        public Value PopV128() => new(ValType.V128);
 
-        public void PopRefType()
-        {
-        }
+        public Value PopRefType() => new(ValType.Funcref);
 
         public void ValidateStack(ResultType types, bool keep = true)
         {
         }
 
-        public void PopType(ValType type)
-        {
-        }
+        public Value PopType(ValType type) => new(type);
 
         public Value PopAny() => new(ValType.I32);
     }

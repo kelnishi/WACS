@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Wacs.Core.OpCodes;
@@ -66,7 +67,7 @@ namespace Wacs.Core.Instructions
                 var funcType = context.Types.ResolveBlockType(Block.Type);
                 context.Assert(funcType != null, () => $"Invalid BlockType: {Block.Type}");
                 
-                var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
+                var label = new Label(funcType!.ResultType, new InstructionPointer(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
 
                 //Check the parameters [t1*]
@@ -83,6 +84,8 @@ namespace Wacs.Core.Instructions
                 {
                     context.Reachability = true;
                 }
+
+                context.ControlStack.Frame.Labels.Pop();
             }
             catch (IndexOutOfRangeException exc)
             {
@@ -103,7 +106,7 @@ namespace Wacs.Core.Instructions
                 //2,3
                 var funcType = context.Frame.Module.Types.ResolveBlockType(block.Type);
                 //4.
-                var label = new Label(funcType.ResultType, context.GetPointer(), OpCode.Block);
+                var label = new Label(funcType!.ResultType, context.GetPointer(), OpCode.Block);
                 //5.
                 context.Assert(() => context.OpStack.Count >= funcType.ParameterTypes.Length,
                     () => $"Instruction block failed. Operand Stack underflow.");
@@ -155,7 +158,7 @@ namespace Wacs.Core.Instructions
                 var funcType = context.Types.ResolveBlockType(Block.Type);
                 context.Assert(funcType != null, () => $"Invalid BlockType: {Block.Type}");
 
-                var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
+                var label = new Label(funcType!.ResultType, new InstructionPointer(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
 
                 //Check the parameters [t1*]
@@ -171,6 +174,8 @@ namespace Wacs.Core.Instructions
                 {
                     context.Reachability = true;
                 }
+
+                context.ControlStack.Frame.Labels.Pop();
             }
             catch (IndexOutOfRangeException exc)
             {
@@ -189,7 +194,7 @@ namespace Wacs.Core.Instructions
                 //2,3
                 var funcType = context.Frame.Module.Types.ResolveBlockType(Block.Type);
                 //4.
-                var label = new Label(funcType.ResultType, context.GetPointer(-1), OpCode.Loop);
+                var label = new Label(funcType!.ResultType, context.GetPointer(-1), OpCode.Loop);
                 //5.
                 context.Assert(() => context.OpStack.Count >= funcType.ParameterTypes.Length,
                     () => $"Instruction loop failed. Operand Stack underflow.");
@@ -245,7 +250,7 @@ namespace Wacs.Core.Instructions
                 var funcType = context.Types.ResolveBlockType(IfBlock.Type);
                 context.Assert(funcType != null, () => $"Invalid BlockType: {IfBlock.Type}");
 
-                var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
+                var label = new Label(funcType!.ResultType, new InstructionPointer(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
 
                 //Check the parameters [t1*]
@@ -271,7 +276,10 @@ namespace Wacs.Core.Instructions
                 }
 
                 if (ElseBlock.Size == 0)
+                {
+                    context.ControlStack.Frame.Labels.Pop();
                     return;
+                }
 
                 context.ValidateBlock(ElseBlock, 1);
 
@@ -283,6 +291,8 @@ namespace Wacs.Core.Instructions
                 {
                     context.Reachability = true;
                 }
+                
+                context.ControlStack.Frame.Labels.Pop();
             }
             catch (IndexOutOfRangeException exc)
             {
@@ -391,10 +401,9 @@ namespace Wacs.Core.Instructions
             context.Assert(context.ControlStack.Frame.Contains(L),
                 () => $"Instruction br invalid. Context did not contain Label {L}");
             var label = context.ControlStack.Frame[L];
-            foreach (var type in label.Type.Types.Reverse())
-            {
-                context.OpStack.PopType(type);
-            }
+
+            //Validate results, but leave them on the stack
+            context.OpStack.ValidateStack(label.Type, keep: true);
         }
 
         // @Spec 4.4.8.6. br l
@@ -460,10 +469,9 @@ namespace Wacs.Core.Instructions
             context.Assert(context.ControlStack.Frame.Contains(L),
                 () => $"Instruction br_if invalid. Context did not contain Label {L}");
             var label = context.ControlStack.Frame[L];
-            foreach (var type in label.Type.Types.Reverse())
-            {
-                context.OpStack.PopType(type);
-            }
+            
+            //Validate results, but leave them on the stack
+            context.OpStack.ValidateStack(label.Type, keep: true);
         }
 
         // @Spec 4.4.8.7. br_if
@@ -517,11 +525,8 @@ namespace Wacs.Core.Instructions
                 context.Assert(typeN.Matches(type),
                     () => $"Instruction br_table failed. Table types are incongruent.");
             }
-
-            foreach (var type in labelN.Type.Types.Reverse())
-            {
-                context.OpStack.PopType(type);
-            }
+            
+            context.OpStack.ValidateStack(labelN.Type, keep: true);
         }
 
         /// <summary>

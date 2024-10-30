@@ -72,7 +72,8 @@ namespace Wacs.Core
                     ElementMode.ActiveMode { TableIndex: { Value: 0 }, Offset: { Instructions: { IsConstant: true } } } am =>
                         $"{ am.Offset.ToWat() }",
                     ElementMode.ActiveMode am => $" (table {am.TableIndex.Value}) (offset{am.Offset.ToWat()})",
-                    ElementMode.DeclarativeMode dm => $" declare",
+                    ElementMode.DeclarativeMode => $" declare",
+                    _ => throw new InvalidDataException($"Unknown Element Mode: {Mode}")
                 };
                 string elemListText = "";
                 

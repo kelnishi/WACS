@@ -82,8 +82,8 @@ namespace Wacs.Core.Types
                 BlockType.V128 => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
                 BlockType.Funcref => new FunctionType(ResultType.Empty, new ResultType(ValType.Funcref)),
                 BlockType.Externref => new FunctionType(ResultType.Empty, new ResultType(ValType.Externref)),
-                _ when (int)blockType < 0 => null,
-                _ => this[(TypeIdx)(int)blockType]
+                _ when Contains((TypeIdx)(int)blockType) => this[(TypeIdx)(int)blockType],
+                _ => null
             };
     }
 

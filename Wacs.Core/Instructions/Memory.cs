@@ -55,9 +55,9 @@ namespace Wacs.Core.Instructions
         {
             context.Assert(context.Mems.Contains((MemIdx)0),
                 () => $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(2 << ((int)M.Align - 1) <= WidthN.ByteSize(),
+            context.Assert(M.Align <= WidthN.ByteSize(),
                 () =>
-                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment 2^{M.Align} <= {WidthN}/8");
+                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align} <= {WidthN}/8");
 
             context.OpStack.PopI32();
             context.OpStack.PushType(Type);
@@ -205,9 +205,9 @@ namespace Wacs.Core.Instructions
         {
             context.Assert(context.Mems.Contains((MemIdx)0),
                 () => $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(2 << ((int)M.Align - 1) <= WidthN.ByteSize(),
+            context.Assert(M.Align <= WidthN.ByteSize(),
                 () =>
-                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment 2^{M.Align} <= {WidthN}/8");
+                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align} <= {WidthN}/8");
 
             //Pop parameters from right to left
             context.OpStack.PopType(Type);

@@ -45,6 +45,7 @@ namespace Wacs.Core
                     DataMode.PassiveMode => datastring,
                     DataMode.ActiveMode { MemoryIndex: { Value: 0 }, Offset: { IsConstant: true } } am => $"{am.Offset.ToWat()} {datastring}",
                     DataMode.ActiveMode am => $" (memory {am.MemoryIndex.Value}) (offset{am.Offset.ToWat()}) {datastring}",
+                    _ => throw new InvalidDataException($"Unkown datamode: {Mode}")
                 };
                 var dataText = $"{indent}(data{id}{data})";
             

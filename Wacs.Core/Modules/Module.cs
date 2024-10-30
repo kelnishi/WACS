@@ -224,6 +224,7 @@ namespace Wacs.Core
         /// </summary>
         public static IInstruction? ParseInstruction(BinaryReader reader)
         {
+            
             //Splice another byte if the first byte is a prefix
             var opcode = (OpCode)reader.ReadByte() switch {
                 OpCode.FB => new ByteCode((GcCode)reader.ReadLeb128_u32()), 
@@ -232,12 +233,13 @@ namespace Wacs.Core
                 OpCode.FE => new ByteCode((AtomCode)reader.ReadLeb128_u32()),
                 var b => new ByteCode(b)
             };
+            int traceIdx = InstructionsParsed;
             var inst = _instructionFactory.CreateInstruction(opcode)?.Parse(reader);
             
             //Raw tracking for debugging purposes
             // if (inst != null)
             //     InstructionsParsed += 1;
-            
+
             return inst;
         }
 
