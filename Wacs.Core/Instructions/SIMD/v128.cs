@@ -15,7 +15,7 @@ namespace Wacs.Core.Instructions.Simd
         /// @Spec 3.3.1.1 t.const
         /// </summary>
         /// <param name="context"></param>
-        public override void Validate(WasmValidationContext context) =>
+        public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushV128(V128);
 
         /// <summary>

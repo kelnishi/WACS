@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -17,14 +18,19 @@ namespace Wacs.Core
         }
 
         //Function[100].Expression[34].NumericInst
-        public int CalculateLine(string validationPath, bool print, out string instruction)
+        public (int line, string instruction) CalculateLine(string validationPath, bool print = false, bool functionRelative = false)
         {
-            int line = 1;
-            line += Types.Count;
-            line += Imports.Length;
+            int line = 0;
+
+            if (!functionRelative)
+            {
+                line += 1;              //(module
+                line += Types.Count;    //  (type
+                line += Imports.Length; //  (import
+            }
             //Start of functions
             var parts = validationPath.Split(".");
-            instruction = "";
+            string foundInstruction = "";
 
             IBlockInstruction pointerInst = null!;
             InstructionSequence seq = null!;
@@ -53,7 +59,10 @@ namespace Wacs.Core
                             index -= Imports.Length;
                             for (int i = 0; i < index; ++i)
                             {
-                                line += Funcs[i].Size;
+                                if (!functionRelative)
+                                {
+                                    line += Funcs[i].Size; //other (func
+                                }
                             }
                         
                             if (print)
@@ -62,7 +71,7 @@ namespace Wacs.Core
                             if (Funcs[index].Locals.Length > 0)
                                 addLocals = true;
 
-                            instruction = "func";
+                            foundInstruction = "func";
 
                             seq = Funcs[index].Body.Instructions;
                             break;
@@ -103,7 +112,7 @@ namespace Wacs.Core
                             {
                                 pointerInst = blTerm;
                             }
-                            instruction = term.Op.GetMnemonic();
+                            foundInstruction = term.Op.GetMnemonic();
                             break;
                         }
                         case "InstBlock":
@@ -123,7 +132,7 @@ namespace Wacs.Core
                 }
             }
 
-            return line;
+            return (line, foundInstruction);
         }
     }
 
@@ -152,9 +161,10 @@ namespace Wacs.Core
             }
             
             //Functions
-            foreach (var func in module.Funcs)
+            int idx = module.ImportedFunctions.Count;
+            for (int i = 0, l = module.Funcs.Count; i < l; ++i, ++idx)
             {
-                func.RenderText(writer, module, indent);
+                RenderFunctionWatToStream(writer, module, (FuncIdx)idx, indent);
             }
             
             //Tables
@@ -212,6 +222,50 @@ namespace Wacs.Core
             
             writer.Flush();
             writer.Close();
+        }
+
+        [SuppressMessage("ReSharper.DPA", "DPA0001: Memory allocation issues")]
+        private static void RenderFunctionWatToStream(StreamWriter writer, Module module, FuncIdx index, string indent, bool renderStack = false)
+        {
+            //Skip imports
+            int idx = (int)(index.Value - module.ImportedFunctions.Count);
+            var func = module.Funcs[idx];
+            bool state = func.RenderStack;
+            func.RenderStack = renderStack;
+            func.RenderText(writer, module, indent);
+            func.RenderStack = state;
+        }
+
+        [SuppressMessage("ReSharper.DPA", "DPA0001: Memory allocation issues")]
+        public static string RenderFunctionWat(Module module, FuncIdx index, string indent, bool renderStack = false)
+        {
+            using var stream = new MemoryStream();
+            using var writer = new StreamWriter(stream, new UTF8Encoding(false), -1, true);
+            RenderFunctionWatToStream(writer, module, index, indent, renderStack);
+            writer.Flush();
+            return Encoding.UTF8.GetString(stream.ToArray());
+        }
+
+        public static FuncIdx GetFuncIdx(string path)
+        {
+            var parts = path.Split(".");
+            var regex = new Regex(@"Function\[(\d+)\]");
+            var match = regex.Match(parts[0]);
+            if (!match.Success)
+                return FuncIdx.Default;
+            
+            return (FuncIdx)uint.Parse(match.Groups[1].Value);
+        }
+
+        public static string ChopFunctionId(string path)
+        {
+            var parts = path.Split(".");
+            var regex = new Regex(@"Function\[(\d+)\]");
+            var match = regex.Match(parts[0]);
+            if (!match.Success)
+                throw new ArgumentException("Function was not found in path.");
+
+            return parts[0];
         }
     }
 }

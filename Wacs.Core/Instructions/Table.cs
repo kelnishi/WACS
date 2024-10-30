@@ -17,7 +17,7 @@ namespace Wacs.Core.Instructions
         private TableIdx X { get; set; }
 
         // @Spec 3.3.6.1. table.get
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
                 () => $"Instruction table.get failed to get table {X} from context");
@@ -76,7 +76,7 @@ namespace Wacs.Core.Instructions
         private TableIdx X { get; set; }
 
         // @Spec 3.3.6.2. table.set
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
                 () => $"Instruction table.set failed to get table {X} from context");
@@ -139,7 +139,7 @@ namespace Wacs.Core.Instructions
         private ElemIdx Y { get; set; }
 
         // @Spec 3.3.6.7. table.init x y
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
                 () => $"Instruction table.init is invalid. Table {X} not in the Context.");
@@ -254,7 +254,7 @@ namespace Wacs.Core.Instructions
         private ElemIdx X { get; set; }
 
         // @Spec 3.3.6.8. elem.drop x
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Elements.Contains(X),
                 () => $"Instruction elem.drop is invalid. Element {X} was not in the Context");
@@ -299,7 +299,7 @@ namespace Wacs.Core.Instructions
         private TableIdx DstX { get; set; }
 
         // @Spec 3.3.6.6. table.copy
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(DstX),
                 () => $"Instruction table.copy failed. Table index {DstX} does not exist in Context");
@@ -424,7 +424,7 @@ namespace Wacs.Core.Instructions
         private TableIdx X { get; set; }
 
         // @Spec 3.3.6.4. table.grow x
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
                 () => $"Instruction table.set failed to get table {X} from context");
@@ -490,7 +490,7 @@ namespace Wacs.Core.Instructions
         private TableIdx X { get; set; }
 
         // @Spec 3.3.6.3. table.size x
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
                 () => $"Instruction table.set failed to get table {X} from context");
@@ -534,7 +534,7 @@ namespace Wacs.Core.Instructions
         private TableIdx X { get; set; }
 
         // @Spec 3.3.6.5. table.fill
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
                 () => $"Instruction table.set failed to get table {X} from context");

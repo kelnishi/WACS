@@ -14,7 +14,7 @@ namespace Wacs.Core.Validation
     /// <summary>
     /// @Spec 3.1.1. Contexts
     /// </summary>
-    public class WasmValidationContext
+    public class WasmValidationContext : IWasmValidationContext
     {
         public delegate string MessageProducer();
 
@@ -50,17 +50,17 @@ namespace Wacs.Core.Validation
 
         public ValidationContext<Module> RootContext { get; }
 
-        public IValidationOpStack OpStack => Stack.Reachability ? Stack : _stackPolymorphic;
-
-        public IValidationOpStack ReturnStack { get; }
-
-        public ValidationControlStack ControlStack { get; } = new();
-
         public Frame Frame => ControlStack.Frame;
 
         public ResultType Return => Frame.Type.ResultType;
 
         private ModuleInstance ValidationModule { get; }
+
+        public IValidationOpStack OpStack => Stack.Reachability ? Stack : _stackPolymorphic;
+
+        public IValidationOpStack ReturnStack { get; }
+
+        public ValidationControlStack ControlStack { get; } = new();
 
         public TypesSpace Types => ValidationModule.Types;
         public FunctionsSpace Funcs { get; }
@@ -68,8 +68,8 @@ namespace Wacs.Core.Validation
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
         public LocalsSpace Locals => ControlStack.Frame.Locals;
-        public ElementsSpace Elements { get; private set; }
-        public DataValidationSpace Datas { get; private set; }
+        public ElementsSpace Elements { get; set; }
+        public DataValidationSpace Datas { get; set; }
 
         public bool Reachability
         {
@@ -100,38 +100,11 @@ namespace Wacs.Core.Validation
             }
         }
 
-        public void ClearOpStacks()
-        {
-            while (_stacks.Count > 1)
-                _stacks.Pop();
-            Stack.Clear();
-        }
-
-        public ValidationContext<T> PushSubContext<T>(T child, int index = -1)
-        where T : class
-        {
-            var subctx = _contextStack.Peek().GetSubContext(child, index);
-            _contextStack.Push(subctx);
-            return subctx;
-        }
-
-        public void PopValidationContext() => _contextStack.Pop();
-
         public void Assert(bool factIsTrue, MessageProducer message)
         {
             if (!factIsTrue)
                 throw new ValidationException(message());
         }
-
-        public void PushFrame(Module.Function func)
-        {
-            var funcType = Types[func.TypeIndex];
-            var locals = new LocalsSpace(funcType.ParameterTypes.Types, func.Locals);
-            var frame = new Frame(ValidationModule, funcType) { Locals = locals };
-            ControlStack.PushFrame(frame);
-        }
-
-        public void PopFrame() => ControlStack.PopFrame();
 
         public void ValidateBlock(Block instructionBlock, int index = 0)
         {
@@ -162,6 +135,33 @@ namespace Wacs.Core.Validation
             PopValidationContext();
         }
 
+        public void ClearOpStacks()
+        {
+            while (_stacks.Count > 1)
+                _stacks.Pop();
+            Stack.Clear();
+        }
+
+        public ValidationContext<T> PushSubContext<T>(T child, int index = -1)
+        where T : class
+        {
+            var subctx = _contextStack.Peek().GetSubContext(child, index);
+            _contextStack.Push(subctx);
+            return subctx;
+        }
+
+        public void PopValidationContext() => _contextStack.Pop();
+
+        public void PushFrame(Module.Function func)
+        {
+            var funcType = Types[func.TypeIndex];
+            var locals = new LocalsSpace(funcType.ParameterTypes.Types, func.Locals);
+            var frame = new Frame(ValidationModule, funcType) { Locals = locals };
+            ControlStack.PushFrame(frame);
+        }
+
+        public void PopFrame() => ControlStack.PopFrame();
+
         public class InstructionValidator : AbstractValidator<IInstruction>
         {
             public InstructionValidator()
@@ -175,10 +175,11 @@ namespace Wacs.Core.Validation
                         }
                         catch (ValidationException exc)
                         {
-                            string path = ctx.PropertyPath;
-                            int line = ctx.GetValidationContext().Frame.Module.Repr.CalculateLine(path, false, out var i);
+                            // string path = ctx.PropertyPath;
+                            // var (line, code) = ctx.GetValidationContext().Frame.Module.Repr.CalculateLine(path);
+                            string message = $"{exc.Message} in Instruction {inst.Op.GetMnemonic()}";
                             
-                            ctx.AddFailure($"{ctx.PropertyPath}: {exc.Message}");
+                            ctx.AddFailure($"{ctx.PropertyPath}: {message}");
                         }
                         catch (InvalidDataException exc)
                         {

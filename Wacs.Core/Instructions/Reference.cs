@@ -19,7 +19,7 @@ namespace Wacs.Core.Instructions
         public ReferenceType Type { get; internal set; }
 
         // @Spec 3.3.2.1. ref.null t
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
              context.OpStack.PushType(Type.StackType());
         }
@@ -44,7 +44,7 @@ namespace Wacs.Core.Instructions
         public override ByteCode Op => OpCode.RefIsNull;
 
         // @Spec 3.3.2.2. ref.is_null
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.OpStack.PopRefType();
             context.OpStack.PushI32();
@@ -72,7 +72,7 @@ namespace Wacs.Core.Instructions
         public FuncIdx FunctionIndex { get; internal set; }
         
         // @Spec 3.3.2.3. ref.func x
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         { 
             context.Assert(context.Funcs.Contains(FunctionIndex),
                 ()=>$"Instruction ref.func is invalid. Function {FunctionIndex} was not in the context.");

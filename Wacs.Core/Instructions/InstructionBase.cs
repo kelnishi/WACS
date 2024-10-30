@@ -15,7 +15,7 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public abstract ByteCode Op { get; }
 
-        public abstract void Validate(WasmValidationContext context);
+        public abstract void Validate(IWasmValidationContext context);
 
         /// <summary>
         /// Executes the instruction within the given execution context.

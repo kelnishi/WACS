@@ -51,7 +51,7 @@ namespace Wacs.Core.Instructions
         /// @Spec 3.3.7.1. t.load
         /// @Spec 3.3.7.2. t.loadN_sx
         /// </summary>
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains((MemIdx)0),
                 () => $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
@@ -201,7 +201,7 @@ namespace Wacs.Core.Instructions
         /// @Spec 3.3.7.3. t.store
         /// @Spec 3.3.7.4. t.storeN
         /// </summary>
-        public override void Validate(WasmValidationContext context)
+        public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains((MemIdx)0),
                 () => $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");

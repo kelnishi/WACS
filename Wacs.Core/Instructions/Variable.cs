@@ -20,7 +20,7 @@ namespace Wacs.Core.Instructions
         public override ByteCode Op { get; }
         private LocalIdx Index { get; set; }
 
-        public override void Validate(WasmValidationContext context) => _validate(context, Index);
+        public override void Validate(IWasmValidationContext context) => _validate(context, Index);
         public override void Execute(ExecContext context) => _execute(context, Index);
 
         public override IInstruction Parse(BinaryReader reader)
@@ -38,7 +38,7 @@ namespace Wacs.Core.Instructions
 
         //0x20
         // @Spec 3.3.5.1. local.get
-        private static void ValidateLocalGet(WasmValidationContext context, LocalIdx localIndex)
+        private static void ValidateLocalGet(IWasmValidationContext context, LocalIdx localIndex)
         {
             context.Assert(context.Locals.Contains(localIndex),
                 ()=>$"Instruction local.get was invalid. Context Locals did not contain {localIndex}");
@@ -59,7 +59,7 @@ namespace Wacs.Core.Instructions
         }
 
         //0x21
-        private static void ValidateLocalSet(WasmValidationContext context, LocalIdx localIndex)
+        private static void ValidateLocalSet(IWasmValidationContext context, LocalIdx localIndex)
         {
             context.Assert(context.Locals.Contains(localIndex),
                 ()=>$"Instruction local.set was invalid. Context Locals did not contain {localIndex}");
@@ -86,7 +86,7 @@ namespace Wacs.Core.Instructions
 
         //0x22
         // @Spec 3.3.5.2. local.tee
-        private static void ValidateLocalTee(WasmValidationContext context, LocalIdx localIndex)
+        private static void ValidateLocalTee(IWasmValidationContext context, LocalIdx localIndex)
         {
             context.Assert(context.Locals.Contains(localIndex),
                 ()=>$"Instruction local.tee was invalid. Context Locals did not contain {localIndex}");
@@ -116,7 +116,7 @@ namespace Wacs.Core.Instructions
 
         private delegate void ExecuteDelegate(ExecContext context, LocalIdx localIndex);
 
-        private delegate void ValidationDelegate(WasmValidationContext context, LocalIdx localIndex);
+        private delegate void ValidationDelegate(IWasmValidationContext context, LocalIdx localIndex);
     }
     
     public class GlobalVariableInst : InstructionBase
@@ -131,7 +131,7 @@ namespace Wacs.Core.Instructions
         public override ByteCode Op { get; }
         private GlobalIdx Index { get; set; }
 
-        public override void Validate(WasmValidationContext context) => _validate(context, Index);
+        public override void Validate(IWasmValidationContext context) => _validate(context, Index);
         public override void Execute(ExecContext context) => _execute(context, Index);
 
         public override IInstruction Parse(BinaryReader reader)
@@ -147,7 +147,7 @@ namespace Wacs.Core.Instructions
 
         //0x23
         // @Spec 3.3.5.4. global.get
-        private static void ValidateGlobalGet(WasmValidationContext context, GlobalIdx globalIndex)
+        private static void ValidateGlobalGet(IWasmValidationContext context, GlobalIdx globalIndex)
         {
             context.Assert(context.Globals.Contains(globalIndex),
                 ()=>$"Instruction global.get was invalid. Context Globals did not contain {globalIndex}");
@@ -176,7 +176,7 @@ namespace Wacs.Core.Instructions
 
         //0x24
         // @Spec 3.3.5.5. global.set
-        private static void ValidateGlobalSet(WasmValidationContext context, GlobalIdx globalIndex)
+        private static void ValidateGlobalSet(IWasmValidationContext context, GlobalIdx globalIndex)
         {
             context.Assert(context.Globals.Contains(globalIndex),
                 ()=>$"Instruction global.set was invalid. Context Globals did not contain {globalIndex}");
@@ -213,7 +213,7 @@ namespace Wacs.Core.Instructions
 
         private delegate void ExecuteDelegate(ExecContext context, GlobalIdx index);
 
-        private delegate void ValidationDelegate(WasmValidationContext context, GlobalIdx index);
+        private delegate void ValidationDelegate(IWasmValidationContext context, GlobalIdx index);
     }
     
 }

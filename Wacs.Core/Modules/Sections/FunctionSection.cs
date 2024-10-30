@@ -35,6 +35,8 @@ namespace Wacs.Core
 
             public int Size => (Locals.Length > 0?1:0) + Body.Size;
 
+            public bool RenderStack { get; set; } = false;
+
             public void RenderText(StreamWriter writer, Module module, string indent)
             {
                 var id = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
@@ -59,12 +61,14 @@ namespace Wacs.Core
                     writer.Write(locals);
                 }
 
-                RenderInstructions(writer, indent, 0, module, Body.Instructions);
+                var fakeContext = new FakeContext(module, this);
+                StackRenderer stackRenderer = new(null, RenderStack, context:fakeContext);
+                RenderInstructions(writer, indent, 0, module, Body.Instructions, stackRenderer);
                 
                 writer.WriteLine(")");
             }
 
-            private void RenderInstructions(StreamWriter writer, string indent, int depth, Module module, InstructionSequence seq)
+            private void RenderInstructions(StreamWriter writer, string indent, int depth, Module module, InstructionSequence seq, StackRenderer stackRenderer)
             {
                 foreach (var inst in seq)
                 {
@@ -77,7 +81,7 @@ namespace Wacs.Core
                         case IBlockInstruction blockInst:
                         {
                             depth += 1;
-
+                            stackRenderer.FakeContext.lastEvent = "[";
                             var mnemonic = inst.Op.GetMnemonic();
                             var funcType = ComputeBlockType(blockInst.Type, module);
                             var blockParams = funcType.ParameterTypes.Length > 0
@@ -87,7 +91,7 @@ namespace Wacs.Core
                                 ? funcType.ResultType.ToResults()
                                 : "";
                             var label = $"  ;; label = @{depth}";
-                            var instText = $"{indent}{mnemonic}{blockParams}{blockResults}{label}";
+                            var instText = $"{stackRenderer}{indent}{mnemonic}{blockParams}{blockResults}{label}";
                             writer.WriteLine();
                             writer.Write(instText);
 
@@ -95,24 +99,37 @@ namespace Wacs.Core
                         
                             for (int b = 0; b < blockInst.Count; ++b)
                             {
+                                stackRenderer.FakeContext.lastEvent = "[";
+                                stackRenderer.ProcessBlockInstruction(blockInst);
+                                
                                 var blockSeq = blockInst.GetBlock(b);
-                                RenderInstructions(writer, blockIndent, depth, module, blockSeq);
+                                RenderInstructions(writer, blockIndent, depth, module, blockSeq, stackRenderer.SubRenderer());
 
                                 var lastInst = blockSeq.LastInstruction;
                                 if (IInstruction.IsElseOrEnd(lastInst))
                                 {
-                                    var subText = $"{indent}{lastInst.RenderText(depth)}";
+                                    if (IInstruction.IsEnd(lastInst))
+                                    {
+                                        stackRenderer.EndBlockInstruction(blockInst);
+                                    }
+                                    else
+                                    {
+                                        stackRenderer.ElseBlockInstruction(blockInst);
+                                    }
+                                    
+                                    var subText = $"{stackRenderer}{indent}{lastInst.RenderText(depth)}";
                                     writer.WriteLine();
                                     writer.Write(subText);
                                 }
                             }
-                            
+
                             depth -= 1;
                             break;
                         }
                         default:
                         {
-                            var instText = $"{indent}{inst.RenderText(depth)}";
+                            stackRenderer.ProcessInstruction(inst);
+                            var instText = $"{stackRenderer}{indent}{inst.RenderText(depth)}";
                             writer.WriteLine();
                             writer.Write(instText);
                             break;
