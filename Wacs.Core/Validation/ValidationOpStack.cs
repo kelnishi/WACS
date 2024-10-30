@@ -7,7 +7,8 @@ namespace Wacs.Core.Validation
 {
     public interface IValidationOpStack
     {
-        public void Clear();
+        int Height { get; }
+        void Clear();
         void Push(ResultType types);
         void PushI32(int i32 = 0);
         void PushI64(long i64 = 0);
@@ -31,6 +32,10 @@ namespace Wacs.Core.Validation
     public class ValidationOpStack : IValidationOpStack
     {
         private readonly Stack<Value> _stack = new();
+
+        public bool Reachability { get; set; } = true;
+
+        public int Height => _stack.Count;
 
         public void Clear() => _stack.Clear();
 
@@ -111,7 +116,7 @@ namespace Wacs.Core.Validation
         public Value PopI32()
         {
             if (_stack.Count == 0)
-                throw new ValidationException("Operand stack underflow.");
+                throw new ValidationException("Operand stack underflow. pop(i32)");
 
             Value value = _stack.Pop();
             if (value.Type != ValType.I32)
@@ -123,7 +128,7 @@ namespace Wacs.Core.Validation
         public Value PopI64()
         {
             if (_stack.Count == 0)
-                throw new ValidationException("Operand stack underflow.");
+                throw new ValidationException("Operand stack underflow. pop(i64)");
 
             Value value = _stack.Pop();
             if (value.Type != ValType.I64)
@@ -135,7 +140,7 @@ namespace Wacs.Core.Validation
         public Value PopF32()
         {
             if (_stack.Count == 0)
-                throw new ValidationException("Operand stack underflow.");
+                throw new ValidationException("Operand stack underflow. pop(f32)");
 
             Value value = _stack.Pop();
             if (value.Type != ValType.F32)
@@ -147,7 +152,7 @@ namespace Wacs.Core.Validation
         public Value PopF64()
         {
             if (_stack.Count == 0)
-                throw new ValidationException("Operand stack underflow.");
+                throw new ValidationException("Operand stack underflow. pop(f64)");
 
             Value value = _stack.Pop();
             if (value.Type != ValType.F64)
@@ -159,7 +164,7 @@ namespace Wacs.Core.Validation
         public Value PopV128()
         {
             if (_stack.Count == 0)
-                throw new ValidationException("Operand stack underflow.");
+                throw new ValidationException("Operand stack underflow. pop(v128)");
 
             Value value = _stack.Pop();
             if (value.Type != ValType.V128)
@@ -171,7 +176,7 @@ namespace Wacs.Core.Validation
         public Value PopRefType()
         {
             if (_stack.Count == 0)
-                throw new ValidationException("Operand stack underflow.");
+                throw new ValidationException("Operand stack underflow. pop(ref)");
 
             Value value = _stack.Pop();
             switch (value.Type)
@@ -209,7 +214,7 @@ namespace Wacs.Core.Validation
         public Value PopType(ValType type)
         {
             if (_stack.Count == 0)
-                throw new ValidationException("Operand stack underflow.");
+                throw new ValidationException($"Operand stack underflow. pop({type})");
 
             Value value = _stack.Pop();
             if (value.Type != type)
@@ -222,7 +227,7 @@ namespace Wacs.Core.Validation
         public Value PopAny()
         {
             if (_stack.Count == 0)
-                throw new ValidationException("Operand stack underflow.");
+                throw new ValidationException("Operand stack underflow. pop(any)");
 
             return _stack.Pop();
         }
@@ -230,6 +235,8 @@ namespace Wacs.Core.Validation
 
     public class UnreachableOpStack : IValidationOpStack
     {
+        public int Height => 0;
+
         public void Clear()
         {
         }

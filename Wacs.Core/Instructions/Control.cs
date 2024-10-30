@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Wacs.Core.OpCodes;
@@ -69,22 +68,21 @@ namespace Wacs.Core.Instructions
                 
                 var label = new Label(funcType!.ResultType, new InstructionPointer(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
-
                 //Check the parameters [t1*]
-                context.OpStack.ValidateStack(funcType.ParameterTypes);
-
+                context.OpStack.ValidateStack(funcType.ParameterTypes, false);
+                //Clean stack with params
+                context.NewOpStack(funcType.ParameterTypes);
+                //Validate
                 context.ValidateBlock(Block);
-
-                if (context.Reachability)
-                {
-                    //Check the result [t2*]
-                    context.OpStack.ValidateStack(funcType.ResultType);
-                }
-                else
-                {
-                    context.Reachability = true;
+                //Check the result [t2*]
+                if (context.Reachability) {
+                    context.OpStack.ValidateStack(funcType.ResultType, false);
+                    if (context.OpStack.Height > 0)
+                        throw new InvalidDataException("Why do we still have operands?");
                 }
 
+                //Restore stack with results
+                context.FreeOpStack(funcType.ResultType);
                 context.ControlStack.Frame.Labels.Pop();
             }
             catch (IndexOutOfRangeException exc)
@@ -160,21 +158,20 @@ namespace Wacs.Core.Instructions
 
                 var label = new Label(funcType!.ResultType, new InstructionPointer(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
-
                 //Check the parameters [t1*]
-                context.OpStack.ValidateStack(funcType.ParameterTypes);
-
+                context.OpStack.ValidateStack(funcType.ParameterTypes, false);
+                //Clean stack with params
+                context.NewOpStack(funcType.ParameterTypes);
+                //Validate
                 context.ValidateBlock(Block);
-
-                if (context.Reachability)
-                {
-                    context.OpStack.ValidateStack(funcType.ResultType);
+                //Check the result [t2*]
+                if (context.Reachability) {
+                    context.OpStack.ValidateStack(funcType.ResultType, false);
+                    if (context.OpStack.Height > 0)
+                        throw new InvalidDataException("Why do we still have operands?");
                 }
-                else
-                {
-                    context.Reachability = true;
-                }
-
+                //Restore stack with results
+                context.FreeOpStack(funcType.ResultType);
                 context.ControlStack.Frame.Labels.Pop();
             }
             catch (IndexOutOfRangeException exc)
@@ -247,51 +244,49 @@ namespace Wacs.Core.Instructions
                 //Pop the predicate
                 context.OpStack.PopI32();
 
+                int height = context.OpStack.Height;
+
                 var funcType = context.Types.ResolveBlockType(IfBlock.Type);
                 context.Assert(funcType != null, () => $"Invalid BlockType: {IfBlock.Type}");
 
                 var label = new Label(funcType!.ResultType, new InstructionPointer(), OpCode.Block);
                 context.ControlStack.Frame.Labels.Push(label);
-
+                
                 //Check the parameters [t1*]
-                context.OpStack.ValidateStack(funcType.ParameterTypes);
-
+                context.OpStack.ValidateStack(funcType.ParameterTypes, false);
+                //Load the clean stack with parameters
+                context.NewOpStack(funcType.ParameterTypes);
+                //Validate
                 context.ValidateBlock(IfBlock, 0);
-
-                if (context.Reachability)
-                {
-                    context.OpStack.ValidateStack(funcType.ResultType, keep: ElseBlock.IsEmptyType);
-
-                    if (!ElseBlock.IsEmptyType)
-                    {
-                        foreach (var type in funcType.ParameterTypes.Types)
-                        {
-                            context.OpStack.PushType(type);
-                        }
-                    }
-                }
-                else
-                {
-                    context.Reachability = true;
+                //Check results
+                if (context.Reachability) {
+                    context.OpStack.ValidateStack(funcType.ResultType, keep: false);
+                    if (context.OpStack.Height > 0)
+                        throw new InvalidDataException("Why do we still have operands?");
                 }
 
+                //Restore the stack with results
+                context.FreeOpStack(funcType.ResultType);
+                
                 if (ElseBlock.Size == 0)
                 {
                     context.ControlStack.Frame.Labels.Pop();
                     return;
                 }
-
-                context.ValidateBlock(ElseBlock, 1);
-
-                if (context.Reachability)
-                {
-                    context.OpStack.ValidateStack(funcType.ResultType);
-                }
-                else
-                {
-                    context.Reachability = true;
-                }
                 
+                //For an Else case, do it again
+                //Load the clean stack with parameters
+                context.NewOpStack(funcType.ParameterTypes);
+                //Validate
+                context.ValidateBlock(IfBlock, 0);
+                //Check results
+                if (context.Reachability) {
+                    context.OpStack.ValidateStack(funcType.ResultType, keep: false);
+                    if (context.OpStack.Height > 0)
+                        throw new InvalidDataException("Why do we still have operands?");
+                }
+                //Restore the stack, results are already on the stack from the first block
+                context.FreeOpStack(ResultType.Empty);
                 context.ControlStack.Frame.Labels.Pop();
             }
             catch (IndexOutOfRangeException exc)
@@ -404,6 +399,7 @@ namespace Wacs.Core.Instructions
 
             //Validate results, but leave them on the stack
             context.OpStack.ValidateStack(label.Type, keep: true);
+            context.Reachability = false;
         }
 
         // @Spec 4.4.8.6. br l
@@ -577,7 +573,15 @@ namespace Wacs.Core.Instructions
         public override void Validate(WasmValidationContext context)
         {
             var returnType = context.ControlStack.Frame.Type.ResultType;
-            context.OpStack.ValidateStack(returnType, false);
+            //keep the results for the block or function to validate
+            context.OpStack.ValidateStack(returnType);
+            context.Reachability = false;
+            
+            //Push the results to the return stack
+            foreach (var type in returnType.Types)
+            {
+                context.ReturnStack.PushType(type);
+            }
         }
 
         // @Spec 4.4.8.9. return

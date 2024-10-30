@@ -9,8 +9,13 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class ModuleInstance
     {
-        public ModuleInstance(Module module) =>
+        public ModuleInstance(Module module)
+        {
             Types = new TypesSpace(module);
+            Repr = module;
+        }
+
+        public Module Repr { get; }
 
         public TypesSpace Types { get; }
         public FuncAddrs FuncAddrs { get; } = new();

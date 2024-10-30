@@ -18,13 +18,10 @@ namespace Wacs.Core.Validation
     {
         public delegate string MessageProducer();
 
-        private readonly ValidationOpStack _stack = new();
         private readonly UnreachableOpStack _stackPolymorphic = new();
 
-
+        private readonly Stack<ValidationOpStack> _stacks = new();
         private Stack<IValidationContext> _contextStack = new();
-
-        private bool _reachability;
 
         /// <summary>
         /// @Spec 3.1.1. Contexts
@@ -45,13 +42,18 @@ namespace Wacs.Core.Validation
 
             RootContext = rootContext;
             _contextStack.Push(rootContext);
-            
-            Reachability = true;
+            NewOpStack(ResultType.Empty);
+            ReturnStack = Stack;
         }
+
+        private ValidationOpStack Stack => _stacks.Peek();
 
         public ValidationContext<Module> RootContext { get; }
 
-        public IValidationOpStack OpStack => Reachability ? _stack : _stackPolymorphic;
+        public IValidationOpStack OpStack => Stack.Reachability ? Stack : _stackPolymorphic;
+
+        public IValidationOpStack ReturnStack { get; }
+
         public ValidationControlStack ControlStack { get; } = new();
 
         public Frame Frame => ControlStack.Frame;
@@ -71,13 +73,38 @@ namespace Wacs.Core.Validation
 
         public bool Reachability
         {
-            get => _reachability;
-            set
+            get => Stack.Reachability;
+            set => Stack.Reachability = value;
+        }
+
+        public void NewOpStack(ResultType parameters)
+        {
+            _stacks.Push(new ValidationOpStack());
+
+            foreach (var type in parameters.Types)
             {
-                if (value && !_reachability)
-                    _stack.Clear();
-                _reachability = value;
+                Stack.PushType(type);
             }
+        }
+
+        public void FreeOpStack(ResultType results)
+        {
+            if (_stacks.Count == 1)
+                throw new InvalidOperationException($"Validation Operand Stack underflow");
+            
+            _stacks.Pop();
+            
+            foreach (var type in results.Types)
+            {
+                Stack.PushType(type);
+            }
+        }
+
+        public void ClearOpStacks()
+        {
+            while (_stacks.Count > 1)
+                _stacks.Pop();
+            Stack.Clear();
         }
 
         public ValidationContext<T> PushSubContext<T>(T child, int index = -1)
@@ -148,6 +175,9 @@ namespace Wacs.Core.Validation
                         }
                         catch (ValidationException exc)
                         {
+                            string path = ctx.PropertyPath;
+                            int line = ctx.GetValidationContext().Frame.Module.Repr.CalculateLine(path, false, out var i);
+                            
                             ctx.AddFailure($"{ctx.PropertyPath}: {exc.Message}");
                         }
                         catch (InvalidDataException exc)
