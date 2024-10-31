@@ -14,7 +14,6 @@ namespace Wacs.Core.Runtime
 
         public ModuleInstance Module { get; }
         public LocalsSpace Locals { get; set; } = new();
-
         public InstructionPointer ContinuationAddress { get; set; } = InstructionPointer.Nil;
 
         public Label this[LabelIdx index] {
@@ -39,6 +38,9 @@ namespace Wacs.Core.Runtime
         public FunctionType Type { get; }
 
         public int Arity => (int)Type.ResultType.Length;
+
+        //For validation
+        public bool Unreachable { get; set; }
 
         public bool Contains(LabelIdx index) =>
             index.Value < Labels.Count;

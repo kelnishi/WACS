@@ -46,6 +46,7 @@ namespace Wacs.Console
             var funcsToRender = new HashSet<(FuncIdx, string)>();
             foreach (var error in validationResult.Errors)
             {
+                if (funcsToRender.Count > 100) break;
                 switch (error.Severity)
                 {
                     case Severity.Warning:
@@ -77,7 +78,7 @@ namespace Wacs.Console
                         break;
                 }
             }
-
+            
             foreach (var (fIdx, funcId) in funcsToRender)
             {
                 string funcString = ModuleRenderer.RenderFunctionWat(module, fIdx, "", true);
@@ -103,6 +104,7 @@ namespace Wacs.Console
             var wasi = new WASIp1.Wasi(Wasi.GetDefaultWasiConfiguration());
             wasi.BindToRuntime(runtime);
             
+            System.Console.WriteLine("Instantiating Module");
 
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing
             var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true });
@@ -112,6 +114,7 @@ namespace Wacs.Console
             
             var caller = runtime.CreateInvoker<Delegates.WasmAction>(mainAddr);
             
+            System.Console.WriteLine("Calling _start");
             caller();
             // System.Console.WriteLine($"Result was: {result}");
         }

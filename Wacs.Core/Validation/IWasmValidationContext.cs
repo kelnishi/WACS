@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Validation
@@ -6,14 +8,14 @@ namespace Wacs.Core.Validation
     {
         public IValidationOpStack OpStack { get; }
 
+        public Stack<ValidationControlFrame> ControlStack { get; }
+
+        //Reference to the top of the control stack
+        public ValidationControlFrame ControlFrame { get; }
+        public ResultType ReturnType { get; }
+        public bool Unreachable { get; set; }
+
         public TypesSpace Types { get; }
-
-        public ValidationControlStack ControlStack { get; }
-
-        public bool Reachability { get; set; }
-
-        public IValidationOpStack ReturnStack { get; }
-
         public FunctionsSpace Funcs { get; }
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }
@@ -21,13 +23,11 @@ namespace Wacs.Core.Validation
         public LocalsSpace Locals { get; }
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
+        public void PushControlFrame(ByteCode opCode, FunctionType types);
+        public ValidationControlFrame PopControlFrame();
+        public void SetUnreachable();
 
         public void Assert(bool factIsTrue, WasmValidationContext.MessageProducer message);
-
-        public void NewOpStack(ResultType parameters);
-
         public void ValidateBlock(Block instructionBlock, int index = 0);
-
-        public void FreeOpStack(ResultType results);
     }
 }
