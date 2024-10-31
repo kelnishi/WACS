@@ -114,7 +114,7 @@ namespace Wacs.Core.Runtime
             }
             
             var type = new FunctionType(paramValTypes, returnValType);
-            var funcAddr = AllocateHostFunc(Store, type, funcType, func);
+            var funcAddr = AllocateHostFunc(Store, id, type, funcType, func);
             _entityBindings[id] = funcAddr;
         }
 
@@ -149,6 +149,11 @@ namespace Wacs.Core.Runtime
                     Console.WriteLine($"Process used {steps} gas.");
                 
                 var results = Context.OpStack.PopScalars(funcType.ResultType);
+                
+                //void
+                if (funcType.ResultType.Types.Length == 0)
+                    return results;
+                
                 //TODO: Multiple result values?
                 return results[0];
             });
@@ -446,9 +451,9 @@ namespace Wacs.Core.Runtime
         /// <summary>
         /// @Spec 4.5.3.2. Host Functions
         /// </summary>
-        private static FuncAddr AllocateHostFunc(Store store, FunctionType funcType, Type delType, Delegate hostFunc)
+        private static FuncAddr AllocateHostFunc(Store store, (string module, string entity) id, FunctionType funcType, Type delType, Delegate hostFunc)
         {
-            var funcInst = new HostFunction(funcType, delType, hostFunc);
+            var funcInst = new HostFunction(id, funcType, delType, hostFunc);
             var funcAddr = store.AddFunction(funcInst);
             return funcAddr;
         }
