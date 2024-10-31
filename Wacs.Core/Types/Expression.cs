@@ -31,7 +31,7 @@ namespace Wacs.Core.Types
         /// Leaves the result on the OpStack
         /// </summary>
         /// <param name="context"></param>
-        public void Execute(ExecContext context)
+        public void Execute(ExecContext? context)
         {
             var frame = new Frame(context.Frame.Module, FunctionType.Empty);
             var label = new Label(ResultType.Empty, new InstructionPointer(Instructions, 1), OpCode.Nop);
@@ -51,7 +51,6 @@ namespace Wacs.Core.Types
         public static Expression Parse(BinaryReader reader) =>
             new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd)));
 
-
         /// <summary>
         /// For Single instruction renders (globals, elements)
         /// </summary>
@@ -59,7 +58,7 @@ namespace Wacs.Core.Types
         public string ToWat()
         {
             var inst = this.Instructions[0];
-            var instText = $" ({inst.RenderText(0)})";
+            var instText = $" ({inst.RenderText(null)})";
             return instText;
         }
 

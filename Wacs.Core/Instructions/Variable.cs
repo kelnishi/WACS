@@ -29,7 +29,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {Index.Value}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Index.Value}";
 
         public static LocalVariableInst CreateInstLocalGet() => new(OpCode.LocalGet, ExecuteLocalGet, ValidateLocalGet);
         public static LocalVariableInst CreateInstLocalSet() => new(OpCode.LocalSet, ExecuteLocalSet, ValidateLocalSet);
@@ -114,7 +114,7 @@ namespace Wacs.Core.Instructions
             ExecuteLocalSet(context, localIndex);
         }
 
-        private delegate void ExecuteDelegate(ExecContext context, LocalIdx localIndex);
+        private delegate void ExecuteDelegate(ExecContext? context, LocalIdx localIndex);
 
         private delegate void ValidationDelegate(IWasmValidationContext context, LocalIdx localIndex);
     }
@@ -140,7 +140,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {Index.Value}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Index.Value}";
 
         public static GlobalVariableInst CreateInstGlobalGet() => new(OpCode.GlobalGet, ExecuteGlobalGet, ValidateGlobalGet);
         public static GlobalVariableInst CreateInstGlobalSet() => new(OpCode.GlobalSet, ExecuteGlobalSet, ValidateGlobalSet);
@@ -211,7 +211,7 @@ namespace Wacs.Core.Instructions
 
         }
 
-        private delegate void ExecuteDelegate(ExecContext context, GlobalIdx index);
+        private delegate void ExecuteDelegate(ExecContext? context, GlobalIdx index);
 
         private delegate void ValidationDelegate(IWasmValidationContext context, GlobalIdx index);
     }

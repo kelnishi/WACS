@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using FluentValidation;
 using Wacs.Core.Types;
@@ -11,7 +12,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.10. Exports
         /// </summary>
-        public Export[] Exports { get; internal set; } = null!;
+        public Export[] Exports { get; internal set; } = Array.Empty<Export>();
 
         /// <summary>
         /// @Spec 2.5.10. Exports

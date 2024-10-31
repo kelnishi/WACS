@@ -1,3 +1,4 @@
+using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
@@ -14,7 +15,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.11. Imports
         /// </summary>
-        public Import[] Imports { get; internal set; } = null!;
+        public Import[] Imports { get; internal set; } = Array.Empty<Import>();
 
         public ReadOnlyCollection<Function> ImportedFunctions =>
             Imports

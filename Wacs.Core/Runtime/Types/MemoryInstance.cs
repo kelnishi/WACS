@@ -23,16 +23,8 @@ namespace Wacs.Core.Runtime.Types
 
         public long Size => _data.Length / Constants.PageSize;
 
-        public Span<byte> this[Range range]
-        {
-            get
-            {
-                var (start, length) = range.GetOffsetAndLength(_data.Length);
-                int end = Math.Min(start + length, _data.Length);
-                Span<byte> span = _data[start..end];
-                return span;
-            }
-        }
+        //TODO bounds checking?
+        public Span<byte> this[Range range] => _data.AsSpan(range);
 
         /// <summary>
         /// @Spec 4.5.3.9. Growing memories

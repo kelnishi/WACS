@@ -10,7 +10,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.5. Memories
         /// </summary>
-        public List<MemoryType> Memories { get; internal set; } = null!;
+        public List<MemoryType> Memories { get; internal set; } = new();
     }
     
     public static partial class BinaryModuleParser

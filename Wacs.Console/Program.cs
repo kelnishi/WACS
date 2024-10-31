@@ -38,8 +38,8 @@ namespace Wacs.Console
             using var fileStream = new FileStream(wasmFilePath, FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
             
-            // using var outputStream = new FileStream("output.wat", FileMode.Create);
-            // ModuleRenderer.RenderWatToStream(outputStream, module);
+            using var outputStream = new FileStream("output.wat", FileMode.Create);
+            ModuleRenderer.RenderWatToStream(outputStream, module);
             
             //If you just want to do validation without a runtime, you could do it like this
             var validationResult = module.Validate();
@@ -105,17 +105,23 @@ namespace Wacs.Console
             wasi.BindToRuntime(runtime);
             
             System.Console.WriteLine("Instantiating Module");
-
+            
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing
             var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true });
             runtime.RegisterModule("hello", modInst);
+            return;
 
-            var mainAddr = runtime.GetExportedFunction(("hello", "_start"));
-            
-            var caller = runtime.CreateInvoker<Delegates.WasmAction>(mainAddr);
-            
-            System.Console.WriteLine("Calling _start");
-            caller();
+            // var mainAddr = runtime.GetExportedFunction(("hello", "_start"));
+            //
+            // var options = new InvokerOptions
+            // {
+            //     LogGas = true,
+            //     LogInstructionExecution = true,
+            // };
+            // var caller = runtime.CreateInvoker<Delegates.WasmAction>(mainAddr, options);
+            //
+            // System.Console.WriteLine("Calling _start");
+            // caller();
             // System.Console.WriteLine($"Result was: {result}");
         }
     }

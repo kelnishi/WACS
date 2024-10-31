@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
@@ -44,5 +45,19 @@ namespace Wacs.Core.Runtime
 
         public bool Contains(LabelIdx index) =>
             index.Value < Labels.Count;
+
+        public void ForceLabels(int depth)
+        {
+            while (Labels.Count < depth)
+            {
+                var fakeLabel = new Label(ResultType.Empty, InstructionPointer.Nil, OpCode.Nop);
+                Labels.Push(fakeLabel);
+            }
+
+            while (Labels.Count > depth)
+            {
+                Labels.Pop();
+            }
+        }
     }
 }

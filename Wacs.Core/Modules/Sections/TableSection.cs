@@ -10,7 +10,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.4. Tables
         /// </summary>
-        public List<TableType> Tables { get; internal set; } = null!;
+        public List<TableType> Tables { get; internal set; } = new();
     }
     
     public static partial class BinaryModuleParser

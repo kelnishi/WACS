@@ -10,7 +10,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.2. Types
         /// </summary>
-        public List<FunctionType> Types { get; internal set; }  = null!;
+        public List<FunctionType> Types { get; internal set; } = new();
     }
     
     public static partial class BinaryModuleParser

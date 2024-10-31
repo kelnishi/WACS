@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Linq;
 using FluentValidation;
@@ -15,7 +16,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.7. Element Segments
         /// </summary>
-        public ElementSegment[] Elements { get; internal set; } = null!;
+        public ElementSegment[] Elements { get; internal set; } = Array.Empty<ElementSegment>();
 
         /// <summary>
         /// @Spec 2.5.7. Element Segments

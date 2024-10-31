@@ -148,18 +148,18 @@ namespace Wacs.Core
 
         public static void PatchNames(Module module)
         {
-            //throw new NotImplementedException();
-            // if (module.Names != null)
-            // {
-            //     if (module.Names.FunctionNames != null)
-            //     {
-            //         foreach (var kv in module.Names.FunctionNames.Names.NameAssocMap)
-            //         {
-            //             
-            //             // module.Funcs[]
-            //         }
-            //     }
-            // }
+            if (module.Names?.FunctionNames != null)
+                foreach (var kv in module.Names.FunctionNames.Names.NameAssocMap)
+                {
+                    if (kv.Key > 0 && kv.Key < module.Funcs.Count)
+                        module.Funcs[(int)kv.Key].Id = kv.Value;
+                }
+
+            if (module.Names?.LocalNames != null)
+                foreach (var kv in module.Names.LocalNames.Names.IndirectNameAssocMap)
+                {
+                    //???
+                }
         }
     }
 }

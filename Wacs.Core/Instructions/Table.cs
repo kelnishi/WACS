@@ -29,7 +29,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.6.1. table.get 
         public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
 
-        public static void ExecuteInstruction(ExecContext context, TableIdx tableIndex)
+        public static void ExecuteInstruction(ExecContext? context, TableIdx tableIndex)
         {
             //2.
             context.Assert(() => context.Frame.Module.TableAddrs.Contains(tableIndex),
@@ -66,7 +66,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {X.Value}";
     }
 
     // 0x26
@@ -88,7 +88,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.6.2. table.set
         public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
 
-        public static void ExecuteInstruction(ExecContext context, TableIdx tableIndex)
+        public static void ExecuteInstruction(ExecContext? context, TableIdx tableIndex)
         {
             //2.
             context.Assert(() => context.Frame.Module.TableAddrs.Contains(tableIndex),
@@ -128,7 +128,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {X.Value}";
     }
 
     // 0xFC0C
@@ -244,7 +244,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value} {Y.Value}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {X.Value} {Y.Value}";
     }
 
     // 0xFC0F
@@ -288,7 +288,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {X.Value}";
     }
 
     // 0xFC0E
@@ -414,7 +414,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {DstX.Value} {SrcY.Value}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {DstX.Value} {SrcY.Value}";
     }
 
     // 0xFC0F
@@ -480,7 +480,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {X.Value}";
     }
 
     // 0xFC10
@@ -524,7 +524,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {X.Value}";
     }
 
     // 0xFC11
@@ -610,6 +610,6 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {X.Value}";
     }
 }

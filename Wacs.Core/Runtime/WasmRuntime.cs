@@ -20,9 +20,9 @@ namespace Wacs.Core.Runtime
 
     public class InvokerOptions
     {
-        public readonly int GasLimit = 0;
-        public readonly bool LogGas = false;
-        public readonly bool LogInstructions = false;
+        public int GasLimit = 0;
+        public bool LogGas = false;
+        public bool LogInstructionExecution = false;
     }
 
     public class WasmRuntime
@@ -39,7 +39,7 @@ namespace Wacs.Core.Runtime
 
         private Store Store { get; }
 
-        private ExecContext Context { get; }
+        private ExecContext? Context { get; }
 
         public IInstructionFactory InstructionFactory => Context.InstructionFactory;
 
@@ -59,6 +59,7 @@ namespace Wacs.Core.Runtime
                     _ => throw new InvalidDataException($"Corrupted Export Instance in {moduleName} ({export.Name})"),
                 };
             }
+            moduleInstance.Name = moduleName;
         }
 
         public ModuleInstance GetModule(string moduleName)
@@ -132,7 +133,7 @@ namespace Wacs.Core.Runtime
                 Context.Invoke(funcAddr);
                 
                 int steps = 0;
-                while (ProcessThread(options.LogInstructions))
+                while (ProcessThread(options.LogInstructionExecution))
                 {
                     steps += 1;
 
@@ -168,7 +169,9 @@ namespace Wacs.Core.Runtime
             
             //Trace execution
             if (logInstructions)
-                Console.WriteLine($"Instruction: {comp.Op.GetMnemonic()}");
+            {
+                Console.WriteLine($"Instruction: {comp.RenderText(Context)}");
+            }
 
             comp.Execute(Context);
             return true;
@@ -196,6 +199,10 @@ namespace Wacs.Core.Runtime
                             throw new NotSupportedException(
                                 $"The imported Function was not provided by the environment: {entityId.module}.{entityId.entity} {funcSig.ToNotation()}");
                         var functionInstance = Store[funcAddr];
+                        if (functionInstance is FunctionInstance wasmFunc)
+                        {
+                            wasmFunc.SetName(entityId.entity);
+                        }
                         if (!functionInstance.Type.Matches(funcSig))
                             throw new NotSupportedException(
                                 $"Type mismatch while importing Function {entityId.module}.{entityId.entity}: expected {funcSig.ToNotation()}, env provided Function {functionInstance.Type.ToNotation()}");
@@ -245,7 +252,7 @@ namespace Wacs.Core.Runtime
             //8. index ordered function addresses
             foreach (var func in module.Funcs)
             {
-                moduleInstance.FuncAddrs.Add(AllocateFunc(Store, func, moduleInstance));
+                moduleInstance.FuncAddrs.Add(AllocateWasmFunc(Store, func, moduleInstance));
             }
 
             //3. Allocate Tables and capture their addresses in the Store
@@ -315,6 +322,17 @@ namespace Wacs.Core.Runtime
                 var exportInstance = new ExportInstance(export.Name, val);
                 //19. indexed export addresses
                 moduleInstance.Exports.Add(exportInstance);
+            }
+
+            //Patch in export names
+            var exportedFuncs = moduleInstance.Exports
+                .Where(exp => exp.Value is ExternalValue.Function);
+            foreach (var export in exportedFuncs)
+            {
+                var funcDesc = export.Value as ExternalValue.Function;
+                var funcAddr = funcDesc!.Address;
+                var funcInst = Store[funcAddr];
+                funcInst.SetName(export.Name);
             }
 
             return moduleInstance;
@@ -439,12 +457,9 @@ namespace Wacs.Core.Runtime
         /// <summary>
         /// @Spec 4.5.3.1. Functions
         /// </summary>
-        private static FuncAddr AllocateFunc(Store store, Module.Function func, ModuleInstance moduleInst)
+        private static FuncAddr AllocateWasmFunc(Store store, Module.Function func, ModuleInstance moduleInst)
         {
-            var funcType = moduleInst.Types[func.TypeIndex];
-            var funcInst = new FunctionInstance(funcType, moduleInst, func);
-            var funcAddr = store.AddFunction(funcInst);
-            return funcAddr;
+            return store.AllocateWasmFunction(func, moduleInst);
         }
 
         /// <summary>
@@ -452,9 +467,7 @@ namespace Wacs.Core.Runtime
         /// </summary>
         private static FuncAddr AllocateHostFunc(Store store, (string module, string entity) id, FunctionType funcType, Type delType, Delegate hostFunc)
         {
-            var funcInst = new HostFunction(id, funcType, delType, hostFunc);
-            var funcAddr = store.AddFunction(funcInst);
-            return funcAddr;
+            return store.AllocateHostFunction(id, funcType, delType, hostFunc);
         }
 
         /// <summary>

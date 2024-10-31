@@ -28,7 +28,7 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// Render the instruction at a given label stack depth
         /// </summary>
-        string RenderText(int depth);
+        string RenderText(ExecContext? context);
 
         public static bool IsEnd(IInstruction inst) => inst.Op.x00 == OpCode.End;
 
