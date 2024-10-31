@@ -55,7 +55,7 @@ namespace Wacs.Core.Utilities
 
             while (true)
             {
-                int byteValue = reader.ReadSByte();
+                int byteValue = reader.ReadByte();
                 if (byteValue == -1)
                     throw new EndOfStreamException("Unexpected end of stream while decoding s64.");
 
