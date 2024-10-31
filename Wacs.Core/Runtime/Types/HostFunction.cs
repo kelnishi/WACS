@@ -29,13 +29,19 @@ namespace Wacs.Core.Runtime.Types
         /// <param name="delType">The System.Type of the delegate must match type.</param>
         /// <param name="hostFunction">The delegate representing the host function.</param>
         /// <param name="passCtx">True if the specified function type had Store as the first type</param>
-        public HostFunction(FunctionType type, Type delType, Delegate hostFunction)
+        public HostFunction((string module, string entity) id, FunctionType type, Type delType, Delegate hostFunction)
         {
             Type = type;
             _hostFunction = hostFunction;
             _invoker = delType.GetMethod("Invoke")!;
+            (ModuleName, Name) = id;
             BuildConversionHelpers();
         }
+
+        public bool PassExecContext { get; set; }
+
+        public string ModuleName { get; }
+        public string Name { get; }
 
         public FunctionType Type { get; }
 
@@ -46,9 +52,16 @@ namespace Wacs.Core.Runtime.Types
             for (int i = 0; i < parameters.Length; i++)
             {
                 var paramType = parameters[i].ParameterType;
+                if (paramType == typeof(ExecContext))
+                {
+                    if (i > 0)
+                        throw new ArgumentException($"Host binding ({ModuleName} {Name}) has invalid parameters. ExecContext may only be the first parameter");
+                    PassExecContext = true;
+                }
 
                 _parameterConversions[i] = paramType switch
                 {
+                    { } t when t == typeof(ExecContext) => wasmValue => wasmValue,
                     { } t when t == typeof(char) => wasmValue => (char)(int)wasmValue,
                     { } t when t == typeof(byte) => wasmValue => (byte)(int)wasmValue,
                     { } t when t == typeof(sbyte) => wasmValue => (sbyte)(int)wasmValue,

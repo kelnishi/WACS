@@ -164,7 +164,7 @@ namespace Wacs.Core.Runtime
             var vals = OpStack.PopScalars(funcType.ParameterTypes);
 
             //Prepend the context if it's needed
-            if (funcType.ParameterTypes.Types[0] == ValType.ExecContext)
+            if (hostFunc.PassExecContext)
             {
                 vals = new object[] { this }.Concat(vals).ToArray();
             }
