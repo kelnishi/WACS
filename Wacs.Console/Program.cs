@@ -101,7 +101,7 @@ namespace Wacs.Console
             });
             
             
-            var wasi = new WASIp1.Wasi(Wasi.GetDefaultWasiConfiguration());
+            var wasi = new WASIp1.Wasi(Wasi.DefaultConfiguration());
             wasi.BindToRuntime(runtime);
             
             System.Console.WriteLine("Instantiating Module");
