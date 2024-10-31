@@ -8,7 +8,7 @@ namespace Wacs.Console
 {
     public static class Wasi
     {
-        public static WasiConfiguration GetDefaultWasiConfiguration() =>
+        public static WasiConfiguration DefaultConfiguration() =>
             new() {
                 StandardInput = System.Console.OpenStandardInput(),
                 StandardOutput = System.Console.OpenStandardOutput(),
@@ -24,4 +24,5 @@ namespace Wacs.Console
                 HostRootDirectory = Directory.GetCurrentDirectory(),
             };
     }
+
 }
