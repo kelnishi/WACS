@@ -54,20 +54,7 @@ namespace Wacs.Core.Validation
 
         public ResultType ReturnType => ExecFrame.Type.ResultType;
 
-        public IValidationOpStack OpStack
-        {
-            get
-            {
-                // if (ControlFrame.Unreachable && Stack.Height == ControlFrame.Height)
-                //     return _stackPolymorphic;
-                //
-                // //TODO make validation context harness all pops to check for unreachability
-                // // if (Stack.Height == ControlFrame.Height)
-                // //     throw new ValidationException("Validation Stack underflow");
-                
-                return Stack;
-            }
-        }
+        public IValidationOpStack OpStack => Stack;
 
         public Stack<ValidationControlFrame> ControlStack { get; } = new();
         public ValidationControlFrame ControlFrame => ControlStack.Peek();
