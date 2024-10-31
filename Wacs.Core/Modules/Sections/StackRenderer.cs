@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
@@ -23,7 +24,7 @@ namespace Wacs.Core
             throw new InvalidOperationException();
         }
 
-        public void Push(ResultType types)
+        public void PushResult(ResultType types)
         {
             foreach (var type in types.Types) {
                 _context.Push(type);
@@ -38,6 +39,11 @@ namespace Wacs.Core
         public void PushFuncref(Value value) => _context.Push(ValType.Funcref);
         public void PushExternref(Value value) => _context.Push(ValType.Externref);
         public void PushType(ValType type) => _context.Push(type);
+
+        public void PushValues(Stack<Value> vals) {
+            while (vals.Count > 0) _context.Push(vals.Pop().Type);
+        }
+
         public Value PopI32() => _context.Pop(ValType.I32);
         public Value PopI64() => _context.Pop(ValType.I64);
         public Value PopF32() => _context.Pop(ValType.F32);
@@ -45,7 +51,29 @@ namespace Wacs.Core
         public Value PopV128() => _context.Pop(ValType.V128);
         public Value PopRefType() => _context.Pop(ValType.Funcref);
 
-        public void ValidateStack(ResultType types, bool keep = true)
+        public Value PopType(ValType type) => _context.Pop(type);
+        public Value PopAny() => _context.Pop(ValType.Nil);
+
+        public Stack<Value> PopValues(ResultType types)
+        {
+            var aside = new Stack<Value>();
+            foreach (var type in types.Types.Reverse())
+            {
+                var stackType = PopAny();
+                aside.Push(stackType);
+            }
+            return aside;
+        }
+
+        public void ReturnResults(ResultType types)
+        {
+            foreach (var type in types.Types)
+            {
+                PushType(type);
+            }
+        }
+
+        public void PopValues(ResultType types, bool keep = true)
         {
             var aside = new Stack<Value>();
             //Pop vals off the stack
@@ -66,9 +94,6 @@ namespace Wacs.Core
                     PushType(p.Type);
             }
         }
-
-        public Value PopType(ValType type) => _context.Pop(type);
-        public Value PopAny() => _context.Pop(ValType.Nil);
     }
     
     public class FakeContext : IWasmValidationContext
@@ -97,42 +122,79 @@ namespace Wacs.Core
 
             _opStack = new FakeOpStack(this);
             
-            PushFrame(func);
+            var funcType = Types[func.TypeIndex];
+            var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
+            var locals = new LocalsSpace(funcType.ParameterTypes.Types, func.Locals);
+            ExecFrame = new Frame(ValidationModule, fakeType) { Locals = locals };
+            ReturnType = funcType.ResultType;
+            PushControlFrame(OpCode.Block, fakeType);
         }
 
         private ModuleInstance ValidationModule { get; }
+
+        public IValidationOpStack ReturnStack => _opStack;
+
+        private Frame ExecFrame { get; set; } = null!;
         public IValidationOpStack OpStack => _opStack;
 
         public void Assert(bool factIsTrue, WasmValidationContext.MessageProducer message) {}
 
-        public ValidationControlStack ControlStack { get; } = new();
+        public Stack<ValidationControlFrame> ControlStack { get; } = new();
+        public ValidationControlFrame ControlFrame { get; }
 
-        public void NewOpStack(ResultType parameters) {}
+        public void PushControlFrame(ByteCode opCode, FunctionType types)
+        {
+            var frame = new ValidationControlFrame
+            {
+                Opcode = opCode,
+                Types = types,
+                Height = OpStack.Height,
+            };
+            
+            ControlStack.Push(frame);
+            
+            OpStack.PushResult(types.ParameterTypes);
+        }
+
+        public ValidationControlFrame PopControlFrame()
+        {
+            if (ControlStack.Count == 0)
+                throw new InvalidDataException("Control Stack underflow");
+            
+            //Check to make sure we have the correct results
+            OpStack.PopValues(ControlFrame.EndTypes);
+            
+            //Reset the stack
+            if (OpStack.Height != ControlFrame.Height)
+                throw new InvalidDataException($"Operand stack height {OpStack.Height} differed from Control Frame height {ControlFrame.Height}");
+            
+            return ControlStack.Pop();
+        }
+
+        public ResultType ReturnType { get; }
 
         public void ValidateBlock(Block instructionBlock, int index = 0) { }
 
-        public bool Reachability { get; set; }
+        public bool Unreachable { get; set; }
 
-        public void FreeOpStack(ResultType results) {}
-
-        public IValidationOpStack ReturnStack => _opStack;
+        public void SetUnreachable()
+        {
+            //reset the height to the controlstack height
+            Unreachable = true;
+        }
 
         public TypesSpace Types { get; }
         public FunctionsSpace Funcs { get; }
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
-        public LocalsSpace Locals => ControlStack.Frame.Locals;
+        public LocalsSpace Locals => ExecFrame.Locals;
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
 
-        private void PushFrame(Module.Function func)
-        {
-            var funcType = Types[func.TypeIndex];
-            var locals = new LocalsSpace(funcType.ParameterTypes.Types, func.Locals);
-            var frame = new Frame(ValidationModule, funcType) { Locals = locals };
-            ControlStack.PushFrame(frame);
-        }
+        public void NewOpStack(ResultType parameters) {}
+
+        public void FreeOpStack(ResultType results) {}
 
         public void Push(ValType type)
         {
@@ -204,31 +266,33 @@ namespace Wacs.Core
 
         public void ProcessBlockInstruction(IBlockInstruction inst)
         {
-            var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
-            var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
-            FakeContext.ControlStack.Frame.Labels.Push(label);
-            FakeContext.OpStack.ValidateStack(funcType.ParameterTypes, false);
-            FakeContext.Push(ValType.ExecContext);
-            FakeContext.OpStack.Push(funcType.ParameterTypes);
+            FakeContext.lastEvent = "[";
+            (inst as IInstruction)!.Validate(FakeContext);
+            // var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
+            // var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
+            //
+            // FakeContext.OpStack.PopValues(funcType.ParameterTypes);
+            // FakeContext.Push(ValType.ExecContext);
+            // FakeContext.OpStack.PushResult(funcType.ParameterTypes);
         }
 
         public void ElseBlockInstruction(IBlockInstruction inst)
         {
-            var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
-            FakeContext.lastEvent = "]";
-            FakeContext.ControlStack.Frame.Labels.Pop();
-            FakeContext.OpStack.ValidateStack(funcType.ResultType, false);
-            FakeContext.Pop(ValType.ExecContext);
+            // var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
+            FakeContext.lastEvent = "][";
+            (inst as IInstruction)!.Validate(FakeContext);
+            // FakeContext.OpStack.PopValues(funcType.ResultType);
+            // FakeContext.Pop(ValType.ExecContext);
         }
 
         public void EndBlockInstruction(IBlockInstruction inst)
         {
-            var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
+            // var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
             FakeContext.lastEvent = "]";
-            FakeContext.ControlStack.Frame.Labels.Pop();
-            FakeContext.OpStack.ValidateStack(funcType.ResultType, false);
-            FakeContext.Pop(ValType.ExecContext);
-            FakeContext.OpStack.Push(funcType.ResultType);
+            (inst as IInstruction)!.Validate(FakeContext);
+            // FakeContext.OpStack.PopValues(funcType.ResultType);
+            // FakeContext.Pop(ValType.ExecContext);
+            // FakeContext.OpStack.PushResult(funcType.ResultType);
         }
 
         public void ProcessInstruction(IInstruction inst)

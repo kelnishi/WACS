@@ -79,6 +79,10 @@ namespace Wacs.Core.Types
                             ctx.AddFailure($"Expression must be constant");
 
                     var validationContext = ctx.GetValidationContext();
+
+                    var funcType = new FunctionType(ResultType.Empty, resultType);
+                    validationContext.PushControlFrame(OpCode.Block, funcType);
+                    
                     int instIdx = 0;
                     
                     var instructionValidator = new WasmValidationContext.InstructionValidator();
@@ -98,7 +102,9 @@ namespace Wacs.Core.Types
 
                     try
                     {
-                        validationContext.OpStack.ValidateStack(resultType, keep: false);
+                        validationContext.OpStack.PopValues(resultType);
+                        if (validationContext.OpStack.Height != 0)
+                            throw new ValidationException($"Expression had leftover operands on the stack");
                     }
                     catch (ValidationException exc)
                     {

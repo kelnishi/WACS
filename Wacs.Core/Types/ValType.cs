@@ -64,7 +64,11 @@ namespace Wacs.Core.Types
 
         // Additional types from future extensions can be added here.
         
+        
         //Special types
+        
+        [WatToken("Unknown")] Unknown = 0xFC, //for validation
+        
         ExecContext = 0xFD,
         Nil = 0xFE,
         Undefined = 0xFF,

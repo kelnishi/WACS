@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using FluentValidation;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -9,7 +10,7 @@ namespace Wacs.Core.Validation
     {
         int Height { get; }
         void Clear();
-        void Push(ResultType types);
+        void PushResult(ResultType types);
         void PushI32(int i32 = 0);
         void PushI64(long i64 = 0);
         void PushF32(float f32 = 0.0f);
@@ -18,28 +19,31 @@ namespace Wacs.Core.Validation
         void PushFuncref(Value value);
         void PushExternref(Value value);
         void PushType(ValType type);
+        void PushValues(Stack<Value> vals);
         Value PopI32();
         Value PopI64();
         Value PopF32();
         Value PopF64();
         Value PopV128();
         Value PopRefType();
-        void ValidateStack(ResultType types, bool keep = true);
         Value PopType(ValType type);
         Value PopAny();
+
+        Stack<Value> PopValues(ResultType types);
+        public void ReturnResults(ResultType type);
     }
 
     public class ValidationOpStack : IValidationOpStack
     {
         private readonly Stack<Value> _stack = new();
 
-        public bool Reachability { get; set; } = true;
+        public bool Unreachable { get; set; } = false;
 
         public int Height => _stack.Count;
 
         public void Clear() => _stack.Clear();
 
-        public void Push(ResultType types)
+        public void PushResult(ResultType types)
         {
             foreach (var type in types.Types)
             {
@@ -111,6 +115,12 @@ namespace Wacs.Core.Validation
         public void PushType(ValType type)
         {
             _stack.Push(new Value(type));
+        }
+
+        public void PushValues(Stack<Value> vals)
+        {
+            while (vals.Count > 0)
+                _stack.Push(vals.Pop());
         }
 
         public Value PopI32()
@@ -190,24 +200,24 @@ namespace Wacs.Core.Validation
             }
         }
 
-        public void ValidateStack(ResultType types, bool keep = true)
+        public Stack<Value> PopValues(ResultType types)
         {
             var aside = new Stack<Value>();
-            //Pop vals off the stack
-            for (int i = 0, l = types.Types.Length; i < l; ++i)
+            foreach (var type in types.Types.Reverse())
             {
-                var v = PopAny();
-                aside.Push(v);
+                var stackType = PopAny();
+                if (stackType.Type != type)
+                    throw new ValidationException("Invalid Operand Stack did not match ResultType");
+                aside.Push(stackType);
             }
+            return aside;
+        }
 
-            //Check that they match ResultType and push them back on
+        public void ReturnResults(ResultType types)
+        {
             foreach (var type in types.Types)
             {
-                var p = aside.Pop();
-                if (p.Type != type)
-                    throw new ValidationException("Invalid Operand Stack did not match ResultType");
-                if (keep)
-                    PushType(p.Type);
+                PushType(type);
             }
         }
 
@@ -235,13 +245,14 @@ namespace Wacs.Core.Validation
 
     public class UnreachableOpStack : IValidationOpStack
     {
+        public bool Unreachable { get => true; set {} }
         public int Height => 0;
 
         public void Clear()
         {
         }
 
-        public void Push(ResultType types)
+        public void PushResult(ResultType types)
         {
         }
 
@@ -277,6 +288,10 @@ namespace Wacs.Core.Validation
         {
         }
 
+        public void PushValues(Stack<Value> vals)
+        {
+        }
+
         public Value PopI32() => new(ValType.I32);
 
         public Value PopI64() => new(ValType.I64);
@@ -289,9 +304,9 @@ namespace Wacs.Core.Validation
 
         public Value PopRefType() => new(ValType.Funcref);
 
-        public void ValidateStack(ResultType types, bool keep = true)
-        {
-        }
+        public Stack<Value> PopValues(ResultType types) => new();
+
+        public void ReturnResults(ResultType types) { }
 
         public Value PopType(ValType type) => new(type);
 

@@ -20,7 +20,6 @@ namespace Wacs.Core.Validation
 
         private readonly UnreachableOpStack _stackPolymorphic = new();
 
-        private readonly Stack<ValidationOpStack> _stacks = new();
         private Stack<IValidationContext> _contextStack = new();
 
         /// <summary>
@@ -42,62 +41,58 @@ namespace Wacs.Core.Validation
 
             RootContext = rootContext;
             _contextStack.Push(rootContext);
-            NewOpStack(ResultType.Empty);
-            ReturnStack = Stack;
         }
 
-        private ValidationOpStack Stack => _stacks.Peek();
+        private Frame ExecFrame { get; set; } = null!;
+
+        private ValidationOpStack Stack { get; } = new();
 
         public ValidationContext<Module> RootContext { get; }
 
-        public Frame Frame => ControlStack.Frame;
-
-        public ResultType Return => Frame.Type.ResultType;
-
+        public ResultType Return => ControlFrame.EndTypes;
         private ModuleInstance ValidationModule { get; }
 
-        public IValidationOpStack OpStack => Stack.Reachability ? Stack : _stackPolymorphic;
+        public ResultType ReturnType => ExecFrame.Type.ResultType;
 
-        public IValidationOpStack ReturnStack { get; }
+        public IValidationOpStack OpStack
+        {
+            get
+            {
+                // if (ControlFrame.Unreachable && Stack.Height == ControlFrame.Height)
+                //     return _stackPolymorphic;
+                //
+                // //TODO make validation context harness all pops to check for unreachability
+                // // if (Stack.Height == ControlFrame.Height)
+                // //     throw new ValidationException("Validation Stack underflow");
+                
+                return Stack;
+            }
+        }
 
-        public ValidationControlStack ControlStack { get; } = new();
-
+        public Stack<ValidationControlFrame> ControlStack { get; } = new();
+        public ValidationControlFrame ControlFrame => ControlStack.Peek();
         public TypesSpace Types => ValidationModule.Types;
         public FunctionsSpace Funcs { get; }
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
-        public LocalsSpace Locals => ControlStack.Frame.Locals;
+        public LocalsSpace Locals => ExecFrame.Locals;
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
 
-        public bool Reachability
+        public bool Unreachable
         {
-            get => Stack.Reachability;
-            set => Stack.Reachability = value;
+            get => ControlFrame.Unreachable;
+            set => ControlFrame.Unreachable = value;
         }
 
-        public void NewOpStack(ResultType parameters)
+        /// <summary>
+        /// @Spec A.3 Validation Algorithm
+        /// </summary>
+        public void SetUnreachable()
         {
-            _stacks.Push(new ValidationOpStack());
-
-            foreach (var type in parameters.Types)
-            {
-                Stack.PushType(type);
-            }
-        }
-
-        public void FreeOpStack(ResultType results)
-        {
-            if (_stacks.Count == 1)
-                throw new InvalidOperationException($"Validation Operand Stack underflow");
-            
-            _stacks.Pop();
-            
-            foreach (var type in results.Types)
-            {
-                Stack.PushType(type);
-            }
+            PopOperandsToHeight(ControlFrame.Height);
+            ControlFrame.Unreachable = true;
         }
 
         public void Assert(bool factIsTrue, MessageProducer message)
@@ -135,11 +130,45 @@ namespace Wacs.Core.Validation
             PopValidationContext();
         }
 
-        public void ClearOpStacks()
+        public void PushControlFrame(ByteCode opCode, FunctionType types)
         {
-            while (_stacks.Count > 1)
-                _stacks.Pop();
-            Stack.Clear();
+            var frame = new ValidationControlFrame
+            {
+                Opcode = opCode,
+                Types = types,
+                Height = OpStack.Height,
+            };
+            
+            ControlStack.Push(frame);
+            
+            OpStack.PushResult(types.ParameterTypes);
+        }
+
+        public ValidationControlFrame PopControlFrame()
+        {
+            if (ControlStack.Count == 0)
+                throw new ValidationException("Validation Control Stack underflow");
+            
+            //Check to make sure we have the correct results, but only if we didn't jump
+            if (!ControlFrame.Unreachable)
+                OpStack.PopValues(ControlFrame.EndTypes);
+            
+            //Reset the stack
+            if (OpStack.Height != ControlFrame.Height)
+                throw new ValidationException($"Operand stack height {OpStack.Height} differed from Control Frame height {ControlFrame.Height}");
+
+            return ControlStack.Pop();
+        }
+
+        public void PopOperandsToHeight(int height)
+        {
+            if (OpStack.Height < height)
+                throw new InvalidDataException("Operand Stack underflow.");
+            
+            while (OpStack.Height > height)
+            {
+                OpStack.PopAny();
+            }
         }
 
         public ValidationContext<T> PushSubContext<T>(T child, int index = -1)
@@ -152,15 +181,12 @@ namespace Wacs.Core.Validation
 
         public void PopValidationContext() => _contextStack.Pop();
 
-        public void PushFrame(Module.Function func)
+        public void SetExecFrame(Module.Function func)
         {
             var funcType = Types[func.TypeIndex];
             var locals = new LocalsSpace(funcType.ParameterTypes.Types, func.Locals);
-            var frame = new Frame(ValidationModule, funcType) { Locals = locals };
-            ControlStack.PushFrame(frame);
+            ExecFrame = new Frame(ValidationModule, funcType) { Locals = locals };
         }
-
-        public void PopFrame() => ControlStack.PopFrame();
 
         public class InstructionValidator : AbstractValidator<IInstruction>
         {

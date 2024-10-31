@@ -5,7 +5,6 @@ using FluentValidation;
 using Wacs.Core.Attributes;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
@@ -177,10 +176,7 @@ namespace Wacs.Core
                             }
 
                             var funcType = types[func.TypeIndex];
-                            vContext.PushFrame(func);
-                            var retType = vContext.Return;
-                            var label = new Label(retType, InstructionPointer.Nil, OpCode.Nop);
-                            vContext.Frame.Labels.Push(label);
+                            vContext.SetExecFrame(func);
                             
                             //*Expression Validator also validates result types
                             var exprValidator = new Expression.Validator(funcType.ResultType);
@@ -197,8 +193,6 @@ namespace Wacs.Core
                                 }
                             }
                             vContext.PopValidationContext();
-                            vContext.PopFrame();
-                            vContext.ClearOpStacks();
                         });
                 }
             }
