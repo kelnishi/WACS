@@ -84,7 +84,6 @@ namespace Wacs.Core.Runtime
         private IAddress? GetBoundEntity((string module, string entity) id) =>
             _entityBindings.GetValueOrDefault(id);
 
-        //TODO Use Linq expression trees to bind types at runtime
         public void BindHostFunction<TDelegate>((string module, string entity) id, TDelegate func)
         where TDelegate : Delegate
         {
