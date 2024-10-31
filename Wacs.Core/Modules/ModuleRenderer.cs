@@ -236,6 +236,14 @@ namespace Wacs.Core
             func.RenderStack = state;
         }
 
+        /// <summary>
+        /// Render out the WAT format of this function.
+        /// </summary>
+        /// <param name="module">The parsed module</param>
+        /// <param name="index">The function index to render</param>
+        /// <param name="indent"></param>
+        /// <param name="renderStack">If true, renderer will put the opstack manipulations in the left hand margin.</param>
+        /// <returns>The rendered WAT text.</returns>
         [SuppressMessage("ReSharper.DPA", "DPA0001: Memory allocation issues")]
         public static string RenderFunctionWat(Module module, FuncIdx index, string indent, bool renderStack = false)
         {
