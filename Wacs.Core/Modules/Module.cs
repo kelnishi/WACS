@@ -1,12 +1,10 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FluentValidation;
 using FluentValidation.Results;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -36,12 +34,12 @@ namespace Wacs.Core
         public static bool AnnotateWhileParsing = true;
 
         private static IInstructionFactory _instructionFactory = ReferenceFactory.Factory;
+
+        public static int InstructionsParsed = 0;
         public static IInstructionFactory InstructionFactory => _instructionFactory;
 
         public static void UseInstructionFactory(IInstructionFactory factory) =>
             _instructionFactory = factory;
-
-        public static int InstructionsParsed = 0;
 
         /// <summary>
         /// @Spec 5.5.16. Modules
@@ -243,20 +241,8 @@ namespace Wacs.Core
             return inst;
         }
 
-        //TODO Warn for missing sections?
         private static void FinalizeModule(Module module)
         {
-            // ReSharper disable NullCoalescingConditionIsAlwaysNotNullAccordingToAPIContract
-            module.Types ??= new List<FunctionType>();
-            module.Imports ??= Array.Empty<Module.Import>();
-            module.Funcs ??= new List<Module.Function>();
-            module.Tables ??= new List<TableType>();
-            module.Memories ??= new List<MemoryType>();
-            module.Globals ??= new List<Module.Global>();
-            module.Exports ??= Array.Empty<Module.Export>();
-            module.Elements ??= Array.Empty<Module.ElementSegment>();
-            module.Datas ??= Array.Empty<Module.Data>();
-            // ReSharper restore All
             PatchNames(module);
         }
     }

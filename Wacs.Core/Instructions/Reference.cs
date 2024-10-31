@@ -35,7 +35,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
         
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {((HeapType)Type).ToWat()}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {((HeapType)Type).ToWat()}";
     }
     
     //0xD1
@@ -96,7 +96,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
         
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {FunctionIndex.Value}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {FunctionIndex.Value}";
     }
     
 }

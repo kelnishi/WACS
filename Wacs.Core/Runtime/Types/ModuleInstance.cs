@@ -15,6 +15,8 @@ namespace Wacs.Core.Runtime.Types
             Repr = module;
         }
 
+        public string Name { get; set; } = "_";
+
         public Module Repr { get; }
 
         public TypesSpace Types { get; }

@@ -157,7 +157,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)}{M.ToWat(WidthN)}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)}{M.ToWat(WidthN)}";
     }
 
     public class InstMemoryStore : InstructionBase
@@ -247,7 +247,7 @@ namespace Wacs.Core.Instructions
             if (ea + WidthN.ByteSize() > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
-            var bs = mem.Data.AsSpan(ea, WidthN.ByteSize());
+            Span<byte> bs = mem.Data.AsSpan(ea, WidthN.ByteSize());
             switch (WidthN)
             {
                 case BitWidth.S8:
@@ -278,7 +278,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)}{M.ToWat(WidthN)}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)}{M.ToWat(WidthN)}";
     }
 
     public struct MemArg

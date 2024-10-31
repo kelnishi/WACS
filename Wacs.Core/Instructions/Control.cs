@@ -88,7 +88,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.3. block
         public override void Execute(ExecContext context) => ExecuteInstruction(context, Block);
 
-        public static void ExecuteInstruction(ExecContext context, Block block)
+        public static void ExecuteInstruction(ExecContext? context, Block block)
         {
             try
             {
@@ -374,7 +374,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.6. br l
         public override void Execute(ExecContext context) => ExecuteInstruction(context, L);
 
-        public static void ExecuteInstruction(ExecContext context, LabelIdx labelIndex)
+        public static void ExecuteInstruction(ExecContext? context, LabelIdx labelIndex)
         {
             //1.
             context.Assert(() => context.Frame.Labels.Count > (int)labelIndex.Value,
@@ -417,7 +417,12 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {L.Value} (;@{depth - L.Value};)";
+        public override string RenderText(ExecContext? context)
+        {
+            if (context == null) return $"{base.RenderText(context)} {L.Value}";
+            int depth = context.Frame.Labels.Count;
+            return $"{base.RenderText(context)} {L.Value} (;@{depth - L.Value};)";
+        }
     }
 
     //0x0D
@@ -462,7 +467,12 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {L.Value} (;@{depth - L.Value};)";
+        public override string RenderText(ExecContext? context)
+        {
+            if (context == null) return $"{base.RenderText(context)} {L.Value}";
+            int depth = context.Frame.Labels.Count;
+            return $"{base.RenderText(context)} {L.Value} (;@{depth - L.Value};)";
+        }
     }
 
     //0x0E
@@ -535,8 +545,14 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => 
-            $"{base.RenderText(depth)} {string.Join(" ", Ls.Select(idx => idx.Value).Select(v => $"{v} (;@{depth - v};)"))} {Ln.Value} (;@{depth - Ln.Value};)";
+        public override string RenderText(ExecContext? context)
+        {
+            if (context==null)
+                return $"{base.RenderText(context)} {string.Join(" ", Ls.Select(idx => idx.Value).Select(v => $"{v}"))} {Ln.Value}";
+            int depth = context.Frame.Labels.Count;
+            return
+                $"{base.RenderText(context)} {string.Join(" ", Ls.Select(idx => idx.Value).Select(v => $"{v} (;@{depth - v};)"))} {Ln.Value} (;@{depth - Ln.Value};)";
+        }
     }
 
     //0x0F
@@ -571,7 +587,7 @@ namespace Wacs.Core.Instructions
     {
         public override ByteCode Op => OpCode.Call;
 
-        private FuncIdx X { get; set; }
+        public FuncIdx X { get; set; }
 
         /// <summary>
         /// @Spec 3.3.8.10. call
@@ -611,7 +627,17 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {X.Value}";
+        public override string RenderText(ExecContext? context)
+        {
+            if (context != null)
+            {
+                var a = context.Frame.Module.FuncAddrs[X];
+                var func = context.Store[a];
+                if (!string.IsNullOrEmpty(func.Id))
+                    return $"{base.RenderText(context)} {X.Value} (; -> {func.Id};)";
+            }
+            return $"{base.RenderText(context)} {X.Value}";
+        }
     }
 
     //0x11
@@ -702,7 +728,6 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(int depth) => 
-            $"{base.RenderText(depth)}{(X.Value == 0 ? "" : $" {X.Value}")} (type {Y.Value})";
+        public override string RenderText(ExecContext? context)=> $"{base.RenderText(context)}{(X.Value == 0 ? "" : $" {X.Value}")} (type {Y.Value})";
     }
 }

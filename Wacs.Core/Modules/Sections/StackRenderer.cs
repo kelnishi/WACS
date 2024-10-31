@@ -110,7 +110,6 @@ namespace Wacs.Core
             ValidationModule = new ModuleInstance(module);
             _module = module;
 
-            Types = new TypesSpace(module);
             Funcs = new FunctionsSpace(module);
             Tables = new TablesSpace(module);
             Mems = new MemSpace(module);
@@ -125,7 +124,10 @@ namespace Wacs.Core
             var funcType = Types[func.TypeIndex];
             var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
             var locals = new LocalsSpace(funcType.ParameterTypes.Types, func.Locals);
-            ExecFrame = new Frame(ValidationModule, fakeType) { Locals = locals };
+            var execFrame = new Frame(ValidationModule, fakeType) { Locals = locals };
+
+            DummyContext = BuildDummyContext(module, ValidationModule, execFrame);
+
             ReturnType = funcType.ResultType;
             PushControlFrame(OpCode.Block, fakeType);
         }
@@ -134,13 +136,14 @@ namespace Wacs.Core
 
         public IValidationOpStack ReturnStack => _opStack;
 
-        private Frame ExecFrame { get; set; } = null!;
+        internal ExecContext DummyContext { get; set; }
+
         public IValidationOpStack OpStack => _opStack;
 
         public void Assert(bool factIsTrue, WasmValidationContext.MessageProducer message) {}
 
         public Stack<ValidationControlFrame> ControlStack { get; } = new();
-        public ValidationControlFrame ControlFrame { get; }
+        public ValidationControlFrame ControlFrame { get; } = null!;
 
         public void PushControlFrame(ByteCode opCode, FunctionType types)
         {
@@ -183,14 +186,58 @@ namespace Wacs.Core
             Unreachable = true;
         }
 
-        public TypesSpace Types { get; }
+        public TypesSpace Types => ValidationModule.Types;
         public FunctionsSpace Funcs { get; }
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
-        public LocalsSpace Locals => ExecFrame.Locals;
+        public LocalsSpace Locals => DummyContext.Frame.Locals;
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
+
+        private ExecContext BuildDummyContext(Module module, ModuleInstance moduleInst, Frame execFrame)
+        {
+            var store = new Store();
+            FakeHostDelegate fakeHostFunc = () => { };
+            foreach (var import in module.Imports)
+            {
+                var entityId = (module: import.ModuleName, entity: import.Name);
+                switch (import.Desc)
+                {
+                    case Module.ImportDesc.FuncDesc funcDesc:
+                        var funcSig = moduleInst.Types[funcDesc.TypeIndex];
+                        var funcAddr = store.AllocateHostFunction(entityId, funcSig, typeof(FakeHostDelegate), fakeHostFunc);
+                        moduleInst.FuncAddrs.Add(funcAddr);
+                        break;
+                    default: break;
+                }
+            }
+
+            int idx = module.ImportedFunctions.Count;
+            foreach (var fakeFunc in module.Funcs)
+            {
+                var addr = store.AllocateWasmFunction(fakeFunc, moduleInst);
+                moduleInst.FuncAddrs.Add(addr);
+                var func = store[addr];
+                if (func.Id != $"{idx}")
+                    func.SetName(func.Id);
+                idx++;
+            }
+
+            foreach (var export in module.Exports)
+            {
+                if (export.Desc is Module.ExportDesc.FuncDesc desc)
+                {
+                    var addr = moduleInst.FuncAddrs[desc.FunctionIndex];
+                    var funcInst = store[addr];
+                    funcInst.SetName(export.Name);
+                }
+            }
+            
+            var dummyContext = new ExecContext(store, InstructionSequence.Empty);
+            dummyContext.PushFrame(execFrame);
+            return dummyContext;
+        }
 
         public void NewOpStack(ResultType parameters) {}
 
@@ -244,6 +291,8 @@ namespace Wacs.Core
         {
             return string.Join("", fakeStack.ToArray().Reverse()) + " " + lastEvent;
         }
+
+        delegate void FakeHostDelegate();
     }
     
     public class StackRenderer
@@ -263,37 +312,37 @@ namespace Wacs.Core
         public int Width { get; }
 
         public StackRenderer SubRenderer() => new(this, DoesWrite, Width);
-
-        public void ProcessBlockInstruction(IBlockInstruction inst)
-        {
-            FakeContext.lastEvent = "[";
-            (inst as IInstruction)!.Validate(FakeContext);
-            // var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
-            // var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
-            //
-            // FakeContext.OpStack.PopValues(funcType.ParameterTypes);
-            // FakeContext.Push(ValType.ExecContext);
-            // FakeContext.OpStack.PushResult(funcType.ParameterTypes);
-        }
-
-        public void ElseBlockInstruction(IBlockInstruction inst)
-        {
-            // var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
-            FakeContext.lastEvent = "][";
-            (inst as IInstruction)!.Validate(FakeContext);
-            // FakeContext.OpStack.PopValues(funcType.ResultType);
-            // FakeContext.Pop(ValType.ExecContext);
-        }
-
-        public void EndBlockInstruction(IBlockInstruction inst)
-        {
-            // var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
-            FakeContext.lastEvent = "]";
-            (inst as IInstruction)!.Validate(FakeContext);
-            // FakeContext.OpStack.PopValues(funcType.ResultType);
-            // FakeContext.Pop(ValType.ExecContext);
-            // FakeContext.OpStack.PushResult(funcType.ResultType);
-        }
+        //
+        // public void ProcessBlockInstruction(IBlockInstruction inst)
+        // {
+        //     FakeContext.lastEvent = "[";
+        //     (inst as IInstruction)!.Validate(FakeContext);
+        //     // var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
+        //     // var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
+        //     //
+        //     // FakeContext.OpStack.PopValues(funcType.ParameterTypes);
+        //     // FakeContext.Push(ValType.ExecContext);
+        //     // FakeContext.OpStack.PushResult(funcType.ParameterTypes);
+        // }
+        //
+        // public void ElseBlockInstruction(IBlockInstruction inst)
+        // {
+        //     // var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
+        //     FakeContext.lastEvent = "][";
+        //     (inst as IInstruction)!.Validate(FakeContext);
+        //     // FakeContext.OpStack.PopValues(funcType.ResultType);
+        //     // FakeContext.Pop(ValType.ExecContext);
+        // }
+        //
+        // public void EndBlockInstruction(IBlockInstruction inst)
+        // {
+        //     // var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
+        //     FakeContext.lastEvent = "]";
+        //     (inst as IInstruction)!.Validate(FakeContext);
+        //     // FakeContext.OpStack.PopValues(funcType.ResultType);
+        //     // FakeContext.Pop(ValType.ExecContext);
+        //     // FakeContext.OpStack.PushResult(funcType.ResultType);
+        // }
 
         public void ProcessInstruction(IInstruction inst)
         {

@@ -43,13 +43,6 @@ namespace Wacs.Core.Runtime
 
         public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[(MemIdx)0]];
 
-        // [Conditional("STRICT_EXECUTION")]
-        // public void Assert(bool factIsTrue, MessageProducer message)
-        // {
-        //     if (!factIsTrue)
-        //         throw new TrapException(message());
-        // }
-
         [Conditional("STRICT_EXECUTION")]
         public void Assert(FactProducer assertion, MessageProducer message)
         {
@@ -200,6 +193,13 @@ namespace Wacs.Core.Runtime
                 return null;
 
             return _currentSequence[_sequenceIndex];
+        }
+
+        public void SetFrame(Frame frame)
+        {
+            while (CallStack.Count > 0)
+                CallStack.Pop();
+            CallStack.Push(frame);
         }
     }
 }

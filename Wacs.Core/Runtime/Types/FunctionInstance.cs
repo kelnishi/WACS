@@ -26,6 +26,11 @@ namespace Wacs.Core.Runtime.Types
         /// </summary>
         public Module.Function Definition { get; }
 
+        public string ModuleName => Module.Name;
+        private string Name { get; set; } = "";
+
         public FunctionType Type { get; }
+        public void SetName(string value) => Name = value;
+        public string Id => string.IsNullOrEmpty(Name)?"":$"{ModuleName}.{Name}";
     }
 }

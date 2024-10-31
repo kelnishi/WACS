@@ -13,7 +13,7 @@ namespace Wacs.Core
 {
     public partial class Module
     {
-        public List<Function> Funcs { get; internal set; } = null!;
+        public List<Function> Funcs { get; internal set; } = new();
 
         public List<Function> ValidationFuncs => ImportedFunctions.Concat(Funcs).ToList();
 
@@ -99,24 +99,19 @@ namespace Wacs.Core
                             for (int b = 0; b < blockInst.Count; ++b)
                             {
                                 stackRenderer.FakeContext.lastEvent = "[";
-                                stackRenderer.ProcessBlockInstruction(blockInst);
+                                stackRenderer.ProcessInstruction(inst);
                                 
                                 var blockSeq = blockInst.GetBlock(b);
+                                stackRenderer.FakeContext.DummyContext.Frame.ForceLabels(depth);
                                 RenderInstructions(writer, blockIndent, depth, module, blockSeq, stackRenderer.SubRenderer());
 
                                 var lastInst = blockSeq.LastInstruction;
                                 if (IInstruction.IsElseOrEnd(lastInst))
                                 {
-                                    if (IInstruction.IsEnd(lastInst))
-                                    {
-                                        stackRenderer.EndBlockInstruction(blockInst);
-                                    }
-                                    else
-                                    {
-                                        stackRenderer.ElseBlockInstruction(blockInst);
-                                    }
-                                    
-                                    var subText = $"{stackRenderer}{indent}{lastInst.RenderText(depth)}";
+                                    stackRenderer.FakeContext.lastEvent = IInstruction.IsEnd(lastInst) ? "[" : "][";
+                                    stackRenderer.ProcessInstruction(inst);
+                                    stackRenderer.FakeContext.DummyContext.Frame.ForceLabels(depth-1);
+                                    var subText = $"{stackRenderer}{indent}{lastInst.RenderText(stackRenderer.FakeContext.DummyContext)}";
                                     writer.WriteLine();
                                     writer.Write(subText);
                                 }
@@ -128,7 +123,7 @@ namespace Wacs.Core
                         default:
                         {
                             stackRenderer.ProcessInstruction(inst);
-                            var instText = $"{stackRenderer}{indent}{inst.RenderText(depth)}";
+                            var instText = $"{stackRenderer}{indent}{inst.RenderText(stackRenderer.FakeContext.DummyContext)}";
                             writer.WriteLine();
                             writer.Write(instText);
                             break;

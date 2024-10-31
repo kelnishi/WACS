@@ -42,6 +42,8 @@ namespace Wacs.Core.Runtime.Types
 
         public string ModuleName { get; }
         public string Name { get; }
+        public void SetName(string value) {}
+        public string Id => $"{ModuleName}.{Name}";
 
         public FunctionType Type { get; }
 

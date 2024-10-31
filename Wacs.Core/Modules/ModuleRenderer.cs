@@ -144,7 +144,7 @@ namespace Wacs.Core
         {
             string indent = "";
             using var writer = new StreamWriter(output, new UTF8Encoding(false), -1, true);
-            
+
             module.RenderText(writer, module, indent);
             
             indent += Indent2Space;
@@ -231,6 +231,7 @@ namespace Wacs.Core
             int idx = (int)(index.Value - module.ImportedFunctions.Count);
             var func = module.Funcs[idx];
             bool state = func.RenderStack;
+            
             func.RenderStack = renderStack;
             func.RenderText(writer, module, indent);
             func.RenderStack = state;

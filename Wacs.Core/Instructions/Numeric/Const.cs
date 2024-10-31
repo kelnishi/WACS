@@ -37,7 +37,7 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {Value}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
     }
     
     //0x42
@@ -64,7 +64,7 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
-        public override string RenderText(int depth) => $"{base.RenderText(depth)} {Value}";
+        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
     }
     
     //0x43
@@ -91,14 +91,14 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
-        public override string RenderText(int depth)
+        public override string RenderText(ExecContext? context)
         {
             var sourceText = Value.ToString(CultureInfo.InvariantCulture).ToLower();
             if (sourceText.Contains("e-") || sourceText.Contains("e+") || sourceText.Length > 5)
                 sourceText = Value.ToString("0.#####e+00");
             var floatText = FloatFormatter.FormatFloat(Value);
             return
-                $"{base.RenderText(depth)} {floatText} (;={sourceText};)";
+                $"{base.RenderText(context)} {floatText} (;={sourceText};)";
         }
     }
     
@@ -126,14 +126,14 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
-        public override string RenderText(int depth)
+        public override string RenderText(ExecContext? context)
         {
             var sourceText = Value.ToString(CultureInfo.InvariantCulture).ToLower();
             if (sourceText.Contains("e-") || sourceText.Contains("e+") || sourceText.Length > 5)
                 sourceText = Value.ToString("0.#####e+00");
             var doubleText = FloatFormatter.FormatDouble(Value);
             return
-                $"{base.RenderText(depth)} {doubleText} (;={sourceText};)";
+                $"{base.RenderText(context)} {doubleText} (;={sourceText};)";
         }
     }
 }

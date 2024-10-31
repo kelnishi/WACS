@@ -14,7 +14,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.6 Globals
         /// </summary>
-        public List<Global> Globals { get; internal set; } = null!;
+        public List<Global> Globals { get; internal set; } = new();
 
         /// <summary>
         /// @Spec 2.5.6. Globals

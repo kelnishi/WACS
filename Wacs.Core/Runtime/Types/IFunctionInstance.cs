@@ -8,5 +8,7 @@ namespace Wacs.Core.Runtime.Types
     public interface IFunctionInstance
     {
         FunctionType Type { get; }
+        public string Id { get; }
+        public void SetName(string name);
     }
 }

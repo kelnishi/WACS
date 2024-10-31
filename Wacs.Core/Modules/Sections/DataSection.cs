@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using FluentValidation;
 using Wacs.Core.Types;
@@ -18,7 +19,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.8. Data Segments
         /// </summary>
-        public Data[] Datas { get; internal set; } = null!;
+        public Data[] Datas { get; internal set; } = Array.Empty<Data>();
 
         public uint DataCount { get; internal set; }
 

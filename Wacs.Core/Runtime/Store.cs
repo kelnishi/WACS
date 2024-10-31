@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime
 {
@@ -29,6 +30,22 @@ namespace Wacs.Core.Runtime
         public bool Contains(GlobalAddr addr) => addr.Value < Globals.Count;
         public bool Contains(ElemAddr addr) => addr.Value < Elems.Count;
         public bool Contains(DataAddr addr) => addr.Value < Datas.Count;
+
+
+        public FuncAddr AllocateWasmFunction(Module.Function func, ModuleInstance moduleInst)
+        {
+            var funcType = moduleInst.Types[func.TypeIndex];
+            var funcInst = new FunctionInstance(funcType, moduleInst, func);
+            var funcAddr = AddFunction(funcInst);
+            return funcAddr;
+        }
+
+        public FuncAddr AllocateHostFunction((string module, string entity) id, FunctionType funcType, Type delType, Delegate hostFunc)
+        {
+            var funcInst = new HostFunction(id, funcType, delType, hostFunc);
+            var funcAddr = AddFunction(funcInst);
+            return funcAddr;
+        }
 
         public FuncAddr AddFunction(IFunctionInstance func)
         {
