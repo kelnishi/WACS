@@ -55,8 +55,7 @@ namespace Wacs.Core.Utilities
 
             while (true)
             {
-                //TODO Fix LEB128 S64 decoding!
-                int byteValue = reader.ReadByte();
+                int byteValue = reader.ReadSByte();
                 if (byteValue == -1)
                     throw new EndOfStreamException("Unexpected end of stream while decoding s64.");
 
