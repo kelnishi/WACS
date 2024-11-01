@@ -46,7 +46,7 @@ namespace Wacs.WASIp1
             {
                 return ErrNo.NoSys;
             }
-            catch (IOException ex)
+            catch (IOException)
             {
                 return ErrNo.Exist;
             }

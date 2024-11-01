@@ -114,7 +114,7 @@ namespace Wacs.Core.Instructions
             ExecuteLocalSet(context, localIndex);
         }
 
-        private delegate void ExecuteDelegate(ExecContext? context, LocalIdx localIndex);
+        private delegate void ExecuteDelegate(ExecContext context, LocalIdx localIndex);
 
         private delegate void ValidationDelegate(IWasmValidationContext context, LocalIdx localIndex);
     }
@@ -211,7 +211,7 @@ namespace Wacs.Core.Instructions
 
         }
 
-        private delegate void ExecuteDelegate(ExecContext? context, GlobalIdx index);
+        private delegate void ExecuteDelegate(ExecContext context, GlobalIdx index);
 
         private delegate void ValidationDelegate(IWasmValidationContext context, GlobalIdx index);
     }

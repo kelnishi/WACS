@@ -117,8 +117,6 @@ namespace Wacs.WASIp1
             fileDescriptor.Stream.SetLength(Math.Max(fileDescriptor.Stream.Length, newLen));
 
             return ErrNo.Success;
-            
-            return ErrNo.Success;
         }
 
         /// <summary>
@@ -136,7 +134,7 @@ namespace Wacs.WASIp1
             {
                 RemoveFD(fd);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 return ErrNo.IO; // Return a generic I/O error indicating the closure failed.
             }
