@@ -144,7 +144,7 @@ namespace Wacs.Core
 
         public IValidationOpStack OpStack => _opStack;
 
-        public void Assert(bool factIsTrue, WasmValidationContext.MessageProducer message) {}
+        public void Assert(bool factIsTrue, string message) {}
 
         public Stack<ValidationControlFrame> ControlStack { get; } = new();
         public ValidationControlFrame ControlFrame { get; } = null!;

@@ -16,8 +16,6 @@ namespace Wacs.Core.Validation
     /// </summary>
     public class WasmValidationContext : IWasmValidationContext
     {
-        public delegate string MessageProducer();
-
         private readonly UnreachableOpStack _stackPolymorphic = new();
 
         private Stack<IValidationContext> _contextStack = new();
@@ -82,10 +80,10 @@ namespace Wacs.Core.Validation
             ControlFrame.Unreachable = true;
         }
 
-        public void Assert(bool factIsTrue, MessageProducer message)
+        public void Assert(bool factIsTrue, string message)
         {
             if (!factIsTrue)
-                throw new ValidationException(message());
+                throw new ValidationException(message);
         }
 
         public void ValidateBlock(Block instructionBlock, int index = 0)

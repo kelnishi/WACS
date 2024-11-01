@@ -38,7 +38,8 @@ namespace Wacs.Console
             using var fileStream = new FileStream(wasmFilePath, FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
             
-            using var outputStream = new FileStream("output.wat", FileMode.Create);
+            string outputFilePath = Path.ChangeExtension(wasmFilePath, ".wat");
+            using var outputStream = new FileStream(outputFilePath, FileMode.Create);
             ModuleRenderer.RenderWatToStream(outputStream, module);
             
             //If you just want to do validation without a runtime, you could do it like this
@@ -114,9 +115,10 @@ namespace Wacs.Console
 
             var callOptions = new InvokerOptions {
                 LogGas = true,
-                LogProgressEvery = 1_000_000, 
+                LogProgressEvery = 0x40_0000, 
                 LogInstructionExecution = false,
                 CalculateLineNumbers = false,
+                CollectStats = true,
             };
             
             //Wasm/WASI entry points

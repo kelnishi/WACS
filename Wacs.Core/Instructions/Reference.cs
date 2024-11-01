@@ -53,8 +53,8 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.2.2. ref.is_null
         public override void Execute(ExecContext context)
         {
-            context.Assert(() => context.OpStack.Peek().IsRef,
-                ()=>$"Instruction ref.is_null failed. Expected reftype on top of the stack.");
+            context.Assert( context.OpStack.Peek().IsRef,
+                $"Instruction ref.is_null failed. Expected reftype on top of the stack.");
             Value val = context.OpStack.PopRefType();
             int booleanResult = val.IsNullRef ? 1 : 0;
             context.OpStack.PushI32(booleanResult);
@@ -75,7 +75,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         { 
             context.Assert(context.Funcs.Contains(FunctionIndex),
-                ()=>$"Instruction ref.func is invalid. Function {FunctionIndex} was not in the context.");
+                $"Instruction ref.func is invalid. Function {FunctionIndex} was not in the context.");
             //Seems like C.Refs isn't strictly necessary since FunctionSpace collects all the references
             var func = context.Funcs[FunctionIndex];
             context.OpStack.PushFuncref(Value.NullFuncRef);
@@ -84,8 +84,8 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.2.3. ref.func x
         public override void Execute(ExecContext context)
         {
-            context.Assert(() => context.Frame.Module.FuncAddrs.Contains(FunctionIndex),
-                ()=>$"Instruction ref.func failed. Could not find function address in the context");
+            context.Assert( context.Frame.Module.FuncAddrs.Contains(FunctionIndex),
+                $"Instruction ref.func failed. Could not find function address in the context");
             var a = context.Frame.Module.FuncAddrs[FunctionIndex];
             context.OpStack.PushFuncref(new Value(ValType.Funcref, a.Value));
         }

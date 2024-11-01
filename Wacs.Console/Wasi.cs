@@ -15,6 +15,7 @@ namespace Wacs.Console
                 StandardError = System.Console.OpenStandardError(),
                 
                 Arguments = Environment.GetCommandLineArgs()
+                    .Skip(1)
                     .ToList(),
                 
                 EnvironmentVariables = Environment.GetEnvironmentVariables()

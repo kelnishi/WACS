@@ -27,7 +27,7 @@ namespace Wacs.Core.OpCodes
                 _ => opcode.x00.GetMnemonic()
             };
 
-        public static string LookUp<T>(T op)
+        private static string LookUp<T>(T op)
         where T : Enum
         {
             var type = typeof(T);
@@ -44,10 +44,20 @@ namespace Wacs.Core.OpCodes
             return $"undefined {op}";
         }
 
-        public static string GetMnemonic(this OpCode opcode) => MnemonicCache00.GetOrAdd(opcode, LookUp);
-        public static string GetMnemonic(this GcCode opcode) => MnemonicCacheFB.GetOrAdd(opcode, LookUp);
-        public static string GetMnemonic(this ExtCode opcode) => MnemonicCacheFC.GetOrAdd(opcode, LookUp);
-        public static string GetMnemonic(this SimdCode opcode) => MnemonicCacheFD.GetOrAdd(opcode, LookUp);
-        public static string GetMnemonic(this AtomCode opcode) => MnemonicCacheFE.GetOrAdd(opcode, LookUp);
+        private static string GetOpCode<T>(T opcode, ConcurrentDictionary<T, string> cache)
+        where T : Enum
+        {
+            if (cache.TryGetValue(opcode, out var result))
+                return result;
+            var newResult = LookUp(opcode);
+            cache.TryAdd(opcode, newResult);
+            return newResult;
+        }
+
+        public static string GetMnemonic(this OpCode opcode) => GetOpCode(opcode, MnemonicCache00);
+        public static string GetMnemonic(this GcCode opcode) => GetOpCode(opcode, MnemonicCacheFB);
+        public static string GetMnemonic(this ExtCode opcode) => GetOpCode(opcode, MnemonicCacheFC);
+        public static string GetMnemonic(this SimdCode opcode) => GetOpCode(opcode, MnemonicCacheFD);
+        public static string GetMnemonic(this AtomCode opcode) => GetOpCode(opcode, MnemonicCacheFE);
     }
 }

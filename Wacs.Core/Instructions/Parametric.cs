@@ -52,7 +52,7 @@ namespace Wacs.Core.Instructions
             if (WithTypes)
             {
                 context.Assert(Types.Length == 1,
-                    ()=>$"Select instruction type must be of length 1");
+                    $"Select instruction type must be of length 1");
                 var type = Types[0];
                 context.OpStack.PopI32();
                 context.OpStack.PopType(type);
@@ -65,7 +65,7 @@ namespace Wacs.Core.Instructions
                 Value val2 = context.OpStack.PopAny();
                 Value val1 = context.OpStack.PopAny();
                 context.Assert(val1.Type == val2.Type,
-                    ()=>$"Select instruction expected matching types on the stack: {val1.Type} == {val2.Type}");
+                    $"Select instruction expected matching types on the stack: {val1.Type} == {val2.Type}");
                 context.OpStack.PushType(val1.Type);
             }
         }

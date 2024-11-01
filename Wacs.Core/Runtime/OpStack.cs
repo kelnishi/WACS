@@ -55,16 +55,13 @@ namespace Wacs.Core.Runtime
 
         public Value Peek() => _stack.Peek();
 
-        public Stack<Value> PopResults(ResultType type)
+        public void PopResults(ResultType type, ref Stack<Value> results)
         {
-            var results = new Stack<Value>();
             for (int i = 0, l = type.Arity; i < l; ++i)
             {
                 //We could check the types here, but the spec just says to YOLO it.
                 results.Push(PopAny());
             }
-
-            return results;
         }
 
         public object[] PopScalars(ResultType type)

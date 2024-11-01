@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -14,16 +15,22 @@ namespace Wacs.Core.Runtime
         public double FloatingPointTolerance { get; set; } = 1e-10;
     }
 
+    public struct ExecStat
+    {
+        public long duration;
+        public long count;
+    }
+
     public class ExecContext
     {
-        public delegate bool FactProducer();
-
-        public delegate string MessageProducer();
-
         public readonly RuntimeAttributes Attributes;
+
+        private Stack<Value> _asideVals = new();
 
         private InstructionSequence _currentSequence;
         private int _sequenceIndex;
+
+        public Dictionary<ushort, ExecStat> Stats = new();
 
         public ExecContext(Store store, InstructionSequence seq, RuntimeAttributes? attributes = default)
         {
@@ -32,6 +39,9 @@ namespace Wacs.Core.Runtime
             _sequenceIndex = -1;
             Attributes = attributes ?? new RuntimeAttributes();
         }
+
+        public Stopwatch ProcessTimer { get; set; } = new();
+        public Stopwatch InstructionTimer { get; set; } = new();
 
         public IInstructionFactory InstructionFactory => Attributes.InstructionFactory;
 
@@ -44,10 +54,10 @@ namespace Wacs.Core.Runtime
         public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[(MemIdx)0]];
 
         [Conditional("STRICT_EXECUTION")]
-        public void Assert(FactProducer assertion, MessageProducer message)
+        public void Assert(bool assertion, string message)
         {
-            if (!assertion())
-                throw new TrapException(message());
+            if (!assertion)
+                throw new TrapException(message);
         }
 
         public void PushFrame(Frame frame)
@@ -92,8 +102,8 @@ namespace Wacs.Core.Runtime
         public void Invoke(FuncAddr addr)
         {
             //1.
-            Assert(() => Store.Contains(addr),
-                () => $"Failure in Function Invocation. Address does not exist {addr}");
+            Assert( Store.Contains(addr),
+                 $"Failure in Function Invocation. Address does not exist {addr}");
             //2.
             var funcInst = Store[addr];
             switch (funcInst)
@@ -116,10 +126,12 @@ namespace Wacs.Core.Runtime
             //5. *Instructions will be handled in EnterSequence below
             //var seq = wasmFunc.Definition.Body;
             //6.
-            Assert(() => OpStack.Count >= funcType.ParameterTypes.Arity,
-                () => $"Function invocation failed. Operand Stack underflow.");
+            Assert( OpStack.Count >= funcType.ParameterTypes.Arity,
+                 $"Function invocation failed. Operand Stack underflow.");
             //7.
-            var vals = OpStack.PopResults(funcType.ParameterTypes);
+            Assert(_asideVals.Count == 0,
+                $"Shared temporary stack had values left in it.");
+            OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
             //8.
             var frame = new Frame(wasmFunc.Module, funcType)
             {
@@ -130,9 +142,9 @@ namespace Wacs.Core.Runtime
             int li = 0;
             int localCount = funcType.ParameterTypes.Arity + t.Length;
             //Load parameters
-            while (vals.Count > 0)
+            while (_asideVals.Count > 0)
             {
-                frame.Locals[(LocalIdx)li] = vals.Pop();
+                frame.Locals[(LocalIdx)li] = _asideVals.Pop();
                 li += 1;
             }
             //Set the Locals to default
@@ -170,8 +182,8 @@ namespace Wacs.Core.Runtime
         public void FunctionReturn()
         {
             //3.
-            Assert(() => OpStack.Count >= Frame.Arity,
-                () => $"Function Return failed. Stack did not contain return values");
+            Assert( OpStack.Count >= Frame.Arity,
+                 $"Function Return failed. Stack did not contain return values");
             //4. Since we have a split stack, we can leave the results in place.
             // var vals = OpStack.PopResults(Frame.Type.ResultType);
             //5.
@@ -233,6 +245,31 @@ namespace Wacs.Core.Runtime
             while (CallStack.Count > 0)
                 CallStack.Pop();
             CallStack.Push(frame);
+        }
+
+        public void ResetStats()
+        {
+            Stats.Clear();
+            foreach (OpCode opcode in Enum.GetValues(typeof(OpCode)))
+            { 
+                Stats[(ushort)(ByteCode)opcode] = new ExecStat();
+            }
+            foreach (GcCode opcode in Enum.GetValues(typeof(GcCode)))
+            { 
+                Stats[(ushort)(ByteCode)opcode] = new ExecStat();
+            }
+            foreach (ExtCode opcode in Enum.GetValues(typeof(ExtCode)))
+            { 
+                Stats[(ushort)(ByteCode)opcode] = new ExecStat();
+            }
+            foreach (SimdCode opcode in Enum.GetValues(typeof(SimdCode)))
+            { 
+                Stats[(ushort)(ByteCode)opcode] = new ExecStat();
+            }
+            foreach (AtomCode opcode in Enum.GetValues(typeof(AtomCode)))
+            { 
+                Stats[(ushort)(ByteCode)opcode] = new ExecStat();
+            }
         }
     }
 }

@@ -74,14 +74,14 @@ namespace Wacs.Core.Types
         public FunctionType? ResolveBlockType(BlockType blockType) =>
             blockType switch
             {
-                BlockType.Empty => new FunctionType(ResultType.Empty, ResultType.Empty),
-                BlockType.I32 => new FunctionType(ResultType.Empty, new ResultType(ValType.I32)),
-                BlockType.I64 => new FunctionType(ResultType.Empty, new ResultType(ValType.I64)),
-                BlockType.F32 => new FunctionType(ResultType.Empty, new ResultType(ValType.F32)),
-                BlockType.F64 => new FunctionType(ResultType.Empty, new ResultType(ValType.F64)),
-                BlockType.V128 => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
-                BlockType.Funcref => new FunctionType(ResultType.Empty, new ResultType(ValType.Funcref)),
-                BlockType.Externref => new FunctionType(ResultType.Empty, new ResultType(ValType.Externref)),
+                BlockType.Empty     => FunctionType.Empty,
+                BlockType.I32       => FunctionType.SingleI32,
+                BlockType.I64       => FunctionType.SingleI64,
+                BlockType.F32       => FunctionType.SingleF32,
+                BlockType.F64       => FunctionType.SingleF64,
+                BlockType.V128      => FunctionType.SingleV128,
+                BlockType.Funcref   => FunctionType.SingleFuncref,
+                BlockType.Externref => FunctionType.SingleExternref,
                 _ when Contains((TypeIdx)(int)blockType) => this[(TypeIdx)(int)blockType],
                 _ => null
             };
