@@ -41,7 +41,7 @@ namespace Wacs.Core.Runtime
 
         private Store Store { get; }
 
-        private ExecContext? Context { get; }
+        private ExecContext Context { get; }
 
         public IInstructionFactory InstructionFactory => Context.InstructionFactory;
 
@@ -577,6 +577,7 @@ namespace Wacs.Core.Runtime
         private Value EvaluateExpression(Expression ini)
         {
             ini.Execute(Context);
+            
             var value = Context.OpStack.PopAny();
             return value;
         }

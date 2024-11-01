@@ -44,7 +44,7 @@ namespace Wacs.Core.Instructions.Numeric
                 context.OpStack.PushType(push);
             };
 
-        private delegate void ExecuteDelegate(ExecContext? context);
+        private delegate void ExecuteDelegate(ExecContext context);
 
         private delegate void ValidationDelegate(IWasmValidationContext context);
     }

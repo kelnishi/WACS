@@ -88,7 +88,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.3. block
         public override void Execute(ExecContext context) => ExecuteInstruction(context, Block, Op);
 
-        public static void ExecuteInstruction(ExecContext? context, Block block, ByteCode inst)
+        public static void ExecuteInstruction(ExecContext context, Block block, ByteCode inst)
         {
             if (block.Size == 0)
                 return;
@@ -341,6 +341,8 @@ namespace Wacs.Core.Instructions
             {
                 case OpCode.Block:
                 case OpCode.Loop:
+                case OpCode.If:
+                case OpCode.Else:
                     context.ExitBlock();
                     break;
                 case OpCode.Call:
@@ -377,7 +379,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.6. br l
         public override void Execute(ExecContext context) => ExecuteInstruction(context, L);
 
-        public static void ExecuteInstruction(ExecContext? context, LabelIdx labelIndex)
+        public static void ExecuteInstruction(ExecContext context, LabelIdx labelIndex)
         {
             //1.
             context.Assert(() => context.Frame.Labels.Count > (int)labelIndex.Value,
