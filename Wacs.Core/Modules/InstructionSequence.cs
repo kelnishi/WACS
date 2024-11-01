@@ -60,6 +60,14 @@ namespace Wacs.Core
             }
         }
 
+        /// <summary>
+        /// The number of instructions in this sequence
+        /// </summary>
+        public int Length => _instructions.Count;
+
+        /// <summary>
+        /// The total number of instructions in this sequence and subsequences (blocks)
+        /// </summary>
         public int Size
         {
             get

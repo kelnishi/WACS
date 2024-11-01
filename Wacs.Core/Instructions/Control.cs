@@ -92,7 +92,7 @@ namespace Wacs.Core.Instructions
 
         public static void ExecuteInstruction(ExecContext context, Block block, ByteCode inst)
         {
-            if (block.Size == 0)
+            if (block.Length == 0)
                 return;
             
             try
@@ -223,7 +223,7 @@ namespace Wacs.Core.Instructions
 
         public BlockType Type => IfBlock.Type;
 
-        public int Count => ElseBlock.Size == 0 ? 1 : 2;
+        public int Count => ElseBlock.Length == 0 ? 1 : 2;
 
         public int Size => 1 + IfBlock.Size + ElseBlock.Size;
         public InstructionSequence GetBlock(int idx) => idx == 0 ? IfBlock.Instructions : ElseBlock.Instructions;
@@ -250,7 +250,7 @@ namespace Wacs.Core.Instructions
                 // *any (else) contained within will pop and repush the control frame
                 context.ValidateBlock(IfBlock);
                 
-                if (ElseBlock.Size == 0)
+                if (ElseBlock.Length == 0)
                     return;
                 
                 //Continue on to instructions in sequence
@@ -302,7 +302,7 @@ namespace Wacs.Core.Instructions
                     Instructions = new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
                         IInstruction.IsEnd))
                 };
-                if (ElseBlock.Size == 0)
+                if (ElseBlock.Length == 0)
                     throw new InvalidDataException($"Explicit Else block contained no instructions.");
             }
             else
