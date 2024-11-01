@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
+    <PackageReference Include="JetBrains.Profiler.Api" Version="1.4.8" />
   </ItemGroup>
 
 </Project>
