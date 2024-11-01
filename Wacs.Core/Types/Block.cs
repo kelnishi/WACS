@@ -28,6 +28,15 @@ namespace Wacs.Core.Types
 
         public InstructionSequence Instructions { get; set; } = new();
 
+
+        /// <summary>
+        /// The number of immediate child instructions 
+        /// </summary>
+        public int Length => Instructions.Length;
+
+        /// <summary>
+        /// The total number of instructions in the tree below
+        /// </summary>
         public int Size => Instructions.Size;
 
         public bool IsEmptyType => Type == BlockType.Empty;

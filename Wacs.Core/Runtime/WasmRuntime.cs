@@ -245,14 +245,19 @@ namespace Wacs.Core.Runtime
                 {
                     PrintStats();
                 }
+
+                if (options.CalculateLineNumbers)
+                {
+                    Console.Error.WriteLine();
+                    var ptr = Context.ComputePointerPath();
+                    var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                    (int line, string inst) = Context.Frame.Module.Repr.CalculateLine(path);
+                    line += 1;
                 
-                Console.Error.WriteLine();
-                var ptr = Context.ComputePointerPath();
-                var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                (int line, string inst) = Context.Frame.Module.Repr.CalculateLine(path);
-                line += 1;
-            
-                throw new TrapException(exc.Message + $":line {line} instruction #{steps}\n{path}");
+                    throw new TrapException(exc.Message + $":line {line} instruction #{steps}\n{path}");
+                }
+
+                throw;
             }
 
             return true;
