@@ -6,6 +6,7 @@ using CommandLine;
 using FluentValidation;
 using Wacs.Core;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
 namespace Wacs.Console
@@ -118,27 +119,46 @@ namespace Wacs.Console
                 LogProgressEvery = 0x40_0000, 
                 LogInstructionExecution = false,
                 CalculateLineNumbers = false,
-                CollectStats = true,
+                CollectStats = false,
             };
-            
+
             //Wasm/WASI entry points
             if (modInst.StartFunc != null)
             {
-                var caller = runtime.CreateInvoker<Delegates.WasmAction>(modInst.StartFunc, callOptions);    
-                
-                System.Console.WriteLine("Calling start");
-                caller();
+                var caller = runtime.CreateInvoker<Delegates.WasmAction>(modInst.StartFunc, callOptions);
+
+                using (var profilingSession = new ProfilingSession())
+                {
+                    try
+                    {
+                        System.Console.WriteLine("Calling start");
+                        caller();
+                    }
+                    catch (TrapException exc)
+                    {
+                        System.Console.WriteLine(exc);
+                    }
+                }
             }
-            else if (runtime.TryGetExportedFunction((moduleName, "main"), out var mainAddr)) 
+            else if (runtime.TryGetExportedFunction((moduleName, "main"), out var mainAddr))
             {
                 var caller = runtime.CreateInvoker<Func<Value>>(mainAddr, callOptions);
-                
-                System.Console.WriteLine("Calling main");
-                int result = caller();
-                
-                System.Console.WriteLine($"Result was: {result}");
+
+                using (var profilingSession = new ProfilingSession())
+                {
+                    try
+                    {
+                        System.Console.WriteLine("Calling main");
+                        int result = caller();
+
+                        System.Console.WriteLine($"Result was: {result}");
+                    }
+                    catch (TrapException exc)
+                    {
+                        System.Console.WriteLine(exc);
+                    }
+                }
             }
-            
         }
     }
 }

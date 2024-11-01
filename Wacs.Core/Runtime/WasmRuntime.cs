@@ -176,13 +176,13 @@ namespace Wacs.Core.Runtime
                         }
                     }
                 }
-                if (options.CollectStats)
-                {
-                    Context.ProcessTimer.Stop();
+                Context.ProcessTimer.Stop();
+                if (options.LogProgressEvery > 0)
+                    Console.Error.WriteLine("done.");
+                if (options.CollectStats) 
                     PrintStats();
-                }
-                if (options.LogGas)
-                    Console.Error.WriteLine($"Process used {steps} gas.");
+                if (options.LogGas) 
+                    Console.Error.WriteLine($"Process used {steps} gas. {Context.ProcessTimer.Elapsed}");
                 
                 var results = Context.OpStack.PopScalars(funcType.ResultType);
                 
@@ -199,8 +199,8 @@ namespace Wacs.Core.Runtime
 
         public bool ProcessThread(InvokerOptions options, int steps)
         {
-            var comp = Context!.Next();
-            if (comp == null)
+            var inst = Context!.Next();
+            if (inst == null)
                 return false;
             
             //Trace execution
@@ -211,12 +211,12 @@ namespace Wacs.Core.Runtime
                 {
                     var ptr = Context.ComputePointerPath();
                     var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                    (int line, string inst) = Context.Frame.Module.Repr.CalculateLine(path);
+                    (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
                     location = $";;line {line + 1}";
                     if (options.ShowPath)
                         location += $":{path}";
                 }
-                var log = $"Instruction: {comp.RenderText(Context)}".PadRight(40, ' ') + location;
+                var log = $"Instruction: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
                 Console.Error.WriteLine(log);
             }
 
@@ -225,35 +225,36 @@ namespace Wacs.Core.Runtime
                 if (options.CollectStats)
                 {
                     Context.InstructionTimer.Restart();
-                    comp.Execute(Context);
+                    inst.Execute(Context);
                     Context.InstructionTimer.Stop();
 
-                    var st = Context.Stats[(ushort)comp.Op]; 
+                    var st = Context.Stats[(ushort)inst.Op]; 
                     st.count += 1;
                     st.duration += Context.InstructionTimer.ElapsedTicks;
-                    Context.Stats[(ushort)comp.Op] = st;
+                    Context.Stats[(ushort)inst.Op] = st;
                 }
                 else
                 {
-                    comp.Execute(Context);
+                    inst.Execute(Context);
                 }
             }
             catch (TrapException exc)
             {
                 Context.ProcessTimer.Stop();
-                if (options.CollectStats)
-                {
+                if (options.LogProgressEvery > 0)
+                    Console.Error.WriteLine();
+                if (options.CollectStats) 
                     PrintStats();
-                }
-
+                if (options.LogGas)
+                    Console.Error.WriteLine($"Process used {steps} gas. {Context.ProcessTimer.Elapsed}");
+                
                 if (options.CalculateLineNumbers)
                 {
                     Console.Error.WriteLine();
                     var ptr = Context.ComputePointerPath();
                     var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                    (int line, string inst) = Context.Frame.Module.Repr.CalculateLine(path);
+                    (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
                     line += 1;
-                
                     throw new TrapException(exc.Message + $":line {line} instruction #{steps}\n{path}");
                 }
 
@@ -265,21 +266,24 @@ namespace Wacs.Core.Runtime
 
         public void PrintStats()
         {
-            long procTime = Context.ProcessTimer.ElapsedTicks;
+            long procTicks = Context.ProcessTimer.ElapsedTicks;
             long totalExecs = Context.Stats.Values.Sum(dc => dc.count);
-            long totalTicks = Context.Stats.Values.Sum(dc => dc.duration);
-            long procOverhead = procTime - totalTicks;
-            
-            TimeSpan totalTime = new TimeSpan(totalTicks);
-            TimeSpan overheadTime = new TimeSpan(procOverhead);
-            double overheadPercent =  100.0 * procOverhead / procTime;
+            long execTicks = Context.Stats.Values.Sum(dc => dc.duration);
+            long overheadTicks = procTicks - execTicks;
+
+            TimeSpan totalTime = new TimeSpan(procTicks);
+            TimeSpan execTime = new TimeSpan(execTicks);
+            TimeSpan overheadTime = new TimeSpan(overheadTicks);
+            double overheadPercent =  100.0 * overheadTicks / procTicks;
+            double execPercent = 100.0 * execTicks / procTicks;
             string overheadLabel = $"({overheadPercent:#0.###}%) {overheadTime}";
             
             string totalLabel = "    total duration";
             string totalInst = $"{totalExecs}";
-            string avgTime = $"{new TimeSpan(totalTicks / totalExecs)}/instruction";
-            Console.WriteLine($"Execution Stats:");
-            Console.WriteLine($"{totalLabel}: {totalInst}| {totalTime} {avgTime} overhead:{overheadLabel}");
+            string totalPercent = $"{execPercent:#0.###}%t".PadLeft(8,' ');
+            string avgTime = $"{new TimeSpan(execTicks / totalExecs)}/instruction";
+            Console.Error.WriteLine($"Execution Stats:");
+            Console.Error.WriteLine($"{totalLabel}: {totalInst}| ({totalPercent}) {execTime} {avgTime} overhead:{overheadLabel} total proctime:{totalTime}");
             var orderedStats = Context.Stats
                 .Where(bdc => bdc.Value.count != 0)
                 .OrderBy(bdc => -bdc.Value.count);
@@ -288,10 +292,10 @@ namespace Wacs.Core.Runtime
             {
                 string label = $"{((ByteCode)opcode).GetMnemonic()}".PadLeft(totalLabel.Length, ' ');
                 TimeSpan instTime = new TimeSpan(st.duration);
-                double percent = 100.0 * st.duration / totalTicks;
+                double percent = 100.0 * st.duration / execTicks;
                 string execsLabel = $"{st.count}".PadLeft(totalInst.Length, ' ');
-                string percentLabel = $"{percent:#0.###}%".PadLeft(7,' ');
-                Console.WriteLine($"{label}: {execsLabel}| ({percentLabel}) {instTime}");
+                string percentLabel = $"{percent:#0.###}%e".PadLeft(8,' ');
+                Console.Error.WriteLine($"{label}: {execsLabel}| ({percentLabel}) {instTime}");
             }
         }
 
