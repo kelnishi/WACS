@@ -24,6 +24,7 @@ namespace Wacs.Core
         {
             public bool IsImport = false;
             public string Id { get; set; } = "";
+            public FuncIdx Index { get; set; }
 
             //Function Section only parses the type indices
             public TypeIdx TypeIndex { get; internal set; }
@@ -38,7 +39,7 @@ namespace Wacs.Core
 
             public void RenderText(StreamWriter writer, Module module, string indent)
             {
-                var id = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
+                var id = string.IsNullOrWhiteSpace(Id) ? $" (;{Index.Value};)" : $" (;{Id};)";
                 var type = $" (type {TypeIndex.Value})";
                 var functionType = module.Types[(int)TypeIndex.Value];
                 var param = functionType.ParameterTypes.Length > 0

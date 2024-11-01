@@ -5,6 +5,7 @@ using FluentValidation;
 using FluentValidation.Results;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -99,13 +100,10 @@ namespace Wacs.Core
                     break;
                 case SectionId.Function:
                     module.Funcs = ParseFunctionSection(reader).ToList();
-                    if (AnnotateWhileParsing)
+                    int fIdx = module.ImportedFunctions.Count;
+                    foreach (var func in module.Funcs)
                     {
-                        int idx = module.ImportedFunctions.Count;
-                        foreach (var func in module.Funcs)
-                        {
-                            func.Id = $"{idx++}";
-                        }
+                        func.Index = (FuncIdx)fIdx++;
                     }
                     break;
                 case SectionId.Table:

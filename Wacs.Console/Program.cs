@@ -105,24 +105,37 @@ namespace Wacs.Console
             wasi.BindToRuntime(runtime);
             
             System.Console.WriteLine("Instantiating Module");
-            
-            //Validation normally happens after instantiation, but you can skip it if you did it after parsing
-            var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true });
-            runtime.RegisterModule("hello", modInst);
-            return;
 
-            // var mainAddr = runtime.GetExportedFunction(("hello", "_start"));
-            //
-            // var options = new InvokerOptions
-            // {
-            //     LogGas = true,
-            //     LogInstructionExecution = true,
-            // };
-            // var caller = runtime.CreateInvoker<Delegates.WasmAction>(mainAddr, options);
-            //
-            // System.Console.WriteLine("Calling _start");
-            // caller();
-            // System.Console.WriteLine($"Result was: {result}");
+            string moduleName = "hello";
+            //Validation normally happens after instantiation, but you can skip it if you did it after parsing or you're like super confident.
+            var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true, SkipStartFunction = true});
+            runtime.RegisterModule(moduleName, modInst);
+
+
+            var callOptions = new InvokerOptions {
+                LogGas = true,
+                LogInstructionExecution = true,
+                CalculateLineNumbers = true,
+            };
+            
+            //Wasm/WASI entry points
+            if (modInst.StartFunc != null)
+            {
+                var caller = runtime.CreateInvoker<Delegates.WasmAction>(modInst.StartFunc, callOptions);    
+                
+                System.Console.WriteLine("Calling start");
+                caller();
+            }
+            else if (runtime.TryGetExportedFunction((moduleName, "main"), out var mainAddr)) 
+            {
+                var caller = runtime.CreateInvoker<Func<Value>>(mainAddr, callOptions);
+                
+                System.Console.WriteLine("Calling main");
+                int result = caller();
+                
+                System.Console.WriteLine($"Result was: {result}");
+            }
+            
         }
     }
 }

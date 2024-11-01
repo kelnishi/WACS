@@ -17,6 +17,7 @@ namespace Wacs.Core.Runtime.Types
             Type = type;
             Module = module;
             Definition = definition;
+            Index = definition.Index;
         }
 
         public ModuleInstance Module { get; }
@@ -25,6 +26,8 @@ namespace Wacs.Core.Runtime.Types
         /// Gets the function definition containing the code and locals.
         /// </summary>
         public Module.Function Definition { get; }
+
+        public FuncIdx Index { get; }
 
         public string ModuleName => Module.Name;
         private string Name { get; set; } = "";

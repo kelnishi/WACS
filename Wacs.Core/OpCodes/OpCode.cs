@@ -289,5 +289,8 @@ namespace Wacs.Core.OpCodes
         // Prefix Threads
         FE = 0xFE,
         
+        //Custom
+        [OpCode("func")] Func = 0xF0,
+        [OpCode("expr")] Expr = 0xF1,
     }
 }

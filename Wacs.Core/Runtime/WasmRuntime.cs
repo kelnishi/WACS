@@ -9,6 +9,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime
 {
@@ -20,6 +21,7 @@ namespace Wacs.Core.Runtime
 
     public class InvokerOptions
     {
+        public bool CalculateLineNumbers = false;
         public int GasLimit = 0;
         public bool LogGas = false;
         public bool LogInstructionExecution = false;
@@ -72,6 +74,20 @@ namespace Wacs.Core.Runtime
             throw new Exception($"Module '{moduleName}' not found.");
         }
 
+        public bool TryGetExportedFunction((string module, string entity) id, out FuncAddr addr)
+        {
+            try
+            {
+                addr = GetExportedFunction(id);
+                return true;
+            }
+            catch (UnboundEntityException)
+            {
+                addr = null!;
+                return false;
+            }
+        }
+
         public FuncAddr GetExportedFunction((string module, string entity) id)
         {
             if (GetBoundEntity(id) is FuncAddr addr)
@@ -86,7 +102,7 @@ namespace Wacs.Core.Runtime
             _entityBindings.GetValueOrDefault(id);
 
         public void BindHostFunction<TDelegate>((string module, string entity) id, TDelegate func)
-        where TDelegate : Delegate
+            where TDelegate : Delegate
         {
             var funcType = func.GetType();
             var parameters = funcType.GetMethod("Invoke")?.GetParameters();
@@ -120,7 +136,7 @@ namespace Wacs.Core.Runtime
 
         //TODO: Use TDelegate to define the delegate rather than relying on CreateAnonymousFunctionFromFunctionType's switch.
         public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr, InvokerOptions? options = default)
-        where TDelegate : Delegate
+            where TDelegate : Delegate
         {
             options ??= new InvokerOptions();
             var funcInst = Context.Store[funcAddr];
@@ -133,7 +149,7 @@ namespace Wacs.Core.Runtime
                 Context.Invoke(funcAddr);
                 
                 int steps = 0;
-                while (ProcessThread(options.LogInstructionExecution))
+                while (ProcessThread(options))
                 {
                     steps += 1;
 
@@ -146,7 +162,7 @@ namespace Wacs.Core.Runtime
                     }
                 }
                 if (options.LogGas)
-                    Console.WriteLine($"Process used {steps} gas.");
+                    Console.Error.WriteLine($"Process used {steps} gas.");
                 
                 var results = Context.OpStack.PopScalars(funcType.ResultType);
                 
@@ -161,16 +177,25 @@ namespace Wacs.Core.Runtime
             return (TDelegate)Delegates.CreateTypedDelegate(genericDelegate, typeof(TDelegate));
         }
 
-        public bool ProcessThread(bool logInstructions = false)
+        public bool ProcessThread(InvokerOptions options)
         {
-            var comp = Context.Next();
+            var comp = Context!.Next();
             if (comp == null)
                 return false;
             
             //Trace execution
-            if (logInstructions)
+            if (options.LogInstructionExecution)
             {
-                Console.WriteLine($"Instruction: {comp.RenderText(Context)}");
+                string location = "";
+                if (options.CalculateLineNumbers)
+                {
+                    var ptr = Context.ComputePointerPath();
+                    var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                    (int line, string inst) = Context.Frame.Module.Repr.CalculateLine(path);
+                    location = $";;line {line + 1} :{path}";
+                }
+                var log = $"Instruction: {comp.RenderText(Context)}".PadRight(40, ' ') + location;
+                Console.Error.WriteLine(log);
             }
 
             comp.Execute(Context);
@@ -431,16 +456,38 @@ namespace Wacs.Core.Runtime
             //17. 
             if (module.StartIndex != FuncIdx.Default)
             {
+                if (!moduleInstance.FuncAddrs.Contains(module.StartIndex))
+                    throw new EntryPointNotFoundException("Module StartFunction index was invalid");
+                var startAddr = moduleInstance.FuncAddrs[module.StartIndex];
+                if (!Context.Store.Contains(startAddr))
+                    throw new EntryPointNotFoundException("Module StartFunction address not found in the Store.");
+
+                moduleInstance.StartFunc = startAddr;
+                    
+                //Invoke the function!
                 if (!options.SkipStartFunction)
-                {
-                    if (!moduleInstance.FuncAddrs.Contains(module.StartIndex))
-                        throw new EntryPointNotFoundException("Module StartFunction index was invalid");
-                    var startAddr = moduleInstance.FuncAddrs[module.StartIndex];
-                    if (!Context.Store.Contains(startAddr))
-                        throw new EntryPointNotFoundException("Module StartFunction address not found in the Store.");
-                    //Invoke the function!
                     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Call)!.Immediate(module.StartIndex)
                         .Execute(Context);
+            }
+            else
+            {   // Look for WASI/Emscripten _start in the exports
+                int fIdx = 0;
+                foreach (var export in moduleInstance.Exports.Where(export => export.Value is ExternalValue.Function))
+                {
+                    var exportedFunc = export.Value as ExternalValue.Function;
+                    if (export.Name == "_start")
+                    {
+                        moduleInstance.StartFunc = exportedFunc!.Address;
+                        
+                        //Invoke the function!
+                        if (!options.SkipStartFunction)
+                            Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Call)!.Immediate((FuncIdx)fIdx)
+                                .Execute(Context);
+                        
+                        break;
+                    }
+
+                    fIdx++;
                 }
             }
 

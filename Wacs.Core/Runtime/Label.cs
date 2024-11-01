@@ -19,6 +19,7 @@ namespace Wacs.Core.Runtime
         public int Arity => Type.Arity;
 
         public ByteCode Instruction { get; }
+
         public InstructionPointer ContinuationAddress { get; } // The instruction index to jump to on branch
     }
 }

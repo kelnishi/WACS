@@ -21,6 +21,9 @@ namespace Wacs.Core.Runtime.Types
 
         public TypesSpace Types { get; }
         public FuncAddrs FuncAddrs { get; } = new();
+
+        public FuncAddr? StartFunc { get; set; }
+
         public TableAddrs TableAddrs { get; } = new();
         public MemAddrs MemAddrs { get; } = new();
         public GlobalAddrs GlobalAddrs { get; } = new();

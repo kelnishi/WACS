@@ -85,7 +85,6 @@ namespace Wacs.Core.Runtime
                     throw new ArgumentException(
                         $"Return type mismatch. Expected return type is {expectedReturnType.Name}, but delegate returns {returnType.Name}.");
                 }
-                
             }
             else
             {

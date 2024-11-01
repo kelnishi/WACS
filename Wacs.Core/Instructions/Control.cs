@@ -86,16 +86,16 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.3. block
-        public override void Execute(ExecContext context) => ExecuteInstruction(context, Block);
+        public override void Execute(ExecContext context) => ExecuteInstruction(context, Block, Op);
 
-        public static void ExecuteInstruction(ExecContext? context, Block block)
+        public static void ExecuteInstruction(ExecContext? context, Block block, ByteCode inst)
         {
             try
             {
                 //2,3
                 var funcType = context.Frame.Module.Types.ResolveBlockType(block.Type);
                 //4.
-                var label = new Label(funcType!.ResultType, context.GetPointer(), OpCode.Block);
+                var label = new Label(funcType!.ResultType, context.GetPointer(), inst);
                 //5.
                 context.Assert(() => context.OpStack.Count >= funcType.ParameterTypes.Length,
                     () => $"Instruction block failed. Operand Stack underflow.");
@@ -262,11 +262,11 @@ namespace Wacs.Core.Instructions
             int c = context.OpStack.PopI32();
             if (c != 0)
             {
-                InstBlock.ExecuteInstruction(context, IfBlock);
+                InstBlock.ExecuteInstruction(context, IfBlock, OpCode.If);
             }
             else
             {
-                InstBlock.ExecuteInstruction(context, ElseBlock);
+                InstBlock.ExecuteInstruction(context, ElseBlock, OpCode.Else);
             }
         }
 

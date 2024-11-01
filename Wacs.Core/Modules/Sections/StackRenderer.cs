@@ -107,7 +107,7 @@ namespace Wacs.Core
 
         public FakeContext(Module module, Module.Function func)
         {
-            ValidationModule = new ModuleInstance(module);
+            ModuleInst = new ModuleInstance(module);
             _module = module;
 
             Funcs = new FunctionsSpace(module);
@@ -124,15 +124,19 @@ namespace Wacs.Core
             var funcType = Types[func.TypeIndex];
             var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
             var locals = new LocalsSpace(funcType.ParameterTypes.Types, func.Locals);
-            var execFrame = new Frame(ValidationModule, fakeType) { Locals = locals };
+            var execFrame = new Frame(ModuleInst, fakeType)
+            {
+                Locals = locals,
+                Index = func.Index
+            };
 
-            DummyContext = BuildDummyContext(module, ValidationModule, execFrame);
+            DummyContext = BuildDummyContext(module, ModuleInst, execFrame);
 
             ReturnType = funcType.ResultType;
             PushControlFrame(OpCode.Block, fakeType);
         }
 
-        private ModuleInstance ValidationModule { get; }
+        private ModuleInstance ModuleInst { get; }
 
         public IValidationOpStack ReturnStack => _opStack;
 
@@ -186,7 +190,7 @@ namespace Wacs.Core
             Unreachable = true;
         }
 
-        public TypesSpace Types => ValidationModule.Types;
+        public TypesSpace Types => ModuleInst.Types;
         public FunctionsSpace Funcs { get; }
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }

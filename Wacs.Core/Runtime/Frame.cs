@@ -38,6 +38,8 @@ namespace Wacs.Core.Runtime
 
         public FunctionType Type { get; }
 
+        public FuncIdx Index { get; set; }
+
         public int Arity => (int)Type.ResultType.Length;
 
         //For validation
