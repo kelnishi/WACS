@@ -60,7 +60,20 @@ namespace Wacs.Core
             }
         }
 
-        public int Size => _instructions.Sum(inst => inst is IBlockInstruction blockInst ? blockInst.Size : 1);
+        public int Size
+        {
+            get
+            {
+                int sum = 0;
+                for (int index = 0; index < _instructions.Count; index++)
+                {
+                    var inst = _instructions[index];
+                    sum += inst is IBlockInstruction blockInst ? blockInst.Size : 1;
+                }
+                return sum;
+            }
+        }
+
         public IInstruction LastInstruction => _instructions[^1];
 
         public IEnumerator<IInstruction> GetEnumerator() => _instructions.GetEnumerator();

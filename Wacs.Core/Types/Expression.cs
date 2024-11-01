@@ -31,7 +31,7 @@ namespace Wacs.Core.Types
         /// Leaves the result on the OpStack
         /// </summary>
         /// <param name="context"></param>
-        public void Execute(ExecContext? context)
+        public void Execute(ExecContext context)
         {
             var frame = new Frame(context.Frame.Module, FunctionType.Empty);
             var label = new Label(ResultType.Empty, new InstructionPointer(Instructions, 1), OpCode.Nop);

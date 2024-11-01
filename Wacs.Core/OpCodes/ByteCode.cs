@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace Wacs.Core.OpCodes
 {
     [StructLayout(LayoutKind.Explicit)]
-    public struct ByteCode
+    public struct ByteCode : IComparable<ByteCode>
     {
         [FieldOffset(0)] public readonly OpCode   x00;
         [FieldOffset(1)] public readonly GcCode       xFB;
@@ -45,7 +45,27 @@ namespace Wacs.Core.OpCodes
             x00 = OpCode.FE;
             xFE = b;
         }
-        
+
+        public static explicit operator ByteCode(ushort bytes) =>
+            (byte)(bytes >> 8) switch
+            {
+                0xFB => new ByteCode((GcCode)(byte)(bytes & 0xFF)),
+                0xFC => new ByteCode((ExtCode)(byte)(bytes & 0xFF)),
+                0xFD => new ByteCode((SimdCode)(byte)(bytes & 0xFF)),
+                0xFE => new ByteCode((AtomCode)(byte)(bytes & 0xFF)),
+                _ => new ByteCode((OpCode)(byte)(bytes >> 8)),
+            };
+
+        public static explicit operator ushort(ByteCode byteCode) =>
+            byteCode.x00 switch
+            {
+                OpCode.FB => (ushort)((byte)byteCode.x00 << 8 | (byte)byteCode.xFB),
+                OpCode.FC => (ushort)((byte)byteCode.x00 << 8 | (byte)byteCode.xFC),
+                OpCode.FD => (ushort)((byte)byteCode.x00 << 8 | (byte)byteCode.xFD),
+                OpCode.FE => (ushort)((byte)byteCode.x00 << 8 | (byte)byteCode.xFE),
+                _ => (ushort)((byte)byteCode.x00 << 8),
+            };
+
         public static implicit operator OpCode(ByteCode byteCode) => byteCode.x00;
         public static implicit operator ByteCode(OpCode b) => new ByteCode(b);
         public static implicit operator ByteCode(GcCode b) => new ByteCode(b);
@@ -72,5 +92,19 @@ namespace Wacs.Core.OpCodes
             };
         public static bool operator ==(ByteCode left, ByteCode right) => left.Equals(right);
         public static bool operator !=(ByteCode left, ByteCode right) => !(left == right);
+
+        public int CompareTo(ByteCode other)
+        {
+            var x00Comparison = x00.CompareTo(other.x00);
+            if (x00Comparison != 0) return x00Comparison;
+            switch (x00)
+            {
+                case OpCode.FB: return xFB.CompareTo(other.xFB);
+                case OpCode.FC: return xFC.CompareTo(other.xFC);
+                case OpCode.FD: return xFD.CompareTo(other.xFD);
+                case OpCode.FE: return xFE.CompareTo(other.xFE);
+                default: return 0;
+            }
+        }
     }
 }

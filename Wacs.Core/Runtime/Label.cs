@@ -3,15 +3,16 @@ using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime
 {
-    public class Label
+    public struct Label
     {
-        public int StackHeight = 0;
+        public int StackHeight;
 
         public Label(ResultType type, InstructionPointer continuationAddress, ByteCode inst)
         {
             Type = type;
             ContinuationAddress = continuationAddress;
             Instruction = inst;
+            StackHeight = 0;
         }
 
         public ResultType Type { get; }

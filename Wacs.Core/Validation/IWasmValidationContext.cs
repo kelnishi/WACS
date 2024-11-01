@@ -27,7 +27,7 @@ namespace Wacs.Core.Validation
         public ValidationControlFrame PopControlFrame();
         public void SetUnreachable();
 
-        public void Assert(bool factIsTrue, WasmValidationContext.MessageProducer message);
+        public void Assert(bool factIsTrue, string message);
         public void ValidateBlock(Block instructionBlock, int index = 0);
     }
 }

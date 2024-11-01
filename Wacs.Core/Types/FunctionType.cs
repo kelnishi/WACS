@@ -10,6 +10,13 @@ namespace Wacs.Core.Types
     public class FunctionType : IRenderable
     {
         public static readonly FunctionType Empty = new(ResultType.Empty, ResultType.Empty);
+        public static readonly FunctionType SingleI32 = new(ResultType.Empty, new ResultType(ValType.I32));
+        public static readonly FunctionType SingleI64 = new(ResultType.Empty, new ResultType(ValType.I64));
+        public static readonly FunctionType SingleF32 = new(ResultType.Empty, new ResultType(ValType.F32));
+        public static readonly FunctionType SingleF64 = new(ResultType.Empty, new ResultType(ValType.F64));
+        public static readonly FunctionType SingleV128 = new(ResultType.Empty, new ResultType(ValType.V128));
+        public static readonly FunctionType SingleFuncref = new(ResultType.Empty, new ResultType(ValType.Funcref));
+        public static readonly FunctionType SingleExternref = new(ResultType.Empty, new ResultType(ValType.Externref));
 
         public FunctionType(ResultType parameterTypes, ResultType resultType) =>
             (ParameterTypes, ResultType) = (parameterTypes, resultType);

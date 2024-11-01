@@ -21,6 +21,8 @@ namespace Wacs.Core.Runtime
     public class InvokerOptions
     {
         public bool CalculateLineNumbers = false;
+
+        public bool CollectStats = false;
         public int GasLimit = 0;
         public bool LogGas = false;
         public bool LogInstructionExecution = false;
@@ -146,6 +148,10 @@ namespace Wacs.Core.Runtime
             Delegates.ValidateFunctionTypeCompatibility(funcType, typeof(TDelegate));
             var genericDelegate = Delegates.AnonymousFunctionFromType(funcType, args => {
                 Context.OpStack.PushScalars(funcType.ParameterTypes, args);
+
+                Context.ResetStats();
+                Context.InstructionTimer.Reset();
+                Context.ProcessTimer.Restart();
                 
                 Context.Invoke(funcAddr);
                 
@@ -169,6 +175,11 @@ namespace Wacs.Core.Runtime
                             Console.Error.Write('.');
                         }
                     }
+                }
+                if (options.CollectStats)
+                {
+                    Context.ProcessTimer.Stop();
+                    PrintStats();
                 }
                 if (options.LogGas)
                     Console.Error.WriteLine($"Process used {steps} gas.");
@@ -211,10 +222,30 @@ namespace Wacs.Core.Runtime
 
             try
             {
-                comp.Execute(Context);
+                if (options.CollectStats)
+                {
+                    Context.InstructionTimer.Restart();
+                    comp.Execute(Context);
+                    Context.InstructionTimer.Stop();
+
+                    var st = Context.Stats[(ushort)comp.Op]; 
+                    st.count += 1;
+                    st.duration += Context.InstructionTimer.ElapsedTicks;
+                    Context.Stats[(ushort)comp.Op] = st;
+                }
+                else
+                {
+                    comp.Execute(Context);
+                }
             }
             catch (TrapException exc)
             {
+                Context.ProcessTimer.Stop();
+                if (options.CollectStats)
+                {
+                    PrintStats();
+                }
+                
                 Console.Error.WriteLine();
                 var ptr = Context.ComputePointerPath();
                 var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
@@ -225,6 +256,38 @@ namespace Wacs.Core.Runtime
             }
 
             return true;
+        }
+
+        public void PrintStats()
+        {
+            long procTime = Context.ProcessTimer.ElapsedTicks;
+            long totalExecs = Context.Stats.Values.Sum(dc => dc.count);
+            long totalTicks = Context.Stats.Values.Sum(dc => dc.duration);
+            long procOverhead = procTime - totalTicks;
+            
+            TimeSpan totalTime = new TimeSpan(totalTicks);
+            TimeSpan overheadTime = new TimeSpan(procOverhead);
+            double overheadPercent =  100.0 * procOverhead / procTime;
+            string overheadLabel = $"({overheadPercent:#0.###}%) {overheadTime}";
+            
+            string totalLabel = "    total duration";
+            string totalInst = $"{totalExecs}";
+            string avgTime = $"{new TimeSpan(totalTicks / totalExecs)}/instruction";
+            Console.WriteLine($"Execution Stats:");
+            Console.WriteLine($"{totalLabel}: {totalInst}| {totalTime} {avgTime} overhead:{overheadLabel}");
+            var orderedStats = Context.Stats
+                .Where(bdc => bdc.Value.count != 0)
+                .OrderBy(bdc => -bdc.Value.count);
+            
+            foreach (var (opcode, st) in orderedStats)
+            {
+                string label = $"{((ByteCode)opcode).GetMnemonic()}".PadLeft(totalLabel.Length, ' ');
+                TimeSpan instTime = new TimeSpan(st.duration);
+                double percent = 100.0 * st.duration / totalTicks;
+                string execsLabel = $"{st.count}".PadLeft(totalInst.Length, ' ');
+                string percentLabel = $"{percent:#0.###}%".PadLeft(7,' ');
+                Console.WriteLine($"{label}: {execsLabel}| ({percentLabel}) {instTime}");
+            }
         }
 
         /// <summary>
