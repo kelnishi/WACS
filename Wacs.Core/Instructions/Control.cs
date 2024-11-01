@@ -345,6 +345,7 @@ namespace Wacs.Core.Instructions
                 case OpCode.Else:
                     context.ExitBlock();
                     break;
+                case OpCode.Expr:
                 case OpCode.Call:
                     context.FunctionReturn();
                     break;

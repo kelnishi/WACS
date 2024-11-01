@@ -24,6 +24,7 @@ namespace Wacs.Core.Runtime
         public int GasLimit = 0;
         public bool LogGas = false;
         public bool LogInstructionExecution = false;
+        public int LogProgressEvery = -1;
         public bool ShowPath = false;
     }
 
@@ -149,7 +150,7 @@ namespace Wacs.Core.Runtime
                 Context.Invoke(funcAddr);
                 
                 int steps = 0;
-                while (ProcessThread(options))
+                while (ProcessThread(options, steps))
                 {
                     steps += 1;
 
@@ -158,6 +159,14 @@ namespace Wacs.Core.Runtime
                         if (steps >= options.GasLimit)
                         {
                             throw new InsufficientGasException($"Invocation ran out of gas (limit:{options.GasLimit}).");
+                        }
+                    }
+
+                    if (options.LogGas && options.LogProgressEvery > 0)
+                    {
+                        if (steps % options.LogProgressEvery == 0)
+                        {
+                            Console.Error.Write('.');
                         }
                     }
                 }
@@ -177,7 +186,7 @@ namespace Wacs.Core.Runtime
             return (TDelegate)Delegates.CreateTypedDelegate(genericDelegate, typeof(TDelegate));
         }
 
-        public bool ProcessThread(InvokerOptions options)
+        public bool ProcessThread(InvokerOptions options, int steps)
         {
             var comp = Context!.Next();
             if (comp == null)
@@ -200,7 +209,21 @@ namespace Wacs.Core.Runtime
                 Console.Error.WriteLine(log);
             }
 
-            comp.Execute(Context);
+            try
+            {
+                comp.Execute(Context);
+            }
+            catch (TrapException exc)
+            {
+                Console.Error.WriteLine();
+                var ptr = Context.ComputePointerPath();
+                var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                (int line, string inst) = Context.Frame.Module.Repr.CalculateLine(path);
+                line += 1;
+            
+                throw new TrapException(exc.Message + $":line {line} instruction #{steps}\n{path}");
+            }
+
             return true;
         }
 

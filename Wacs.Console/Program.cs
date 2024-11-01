@@ -114,8 +114,9 @@ namespace Wacs.Console
 
             var callOptions = new InvokerOptions {
                 LogGas = true,
-                LogInstructionExecution = true,
-                CalculateLineNumbers = true,
+                LogProgressEvery = 1_000_000, 
+                LogInstructionExecution = false,
+                CalculateLineNumbers = false,
             };
             
             //Wasm/WASI entry points
