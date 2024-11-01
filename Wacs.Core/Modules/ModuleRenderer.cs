@@ -76,6 +76,7 @@ namespace Wacs.Core
                             seq = Funcs[index].Body.Instructions;
                             break;
                         }
+                        case "Expr":
                         case "Expression":
                         case "Block":
                         {

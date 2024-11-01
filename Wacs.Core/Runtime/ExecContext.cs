@@ -99,7 +99,7 @@ namespace Wacs.Core.Runtime
             switch (funcInst)
             {
                 case FunctionInstance wasmFunc:
-                    Invoke(wasmFunc);
+                    Invoke(wasmFunc, wasmFunc.Index);
                     return;
                 case HostFunction hostFunc:
                     Invoke(hostFunc);
@@ -107,7 +107,7 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        private void Invoke(FunctionInstance wasmFunc)
+        private void Invoke(FunctionInstance wasmFunc, FuncIdx idx)
         {
             //3.
             var funcType = wasmFunc.Type;
@@ -124,7 +124,8 @@ namespace Wacs.Core.Runtime
             var frame = new Frame(wasmFunc.Module, funcType)
             {
                 ContinuationAddress = GetPointer(),
-                Locals = new LocalsSpace(funcType.ParameterTypes.Types, t)
+                Locals = new LocalsSpace(funcType.ParameterTypes.Types, t),
+                Index = idx
             };
             int li = 0;
             int localCount = funcType.ParameterTypes.Arity + t.Length;
@@ -143,9 +144,9 @@ namespace Wacs.Core.Runtime
             //9.
             PushFrame(frame);
             //10.
-            var label = new Label(funcType.ResultType, GetPointer(), OpCode.Call)
+            var label = new Label(funcType.ResultType, GetPointer(), OpCode.Expr)
             {
-                StackHeight = OpStack.Count
+                StackHeight = OpStack.Count,
             };
             frame.Labels.Push(label);
             EnterSequence(wasmFunc.Definition.Body.Instructions);
@@ -193,6 +194,27 @@ namespace Wacs.Core.Runtime
                 return null;
 
             return _currentSequence[_sequenceIndex];
+        }
+
+        public List<(string, int)> ComputePointerPath()
+        {
+            Stack<(string, int)> ascent = new();
+            int idx = _sequenceIndex;
+
+            // foreach (var frame in CallStack)
+            // {
+            
+            foreach (var label in Frame.Labels)
+            {
+                var pointer = (label.Instruction.GetMnemonic(), idx);
+                ascent.Push(pointer);
+                idx = label.ContinuationAddress.Index;
+            }
+            
+            ascent.Push(("Function", (int)Frame.Index.Value));
+            // }
+
+            return ascent.Select(a => a).ToList();
         }
 
         public void SetFrame(Frame frame)
