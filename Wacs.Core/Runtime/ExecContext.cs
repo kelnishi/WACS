@@ -206,6 +206,8 @@ namespace Wacs.Core.Runtime
                 var pointer = (label.Instruction.GetMnemonic(), idx);
                 ascent.Push(pointer);
 
+                idx = label.ContinuationAddress.Index;
+                
                 switch ((OpCode)label.Instruction)
                 {
                     case OpCode.If: ascent.Push(("InstIf", 0));
@@ -214,9 +216,11 @@ namespace Wacs.Core.Runtime
                         break;
                     case OpCode.Block: ascent.Push(("InstBlock", 0));
                         break;
+                    case OpCode.Loop: ascent.Push(("InstLoop", 0));
+                        idx += 1; //Loops point to their own precursor
+                        break;
                 }
                 
-                idx = label.ContinuationAddress.Index;
             }
             
             ascent.Push(("Function", (int)Frame.Index.Value));

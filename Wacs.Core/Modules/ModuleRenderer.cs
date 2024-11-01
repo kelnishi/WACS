@@ -81,6 +81,7 @@ namespace Wacs.Core
                         case "Block":
                         case "If":
                         case "Else":
+                        case "Loop":
                         {
                             if (seq == null)
                                 throw new ArgumentException("Validation path was invalid.");
