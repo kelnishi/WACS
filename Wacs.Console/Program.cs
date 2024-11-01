@@ -127,11 +127,11 @@ namespace Wacs.Console
             {
                 var caller = runtime.CreateInvoker<Delegates.WasmAction>(modInst.StartFunc, callOptions);
 
+                System.Console.WriteLine("Calling start");
                 using (var profilingSession = new ProfilingSession())
                 {
                     try
                     {
-                        System.Console.WriteLine("Calling start");
                         caller();
                     }
                     catch (TrapException exc)
@@ -144,11 +144,11 @@ namespace Wacs.Console
             {
                 var caller = runtime.CreateInvoker<Func<Value>>(mainAddr, callOptions);
 
+                System.Console.WriteLine("Calling main");
                 using (var profilingSession = new ProfilingSession())
                 {
                     try
                     {
-                        System.Console.WriteLine("Calling main");
                         int result = caller();
 
                         System.Console.WriteLine($"Result was: {result}");
