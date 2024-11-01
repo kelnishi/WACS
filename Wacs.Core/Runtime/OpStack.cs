@@ -1,6 +1,6 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime
@@ -64,20 +64,12 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public object[] PopScalars(ResultType type)
+        public void PopScalars(ResultType type, Span<object> targetBuf)
         {
-            var results = new Stack<Value>();
-            for (int i = 0, l = type.Arity; i < l; ++i)
+            for (int i = type.Arity - 1; i >= 0; --i)
             {
-                //Skip ExecContext
-                if (type.Types[i] == ValType.ExecContext)
-                    continue;
-                
-                //We could check the types here, but the spec just says to YOLO it.
-                results.Push(PopAny());
+                targetBuf[i] = PopAny().Scalar;
             }
-
-            return results.Select(value => value.Scalar).ToArray();
         }
 
         public void PushScalars(ResultType type, object[] scalars)

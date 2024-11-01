@@ -186,8 +186,10 @@ namespace Wacs.Core.Runtime
                     PrintStats();
                 if (options.LogGas) 
                     Console.Error.WriteLine($"Process used {steps} gas. {Context.ProcessTimer.Elapsed}");
-                
-                var results = Context.OpStack.PopScalars(funcType.ResultType);
+
+                object[] results = new object[funcType.ResultType.Arity];
+                var span = results.AsSpan();
+                Context.OpStack.PopScalars(funcType.ResultType, span);
                 
                 //void
                 if (funcType.ResultType.Types.Length == 0)

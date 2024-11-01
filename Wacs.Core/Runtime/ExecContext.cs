@@ -167,15 +167,15 @@ namespace Wacs.Core.Runtime
         private void Invoke(HostFunction hostFunc)
         {
             var funcType = hostFunc.Type;
-            var vals = OpStack.PopScalars(funcType.ParameterTypes);
 
-            //Prepend the context if it's needed
-            if (hostFunc.PassExecContext)
-            {
-                vals = new object[] { this }.Concat(vals).ToArray();
-            }
+            //Write the ExecContext to the first parameter if needed
+            var paramBuf = hostFunc.GetParameterBuf(this);
             
-            hostFunc.Invoke(vals, OpStack);
+            //Fetch the parameters
+            OpStack.PopScalars(funcType.ParameterTypes, paramBuf);
+
+            //Pass them
+            hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
         }
 
         // @Spec 4.4.10.2. Returning from a function
