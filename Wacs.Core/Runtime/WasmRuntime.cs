@@ -149,8 +149,11 @@ namespace Wacs.Core.Runtime
             var genericDelegate = Delegates.AnonymousFunctionFromType(funcType, args => {
                 Context.OpStack.PushScalars(funcType.ParameterTypes, args);
 
-                Context.ResetStats();
-                Context.InstructionTimer.Reset();
+                if (options.CollectStats)
+                {
+                    Context.ResetStats();
+                    Context.InstructionTimer.Reset();
+                }
                 Context.ProcessTimer.Restart();
                 
                 Context.Invoke(funcAddr);

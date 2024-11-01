@@ -101,10 +101,8 @@ namespace Wacs.Core.Runtime.Types
                 throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
             
             var buf = this[(int)ptr..(int)(ptr + sizeof(uint))];
-            buf[0] = (byte) (x & 0xFF);
-            buf[1] = (byte)((x >> 8) & 0xFF);
-            buf[2] = (byte)((x >> 16) & 0xFF);
-            buf[3] = (byte)((x >> 24) & 0xFF);
+            var byteSpan = MemoryMarshal.AsBytes(stackalloc uint[] { x });
+            byteSpan.CopyTo(buf);
         }
 
         public void WriteInt64(int ptr, long x) => WriteInt64((uint)ptr, (ulong)x);
@@ -117,14 +115,8 @@ namespace Wacs.Core.Runtime.Types
                 throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
             
             var buf = this[(int)ptr..(int)(ptr + sizeof(ulong))];
-            buf[0] = (byte) (x & 0xFF);
-            buf[1] = (byte)((x >> 8) & 0xFF);
-            buf[2] = (byte)((x >> 16) & 0xFF);
-            buf[3] = (byte)((x >> 24) & 0xFF);
-            buf[4] = (byte)((x >> 32) & 0xFF);
-            buf[5] = (byte)((x >> 40) & 0xFF);
-            buf[6] = (byte)((x >> 48) & 0xFF);
-            buf[7] = (byte)((x >> 56) & 0xFF);
+            var byteSpan = MemoryMarshal.AsBytes(stackalloc ulong[] { x });
+            byteSpan.CopyTo(buf);
         }
 
         public T[] ReadStructs<T>(uint iovsPtr, uint iovsLen)
