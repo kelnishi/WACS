@@ -108,7 +108,7 @@ namespace Wacs.Console
 
             string moduleName = "hello";
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing or you're like super confident.
-            var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true, SkipStartFunction = true});
+            var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true});
             runtime.RegisterModule(moduleName, modInst);
 
 

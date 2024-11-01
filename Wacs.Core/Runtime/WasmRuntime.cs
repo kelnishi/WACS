@@ -16,7 +16,6 @@ namespace Wacs.Core.Runtime
     public class RuntimeOptions
     {
         public bool SkipModuleValidation = false;
-        public bool SkipStartFunction = false;
     }
 
     public class InvokerOptions
@@ -464,10 +463,10 @@ namespace Wacs.Core.Runtime
 
                 moduleInstance.StartFunc = startAddr;
                     
-                //Invoke the function!
-                if (!options.SkipStartFunction)
-                    Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Call)!.Immediate(module.StartIndex)
-                        .Execute(Context);
+                // //Invoke the function!
+                // if (!options.SkipStartFunction)
+                //     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Func)!.Immediate(module.StartIndex)
+                //         .Execute(Context);
             }
             else
             {   // Look for WASI/Emscripten _start in the exports
@@ -479,10 +478,10 @@ namespace Wacs.Core.Runtime
                     {
                         moduleInstance.StartFunc = exportedFunc!.Address;
                         
-                        //Invoke the function!
-                        if (!options.SkipStartFunction)
-                            Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Call)!.Immediate((FuncIdx)fIdx)
-                                .Execute(Context);
+                        // //Invoke the function!
+                        // if (!options.SkipStartFunction)
+                        //     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Func)!.Immediate((FuncIdx)fIdx)
+                        //         .Execute(Context);
                         
                         break;
                     }
