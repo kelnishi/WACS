@@ -90,6 +90,9 @@ namespace Wacs.Core.Instructions
 
         public static void ExecuteInstruction(ExecContext? context, Block block, ByteCode inst)
         {
+            if (block.Size == 0)
+                return;
+            
             try
             {
                 //2,3
