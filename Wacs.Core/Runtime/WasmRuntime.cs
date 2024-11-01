@@ -24,6 +24,7 @@ namespace Wacs.Core.Runtime
         public int GasLimit = 0;
         public bool LogGas = false;
         public bool LogInstructionExecution = false;
+        public bool ShowPath = false;
     }
 
     public class WasmRuntime
@@ -191,7 +192,9 @@ namespace Wacs.Core.Runtime
                     var ptr = Context.ComputePointerPath();
                     var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
                     (int line, string inst) = Context.Frame.Module.Repr.CalculateLine(path);
-                    location = $";;line {line + 1} :{path}";
+                    location = $";;line {line + 1}";
+                    if (options.ShowPath)
+                        location += $":{path}";
                 }
                 var log = $"Instruction: {comp.RenderText(Context)}".PadRight(40, ' ') + location;
                 Console.Error.WriteLine(log);

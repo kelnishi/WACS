@@ -79,6 +79,8 @@ namespace Wacs.Core
                         case "Expr":
                         case "Expression":
                         case "Block":
+                        case "If":
+                        case "Else":
                         {
                             if (seq == null)
                                 throw new ArgumentException("Validation path was invalid.");
@@ -117,8 +119,9 @@ namespace Wacs.Core
                             break;
                         }
                         case "InstBlock":
-                        case "InstIf":
                         case "InstLoop":
+                        case "InstIf":
+                        case "InstElse":
                         {
                             if (pointerInst == null)
                                 throw new ArgumentException("Validation path was invalid.");
