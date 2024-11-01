@@ -91,32 +91,58 @@ namespace Wacs.Core.Runtime.Types
             return size;
         }
 
-        public void WriteInt32(int ptr, int x) => WriteInt32((uint)ptr, (uint)x);
-        public void WriteInt32(int ptr, uint x) => WriteInt32((uint)ptr, x);
-        public void WriteInt32(uint ptr, int x) => WriteInt32(ptr, (uint)x);
+        public void WriteInt32(int ptr, int x)
+        {
+            if (!Contains(ptr, sizeof(int)))
+                throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
+            
+            var scratchBuffer = BitConverter.GetBytes(x);
+            Buffer.BlockCopy(scratchBuffer, 0, _data, ptr, sizeof(int));
+        }
+
+        public void WriteInt32(uint ptr, int x)
+        {
+            if (!Contains((int)ptr, sizeof(uint)))
+                throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
+            
+            var scratchBuffer = BitConverter.GetBytes(x);
+            Buffer.BlockCopy(scratchBuffer, 0, _data, (int)ptr, sizeof(int));
+        }
+
+        public void WriteInt32(int ptr, uint x)
+        {
+            if (!Contains(ptr, sizeof(uint)))
+                throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
+            
+            var scratchBuffer = BitConverter.GetBytes(x);
+            Buffer.BlockCopy(scratchBuffer, 0, _data, ptr, sizeof(uint));
+        }
 
         public void WriteInt32(uint ptr, uint x)
         {
             if (!Contains((int)ptr, sizeof(uint)))
                 throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
             
-            var buf = this[(int)ptr..(int)(ptr + sizeof(uint))];
-            var byteSpan = MemoryMarshal.AsBytes(stackalloc uint[] { x });
-            byteSpan.CopyTo(buf);
+            var scratchBuffer = BitConverter.GetBytes(x);
+            Buffer.BlockCopy(scratchBuffer, 0, _data, (int)ptr, sizeof(uint));
         }
 
-        public void WriteInt64(int ptr, long x) => WriteInt64((uint)ptr, (ulong)x);
-        public void WriteInt64(int ptr, ulong x) => WriteInt64((uint)ptr, x);
-        public void WriteInt64(uint ptr, long x) => WriteInt64(ptr, (ulong)x);
+        public void WriteInt64(int ptr, ulong x)
+        {
+            if (!Contains(ptr, sizeof(ulong)))
+                throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
+            
+            var scratchBuffer = BitConverter.GetBytes(x);
+            Buffer.BlockCopy(scratchBuffer, 0, _data, ptr, sizeof(ulong));
+        }
 
         public void WriteInt64(uint ptr, ulong x)
         {
             if (!Contains((int)ptr, sizeof(ulong)))
                 throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
             
-            var buf = this[(int)ptr..(int)(ptr + sizeof(ulong))];
-            var byteSpan = MemoryMarshal.AsBytes(stackalloc ulong[] { x });
-            byteSpan.CopyTo(buf);
+            var scratchBuffer = BitConverter.GetBytes(x);
+            Buffer.BlockCopy(scratchBuffer, 0, _data, (int)ptr, sizeof(ulong));
         }
 
         public T[] ReadStructs<T>(uint iovsPtr, uint iovsLen)
