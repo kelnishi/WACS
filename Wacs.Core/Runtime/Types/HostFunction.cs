@@ -21,6 +21,8 @@ namespace Wacs.Core.Runtime.Types
         private ConversionHelper?[] _parameterConversions = null!;
         private ConversionHelper?[] _resultConversions = null!;
 
+        public object[] ParameterBuffer;
+
         /// <summary>
         /// @Spec 4.5.3.2. Host Functions
         /// Initializes a new instance of the <see cref="HostFunction"/> class.
@@ -36,6 +38,7 @@ namespace Wacs.Core.Runtime.Types
             _invoker = delType.GetMethod("Invoke")!;
             (ModuleName, Name) = id;
             BuildConversionHelpers();
+            ParameterBuffer = new object[type.ParameterTypes.Arity + (PassExecContext ? 1 : 0)];
         }
 
         public bool PassExecContext { get; set; }
@@ -46,6 +49,14 @@ namespace Wacs.Core.Runtime.Types
         public string Id => $"{ModuleName}.{Name}";
 
         public FunctionType Type { get; }
+
+        public Span<object> GetParameterBuf(ExecContext ctx)
+        {
+            var span = ParameterBuffer.AsSpan();
+            if (!PassExecContext) return span;
+            span[0] = ctx;
+            return span[1..];
+        }
 
         private void BuildConversionHelpers()
         {
