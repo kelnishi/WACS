@@ -38,6 +38,14 @@ namespace Wacs.Core.Instructions
             OpCode.End => true,
             _ => false
         };
+
+        public static bool IsBranch(IInstruction? inst) => inst?.Op.x00 switch
+        {
+            OpCode.Br => true,
+            OpCode.BrIf => true,
+            OpCode.BrTable => true,
+            _ => false
+        };
     }
     
 }

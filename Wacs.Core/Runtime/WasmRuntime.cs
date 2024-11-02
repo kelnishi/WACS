@@ -48,6 +48,8 @@ namespace Wacs.Core.Runtime
 
         private readonly Dictionary<string, ModuleInstance> _modules = new();
 
+        private IInstruction? lastInstruction = null;
+
         public WasmRuntime(RuntimeAttributes? attributes = null)
         {
             Store = new Store();
@@ -242,6 +244,7 @@ namespace Wacs.Core.Runtime
                     case OpCode.Br when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
                     case OpCode.BrIf when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
                     case OpCode.BrTable when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
+                    case OpCode.End when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0) && IInstruction.IsBranch(lastInstruction):
                         
                     case var _ when ((options.LogInstructionExecution & InstructionLogging.Computes) != 0):
                         string location = "";
@@ -301,6 +304,7 @@ namespace Wacs.Core.Runtime
                 throw;
             }
 
+            lastInstruction = inst;
             return true;
         }
 
