@@ -279,5 +279,12 @@ namespace Wacs.Core.Runtime
                 Stats[(ushort)(ByteCode)opcode] = new ExecStat();
             }
         }
+
+        public OpCode GetEndFor()
+        {
+            if (Frame.Labels.Count == 1 && Frame.Label.Instruction.x00 == OpCode.Expr)
+                return OpCode.Func;    
+            return OpCode.Block;
+        }
     }
 }

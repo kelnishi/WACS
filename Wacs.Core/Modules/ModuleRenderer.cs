@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Text;
@@ -12,6 +13,8 @@ namespace Wacs.Core
 
     public partial class Module : IRenderable
     {
+        private readonly Dictionary<string, (int line, string instruction)> _pathLineCache = new();
+
         public void RenderText(StreamWriter writer, Module module, string indent)
         {
             writer.WriteLine($"{indent}(module");
@@ -22,121 +25,132 @@ namespace Wacs.Core
         {
             int line = 0;
 
+            string foundInstruction = "";
+            if (_pathLineCache.TryGetValue(validationPath, out var result))
+            {
+                line = result.line;
+                foundInstruction = result.instruction;
+            }
+            else
+            {
+                //Start of functions
+                var parts = validationPath.Split(".");
+
+                IBlockInstruction pointerInst = null!;
+                InstructionSequence seq = null!;
+                bool addLocals = false;
+                string indent = "";
+                foreach (var part in parts)
+                {
+                    indent += " ";
+                    //Skip instruction strata
+                    if (!part.EndsWith("]"))
+                    {
+                        line += 1;
+                        break;
+                    }
+
+                    var regex = new Regex(@"(\w+)\[(\d+)\]");
+                    var match = regex.Match(part);
+                    if (match.Success)
+                    {
+                        int index = int.Parse(match.Groups[2].Value);
+                        string strata = match.Groups[1].Value;
+                        switch (strata)
+                        {
+                            case "Function":
+                            {
+                                index -= Imports.Length;
+                                for (int i = 0; i < index; ++i)
+                                {
+                                    if (!functionRelative)
+                                    {
+                                        line += Funcs[i].Size; //other (func
+                                    }
+                                }
+
+                                if (print)
+                                    Console.WriteLine($"{indent}Function[{index + Imports.Length}]:{line}");
+
+                                if (Funcs[index].Locals.Length > 0)
+                                    addLocals = true;
+
+                                foundInstruction = "func";
+
+                                seq = Funcs[index].Body.Instructions;
+                                break;
+                            }
+                            case "Expr":
+                            case "Expression":
+                            case "Block":
+                            case "If":
+                            case "Else":
+                            case "Loop":
+                            {
+                                if (seq == null)
+                                    throw new ArgumentException("Validation path was invalid.");
+
+                                //Fast-forward through instructions
+                                for (int i = 0; i < index; ++i)
+                                {
+                                    var inst = seq[i];
+                                    if (inst is IBlockInstruction blockInstruction)
+                                    {
+                                        line += blockInstruction.Size;
+                                    }
+                                    else
+                                    {
+                                        line += 1;
+                                    }
+                                }
+
+                                if (addLocals)
+                                {
+                                    addLocals = false;
+                                    line += 1;
+                                }
+
+                                line += 1;
+
+                                if (print)
+                                    Console.WriteLine($"{indent}{strata}[{index}]:{line}");
+
+                                var term = seq[index];
+                                if (term is IBlockInstruction blTerm)
+                                {
+                                    pointerInst = blTerm;
+                                }
+
+                                foundInstruction = term.Op.GetMnemonic();
+                                break;
+                            }
+                            case "InstBlock":
+                            case "InstLoop":
+                            case "InstIf":
+                            case "InstElse":
+                            {
+                                if (pointerInst == null)
+                                    throw new ArgumentException("Validation path was invalid.");
+
+                                if (print)
+                                    Console.WriteLine($"{indent}{strata}[{index}]:{line}");
+
+                                seq = pointerInst.GetBlock(index);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                _pathLineCache[validationPath] = (line, foundInstruction);
+            }
+
             if (!functionRelative)
             {
                 line += 1;              //(module
                 line += Types.Count;    //  (type
                 line += Imports.Length; //  (import
             }
-            //Start of functions
-            var parts = validationPath.Split(".");
-            string foundInstruction = "";
-
-            IBlockInstruction pointerInst = null!;
-            InstructionSequence seq = null!;
-            bool addLocals = false;
-            string indent = "";
-            foreach (var part in parts)
-            {
-                indent += " ";
-                //Skip instruction strata
-                if (!part.EndsWith("]"))
-                {
-                    line += 1;
-                    break;
-                }
-                
-                var regex = new Regex(@"(\w+)\[(\d+)\]");
-                var match = regex.Match(part);
-                if (match.Success)
-                {
-                    int index = int.Parse(match.Groups[2].Value);
-                    string strata = match.Groups[1].Value;
-                    switch (strata)
-                    {
-                        case "Function":
-                        {
-                            index -= Imports.Length;
-                            for (int i = 0; i < index; ++i)
-                            {
-                                if (!functionRelative)
-                                {
-                                    line += Funcs[i].Size; //other (func
-                                }
-                            }
-                        
-                            if (print)
-                                Console.WriteLine($"{indent}Function[{index+Imports.Length}]:{line}");
-
-                            if (Funcs[index].Locals.Length > 0)
-                                addLocals = true;
-
-                            foundInstruction = "func";
-
-                            seq = Funcs[index].Body.Instructions;
-                            break;
-                        }
-                        case "Expr":
-                        case "Expression":
-                        case "Block":
-                        case "If":
-                        case "Else":
-                        case "Loop":
-                        {
-                            if (seq == null)
-                                throw new ArgumentException("Validation path was invalid.");
-                        
-                            //Fast-forward through instructions
-                            for (int i = 0; i < index; ++i)
-                            {
-                                var inst = seq[i];
-                                if (inst is IBlockInstruction blockInstruction)
-                                {
-                                    line += blockInstruction.Size;
-                                }
-                                else
-                                {
-                                    line += 1;
-                                }
-                            }
-
-                            if (addLocals)
-                            {
-                                addLocals = false;
-                                line += 1;
-                            }
-                            
-                            line += 1;
-                            
-                            if (print)
-                                Console.WriteLine($"{indent}{strata}[{index}]:{line}");
-                        
-                            var term = seq[index];
-                            if (term is IBlockInstruction blTerm)
-                            {
-                                pointerInst = blTerm;
-                            }
-                            foundInstruction = term.Op.GetMnemonic();
-                            break;
-                        }
-                        case "InstBlock":
-                        case "InstLoop":
-                        case "InstIf":
-                        case "InstElse":
-                        {
-                            if (pointerInst == null)
-                                throw new ArgumentException("Validation path was invalid.");
-                        
-                            if (print)
-                                Console.WriteLine($"{indent}{strata}[{index}]:{line}");
-                        
-                            seq = pointerInst.GetBlock(index);
-                            break;
-                        }
-                    }
-                }
-            }
-
             return (line, foundInstruction);
         }
     }

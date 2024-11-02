@@ -18,6 +18,18 @@ namespace Wacs.Core.Runtime
         public bool SkipModuleValidation = false;
     }
 
+    [Flags]
+    public enum InstructionLogging
+    {
+        None = 0,
+        Calls = 1 << 0,
+        Blocks = 1 << 1,
+        Branches = 1 << 2,
+        Computes = 1 << 3,
+        
+        All = Calls | Blocks | Branches | Computes,
+    }
+
     public class InvokerOptions
     {
         public bool CalculateLineNumbers = false;
@@ -25,7 +37,7 @@ namespace Wacs.Core.Runtime
         public bool CollectStats = false;
         public int GasLimit = 0;
         public bool LogGas = false;
-        public bool LogInstructionExecution = false;
+        public InstructionLogging LogInstructionExecution = InstructionLogging.None;
         public int LogProgressEvery = -1;
         public bool ShowPath = false;
     }
@@ -209,20 +221,43 @@ namespace Wacs.Core.Runtime
                 return false;
             
             //Trace execution
-            if (options.LogInstructionExecution)
+            if (options.LogInstructionExecution != InstructionLogging.None)
             {
-                string location = "";
-                if (options.CalculateLineNumbers)
+                switch ((OpCode)inst.Op)
                 {
-                    var ptr = Context.ComputePointerPath();
-                    var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                    (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
-                    location = $";;line {line + 1}";
-                    if (options.ShowPath)
-                        location += $":{path}";
+                    case OpCode.Call when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
+                    case OpCode.CallIndirect when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
+                    case OpCode.CallRef when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
+                    case OpCode.Return when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
+                    case OpCode.ReturnCallIndirect when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
+                    case OpCode.ReturnCall when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
+                    case OpCode.End when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0) && Context.GetEndFor() == OpCode.Func:    
+                        
+                    case OpCode.Block when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
+                    case OpCode.Loop when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
+                    case OpCode.If when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
+                    case OpCode.Else when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
+                    case OpCode.End when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0) && Context.GetEndFor() == OpCode.Block:
+                            
+                    case OpCode.Br when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
+                    case OpCode.BrIf when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
+                    case OpCode.BrTable when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
+                        
+                    case var _ when ((options.LogInstructionExecution & InstructionLogging.Computes) != 0):
+                        string location = "";
+                        if (options.CalculateLineNumbers)
+                        {
+                            var ptr = Context.ComputePointerPath();
+                            var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                            (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+                            location = $";;line {line + 1}";
+                            if (options.ShowPath)
+                                location += $":{path}";
+                        }
+                        var log = $"Instruction: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
+                        Console.Error.WriteLine(log);
+                        break; 
                 }
-                var log = $"Instruction: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
-                Console.Error.WriteLine(log);
             }
 
             try

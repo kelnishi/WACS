@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
 using FluentValidation;
@@ -11,10 +12,11 @@ namespace Wacs.Core.Runtime.Types
     {
         private byte[] _data;
 
+        [SuppressMessage("ReSharper.DPA", "DPA0003: Excessive memory allocations in LOH", MessageId = "type: System.Byte[]; size: 134MB")]
         public MemoryInstance(MemoryType type)
         {
             Type = type;
-            uint initialSize = type.Limits.Minimum * Constants.PageSize;
+            uint initialSize = (type.Limits.Minimum*8)* Constants.PageSize;
             _data = new byte[initialSize];
         }
 
@@ -67,8 +69,6 @@ namespace Wacs.Core.Runtime.Types
             var bytes = this[(int)ptr..(int)(ptr + len)];
             return Encoding.UTF8.GetString(bytes.ToArray());
         }
-
-        public int WriteString(int ptr, string str) => WriteString((uint)ptr, str);
 
         public int WriteString(uint ptr, string str)
         {
