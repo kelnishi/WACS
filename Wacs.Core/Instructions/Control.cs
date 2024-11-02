@@ -435,7 +435,7 @@ namespace Wacs.Core.Instructions
         public override string RenderText(ExecContext? context)
         {
             if (context == null) return $"{base.RenderText(context)} {L.Value}";
-            int depth = context.Frame.Labels.Count;
+            int depth = context.Frame.Labels.Count - 1;
             return $"{base.RenderText(context)} {L.Value} (;@{depth - L.Value};)";
         }
     }
@@ -485,7 +485,7 @@ namespace Wacs.Core.Instructions
         public override string RenderText(ExecContext? context)
         {
             if (context == null) return $"{base.RenderText(context)} {L.Value}";
-            int depth = context.Frame.Labels.Count;
+            int depth = context.Frame.Labels.Count - 1;
             return $"{base.RenderText(context)} {L.Value} (;@{depth - L.Value};)";
         }
     }
@@ -564,7 +564,7 @@ namespace Wacs.Core.Instructions
         {
             if (context==null)
                 return $"{base.RenderText(context)} {string.Join(" ", Ls.Select(idx => idx.Value).Select(v => $"{v}"))} {Ln.Value}";
-            int depth = context.Frame.Labels.Count;
+            int depth = context.Frame.Labels.Count-1;
             return
                 $"{base.RenderText(context)} {string.Join(" ", Ls.Select(idx => idx.Value).Select(v => $"{v} (;@{depth - v};)"))} {Ln.Value} (;@{depth - Ln.Value};)";
         }

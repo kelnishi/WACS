@@ -27651,7 +27651,7 @@
     i32.load
     call 172
     local.get 0
-    call 0 (; -> wasi_snapshot_preview1.proc_exit;)
+    call 0
     unreachable)
   (func (;174;) (type 20)
     (local i32 i32)
@@ -27667,7 +27667,7 @@
       local.get 0
       i32.const 8
       i32.add
-      call 6 (; -> wasi_snapshot_preview1.environ_sizes_get;)
+      call 6
       br_if 0 (;@1;)
       i32.const 622528
       local.get 0
@@ -27699,7 +27699,7 @@
         i32.const 622528
         i32.load
         local.get 1
-        call 5 (; -> wasi_snapshot_preview1.environ_get;)
+        call 5
         i32.eqz
         br_if 1 (;@1;)
       end
@@ -55570,7 +55570,7 @@
         local.tee 3
         br_if 1 (;@1;)
         local.get 0
-        call 1 (; -> wasi_snapshot_preview1.fd_close;)
+        call 1
         drop
       end
       i32.const 0
@@ -108606,7 +108606,7 @@
   (func (;1159;) (type 1) (param i32) (result i32)
     local.get 0
     i32.load offset=60
-    call 1 (; -> wasi_snapshot_preview1.fd_close;)
+    call 1
     call 141)
   (func (;1160;) (type 3) (param i32 i32 i32) (result i32)
     (local i32 i32 i32 i32)
@@ -108650,7 +108650,7 @@
         local.get 4
         i32.const 12
         i32.add
-        call 7 (; -> wasi_snapshot_preview1.fd_read;)
+        call 7
         call 141
         if (result i32)  ;; label = @3
           i32.const 32
@@ -108764,7 +108764,7 @@
             local.get 3
             i32.const 12
             i32.add
-            call 2 (; -> wasi_snapshot_preview1.fd_write;)
+            call 2
             call 141
             if  ;; label = @5
               local.get 1
@@ -108835,7 +108835,7 @@
               local.get 3
               i32.const 12
               i32.add
-              call 2 (; -> wasi_snapshot_preview1.fd_write;)
+              call 2
               call 141
               i32.eqz
               br_if 0 (;@5;)
@@ -108906,7 +108906,7 @@
     local.get 0
     i32.const 8
     i32.add
-    call 3 (; -> wasi_snapshot_preview1.fd_seek;)
+    call 3
     call 141
     local.set 2
     local.get 0
@@ -109057,7 +109057,7 @@
         local.get 22
         i32.const 8
         i32.add
-        call 9 (; -> wasi_snapshot_preview1.args_sizes_get;)
+        call 9
         i32.eqz
         if  ;; label = @3
           block (result i32)  ;; label = @4
@@ -109094,7 +109094,7 @@
               i32.store
               local.get 0
               local.get 2
-              call 8 (; -> wasi_snapshot_preview1.args_get;)
+              call 8
               br_if 3 (;@2;)
               local.get 22
               i32.load offset=12
@@ -136184,7 +136184,7 @@
                     local.get 0
                     i32.const 8
                     i32.add
-                    call 4 (; -> wasi_snapshot_preview1.fd_fdstat_get;)
+                    call 4
                     local.tee 1
                     i32.eqz
                     if  ;; label = @9
@@ -137227,11 +137227,11 @@
           br 2 (;@1;)
         end
         i32.const 71
-        call 0 (; -> wasi_snapshot_preview1.proc_exit;)
+        call 0
         unreachable
       end
       i32.const 71
-      call 0 (; -> wasi_snapshot_preview1.proc_exit;)
+      call 0
       unreachable
     end
     call 173
