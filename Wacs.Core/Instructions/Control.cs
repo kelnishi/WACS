@@ -375,7 +375,21 @@ namespace Wacs.Core.Instructions
             {
                 return $"{base.RenderText(context)}";
             }
-            return $"{base.RenderText(context)} (;<@{context.Frame.Labels.Count};)";
+            var label = context.Frame.Label;
+            switch (label.Instruction.x00)
+            {
+                case OpCode.Block:
+                case OpCode.If:
+                case OpCode.Else:
+                    return $"{base.RenderText(context)} (;b/@{context.Frame.Labels.Count};)";
+                case OpCode.Loop:
+                    return $"{base.RenderText(context)} (;L/@{context.Frame.Labels.Count};)";
+                case OpCode.Expr:
+                case OpCode.Call:
+                    return $"{base.RenderText(context)} (;f/@{context.Frame.Labels.Count};)";
+                default:
+                    return $"{base.RenderText(context)}";
+            }
         }
     }
 
@@ -506,7 +520,7 @@ namespace Wacs.Core.Instructions
             string taken = "";
             if (context.Attributes.Live)
             {
-                taken = (int)context.OpStack.Peek() != 0 ? " -> " : " X: ";
+                taken = (int)context.OpStack.Peek() != 0 ? "-> " : "X: ";
             }
             return $"{base.RenderText(context)} {L.Value} (;{taken}@{depth - L.Value};)";
         }
@@ -608,11 +622,11 @@ namespace Wacs.Core.Instructions
             {
                 sb.Append(" ");
                 sb.Append(i == index
-                    ? $"{idx.Value} (; -> @{depth - idx.Value};)"
+                    ? $"{idx.Value} (;-> @{depth - idx.Value};)"
                     : $"{idx.Value} (;@{depth - idx.Value};)");
             }
             sb.Append(index == -1
-                ? $"{Ln.Value} (; -> @{depth - Ln.Value};)"
+                ? $"{Ln.Value} (;-> @{depth - Ln.Value};)"
                 : $"{Ln.Value} (;@{depth - Ln.Value};)");
 
             return
