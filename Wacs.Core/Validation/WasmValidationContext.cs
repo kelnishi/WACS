@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using FluentValidation;
@@ -83,6 +84,12 @@ namespace Wacs.Core.Validation
         public void Assert(bool factIsTrue, string message)
         {
             if (!factIsTrue)
+                throw new ValidationException(message);
+        }
+
+        public void Assert([NotNull] object? objIsNotNull, string message)
+        {
+            if (objIsNotNull == null)
                 throw new ValidationException(message);
         }
 

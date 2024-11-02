@@ -10,11 +10,11 @@ namespace Wacs.Core.Instructions
         public static readonly ReferenceFactory Factory = new();
         public ReferenceFactory() {}
 
-        public T? CreateInstruction<T>(ByteCode code)
+        public T CreateInstruction<T>(ByteCode code)
             where T : InstructionBase =>
-            CreateInstruction(code) as T;
+            CreateInstruction(code) as T ?? throw new InvalidOperationException($"Could not create instruction of type {typeof(T).Name} for the given ByteCode.");
 
-        public IInstruction? CreateInstruction(ByteCode opcode) => opcode.x00 switch {
+        public IInstruction CreateInstruction(ByteCode opcode) => opcode.x00 switch {
             OpCode.FB                => CreateInstruction(opcode.xFB),
             OpCode.FC                => CreateInstruction(opcode.xFC),
             OpCode.FD                => CreateInstruction(opcode.xFD),
@@ -235,6 +235,6 @@ namespace Wacs.Core.Instructions
             OpCode.I64Extend32S      => NumericInst.I64Extend32S,
             
             _ => throw new NotSupportedException($"Opcode {opcode} is not supported.")
-        };
+        } ?? throw new InvalidOperationException($"Could not create instruction for opcode {opcode}");
     }
 }

@@ -68,10 +68,10 @@ namespace Wacs.Core.Instructions
             try
             {
                 var funcType = context.Types.ResolveBlockType(Block.Type);
-                context.Assert(funcType != null,  $"Invalid BlockType: {Block.Type}");
+                context.Assert(funcType,  $"Invalid BlockType: {Block.Type}");
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(funcType!.ParameterTypes);
+                context.OpStack.PopValues(funcType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
                 context.PushControlFrame(Op, funcType);
@@ -98,10 +98,12 @@ namespace Wacs.Core.Instructions
             
             try
             {
-                //2,3
+                //2.
                 var funcType = context.Frame.Module.Types.ResolveBlockType(block.Type);
+                //3.
+                context.Assert(funcType, $"Invalid BlockType: {block.Type}");
                 //4.
-                var label = new Label(funcType!.ResultType, context.GetPointer(), inst);
+                var label = new Label(funcType.ResultType, context.GetPointer(), inst);
                 //5.
                 context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Length,
                     $"Instruction block failed. Operand Stack underflow.");
@@ -154,10 +156,10 @@ namespace Wacs.Core.Instructions
             try
             {
                 var funcType = context.Types.ResolveBlockType(Block.Type);
-                context.Assert(funcType != null,  $"Invalid BlockType: {Block.Type}");
+                context.Assert(funcType, $"Invalid BlockType: {Block.Type}");
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(funcType!.ParameterTypes);
+                context.OpStack.PopValues(funcType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
                 context.PushControlFrame(Op, funcType);
@@ -179,10 +181,12 @@ namespace Wacs.Core.Instructions
         {
             try
             {
-                //2,3
+                //2.
                 var funcType = context.Frame.Module.Types.ResolveBlockType(Block.Type);
+                //3.
+                context.Assert(funcType, $"Invalid BlockType: {Block.Type}");
                 //4.
-                var label = new Label(funcType!.ResultType, context.GetPointer(), OpCode.Loop);
+                var label = new Label(funcType.ResultType, context.GetPointer(), OpCode.Loop);
                 //5.
                 context.Assert( context.OpStack.Count >= funcType.ParameterTypes.Length,
                     $"Instruction loop failed. Operand Stack underflow.");
@@ -235,13 +239,13 @@ namespace Wacs.Core.Instructions
             try
             {
                 var funcType = context.Types.ResolveBlockType(IfBlock.Type);
-                context.Assert(funcType != null,  $"Invalid BlockType: {IfBlock.Type}");
+                context.Assert(funcType,  $"Invalid BlockType: {IfBlock.Type}");
 
                 //Pop the predicate
                 context.OpStack.PopI32();
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(funcType!.ParameterTypes);
+                context.OpStack.PopValues(funcType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
                 context.PushControlFrame(Op, funcType);

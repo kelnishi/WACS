@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 
@@ -28,6 +29,7 @@ namespace Wacs.Core.Validation
         public void SetUnreachable();
 
         public void Assert(bool factIsTrue, string message);
+        public void Assert([NotNull] object? objIsNotNull, string message);
         public void ValidateBlock(Block instructionBlock, int index = 0);
     }
 }

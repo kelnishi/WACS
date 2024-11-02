@@ -218,7 +218,7 @@ namespace Wacs.Core.Runtime
 
         public bool ProcessThread(InvokerOptions options, int steps)
         {
-            var inst = Context!.Next();
+            var inst = Context.Next();
             if (inst == null)
                 return false;
             
@@ -549,19 +549,19 @@ namespace Wacs.Core.Runtime
                         var n = elem.Initializers.Length;
                         activeMode.Offset
                             .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(0)
+                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(0)
                             .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(n)
+                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(n)
                             .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstTableInit>(ExtCode.TableInit)!
+                        Context.InstructionFactory.CreateInstruction<InstTableInit>(ExtCode.TableInit)
                             .Immediate(activeMode.TableIndex, (ElemIdx)i)
                             .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)!.Immediate((ElemIdx)i)
+                        Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop).Immediate((ElemIdx)i)
                             .Execute(Context);
                         break;
                     case Module.ElementMode.DeclarativeMode declarativeMode:
                         _ = declarativeMode;
-                        Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)!.Immediate((ElemIdx)i)
+                        Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop).Immediate((ElemIdx)i)
                             .Execute(Context);
                         break;
                 }
@@ -580,13 +580,13 @@ namespace Wacs.Core.Runtime
                         var n = data.Init.Length;
                         activeMode.Offset
                             .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(0)
+                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(0)
                             .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const)!.Immediate(n)
+                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(n)
                             .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstMemoryInit>(ExtCode.MemoryInit)!.Immediate((DataIdx)i)
+                        Context.InstructionFactory.CreateInstruction<InstMemoryInit>(ExtCode.MemoryInit).Immediate((DataIdx)i)
                             .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstDataDrop>(ExtCode.DataDrop)!.Immediate((DataIdx)i)
+                        Context.InstructionFactory.CreateInstruction<InstDataDrop>(ExtCode.DataDrop).Immediate((DataIdx)i)
                             .Execute(Context);
                         break;
                     case Module.DataMode.PassiveMode: //Do nothing
@@ -607,7 +607,7 @@ namespace Wacs.Core.Runtime
                     
                 // //Invoke the function!
                 // if (!options.SkipStartFunction)
-                //     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Func)!.Immediate(module.StartIndex)
+                //     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Func).Immediate(module.StartIndex)
                 //         .Execute(Context);
             }
             else
@@ -622,7 +622,7 @@ namespace Wacs.Core.Runtime
                         
                         // //Invoke the function!
                         // if (!options.SkipStartFunction)
-                        //     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Func)!.Immediate((FuncIdx)fIdx)
+                        //     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Func).Immediate((FuncIdx)fIdx)
                         //         .Execute(Context);
                         
                         break;
