@@ -84,8 +84,7 @@ namespace Wacs.Core.Runtime
         public void ResumeSequence(InstructionPointer pointer) =>
             (_currentSequence, _sequenceIndex) = (pointer.Sequence, pointer.Index);
 
-        public InstructionPointer GetPointer(int offset = 0) =>
-            new(_currentSequence, _sequenceIndex + offset);
+        public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
 
         // @Spec 4.4.9.1. Enter Block
         public void EnterBlock(Label label, Block block, Stack<Value> vals)
@@ -104,6 +103,12 @@ namespace Wacs.Core.Runtime
             // We manage separate stacks, so we don't need to relocate the operands
             // var vals = OpStack.PopResults(label.Type);
             ResumeSequence(label.ContinuationAddress);
+        }
+
+        public void EndLoop()
+        {
+            var label = Frame.Labels.Pop();
+            ResumeSequence(label.ContinuationAddress.Previous);
         }
 
         // @Spec 4.4.10.1 Function Invocation
@@ -237,7 +242,6 @@ namespace Wacs.Core.Runtime
                     case OpCode.Block: ascent.Push(("InstBlock", 0));
                         break;
                     case OpCode.Loop: ascent.Push(("InstLoop", 0));
-                        idx += 1; //Loops point to their own precursor
                         break;
                 }
                 

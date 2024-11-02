@@ -9,5 +9,7 @@ namespace Wacs.Core.Runtime
             (Sequence, Index) = (seq, index);
 
         public static InstructionPointer Nil = new(InstructionSequence.Empty, 0);
+
+        public InstructionPointer Previous => new(Sequence, Index - 1);
     }
 }
