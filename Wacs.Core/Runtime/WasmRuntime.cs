@@ -10,6 +10,7 @@ using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
+// using System.Diagnostics.CodeAnalysis;
 
 namespace Wacs.Core.Runtime
 {
@@ -118,6 +119,7 @@ namespace Wacs.Core.Runtime
         private IAddress? GetBoundEntity((string module, string entity) id) =>
             _entityBindings.GetValueOrDefault(id);
 
+        // [RequiresUnreferencedCode("Uses reflection to match parameters for binding")]
         public void BindHostFunction<TDelegate>((string module, string entity) id, TDelegate func)
             where TDelegate : Delegate
         {
@@ -152,6 +154,7 @@ namespace Wacs.Core.Runtime
         }
 
         //TODO: Use TDelegate to define the delegate rather than relying on CreateAnonymousFunctionFromFunctionType's switch.
+        // [RequiresUnreferencedCode("Uses reflection to match parameters for binding")]
         public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr, InvokerOptions? options = default)
             where TDelegate : Delegate
         {
