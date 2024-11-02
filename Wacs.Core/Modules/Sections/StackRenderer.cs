@@ -316,37 +316,6 @@ namespace Wacs.Core
         public int Width { get; }
 
         public StackRenderer SubRenderer() => new(this, DoesWrite, Width);
-        //
-        // public void ProcessBlockInstruction(IBlockInstruction inst)
-        // {
-        //     FakeContext.lastEvent = "[";
-        //     (inst as IInstruction)!.Validate(FakeContext);
-        //     // var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
-        //     // var label = new Label(funcType.ResultType, new InstructionPointer(), OpCode.Block);
-        //     //
-        //     // FakeContext.OpStack.PopValues(funcType.ParameterTypes);
-        //     // FakeContext.Push(ValType.ExecContext);
-        //     // FakeContext.OpStack.PushResult(funcType.ParameterTypes);
-        // }
-        //
-        // public void ElseBlockInstruction(IBlockInstruction inst)
-        // {
-        //     // var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
-        //     FakeContext.lastEvent = "][";
-        //     (inst as IInstruction)!.Validate(FakeContext);
-        //     // FakeContext.OpStack.PopValues(funcType.ResultType);
-        //     // FakeContext.Pop(ValType.ExecContext);
-        // }
-        //
-        // public void EndBlockInstruction(IBlockInstruction inst)
-        // {
-        //     // var funcType = FakeContext.Types.ResolveBlockType(inst.Type) ?? new FunctionType(ResultType.Empty,ResultType.Empty);
-        //     FakeContext.lastEvent = "]";
-        //     (inst as IInstruction)!.Validate(FakeContext);
-        //     // FakeContext.OpStack.PopValues(funcType.ResultType);
-        //     // FakeContext.Pop(ValType.ExecContext);
-        //     // FakeContext.OpStack.PushResult(funcType.ResultType);
-        // }
 
         public void ProcessInstruction(IInstruction inst)
         {
