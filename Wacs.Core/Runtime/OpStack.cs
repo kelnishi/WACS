@@ -7,7 +7,7 @@ namespace Wacs.Core.Runtime
 {
     public class OpStack
     {
-        private readonly Stack<Value> _stack = new();
+        private readonly Stack<Value> _stack = new(256);
 
         public bool HasValue => _stack.Count > 0;
 

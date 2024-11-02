@@ -394,11 +394,13 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Frame.Labels.Count > (int)labelIndex.Value,
                  $"Instruction br failed. Context did not contain Label {labelIndex}");
             //2.
-            var label = context.Frame[labelIndex];
-            //3.
-            int n = label.Arity;
-            //4.
-            context.Assert( context.OpStack.Count >= n,
+            var labels = context.Frame.Labels;
+            for (uint i = 0, l = labelIndex.Value; i < l; ++i)
+                labels.Pop();
+            
+            var label = labels.Peek();
+            //3,4.
+            context.Assert( context.OpStack.Count >= label.Arity,
                  $"Instruction br failed. Not enough values on the stack.");
             //5.
             context.Assert(_asideVals.Count == 0,
@@ -409,15 +411,12 @@ namespace Wacs.Core.Instructions
             {
                 context.OpStack.PopAny();
             }
-
-            Label? sl = null;
-            for (int i = -1, l = (int)labelIndex.Value; i < l; ++i)
-            {
-                sl = context.Frame.Labels.Pop();
-            }
-
-            context.Assert( Equals(label, sl),
-                 $"Instruction br failed. Failure in stack management.");
+            //We did this in part 2 to avoid stack drilling.
+            // for (uint i = 0, l = labelIndex.Value; i < l; ++i)
+            //     labels.Pop();
+            // Pop the target label
+            labels.Pop();
+            context.ResetStack(label);
             //7.
             context.OpStack.Push(_asideVals);
             //8.
