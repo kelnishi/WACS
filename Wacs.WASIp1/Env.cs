@@ -57,7 +57,7 @@ namespace Wacs.WASIp1
             foreach (string arg in _config.Arguments)
             {
                 // Copy argument string to argvBufPtr.
-                int strLen = mem.WriteString(argvBufPtr, arg);
+                int strLen = mem.WriteString((uint)argvBufPtr, arg);
                 
                 // Write pointer to argument in argvPtr.
                 mem.WriteInt32(argvPtr, argvBufPtr+offset);
@@ -98,7 +98,7 @@ namespace Wacs.WASIp1
                 string envEntry = $"{envVar.Key}={envVar.Value}\0";
 
                 // Copy environment string to environBufPtr.
-                int strLen = mem.WriteString(environPtr, envEntry);
+                int strLen = mem.WriteString((uint)environPtr, envEntry);
 
                 // Write pointer to environment variable in environPtr.
                 mem.WriteInt32(environPtr, environBufPtr + offset);

@@ -22,8 +22,11 @@ namespace Wacs.Console
     {
         public static void Main(string[] args)
         {
-            Parser.Default.ParseArguments<Options>(args)
-                .WithParsed(options => new Program().Run(options.WasmFilePath))
+            var firstArg = args.Take(1).ToArray();
+            var remainingArgs = args.Skip(1).ToList();
+            
+            Parser.Default.ParseArguments<Options>(firstArg)
+                .WithParsed(options => new Program().Run(options.WasmFilePath, remainingArgs))
                 .WithNotParsed(errors =>
                 {
                     var messages = string.Join("|",errors.Select(e=> e.ToString()));
@@ -31,7 +34,7 @@ namespace Wacs.Console
                 });
         }
 
-        private void Run(string wasmFilePath)
+        private void Run(string wasmFilePath, List<string> vargs)
         {
             var runtime = new WasmRuntime();
             
@@ -101,9 +104,11 @@ namespace Wacs.Console
             {
                 System.Console.WriteLine($"Emscripten notify memory growth {p}");
             });
-            
-            
-            var wasi = new WASIp1.Wasi(Wasi.DefaultConfiguration());
+
+
+            var wasiConfig = Wasi.DefaultConfiguration();
+            wasiConfig.Arguments = vargs;
+            var wasi = new WASIp1.Wasi(wasiConfig);
             wasi.BindToRuntime(runtime);
             
             System.Console.WriteLine("Instantiating Module");
@@ -117,7 +122,7 @@ namespace Wacs.Console
             var callOptions = new InvokerOptions {
                 LogGas = true,
                 LogProgressEvery = 0x40_0000, 
-                LogInstructionExecution = false,
+                LogInstructionExecution = InstructionLogging.Calls,
                 CalculateLineNumbers = false,
                 CollectStats = false,
             };
