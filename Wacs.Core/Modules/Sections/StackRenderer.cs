@@ -226,8 +226,8 @@ namespace Wacs.Core
                 var addr = store.AllocateWasmFunction(fakeFunc, moduleInst);
                 moduleInst.FuncAddrs.Add(addr);
                 var func = store[addr];
-                if (func.Id != $"{idx}")
-                    func.SetName(func.Id);
+                if (string.IsNullOrEmpty(func.Id))
+                    func.SetName($"{idx} {func.Id}");
                 idx++;
             }
 

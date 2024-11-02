@@ -10,6 +10,13 @@ namespace Wacs.Core
         ModuleName = 0,
         FuncName = 1,
         LocalName = 2,
+        LabelName = 3,
+        TypeName = 4,
+        TableName = 5,
+        MemoryName = 6,
+        GlobalName = 7,
+        ElementSegName = 8,
+        DataSegName = 9
     }
 
     public partial class Module
@@ -25,7 +32,13 @@ namespace Wacs.Core
             public NameSubsection.ModuleNameSubsection? ModuleName { get; internal set; }
             public NameSubsection.FuncNameSubsection? FunctionNames { get; internal set; }
             public NameSubsection.LocalNameSubsection? LocalNames { get; internal set; }
-
+            public NameSubsection.ElementSegNameSubsection? ElementSegNames { get; internal set; }
+            public NameSubsection.DataSegNameSubsection? DataSegNames { get; internal set; }
+            public NameSubsection.GlobalNameSubsection? GlobalNames { get; internal set; }
+            public NameSubsection.TableNameSubsection? TableNames { get; internal set; }
+            public NameSubsection.MemoryNameSubsection? MemoryNames { get; internal set; }
+            public NameSubsection.LabelNameSubsection? LabelNames { get; internal set; }
+            public NameSubsection.TypeNameSubsection? TypeNames { get; internal set; }
 
             public static NameSection Parse(BinaryReader reader)
             {
@@ -47,6 +60,28 @@ namespace Wacs.Core
                         case NameSubsectionId.LocalName:
                             nameSection.LocalNames = NameSubsection.LocalNameSubsection.Parse(reader);
                             break;
+                        case NameSubsectionId.LabelName:
+                            nameSection.LabelNames = NameSubsection.LabelNameSubsection.Parse(reader);
+                            break;
+                        case NameSubsectionId.TypeName:
+                            nameSection.TypeNames = NameSubsection.TypeNameSubsection.Parse(reader);
+                            break;
+                        case NameSubsectionId.TableName:
+                            nameSection.TableNames = NameSubsection.TableNameSubsection.Parse(reader);
+                            break;
+                        case NameSubsectionId.MemoryName:
+                            nameSection.MemoryNames = NameSubsection.MemoryNameSubsection.Parse(reader);
+                            break;
+                        case NameSubsectionId.GlobalName:
+                            nameSection.GlobalNames = NameSubsection.GlobalNameSubsection.Parse(reader);
+                            break;
+                        case NameSubsectionId.ElementSegName:
+                            nameSection.ElementSegNames = NameSubsection.ElementSegNameSubsection.Parse(reader);
+                            break;
+                        case NameSubsectionId.DataSegName:
+                            nameSection.DataSegNames = NameSubsection.DataSegNameSubsection.Parse(reader);
+                            break;
+                        
                         default:
                             throw new InvalidDataException($"Name Subsection had invalid id: {subsectionId}");
                     }
@@ -65,34 +100,61 @@ namespace Wacs.Core
             public class ModuleNameSubsection : NameSubsection
             {
                 public string Name { get; internal set; } = null!;
-
-                public static ModuleNameSubsection Parse(BinaryReader reader) =>
-                    new()
-                    {
-                        Name = reader.ReadUtf8String()
-                    };
+                public static ModuleNameSubsection Parse(BinaryReader reader) => new() {  Name = reader.ReadUtf8String() };
             }
 
             public class FuncNameSubsection : NameSubsection
             {
                 public NameMap Names { get; internal set; } = null!;
-
-                public static FuncNameSubsection Parse(BinaryReader reader) =>
-                    new()
-                    {
-                        Names = NameMap.Parse(reader)
-                    };
+                public static FuncNameSubsection Parse(BinaryReader reader) => new() { Names = NameMap.Parse(reader) };
             }
 
             public class LocalNameSubsection : NameSubsection
             {
                 public IndirectNameMap Names { get; internal set; } = null!;
+                public static LocalNameSubsection Parse(BinaryReader reader) => new() { Names = IndirectNameMap.Parse(reader) };
+            }
 
-                public static LocalNameSubsection Parse(BinaryReader reader) =>
-                    new()
-                    {
-                        Names = IndirectNameMap.Parse(reader)
-                    };
+            public class LabelNameSubsection : NameSubsection
+            {
+                public NameMap Names { get; internal set; } = null!;
+                public static LabelNameSubsection Parse(BinaryReader reader) => new() { Names = NameMap.Parse(reader) };
+            }
+
+            public class TypeNameSubsection : NameSubsection
+            {
+                public NameMap Names { get; internal set; } = null!;
+                public static TypeNameSubsection Parse(BinaryReader reader) => new() { Names = NameMap.Parse(reader) };
+            }
+
+            public class TableNameSubsection : NameSubsection
+            {
+                public NameMap Names { get; internal set; } = null!;
+                public static TableNameSubsection Parse(BinaryReader reader) => new() { Names = NameMap.Parse(reader) };
+            }
+
+            public class MemoryNameSubsection : NameSubsection
+            {
+                public NameMap Names { get; internal set; } = null!;
+                public static MemoryNameSubsection Parse(BinaryReader reader) => new() { Names = NameMap.Parse(reader) };
+            }
+
+            public class GlobalNameSubsection : NameSubsection
+            {
+                public NameMap Names { get; internal set; } = null!;
+                public static GlobalNameSubsection Parse(BinaryReader reader) => new()  { Names = NameMap.Parse(reader) };
+            }
+
+            public class ElementSegNameSubsection : NameSubsection
+            {
+                public NameMap Names { get; internal set; } = null!;
+                public static ElementSegNameSubsection Parse(BinaryReader reader) => new() { Names = NameMap.Parse(reader) };
+            }
+
+            public class DataSegNameSubsection : NameSubsection
+            {
+                public NameMap Names { get; internal set; } = null!;
+                public static DataSegNameSubsection Parse(BinaryReader reader) => new() { Names = NameMap.Parse(reader) };
             }
         }
 
@@ -148,17 +210,66 @@ namespace Wacs.Core
 
         public static void PatchNames(Module module)
         {
-            if (module.Names?.FunctionNames != null)
-                foreach (var kv in module.Names.FunctionNames.Names.NameAssocMap)
+            if (module.Names?.TypeNames != null)
+                foreach (var kv in module.Names.TypeNames.Names.NameAssocMap)
                 {
-                    if (kv.Key > 0 && kv.Key < module.Funcs.Count)
-                        module.Funcs[(int)kv.Key].Id = kv.Value;
+                    if (kv.Key > 0 && kv.Key < module.Types.Count)
+                        module.Types[(int)kv.Key].Id = kv.Value;
                 }
+
+            
+            if (module.Names?.FunctionNames != null)
+            {
+                uint idx = 0;
+                foreach (var func in module.Funcs)
+                {
+                    uint funcIdx = (uint)(idx + module.ImportedFunctions.Count);
+                    func.Id = module.Names.FunctionNames.Names.NameAssocMap.TryGetValue(idx, out var funcName) 
+                        ? $"{funcName}|{funcIdx}"
+                        : $"{funcIdx}";
+                    idx++;
+                }
+            }
 
             if (module.Names?.LocalNames != null)
                 foreach (var kv in module.Names.LocalNames.Names.IndirectNameAssocMap)
                 {
                     //???
+                }
+            
+            if (module.Names?.TableNames != null)
+                foreach (var kv in module.Names.TableNames.Names.NameAssocMap)
+                {
+                    if (kv.Key > 0 && kv.Key < module.Tables.Count)
+                        module.Tables[(int)kv.Key].Id = kv.Value;
+                }
+            
+            if (module.Names?.MemoryNames != null)
+                foreach (var kv in module.Names.MemoryNames.Names.NameAssocMap)
+                {
+                    if (kv.Key > 0 && kv.Key < module.Memories.Count)
+                        module.Memories[(int)kv.Key].Id = kv.Value;
+                }
+            
+            if (module.Names?.GlobalNames != null)
+                foreach (var kv in module.Names.GlobalNames.Names.NameAssocMap)
+                {
+                    if (kv.Key > 0 && kv.Key < module.Globals.Count)
+                        module.Globals[(int)kv.Key].Id = kv.Value;
+                }
+            
+            if (module.Names?.ElementSegNames != null)
+                foreach (var kv in module.Names.ElementSegNames.Names.NameAssocMap)
+                {
+                    if (kv.Key > 0 && kv.Key < module.Elements.Length)
+                        module.Elements[(int)kv.Key].Id = kv.Value;
+                }
+            
+            if (module.Names?.DataSegNames != null)
+                foreach (var kv in module.Names.DataSegNames.Names.NameAssocMap)
+                {
+                    if (kv.Key > 0 && kv.Key < module.Datas.Length)
+                        module.Datas[(int)kv.Key].Id = kv.Value;
                 }
         }
     }
