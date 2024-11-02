@@ -23,7 +23,7 @@ namespace Wacs.Core
         //Function[100].Expression[34].NumericInst
         public (int line, string instruction) CalculateLine(string validationPath, bool print = false, bool functionRelative = false)
         {
-            int line = 0;
+            int line = 1;
 
             string foundInstruction = "";
             if (_pathLineCache.TryGetValue(validationPath, out var result))

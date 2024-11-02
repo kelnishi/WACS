@@ -258,12 +258,18 @@ namespace Wacs.Core.Runtime
                             var ptr = Context.ComputePointerPath();
                             var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
                             (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
-                            location = $";;line {line + 1}";
+                            location = $"line {line.ToString().PadLeft(7,' ')}";
                             if (options.ShowPath)
                                 location += $":{path}";
+                            
+                            var log = $"{location}: {inst.RenderText(Context)}".PadRight(40, ' ');
+                            Console.Error.WriteLine(log);
                         }
-                        var log = $"Instruction: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
-                        Console.Error.WriteLine(log);
+                        else
+                        {
+                            var log = $"Instruction: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
+                            Console.Error.WriteLine(log);
+                        }
                         break; 
                 }
             }
@@ -302,7 +308,6 @@ namespace Wacs.Core.Runtime
                     var ptr = Context.ComputePointerPath();
                     var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
                     (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
-                    line += 1;
                     throw new TrapException(exc.Message + $":line {line} instruction #{steps}\n{path}");
                 }
 
@@ -331,8 +336,9 @@ namespace Wacs.Core.Runtime
             string totalInst = $"{totalExecs}";
             string totalPercent = $"{execPercent:#0.###}%t".PadLeft(8,' ');
             string avgTime = $"{new TimeSpan(execTicks / totalExecs)}/instruction";
+            string velocity = $"{totalExecs*1.0/totalTime.TotalMilliseconds:#0.#} inst/ms";
             Console.Error.WriteLine($"Execution Stats:");
-            Console.Error.WriteLine($"{totalLabel}: {totalInst}| ({totalPercent}) {execTime} {avgTime} overhead:{overheadLabel} total proctime:{totalTime}");
+            Console.Error.WriteLine($"{totalLabel}: {totalInst}| ({totalPercent}) {execTime} {avgTime} {velocity} overhead:{overheadLabel} total proctime:{totalTime}");
             var orderedStats = Context.Stats
                 .Where(bdc => bdc.Value.count != 0)
                 .OrderBy(bdc => -bdc.Value.count);
