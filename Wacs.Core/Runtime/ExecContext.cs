@@ -11,6 +11,7 @@ namespace Wacs.Core.Runtime
 {
     public class RuntimeAttributes
     {
+        public bool Live = true;
         public IInstructionFactory InstructionFactory { get; set; } = ReferenceFactory.Factory;
         public double FloatingPointTolerance { get; set; } = 1e-10;
     }
