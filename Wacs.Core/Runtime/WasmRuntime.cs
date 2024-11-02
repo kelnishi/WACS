@@ -249,8 +249,8 @@ namespace Wacs.Core.Runtime
                     case OpCode.Br when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
                     case OpCode.BrIf when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
                     case OpCode.BrTable when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
-                    case OpCode.End when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0) && IInstruction.IsBranch(lastInstruction):
                         
+                    case var _ when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0) && IInstruction.IsBranch(lastInstruction):
                     case var _ when ((options.LogInstructionExecution & InstructionLogging.Computes) != 0):
                         string location = "";
                         if (options.CalculateLineNumbers)
