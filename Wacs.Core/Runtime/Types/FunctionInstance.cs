@@ -18,6 +18,8 @@ namespace Wacs.Core.Runtime.Types
             Module = module;
             Definition = definition;
             Index = definition.Index;
+            if (!string.IsNullOrEmpty(Definition.Id))
+                Name = Definition.Id;
         }
 
         public ModuleInstance Module { get; }
