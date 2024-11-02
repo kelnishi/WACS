@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -487,8 +488,14 @@ namespace Wacs.Core.Instructions
         public override string RenderText(ExecContext? context)
         {
             if (context == null) return $"{base.RenderText(context)} {L.Value}";
+            
             int depth = context.Frame.Labels.Count - 1;
-            return $"{base.RenderText(context)} {L.Value} (;@{depth - L.Value};)";
+            string taken = "";
+            if (context.Attributes.Live)
+            {
+                taken = (int)context.OpStack.Peek() != 0 ? " -> " : " X: ";
+            }
+            return $"{base.RenderText(context)} {L.Value} (;{taken}@{depth - L.Value};)";
         }
     }
 
@@ -567,8 +574,36 @@ namespace Wacs.Core.Instructions
             if (context==null)
                 return $"{base.RenderText(context)} {string.Join(" ", Ls.Select(idx => idx.Value).Select(v => $"{v}"))} {Ln.Value}";
             int depth = context.Frame.Labels.Count-1;
+
+            int index = -2;
+            if (context.Attributes.Live)
+            {
+                int c = context.OpStack.Peek();
+                if (c < Ls.Length)
+                {
+                    index = c;
+                }
+                else
+                {
+                    index = -1;
+                }
+            }
+
+            StringBuilder sb = new();
+            int i = 0;
+            foreach (var idx in Ls)
+            {
+                sb.Append(" ");
+                sb.Append(i == index
+                    ? $"{idx.Value} (; -> @{depth - idx.Value};)"
+                    : $"{idx.Value} (;@{depth - idx.Value};)");
+            }
+            sb.Append(index == -1
+                ? $"{Ln.Value} (; -> @{depth - Ln.Value};)"
+                : $"{Ln.Value} (;@{depth - Ln.Value};)");
+
             return
-                $"{base.RenderText(context)} {string.Join(" ", Ls.Select(idx => idx.Value).Select(v => $"{v} (;@{depth - v};)"))} {Ln.Value} (;@{depth - Ln.Value};)";
+                $"{base.RenderText(context)} {sb}";
         }
     }
 
