@@ -70,6 +70,14 @@ namespace Wacs.Core.Runtime
             return CallStack.Pop();
         }
 
+        public void ResetStack(Label label)
+        {
+            while (OpStack.Count > label.StackHeight)
+            {
+                OpStack.PopAny();
+            }
+        }
+
         private void EnterSequence(InstructionSequence seq) =>
             (_currentSequence, _sequenceIndex) = (seq, -1);
 
