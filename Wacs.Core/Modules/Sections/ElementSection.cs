@@ -81,8 +81,9 @@ namespace Wacs.Core
                 if (Type == ReferenceType.Funcref && IsAllRefFunc())
                 {
                     var listElems = Initializers
-                        .Select(expr => expr.Instructions[0] as InstRefFunc)
-                        .Select(rf => rf!.FunctionIndex.Value);
+                        .Select(expr => expr.Instructions[0])
+                        .OfType<InstRefFunc>()
+                        .Select(rf => rf.FunctionIndex.Value);
                     var listText = string.Join(" ", listElems);
                     elemListText = $" func {listText}";
                 }
@@ -104,7 +105,7 @@ namespace Wacs.Core
             /// Generate a InstRefFunc for a funcidx
             /// </summary>
             private static IInstruction ParseFuncIdxInstructions(BinaryReader reader) =>
-                BinaryModuleParser.InstructionFactory.CreateInstruction(OpCode.RefFunc)!.Parse(reader);
+                BinaryModuleParser.InstructionFactory.CreateInstruction(OpCode.RefFunc).Parse(reader);
 
             private static ReferenceType ParseElementKind(BinaryReader reader) =>
                 reader.ReadByte() switch {

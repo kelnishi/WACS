@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
@@ -53,6 +54,13 @@ namespace Wacs.Core.Runtime
         public Frame Frame => CallStack.Peek();
 
         public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[(MemIdx)0]];
+
+        [Conditional("STRICT_EXECUTION")]
+        public void Assert([NotNull] object? objIsNotNull, string message)
+        {
+            if (objIsNotNull == null)
+                throw new TrapException(message);
+        }
 
         [Conditional("STRICT_EXECUTION")]
         public void Assert(bool assertion, string message)

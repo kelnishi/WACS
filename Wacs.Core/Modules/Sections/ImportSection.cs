@@ -19,30 +19,30 @@ namespace Wacs.Core
 
         public ReadOnlyCollection<Function> ImportedFunctions =>
             Imports
-                .Select(import => import.Desc as ImportDesc.FuncDesc)
-                .Where(funcDesc => funcDesc != null)
-                .Select(funcDesc => new Function { TypeIndex = funcDesc!.TypeIndex, IsImport = true })
+                .Select(import => import.Desc)
+                .OfType<ImportDesc.FuncDesc>()
+                .Select(funcDesc => new Function { TypeIndex = funcDesc.TypeIndex, IsImport = true })
                 .ToList().AsReadOnly();
 
         public ReadOnlyCollection<TableType> ImportedTables =>
             Imports
-                .Select(import => import.Desc as ImportDesc.TableDesc)
-                .Where(tableDesc => tableDesc != null)
-                .Select(tableDesc => tableDesc!.TableDef)
+                .Select(import => import.Desc)
+                .OfType<ImportDesc.TableDesc>()
+                .Select(tableDesc => tableDesc.TableDef)
                 .ToList().AsReadOnly();
 
         public ReadOnlyCollection<MemoryType> ImportedMems =>
             Imports
-                .Select(import => import.Desc as ImportDesc.MemDesc)
-                .Where(memDesc => memDesc != null)
-                .Select(memDesc => memDesc!.MemDef)
+                .Select(import => import.Desc)
+                .OfType<ImportDesc.MemDesc>()
+                .Select(memDesc => memDesc.MemDef)
                 .ToList().AsReadOnly();
 
         public ReadOnlyCollection<Global> ImportedGlobals =>
             Imports
-                .Select(import => import.Desc as ImportDesc.GlobalDesc)
-                .Where(globDesc => globDesc != null)
-                .Select(globDesc => new Global(globDesc!.GlobalDef))
+                .Select(import => import.Desc)
+                .OfType<ImportDesc.GlobalDesc>()
+                .Select(globDesc => new Global(globDesc.GlobalDef))
                 .ToList().AsReadOnly();
 
         /// <summary>

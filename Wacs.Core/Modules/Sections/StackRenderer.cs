@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using Wacs.Core.Instructions;
@@ -98,6 +99,7 @@ namespace Wacs.Core
     
     public class FakeContext : IWasmValidationContext
     {
+        private static readonly object NonNull = new();
         private Module _module;
         private FakeOpStack _opStack;
 
@@ -145,6 +147,7 @@ namespace Wacs.Core
         public IValidationOpStack OpStack => _opStack;
 
         public void Assert(bool factIsTrue, string message) {}
+        public void Assert([NotNull] object? objIsNotNull, string message) { objIsNotNull = NonNull; }
 
         public Stack<ValidationControlFrame> ControlStack { get; } = new();
         public ValidationControlFrame ControlFrame { get; } = null!;
