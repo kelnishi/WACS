@@ -1,4 +1,5 @@
 using System.IO;
+using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
@@ -46,6 +47,16 @@ namespace Wacs.Core.Instructions
             OpCode.BrTable => true,
             _ => false
         };
+
+        public static bool IsNumeric(IInstruction? inst) => inst is NumericInst;
+
+        public static bool IsVar(IInstruction? inst) =>
+            inst switch
+            {
+                LocalVariableInst _ => true,
+                GlobalVariableInst _ => true,
+                _ => false,
+            };
     }
     
 }
