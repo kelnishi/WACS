@@ -590,7 +590,7 @@ namespace Wacs.Core.Instructions
             //2.
             int i = context.OpStack.PopI32();
             //3.
-            if (i < Ls.Length)
+            if (i >= 0 && i < Ls.Length)
             {
                 var label = Ls[i];
                 InstBranch.ExecuteInstruction(context, label);
