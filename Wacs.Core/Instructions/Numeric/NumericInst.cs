@@ -19,6 +19,19 @@ namespace Wacs.Core.Instructions.Numeric
         public override void Validate(IWasmValidationContext context) => _validate(context);
         public override void Execute(ExecContext context) => _execute(context);
 
+        public override string RenderText(ExecContext? context)
+        {
+            if (context == null)
+                return $"{base.RenderText(context)}";
+            if (!context.Attributes.Live)
+                return $"{base.RenderText(context)}";
+
+            var val = context.OpStack.PopAny();
+            string valStr = $" (;>{val}<;)";
+            context.OpStack.PushValue(val);
+            return $"{base.RenderText(context)} {valStr}";
+        }
+
         // [pop] -> [push]
         private static ValidationDelegate ValidateOperands(ValType pop, ValType push) =>
             context =>

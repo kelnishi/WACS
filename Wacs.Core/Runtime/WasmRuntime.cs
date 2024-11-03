@@ -230,48 +230,7 @@ namespace Wacs.Core.Runtime
             //Trace execution
             if (options.LogInstructionExecution != InstructionLogging.None)
             {
-                switch ((OpCode)inst.Op)
-                {
-                    case OpCode.Call when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
-                    case OpCode.CallIndirect when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
-                    case OpCode.CallRef when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
-                    case OpCode.Return when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
-                    case OpCode.ReturnCallIndirect when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
-                    case OpCode.ReturnCall when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
-                    case OpCode.End when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0) && Context.GetEndFor() == OpCode.Func:    
-                        
-                    case OpCode.Block when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
-                    case OpCode.Loop when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
-                    case OpCode.If when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
-                    case OpCode.Else when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
-                    case OpCode.End when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0) && Context.GetEndFor() == OpCode.Block:
-                            
-                    case OpCode.Br when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
-                    case OpCode.BrIf when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
-                    case OpCode.BrTable when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
-                        
-                    case var _ when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0) && IInstruction.IsBranch(lastInstruction):
-                    case var _ when ((options.LogInstructionExecution & InstructionLogging.Computes) != 0):
-                        string location = "";
-                        if (options.CalculateLineNumbers)
-                        {
-                            var ptr = Context.ComputePointerPath();
-                            var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                            (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
-                            location = $"line {line.ToString().PadLeft(7,' ')}";
-                            if (options.ShowPath)
-                                location += $":{path}";
-                            
-                            var log = $"{location}: {inst.RenderText(Context)}".PadRight(40, ' ');
-                            Console.Error.WriteLine(log);
-                        }
-                        else
-                        {
-                            var log = $"Instruction: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
-                            Console.Error.WriteLine(log);
-                        }
-                        break; 
-                }
+                LogPreInstruction(options, inst);
             }
 
             try
@@ -290,6 +249,11 @@ namespace Wacs.Core.Runtime
                 else
                 {
                     inst.Execute(Context);
+                }
+
+                if (options.LogInstructionExecution.HasFlag(InstructionLogging.Computes))
+                {
+                    LogPostInstruction(options, inst);
                 }
             }
             catch (TrapException exc)
@@ -337,6 +301,88 @@ namespace Wacs.Core.Runtime
 
             lastInstruction = inst;
             return true;
+        }
+
+        public void LogPreInstruction(InvokerOptions options, IInstruction inst)
+        {
+            switch ((OpCode)inst.Op)
+            {
+                //Handle these post
+                case var _ when IInstruction.IsNumeric(inst): break;
+                case var _ when IInstruction.IsVar(inst): break;
+                
+                case OpCode.Call when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
+                case OpCode.CallIndirect when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
+                case OpCode.CallRef when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
+                case OpCode.Return when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
+                case OpCode.ReturnCallIndirect when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
+                case OpCode.ReturnCall when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
+                case OpCode.End when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0) && Context.GetEndFor() == OpCode.Func:    
+                        
+                case OpCode.Block when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
+                case OpCode.Loop when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
+                case OpCode.If when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
+                case OpCode.Else when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
+                case OpCode.End when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0) && Context.GetEndFor() == OpCode.Block:
+                            
+                case OpCode.Br when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
+                case OpCode.BrIf when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
+                case OpCode.BrTable when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
+                
+                case var _ when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0) && IInstruction.IsBranch(lastInstruction):
+                case var _ when ((options.LogInstructionExecution & InstructionLogging.Computes) != 0):
+                    string location = "";
+                    if (options.CalculateLineNumbers)
+                    {
+                        var ptr = Context.ComputePointerPath();
+                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+                        location = $"line {line.ToString().PadLeft(7,' ')}";
+                        if (options.ShowPath)
+                            location += $":{path}";
+                            
+                        var log = $"{location}: {inst.RenderText(Context)}".PadRight(40, ' ');
+                        Console.Error.WriteLine(log);
+                    }
+                    else
+                    {
+                        var log = $"Instruction: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
+                        Console.Error.WriteLine(log);
+                    }
+                    break; 
+            }
+        }
+
+        public void LogPostInstruction(InvokerOptions options, IInstruction inst)
+        {
+            if ((options.LogInstructionExecution & InstructionLogging.Computes) == 0)
+                return;
+            
+            switch ((OpCode)inst.Op)
+            {
+                case var _ when IInstruction.IsNumeric(inst): 
+                case var _ when IInstruction.IsVar(inst):
+                    string location = "";
+                    if (options.CalculateLineNumbers)
+                    {
+                        var ptr = Context.ComputePointerPath();
+                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+                        location = $"line {line.ToString().PadLeft(7,' ')}";
+                        if (options.ShowPath)
+                            location += $":{path}";
+                            
+                        var log = $"{location}: {inst.RenderText(Context)}".PadRight(40, ' ');
+                        Console.Error.WriteLine(log);
+                    }
+                    else
+                    {
+                        var log = $"Instruction: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
+                        Console.Error.WriteLine(log);
+                    }
+                    break; 
+                default: return;
+            }
         }
 
         public void PrintStats()

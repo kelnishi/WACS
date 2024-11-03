@@ -29,7 +29,19 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Index.Value}";
+        public override string RenderText(ExecContext? context)
+        {
+            if (context == null)
+                return $"{base.RenderText(context)} {Index.Value}";
+            if (!context.Attributes.Live)
+                return $"{base.RenderText(context)} {Index.Value}";
+            if (!context.Frame.Locals.Contains(Index))
+                return $"{base.RenderText(context)} {Index.Value}";
+            
+            var value = context.Frame.Locals[Index];
+            string valStr = $" (;>{value}<;)";
+            return $"{base.RenderText(context)} {Index.Value}{valStr}";
+        }
 
         public static LocalVariableInst CreateInstLocalGet() => new(OpCode.LocalGet, ExecuteLocalGet, ValidateLocalGet);
         public static LocalVariableInst CreateInstLocalSet() => new(OpCode.LocalSet, ExecuteLocalSet, ValidateLocalSet);
@@ -140,7 +152,21 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Index.Value}";
+        public override string RenderText(ExecContext? context)
+        {
+            if (context == null)
+                return $"{base.RenderText(context)} {Index.Value}";
+            if (!context.Attributes.Live)
+                return $"{base.RenderText(context)} {Index.Value}";
+            if (!context.Frame.Module.GlobalAddrs.Contains(Index))
+                return $"{base.RenderText(context)} {Index.Value}";
+            
+            var a = context.Frame.Module.GlobalAddrs[Index];
+            var glob = context.Store[a];
+            var val = glob.Value;
+            string valStr = $" (;>{val}<;)";
+            return $"{base.RenderText(context)} {Index.Value}{valStr}";
+        }
 
         public static GlobalVariableInst CreateInstGlobalGet() => new(OpCode.GlobalGet, ExecuteGlobalGet, ValidateGlobalGet);
         public static GlobalVariableInst CreateInstGlobalSet() => new(OpCode.GlobalSet, ExecuteGlobalSet, ValidateGlobalSet);
