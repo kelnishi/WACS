@@ -313,6 +313,27 @@ namespace Wacs.Core.Runtime
 
                 throw;
             }
+            catch (SignalException exc)
+            {
+                Context.ProcessTimer.Stop();
+                if (options.LogProgressEvery > 0)
+                    Console.Error.WriteLine();
+                if (options.CollectStats) 
+                    PrintStats();
+                if (options.LogGas)
+                    Console.Error.WriteLine($"Process used {steps} gas. {Context.ProcessTimer.Elapsed}");
+                
+                if (options.CalculateLineNumbers)
+                {
+                    Console.Error.WriteLine();
+                    var ptr = Context.ComputePointerPath();
+                    var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                    (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+                    Console.Error.WriteLine(exc.Message + $":line {line} instruction #{steps}\n{path}");
+                }
+
+                throw;
+            }
 
             lastInstruction = inst;
             return true;

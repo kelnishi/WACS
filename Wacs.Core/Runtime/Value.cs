@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -309,7 +310,22 @@ namespace Wacs.Core.Runtime
         public static implicit operator double(Value value) => value.Float64;
 
         public static implicit operator Value(V128 v128) => new(v128);
-
+        
+        
+        public override string ToString()
+        {
+            return Type switch
+            {
+                ValType.I32 => $"i32={Int32.ToString()}",
+                ValType.I64 => $"i64={Int64.ToString()}",
+                ValType.F32 => $"f32={Float32.ToString("G", CultureInfo.InvariantCulture)}",
+                ValType.F64 => $"f64={Float64.ToString("G", CultureInfo.InvariantCulture)}",
+                ValType.V128 => $"v128={V128.ToString()}",
+                ValType.Funcref => $"Funcref: {Ptr}",
+                ValType.Externref => $"Externref: {Ptr}",
+                _ => "Undefined",
+            };
+        }
         
     }
 }
