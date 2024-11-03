@@ -83,4 +83,6 @@ obj/
 riderModule.iml
 /_ReSharper.Caches/
 
+/Wacs.Console/Data/**
+
 .DS_Store

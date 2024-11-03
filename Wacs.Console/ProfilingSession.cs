@@ -5,6 +5,11 @@ using JetBrains.Profiler.Api;
 
 namespace Wacs.Console
 {
+    public class NoOpProfilingSession : IDisposable
+    {
+        public void Dispose() { }
+    }
+    
     public class ProfilingSession : IDisposable
     {
         private readonly string _snapshotPath;
