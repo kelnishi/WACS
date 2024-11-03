@@ -643,10 +643,11 @@ namespace Wacs.Core.Instructions
                 sb.Append(i == index
                     ? $"{idx.Value} (;-> @{depth - idx.Value};)"
                     : $"{idx.Value} (;@{depth - idx.Value};)");
+                i += 1;
             }
             sb.Append(index == -1
-                ? $"{Ln.Value} (;-> @{depth - Ln.Value};)"
-                : $"{Ln.Value} (;@{depth - Ln.Value};)");
+                ? $"{(i > 0 ? " " : "")}{Ln.Value} (;-> @{depth - Ln.Value};)"
+                : $"{(i > 0 ? " " : "")}{Ln.Value} (;@{depth - Ln.Value};)");
 
             return
                 $"{base.RenderText(context)} {sb}";
