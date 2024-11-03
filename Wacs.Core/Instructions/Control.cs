@@ -386,7 +386,26 @@ namespace Wacs.Core.Instructions
                     return $"{base.RenderText(context)} (;L/@{context.Frame.Labels.Count};)";
                 case OpCode.Expr:
                 case OpCode.Call:
-                    return $"{base.RenderText(context)} (;f/@{context.Frame.Labels.Count};)";
+                    var funcAddr = context.Frame.Module.FuncAddrs[context.Frame.Index];
+                    var func = context.Store[funcAddr];
+                    var funcName = func.Id;
+                    StringBuilder sb = new();
+                    if (context.Attributes.Live)
+                    {
+                        sb.Append(" ");
+                        Stack<Value> values = new Stack<Value>();
+                        context.OpStack.PopResults(func.Type.ResultType, ref values);
+                        sb.Append("[");
+                        while (values.Count > 0)
+                        {
+                            sb.Append(values.Peek().ToString());
+                            if (values.Count > 1)
+                                sb.Append(" ");
+                            context.OpStack.PushValue(values.Pop());
+                        }
+                        sb.Append("]");
+                    }
+                    return $"{base.RenderText(context)} (;f/@{context.Frame.Labels.Count} <- {funcName}{sb};)";
                 default:
                     return $"{base.RenderText(context)}";
             }
@@ -713,7 +732,26 @@ namespace Wacs.Core.Instructions
                 var a = context.Frame.Module.FuncAddrs[X];
                 var func = context.Store[a];
                 if (!string.IsNullOrEmpty(func.Id))
-                    return $"{base.RenderText(context)} {X.Value} (; -> {func.Id};)";
+                {
+                    StringBuilder sb = new();
+                    if (context.Attributes.Live)
+                    {
+                        sb.Append(" ");
+                        Stack<Value> values = new Stack<Value>();
+                        context.OpStack.PopResults(func.Type.ParameterTypes, ref values);
+                        sb.Append("[");
+                        while (values.Count > 0)
+                        {
+                            sb.Append(values.Peek().ToString());
+                            if (values.Count > 1)
+                                sb.Append(" ");
+                            context.OpStack.PushValue(values.Pop());
+                        }
+                        sb.Append("]");
+                    }
+                    
+                    return $"{base.RenderText(context)} {X.Value} (; -> {func.Id}{sb};)";
+                }
             }
             return $"{base.RenderText(context)} {X.Value}";
         }

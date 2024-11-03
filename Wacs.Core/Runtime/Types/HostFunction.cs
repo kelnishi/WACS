@@ -80,6 +80,7 @@ namespace Wacs.Core.Runtime.Types
                     { } t when t == typeof(sbyte) => wasmValue => (sbyte)(int)wasmValue,
                     { } t when t == typeof(ushort) => wasmValue => (ushort)(int)wasmValue,
                     { } t when t == typeof(short) => wasmValue => (short)(int)wasmValue,
+                    { } t when t == typeof(uint) => wasmValue => (uint)(int)wasmValue,
                     { } t when t.GetWasmType() is { } wasmType => CreateConversionHelper(t),
                     _ => null
                 };
@@ -170,30 +171,37 @@ namespace Wacs.Core.Runtime.Types
             {
                 args[i] = _parameterConversions[i]?.Invoke(args[i]) ?? args[i];
             }
-            
-            var result = _invoker.Invoke(_hostFunction, args);
-            if (!Type.ResultType.IsEmpty)
-            {
-                for (int i = 0; i < _resultConversions.Length; )
-                {
-                    if (_resultConversions[i] != null)
-                        result = _resultConversions[i]?.Invoke(result) ?? result;
 
-                    break;
+            try
+            {
+                var result = _invoker.Invoke(_hostFunction, args);
+
+                if (!Type.ResultType.IsEmpty)
+                {
+                    for (int i = 0; i < _resultConversions.Length;)
+                    {
+                        if (_resultConversions[i] != null)
+                            result = _resultConversions[i]?.Invoke(result) ?? result;
+
+                        break;
+                    }
+
+                    opStack.PushValue(new Value(result));
+
+                    //TODO: Maybe support multiple return values someday...
+                    // if (result is Array resultArray)
+                    // {
+                    //     foreach (var item in resultArray)
+                    //     {
+                    //         opStack.PushValue(new Value(item));
+                    //     }
+                    // }
                 }
-                
-                opStack.PushValue(new Value(result));
-                
-                //TODO: Maybe support multiple return values someday...
-                // if (result is Array resultArray)
-                // {
-                //     foreach (var item in resultArray)
-                //     {
-                //         opStack.PushValue(new Value(item));
-                //     }
-                // }
             }
-            
+            catch (TargetInvocationException ex)
+            {
+                throw ex.InnerException!;
+            }
         }
 
         delegate object ConversionHelper(object value);

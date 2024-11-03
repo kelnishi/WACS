@@ -156,7 +156,18 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)}{M.ToWat(WidthN)}";
+        public override string RenderText(ExecContext? context)
+        {
+            if (context != null)
+            {
+                if (context.Attributes.Live && context.OpStack.Count > 0)
+                {
+                    var loadedValue = context.OpStack.Peek();
+                    return $"{base.RenderText(context)}{M.ToWat(WidthN)} (;>{loadedValue}<;)";
+                }
+            }
+            return $"{base.RenderText(context)}{M.ToWat(WidthN)}";
+        }
     }
 
     public class InstMemoryStore : InstructionBase
