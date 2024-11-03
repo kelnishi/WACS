@@ -53,17 +53,16 @@ namespace Wacs.WASIp1
         {
             var mem = ctx.DefaultMemory;
             
-            int offset = 0;
             foreach (string arg in _config.Arguments)
             {
                 // Copy argument string to argvBufPtr.
-                int strLen = mem.WriteString((uint)argvBufPtr, arg);
+                int strLen = mem.WriteUtf8String((uint)argvBufPtr, arg, true);
                 
                 // Write pointer to argument in argvPtr.
-                mem.WriteInt32(argvPtr, argvBufPtr+offset);
+                mem.WriteInt32(argvPtr, argvBufPtr);
 
                 // Update offsets.
-                offset += strLen;
+                argvBufPtr += strLen;
                 argvPtr += sizeof(ptr);
             }
 
@@ -92,19 +91,18 @@ namespace Wacs.WASIp1
         public ErrNo EnvironGet(ExecContext ctx, ptr environPtr, ptr environBufPtr)
         {
             var mem = ctx.DefaultMemory;
-            int offset = 0;
             foreach (var envVar in _config.EnvironmentVariables)
             {
-                string envEntry = $"{envVar.Key}={envVar.Value}\0";
+                string envEntry = $"{envVar.Key}={envVar.Value}";
 
                 // Copy environment string to environBufPtr.
-                int strLen = mem.WriteString((uint)environPtr, envEntry);
+                int strLen = mem.WriteUtf8String((uint)environBufPtr, envEntry, true);
 
                 // Write pointer to environment variable in environPtr.
-                mem.WriteInt32(environPtr, environBufPtr + offset);
+                mem.WriteInt32(environPtr, environBufPtr);
                 
                 // Update offsets.
-                offset += strLen;
+                environBufPtr += strLen;
                 environPtr += sizeof(ptr);
             }
 

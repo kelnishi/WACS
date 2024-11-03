@@ -70,14 +70,13 @@ namespace Wacs.Core.Runtime.Types
             return Encoding.UTF8.GetString(bytes.ToArray());
         }
 
-        public int WriteString(uint ptr, string str)
+        public int WriteUtf8String(uint ptr, string str, bool nullTerminate = false)
         {
             var data = Encoding.UTF8.GetBytes(str);
-            var bytes = this[(int)ptr..(int)(ptr + data.Length + 1)];
-            data.CopyTo(bytes);
-            //null terminate strings
-            bytes[^1] = 0;
-            return bytes.Length;
+            Buffer.BlockCopy(data, 0, _data, (int)ptr, data.Length);
+            if (nullTerminate)
+                _data[ptr + data.Length] = 0;
+            return data.Length + (nullTerminate?1:0);
         }
 
         public int WriteStruct<T>(int ptr, ref T str) where T : struct => WriteStruct((uint)ptr, ref str);
