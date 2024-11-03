@@ -220,13 +220,12 @@ namespace Wacs.Core
             
             if (module.Names?.FunctionNames != null)
             {
-                uint idx = 0;
+                uint idx = (uint)module.ImportedFunctions.Count;
                 foreach (var func in module.Funcs)
                 {
-                    uint funcIdx = (uint)(idx + module.ImportedFunctions.Count);
                     func.Id = module.Names.FunctionNames.Names.NameAssocMap.TryGetValue(idx, out var funcName) 
-                        ? $"{funcName}|{funcIdx}"
-                        : $"{funcIdx}";
+                        ? $"{funcName}|{idx}"
+                        : $"{idx}";
                     idx++;
                 }
             }
