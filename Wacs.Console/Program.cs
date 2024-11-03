@@ -6,45 +6,120 @@ using CommandLine;
 using FluentValidation;
 using Wacs.Core;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.WASIp1.Types;
 
 namespace Wacs.Console
 {
     // ReSharper disable once ClassNeverInstantiated.Global
     public class Options
     {
-        [Value(0, Required = true, HelpText = "Path to the WebAssembly (.wasm) file.")]
-        public string WasmFilePath { get; init; } = "";
+        [Option('e',"env", Separator = ',', HelpText = "Comma-separated list of environment variables (format: KEY=VALUE)")]
+        public IEnumerable<string> EnvironmentVars { get; set; } = new List<string>();
+
+        [Option('d',"directories", Separator = ',', HelpText = "Comma-separated list of pre-opened directories")]
+        public IEnumerable<string> Directories { get; set; } = new List<string>();
+
+        [Option('r', "render", HelpText = "Render the wasm file to wat.")]
+        public bool Render { get; set; }
+
+        [Option('g', "log_gas", HelpText = "Print total instructions executed.", Default = false)]
+        public bool LogGas { get; set; }
+
+        [Option('n',"log_progress", HelpText = "Print a . every n instructions.", Default = -1)]
+        public int LogProgressEvery { get; set; }
+
+        [Option('v',"verbose", HelpText = "Log execution.", Default = InstructionLogging.None)]
+        public InstructionLogging LogInstructionExecution { get; set; }
+
+        [Option('l',"calculate_lines", HelpText = "Calculate line numbers for logged instructions.", Default = false)]
+        public bool CalculateLineNumbers { get; set; }
+
+        [Option('s', "stats", HelpText = "Collect instruction statistics.", Default = false)]
+        public bool CollectStats { get; set; }
+
+        [Option('p', "profile", HelpText = "Collect instruction statistics.", Default = false)]
+        public bool Profile { get; set; }
+
+        // This will capture all values that aren't tied to an option
+        [Value(0, Required = true, MetaName = "WasmModule", HelpText = "Path to the executable")]
+        public string WasmModule { get; set; } = "";
+
+        [Value(1, Required = false, HelpText = "Arguments to pass to the executable")]
+        public IEnumerable<string> ExecutableArgs { get; set; }
     }
+
 
     public class Program
     {
-        public static void Main(string[] args)
+        private const string VERSION = "0.0.1";
+
+        static int Main(string[] args)
         {
-            var firstArg = args.Take(1).ToArray();
-            var remainingArgs = args.Skip(1).ToList();
+            if (args.Length > 0 && args[0] == "--version")
+            {
+                System.Console.WriteLine($"Wacs version {VERSION}");
+                return 0;
+            }
             
-            Parser.Default.ParseArguments<Options>(firstArg)
-                .WithParsed(options => new Program().Run(options.WasmFilePath, remainingArgs))
-                .WithNotParsed(errors =>
-                {
-                    var messages = string.Join("|",errors.Select(e=> e.ToString()));
-                    System.Console.WriteLine($"Error occurred while parsing arguments. {messages}");
-                });
+            var parser = new Parser(with => {
+                with.EnableDashDash = true;
+                with.AutoHelp = false;        // Suppress automatic help
+                with.AutoVersion = false;      // Suppress automatic version
+                with.HelpWriter = System.Console.Out;
+            });
+
+            var parsedResult = parser.ParseArguments<Options>(args);
+            
+            return parsedResult.MapResult(RunWithOptions,errors => 1);
         }
 
-        private void Run(string wasmFilePath, List<string> vargs)
+        static int RunWithOptions(Options opts)
         {
+            // Validate executable path
+            if (!File.Exists(opts.WasmModule))
+            {
+                System.Console.Error.WriteLine($"Error: Wasm file not found: {opts.WasmModule}");
+                return 1;
+            }
+
+            // Validate directories
+            foreach (var dir in opts.Directories)
+            {
+                if (!Directory.Exists(dir))
+                {
+                    System.Console.Error.WriteLine($"Error: Directory not found: {dir}");
+                    return 1;
+                }
+            }
+
+            // Process environment variables
+            var envVars = new Dictionary<string, string>();
+            foreach (var env in opts.EnvironmentVars)
+            {
+                var parts = env.Split('=', 2);
+                if (parts.Length != 2)
+                {
+                    System.Console.Error.WriteLine($"Error: Invalid environment variable format: {env}");
+                    return 1;
+                }
+                envVars[parts[0]] = parts[1];
+            }
+            
             var runtime = new WasmRuntime();
             
             //Parse the module
-            using var fileStream = new FileStream(wasmFilePath, FileMode.Open);
+            using var fileStream = new FileStream(opts.WasmModule, FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
-            
-            string outputFilePath = Path.ChangeExtension(wasmFilePath, ".wat");
-            using var outputStream = new FileStream(outputFilePath, FileMode.Create);
-            ModuleRenderer.RenderWatToStream(outputStream, module);
+
+            if (opts.Render)
+            {
+                string outputFilePath = Path.ChangeExtension(opts.WasmModule, ".wat");
+                using var outputStream = new FileStream(outputFilePath, FileMode.Create);
+                ModuleRenderer.RenderWatToStream(outputStream, module);
+            }
             
             //If you just want to do validation without a runtime, you could do it like this
             var validationResult = module.Validate();
@@ -69,7 +144,7 @@ namespace Wacs.Console
                             
                             System.Console.Error.WriteLine($"Validation {error.Severity}.{msg}");
                             System.Console.Error.WriteLine($"    {path}");
-                            System.Console.Error.WriteLine($"    at{code} in {wasmFilePath}:line {line} ({fline})");
+                            System.Console.Error.WriteLine($"    at{code} in {opts.WasmModule}:line {line} ({fline})");
                             System.Console.Error.WriteLine();
 
                             FuncIdx fIdx = ModuleRenderer.GetFuncIdx(path);
@@ -107,11 +182,15 @@ namespace Wacs.Console
 
 
             var wasiConfig = Wasi.DefaultConfiguration();
-            wasiConfig.Arguments = vargs;
+            wasiConfig.Arguments = opts.ExecutableArgs.ToList();
+            wasiConfig.EnvironmentVariables = envVars;
+            wasiConfig.PreopenedDirectories = opts.Directories
+                    .Select(path => new PreopenedDirectory(wasiConfig, path))
+                    .ToList();
             var wasi = new WASIp1.Wasi(wasiConfig);
             wasi.BindToRuntime(runtime);
             
-            System.Console.WriteLine("Instantiating Module");
+            // System.Console.WriteLine("Instantiating Module");
 
             string moduleName = "hello";
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing or you're like super confident.
@@ -120,20 +199,19 @@ namespace Wacs.Console
 
 
             var callOptions = new InvokerOptions {
-                LogGas = true,
-                LogProgressEvery = 0x40_0000, 
-                LogInstructionExecution = InstructionLogging.Calls,
-                CalculateLineNumbers = false,
-                CollectStats = false,
+                LogGas = opts.LogGas,
+                LogProgressEvery = opts.LogProgressEvery, 
+                LogInstructionExecution = opts.LogInstructionExecution,
+                CalculateLineNumbers = opts.CalculateLineNumbers,
+                CollectStats = opts.CollectStats,
             };
 
             //Wasm/WASI entry points
             if (modInst.StartFunc != null)
             {
                 var caller = runtime.CreateInvoker<Delegates.WasmAction>(modInst.StartFunc, callOptions);
-
-                System.Console.WriteLine("Calling start");
-                using (var profilingSession = new ProfilingSession())
+                
+                using (IDisposable profilingSession = opts.Profile? new ProfilingSession(): new NoOpProfilingSession())
                 {
                     try
                     {
@@ -141,29 +219,44 @@ namespace Wacs.Console
                     }
                     catch (TrapException exc)
                     {
-                        System.Console.WriteLine(exc);
+                        System.Console.Error.WriteLine(exc);
+                        return 1;
+                    }
+                    catch (SignalException exc)
+                    {
+                        ErrNo sig = (ErrNo)exc.Signal;
+                        System.Console.Error.WriteLine($"Signal.{sig.HumanReadable()}");
+                        return exc.Signal;
                     }
                 }
             }
             else if (runtime.TryGetExportedFunction((moduleName, "main"), out var mainAddr))
             {
                 var caller = runtime.CreateInvoker<Func<Value>>(mainAddr, callOptions);
-
-                System.Console.WriteLine("Calling main");
-                using (var profilingSession = new ProfilingSession())
+                
+                using (IDisposable profilingSession = opts.Profile? new ProfilingSession(): new NoOpProfilingSession())
                 {
                     try
                     {
                         int result = caller();
 
-                        System.Console.WriteLine($"Result was: {result}");
+                        return result;
                     }
                     catch (TrapException exc)
                     {
-                        System.Console.WriteLine(exc);
+                        System.Console.Error.WriteLine(exc);
+                        return 1;
+                    }
+                    catch (SignalException exc)
+                    {
+                        ErrNo sig = (ErrNo)exc.Signal;
+                        System.Console.Error.WriteLine($"Signal.{sig.HumanReadable()}");
+                        return exc.Signal;
                     }
                 }
             }
+
+            return 0;
         }
     }
 }

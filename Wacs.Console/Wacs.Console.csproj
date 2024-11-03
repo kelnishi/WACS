@@ -6,11 +6,16 @@
     <LangVersion>9</LangVersion>
     <TargetFramework>net6.0</TargetFramework>
     <OutputType>Exe</OutputType>
+    <AssemblyName>Wacs</AssemblyName>
+    <AssemblyVersion>0.0.1</AssemblyVersion>
+    <FileVersion>0.0.1</FileVersion>
+    <Company>Kelvin Nishikawa</Company>
+    <Version>0.0.1</Version>
+    <Authors>Kelvin Nishikawa</Authors>
   </PropertyGroup>
-
+  
   <ItemGroup>
     <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
-    <ProjectReference Include="..\Wacs.Extensions\Wacs.Extensions.csproj" />
     <ProjectReference Include="..\Wacs.WASIp1\Wacs.WASIp1.csproj" />
   </ItemGroup>
 
