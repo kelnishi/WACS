@@ -1,7 +1,7 @@
 using Wacs.Core.Attributes;
 using Wacs.Core.Types;
 
-namespace Wacs.WASIp1.Types
+namespace Wacs.Core.WASIp1
 {
     /// <summary>
     /// WASI error codes as per the WASI specification.
@@ -481,7 +481,7 @@ namespace Wacs.WASIp1.Types
             var type = typeof(ErrNo);
             var memberInfo = type.GetMember(sig.ToString());
             if (memberInfo.Length <= 0)
-                return $"Signal {sig}";
+                return $"Signal: {sig}";
 
             var attributes = memberInfo[0].GetCustomAttributes(typeof(SignalAttribute), false);
             if (attributes.Length > 0)
@@ -489,7 +489,7 @@ namespace Wacs.WASIp1.Types
                 return $"{sig}: {((SignalAttribute)attributes[0]).HumanReadableMessage}";
             }
 
-            return $"Signal {sig}";
+            return $"Signal: {sig}";
         }
     }
 }

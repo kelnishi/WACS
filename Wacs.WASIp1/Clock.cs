@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using Wacs.Core.Runtime;
+using Wacs.Core.WASIp1;
 using Wacs.WASIp1.Types;
 using ptr = System.Int32;
 

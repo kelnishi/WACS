@@ -11,6 +11,7 @@ using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
+using Wacs.Core.WASIp1;
 
 // using System.Diagnostics.CodeAnalysis;
 
@@ -241,7 +242,7 @@ namespace Wacs.Core.Runtime
                     inst.Execute(Context);
                     Context.InstructionTimer.Stop();
 
-                    var st = Context.Stats[(ushort)inst.Op]; 
+                    var st = Context.Stats[(ushort)inst.Op];
                     st.count += 1;
                     st.duration += Context.InstructionTimer.ElapsedTicks;
                     Context.Stats[(ushort)inst.Op] = st;
@@ -272,9 +273,9 @@ namespace Wacs.Core.Runtime
                     var ptr = Context.ComputePointerPath();
                     var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
                     (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+                
                     throw new TrapException(exc.Message + $":line {line} instruction #{steps}\n{path}");
                 }
-
                 throw;
             }
             catch (SignalException exc)
@@ -293,9 +294,12 @@ namespace Wacs.Core.Runtime
                     var ptr = Context.ComputePointerPath();
                     var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
                     (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
-                    Console.Error.WriteLine(exc.Message + $":line {line} instruction #{steps}\n{path}");
-                }
 
+                    var newMessage = exc.Message + $":line {line} instruction #{steps}\n{path}";
+                    var exType = exc.GetType();
+                    var ctr = exType.GetConstructor(new Type[] { typeof(int), typeof(string) });
+                    throw ctr?.Invoke(new object[] {exc.Signal, exc.Message}) as Exception ?? exc;
+                }
                 throw;
             }
 
@@ -303,7 +307,7 @@ namespace Wacs.Core.Runtime
             return true;
         }
 
-        public void LogPreInstruction(InvokerOptions options, IInstruction inst)
+        private void LogPreInstruction(InvokerOptions options, IInstruction inst)
         {
             switch ((OpCode)inst.Op)
             {
@@ -353,7 +357,7 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public void LogPostInstruction(InvokerOptions options, IInstruction inst)
+        private void LogPostInstruction(InvokerOptions options, IInstruction inst)
         {
             if ((options.LogInstructionExecution & InstructionLogging.Computes) == 0)
                 return;
@@ -385,7 +389,7 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public void PrintStats()
+        private void PrintStats()
         {
             long procTicks = Context.ProcessTimer.ElapsedTicks;
             long totalExecs = Context.Stats.Values.Sum(dc => dc.count);

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using Wacs.Core.Runtime;
+using Wacs.Core.WASIp1;
 using Wacs.WASIp1.Types;
 //Interop should use plain numeric types, functions are responsible for marshaling.
 using ptr = System.UInt32;

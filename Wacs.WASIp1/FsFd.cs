@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using Wacs.Core.Runtime;
+using Wacs.Core.WASIp1;
 using Wacs.WASIp1.Types;
 using ptr = System.UInt32;
 using fd = System.UInt32;
