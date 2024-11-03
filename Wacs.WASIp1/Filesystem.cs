@@ -179,6 +179,11 @@ namespace Wacs.WASIp1
 
         private fd BindFile(string guestPath, Stream filestream, FileAccess perm)
         {
+            if (guestPath == "/dev/null")
+            {
+                return BindDevNull(perm);
+            }
+            
             var hostpath = _state.PathMapper.MapToHostPath(guestPath);
             if (!File.Exists(hostpath))
             {
@@ -194,6 +199,22 @@ namespace Wacs.WASIp1
                 Access = perm,
                 IsPreopened = false,
                 Type = Filetype.RegularFile,
+            };
+            return fd;
+        }
+
+        private fd BindDevNull(FileAccess perm)
+        {
+            var devNull = new NullStream();
+            fd fd = _state.GetNextFd;
+            _state.FileDescriptors[fd] = new FileDescriptor
+            {
+                Fd = fd,
+                Stream = devNull,
+                Path = "/dev/null",
+                Access = perm,
+                IsPreopened = true,
+                Type = Filetype.CharacterDevice
             };
             return fd;
         }
@@ -270,27 +291,6 @@ namespace Wacs.WASIp1
                 Path = "/dev/stderr",
                 Access = FileAccess.Write,
                 IsPreopened = IsStreamOpen(_config.StandardError),
-                Type = Filetype.CharacterDevice
-            };
-            var devNull = new NullStream();
-            fd = _state.GetNextFd;
-            _state.FileDescriptors[fd] = new FileDescriptor
-            {
-                Fd = fd,
-                Stream = devNull,
-                Path = "/dev/null",
-                Access = FileAccess.Write,
-                IsPreopened = true,
-                Type = Filetype.CharacterDevice
-            };
-            fd = _state.GetNextFd;
-            _state.FileDescriptors[fd] = new FileDescriptor
-            {
-                Fd = fd,
-                Stream = devNull,
-                Path = "/dev/null",
-                Access = FileAccess.Read,
-                IsPreopened = true,
                 Type = Filetype.CharacterDevice
             };
         }
