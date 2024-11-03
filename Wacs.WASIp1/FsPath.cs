@@ -209,7 +209,7 @@ namespace Wacs.WASIp1
                 if (linkTarget.Length > bufLen)
                     return ErrNo.MsgSize;
 
-                int strLen = mem.WriteString(bufPtr, linkTarget);
+                int strLen = mem.WriteUtf8String(bufPtr, linkTarget, true);
                 mem.WriteInt32(bufUsedPtr, strLen);
             }
             catch (FileNotFoundException)

@@ -252,7 +252,7 @@ namespace Wacs.WASIp1
                 Tag = PrestatTag.Dir,
                 Dir = new PrestatDir
                 {
-                    NameLen = (uint)utf8Name.Length
+                    NameLen = (uint)utf8Name.Length+1
                 }
             };
 
@@ -292,8 +292,8 @@ namespace Wacs.WASIp1
             var utf8Name = Encoding.UTF8.GetBytes(name);
             if (utf8Name.Length+1 > pathLen)
                 return ErrNo.TooBig;
-
-            mem.WriteString(pathPtr, name);
+            
+            mem.WriteUtf8String(pathPtr, name, true);
             return ErrNo.Success;
         }
 
