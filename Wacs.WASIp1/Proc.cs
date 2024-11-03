@@ -1,8 +1,8 @@
 using System;
 using Wacs.Core.Runtime;
-using Wacs.Core.Runtime.Exceptions;
+using Wacs.Core.WASIp1;
 using Wacs.WASIp1.Types;
-using exitcode = System.UInt32;
+using exitcode = System.Int32;
 
 namespace Wacs.WASIp1
 {
@@ -16,14 +16,14 @@ namespace Wacs.WASIp1
         {
             string module = "wasi_snapshot_preview1";
             runtime.BindHostFunction<Action<exitcode>>((module, "proc_exit"), ProcExit);
-            runtime.BindHostFunction<Func<Signal,ErrNo>>((module, "proc_raise"), ProcRaise);
+            runtime.BindHostFunction<Func<int,ErrNo>>((module, "proc_raise"), ProcRaise);
             runtime.BindHostFunction<Func<ExecContext,ErrNo>>((module, "sched_yield"), SchedYield);
         }
 
         private void ProcExit(exitcode exitCode)
         {
-            _state.ExitCode = (Signal)exitCode;
-            throw new SignalException((int)exitCode);
+            _state.ExitCode = exitCode;
+            throw new SystemExitException(exitCode);
         }
 
         /// <summary>
@@ -36,10 +36,10 @@ namespace Wacs.WASIp1
         /// Returns 0 (<see cref="ErrNo.Success"/>) on success,
         /// or a non-zero WASI error code on failure.
         /// </returns>
-        public ErrNo ProcRaise(Signal signal)
+        public ErrNo ProcRaise(int signal)
         {
             // Handle common signals as per WASI specification.
-            switch (signal)
+            switch ((Signal)signal)
             {
                 case Signal.SIGINT: // SIGINT
                 case Signal.SIGTERM: // SIGTERM
@@ -50,7 +50,7 @@ namespace Wacs.WASIp1
                     // Depending on the signal, perform appropriate actions.
                     // For SIGINT and SIGTERM, we might initiate graceful shutdown.
                     // For demonstration, we'll throw an exception to simulate termination.
-                    throw new SignalException((int)signal);
+                    throw new SignalException(signal);
 
                 default:
                     // Unsupported signal.

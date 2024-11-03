@@ -1,7 +1,7 @@
 using System;
 using System.Security.Cryptography;
 using Wacs.Core.Runtime;
-using Wacs.WASIp1.Types;
+using Wacs.Core.WASIp1;
 using ptr = System.Int32;
 using size = System.Int32;
 

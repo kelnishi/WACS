@@ -6,9 +6,9 @@ using CommandLine;
 using FluentValidation;
 using Wacs.Core;
 using Wacs.Core.Runtime;
-using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.WASIp1;
 using Wacs.WASIp1.Types;
 
 namespace Wacs.Console
@@ -224,8 +224,7 @@ namespace Wacs.Console
                     }
                     catch (SignalException exc)
                     {
-                        ErrNo sig = (ErrNo)exc.Signal;
-                        System.Console.Error.WriteLine($"Signal.{sig.HumanReadable()}");
+                        System.Console.Error.WriteLine($"{exc.HumanReadable}");
                         return exc.Signal;
                     }
                 }
@@ -250,8 +249,8 @@ namespace Wacs.Console
                     catch (SignalException exc)
                     {
                         ErrNo sig = (ErrNo)exc.Signal;
-                        System.Console.Error.WriteLine($"Signal.{sig.HumanReadable()}");
-                        return exc.Signal;
+                        System.Console.Error.WriteLine($"{sig.HumanReadable()}");
+                        return (int)exc.Signal;
                     }
                 }
             }

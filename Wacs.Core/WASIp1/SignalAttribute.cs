@@ -1,6 +1,6 @@
 using System;
 
-namespace Wacs.WASIp1
+namespace Wacs.Core.WASIp1
 {
     public class SignalAttribute : Attribute
     {

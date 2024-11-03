@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Wacs.Core.Runtime;
+using Wacs.Core.WASIp1;
 using Wacs.WASIp1.Types;
 using ptr = System.Int32;
 using size = System.UInt32;

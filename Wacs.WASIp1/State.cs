@@ -9,8 +9,8 @@ namespace Wacs.WASIp1
         public readonly CancellationTokenSource Cts = new();
 
         private uint nextFd = 0;
-        public Signal ExitCode { get; set; }
-        public Signal LastSignal { get; set; }
+        public int ExitCode { get; set; }
+        public int LastSignal { get; set; }
 
         public uint GetNextFd {
             get

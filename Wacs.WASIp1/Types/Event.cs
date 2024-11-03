@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Wacs.Core.WASIp1;
 
 namespace Wacs.WASIp1.Types
 {
