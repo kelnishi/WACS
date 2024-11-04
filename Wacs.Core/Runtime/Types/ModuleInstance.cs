@@ -22,7 +22,7 @@ namespace Wacs.Core.Runtime.Types
         public TypesSpace Types { get; }
         public FuncAddrs FuncAddrs { get; } = new();
 
-        public FuncAddr? StartFunc { get; set; }
+        public FuncAddr StartFunc { get; set; } = FuncAddr.Null;
 
         public TableAddrs TableAddrs { get; } = new();
         public MemAddrs MemAddrs { get; } = new();

@@ -840,8 +840,8 @@ namespace Wacs.Core.Instructions
             //13.
             context.Assert( r.Type == ValType.Funcref,
                 $"Instruction call_indirect failed. Element was not a FuncRef");
-            //14. ???
-            var a = context.Frame.Module.FuncAddrs[r.FuncIdx];
+            //14.
+            var a = (FuncAddr)r;
             //15.
             context.Assert( context.Store.Contains(a),
                 $"Instruction call_indirect failed. Validation of table mutation failed.");

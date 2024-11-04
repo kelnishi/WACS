@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -97,7 +96,7 @@ namespace Wacs.Core.Runtime
             throw new Exception($"Module '{moduleName}' not found.");
         }
 
-        public bool TryGetExportedFunction((string module, string entity) id, [NotNullWhen(true)] out FuncAddr? addr)
+        public bool TryGetExportedFunction((string module, string entity) id, out FuncAddr addr)
         {
             try
             {
@@ -106,7 +105,7 @@ namespace Wacs.Core.Runtime
             }
             catch (UnboundEntityException)
             {
-                addr = null;
+                addr = FuncAddr.Null;
                 return false;
             }
         }

@@ -39,9 +39,6 @@ namespace Wacs.Core.Runtime
         // 128-bit vector
         [FieldOffset(1)] public readonly V128 V128;
 
-        // // ref funcIdx
-        public FuncIdx FuncIdx => (FuncIdx)Int32;
-
         // ref.extern externIdx
         [FieldOffset(1)] public readonly ulong ExternIdx;
 
