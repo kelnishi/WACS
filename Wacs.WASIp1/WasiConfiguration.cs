@@ -23,6 +23,10 @@ namespace Wacs.WASIp1
         public bool AllowSymbolicLinks { get; set; } = false;
         public bool AllowHardLinks { get; set; } = false;
 
+        public bool AllowFileCreation { get; set; } = false;
+
+        public bool AllowFileDeletion { get; set; } = false;
+
         public Stream StandardInput { get; set; } = Stream.Null;
         public Stream StandardOutput { get; set; } = Stream.Null;
         public Stream StandardError { get; set; } = Stream.Null;

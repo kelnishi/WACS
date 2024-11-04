@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using Wacs.Core.Runtime;
@@ -117,7 +118,7 @@ namespace Wacs.WASIp1
             }
         }
 
-        private fd BindDir(string hostDir, string guestDir, FileAccess perm, bool isPreopened)
+        private fd BindDir(string hostDir, string guestDir, FileAccess perm, bool isPreopened, Rights restrictedRights = Rights.All, Rights inheritedRights = Rights.None)
         {
             if (_state.FileDescriptors.Count >= _config.MaxOpenFileDescriptors)
             {
@@ -143,19 +144,37 @@ namespace Wacs.WASIp1
             }
             
             _state.PathMapper.AddDirectoryMapping(guestDir, hostDir);
-            _state.FileDescriptors[fd] = new FileDescriptor
+            var fileDescriptor = new FileDescriptor
             {
                 Fd = fd,
                 Stream = Stream.Null,
                 Path = guestDir,
                 Access = perm,
                 IsPreopened = isPreopened,
-                Type = Filetype.Directory
+                Type = Filetype.Directory,
             };
 
             var fileInfo = new FileInfo(hostDir);
-            _state.FileDescriptors[fd].SetFileRights(fileInfo);
+            var rights = FileDescriptor.ComputeFileRights(
+                fileInfo, 
+                Filetype.Directory,
+                perm, 
+                Stream.Null,
+                _config.AllowFileCreation,
+                _config.AllowFileDeletion) & restrictedRights;
+
+            if (inheritedRights == Rights.None)
+            {
+                fileDescriptor.Rights = rights;
+                fileDescriptor.InheritedRights = rights;
+            }
+            else
+            {
+                fileDescriptor.Rights = inheritedRights & rights;
+                fileDescriptor.InheritedRights = inheritedRights;
+            }
             
+            _state.FileDescriptors[fd] = fileDescriptor;
             return fd;
         }
 
@@ -178,7 +197,7 @@ namespace Wacs.WASIp1
             }
         }
 
-        private fd BindFile(string guestPath, Stream filestream, FileAccess perm)
+        private fd BindFile(string guestPath, Stream filestream, FileAccess perm, Rights rights, Rights inheritedRights)
         {
             if (guestPath == "/dev/null")
             {
@@ -200,6 +219,8 @@ namespace Wacs.WASIp1
                 Access = perm,
                 IsPreopened = false,
                 Type = Filetype.RegularFile,
+                Rights = rights,
+                InheritedRights = inheritedRights,
             };
             return fd;
         }
@@ -272,7 +293,8 @@ namespace Wacs.WASIp1
                 Path = "/dev/stdin",
                 Access = FileAccess.Read,
                 IsPreopened = IsStreamOpen(_config.StandardInput),
-                Type = Filetype.CharacterDevice
+                Type = Filetype.CharacterDevice,
+                Rights = Rights.FD_READ | Rights.PATH_OPEN,
             };
             fd = _state.GetNextFd;
             _state.FileDescriptors[fd] = new FileDescriptor
@@ -282,7 +304,8 @@ namespace Wacs.WASIp1
                 Path = "/dev/stdout",
                 Access = FileAccess.Write,
                 IsPreopened = IsStreamOpen(_config.StandardOutput),
-                Type = Filetype.CharacterDevice
+                Type = Filetype.CharacterDevice,
+                Rights = Rights.FD_WRITE | Rights.PATH_OPEN,
             };
             fd = _state.GetNextFd;
             _state.FileDescriptors[fd] = new FileDescriptor
@@ -292,7 +315,8 @@ namespace Wacs.WASIp1
                 Path = "/dev/stderr",
                 Access = FileAccess.Write,
                 IsPreopened = IsStreamOpen(_config.StandardError),
-                Type = Filetype.CharacterDevice
+                Type = Filetype.CharacterDevice,
+                Rights = Rights.FD_WRITE | Rights.PATH_OPEN,
             };
         }
 
@@ -321,21 +345,31 @@ namespace Wacs.WASIp1
             }
         }
 
-        public FileDescriptor GetFD(fd fd)
+        public bool GetFd(fd fd, [NotNullWhen(true)] out FileDescriptor fileDescriptor)
         {
-            if (_state.FileDescriptors.TryGetValue(fd, out var fileDescriptor))
+            
+            if (_state.FileDescriptors.TryGetValue(fd, out var file))
             {
-                return fileDescriptor;
+                fileDescriptor = file;
+                return true;
             }
-            throw new ArgumentException($"File descriptor {fd} not found.");
+            fileDescriptor = null;
+            return false;
         }
 
-        public FileDescriptor? GetFD(string path)
+        public bool GetFd(string path, [NotNullWhen(true)] out FileDescriptor fileDescriptor)
         {
-            var entry = _state.FileDescriptors.Values
-                .FirstOrDefault(fd => fd.Path == path);
-            
-            return entry;
+            var file = _state.FileDescriptors.Values.FirstOrDefault(fd => fd.Path == path);
+            if (file != null)
+            {
+                fileDescriptor = file;
+                return true;
+            }
+            else
+            {
+                fileDescriptor = null!;
+                return false;
+            }
         }
     }
 }
