@@ -105,6 +105,9 @@ namespace Wacs.Core.Runtime.Types
             
         }
 
+        private static uint ConvertInt(int value) => BitConverter.ToUInt32(BitConverter.GetBytes(value), 0);
+        private static ulong ConvertLong(long value) => BitConverter.ToUInt64(BitConverter.GetBytes(value), 0);
+
         private static ConversionHelper CreateConversionHelper(Type hostType)
         {
             if (hostType.IsEnum)
@@ -117,7 +120,9 @@ namespace Wacs.Core.Runtime.Types
                     { } t when t == typeof(short) => Enum.ToObject(hostType, (short)(int)wasmValue),
                     { } t when t == typeof(ushort) => Enum.ToObject(hostType, (ushort)(int)wasmValue),
                     { } t when t == typeof(int) => Enum.ToObject(hostType, (int)wasmValue),
-                    { } t when t == typeof(uint) => Enum.ToObject(hostType, (uint)wasmValue),
+                    { } t when t == typeof(uint) => Enum.ToObject(hostType, ConvertInt((int)wasmValue)),
+                    { } t when t == typeof(long) => Enum.ToObject(hostType, (long)wasmValue),
+                    { } t when t == typeof(ulong) => Enum.ToObject(hostType, ConvertLong((long)wasmValue)),
                     _ => throw new ArgumentException($"Unsupported underlying type: {baseType} for enum type {hostType}")
                 };
             }
@@ -147,6 +152,8 @@ namespace Wacs.Core.Runtime.Types
                     { } t when t == typeof(ushort) => (ushort)hostValue,
                     { } t when t == typeof(int) => (int)hostValue,
                     { } t when t == typeof(uint) => (uint)hostValue,
+                    { } t when t == typeof(long) => (long)hostValue,
+                    { } t when t == typeof(ulong) => (ulong)hostValue,
                     _ => throw new ArgumentException($"Unsupported underlying type: {baseType} for enum type {hostType}")
                 };
             }
@@ -172,7 +179,7 @@ namespace Wacs.Core.Runtime.Types
                 args[i] = _parameterConversions[i]?.Invoke(args[i]) ?? args[i];
             }
 
-            try
+            // try
             {
                 var result = _invoker.Invoke(_hostFunction, args);
 
@@ -198,10 +205,10 @@ namespace Wacs.Core.Runtime.Types
                     // }
                 }
             }
-            catch (TargetInvocationException ex)
-            {
-                throw ex.InnerException!;
-            }
+            // catch (TargetInvocationException ex)
+            // {
+            //     throw ex.InnerException!;
+            // }
         }
 
         delegate object ConversionHelper(object value);

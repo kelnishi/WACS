@@ -36,12 +36,7 @@ namespace Wacs.WASIp1
         /// <returns>Returns an ErrNo indicating success or specific error code.</returns>
         public ErrNo FdAdvise(ExecContext ctx, fd fd, filesize offset, filesize len, Advice advice)
         {
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
+            if (!GetFd(fd, out var fileDescriptor))
             {
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
@@ -97,12 +92,7 @@ namespace Wacs.WASIp1
         /// <returns>Returns an ErrNo indicating success or specific error code.</returns>
         public ErrNo FdAllocate(ExecContext ctx, fd fd, filesize offset, filesize len)
         {
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
+            if (!GetFd(fd, out var fileDescriptor))
             {
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
@@ -155,12 +145,7 @@ namespace Wacs.WASIp1
         /// <returns>Returns an ErrNo indicating success or specific error code.</returns>
         public ErrNo FdDatasync(ExecContext ctx, fd fd)
         {
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
+            if (!GetFd(fd, out var fileDescriptor))
             {
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
@@ -186,12 +171,7 @@ namespace Wacs.WASIp1
         /// <returns>Returns an ErrNo indicating success or specific error code.</returns>
         public ErrNo FdPread(ExecContext ctx, fd fd, ptr iovsPtr, size iovsLen, filesize offset, ptr nreadPtr)
         {
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
+            if (!GetFd(fd, out var fileDescriptor))
             {
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
@@ -247,12 +227,7 @@ namespace Wacs.WASIp1
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdPwrite(ExecContext ctx, fd fd, ptr iovsPtr, size iovsLen, filesize offset, ptr nwrittenPtr)
         {
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
+            if (!GetFd(fd, out var fileDescriptor))
             {
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
@@ -304,12 +279,7 @@ namespace Wacs.WASIp1
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdRead(ExecContext ctx, fd fd, ptr iovsPtr, size iovsLen, ptr nreadPtr)
         {
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
+            if (!GetFd(fd, out var fileDescriptor))
             {
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
@@ -356,12 +326,7 @@ namespace Wacs.WASIp1
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdReaddir(ExecContext ctx, fd fd, ptr bufPtr, size bufLen, dircookie cookie, ptr bufUsedPtr)
         {
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
+            if (!GetFd(fd, out var fileDescriptor))
             {
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
@@ -440,21 +405,18 @@ namespace Wacs.WASIp1
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdRenumber(ExecContext ctx, fd from, fd to)
         {
+            //Check if both exist
+            if (!GetFd(from, out _))
+                return ErrNo.NoEnt;
+            if (!GetFd(to, out _))
+                return ErrNo.NoEnt;
             try
             {
-                //Check if both exist
-                var fromFD = GetFD(from);
-                var toFD = GetFD(to);
-                
                 // Close the "to" file descriptor if it is open
                 RemoveFD(to);
                 
                 // Assign the "to" file descriptor to the same underlying resources of the "from" fd
                 MoveFD(from, to);
-            }
-            catch (ArgumentException)
-            {
-                return ErrNo.NoEnt; // One of the file descriptors does not exist.
             }
             catch (Exception)
             {
@@ -476,12 +438,7 @@ namespace Wacs.WASIp1
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdSeek(ExecContext ctx, fd fd, filedelta offset, Whence whence, ptr newoffsetPtr)
         {
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
+            if (!GetFd(fd, out var fileDescriptor))
             {
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
@@ -527,12 +484,7 @@ namespace Wacs.WASIp1
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdSync(ExecContext ctx, fd fd)
         {
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
+            if (!GetFd(fd, out var fileDescriptor))
             {
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
@@ -556,18 +508,16 @@ namespace Wacs.WASIp1
         public ErrNo FdTell(ExecContext ctx, fd fd, ptr offsetPtr)
         {
             var mem = ctx.DefaultMemory;
+            if (!GetFd(fd, out var fileDescriptor))
+                return ErrNo.NoEnt;
+            
             try
             {
-                var fileDescriptor = GetFD(fd);
                 if (fileDescriptor.Type == Filetype.Directory)
                     return ErrNo.IsDir;
 
                 filesize currentPosition = (filesize)fileDescriptor.Stream.Position;
                 mem.WriteInt64(offsetPtr, currentPosition);
-            }
-            catch (ArgumentException)
-            {
-                return ErrNo.NoEnt;
             }
             catch (Exception)
             {
@@ -589,12 +539,7 @@ namespace Wacs.WASIp1
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdWrite(ExecContext ctx, fd fd, ptr iovsPtr, size iovsLen, ptr nwrittenPtr)
         {
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
+            if (!GetFd(fd, out var fileDescriptor))
             {
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }

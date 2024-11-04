@@ -32,15 +32,8 @@ namespace Wacs.WASIp1
             if (!mem.Contains((int)bufPtr, FdStatSize))
                 return ErrNo.Inval;
             
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
-            {
+            if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.NoEnt;
-            }
 
             //TODO: I really don't know if these flags are correct...
             FdFlags flags = FdFlags.None;
@@ -116,15 +109,8 @@ namespace Wacs.WASIp1
             if (!mem.Contains((int)bufPtr, FdStatSize))
                 return ErrNo.Inval;
             
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
-            {
+            if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.NoEnt;
-            }
 
             var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
             var fileInfo = new FileInfo(hostPath);
@@ -156,16 +142,11 @@ namespace Wacs.WASIp1
         /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
         public ErrNo FdFilestatSetSize(ExecContext ctx, fd fd, filesize stSize)
         {
-            try
-            {
-                var fileDescriptor = GetFD(fd);
-                fileDescriptor.Stream.SetLength((long)stSize);
-            }
-            catch (ArgumentException)
-            {
+            if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.NoEnt;
-            }
-
+            
+            fileDescriptor.Stream.SetLength((long)stSize);
+            
             return ErrNo.Success;
         }
 
@@ -181,37 +162,32 @@ namespace Wacs.WASIp1
         /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
         public ErrNo FdFilestatSetTimes(ExecContext ctx, fd fd, timestamp atim, timestamp mtim, FstFlags flags)
         {
-            try
-            {
-                var fileDescriptor = GetFD(fd);
-                var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
-                var fileInfo = new FileInfo(hostPath);
-
-                if ((flags & FstFlags.ATim) != 0)
-                {
-                    fileInfo.LastAccessTimeUtc = Clock.ToDateTimeUtc(atim);
-                }
-                if ((flags & FstFlags.MTim) != 0)
-                {
-                    fileInfo.LastWriteTimeUtc = Clock.ToDateTimeUtc(mtim);
-                }
-                if ((flags & FstFlags.ATimNow) != 0)
-                {
-                    fileInfo.LastAccessTimeUtc = DateTime.Now.ToUniversalTime();
-                }
-                if ((flags & FstFlags.MTimNow) != 0)
-                {
-                    fileInfo.LastWriteTimeUtc = DateTime.Now.ToUniversalTime();
-                }
-
-                // FileInfo does not directly support updating timestamps, so we need to use the File.SetLastWriteTimeUtc
-                File.SetLastWriteTimeUtc(hostPath, fileInfo.LastWriteTimeUtc);
-                File.SetLastAccessTimeUtc(hostPath, fileInfo.LastAccessTimeUtc);
-            }
-            catch (ArgumentException)
-            {
+            if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.NoEnt;
+                
+            var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
+            var fileInfo = new FileInfo(hostPath);
+
+            if ((flags & FstFlags.ATim) != 0)
+            {
+                fileInfo.LastAccessTimeUtc = Clock.ToDateTimeUtc(atim);
             }
+            if ((flags & FstFlags.MTim) != 0)
+            {
+                fileInfo.LastWriteTimeUtc = Clock.ToDateTimeUtc(mtim);
+            }
+            if ((flags & FstFlags.ATimNow) != 0)
+            {
+                fileInfo.LastAccessTimeUtc = DateTime.Now.ToUniversalTime();
+            }
+            if ((flags & FstFlags.MTimNow) != 0)
+            {
+                fileInfo.LastWriteTimeUtc = DateTime.Now.ToUniversalTime();
+            }
+
+            // FileInfo does not directly support updating timestamps, so we need to use the File.SetLastWriteTimeUtc
+            File.SetLastWriteTimeUtc(hostPath, fileInfo.LastWriteTimeUtc);
+            File.SetLastAccessTimeUtc(hostPath, fileInfo.LastAccessTimeUtc);
             
             return ErrNo.Success;
         }
@@ -229,12 +205,7 @@ namespace Wacs.WASIp1
             if (!mem.Contains((int)bufPtr, sizeof(ptr)))
                 return ErrNo.Inval;
 
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
+            if (!GetFd(fd, out var fileDescriptor))
             {
                 //Signal that there are no more FDs
                 return ErrNo.Badf;
@@ -273,15 +244,8 @@ namespace Wacs.WASIp1
             if (!mem.Contains((int)pathPtr, (int)pathLen))
                 return ErrNo.Inval;
 
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
-            {
+            if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.NoEnt;
-            }
 
             if (fileDescriptor.Type != Filetype.Directory)
                 return ErrNo.NotDir;
@@ -312,15 +276,8 @@ namespace Wacs.WASIp1
             if (!mem.Contains((int)buf, FileStatSize))
                 return ErrNo.Inval;
 
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
-            {
+            if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.NoEnt;
-            }
 
             var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
             var fileInfo = new FileInfo(hostPath);
@@ -362,15 +319,8 @@ namespace Wacs.WASIp1
             if (!mem.Contains((int)pathPtr, (int)pathLen))
                 return ErrNo.Inval;
 
-            FileDescriptor fileDescriptor;
-            try
-            {
-                fileDescriptor = GetFD(fd);
-            }
-            catch (ArgumentException)
-            {
+            if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.NoEnt;
-            }
             
             var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
             var fileInfo = new FileInfo(hostPath);
