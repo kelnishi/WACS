@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using FluentValidation;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
@@ -129,15 +130,29 @@ namespace Wacs.Core.Runtime
         {
             var funcType = func.GetType();
             var parameters = funcType.GetMethod("Invoke")?.GetParameters();
-            var paramTypes = parameters?.Select(p => p.ParameterType).Where(t=> t != typeof(Store)).ToArray() ?? Array.Empty<Type>();
-            var returnType = funcType.GetMethod("Invoke")?.ReturnType;
+            var paramTypes = parameters?
+                                 .Where(p=> !p.Attributes.HasFlag(ParameterAttributes.Out))
+                                 .Select(p => p.ParameterType)
+                                 .ToArray()
+                             ?? Array.Empty<Type>();
+            var outTypes = parameters?
+                               .Where(p=> p.Attributes.HasFlag(ParameterAttributes.Out))
+                               .Select(p => p.ParameterType)
+                               .ToArray()
+                           ?? Array.Empty<Type>();
+            
+            var returnTypeInfo = funcType.GetMethod("Invoke")?.ReturnType;
             
             var paramValTypes = new ResultType(paramTypes.Select(t => t.ToValType()).ToArray());
-            var valType = returnType?.ToValType() ?? ValType.Nil;
-            var returnValType = valType == ValType.Nil
-                ? ResultType.Empty
-                : new ResultType(valType);
+            var outValTypes = outTypes.Select(t => ValTypeUtilities.UnpackRef(t)).ToArray();
+            var returnType = returnTypeInfo?.ToValType() ?? ValType.Nil;
 
+            if (returnType != ValType.Nil)
+            {
+                outValTypes = new ValType[] { returnType }.Concat(outValTypes).ToArray();
+            }
+            var returnValType = new ResultType(outValTypes);
+            
             for (int i = paramValTypes.Types.Length - 1; i >= 0; --i)
             {
                 if (paramValTypes.Types[i] == ValType.ExecContext)

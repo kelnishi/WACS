@@ -7,7 +7,7 @@ namespace Wacs.WASIp1.Types
 {
     [WasmType(nameof(ValType.I64))]
     [Flags]
-    public enum Rights : long
+    public enum Rights : ulong
     {
         None = 0,
         
@@ -42,7 +42,7 @@ namespace Wacs.WASIp1.Types
         SOCK_SHUTDOWN = 1 << 28,
         SOCK_ACCEPT = 1 << 29,
         
-        All = -1,
+        All = UInt64.MaxValue, 
     }
 
     public static class RightsExtension

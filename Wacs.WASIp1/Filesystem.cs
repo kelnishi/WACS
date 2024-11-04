@@ -40,8 +40,11 @@ namespace Wacs.WASIp1
                 (module, "path_filestat_set_times"), PathFilestatSetTimes);
             runtime.BindHostFunction<Func<ExecContext, fd, LookupFlags, ptr, size, fd, ptr, size, ErrNo>>(
                 (module, "path_link"), PathLink);
-            runtime.BindHostFunction<Func<ExecContext, fd, LookupFlags, ptr, size, OFlags, Rights, Rights, FdFlags, ptr, ErrNo>>(
+            //HACK: 10 parameters + return -> dotnet SEGFAULT!, so we're using outvars to return
+            // *outvars require defining our own delegate (can't use Action<T>).
+            runtime.BindHostFunction<PathOpenDelegate>(
                 (module, "path_open"), PathOpen);
+            
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ptr, size, ptr, ErrNo>>(
                 (module, "path_readlink"), PathReadlink);
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ErrNo>>(

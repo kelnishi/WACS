@@ -18,6 +18,8 @@ namespace Wacs.Core.Runtime.Types
 
         private readonly MethodInfo _invoker;
 
+        private bool _captureReturn = false;
+
         private ConversionHelper?[] _parameterConversions = null!;
         private ConversionHelper?[] _resultConversions = null!;
 
@@ -37,8 +39,31 @@ namespace Wacs.Core.Runtime.Types
             _hostFunction = hostFunction;
             _invoker = delType.GetMethod("Invoke")!;
             (ModuleName, Name) = id;
+
+            var invokerParams = _invoker.GetParameters();
+            if (invokerParams[0].ParameterType == typeof(ExecContext))
+            {
+                PassExecContext = true;
+            }
+            
+            int parameterCount = type.ParameterTypes.Arity;
+            
+            if (PassExecContext)
+                parameterCount += 1;
+            if (type.ResultType.Arity > 0)
+            {
+                parameterCount += type.ResultType.Arity - 1;
+                if (_invoker.ReturnParameter?.ParameterType != typeof(void))
+                {
+                    _captureReturn = true;
+                }
+                else
+                {
+                    parameterCount += 1;
+                }
+            }
+            ParameterBuffer = new object[parameterCount];
             BuildConversionHelpers();
-            ParameterBuffer = new object[type.ParameterTypes.Arity + (PassExecContext ? 1 : 0)];
         }
 
         public bool PassExecContext { get; set; }
@@ -69,7 +94,6 @@ namespace Wacs.Core.Runtime.Types
                 {
                     if (i > 0)
                         throw new ArgumentException($"Host binding ({ModuleName} {Name}) has invalid parameters. ExecContext may only be the first parameter");
-                    PassExecContext = true;
                 }
 
                 _parameterConversions[i] = paramType switch
@@ -86,12 +110,12 @@ namespace Wacs.Core.Runtime.Types
                 };
             }
             
-            _resultConversions = new ConversionHelper?[_invoker.ReturnParameter == null ? 0 : 1];
-            if (_invoker.ReturnParameter != null)
+            _resultConversions = new ConversionHelper?[Type.ResultType.Length];
+            int idx = 0;
+            if (_captureReturn)
             {
-                var returnType = _invoker.ReturnParameter.ParameterType;
-
-                _resultConversions[0] = returnType switch
+                var returnType = _invoker.ReturnParameter!.ParameterType;
+                _resultConversions[idx++] = returnType switch
                 {
                     { } t when t == typeof(char) => hostValue => (int)hostValue,
                     { } t when t == typeof(byte) => hostValue => (int)hostValue,
@@ -102,7 +126,23 @@ namespace Wacs.Core.Runtime.Types
                     _ => null
                 };
             }
-            
+
+            for (; idx < Type.ResultType.Length; ++idx)
+            {
+                int pIdx = parameters.Length - idx - 1;
+                var outType = parameters[pIdx].ParameterType;
+                var paramType = outType.GetElementType();
+                _resultConversions[idx] = paramType switch
+                {
+                    { } t when t == typeof(char) => hostValue => (int)hostValue,
+                    { } t when t == typeof(byte) => hostValue => (int)hostValue,
+                    { } t when t == typeof(sbyte) => hostValue => (int)hostValue,
+                    { } t when t == typeof(ushort) => hostValue => (int)hostValue,
+                    { } t when t == typeof(short) => hostValue => (int)hostValue,
+                    { } t when t.GetWasmType() is { } wasmType => CreateReturnHelper(t),
+                    _ => null
+                };
+            }
         }
 
         private static uint ConvertInt(int value) => BitConverter.ToUInt32(BitConverter.GetBytes(value), 0);
@@ -165,7 +205,6 @@ namespace Wacs.Core.Runtime.Types
             throw new ArgumentException($"Runtime cannot automatically convert host value to wasm type {hostType}");
         }
 
-
         /// <summary>
         /// Invokes the host function with the given arguments.
         /// Pushes any results onto the passed OpStack.
@@ -179,36 +218,34 @@ namespace Wacs.Core.Runtime.Types
                 args[i] = _parameterConversions[i]?.Invoke(args[i]) ?? args[i];
             }
 
-            // try
+            try
             {
-                var result = _invoker.Invoke(_hostFunction, args);
+                var returnValue = _invoker.Invoke(_hostFunction, args);
 
-                if (!Type.ResultType.IsEmpty)
+                int outArgs = Type.ResultType.Types.Length;
+                int j = 0;
+                if (_captureReturn)
                 {
-                    for (int i = 0; i < _resultConversions.Length;)
-                    {
-                        if (_resultConversions[i] != null)
-                            result = _resultConversions[i]?.Invoke(result) ?? result;
-
-                        break;
-                    }
-
-                    opStack.PushValue(new Value(result));
-
-                    //TODO: Maybe support multiple return values someday...
-                    // if (result is Array resultArray)
-                    // {
-                    //     foreach (var item in resultArray)
-                    //     {
-                    //         opStack.PushValue(new Value(item));
-                    //     }
-                    // }
+                    outArgs -= 1;
+                    if (_resultConversions[j] != null)
+                        returnValue = _resultConversions[j]?.Invoke(returnValue) ?? returnValue;
+                    opStack.PushValue(new Value(returnValue));
+                    ++j;
+                }
+                
+                int idx = args.Length - outArgs;
+                for (; idx < args.Length; ++idx, ++j)
+                {
+                    var returnVal = args[idx];
+                    if (_resultConversions[j] != null)
+                        returnVal = _resultConversions[j]?.Invoke(returnVal) ?? returnVal;
+                    opStack.PushValue(new Value(returnVal));
                 }
             }
-            // catch (TargetInvocationException ex)
-            // {
-            //     throw ex.InnerException!;
-            // }
+            catch (TargetInvocationException ex)
+            {
+                throw ex.InnerException!;
+            }
         }
 
         delegate object ConversionHelper(object value);
