@@ -61,33 +61,33 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF32Add(ExecContext context)
         {
-            float a = context.OpStack.PopF32();
-            float b = context.OpStack.PopF32();
-            float result = a + b;
+            float z2 = context.OpStack.PopF32();
+            float z1 = context.OpStack.PopF32();
+            float result = z1 + z2;
             context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Sub(ExecContext context)
         {
-            float a = context.OpStack.PopF32();
-            float b = context.OpStack.PopF32();
-            float result = a - b;
+            float z2 = context.OpStack.PopF32();
+            float z1 = context.OpStack.PopF32();
+            float result = z1 - z2;
             context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Mul(ExecContext context)
         {
-            float a = context.OpStack.PopF32();
-            float b = context.OpStack.PopF32();
-            float result = a * b;
+            float z2 = context.OpStack.PopF32();
+            float z1 = context.OpStack.PopF32();
+            float result = z1 * z2;
             context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Div(ExecContext context)
         {
-            float a = context.OpStack.PopF32();
-            float b = context.OpStack.PopF32();
-            float result = a / b;
+            float z2 = context.OpStack.PopF32();
+            float z1 = context.OpStack.PopF32();
+            float result = z1 / z2;
             if (float.IsInfinity(result))
                 context.OpStack.PushF32(float.PositiveInfinity);
             else if (float.IsNaN(result))
@@ -98,27 +98,27 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF32Min(ExecContext context)
         {
-            float a = context.OpStack.PopF32();
-            float b = context.OpStack.PopF32();
-            float result = Math.Min(a, b);
+            float z2 = context.OpStack.PopF32();
+            float z1 = context.OpStack.PopF32();
+            float result = Math.Min(z1, z2);
             context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Max(ExecContext context)
         {
-            float a = context.OpStack.PopF32();
-            float b = context.OpStack.PopF32();
-            float result = Math.Max(a, b);
+            float z2 = context.OpStack.PopF32();
+            float z1 = context.OpStack.PopF32();
+            float result = Math.Max(z1, z2);
             context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Copysign(ExecContext context)
         {
-            float x = context.OpStack.PopF32();
-            float y = context.OpStack.PopF32();
+            float z2 = context.OpStack.PopF32();
+            float z1 = context.OpStack.PopF32();
             // Extract raw integer bits of x and y
-            uint xBits = BitConverter.ToUInt32(BitConverter.GetBytes(x), 0);
-            uint yBits = BitConverter.ToUInt32(BitConverter.GetBytes(y), 0);
+            uint xBits = BitConverter.ToUInt32(BitConverter.GetBytes(z1), 0);
+            uint yBits = BitConverter.ToUInt32(BitConverter.GetBytes(z2), 0);
 
             // Extract the sign bit from y
             uint ySign = yBits & F32SignMask;
@@ -137,33 +137,33 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF64Add(ExecContext context)
         {
-            double a = context.OpStack.PopF64();
-            double b = context.OpStack.PopF64();
-            var result = a + b;
+            double z2 = context.OpStack.PopF64();
+            double z1 = context.OpStack.PopF64();
+            var result = z1 + z2;
             context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64Sub(ExecContext context)
         {
-            double a = context.OpStack.PopF64();
-            double b = context.OpStack.PopF64();
-            var result = a - b;
+            double z2 = context.OpStack.PopF64();
+            double z1 = context.OpStack.PopF64();
+            var result = z1 - z2;
             context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64Mul(ExecContext context)
         {
-            double a = context.OpStack.PopF64();
-            double b = context.OpStack.PopF64();
-            var result = a * b;
+            double z2 = context.OpStack.PopF64();
+            double z1 = context.OpStack.PopF64();
+            var result = z1 * z2;
             context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64Div(ExecContext context)
         {
-            double a = context.OpStack.PopF64();
-            double b = context.OpStack.PopF64();
-            var result = a / b;
+            double z2 = context.OpStack.PopF64();
+            double z1 = context.OpStack.PopF64();
+            var result = z1 / z2;
             if (double.IsInfinity(result))
                 context.OpStack.PushF64(double.PositiveInfinity);
             else if (double.IsNaN(result))
@@ -174,27 +174,27 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF64Min(ExecContext context)
         {
-            double a = context.OpStack.PopF64();
-            double b = context.OpStack.PopF64();
-            var result = Math.Min(a, b);
+            double z2 = context.OpStack.PopF64();
+            double z1 = context.OpStack.PopF64();
+            var result = Math.Min(z1, z2);
             context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64Max(ExecContext context)
         {
-            double a = context.OpStack.PopF64();
-            double b = context.OpStack.PopF64();
-            var result = Math.Max(a, b);
+            double z2 = context.OpStack.PopF64();
+            double z1 = context.OpStack.PopF64();
+            var result = Math.Max(z1, z2);
             context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64Copysign(ExecContext context)
         {
-            double x = context.OpStack.PopF64();
-            double y = context.OpStack.PopF64();
+            double z2 = context.OpStack.PopF64();
+            double z1 = context.OpStack.PopF64();
             // Extract raw integer bits of x and y
-            ulong xBits = BitConverter.ToUInt64(BitConverter.GetBytes(x), 0);
-            ulong yBits = BitConverter.ToUInt64(BitConverter.GetBytes(y), 0);
+            ulong xBits = BitConverter.ToUInt64(BitConverter.GetBytes(z1), 0);
+            ulong yBits = BitConverter.ToUInt64(BitConverter.GetBytes(z2), 0);
 
             // Extract the sign bit from y
             ulong ySign = yBits & F64SignMask;

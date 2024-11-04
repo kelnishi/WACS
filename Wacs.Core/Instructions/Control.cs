@@ -366,10 +366,8 @@ namespace Wacs.Core.Instructions
                 case OpCode.Block:
                 case OpCode.If:
                 case OpCode.Else:
-                    context.ExitBlock();
-                    break;
                 case OpCode.Loop:
-                    context.EndLoop();
+                    context.ExitBlock();
                     break;
                 case OpCode.Expr:
                 case OpCode.Call:
@@ -481,14 +479,16 @@ namespace Wacs.Core.Instructions
             context.ResetStack(label);
             //7.
             context.OpStack.Push(_asideVals);
-            //8. let InstEnd handle the continuation address and popping of the label
-            context.FastForwardSequence();
-            //Break any loops
+            //8. 
             if (label.Instruction.x00 == OpCode.Loop)
             {
-                var newLabel = new Label(label.Type, label.ContinuationAddress, OpCode.Block);
-                labels.Pop();
-                labels.Push(newLabel);
+                //loop targets the loop head
+                context.RewindSequence();
+            }
+            else
+            {
+                //let InstEnd handle the continuation address and popping of the label
+                context.FastForwardSequence();
             }
         }
 

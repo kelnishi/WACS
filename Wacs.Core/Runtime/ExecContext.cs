@@ -99,6 +99,12 @@ namespace Wacs.Core.Runtime
             _sequenceIndex = _currentSequence.Length - 2;
         }
 
+        public void RewindSequence()
+        {
+            //Go back to the first instruction in the sequence
+            _sequenceIndex = -1;
+        }
+
         public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
 
         // @Spec 4.4.9.1. Enter Block
@@ -118,12 +124,6 @@ namespace Wacs.Core.Runtime
             // We manage separate stacks, so we don't need to relocate the operands
             // var vals = OpStack.PopResults(label.Type);
             ResumeSequence(label.ContinuationAddress);
-        }
-
-        public void EndLoop()
-        {
-            var label = Frame.Labels.Pop();
-            ResumeSequence(label.ContinuationAddress.Previous);
         }
 
         // @Spec 4.4.10.1 Function Invocation

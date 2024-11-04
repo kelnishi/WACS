@@ -56,137 +56,136 @@ namespace Wacs.Core.Instructions.Numeric
         // @Spec 4.3.2.3. iadd
         private static void ExecuteI32Add(ExecContext context)
         {
-            int b = context.OpStack.PopI32();
-            int a = context.OpStack.PopI32();
-            int result = a + b;
+            int i2 = context.OpStack.PopI32();
+            int i1 = context.OpStack.PopI32();
+            int result = i1 + i2;
             context.OpStack.PushI32(result);
         }
 
         // @Spec 4.3.2.4. isub
         private static void ExecuteI32Sub(ExecContext context)
         {
-            int b = context.OpStack.PopI32();
-            int a = context.OpStack.PopI32();
-            int result = a - b;
+            int i2 = context.OpStack.PopI32();
+            int i1 = context.OpStack.PopI32();
+            int result = i1 - i2;
             context.OpStack.PushI32(result);
         }
 
         // @Spec 4.3.2.5. imul
         private static void ExecuteI32Mul(ExecContext context)
         {
-            int a = context.OpStack.PopI32();
-            int b = context.OpStack.PopI32();
-            int result = unchecked(a * b);
+            int i2 = context.OpStack.PopI32();
+            int i1 = context.OpStack.PopI32();
+            int result = unchecked(i1 * i2);
             context.OpStack.PushI32(result);
         }
 
         // @Spec 4.3.2.7. idiv_s
         private static void ExecuteI32DivS(ExecContext context)
         {
-            int dividend = context.OpStack.PopI32();
-            int divisor = context.OpStack.PopI32();
-            if (divisor == 0)
+            int j2 = context.OpStack.PopI32();
+            int j1 = context.OpStack.PopI32();
+            if (j2 == 0)
                 throw new InvalidOperationException("Cannot divide by zero");
-            int quotient = dividend / divisor;
+            int quotient = j1 / j2;
             context.OpStack.PushI32(quotient);
         }
 
         // @Spec 4.3.2.6. idiv_u
         private static void ExecuteI32DivU(ExecContext context)
         {
-            uint dividend = context.OpStack.PopI32();
-            uint divisor = context.OpStack.PopI32();
-            if (divisor == 0)
+            uint i2 = context.OpStack.PopI32();
+            uint i1 = context.OpStack.PopI32();
+            if (i2 == 0)
                 throw new InvalidOperationException("Cannot divide by zero");
-            uint quotient = dividend / divisor;
+            uint quotient = i1 / i2;
             context.OpStack.PushI32((int)quotient);
         }
 
         // @Spec 4.3.2.8. irem_s
         private static void ExecuteI32RemS(ExecContext context)
         {
-            int dividend = context.OpStack.PopI32();
-            int divisor = context.OpStack.PopI32();
-            if (divisor == 0)
+            int j2 = context.OpStack.PopI32();
+            int j1 = context.OpStack.PopI32();
+            if (j2 == 0)
                 throw new InvalidOperationException("Cannot divide by zero");
-            int remainder = dividend % divisor;
+            int remainder = j1 % j2;
             context.OpStack.PushI32(remainder);
         }
 
         // @Spec 4.3.2.8. irem_u
         private static void ExecuteI32RemU(ExecContext context)
         {
-            uint dividend = context.OpStack.PopI32();
-            uint divisor = context.OpStack.PopI32();
-            if (divisor == 0)
+            uint i2 = context.OpStack.PopI32();
+            uint i1 = context.OpStack.PopI32();
+            if (i2 == 0)
                 throw new InvalidOperationException("Cannot divide by zero");
-            uint remainder = dividend % divisor;
+            uint remainder = i1 % i2;
             context.OpStack.PushI32((int)remainder);
         }
 
         // @Spec 4.3.2.11 iand        
         private static void ExecuteI32And(ExecContext context)
         {
-            uint a = context.OpStack.PopI32();
-            uint b = context.OpStack.PopI32();
-            uint result = a & b;
+            uint i2 = context.OpStack.PopI32();
+            uint i1 = context.OpStack.PopI32();
+            uint result = i1 & i2;
             context.OpStack.PushI32((int)result);
         }
 
         // @Spec 4.3.2.13 ior
         private static void ExecuteI32Or(ExecContext context)
         {
-            uint a = context.OpStack.PopI32();
-            uint b = context.OpStack.PopI32();
-            uint result = a | b;
+            uint i2 = context.OpStack.PopI32();
+            uint i1 = context.OpStack.PopI32();
+            uint result = i1 | i2;
             context.OpStack.PushI32((int)result);
         }
 
         // @Spec 4.3.2.14 ixor
         private static void ExecuteI32Xor(ExecContext context)
         {
-            uint a = context.OpStack.PopI32();
-            uint b = context.OpStack.PopI32();
-            uint result = a ^ b;
+            uint i2 = context.OpStack.PopI32();
+            uint i1 = context.OpStack.PopI32();
+            uint result = i1 ^ i2;
             context.OpStack.PushI32((int)result);
         }
 
         // @Spec 4.3.2.15 ishl
         private static void ExecuteI32Shl(ExecContext context)
         {
-            uint a = context.OpStack.PopI32();
-            int b = context.OpStack.PopI32() & 0x1F;
-            int result = (int)(a << b);
+            int k = context.OpStack.PopI32() & 0x1F;
+            uint i1 = context.OpStack.PopI32();
+            int result = (int)(i1 << k);
             context.OpStack.PushI32(result);
         }
 
         // @Spec 4.3.2.17 ishr_s
         private static void ExecuteI32ShrS(ExecContext context)
         {
-            int a = context.OpStack.PopI32();
-            int b = context.OpStack.PopI32() & 0x1F;
-            int result = a >> b;
+            int k = context.OpStack.PopI32() & 0x1F;
+            int i1 = context.OpStack.PopI32();
+            int result = i1 >> k;
             context.OpStack.PushI32(result);
         }
 
         // @Spec 4.3.2.16 ishr_u
         private static void ExecuteI32ShrU(ExecContext context)
         {
-            uint a = context.OpStack.PopI32();
-            int b = context.OpStack.PopI32() & 0x1F;
-            uint result = a >> b;
+            int k = context.OpStack.PopI32() & 0x1F;
+            uint i1 = context.OpStack.PopI32();
+            uint result = i1 >> k;
             context.OpStack.PushI32((int)result);
         }
 
         // @Spec 4.3.2.18 irotl
         private static void ExecuteI32Rotl(ExecContext context)
         {
-            uint x = context.OpStack.PopI32();
-            int shiftDistance = context.OpStack.PopI32() & 0x1F;
-
-            uint result = x << shiftDistance;
-            if (shiftDistance != 0)
-                result |= x >> (32 - shiftDistance);
+            int k = context.OpStack.PopI32() & 0x1F;
+            uint i1 = context.OpStack.PopI32();
+            uint result = i1 << k;
+            if (k != 0)
+                result |= i1 >> (32 - k);
 
             context.OpStack.PushI32((int)result);
         }
@@ -194,9 +193,9 @@ namespace Wacs.Core.Instructions.Numeric
         // @Spec 4.3.2.19 irotr
         private static void ExecuteI32Rotr(ExecContext context)
         {
-            uint x = context.OpStack.PopI32();
-            int shiftDistance = context.OpStack.PopI32() & 31;
-            uint result = (x >> shiftDistance) | (x << (32 - shiftDistance));
+            int k = context.OpStack.PopI32() & 31;
+            uint i1 = context.OpStack.PopI32();
+            uint result = (i1 >> k) | (i1 << (32 - k));
             context.OpStack.PushI32((int)result);
         }
     }
