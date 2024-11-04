@@ -236,11 +236,9 @@ namespace Wacs.WASIp1
             }
             catch (ArgumentException)
             {
-                return ErrNo.NoEnt;
-            }
-
-            if (!fileDescriptor.IsPreopened)
+                //Signal that there are no more FDs
                 return ErrNo.Badf;
+            }
             
             var name = fileDescriptor.Path;
             var utf8Name = Encoding.UTF8.GetBytes(name);
