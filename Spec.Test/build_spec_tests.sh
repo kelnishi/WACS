@@ -1,9 +1,12 @@
 #!/bin/zsh
 
-#!/bin/zsh
-
 # Define the base directory containing the .wast files
 base_dir="./spec/test/core"
+out_dir="./json"
+
+# Clean up the output directory before processing
+rm -rf "$out_dir"
+mkdir -p "$out_dir"
 
 # Use find to locate all .wast files in the base directory and its subdirectories
 find "$base_dir" -type f -name "*.wast" | while read -r wast_file; do
@@ -19,7 +22,7 @@ find "$base_dir" -type f -name "*.wast" | while read -r wast_file; do
     output_subdir=$(dirname "$relative_path")
     
     # Construct the output directory, including the subdirectories
-    output_dir="./json/$output_subdir/${filename}"
+    output_dir="$out_dir/$output_subdir/${filename}.wast"
     mkdir -p "$output_dir"
 
     # Construct the output JSON file path
@@ -29,6 +32,12 @@ find "$base_dir" -type f -name "*.wast" | while read -r wast_file; do
     wast2json -o "$json_output" "$wast_file"
 
     echo "Converted $wast_file to $json_output"
+    
   fi
 done
 
+# Get the current git tag or commit hash
+git_info=$(git -C ./spec describe --tags --always)
+
+# Create a record file in the output directory
+echo "$git_info" > "$out_dir/git_info.txt"
