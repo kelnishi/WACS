@@ -288,7 +288,18 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context) => $"{base.RenderText(context)}{M.ToWat(WidthN)}";
+        public override string RenderText(ExecContext? context)
+        {
+            if (context != null)
+            {
+                if (context.Attributes.Live && context.OpStack.Count > 0)
+                {
+                    var storeValue = context.OpStack.Peek();
+                    return $"{base.RenderText(context)}{M.ToWat(WidthN)} (;>{storeValue}<;)";
+                }
+            }
+            return $"{base.RenderText(context)}{M.ToWat(WidthN)}";
+        }
     }
 
     public struct MemArg

@@ -93,6 +93,12 @@ namespace Wacs.Core.Runtime
         public void ResumeSequence(InstructionPointer pointer) =>
             (_currentSequence, _sequenceIndex) = (pointer.Sequence, pointer.Index);
 
+        public void FastForwardSequence()
+        {
+            //Go to penultimate instruction since we pre-increment on pointer advance.
+            _sequenceIndex = _currentSequence.Length - 2;
+        }
+
         public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
 
         // @Spec 4.4.9.1. Enter Block

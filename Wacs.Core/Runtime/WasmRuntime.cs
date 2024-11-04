@@ -31,6 +31,7 @@ namespace Wacs.Core.Runtime
         Branches = 1 << 2,
         Computes = 1 << 3,
         
+        Control = Calls | Blocks | Branches,
         All = Calls | Blocks | Branches | Computes,
     }
 
@@ -314,6 +315,7 @@ namespace Wacs.Core.Runtime
                 //Handle these post
                 case var _ when IInstruction.IsNumeric(inst): break;
                 case var _ when IInstruction.IsVar(inst): break;
+                case var _ when IInstruction.IsLoad(inst): break;
                 
                 case OpCode.Call when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
                 case OpCode.CallIndirect when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
@@ -364,6 +366,7 @@ namespace Wacs.Core.Runtime
             
             switch ((OpCode)inst.Op)
             {
+                case var _ when IInstruction.IsLoad(inst):
                 case var _ when IInstruction.IsNumeric(inst): 
                 case var _ when IInstruction.IsVar(inst):
                     string location = "";

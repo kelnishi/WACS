@@ -112,7 +112,7 @@ namespace Wacs.Core
                                     stackRenderer.FakeContext.lastEvent = IInstruction.IsEnd(lastInst) ? "[" : "][";
                                     stackRenderer.ProcessInstruction(inst);
                                     stackRenderer.FakeContext.DummyContext.Frame.ForceLabels(depth);
-                                    var endLabel = $"  ;; < @{depth}";
+                                    var endLabel = $" (;< @{depth} ;)";
                                     var subText = $"{stackRenderer}{indent}{lastInst.RenderText(stackRenderer.FakeContext.DummyContext)}{endLabel}";
                                     writer.WriteLine();
                                     writer.Write(subText);

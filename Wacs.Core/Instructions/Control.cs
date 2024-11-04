@@ -134,6 +134,12 @@ namespace Wacs.Core.Instructions
             };
             return this;
         }
+
+        public override string RenderText(ExecContext? context)
+        {
+            if (context == null || !context.Attributes.Live) return base.RenderText(context);
+            return $"{base.RenderText(context)}  ;; label = @{context.Frame.Labels.Count}";
+        }
     }
 
     //0x03
@@ -216,6 +222,12 @@ namespace Wacs.Core.Instructions
                     IInstruction.IsEnd))
             };
             return this;
+        }
+
+        public override string RenderText(ExecContext? context)
+        {
+            if (context == null || !context.Attributes.Live) return base.RenderText(context);
+            return $"{base.RenderText(context)}  ;; label = @{context.Frame.Labels.Count}";
         }
     }
 
@@ -381,9 +393,9 @@ namespace Wacs.Core.Instructions
                 case OpCode.Block:
                 case OpCode.If:
                 case OpCode.Else:
-                    return $"{base.RenderText(context)} (;b/@{context.Frame.Labels.Count};)";
+                    return $"{base.RenderText(context)} (;B/@{context.Frame.Labels.Count-1};)";
                 case OpCode.Loop:
-                    return $"{base.RenderText(context)} (;L/@{context.Frame.Labels.Count};)";
+                    return $"{base.RenderText(context)} (;L/@{context.Frame.Labels.Count-1};)";
                 case OpCode.Expr:
                 case OpCode.Call:
                     var funcAddr = context.Frame.Module.FuncAddrs[context.Frame.Index];
@@ -405,7 +417,7 @@ namespace Wacs.Core.Instructions
                         }
                         sb.Append("]");
                     }
-                    return $"{base.RenderText(context)} (;f/@{context.Frame.Labels.Count} <- {funcName}{sb};)";
+                    return $"{base.RenderText(context)} (;f/@{context.Frame.Labels.Count-1} <- {funcName}{sb};)";
                 default:
                     return $"{base.RenderText(context)}";
             }
@@ -445,7 +457,10 @@ namespace Wacs.Core.Instructions
             //2.
             var labels = context.Frame.Labels;
             for (uint i = 0, l = labelIndex.Value; i < l; ++i)
-                labels.Pop();
+            {
+                var top = labels.Pop();
+                context.ResumeSequence(top.ContinuationAddress);
+            }
             
             var label = labels.Peek();
             //3,4.
@@ -463,13 +478,18 @@ namespace Wacs.Core.Instructions
             //We did this in part 2 to avoid stack drilling.
             // for (uint i = 0, l = labelIndex.Value; i < l; ++i)
             //     labels.Pop();
-            // Pop the target label
-            labels.Pop();
             context.ResetStack(label);
             //7.
             context.OpStack.Push(_asideVals);
-            //8.
-            context.ResumeSequence(label.ContinuationAddress);
+            //8. let InstEnd handle the continuation address and popping of the label
+            context.FastForwardSequence();
+            //Break any loops
+            if (label.Instruction.x00 == OpCode.Loop)
+            {
+                var newLabel = new Label(label.Type, label.ContinuationAddress, OpCode.Block);
+                labels.Pop();
+                labels.Push(newLabel);
+            }
         }
 
         /// <summary>
