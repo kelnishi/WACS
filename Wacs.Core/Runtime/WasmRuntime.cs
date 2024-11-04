@@ -30,9 +30,10 @@ namespace Wacs.Core.Runtime
         Blocks = 1 << 1,
         Branches = 1 << 2,
         Computes = 1 << 3,
+        Binds = 1 << 4,
         
-        Control = Calls | Blocks | Branches,
-        All = Calls | Blocks | Branches | Computes,
+        Control = Calls | Blocks | Branches | Binds,
+        All = Calls | Blocks | Branches | Computes | Binds,
     }
 
     public class InvokerOptions
@@ -339,26 +340,30 @@ namespace Wacs.Core.Runtime
                 case var _ when IInstruction.IsVar(inst): break;
                 case var _ when IInstruction.IsLoad(inst): break;
                 
-                case OpCode.Call when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
-                case OpCode.CallIndirect when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
-                case OpCode.CallRef when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
-                case OpCode.Return when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
-                case OpCode.ReturnCallIndirect when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
-                case OpCode.ReturnCall when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0):
-                case OpCode.End when ((options.LogInstructionExecution & InstructionLogging.Calls) != 0) && Context.GetEndFor() == OpCode.Func:    
-                        
-                case OpCode.Block when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
-                case OpCode.Loop when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
-                case OpCode.If when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
-                case OpCode.Else when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0):
-                case OpCode.End when ((options.LogInstructionExecution & InstructionLogging.Blocks) != 0) && Context.GetEndFor() == OpCode.Block:
-                            
-                case OpCode.Br when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
-                case OpCode.BrIf when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
-                case OpCode.BrTable when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0):
+                case OpCode.Call when options.LogInstructionExecution.HasFlag(InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
+                case OpCode.CallIndirect when options.LogInstructionExecution.HasFlag(InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
+                // case OpCode.CallRef when options.LogInstructionExecution.HasFlag(InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
                 
-                case var _ when ((options.LogInstructionExecution & InstructionLogging.Branches) != 0) && IInstruction.IsBranch(lastInstruction):
-                case var _ when ((options.LogInstructionExecution & InstructionLogging.Computes) != 0):
+                case OpCode.Call when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls):
+                case OpCode.CallIndirect when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls):
+                // case OpCode.CallRef when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls):
+                case OpCode.Return when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls):
+                case OpCode.ReturnCallIndirect when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls):
+                case OpCode.ReturnCall when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls):
+                case OpCode.End when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls) && Context.GetEndFor() == OpCode.Func:
+                        
+                case OpCode.Block when options.LogInstructionExecution.HasFlag(InstructionLogging.Blocks):
+                case OpCode.Loop when options.LogInstructionExecution.HasFlag(InstructionLogging.Blocks):
+                case OpCode.If when options.LogInstructionExecution.HasFlag(InstructionLogging.Blocks):
+                case OpCode.Else when options.LogInstructionExecution.HasFlag(InstructionLogging.Blocks):
+                case OpCode.End when options.LogInstructionExecution.HasFlag(InstructionLogging.Blocks) && Context.GetEndFor() == OpCode.Block:
+                            
+                case OpCode.Br when options.LogInstructionExecution.HasFlag(InstructionLogging.Branches):
+                case OpCode.BrIf when options.LogInstructionExecution.HasFlag(InstructionLogging.Branches):
+                case OpCode.BrTable when options.LogInstructionExecution.HasFlag(InstructionLogging.Branches):
+                
+                case var _ when IInstruction.IsBranch(lastInstruction) && options.LogInstructionExecution.HasFlag(InstructionLogging.Branches):
+                case var _ when options.LogInstructionExecution.HasFlag(InstructionLogging.Computes):
                     string location = "";
                     if (options.CalculateLineNumbers)
                     {
