@@ -832,7 +832,7 @@ namespace Wacs.Core.Instructions
             //10.
             if (i >= tab.Elements.Count)
                 throw new TrapException($"Instruction call_indirect could not find element {i}");
-            //11. ???
+            //11.
             var r = tab.Elements[i];
             //12.
             if (r.IsNullRef)
@@ -866,6 +866,54 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context)=> $"{base.RenderText(context)}{(X.Value == 0 ? "" : $" {X.Value}")} (type {Y.Value})";
+        public override string RenderText(ExecContext? context)
+        {
+            if (context != null && context.Attributes.Live)
+            {
+                try
+                {
+                    var ta = context.Frame.Module.TableAddrs[X];
+                    var tab = context.Store[ta];
+                    int i = context.OpStack.Peek();
+                    if (i >= tab.Elements.Count)
+                        throw new TrapException($"Instruction call_indirect could not find element {i}");
+                    var r = tab.Elements[i];
+                    if (r.IsNullRef)
+                        throw new TrapException($"Instruction call_indirect NullReference.");
+                    var a = (FuncAddr)r;
+                    var func = context.Store[a];
+
+
+                    if (!string.IsNullOrEmpty(func.Id))
+                    {
+                        StringBuilder sb = new();
+                        if (context.Attributes.Live)
+                        {
+                            sb.Append(" ");
+                            Stack<Value> values = new Stack<Value>();
+                            context.OpStack.PopResults(func.Type.ParameterTypes, ref values);
+                            sb.Append("[");
+                            while (values.Count > 0)
+                            {
+                                sb.Append(values.Peek().ToString());
+                                if (values.Count > 1)
+                                    sb.Append(" ");
+                                context.OpStack.PushValue(values.Pop());
+                            }
+
+                            sb.Append("]");
+                        }
+
+                        return $"{base.RenderText(context)} {X.Value} (; -> {func.Id}{sb};)";
+                    }
+                }
+                catch (TrapException)
+                {
+                    return $"{base.RenderText(context)}{(X.Value == 0 ? "" : $" {X.Value}")} (type {Y.Value})";
+                }
+            }
+            
+            return $"{base.RenderText(context)}{(X.Value == 0 ? "" : $" {X.Value}")} (type {Y.Value})";
+        }
     }
 }
