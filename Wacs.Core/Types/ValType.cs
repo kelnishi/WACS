@@ -131,6 +131,9 @@ namespace Wacs.Core.Types
                 //            t == typeof(System.Numerics.Vector128<long>) => ValType.V128,
                 _ => throw new InvalidCastException($"Unsupported type: {type.FullName}")
             };
+
+        public static ValType UnpackRef(Type type) => 
+            type.IsByRef ? type.GetElementType()?.ToValType() ?? ValType.Nil : type.ToValType();
     }
 
     public static class ValTypeParser

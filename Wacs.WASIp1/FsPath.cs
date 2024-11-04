@@ -11,6 +11,18 @@ namespace Wacs.WASIp1
 {
     public partial class Filesystem
     {
+        public delegate void PathOpenDelegate(ExecContext ctx,
+            fd dirFd,
+            LookupFlags dirFlags,
+            ptr pathPtr,
+            size pathLen,
+            OFlags oFlags,
+            Rights fsRightsBase,
+            Rights fsRightsInheriting,
+            FdFlags fsFlags,
+            ptr fdPtr,
+            out ErrNo result);
+
         /// <summary>
         /// Create a directory.
         /// This method is analogous to the POSIX <c>mkdirat</c> function.
@@ -131,18 +143,44 @@ namespace Wacs.WASIp1
         /// <param name="fsFlags">Desired values of the file descriptor flags.</param>
         /// <param name="fdPtr">Pointer to store the newly created file descriptor.</param>
         /// <returns>An error code indicating the result of the operation.</returns>
-        public ErrNo PathOpen(ExecContext ctx, fd dirFd, LookupFlags dirFlags, ptr pathPtr, size pathLen, OFlags oFlags, Rights fsRightsBase,
-            Rights fsRightsInheriting, FdFlags fsFlags, ptr fdPtr)
+        public void PathOpen(ExecContext ctx,
+            fd dirFd, 
+            LookupFlags dirFlags,
+            ptr pathPtr, 
+            size pathLen,
+            OFlags oFlags,
+            Rights fsRightsBase,
+            Rights fsRightsInheriting,
+            FdFlags fsFlags,
+            ptr fdPtr,
+            out ErrNo result)
         {
+            ctx.OpStack.PushI32((int)ErrNo.Success);
+            
             var mem = ctx.DefaultMemory;
             if (!mem.Contains((int)pathPtr, (int)pathLen))
-                return ErrNo.Inval;
+            {
+                // ctx.OpStack.PushI32((int)ErrNo.Inval);
+                result = ErrNo.Inval;
+                return;
+                // return ErrNo.Inval;
+            }
 
             if (!GetFd(dirFd, out var dirFileDescriptor))
-                return ErrNo.NoEnt;
+            {
+                // ctx.OpStack.PushI32((int)ErrNo.NoEnt);
+                result = ErrNo.NoEnt;
+                return;
+                // return ErrNo.NoEnt;
+            }
             
             if ((dirFileDescriptor.Access & FileAccess.Read) == 0)
-                return ErrNo.Acces;
+            {
+                // ctx.OpStack.PushI32((int)ErrNo.Acces);
+                result = ErrNo.Acces;
+                return;
+                // return ErrNo.Acces;
+            }
 
             try
             {
@@ -156,7 +194,10 @@ namespace Wacs.WASIp1
                     if (GetFd(guestPath, out var existing))
                     {
                         mem.WriteInt32(fdPtr, existing.Fd);
-                        return ErrNo.Success;
+                        // ctx.OpStack.PushI32((int)ErrNo.Success);
+                        result = ErrNo.Success;
+                        return;
+                        // return ErrNo.Success;
                     }
                     
                     var fileAccess = fsRightsBase.ToFileAccess();
@@ -173,11 +214,21 @@ namespace Wacs.WASIp1
                     var inheritedRights = fsRightsInheriting & dirFileDescriptor.Rights;
                     
                     if (!inheritedRights.HasFlag(Rights.PATH_OPEN))
-                        return ErrNo.Acces;
+                    {
+                        // ctx.OpStack.PushI32((int)ErrNo.Acces);
+                        result = ErrNo.Acces;
+                        return;
+                        // return ErrNo.Acces;
+                    }
 
                     fileAccess = rights.ToFileAccess();
                     if (fileAccess == 0)
-                        return ErrNo.Acces;
+                    {
+                        // ctx.OpStack.PushI32((int)ErrNo.Acces);
+                        result = ErrNo.Acces;
+                        return;
+                        // return ErrNo.Acces;
+                    }
                         
                     fd newFd = BindFile(guestPath, fileStream, dirFileDescriptor.Access, rights, inheritedRights);
                     
@@ -189,7 +240,10 @@ namespace Wacs.WASIp1
                     if (GetFd(guestPath, out var existing))
                     {
                         mem.WriteInt32(fdPtr, existing.Fd);
-                        return ErrNo.Success;
+                        // ctx.OpStack.PushI32((int)ErrNo.Success);
+                        result = ErrNo.Success;
+                        return;
+                        // return ErrNo.Success;
                     }
                     
                     fd newFd = BindDir(guestPath, hostPath, dirFileDescriptor.Access, false, fsRightsBase, dirFileDescriptor.Rights & fsRightsInheriting);
@@ -198,23 +252,38 @@ namespace Wacs.WASIp1
                 }
                 else
                 {
-                    return ErrNo.NoEnt;
+                    // ctx.OpStack.PushI32((int)ErrNo.NoEnt);
+                    result = ErrNo.NoEnt;
+                    return;
+                    // return ErrNo.NoEnt;
                 }
             }
             catch (IOException ex) when (ex is FileNotFoundException)
             {
-                return ErrNo.NoEnt;
+                // ctx.OpStack.PushI32((int)ErrNo.NoEnt);
+                result = ErrNo.NoEnt;
+                return;
+                // return ErrNo.NoEnt;
             }
             catch (UnauthorizedAccessException)
             {
-                return ErrNo.Acces;
+                // ctx.OpStack.PushI32((int)ErrNo.Acces);
+                result = ErrNo.Acces;
+                return;
+                // return ErrNo.Acces;
             }
             catch (IOException)
             {
-                return ErrNo.NoSys;
+                // ctx.OpStack.PushI32((int)ErrNo.NoSys);
+                result = ErrNo.NoSys;
+                return;
+                // return ErrNo.NoSys;
             }
 
-            return ErrNo.Success;
+            // ctx.OpStack.PushI32((int)ErrNo.Success);
+            result = ErrNo.Success;
+            return;
+            // return ErrNo.Success;
         }
 
         /// <summary>
