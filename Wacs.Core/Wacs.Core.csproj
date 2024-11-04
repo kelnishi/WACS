@@ -9,6 +9,8 @@
     <FileVersion>0.0.1</FileVersion>
     <Version>0.0.1</Version>
     <Authors>Kelvin Nishikawa</Authors>
+    <PublishSingleFile>true</PublishSingleFile>
+    <TrimUnusedDependencies>true</TrimUnusedDependencies>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
