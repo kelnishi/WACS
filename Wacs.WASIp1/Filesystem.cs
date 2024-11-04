@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using Wacs.Core.Runtime;
@@ -248,7 +247,7 @@ namespace Wacs.WASIp1
         /// Closes the Stream and removes the FileDescriptor
         /// </summary>
         /// <param name="fd"></param>
-        private void RemoveFD(fd fd)
+        private void RemoveFd(fd fd)
         {
             if (_state.FileDescriptors.TryRemove(fd, out var fileDescriptor))
             {
@@ -257,7 +256,7 @@ namespace Wacs.WASIp1
             }
         }
 
-        private void MoveFD(fd from, fd to)
+        private void MoveFd(fd from, fd to)
         {
             if (_state.FileDescriptors.ContainsKey(to))
                 throw new IOException($"Cannot overwrite existing file descriptor {to}");
@@ -348,7 +347,7 @@ namespace Wacs.WASIp1
             }
         }
 
-        public bool GetFd(fd fd, [NotNullWhen(true)] out FileDescriptor fileDescriptor)
+        public bool GetFd(fd fd, out FileDescriptor fileDescriptor)
         {
             
             if (_state.FileDescriptors.TryGetValue(fd, out var file))
@@ -356,11 +355,11 @@ namespace Wacs.WASIp1
                 fileDescriptor = file;
                 return true;
             }
-            fileDescriptor = null;
+            fileDescriptor = FileDescriptor.BadFd;
             return false;
         }
 
-        public bool GetFd(string path, [NotNullWhen(true)] out FileDescriptor fileDescriptor)
+        public bool GetFd(string path, out FileDescriptor fileDescriptor)
         {
             var file = _state.FileDescriptors.Values.FirstOrDefault(fd => fd.Path == path);
             if (file != null)
@@ -370,7 +369,7 @@ namespace Wacs.WASIp1
             }
             else
             {
-                fileDescriptor = null!;
+                fileDescriptor = FileDescriptor.BadFd;
                 return false;
             }
         }

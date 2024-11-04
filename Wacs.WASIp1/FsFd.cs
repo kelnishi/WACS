@@ -123,7 +123,7 @@ namespace Wacs.WASIp1
         {
             try
             {
-                RemoveFD(fd);
+                RemoveFd(fd);
             }
             catch (Exception)
             {
@@ -413,10 +413,10 @@ namespace Wacs.WASIp1
             try
             {
                 // Close the "to" file descriptor if it is open
-                RemoveFD(to);
+                RemoveFd(to);
                 
                 // Assign the "to" file descriptor to the same underlying resources of the "from" fd
-                MoveFD(from, to);
+                MoveFd(from, to);
             }
             catch (Exception)
             {
