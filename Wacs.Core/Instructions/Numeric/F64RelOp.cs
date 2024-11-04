@@ -27,11 +27,11 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF64Eq(ExecContext context)
         {
-            double a = context.OpStack.PopF64();
-            double b = context.OpStack.PopF64();
+            double i2 = context.OpStack.PopF64();
+            double i1 = context.OpStack.PopF64();
 
-            int result = Math.Abs(a - b) < context.Attributes.FloatingPointTolerance ? 1 : 0;
-            if (double.IsNaN(a) || double.IsNaN(b))
+            int result = Math.Abs(i1 - i2) < context.Attributes.FloatingPointTolerance ? 1 : 0;
+            if (double.IsNaN(i1) || double.IsNaN(i2))
                 result = 0;
 
             context.OpStack.PushI32(result);
@@ -39,11 +39,11 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF64Ne(ExecContext context)
         {
-            double a = context.OpStack.PopF64();
-            double b = context.OpStack.PopF64();
+            double i2 = context.OpStack.PopF64();
+            double i1 = context.OpStack.PopF64();
 
-            int result = Math.Abs(a - b) > context.Attributes.FloatingPointTolerance ? 1 : 0;
-            if (double.IsNaN(a) || double.IsNaN(b))
+            int result = Math.Abs(i1 - i2) > context.Attributes.FloatingPointTolerance ? 1 : 0;
+            if (double.IsNaN(i1) || double.IsNaN(i2))
                 result = 0;
 
             context.OpStack.PushI32(result);
@@ -51,11 +51,11 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF64Lt(ExecContext context)
         {
-            double a = context.OpStack.PopF64();
-            double b = context.OpStack.PopF64();
+            double i2 = context.OpStack.PopF64();
+            double i1 = context.OpStack.PopF64();
 
-            int result = a < b ? 1 : 0;
-            if (double.IsNaN(a) || double.IsNaN(b))
+            int result = i1 < i2 ? 1 : 0;
+            if (double.IsNaN(i1) || double.IsNaN(i2))
                 result = 0;
 
             context.OpStack.PushI32(result);
@@ -63,11 +63,11 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF64Gt(ExecContext context)
         {
-            double a = context.OpStack.PopF64();
-            double b = context.OpStack.PopF64();
+            double i2 = context.OpStack.PopF64();
+            double i1 = context.OpStack.PopF64();
 
-            int result = a > b ? 1 : 0;
-            if (double.IsNaN(a) || double.IsNaN(b))
+            int result = i1 > i2 ? 1 : 0;
+            if (double.IsNaN(i1) || double.IsNaN(i2))
                 result = 0;
 
             context.OpStack.PushI32(result);
@@ -75,11 +75,11 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF64Le(ExecContext context)
         {
-            double a = context.OpStack.PopF64();
-            double b = context.OpStack.PopF64();
+            double i2 = context.OpStack.PopF64();
+            double i1 = context.OpStack.PopF64();
 
-            int result = a <= b ? 1 : 0;
-            if (double.IsNaN(a) || double.IsNaN(b))
+            int result = i1 <= i2 ? 1 : 0;
+            if (double.IsNaN(i1) || double.IsNaN(i2))
                 result = 0;
 
             context.OpStack.PushI32(result);
@@ -87,11 +87,11 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF64Ge(ExecContext context)
         {
-            double a = context.OpStack.PopF64();
-            double b = context.OpStack.PopF64();
+            double i2 = context.OpStack.PopF64();
+            double i1 = context.OpStack.PopF64();
 
-            int result = a >= b ? 1 : 0;
-            if (double.IsNaN(a) || double.IsNaN(b))
+            int result = i1 >= i2 ? 1 : 0;
+            if (double.IsNaN(i1) || double.IsNaN(i2))
                 result = 0;
 
             context.OpStack.PushI32(result);
