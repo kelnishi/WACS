@@ -35,6 +35,7 @@ namespace Wacs.Core.OpCodes
         
         // Reference Types extension
         [OpCode("call_ref")]      CallRef      = 0x14,
+        [OpCode("return_call_ref")] ReturnCallRef = 0x15,
         
         // Exception Handling (Proposal)
         [OpCode("try")]           Try          = 0x06,
@@ -50,6 +51,10 @@ namespace Wacs.Core.OpCodes
         [OpCode("ref.null")]    RefNull   = 0xD0,
         [OpCode("ref.is_null")] RefIsNull = 0xD1,
         [OpCode("ref.func")]    RefFunc   = 0xD2,
+        
+        [OpCode("ref.as_non_null")] RefAsNonNull   = 0xD4,
+        [OpCode("br_on_null")]      BrOnNull   = 0xD5,
+        [OpCode("br_on_non_null")]  BrOnNonNull   = 0xD6,
 
         // =========================
         // Parametric Instructions

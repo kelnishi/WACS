@@ -59,6 +59,9 @@ namespace Wacs.Core.Instructions
             };
 
         public static bool IsLoad(IInstruction? inst) => inst is InstMemoryLoad;
+
+        public static bool IsBound(ExecContext context, IInstruction? inst) => 
+            inst is ICallInstruction ci && ci.IsBound(context);
     }
     
 }

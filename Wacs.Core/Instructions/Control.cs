@@ -702,11 +702,18 @@ namespace Wacs.Core.Instructions
     }
 
     //0x10
-    public class InstCall : InstructionBase
+    public class InstCall : InstructionBase, ICallInstruction
     {
         public override ByteCode Op => OpCode.Call;
 
         public FuncIdx X { get; set; }
+
+        public bool IsBound(ExecContext context)
+        {
+            var a = context.Frame.Module.FuncAddrs[X];
+            var func = context.Store[a];
+            return func is HostFunction;
+        }
 
         /// <summary>
         /// @Spec 3.3.8.10. call
@@ -779,12 +786,34 @@ namespace Wacs.Core.Instructions
     }
 
     //0x11
-    public class InstCallIndirect : InstructionBase
+    public class InstCallIndirect : InstructionBase, ICallInstruction
     {
         public override ByteCode Op => OpCode.CallIndirect;
 
         private TypeIdx Y { get; set; }
         private TableIdx X { get; set; }
+
+        public bool IsBound(ExecContext context)
+        {
+            try
+            {
+                var ta = context.Frame.Module.TableAddrs[X];
+                var tab = context.Store[ta];
+                int i = context.OpStack.Peek();
+                if (i >= tab.Elements.Count)
+                    throw new TrapException($"Instruction call_indirect could not find element {i}");
+                var r = tab.Elements[i];
+                if (r.IsNullRef)
+                    throw new TrapException($"Instruction call_indirect NullReference.");
+                var a = (FuncAddr)r;
+                var func = context.Store[a];
+                return func is HostFunction;
+            }
+            catch (TrapException)
+            {
+                return false;
+            }
+        }
 
         /// <summary>
         /// @Spec 3.3.8.11. call_indirect
