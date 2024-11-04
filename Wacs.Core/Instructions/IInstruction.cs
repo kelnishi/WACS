@@ -57,6 +57,8 @@ namespace Wacs.Core.Instructions
                 GlobalVariableInst _ => true,
                 _ => false,
             };
+
+        public static bool IsLoad(IInstruction? inst) => inst is InstMemoryLoad;
     }
     
 }
