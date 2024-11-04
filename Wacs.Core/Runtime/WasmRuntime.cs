@@ -171,6 +171,14 @@ namespace Wacs.Core.Runtime
             _entityBindings[id] = funcAddr;
         }
 
+        public string GetFunctionName(FuncAddr funcAddr)
+        {
+            if (!Context.Store.Contains(funcAddr))
+                throw new ArgumentException($"Runtime did not contain function address.");
+            var funcInst = Context.Store[funcAddr];
+            return funcInst.Id;
+        }
+
         //TODO: Use TDelegate to define the delegate rather than relying on CreateAnonymousFunctionFromFunctionType's switch.
         // [RequiresUnreferencedCode("Uses reflection to match parameters for binding")]
         public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr, InvokerOptions? options = default)

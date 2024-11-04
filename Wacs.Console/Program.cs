@@ -15,26 +15,35 @@ namespace Wacs.Console
 {
     public class Program
     {
-        private const string Version = "0.0.1";
-
         static int Main(string[] args)
         {
-            if (args.Length > 0 && args[0] == "--version")
+            List<string> subargs = new List<string>();
+            var moduleArg = args.FirstOrDefault(arg => File.Exists(arg));
+            if (moduleArg != null)
             {
-                System.Console.WriteLine($"Wacs version {Version}");
-                return 0;
+                int moduleIndex = Array.IndexOf(args, moduleArg) + 1;
+                subargs.AddRange(args[moduleIndex..]);
+                args = args[0..moduleIndex];
             }
             
             var parser = new Parser(with => {
                 with.EnableDashDash = true;
-                with.AutoHelp = false;        // Suppress automatic help
-                with.AutoVersion = false;      // Suppress automatic version
+                with.AutoHelp = true;        // Suppress automatic help
+                with.AutoVersion = true;      // Suppress automatic version
                 with.HelpWriter = System.Console.Out;
             });
 
+            // Map subargs to ExecutableArgs in the options
             var parsedResult = parser.ParseArguments<CommandLineOptions>(args);
             
-            return parsedResult.MapResult(RunWithOptions,_ => 1);
+            return parsedResult.MapResult(
+                opts => 
+                {
+                    opts.ExecutableArgs = subargs; // Assign subargs to ExecutableArgs
+                    return RunWithOptions(opts);
+                },
+                _ => 1
+            );
         }
 
         static int RunWithOptions(CommandLineOptions opts)
@@ -45,6 +54,17 @@ namespace Wacs.Console
                 System.Console.Error.WriteLine($"Error: Wasm file not found: {opts.WasmModule}");
                 return 1;
             }
+            
+            // Check the file extension
+            string fileExtension = Path.GetExtension(opts.WasmModule);
+            if (fileExtension != ".wasm")
+            {
+                System.Console.Error.WriteLine($"Error: Invalid file extension: {fileExtension}. Expected .wasm");
+                return 1;
+            }
+            
+            var args = new List<string> { opts.WasmModule };
+            args.AddRange(opts.ExecutableArgs);
 
             // Validate directories
             foreach (var dir in opts.Directories)
@@ -136,14 +156,13 @@ namespace Wacs.Console
                 System.Console.Write(c);
             });
 
-            runtime.BindHostFunction<Action<int>>(("env", "emscripten_notify_memory_growth"), p =>
-            {
-                System.Console.WriteLine($"Emscripten notify memory growth {p}");
-            });
-
+            // runtime.BindHostFunction<Action<int>>(("env", "emscripten_notify_memory_growth"), p =>
+            // {
+            //     System.Console.WriteLine($"Emscripten notify memory growth {p}");
+            // });
 
             var wasiConfig = Wasi.DefaultConfiguration();
-            wasiConfig.Arguments = opts.ExecutableArgs.ToList();
+            wasiConfig.Arguments = args;
             wasiConfig.EnvironmentVariables = envVars;
             wasiConfig.PreopenedDirectories = opts.Directories
                     .Select(path => new PreopenedDirectory(wasiConfig, path))
@@ -151,9 +170,11 @@ namespace Wacs.Console
             var wasi = new WASIp1.Wasi(wasiConfig);
             wasi.BindToRuntime(runtime);
             
-            // System.Console.WriteLine("Instantiating Module");
+            string moduleName = opts.ModuleName;
+            
+            if (opts.LogProg)
+                System.Console.Error.WriteLine($"Instantiating Module {moduleName}");
 
-            string moduleName = "hello";
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing, or you're like super confident.
             var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true});
             runtime.RegisterModule(moduleName, modInst);
@@ -171,6 +192,10 @@ namespace Wacs.Console
             if (modInst.StartFunc != null)
             {
                 var caller = runtime.CreateInvoker<Delegates.WasmAction>(modInst.StartFunc, callOptions);
+
+                var name = runtime.GetFunctionName(modInst.StartFunc);
+                if (opts.LogProg)
+                    System.Console.Error.WriteLine($"Executing wasm function {name}");
                 
                 using (IDisposable _ = opts.Profile? new ProfilingSession(): new NoOpProfilingSession())
                 {
@@ -185,13 +210,17 @@ namespace Wacs.Console
                     }
                     catch (SignalException exc)
                     {
-                        System.Console.Error.WriteLine($"{exc.HumanReadable}");
+                        if (opts.LogProg)
+                            System.Console.Error.WriteLine($"{exc.HumanReadable}");
                         return exc.Signal;
                     }
                 }
             }
             else if (runtime.TryGetExportedFunction((moduleName, "main"), out var mainAddr))
             {
+                if (opts.LogProg)
+                    System.Console.Error.WriteLine("Calling main");
+                
                 var caller = runtime.CreateInvoker<Func<Value>>(mainAddr, callOptions);
                 
                 using (IDisposable _ = opts.Profile? new ProfilingSession(): new NoOpProfilingSession())
@@ -210,7 +239,8 @@ namespace Wacs.Console
                     catch (SignalException exc)
                     {
                         ErrNo sig = (ErrNo)exc.Signal;
-                        System.Console.Error.WriteLine($"{sig.HumanReadable()}");
+                        if (opts.LogProg)
+                            System.Console.Error.WriteLine($"{sig.HumanReadable()}");
                         return exc.Signal;
                     }
                 }
