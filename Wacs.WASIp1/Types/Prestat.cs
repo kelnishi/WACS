@@ -5,6 +5,7 @@ namespace Wacs.WASIp1.Types
     public enum PrestatTag : byte
     {
         Dir = 0,
+        NotDir = 1,
     }
 
     [StructLayout(LayoutKind.Explicit, Size = 4)]
