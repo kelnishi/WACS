@@ -239,9 +239,6 @@ namespace Wacs.WASIp1
                 return ErrNo.NoEnt;
             }
 
-            if (fileDescriptor.Type != Filetype.Directory)
-                return ErrNo.NotDir;
-
             if (!fileDescriptor.IsPreopened)
                 return ErrNo.Badf;
             
@@ -250,7 +247,9 @@ namespace Wacs.WASIp1
             
             Prestat prestat = new Prestat
             {
-                Tag = PrestatTag.Dir,
+                Tag = fileDescriptor.Type == Filetype.Directory
+                    ? PrestatTag.Dir
+                    : PrestatTag.NotDir,
                 Dir = new PrestatDir
                 {
                     NameLen = (uint)utf8Name.Length+1
