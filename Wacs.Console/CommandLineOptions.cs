@@ -13,6 +13,12 @@ namespace Wacs.Console
         [Option('d',"directories", Separator = ',', HelpText = "Comma-separated list of pre-opened directories")]
         public IEnumerable<string> Directories { get; set; } = new List<string>();
 
+        [Option('m', "module", HelpText = "The name of the instantiated module")]
+        public string ModuleName { get; set; } = "_";
+
+        [Option('v', "verbose", HelpText = "Log the program.")]
+        public bool LogProg { get; set; }
+
         [Option('r', "render", HelpText = "Render the wasm file to wat.")]
         public bool Render { get; set; }
 
@@ -22,7 +28,7 @@ namespace Wacs.Console
         [Option('n',"log_progress", HelpText = "Print a . every n instructions.", Default = -1)]
         public int LogProgressEvery { get; set; }
 
-        [Option('v',"verbose", HelpText = "Log execution.", Default = InstructionLogging.None)]
+        [Option('x',"log_execution", HelpText = "Log instruction execution.", Default = InstructionLogging.None)]
         public InstructionLogging LogInstructionExecution { get; set; }
 
         [Option('l',"calculate_lines", HelpText = "Calculate line numbers for logged instructions.", Default = false)]
@@ -31,7 +37,7 @@ namespace Wacs.Console
         [Option('s', "stats", HelpText = "Collect instruction statistics.", Default = false)]
         public bool CollectStats { get; set; }
 
-        [Option('p', "profile", HelpText = "Collect instruction statistics.", Default = false)]
+        [Option('p', "profile", HelpText = "Bracket execution with a JetBrains profiling session.", Default = false)]
         public bool Profile { get; set; }
 
         // This will capture all values that aren't tied to an option
