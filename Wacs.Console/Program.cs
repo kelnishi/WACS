@@ -13,54 +13,15 @@ using Wacs.WASIp1.Types;
 
 namespace Wacs.Console
 {
-    // ReSharper disable once ClassNeverInstantiated.Global
-    public class Options
-    {
-        [Option('e',"env", Separator = ',', HelpText = "Comma-separated list of environment variables (format: KEY=VALUE)")]
-        public IEnumerable<string> EnvironmentVars { get; set; } = new List<string>();
-
-        [Option('d',"directories", Separator = ',', HelpText = "Comma-separated list of pre-opened directories")]
-        public IEnumerable<string> Directories { get; set; } = new List<string>();
-
-        [Option('r', "render", HelpText = "Render the wasm file to wat.")]
-        public bool Render { get; set; }
-
-        [Option('g', "log_gas", HelpText = "Print total instructions executed.", Default = false)]
-        public bool LogGas { get; set; }
-
-        [Option('n',"log_progress", HelpText = "Print a . every n instructions.", Default = -1)]
-        public int LogProgressEvery { get; set; }
-
-        [Option('v',"verbose", HelpText = "Log execution.", Default = InstructionLogging.None)]
-        public InstructionLogging LogInstructionExecution { get; set; }
-
-        [Option('l',"calculate_lines", HelpText = "Calculate line numbers for logged instructions.", Default = false)]
-        public bool CalculateLineNumbers { get; set; }
-
-        [Option('s', "stats", HelpText = "Collect instruction statistics.", Default = false)]
-        public bool CollectStats { get; set; }
-
-        [Option('p', "profile", HelpText = "Collect instruction statistics.", Default = false)]
-        public bool Profile { get; set; }
-
-        // This will capture all values that aren't tied to an option
-        [Value(0, Required = true, MetaName = "WasmModule", HelpText = "Path to the executable")]
-        public string WasmModule { get; set; } = "";
-
-        [Value(1, Required = false, HelpText = "Arguments to pass to the executable")]
-        public IEnumerable<string> ExecutableArgs { get; set; }
-    }
-
-
     public class Program
     {
-        private const string VERSION = "0.0.1";
+        private const string Version = "0.0.1";
 
         static int Main(string[] args)
         {
             if (args.Length > 0 && args[0] == "--version")
             {
-                System.Console.WriteLine($"Wacs version {VERSION}");
+                System.Console.WriteLine($"Wacs version {Version}");
                 return 0;
             }
             
@@ -71,12 +32,12 @@ namespace Wacs.Console
                 with.HelpWriter = System.Console.Out;
             });
 
-            var parsedResult = parser.ParseArguments<Options>(args);
+            var parsedResult = parser.ParseArguments<CommandLineOptions>(args);
             
-            return parsedResult.MapResult(RunWithOptions,errors => 1);
+            return parsedResult.MapResult(RunWithOptions,_ => 1);
         }
 
-        static int RunWithOptions(Options opts)
+        static int RunWithOptions(CommandLineOptions opts)
         {
             // Validate executable path
             if (!File.Exists(opts.WasmModule))
@@ -140,7 +101,7 @@ namespace Wacs.Console
 
                             var (line, code) = module.CalculateLine(path);
                             if (!string.IsNullOrWhiteSpace(code)) code = $" ({code})";
-                            var (fline, fcode) = module.CalculateLine(path, functionRelative: true);
+                            var (fline, _) = module.CalculateLine(path, functionRelative: true);
                             
                             System.Console.Error.WriteLine($"Validation {error.Severity}.{msg}");
                             System.Console.Error.WriteLine($"    {path}");
@@ -193,7 +154,7 @@ namespace Wacs.Console
             // System.Console.WriteLine("Instantiating Module");
 
             string moduleName = "hello";
-            //Validation normally happens after instantiation, but you can skip it if you did it after parsing or you're like super confident.
+            //Validation normally happens after instantiation, but you can skip it if you did it after parsing, or you're like super confident.
             var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true});
             runtime.RegisterModule(moduleName, modInst);
 
@@ -211,7 +172,7 @@ namespace Wacs.Console
             {
                 var caller = runtime.CreateInvoker<Delegates.WasmAction>(modInst.StartFunc, callOptions);
                 
-                using (IDisposable profilingSession = opts.Profile? new ProfilingSession(): new NoOpProfilingSession())
+                using (IDisposable _ = opts.Profile? new ProfilingSession(): new NoOpProfilingSession())
                 {
                     try
                     {
@@ -233,7 +194,7 @@ namespace Wacs.Console
             {
                 var caller = runtime.CreateInvoker<Func<Value>>(mainAddr, callOptions);
                 
-                using (IDisposable profilingSession = opts.Profile? new ProfilingSession(): new NoOpProfilingSession())
+                using (IDisposable _ = opts.Profile? new ProfilingSession(): new NoOpProfilingSession())
                 {
                     try
                     {
@@ -250,7 +211,7 @@ namespace Wacs.Console
                     {
                         ErrNo sig = (ErrNo)exc.Signal;
                         System.Console.Error.WriteLine($"{sig.HumanReadable()}");
-                        return (int)exc.Signal;
+                        return exc.Signal;
                     }
                 }
             }

@@ -5,6 +5,8 @@ namespace Wacs.WASIp1.Types
 {
     public class FileDescriptor
     {
+        public static readonly FileDescriptor BadFd = new() { Fd = uint.MaxValue };
+
         public uint Fd { get; set; }
         public Stream Stream { get; set; } = Stream.Null;
 
