@@ -212,6 +212,14 @@ namespace Wacs.Core.Runtime
                     Type = ValType.I64;
                     Int64 = (long)ul;
                     break;
+                case float f:
+                    Type = ValType.F32;
+                    Float32 = f;
+                    break;
+                case double d:
+                    Type = ValType.F64;
+                    Float64 = d;
+                    break;
                 case BigInteger bi:
                     Type = ValType.V128;
                     V128 = bi.ToV128();
