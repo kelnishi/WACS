@@ -90,8 +90,11 @@ namespace Spec.Test
             List<Exception> errors = new List<Exception>();
             Console.WriteLine($"===== Running test {testDefinition.TestName} =====");
 
+            WasmRuntime? runtime = null;
+            Module? module = null;
             string moduleName = "";
-            WasmRuntime runtime = null;
+
+            var env = new SpecTestEnv();
 
             using (var progress = new ProgressBar(testDefinition.Commands.Count, "Processing"))
             {
@@ -103,11 +106,12 @@ namespace Spec.Test
                         case ModuleCommand moduleCommand:
                         {
                             runtime = new WasmRuntime();
+                            env.BindToRuntime(runtime);
                         
                             var filepath = Path.Combine(testDefinition.Path, moduleCommand.Filename);
                             // Console.WriteLine($"Loading module {filepath}");
                             using var fileStream = new FileStream(filepath, FileMode.Open);
-                            var module = BinaryModuleParser.ParseWasm(fileStream);
+                            module = BinaryModuleParser.ParseWasm(fileStream);
                             var modInst = runtime.InstantiateModule(module);
                             moduleName = $"{moduleCommand.Filename}";
                             runtime.RegisterModule(moduleName, modInst);
@@ -166,8 +170,8 @@ namespace Spec.Test
                             try
                             {
                                 using var fileStreamInvalid = new FileStream(filepathInvalid, FileMode.Open);
-                                var moduleInvalid = BinaryModuleParser.ParseWasm(fileStreamInvalid);
-                                var modInstInvalid = runtime.InstantiateModule(moduleInvalid);
+                                module = BinaryModuleParser.ParseWasm(fileStreamInvalid);
+                                var modInstInvalid = runtime.InstantiateModule(module);
                             }
                             catch (ValidationException exc)
                             {
@@ -176,10 +180,36 @@ namespace Spec.Test
                             }
 
                             if (!didAssert)
-                                throw new TestException($"Test failed {command} \"{assertionMessage}\"");
+                            {
+                                RenderModule(module!, filepathInvalid);
+                                throw new TestException($"Test failed {command}");
+                            }
                             break;
-                        case AssertMalformedCommand:
-                            errors.Add(new Exception($"Assert Malformed line {command.Line}: Skipping assert_malformed. No WAT parsing."));
+                        case AssertMalformedCommand assertMalformedCommand:
+                            if (assertMalformedCommand.ModuleType == "text")
+                                errors.Add(new Exception($"Assert Malformed line {command.Line}: Skipping assert_malformed. No WAT parsing."));
+                            
+                            runtime = new WasmRuntime();
+                            var filepathMalformed = Path.Combine(testDefinition.Path, assertMalformedCommand.Filename);
+                            bool didAssert1 = false;
+                            string assertionMessage1 = "";
+                            try
+                            {
+                                using var fileStreamInvalid = new FileStream(filepathMalformed, FileMode.Open);
+                                module = BinaryModuleParser.ParseWasm(fileStreamInvalid);
+                                var modInstInvalid = runtime.InstantiateModule(module);
+                            }
+                            catch (FormatException exc)
+                            {
+                                didAssert1 = true;
+                                assertionMessage1 = exc.Message;
+                            }
+
+                            if (!didAssert1)
+                            {
+                                RenderModule(module!, filepathMalformed);
+                                throw new TestException($"Test failed {command}");
+                            }
                             break;
                         default:
                             throw new InvalidDataException($"Test command not setup:{command}");
@@ -187,6 +217,13 @@ namespace Spec.Test
                 }
                 
             }
+        }
+
+        static void RenderModule(Module module, string path)
+        {
+            string outputFilePath = Path.ChangeExtension(path, ".wat");
+            using var outputStream = new FileStream(outputFilePath, FileMode.Create);
+            ModuleRenderer.RenderWatToStream(outputStream, module);
         }
     }
 }

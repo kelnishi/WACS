@@ -57,7 +57,7 @@ namespace Wacs.Core
             uint magicNumber = reader.ReadUInt32(); //Exactly 4bytes, little endian
             if (magicNumber != 0x6D736100) // '\0asm'
             {
-                throw new InvalidDataException("Invalid magic number for WebAssembly module.");
+                throw new FormatException("Invalid magic number for WebAssembly module.");
             }
 
             uint version = reader.ReadUInt32(); //Exactly 4bytes, little endian
