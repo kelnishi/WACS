@@ -16,7 +16,7 @@ namespace Wacs.Core.Runtime.Types
         public MemoryInstance(MemoryType type)
         {
             Type = type;
-            uint initialSize = (type.Limits.Minimum*8)* Constants.PageSize;
+            uint initialSize = (type.Limits.Minimum)* Constants.PageSize;
             _data = new byte[initialSize];
         }
 

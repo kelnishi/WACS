@@ -13,7 +13,7 @@ namespace Wacs.Core.Runtime
     /// @Spec 4.2.1. Values
     /// </summary>
     [StructLayout(LayoutKind.Explicit)]
-    public readonly struct Value
+    public readonly struct Value : IComparable<Value>
     {
         [FieldOffset(0)] public readonly ValType Type;
 
@@ -315,6 +315,16 @@ namespace Wacs.Core.Runtime
         public static implicit operator double(Value value) => value.Float64;
 
         public static implicit operator Value(V128 v128) => new(v128);
+        
+        public static bool operator ==(Value left, Value right) => left.Type == right.Type && left.Scalar.Equals(right.Scalar);
+        
+        public static bool operator !=(Value left, Value right) => !(left == right);
+
+        public int CompareTo(Value other) => Type == other.Type ? ((double)Scalar).CompareTo(((double)other.Scalar)) : Type.CompareTo(other.Type);
+
+        public override bool Equals(object obj) => obj is Value value && this == value;
+
+        public override int GetHashCode() => HashCode.Combine(Type, Scalar);
         
         
         public override string ToString()
