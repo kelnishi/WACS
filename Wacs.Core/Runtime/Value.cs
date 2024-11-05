@@ -63,6 +63,13 @@ namespace Wacs.Core.Runtime
             Type = ValType.I64;
             Int64 = value;
         }
+        
+        public Value(ulong value)
+        {
+            this = default;
+            Type = ValType.I64;
+            Int64 = (long)value;
+        }
 
         public Value(float value)
         {
