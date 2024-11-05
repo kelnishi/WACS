@@ -1,6 +1,4 @@
-using Wacs.Core.Runtime;
-
-namespace Wacs.WASIp1
+namespace Wacs.Core.Runtime
 {
     public interface IBindable
     {
