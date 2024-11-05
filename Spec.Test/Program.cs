@@ -42,13 +42,15 @@ namespace Spec.Test
             Console.WriteLine($"Running test {testDefinition.TestName}...");
 
             string moduleName = "";
-            var runtime = new WasmRuntime();
+            WasmRuntime runtime = null;
             foreach (var command in testDefinition.Commands)
             {
                 switch (command)
                 {
                     case ModuleCommand moduleCommand:
                     {
+                        runtime = new WasmRuntime();
+                        
                         var filepath = Path.Combine(testDefinition.Path, moduleCommand.Filename);
                         Console.WriteLine($"Loading moodule {filepath}");
                         using var fileStream = new FileStream(filepath, FileMode.Open);
@@ -107,6 +109,11 @@ namespace Spec.Test
                                 break;
                         }
                         break;
+                    case AssertMalformedCommand:
+                        Console.WriteLine($"Skipping assert_malformed. No WAT parsing.");
+                        break;
+                    default:
+                        throw new Exception($"Test command not setup:{command}");
                 }
                 
             }
