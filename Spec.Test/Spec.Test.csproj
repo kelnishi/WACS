@@ -7,6 +7,10 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
+    <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+      <DefineConstants>TRACE;STRICT_EXECUTION</DefineConstants>
+    </PropertyGroup>
+
     <ItemGroup>
       <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
       <ProjectReference Include="..\Wacs.WASIp1\Wacs.WASIp1.csproj" />

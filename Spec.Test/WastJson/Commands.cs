@@ -25,7 +25,7 @@ namespace Spec.Test.WastJson
         public IAction Action { get; set; }
 
         [JsonPropertyName("expected")]
-        public List<Expected> Expected { get; set; }
+        public List<Argument> Expected { get; set; }
 
         public CommandType Type => CommandType.AssertReturn;
 
@@ -37,6 +37,9 @@ namespace Spec.Test.WastJson
     {
         [JsonPropertyName("action")]
         public IAction Action { get; set; }
+
+        [JsonPropertyName("text")]
+        public string Text { get; set; }
 
         public CommandType Type => CommandType.AssertTrap;
 

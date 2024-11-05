@@ -13,8 +13,5 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("args")]
         List<Argument> Args { get; set; }
-
-        [JsonPropertyName("expected")]
-        public List<Argument> Expected { get; set; }
     }
 }

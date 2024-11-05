@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using Spec.Test.WastJson;
 using Wacs.Core;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
 
 namespace Spec.Test
 {
@@ -58,18 +59,51 @@ namespace Spec.Test
                         break;
                     }
                     case AssertReturnCommand assertReturnCommand:
-                        var action = assertReturnCommand.Action;
-                        switch (action.Type)
+                        var action1 = assertReturnCommand.Action;
+                        switch (action1.Type)
                         {
                             case ActionType.Invoke:
-                                Console.WriteLine($"Running action line {assertReturnCommand.Line}: [{action.Args}] -> [{action.Expected}]");
-                                if (!runtime.TryGetExportedFunction((moduleName, action.Field), out var addr))
-                                    throw new ArgumentException($"Could not get exported function {moduleName}.{action.Field}");
+                                Console.Write($"Assert Return \"{action1.Field}\" line {assertReturnCommand.Line}: [{string.Join(" ",action1.Args)}] -> [{string.Join(" ",assertReturnCommand.Expected.Select(e=>e.AsValue))}]");
+                                if (!runtime.TryGetExportedFunction((moduleName, action1.Field), out var addr))
+                                    throw new ArgumentException($"Could not get exported function {moduleName}.{action1.Field}");
                                 //Compute type from action.Args and action.Expected
                                 var invoker = runtime.CreateStackInvoker(addr);
 
-                                var pVals = action.Args.Select(arg => arg.AsValue).ToArray();
+                                var pVals = action1.Args.Select(arg => arg.AsValue).ToArray();
                                 var result = invoker(pVals);
+                                Console.WriteLine($" got [{string.Join(" ",result)}]");
+                                if (!result.SequenceEqual(assertReturnCommand.Expected.Select(e => e.AsValue)))
+                                    throw new Exception($"Test failed at line {assertReturnCommand.Line} \"{action1.Field}\": Expected [{string.Join(" ", assertReturnCommand.Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
+                                
+                                break;
+                        }
+                        break;
+                    case AssertTrapCommand assertTrapCommand:
+                        var action2 = assertTrapCommand.Action;
+                        switch (action2.Type)
+                        {
+                            case ActionType.Invoke:
+                                Console.Write($"Assert Trap \"{action2.Field}\" line {assertTrapCommand.Line}: [{string.Join(" ",action2.Args)}] -> \"{assertTrapCommand.Text}\"");
+                                if (!runtime.TryGetExportedFunction((moduleName, action2.Field), out var addr))
+                                    throw new ArgumentException($"Could not get exported function {moduleName}.{action2.Field}");
+                                //Compute type from action.Args and action.Expected
+                                var invoker = runtime.CreateStackInvoker(addr);
+
+                                var pVals = action2.Args.Select(arg => arg.AsValue).ToArray();
+                                bool didTrap = false;
+                                string trapMessage = "";
+                                try
+                                {
+                                    var result = invoker(pVals);
+                                }
+                                catch (TrapException e)
+                                {
+                                    didTrap = true;
+                                    trapMessage = e.Message;
+                                }
+                                Console.WriteLine($" got \"{trapMessage}\"");
+                                if (!didTrap)
+                                    throw new Exception($"Test failed at line {assertTrapCommand.Line} \"{action2.Field}\"");
                                 break;
                         }
                         break;
