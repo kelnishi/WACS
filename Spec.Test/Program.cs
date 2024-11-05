@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -36,12 +37,12 @@ namespace Spec.Test
             }
         }
 
-        static string[] FindFileInDirectory(string directoryPath, string fileName)
+        static IEnumerable<string> FindFileInDirectory(string directoryPath, string fileName)
         {
             try
             {
                 // Get all files in the directory and subdirectories
-                return Directory.GetFiles(directoryPath, fileName, SearchOption.AllDirectories);
+                return Directory.GetFiles(directoryPath, fileName, SearchOption.AllDirectories).OrderBy(path => path);
             }
             catch (UnauthorizedAccessException ex)
             {
