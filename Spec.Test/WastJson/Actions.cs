@@ -7,35 +7,32 @@ namespace Spec.Test.WastJson
 {
     public class InvokeAction : IAction
     {
+        [JsonPropertyName("expected")] public List<Argument> Expected { get; set; } = new();
         public ActionType Type => ActionType.Invoke;
 
-        [JsonPropertyName("field")]
-        public string Field { get; set; }
+        [JsonPropertyName("field")] public string Field { get; set; } = "";
 
-        [JsonPropertyName("args")]
-        public List<Argument> Args { get; set; }
+        [JsonPropertyName("args")] public List<Argument> Args { get; set; } = new();
 
-        [JsonPropertyName("expected")]
-        public List<Argument> Expected { get; set; }
+        public override string ToString() => $"{Field} - Args: {string.Join(", ", Args)} - Expected: {string.Join(", ", Expected)}";
     }
     
     public class GetAction : IAction
     {
+        [JsonPropertyName("expected")]
+        public List<Argument> Expected {
+            get => null;
+            set => throw new NotSupportedException("GetAction does not support results.");
+        }
+
         public ActionType Type => ActionType.Get;
 
-        [JsonPropertyName("field")]
-        public string Field { get; set; }
+        [JsonPropertyName("field")] public string Field { get; set; } = "";
 
         public List<Argument> Args
         {
             get => null;
             set => throw new NotSupportedException("GetAction does not support arguments.");
-        }
-
-        [JsonPropertyName("expected")]
-        public List<Argument> Expected {
-            get => null;
-            set => throw new NotSupportedException("GetAction does not support results.");
         }
     }
     

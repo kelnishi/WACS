@@ -31,6 +31,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"AssertReturnCommand {{ Action = {Action}, Expected = [{string.Join(", ", Expected)}], Line = {Line} }}";
     }
     
     public class AssertTrapCommand : ICommand
@@ -45,6 +47,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"AssertTrapCommand {{ Action = {Action}, Text = {Text}, Line = {Line} }}";
     }
 
     public class AssertExhaustionCommand : ICommand
@@ -56,20 +60,27 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"AssertExhaustionCommand {{ Action = {Action}, Line = {Line} }}";
     }
 
     public class AssertInvalidCommand : ICommand
     {
-        [JsonPropertyName("module")]
-        public string Module { get; set; }
+        [JsonPropertyName("filename")]
+        public string Filename { get; set; }
 
-        [JsonPropertyName("name")]
-        public string Name { get; set; }
+        [JsonPropertyName("module_type")]
+        public string ModuleType { get; set; }
+
+        [JsonPropertyName("text")]
+        public string Text { get; set; }
 
         public CommandType Type => CommandType.AssertInvalid;
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"AssertInvalidCommand {{ Filename = {Filename}, ModuleType = {ModuleType}, Text = {Text}, Line = {Line} }}";
     }
 
     public class AssertMalformedCommand : ICommand
@@ -81,6 +92,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"AssertMalformedCommand {{ Module = {Module}, Line = {Line} }}";
     }
 
     public class AssertUnlinkableCommand : ICommand
@@ -92,6 +105,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"AssertUnlinkableCommand {{ Module = {Module}, Line = {Line} }}";
     }
 
     public class AssertUninstantiableCommand : ICommand
@@ -103,6 +118,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"AssertUninstantiableCommand {{ Module = {Module}, Line = {Line} }}";
     }
 
     public class InvokeCommand : ICommand
@@ -120,6 +137,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"InvokeCommand {{ Module = {Module}, Name = {Name}, Args = [{string.Join(", ", Args)}], Line = {Line} }}";
     }
 
     public class GetCommand : ICommand
@@ -134,6 +153,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"GetCommand {{ Module = {Module}, Name = {Name}, Line = {Line} }}";
     }
 
     public class SetCommand : ICommand
@@ -151,6 +172,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"SetCommand {{ Module = {Module}, Name = {Name}, Value = {Value}, Line = {Line} }}";
     }
 
     public class StartCommand : ICommand
@@ -162,6 +185,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"StartCommand {{ Module = {Module}, Line = {Line} }}";
     }
 
     public class AssertReturnCanonicalNansCommand : ICommand
@@ -176,6 +201,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"AssertReturnCanonicalNansCommand {{ Action = {Action}, Expected = [{string.Join(", ", Expected)}], Line = {Line} }}";
     }
 
     public class AssertReturnArithmeticNansCommand : ICommand
@@ -190,6 +217,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"AssertReturnArithmeticNansCommand {{ Action = {Action}, Expected = [{string.Join(", ", Expected)}], Line = {Line} }}";
     }
 
     public class AssertReturnDetachedCommand : ICommand
@@ -201,6 +230,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"AssertReturnDetachedCommand {{ Action = {Action}, Line = {Line} }}";
     }
 
     public class AssertTerminatedCommand : ICommand
@@ -212,6 +243,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"AssertTerminatedCommand {{ Module = {Module}, Line = {Line} }}";
     }
 
     public class AssertUndefinedCommand : ICommand
@@ -223,6 +256,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"AssertUndefinedCommand {{ Module = {Module}, Line = {Line} }}";
     }
 
     public class AssertExcludeFromMustCommand : ICommand
@@ -234,6 +269,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"AssertExcludeFromMustCommand {{ Module = {Module}, Line = {Line} }}";
     }
 
     public class ModuleInstanceCommand : ICommand
@@ -245,6 +282,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"ModuleInstanceCommand {{ Module = {Module}, Line = {Line} }}";
     }
 
     public class ModuleExclusiveCommand : ICommand
@@ -256,6 +295,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"ModuleExclusiveCommand {{ Module = {Module}, Line = {Line} }}";
     }
 
     public class PumpCommand : ICommand
@@ -267,6 +308,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"PumpCommand {{ Action = {Action}, Line = {Line} }}";
     }
 
     public class MaybeCommand : ICommand
@@ -278,6 +321,8 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"MaybeCommand {{ Command = {Command}, Line = {Line} }}";
     }
     
     public class CommandJsonConverter : JsonConverter<ICommand>
