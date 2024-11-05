@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using FluentValidation;
 using ShellProgressBar;
 using Spec.Test.WastJson;
 using Wacs.Core;
@@ -86,6 +87,7 @@ namespace Spec.Test
 
         static void RunTestDefinition(WastJson.WastJson testDefinition)
         {
+            List<Exception> errors = new List<Exception>();
             Console.WriteLine($"===== Running test {testDefinition.TestName} =====");
 
             string moduleName = "";
@@ -95,7 +97,7 @@ namespace Spec.Test
             {
                 foreach (var command in testDefinition.Commands)
                 {
-                    progress.Tick($"{moduleName} line {command.Line}");
+                    progress.Tick($"{moduleName}:{command}");
                     switch (command)
                     {
                         case ModuleCommand moduleCommand:
@@ -116,7 +118,6 @@ namespace Spec.Test
                             switch (action1.Type)
                             {
                                 case ActionType.Invoke:
-                                    // Console.Write($"Assert Return \"{action1.Field}\" line {assertReturnCommand.Line}: [{string.Join(" ",action1.Args)}] -> [{string.Join(" ",assertReturnCommand.Expected.Select(e=>e.AsValue))}]");
                                     if (!runtime.TryGetExportedFunction((moduleName, action1.Field), out var addr))
                                         throw new InvalidDataException($"Could not get exported function {moduleName}.{action1.Field}");
                                     //Compute type from action.Args and action.Expected
@@ -124,9 +125,8 @@ namespace Spec.Test
 
                                     var pVals = action1.Args.Select(arg => arg.AsValue).ToArray();
                                     var result = invoker(pVals);
-                                    // Console.WriteLine($" got [{string.Join(" ",result)}]");
                                     if (!result.SequenceEqual(assertReturnCommand.Expected.Select(e => e.AsValue)))
-                                        throw new TestException($"Test failed at line {assertReturnCommand.Line} \"{action1.Field}\": Expected [{string.Join(" ", assertReturnCommand.Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
+                                        throw new TestException($"Test failed {command} \"{action1.Field}\": Expected [{string.Join(" ", assertReturnCommand.Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
                                 
                                     break;
                             }
@@ -136,7 +136,6 @@ namespace Spec.Test
                             switch (action2.Type)
                             {
                                 case ActionType.Invoke:
-                                    // Console.Write($"Assert Trap \"{action2.Field}\" line {assertTrapCommand.Line}: [{string.Join(" ",action2.Args)}] -> \"{assertTrapCommand.Text}\"");
                                     if (!runtime.TryGetExportedFunction((moduleName, action2.Field), out var addr))
                                         throw new ArgumentException($"Could not get exported function {moduleName}.{action2.Field}");
                                     //Compute type from action.Args and action.Expected
@@ -154,14 +153,33 @@ namespace Spec.Test
                                         didTrap = true;
                                         trapMessage = e.Message;
                                     }
-                                    // Console.WriteLine($" got \"{trapMessage}\"");
                                     if (!didTrap)
-                                        throw new TestException($"Test failed at line {assertTrapCommand.Line} \"{action2.Field}\"");
+                                        throw new TestException($"Test failed {command} \"{trapMessage}\"");
                                     break;
                             }
                             break;
+                        case AssertInvalidCommand assertInvalidCommand:
+                            runtime = new WasmRuntime();
+                            var filepathInvalid = Path.Combine(testDefinition.Path, assertInvalidCommand.Filename);
+                            bool didAssert = false;
+                            string assertionMessage = "";
+                            try
+                            {
+                                using var fileStreamInvalid = new FileStream(filepathInvalid, FileMode.Open);
+                                var moduleInvalid = BinaryModuleParser.ParseWasm(fileStreamInvalid);
+                                var modInstInvalid = runtime.InstantiateModule(moduleInvalid);
+                            }
+                            catch (ValidationException exc)
+                            {
+                                didAssert = true;
+                                assertionMessage = exc.Message;
+                            }
+
+                            if (!didAssert)
+                                throw new TestException($"Test failed {command} \"{assertionMessage}\"");
+                            break;
                         case AssertMalformedCommand:
-                            Console.Error.WriteLine($"Skipping assert_malformed. No WAT parsing.");
+                            errors.Add(new Exception($"Assert Malformed line {command.Line}: Skipping assert_malformed. No WAT parsing."));
                             break;
                         default:
                             throw new InvalidDataException($"Test command not setup:{command}");

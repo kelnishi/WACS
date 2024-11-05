@@ -30,7 +30,8 @@ namespace Spec.Test.WastJson
 
         private double BitBashDouble(string longval)
         {
-            
+            // if (longval.StartsWith("nan"))
+            //     return double.NaN;
             
             ulong v = ulong.Parse(longval);
             return BitConverter.ToDouble(BitConverter.GetBytes(v));
