@@ -50,6 +50,7 @@ namespace Wacs.Core.Runtime
 
     public class WasmRuntime
     {
+        private static readonly MethodInfo GenericFuncsInvoke = typeof(Delegates.GenericFuncs).GetMethod("Invoke")!;
         private readonly Dictionary<(string module, string entity), IAddress> _entityBindings = new();
 
         private readonly Dictionary<string, ModuleInstance> _modules = new();
@@ -180,17 +181,15 @@ namespace Wacs.Core.Runtime
             return funcInst.Id;
         }
 
-        //TODO: Use TDelegate to define the delegate rather than relying on CreateAnonymousFunctionFromFunctionType's switch.
-        // [RequiresUnreferencedCode("Uses reflection to match parameters for binding")]
-        public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr, InvokerOptions? options = default)
-            where TDelegate : Delegate
+        private Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
         {
-            options ??= new InvokerOptions();
             var funcInst = Context.Store[funcAddr];
             var funcType = funcInst.Type;
-            
-            Delegates.ValidateFunctionTypeCompatibility(funcType, typeof(TDelegate));
-            var genericDelegate = Delegates.AnonymousFunctionFromType(funcType, args => {
+
+            return GenericDelegate;
+
+            object[] GenericDelegate(object[] args)
+            {
                 Context.OpStack.PushScalars(funcType.ParameterTypes, args);
 
                 if (options.CollectStats)
@@ -198,10 +197,11 @@ namespace Wacs.Core.Runtime
                     Context.ResetStats();
                     Context.InstructionTimer.Reset();
                 }
+
                 Context.ProcessTimer.Restart();
-                
+
                 Context.Invoke(funcAddr);
-                
+
                 int steps = 0;
                 while (ProcessThread(options, steps))
                 {
@@ -211,7 +211,8 @@ namespace Wacs.Core.Runtime
                     {
                         if (steps >= options.GasLimit)
                         {
-                            throw new InsufficientGasException($"Invocation ran out of gas (limit:{options.GasLimit}).");
+                            throw new InsufficientGasException(
+                                $"Invocation ran out of gas (limit:{options.GasLimit}).");
                         }
                     }
 
@@ -223,27 +224,67 @@ namespace Wacs.Core.Runtime
                         }
                     }
                 }
+                
                 Context.ProcessTimer.Stop();
-                if (options.LogProgressEvery > 0)
-                    Console.Error.WriteLine("done.");
-                if (options.CollectStats) 
-                    PrintStats();
-                if (options.LogGas) 
-                    Console.Error.WriteLine($"Process used {steps} gas. {Context.ProcessTimer.Elapsed}");
+                if (options.LogProgressEvery > 0) Console.Error.WriteLine("done.");
+                if (options.CollectStats) PrintStats();
+                if (options.LogGas) Console.Error.WriteLine($"Process used {steps} gas. {Context.ProcessTimer.Elapsed}");
 
                 object[] results = new object[funcType.ResultType.Arity];
                 var span = results.AsSpan();
                 Context.OpStack.PopScalars(funcType.ResultType, span);
+
+                return results;
+            }
+        }
+
+        public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr, InvokerOptions? options = default)
+            where TDelegate : Delegate
+        {
+            options ??= new InvokerOptions();
+            var funcInst = Context.Store[funcAddr];
+            var funcType = funcInst.Type;
+            
+            Delegates.ValidateFunctionTypeCompatibility(funcType, typeof(TDelegate));
+            var inner = CreateInvoker(funcAddr, options);
+            var genericDelegate = Delegates.AnonymousFunctionFromType(funcType, args =>
+            {
+                try
+                {
+                    object[] results = (object[])GenericFuncsInvoke.Invoke(inner, new object[] { args });
+                    if (funcType.ResultType.Types.Length == 1)
+                        return results[0];
                 
-                //void
-                if (funcType.ResultType.Types.Length == 0)
                     return results;
-                
-                //TODO: Multiple result values?
-                return results[0];
+                }
+                catch (TargetInvocationException exc)
+                { //Propagate out any exceptions
+                    throw exc.InnerException;
+                }
             });
-         
+            
             return (TDelegate)Delegates.CreateTypedDelegate(genericDelegate, typeof(TDelegate));
+        }
+
+        //No type checking, but you can get multiple return values
+        public Delegates.StackFunc CreateStackInvoker(FuncAddr funcAddr, InvokerOptions? options = default)
+        {
+            options ??= new InvokerOptions();
+            var funcInst = Context.Store[funcAddr];
+            var funcType = funcInst.Type;
+            var invoker = CreateInvoker(funcAddr, options);
+            return StackFunc;
+            
+            Value[] StackFunc(Value[] parameters)
+            {
+                object[] results = invoker(parameters);
+                var stackResult = new Value[funcType.ResultType.Arity];
+                for (int i = 0, l = funcType.ResultType.Arity; i < l; ++i)
+                {
+                    stackResult[i] = (Value)results[i];
+                }
+                return stackResult;
+            }
         }
 
         public bool ProcessThread(InvokerOptions options, int steps)
@@ -311,20 +352,19 @@ namespace Wacs.Core.Runtime
                     PrintStats();
                 if (options.LogGas)
                     Console.Error.WriteLine($"Process used {steps} gas. {Context.ProcessTimer.Elapsed}");
-                
+
+                string message = exc.Message;
                 if (options.CalculateLineNumbers)
                 {
                     Console.Error.WriteLine();
                     var ptr = Context.ComputePointerPath();
                     var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
                     (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
-
-                    var newMessage = exc.Message + $":line {line} instruction #{steps}\n{path}";
-                    var exType = exc.GetType();
-                    var ctr = exType.GetConstructor(new Type[] { typeof(int), typeof(string) });
-                    throw ctr?.Invoke(new object[] {exc.Signal, exc.Message}) as Exception ?? exc;
+                    message = exc.Message + $":line {line} instruction #{steps}\n{path}";
                 }
-                throw;
+                var exType = exc.GetType();
+                var ctr = exType.GetConstructor(new Type[] { typeof(int), typeof(string) });
+                throw ctr?.Invoke(new object[] {exc.Signal, message}) as Exception ?? exc;           
             }
 
             lastInstruction = inst;
