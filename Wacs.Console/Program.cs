@@ -191,7 +191,7 @@ namespace Wacs.Console
             //Wasm/WASI entry points
             if (modInst.StartFunc != null)
             {
-                var caller = runtime.CreateInvoker<Delegates.WasmAction>(modInst.StartFunc, callOptions);
+                var caller = runtime.CreateInvoker<Action>(modInst.StartFunc, callOptions);
 
                 var name = runtime.GetFunctionName(modInst.StartFunc);
                 if (opts.LogProg)

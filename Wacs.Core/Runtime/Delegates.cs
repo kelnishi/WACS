@@ -9,22 +9,9 @@ namespace Wacs.Core.Runtime
     {
         public delegate object GenericFunc(params object[] args);
 
-        // Named delegate types for common WebAssembly function signatures
-        public delegate void WasmAction();
+        public delegate object[] GenericFuncs(params object[] args);
 
-        public delegate void WasmAction<T>(Value arg);
-
-        public delegate void WasmAction<T1,T2>(Value arg1, Value arg2);
-
-        public delegate void WasmAction<T1,T2,T3>(Value arg1, Value arg2, Value arg3);
-
-        public delegate Value WasmFunc<TResult>();
-
-        public delegate Value WasmFunc<T, TResult>(Value arg);
-
-        public delegate Value WasmFunc<T1, T2, TResult>(Value arg1, Value arg2);
-
-        public delegate Value WasmFunc<T1, T2, T3, TResult>(Value arg1, Value arg2, Value arg3);
+        public delegate Value[] StackFunc(Value[] parameters);
 
         public static void ValidateFunctionTypeCompatibility(FunctionType functionType, Type delegateType)
         {
@@ -75,15 +62,17 @@ namespace Wacs.Core.Runtime
             else if (functionType.ResultType.Types.Length == 1)
             {
                 Type expectedReturnType = ConvertValTypeToSystemType(functionType.ResultType.Types[0]);
-                var implicitOp = returnType
-                    .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.FlattenHierarchy)
-                    .Where(m => m.Name == "op_Implicit" && m.ReturnType == expectedReturnType)
-                    .FirstOrDefault();
-                // Check if returnType has an implicit conversion operator to expectedReturnType
-                if (implicitOp is null)
+                if (expectedReturnType != returnType)
                 {
-                    throw new ArgumentException(
-                        $"Return type mismatch. Expected return type is {expectedReturnType.Name}, but delegate returns {returnType.Name}.");
+                    var implicitOp = returnType
+                        .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.FlattenHierarchy)
+                        .FirstOrDefault(m => m.Name == "op_Implicit" && m.ReturnType == expectedReturnType);
+                    // Check if returnType has an implicit conversion operator to expectedReturnType
+                    if (implicitOp is null)
+                    {
+                        throw new ArgumentException(
+                            $"Return type mismatch. Expected return type is {expectedReturnType.Name}, but delegate returns {returnType.Name}.");
+                    }
                 }
             }
             else
@@ -92,7 +81,7 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public static Delegate AnonymousFunctionFromType(FunctionType functionType, GenericFunc implementation)
+        public static Delegate AnonymousFunctionFromType(FunctionType functionType, GenericFunc func)
         {
             var paramTypes = functionType.ParameterTypes.Types;
             var resultTypes = functionType.ResultType.Types;
@@ -104,40 +93,31 @@ namespace Wacs.Core.Runtime
 
             return (paramTypes.Length, resultTypes.Length) switch
             {
-                (0, 0) => new WasmAction(() => { implementation(); }),
-                (1, 0) => CreateWasmAction<object>(paramTypes[0], implementation),
-                (2, 0) => CreateWasmAction<object, object>(paramTypes[0], paramTypes[1], implementation),
-                (3, 0) => CreateWasmAction<object, object, object>(paramTypes[0], paramTypes[1], paramTypes[2], implementation),
-                (0, 1) => CreateWasmFunc<object>(resultTypes[0], implementation),
-                (1, 1) => CreateWasmFunc<object, object>(paramTypes[0], resultTypes[0], implementation),
-                (2, 1) => CreateWasmFunc<object, object, object>(paramTypes[0], paramTypes[1], resultTypes[0], implementation),
-                (3, 1) => CreateWasmFunc<object, object, object, object>(paramTypes[0], paramTypes[1], paramTypes[2], resultTypes[0], implementation),
-                _ => throw new NotSupportedException($"Unsupported function signature: ({string.Join(", ", paramTypes)}) -> ({string.Join(", ", resultTypes)})")
+                (0, 0) => new Action(() =>func()),
+                (1, 0) => new Action<object>(i1=>func(i1)),
+                (2, 0) => new Action<object,object>((i1,i2)=>func(i1,i2)),
+                (3, 0) => new Action<object,object,object>((i1,i2,i3)=>func(i1,i2,i3)),
+                (4, 0) => new Action<object, object, object, object>((i1,i2,i3,i4)=>func(i1,i2,i3,i4)),
+                (5, 0) => new Action<object, object, object, object, object>((i1,i2,i3,i4,i5)=>func(i1,i2,i3,i4,i5)),
+                (6, 0) => new Action<object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6)=>func(i1,i2,i3,i4,i5,i6)),
+                (7, 0) => new Action<object, object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6,i7)=>func(i1,i2,i3,i4,i5,i6,i7)),
+                (8, 0) => new Action<object, object, object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6,i7,i8)=>func(i1,i2,i3,i4,i5,i6,i7,i8)),
+                (9, 0) => new Action<object, object, object, object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6,i7,i8,i9)=>func(i1,i2,i3,i4,i5,i6,i7,i8,i9)),
+                
+                (0, 1) => new Func<Value>(()=>new Value(func())),
+                (1, 1) => new Func<object, Value>(i1=>new Value(func(i1))),
+                (2, 1) => new Func<object, object, Value>((i1,i2)=> new Value(func(i1,i2))),
+                (3, 1) => new Func<object, object, object, Value>((i1,i2,i3)=> new Value(func(i1,i2,i3))),
+                (4, 1) => new Func<object, object, object, object, Value>((i1,i2,i3,i4)=> new Value(func(i1,i2,i3,i4))),
+                (5, 1) => new Func<object, object, object, object, object, Value>((i1,i2,i3,i4,i5)=> new Value(func(i1,i2,i3,i4,i5))),
+                (6, 1) => new Func<object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6)=> new Value(func(i1,i2,i3,i4,i5,i6))),
+                (7, 1) => new Func<object, object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6,i7)=> new Value(func(i1,i2,i3,i4,i5,i6,i7))),
+                (8, 1) => new Func<object, object, object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6,i7,i8)=> new Value(func(i1,i2,i3,i4,i5,i6,i7,i8))),
+                (9, 1) => new Func<object, object, object, object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6,i7,i8,i9)=> new Value(func(i1,i2,i3,i4,i5,i6,i7,i8,i9))),
+                
+                _ => throw new NotSupportedException($"Cannot auto-bind function signature: ({string.Join(", ", paramTypes)}) -> ({string.Join(", ", resultTypes)})")
             };
         }
-
-
-        private static Delegate CreateWasmAction<T>(ValType paramType, GenericFunc implementation) =>
-            new WasmAction<T>(arg => implementation(arg));
-
-        private static Delegate CreateWasmAction<T1, T2>(ValType param1Type, ValType param2Type, GenericFunc implementation) =>
-            new WasmAction<T1, T2>((arg1, arg2) => implementation(arg1, arg2));
-
-        private static Delegate CreateWasmAction<T1, T2, T3>(ValType param1Type, ValType param2Type, ValType param3Type, GenericFunc implementation) =>
-            new WasmAction<T1, T2, T3>((arg1, arg2, arg3) => implementation(arg1, arg2, arg3));
-
-        private static Delegate CreateWasmFunc<TResult>(ValType resultType, GenericFunc implementation) =>
-            new WasmFunc<TResult>(() => new Value(implementation()));
-
-        private static Delegate CreateWasmFunc<T, TResult>(ValType paramType, ValType resultType, GenericFunc implementation) =>
-            new WasmFunc<T, TResult>(arg => new Value(implementation(arg)));
-
-        private static Delegate CreateWasmFunc<T1, T2, TResult>(ValType param1Type, ValType param2Type, ValType resultType, GenericFunc implementation) =>
-            new WasmFunc<T1, T2, TResult>((arg1, arg2) => new Value(implementation(arg1, arg2)));
-
-        private static Delegate CreateWasmFunc<T1, T2, T3, TResult>(ValType param1Type, ValType param2Type, ValType param3Type, ValType resultType, GenericFunc implementation) =>
-            new WasmFunc<T1, T2, T3, TResult>((arg1, arg2, arg3) => new Value(implementation(arg1, arg2, arg3)));
-
 
         public static Delegate CreateTypedDelegate(Delegate genericDelegate, Type desiredDelegateType)
         {

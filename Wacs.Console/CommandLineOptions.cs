@@ -44,7 +44,6 @@ namespace Wacs.Console
         [Value(0, Required = true, MetaName = "WasmModule", HelpText = "Path to the executable")]
         public string WasmModule { get; set; } = "";
 
-        [Value(1, Required = false, HelpText = "Arguments to pass to the executable")]
         public IEnumerable<string> ExecutableArgs { get; set; } = new List<string>();
     }
 
