@@ -188,7 +188,7 @@ namespace Wacs.Core.Runtime
 
             return GenericDelegate;
 
-            object[] GenericDelegate(object[] args)
+            object[] GenericDelegate(params object[] args)
             {
                 Context.OpStack.PushScalars(funcType.ParameterTypes, args);
 
@@ -277,11 +277,11 @@ namespace Wacs.Core.Runtime
             
             Value[] StackFunc(Value[] parameters)
             {
-                object[] results = invoker(parameters);
+                object[] results = invoker(parameters.Select(v=> (object)v).ToArray());
                 var stackResult = new Value[funcType.ResultType.Arity];
                 for (int i = 0, l = funcType.ResultType.Arity; i < l; ++i)
                 {
-                    stackResult[i] = (Value)results[i];
+                    stackResult[i] = new Value(results[i]);
                 }
                 return stackResult;
             }
