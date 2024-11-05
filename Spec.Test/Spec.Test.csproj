@@ -16,4 +16,8 @@
       <ProjectReference Include="..\Wacs.WASIp1\Wacs.WASIp1.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <PackageReference Include="ShellProgressBar" Version="5.2.0" />
+    </ItemGroup>
+
 </Project>
