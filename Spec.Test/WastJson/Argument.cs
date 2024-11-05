@@ -30,6 +30,8 @@ namespace Spec.Test.WastJson
 
         private double BitBashDouble(string longval)
         {
+            
+            
             ulong v = ulong.Parse(longval);
             return BitConverter.ToDouble(BitConverter.GetBytes(v));
         }
