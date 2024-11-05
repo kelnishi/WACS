@@ -85,15 +85,21 @@ namespace Spec.Test.WastJson
 
     public class AssertMalformedCommand : ICommand
     {
-        [JsonPropertyName("module")]
-        public string Module { get; set; }
+        [JsonPropertyName("filename")]
+        public string Filename { get; set; }
+
+        [JsonPropertyName("text")]
+        public string Text { get; set; }
+
+        [JsonPropertyName("module_type")]
+        public string ModuleType { get; set; }
 
         public CommandType Type => CommandType.AssertMalformed;
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public override string ToString() => $"AssertMalformedCommand {{ Module = {Module}, Line = {Line} }}";
+        public override string ToString() => $"AssertMalformedCommand {{ Filename = {Filename}, Line = {Line}, Text = {Text}, ModuleType = {ModuleType} }}";
     }
 
     public class AssertUnlinkableCommand : ICommand

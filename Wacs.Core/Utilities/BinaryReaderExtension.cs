@@ -18,10 +18,15 @@ namespace Wacs.Core.Utilities
             do
             {
                 byteValue = reader.ReadByte();
+                if (shift == 28 && (byteValue & 0x70) != 0)
+                    throw new FormatException("LEB128_s32 had too many bits");
                 result |= (uint)(byteValue & 0x7F) << shift;
                 shift += 7;
             } while ((byteValue & 0x80) != 0);
 
+            if (shift > 35)
+                throw new FormatException("LEB128_u32 had too many bytes");
+            
             return result;
         }
 
@@ -34,10 +39,15 @@ namespace Wacs.Core.Utilities
             do
             {
                 byteValue = reader.ReadByte();
+                if (shift == 28 && (byteValue & 0x40) == 0 && (byteValue & 0x30) != 0)
+                    throw new FormatException("LEB128_s32 had too many bits");
                 result |= (byteValue & 0x7F) << shift; //low-order 7 bits
                 shift += 7;
             } while ((byteValue & 0x80) != 0); //high-order bit != 0
 
+            if (shift > 35)
+                throw new FormatException("LEB128_s32 had too many bytes");
+            
             // If the sign bit of the last byte read is set, extend the sign
             if (shift < 32 && (byteValue & 0x40) != 0)
             {
@@ -57,7 +67,7 @@ namespace Wacs.Core.Utilities
             {
                 int byteValue = reader.ReadByte();
                 if (byteValue == -1)
-                    throw new EndOfStreamException("Unexpected end of stream while decoding s64.");
+                    throw new FormatException("Unexpected end of stream while decoding s64.");
 
                 byte lower7Bits = (byte)(byteValue & 0x7F);
                 result |= (long)lower7Bits << shift;
@@ -77,8 +87,9 @@ namespace Wacs.Core.Utilities
                 }
 
                 if (shift >= 64)
-                    throw new OverflowException("Shift count exceeds 64 bits while decoding s64.");
+                    throw new FormatException("Shift count exceeds 64 bits while decoding s64.");
             }
+
 
             return result;
         }
@@ -87,7 +98,7 @@ namespace Wacs.Core.Utilities
         {
             byte[] bytes = reader.ReadBytes(4);
             if (bytes.Length < 4)
-                throw new EndOfStreamException("Not enough bytes to read a float.");
+                throw new FormatException("Not enough bytes to read a float.");
 
             uint intValue = BitConverter.ToUInt32(bytes, 0);
             int sign = (int)(intValue >> 31) & 0x01;
