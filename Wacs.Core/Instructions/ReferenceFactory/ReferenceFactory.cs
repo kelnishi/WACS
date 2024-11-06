@@ -30,7 +30,7 @@ namespace Wacs.Core.Instructions
             OpCode.End               => InstEnd.Inst,
                  
             OpCode.Br                => new InstBranch(),
-            OpCode.BrIf              => new InstBranchConditional(),
+            OpCode.BrIf              => new InstBranchIf(),
             OpCode.BrTable           => new InstBranchTable(),
                  
             OpCode.Return            => InstReturn.Inst,
