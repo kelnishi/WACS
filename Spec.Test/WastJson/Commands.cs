@@ -10,13 +10,12 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("filename")]
         public string Filename { get; set; }
 
-        [JsonPropertyName("name")]
-        public string Name { get; set; }
-
         public CommandType Type => CommandType.Module;
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public override string ToString() => $"ModuleCommand {{ Filename = {Filename}, Line = {Line} }}";
     }
 
     public class AssertReturnCommand : ICommand

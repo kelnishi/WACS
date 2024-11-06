@@ -96,9 +96,10 @@ namespace Spec.Test
 
             var env = new SpecTestEnv();
 
-            using (var progress = new ProgressBar(testDefinition.Commands.Count, "Processing"))
+            using var progress = new ProgressBar(testDefinition.Commands.Count, "Processing");
+            foreach (var command in testDefinition.Commands)
             {
-                foreach (var command in testDefinition.Commands)
+                try
                 {
                     progress.Tick($"{moduleName}:{command}");
                     switch (command)
@@ -107,7 +108,7 @@ namespace Spec.Test
                         {
                             runtime = new WasmRuntime();
                             env.BindToRuntime(runtime);
-                        
+
                             var filepath = Path.Combine(testDefinition.Path, moduleCommand.Filename);
                             // Console.WriteLine($"Loading module {filepath}");
                             using var fileStream = new FileStream(filepath, FileMode.Open);
@@ -123,6 +124,7 @@ namespace Spec.Test
                                 RenderModule(module, filepath);
                                 throw;
                             }
+
                             break;
                         }
                         case AssertReturnCommand assertReturnCommand:
@@ -131,17 +133,20 @@ namespace Spec.Test
                             {
                                 case ActionType.Invoke:
                                     if (!runtime.TryGetExportedFunction((moduleName, action1.Field), out var addr))
-                                        throw new InvalidDataException($"Could not get exported function {moduleName}.{action1.Field}");
+                                        throw new InvalidDataException(
+                                            $"Could not get exported function {moduleName}.{action1.Field}");
                                     //Compute type from action.Args and action.Expected
                                     var invoker = runtime.CreateStackInvoker(addr);
 
                                     var pVals = action1.Args.Select(arg => arg.AsValue).ToArray();
                                     var result = invoker(pVals);
                                     if (!result.SequenceEqual(assertReturnCommand.Expected.Select(e => e.AsValue)))
-                                        throw new TestException($"Test failed {command} \"{action1.Field}\": Expected [{string.Join(" ", assertReturnCommand.Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
-                                
+                                        throw new TestException(
+                                            $"Test failed {command} \"{action1.Field}\": Expected [{string.Join(" ", assertReturnCommand.Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
+
                                     break;
                             }
+
                             break;
                         case AssertTrapCommand assertTrapCommand:
                             var action2 = assertTrapCommand.Action;
@@ -149,7 +154,8 @@ namespace Spec.Test
                             {
                                 case ActionType.Invoke:
                                     if (!runtime.TryGetExportedFunction((moduleName, action2.Field), out var addr))
-                                        throw new ArgumentException($"Could not get exported function {moduleName}.{action2.Field}");
+                                        throw new ArgumentException(
+                                            $"Could not get exported function {moduleName}.{action2.Field}");
                                     //Compute type from action.Args and action.Expected
                                     var invoker = runtime.CreateStackInvoker(addr);
 
@@ -165,10 +171,12 @@ namespace Spec.Test
                                         didTrap = true;
                                         trapMessage = e.Message;
                                     }
+
                                     if (!didTrap)
                                         throw new TestException($"Test failed {command} \"{trapMessage}\"");
                                     break;
                             }
+
                             break;
                         case AssertInvalidCommand assertInvalidCommand:
                             runtime = new WasmRuntime();
@@ -202,11 +210,13 @@ namespace Spec.Test
                                 RenderModule(module!, filepathInvalid);
                                 throw new TestException($"Test failed {command}");
                             }
+
                             break;
                         case AssertMalformedCommand assertMalformedCommand:
                             if (assertMalformedCommand.ModuleType == "text")
-                                errors.Add(new Exception($"Assert Malformed line {command.Line}: Skipping assert_malformed. No WAT parsing."));
-                            
+                                errors.Add(new Exception(
+                                    $"Assert Malformed line {command.Line}: Skipping assert_malformed. No WAT parsing."));
+
                             runtime = new WasmRuntime();
                             var filepathMalformed = Path.Combine(testDefinition.Path, assertMalformedCommand.Filename);
                             bool didAssert1 = false;
@@ -233,12 +243,17 @@ namespace Spec.Test
                                 RenderModule(module!, filepathMalformed);
                                 throw new TestException($"Test failed {command}");
                             }
+
                             break;
                         default:
                             throw new InvalidDataException($"Test command not setup:{command}");
                     }
                 }
-                
+                catch (Exception)
+                {
+                    Console.Error.WriteLine($"Exception in command {command}");
+                    throw;
+                }
             }
         }
 
