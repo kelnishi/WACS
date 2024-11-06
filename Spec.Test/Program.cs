@@ -112,9 +112,17 @@ namespace Spec.Test
                             // Console.WriteLine($"Loading module {filepath}");
                             using var fileStream = new FileStream(filepath, FileMode.Open);
                             module = BinaryModuleParser.ParseWasm(fileStream);
-                            var modInst = runtime.InstantiateModule(module);
                             moduleName = $"{moduleCommand.Filename}";
-                            runtime.RegisterModule(moduleName, modInst);
+                            try
+                            {
+                                var modInst = runtime.InstantiateModule(module);
+                                runtime.RegisterModule(moduleName, modInst);
+                            }
+                            catch (ValidationException)
+                            {
+                                RenderModule(module, filepath);
+                                throw;
+                            }
                             break;
                         }
                         case AssertReturnCommand assertReturnCommand:
