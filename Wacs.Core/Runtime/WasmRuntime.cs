@@ -281,7 +281,7 @@ namespace Wacs.Core.Runtime
                 var stackResult = new Value[funcType.ResultType.Arity];
                 for (int i = 0, l = funcType.ResultType.Arity; i < l; ++i)
                 {
-                    stackResult[i] = new Value(results[i]);
+                    stackResult[i] = new Value(funcType.ResultType.Types[i], results[i]);
                 }
                 return stackResult;
             }
