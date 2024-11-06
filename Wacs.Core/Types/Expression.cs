@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using FluentValidation;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
@@ -87,13 +88,17 @@ namespace Wacs.Core.Types
                     validationContext.PushControlFrame(OpCode.Expr, funcType); //The root frame
                     validationContext.PushControlFrame(OpCode.Block, funcType); //For the end instruction
                     
-                    int instIdx = 0;
-                    
                     var instructionValidator = new WasmValidationContext.InstructionValidator();
+
+                    int lastIndex = e.Instructions.Count - 1;
                     // @Spec 3.3.9. Instruction Sequences
-                    foreach (var inst in e.Instructions)
+                    foreach (var (inst, index) in e.Instructions.Select((inst, index)=>(inst, index)))
                     {
-                        var subContext = validationContext.PushSubContext(inst, instIdx++);
+                        //Skip End for constant expressions
+                        if (isConstant && index == lastIndex && inst.Op == OpCode.End)
+                            break;
+                        
+                        var subContext = validationContext.PushSubContext(inst, index);
 
                         try
                         {
