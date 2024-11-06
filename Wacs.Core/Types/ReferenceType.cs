@@ -37,7 +37,7 @@ namespace Wacs.Core.Types
             {
                 ReferenceType.Funcref => ReferenceType.Funcref,
                 ReferenceType.Externref => ReferenceType.Externref,
-                _ => throw new Exception($"Invalid reference type: {reader.ReadSByte():x8}"),
+                _ => throw new FormatException($"Invalid reference type: {reader.ReadSByte():x8}"),
             };
     }
 
