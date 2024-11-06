@@ -519,7 +519,7 @@ namespace Wacs.Core.Instructions
         // @Spec 3.3.8.7. br_if
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.ControlStack.Count >= L.Value,
+            context.Assert(context.ControlStack.Count-2 >= L.Value,
                 $"Instruction br_if invalid. Could not branch to label {L}");
             
             //Pop the predicate
