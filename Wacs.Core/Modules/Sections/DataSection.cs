@@ -28,8 +28,14 @@ namespace Wacs.Core
         /// </summary>
         public class Data : IRenderable
         {
-            private Data(DataMode mode, (uint size, byte[] bytes) data) =>
-                (Mode, Size, Init) = (mode, data.size, data.bytes);
+            private Data(DataMode mode, (uint size, byte[] bytes) data)
+            {
+                Mode = mode;
+                Size = data.size;
+                Init = data.bytes;
+                if (Size != Init.Length)
+                    throw new FormatException($"Data segment size {Size} differs from bytes provided {Init.Length}");
+            }
 
             public DataMode Mode { get; }
             public uint Size { get; }

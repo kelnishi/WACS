@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using FluentValidation;
 using Wacs.Core.Instructions;
@@ -61,6 +62,9 @@ namespace Wacs.Core.Types
             var instText = $" ({inst.RenderText(null)})";
             return instText;
         }
+
+        public bool ContainsInstructions(HashSet<ByteCode> opcode) => 
+            Instructions.ContainsInstruction(opcode);
 
         /// <summary>
         /// @Spec 3.3.10. Expressions

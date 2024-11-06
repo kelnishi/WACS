@@ -313,11 +313,18 @@ namespace Wacs.Core.Instructions
             Offset = offset;
         }
 
-        public static MemArg Parse(BinaryReader reader) => new()
+        public static MemArg Parse(BinaryReader reader)
         {
-            Align = (uint)(1 << (int)reader.ReadLeb128_u32()),
-            Offset = reader.ReadLeb128_u32(),
-        };
+            uint bits = reader.ReadLeb128_u32();
+            if (bits > 16)
+                throw new InvalidDataException($"Memory alignment exceeds page size");
+            uint offset = reader.ReadLeb128_u32();
+            return new MemArg
+            {
+                Align = (uint)(1 << (int)bits),
+                Offset = offset,
+            };
+        }
 
         public string ToWat(BitWidth naturalAlign)
         {
