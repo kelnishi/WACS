@@ -181,6 +181,9 @@ namespace Wacs.Core
             return ControlStack.Pop();
         }
 
+
+        public bool ContainsLabel(uint label) => ControlStack.Count - 2 >= label;
+
         public ResultType ReturnType { get; }
 
         public void ValidateBlock(Block instructionBlock, int index = 0) { }

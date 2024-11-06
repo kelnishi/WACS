@@ -433,7 +433,7 @@ namespace Wacs.Core.Instructions
         // @Spec 3.3.8.6. br l
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.ControlStack.Count >= L.Value,
+            context.Assert(context.ContainsLabel(L.Value),
                 $"Instruction br invalid. Could not branch to label {L}");
 
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
@@ -519,7 +519,7 @@ namespace Wacs.Core.Instructions
         // @Spec 3.3.8.7. br_if
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.ControlStack.Count-2 >= L.Value,
+            context.Assert(context.ContainsLabel(L.Value),
                 $"Instruction br_if invalid. Could not branch to label {L}");
             
             //Pop the predicate
@@ -578,7 +578,7 @@ namespace Wacs.Core.Instructions
         {
             //Pop the switch
             context.OpStack.PopI32();
-            context.Assert(context.ControlStack.Count >= Ln.Value,
+            context.Assert(context.ContainsLabel(Ln.Value),
                 $"Instruction br_table invalid. Context did not contain Label {Ln}");
             
             var mthFrame = context.ControlStack.PeekAt((int)Ln.Value);
@@ -586,7 +586,7 @@ namespace Wacs.Core.Instructions
             
             foreach (var lidx in Ls)
             {
-                context.Assert(context.ControlStack.Count >= lidx.Value,
+                context.Assert(context.ContainsLabel(lidx.Value),
                     $"Instruction br_table invalid. Context did not contain Label {lidx}");
                 
                 var nthFrame = context.ControlStack.PeekAt((int)lidx.Value);

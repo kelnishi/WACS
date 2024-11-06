@@ -106,5 +106,15 @@ namespace Wacs.Core.OpCodes
                 default: return 0;
             }
         }
+        
+        public override string ToString() => x00 switch
+        {
+            OpCode.FB => $"(GC){xFB}",
+            OpCode.FC => $"(Ext){xFC}",
+            OpCode.FD => $"(SIMD){xFD}",
+            OpCode.FE => $"(Threads){xFE}",
+            _ => $"{x00}"
+        };
+        
     }
 }

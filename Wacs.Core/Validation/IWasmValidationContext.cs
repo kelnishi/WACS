@@ -24,6 +24,7 @@ namespace Wacs.Core.Validation
         public LocalsSpace Locals { get; }
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
+        public bool ContainsLabel(uint label);
         public void PushControlFrame(ByteCode opCode, FunctionType types);
         public ValidationControlFrame PopControlFrame();
         public void SetUnreachable();

@@ -143,16 +143,16 @@ namespace Wacs.Core.Validation
             
             //Check to make sure we have the correct results, but only if we didn't jump
             OpStack.PopValues(ControlFrame.EndTypes);
-            if (!ControlFrame.Unreachable)
-            {
-                //Reset the stack
-                if (OpStack.Height != ControlFrame.Height)
-                    throw new ValidationException(
-                        $"Operand stack height {OpStack.Height} differed from Control Frame height {ControlFrame.Height}");
-            }
-
+            
+            //Check the stack
+            if (OpStack.Height != ControlFrame.Height)
+                throw new ValidationException(
+                    $"Operand stack height {OpStack.Height} differed from Control Frame height {ControlFrame.Height}");
+            
             return ControlStack.Pop();
         }
+
+        public bool ContainsLabel(uint label) => ControlStack.Count - 2 >= label;
 
         public void PopOperandsToHeight(int height)
         {
