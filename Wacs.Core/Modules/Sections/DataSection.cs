@@ -21,7 +21,7 @@ namespace Wacs.Core
         /// </summary>
         public Data[] Datas { get; internal set; } = Array.Empty<Data>();
 
-        public uint DataCount { get; internal set; }
+        public uint DataCount { get; internal set; } = uint.MaxValue;
 
         /// <summary>
         /// @Spec 2.5.8. Data Segments

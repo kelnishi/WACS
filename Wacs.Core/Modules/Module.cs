@@ -34,6 +34,8 @@ namespace Wacs.Core
         //Add Ids to objects while parsing
         public static bool AnnotateWhileParsing = true;
 
+        public static bool SkipFinalization = false;
+
         private static IInstructionFactory _instructionFactory = ReferenceFactory.Factory;
 
         public static int InstructionsParsed = 0;
@@ -179,6 +181,9 @@ namespace Wacs.Core
                     break;
                 case SectionId.Data:
                     module.Datas = ParseDataSection(reader);
+                    if (module.DataCount == uint.MaxValue)
+                        module.DataCount = (uint)module.Datas.Length;
+                    
                     if (AnnotateWhileParsing)
                     {
                         int idx = 0;
@@ -258,7 +263,9 @@ namespace Wacs.Core
 
         private static void FinalizeModule(Module module)
         {
-            if (module.DataCount != module.Datas.Length)
+            if (module.DataCount == uint.MaxValue)
+                module.DataCount = 0;
+            if (module.DataCount != module.Datas.Length && !SkipFinalization)
                 throw new FormatException($"Data count and data section have inconsistent lengths.");
             
             PatchFuncSection(module);
