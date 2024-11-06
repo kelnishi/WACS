@@ -144,11 +144,14 @@ namespace Wacs.Core.Validation
             
             //Check to make sure we have the correct results, but only if we didn't jump
             if (!ControlFrame.Unreachable)
+            {
                 OpStack.PopValues(ControlFrame.EndTypes);
-            
-            //Reset the stack
-            if (OpStack.Height != ControlFrame.Height)
-                throw new ValidationException($"Operand stack height {OpStack.Height} differed from Control Frame height {ControlFrame.Height}");
+                
+                //Reset the stack
+                if (OpStack.Height != ControlFrame.Height)
+                    throw new ValidationException(
+                        $"Operand stack height {OpStack.Height} differed from Control Frame height {ControlFrame.Height}");
+            }
 
             return ControlStack.Pop();
         }
@@ -196,7 +199,11 @@ namespace Wacs.Core.Validation
                         {
                             string message = $"{exc.Message}";
                             if (!exc.Message.StartsWith("Function["))
-                                message = $"{ctx.PropertyPath}: {message} in Instruction {inst.Op.GetMnemonic()}";
+                            {
+                                string path = ctx.PropertyPath;
+                                var (line, _) = ctx.GetValidationContext().ValidationModule.Repr.CalculateLine(path);
+                                message = $"{ctx.PropertyPath} line {line}: {message} in Instruction {inst.Op.GetMnemonic()}";
+                            }
 
                             throw new ValidationException(message);
                         }
