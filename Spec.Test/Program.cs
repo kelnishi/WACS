@@ -186,6 +186,16 @@ namespace Spec.Test
                                 didAssert = true;
                                 assertionMessage = exc.Message;
                             }
+                            catch (InvalidDataException exc)
+                            {
+                                didAssert = true;
+                                assertionMessage = exc.Message;
+                            }
+                            catch (FormatException exc)
+                            {
+                                didAssert = true;
+                                assertionMessage = exc.Message;
+                            }
 
                             if (!didAssert)
                             {

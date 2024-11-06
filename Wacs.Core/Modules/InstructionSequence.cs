@@ -92,5 +92,24 @@ namespace Wacs.Core
         {
             _instructions[^1] = InstEnd.Inst;
         }
+
+        public bool ContainsInstruction(HashSet<ByteCode> opcode)
+        {
+            foreach (var inst in _instructions)
+            {
+                if (opcode.Contains(inst.Op))
+                    return true;
+
+                if (inst is not IBlockInstruction blockInstruction) continue;
+                
+                for (int i = 0, l = blockInstruction.Count; i < l; ++i)
+                {
+                    if (blockInstruction.GetBlock(i).ContainsInstruction(opcode))
+                        return true;
+                }
+            }
+
+            return false;
+        }
     }
 }

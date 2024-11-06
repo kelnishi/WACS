@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FluentValidation;
@@ -39,6 +40,24 @@ namespace Wacs.Core
         private static IInstructionFactory _instructionFactory = ReferenceFactory.Factory;
 
         public static int InstructionsParsed = 0;
+
+        public static readonly SectionId[] SectionOrder = new[]
+        {
+            SectionId.Type,
+            SectionId.Import,
+            SectionId.Function,
+            SectionId.Table,
+            SectionId.Memory,
+            SectionId.Global,
+            SectionId.Export,
+            SectionId.Start,
+            SectionId.Element,
+            SectionId.DataCount,
+            SectionId.Code,
+            SectionId.Data
+        };
+
+        static readonly HashSet<ByteCode> MemoryInstructions = new HashSet<ByteCode> { ExtCode.MemoryInit, ExtCode.DataDrop };
         public static IInstructionFactory InstructionFactory => _instructionFactory;
 
         public static void UseInstructionFactory(IInstructionFactory factory) =>
@@ -70,16 +89,18 @@ namespace Wacs.Core
                     throw new NotSupportedException($"Unsupported WebAssembly version: {version}");
                 }
 
-                SectionId lastSection = SectionId.Custom;
+                int order = -1;
                 // Parse sections
                 while (stream.Position < stream.Length)
                 {
                     var sectionId = ParseSection(reader, module);
                     if (sectionId != SectionId.Custom)
                     {
-                        if ((int)sectionId <= (int)lastSection)
-                            throw new FormatException($"Module sections must proceed in order and not repeat!");
-                        lastSection = sectionId;
+                        int sectionIndex = Array.IndexOf(SectionOrder, sectionId);
+                        if (sectionIndex <= order)
+                            throw new FormatException(
+                                $"Module sections must occur at most once and in the prescribed order.");
+                        order = sectionIndex;
                     }
                 }
             }
@@ -114,12 +135,22 @@ namespace Wacs.Core
                     break;
                 case SectionId.Import:
                     module.Imports = ParseImportSection(reader);
+                    foreach (var import in module.Imports)
+                    {
+                        if (import.Desc is Module.ImportDesc.FuncDesc fd)
+                            if (module.Types.Count == 0)
+                                throw new FormatException($"Module must have Types section before importing Functions");
+
+                    }
                     break;
                 case SectionId.Function:
                     module.Funcs = ParseFunctionSection(reader).ToList();
                     int fIdx = module.ImportedFunctions.Count;
                     foreach (var func in module.Funcs)
                     {
+                        if (module.Types.Count == 0)
+                            throw new FormatException($"Module must have Types section before declaring Functions");
+                        
                         func.Index = (FuncIdx)fIdx++;
                     }
                     break;
@@ -181,8 +212,6 @@ namespace Wacs.Core
                     break;
                 case SectionId.Data:
                     module.Datas = ParseDataSection(reader);
-                    if (module.DataCount == uint.MaxValue)
-                        module.DataCount = (uint)module.Datas.Length;
                     
                     if (AnnotateWhileParsing)
                     {
@@ -252,23 +281,35 @@ namespace Wacs.Core
                 var b => new ByteCode(b)
             };
             int traceIdx = InstructionsParsed;
-            var inst = _instructionFactory.CreateInstruction(opcode)?.Parse(reader);
-            
-            //Raw tracking for debugging purposes
-            // if (inst != null)
-            //     InstructionsParsed += 1;
-
-            return inst;
+            try
+            {
+                return _instructionFactory.CreateInstruction(opcode)?.Parse(reader);
+            }
+            catch (InvalidDataException exc)
+            {
+                throw new FormatException($"Bad Memory parameters {exc.Message}");
+            }
         }
 
         private static void FinalizeModule(Module module)
         {
+            PatchFuncSection(module);
+
+            foreach (var func in module.Funcs)
+            {
+                if (func.Body.ContainsInstructions(MemoryInstructions))
+                {
+                    if (module.DataCount == uint.MaxValue)
+                        throw new FormatException($"memory.init instruction requires Data Count section");
+                }
+            }
+            
             if (module.DataCount == uint.MaxValue)
-                module.DataCount = 0;
-            if (module.DataCount != module.Datas.Length && !SkipFinalization)
+                module.DataCount = (uint)module.Datas.Length;
+            
+            if (module.DataCount != module.Datas.Length)
                 throw new FormatException($"Data count and data section have inconsistent lengths.");
             
-            PatchFuncSection(module);
             PatchNames(module);
         }
     }
