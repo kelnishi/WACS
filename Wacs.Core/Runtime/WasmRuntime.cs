@@ -334,7 +334,6 @@ namespace Wacs.Core.Runtime
                 
                 if (options.CalculateLineNumbers)
                 {
-                    Console.Error.WriteLine();
                     var ptr = Context.ComputePointerPath();
                     var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
                     (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
@@ -356,7 +355,6 @@ namespace Wacs.Core.Runtime
                 string message = exc.Message;
                 if (options.CalculateLineNumbers)
                 {
-                    Console.Error.WriteLine();
                     var ptr = Context.ComputePointerPath();
                     var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
                     (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);

@@ -110,7 +110,6 @@ namespace Spec.Test
                             env.BindToRuntime(runtime);
 
                             var filepath = Path.Combine(testDefinition.Path, moduleCommand.Filename);
-                            // Console.WriteLine($"Loading module {filepath}");
                             using var fileStream = new FileStream(filepath, FileMode.Open);
                             module = BinaryModuleParser.ParseWasm(fileStream);
                             moduleName = $"{moduleCommand.Filename}";

@@ -84,7 +84,8 @@ namespace Wacs.Core.Types
                     var validationContext = ctx.GetValidationContext();
 
                     var funcType = new FunctionType(ResultType.Empty, resultType);
-                    validationContext.PushControlFrame(OpCode.Block, funcType);
+                    validationContext.PushControlFrame(OpCode.Expr, funcType); //The root frame
+                    validationContext.PushControlFrame(OpCode.Block, funcType); //For the end instruction
                     
                     int instIdx = 0;
                     
@@ -93,11 +94,18 @@ namespace Wacs.Core.Types
                     foreach (var inst in e.Instructions)
                     {
                         var subContext = validationContext.PushSubContext(inst, instIdx++);
-                        
-                        var result = instructionValidator.Validate(subContext);
-                        foreach (var error in result.Errors)
+
+                        try
                         {
-                            ctx.AddFailure($"Instruction.{error.PropertyName}", error.ErrorMessage);
+                            var result = instructionValidator.Validate(subContext);
+                            foreach (var error in result.Errors)
+                            {
+                                ctx.AddFailure($"Instruction.{error.PropertyName}", error.ErrorMessage);
+                            }
+                        }
+                        catch (ValidationException exc)
+                        {
+                            ctx.AddFailure(exc.Message);
                         }
                         
                         validationContext.PopValidationContext();
@@ -105,9 +113,10 @@ namespace Wacs.Core.Types
 
                     try
                     {
-                        validationContext.OpStack.PopValues(resultType);
+                        validationContext.PopControlFrame();
                         if (validationContext.OpStack.Height != 0)
                             throw new ValidationException($"Expression had leftover operands on the stack");
+                        
                     }
                     catch (ValidationException exc)
                     {

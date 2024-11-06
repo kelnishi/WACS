@@ -15,6 +15,8 @@ namespace Wacs.Core.Runtime
     [StructLayout(LayoutKind.Explicit)]
     public readonly struct Value : IComparable<Value>
     {
+        public static readonly Value Unknown = new(ValType.Unknown);
+            
         [FieldOffset(0)] public readonly ValType Type;
 
         [FieldOffset(1)] public readonly byte U8;
@@ -174,6 +176,9 @@ namespace Wacs.Core.Runtime
                     Ptr = -1;
                     break;
                 case ValType.Nil:
+                    Ptr = -1;
+                    break;
+                case ValType.Unknown:
                     Ptr = -1;
                     break;
                 case ValType.Undefined:
