@@ -45,7 +45,7 @@ namespace Wacs.Core.Types
             reader.ReadByte() switch {
                 0x00 => new Limits(reader.ReadLeb128_u32()),
                 0x01 => new Limits(reader.ReadLeb128_u32(), reader.ReadLeb128_u32()),
-                var flag => throw new InvalidDataException($"Invalid Limits flag {flag} at offset {reader.BaseStream.Position}.")
+                var flag => throw new FormatException($"Invalid Limits flag {flag} at offset {reader.BaseStream.Position}.")
             };
 
         public string ToWat() => Maximum != null ? $"{Minimum} {Maximum}" : $"{Minimum}";

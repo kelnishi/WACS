@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -44,7 +45,7 @@ namespace Wacs.Core
                 var code = new CodeDesc(size, FuncLocalsBody.Parse(reader));
                 var end = start + size;
                 if (reader.BaseStream.Position != end)
-                    throw new InvalidDataException($"Malformed code size: expected {code.Size:x} bytes, but got {(int)(reader.BaseStream.Position - start):x} at {reader.BaseStream.Position:x}");
+                    throw new FormatException($"Malformed code size: expected {code.Size:x} bytes, but got {(int)(reader.BaseStream.Position - start):x} at {reader.BaseStream.Position:x}");
                 return code;
             }
         }
@@ -64,7 +65,7 @@ namespace Wacs.Core
         private static void PatchFuncSection(List<Module.Function> functions, Module.CodeDesc[] code)
         {
             if (functions.Count != code.Length)
-                throw new InvalidDataException($"Module functions section count {functions.Count} must equal the code count {code.Length}");
+                throw new FormatException($"Module functions section count {functions.Count} must equal the code count {code.Length}");
             
             for (int i = 0, l = code.Length; i < l; ++i)
             {

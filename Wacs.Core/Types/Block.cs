@@ -78,15 +78,15 @@ namespace Wacs.Core.Types
 
                 // Prevent shift overflow
                 if (shift >= 64)
-                    throw new InvalidDataException("Shift count exceeds 64 bits while decoding s33.");
+                    throw new FormatException("Shift count exceeds 64 bits while decoding s33.");
 
                 byteValue = reader.ReadByte();
                 if (byteValue == 0xFF)
-                    throw new InvalidDataException("Unexpected end of stream while decoding s33.");
+                    throw new FormatException("Unexpected end of stream while decoding s33.");
             }
 
             if (result < 0)
-                throw new InvalidDataException($"BlockType Index {result} was negative");
+                throw new FormatException($"BlockType Index {result} was negative");
             
             //Just take the U32 bits since the unset sign bit is 33.
             uint data = (uint)(result & 0xFFFF_FFFF);

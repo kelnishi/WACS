@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using FluentValidation;
 
@@ -59,7 +60,7 @@ namespace Wacs.Core.Types
         public static FunctionType Parse(BinaryReader reader) =>
             reader.ReadByte() switch {
                 0x60 => new FunctionType(ResultType.Parse(reader), ResultType.Parse(reader)),
-                var form => throw new InvalidDataException(
+                var form => throw new FormatException(
                     $"Invalid function type form {form} at offset {reader.BaseStream.Position}.")
             };
 

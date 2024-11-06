@@ -53,7 +53,8 @@ namespace Wacs.Core.Validation
 
         public ResultType ReturnType => ExecFrame.Type.ResultType;
 
-        public IValidationOpStack OpStack => Stack;
+        public IValidationOpStack OpStack =>
+            (ControlStack.Count == 0 || ControlFrame.Unreachable) ? _stackPolymorphic : Stack;
 
         public Stack<ValidationControlFrame> ControlStack { get; } = new();
         public ValidationControlFrame ControlFrame => ControlStack.Peek();

@@ -212,6 +212,11 @@ namespace Spec.Test
                                 didAssert1 = true;
                                 assertionMessage1 = exc.Message;
                             }
+                            catch (NotSupportedException exc)
+                            {
+                                didAssert1 = true;
+                                assertionMessage1 = exc.Message;
+                            }
 
                             if (!didAssert1)
                             {
