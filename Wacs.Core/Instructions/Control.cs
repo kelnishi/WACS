@@ -510,7 +510,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x0D
-    public class InstBranchConditional : InstructionBase, IBranchInstruction
+    public class InstBranchIf : InstructionBase, IBranchInstruction
     {
         public override ByteCode Op => OpCode.BrIf;
 
