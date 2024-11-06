@@ -76,6 +76,9 @@ namespace Wacs.Core.Types
 
     public static class ValueTypeExtensions
     {
+        public static bool IsCompatible(this ValType left, ValType right) => 
+            left == right || left == ValType.Unknown || right == ValType.Unknown;
+
         public static bool IsNumeric(this ValType type) => type switch {
             ValType.I32 => true,
             ValType.I64 => true,

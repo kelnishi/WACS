@@ -64,7 +64,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PopI32();
                 Value val2 = context.OpStack.PopAny();
                 Value val1 = context.OpStack.PopAny();
-                context.Assert(val1.Type == val2.Type,
+                context.Assert(val1.Type.IsCompatible(val2.Type),
                     $"Select instruction expected matching types on the stack: {val1.Type} == {val2.Type}");
                 context.OpStack.PushType(val1.Type);
             }

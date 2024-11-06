@@ -226,9 +226,7 @@ namespace Wacs.Core.Validation
                 throw new ValidationException($"Operand stack underflow. pop({expectedType})");
 
             Value actual = _stack.Pop();
-            if (actual.Type != expectedType
-                && actual.Type != ValType.Unknown
-                && expectedType != ValType.Unknown)
+            if (!actual.Type.IsCompatible(expectedType))
                 throw new ValidationException(
                     $"Wrong operand type {actual.Type} at top of stack. Expected: {expectedType}");
             
