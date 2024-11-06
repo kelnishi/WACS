@@ -126,6 +126,23 @@ namespace Spec.Test
 
                             break;
                         }
+                        case ActionCommand actionCommand:
+                            var action = actionCommand.Action;
+                            switch (action.Type)
+                            {
+                                case ActionType.Invoke:
+                                    if (!runtime.TryGetExportedFunction((moduleName, action.Field), out var addr))
+                                        throw new InvalidDataException(
+                                            $"Could not get exported function {moduleName}.{action.Field}");
+                                    //Compute type from action.Args and action.Expected
+                                    var invoker = runtime.CreateStackInvoker(addr);
+
+                                    var pVals = action.Args.Select(arg => arg.AsValue).ToArray();
+                                    var result = invoker(pVals);
+                                    break;
+                            }
+
+                            break;
                         case AssertReturnCommand assertReturnCommand:
                             var action1 = assertReturnCommand.Action;
                             switch (action1.Type)

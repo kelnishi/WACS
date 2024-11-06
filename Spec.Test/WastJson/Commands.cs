@@ -18,6 +18,17 @@ namespace Spec.Test.WastJson
         public override string ToString() => $"ModuleCommand {{ Filename = {Filename}, Line = {Line} }}";
     }
 
+    public class ActionCommand : ICommand
+    {
+        [JsonPropertyName("action")]
+        public IAction Action { get; set; }
+
+        public CommandType Type => CommandType.Action;
+
+        [JsonPropertyName("line")]
+        public int Line { get; set; }
+    }
+
     public class AssertReturnCommand : ICommand
     {
         [JsonPropertyName("action")]
@@ -342,6 +353,7 @@ namespace Spec.Test.WastJson
 
             ICommand? command = type switch {
                 CommandType.Module => JsonSerializer.Deserialize<ModuleCommand>(root.GetRawText(), options),
+                CommandType.Action => JsonSerializer.Deserialize<ActionCommand>(root.GetRawText(), options),
                 CommandType.AssertReturn => JsonSerializer.Deserialize<AssertReturnCommand>(root.GetRawText(), options),
                 CommandType.AssertTrap => JsonSerializer.Deserialize<AssertTrapCommand>(root.GetRawText(), options),
                 CommandType.AssertExhaustion => JsonSerializer.Deserialize<AssertExhaustionCommand>(root.GetRawText(), options),
