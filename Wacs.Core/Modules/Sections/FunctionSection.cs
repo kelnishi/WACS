@@ -63,8 +63,9 @@ namespace Wacs.Core
 
                 var fakeContext = new FakeContext(module, this);
                 StackRenderer stackRenderer = new(null, RenderStack, context:fakeContext);
+                fakeContext.PushControlFrame(OpCode.Expr, functionType);
                 RenderInstructions(writer, indent, 0, module, Body.Instructions, stackRenderer);
-                
+                fakeContext.PopControlFrame();
                 writer.WriteLine(")");
             }
 
