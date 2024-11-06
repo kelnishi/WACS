@@ -68,10 +68,17 @@ namespace Wacs.Core
                     throw new NotSupportedException($"Unsupported WebAssembly version: {version}");
                 }
 
+                SectionId lastSection = SectionId.Custom;
                 // Parse sections
                 while (stream.Position < stream.Length)
                 {
-                    ParseSection(reader, module);
+                    var sectionId = ParseSection(reader, module);
+                    if (sectionId != SectionId.Custom)
+                    {
+                        if ((int)sectionId <= (int)lastSection)
+                            throw new FormatException($"Module sections must proceed in order and not repeat!");
+                        lastSection = sectionId;
+                    }
                 }
             }
         
@@ -88,7 +95,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 5.5.2. Sections
         /// </summary>
-        private static void ParseSection(BinaryReader reader, Module module)
+        private static SectionId ParseSection(BinaryReader reader, Module module)
         {
             var start = reader.BaseStream.Position;
             var sectionId = (SectionId)reader.ReadByte();
@@ -168,7 +175,7 @@ namespace Wacs.Core
                     module.DataCount = ParseDataCountSection(reader);
                     break;
                 case SectionId.Code:
-                    PatchFuncSection(module.Funcs, ParseCodeSection(reader));
+                    module.Codes = ParseCodeSection(reader);
                     break;
                 case SectionId.Data:
                     module.Datas = ParseDataSection(reader);
@@ -220,6 +227,8 @@ namespace Wacs.Core
                 throw new FormatException(
                     $"Section size mismatch. Expected {payloadLength} bytes, but got {reader.BaseStream.Position - payloadStart}.");
             }
+
+            return sectionId;
         }
 
         /// <summary>
@@ -249,6 +258,10 @@ namespace Wacs.Core
 
         private static void FinalizeModule(Module module)
         {
+            if (module.DataCount != module.Datas.Length)
+                throw new FormatException($"Data count and data section have inconsistent lengths.");
+            
+            PatchFuncSection(module);
             PatchNames(module);
         }
     }
