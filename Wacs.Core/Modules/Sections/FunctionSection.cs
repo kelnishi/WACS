@@ -178,16 +178,25 @@ namespace Wacs.Core
                             //*Expression Validator also validates result types
                             var exprValidator = new Expression.Validator(funcType.ResultType);
                             var subcontext = vContext.PushSubContext(func.Body);
-                            var validationResult = exprValidator.Validate(subcontext);
-                            if (!validationResult.IsValid)
+                            try
                             {
-                                foreach (var failure in validationResult.Errors)
+                                var validationResult = exprValidator.Validate(subcontext);
+                                if (!validationResult.IsValid)
                                 {
-                                    // Map the child validation failures to the parent context
-                                    // Adjust the property name to reflect the path to the child property
-                                    var propertyName = $"{ctx.PropertyPath}.{failure.PropertyName}";
-                                    ctx.AddFailure(propertyName, failure.ErrorMessage);
+                                    foreach (var failure in validationResult.Errors)
+                                    {
+                                        // Map the child validation failures to the parent context
+                                        // Adjust the property name to reflect the path to the child property
+                                        var propertyName = $"{ctx.PropertyPath}.{failure.PropertyName}";
+                                        ctx.AddFailure(propertyName, failure.ErrorMessage);
+                                    }
                                 }
+                            }
+                            catch (ValidationException exc)
+                            {
+                                var message = $"{exc.Message}";
+                                ctx.AddFailure(message);
+                                throw new ValidationException(message);
                             }
                             vContext.PopValidationContext();
                         });

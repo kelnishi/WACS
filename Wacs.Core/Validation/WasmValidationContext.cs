@@ -194,20 +194,16 @@ namespace Wacs.Core.Validation
                         }
                         catch (ValidationException exc)
                         {
-                            // string path = ctx.PropertyPath;
-                            // var (line, code) = ctx.GetValidationContext().Frame.Module.Repr.CalculateLine(path);
-                            string message = $"{exc.Message} in Instruction {inst.Op.GetMnemonic()}";
-                            
-                            ctx.AddFailure($"{ctx.PropertyPath}: {message}");
-                        }
-                        catch (InvalidDataException exc)
-                        {
-                            ctx.AddFailure($"{ctx.PropertyPath}: Invalid instruction data; {exc.Message}");
+                            string message = $"{exc.Message}";
+                            if (!exc.Message.StartsWith("Function["))
+                                message = $"{ctx.PropertyPath}: {message} in Instruction {inst.Op.GetMnemonic()}";
+
+                            throw new ValidationException(message);
                         }
                         catch (NotImplementedException exc)
                         {
                             _ = exc;
-                            ctx.AddFailure($"{ctx.PropertyPath}: WASM Instruction `{inst.Op.GetMnemonic()}` is not implemented.");
+                            ctx.AddFailure($"WASM Instruction `{inst.Op.GetMnemonic()}` is not implemented.");
                         }
                     });
             }
