@@ -222,7 +222,7 @@ namespace Wacs.Core.Validation
         {
             if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
                 return Value.Unknown;
-            if (_stack.Count == 0)
+            if (_stack.Count <= _context.ControlFrame.Height)
                 throw new ValidationException($"Operand stack underflow. pop({expectedType})");
 
             Value actual = _stack.Pop();
