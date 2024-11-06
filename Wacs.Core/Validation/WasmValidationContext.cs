@@ -17,8 +17,6 @@ namespace Wacs.Core.Validation
     /// </summary>
     public class WasmValidationContext : IWasmValidationContext
     {
-        private readonly UnreachableOpStack _stackPolymorphic = new();
-
         private Stack<IValidationContext> _contextStack = new();
 
         /// <summary>
@@ -29,6 +27,8 @@ namespace Wacs.Core.Validation
         {
             ValidationModule = new ModuleInstance(module);
 
+            Stack = new(this);
+            
             Funcs = new FunctionsSpace(module);
             Tables = new TablesSpace(module);
             Mems = new MemSpace(module);
@@ -44,17 +44,16 @@ namespace Wacs.Core.Validation
 
         private Frame ExecFrame { get; set; } = null!;
 
-        private ValidationOpStack Stack { get; } = new();
+        private ValidationOpStack Stack { get; }
 
         public ValidationContext<Module> RootContext { get; }
 
         public ResultType Return => ControlFrame.EndTypes;
         private ModuleInstance ValidationModule { get; }
+        public IValidationOpStack OpStack => Stack;
 
         public ResultType ReturnType => ExecFrame.Type.ResultType;
 
-        public IValidationOpStack OpStack =>
-            (ControlStack.Count == 0 || ControlFrame.Unreachable) ? _stackPolymorphic : Stack;
 
         public Stack<ValidationControlFrame> ControlStack { get; } = new();
         public ValidationControlFrame ControlFrame => ControlStack.Peek();
@@ -143,10 +142,9 @@ namespace Wacs.Core.Validation
                 throw new ValidationException("Validation Control Stack underflow");
             
             //Check to make sure we have the correct results, but only if we didn't jump
+            OpStack.PopValues(ControlFrame.EndTypes);
             if (!ControlFrame.Unreachable)
             {
-                OpStack.PopValues(ControlFrame.EndTypes);
-                
                 //Reset the stack
                 if (OpStack.Height != ControlFrame.Height)
                     throw new ValidationException(
@@ -168,7 +166,7 @@ namespace Wacs.Core.Validation
         }
 
         public ValidationContext<T> PushSubContext<T>(T child, int index = -1)
-        where T : class
+            where T : class
         {
             var subctx = _contextStack.Peek().GetSubContext(child, index);
             _contextStack.Push(subctx);
@@ -204,8 +202,8 @@ namespace Wacs.Core.Validation
                                 var (line, _) = ctx.GetValidationContext().ValidationModule.Repr.CalculateLine(path);
                                 message = $"{ctx.PropertyPath} line {line}: {message} in Instruction {inst.Op.GetMnemonic()}";
                             }
-
-                            throw new ValidationException(message);
+                            ctx.AddFailure(message);
+                            // throw new ValidationException(message);
                         }
                         catch (NotImplementedException exc)
                         {
