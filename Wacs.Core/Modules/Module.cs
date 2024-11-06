@@ -54,22 +54,30 @@ namespace Wacs.Core
             InstructionsParsed = 0;
             
             // Read and validate the magic number and version
-            uint magicNumber = reader.ReadUInt32(); //Exactly 4bytes, little endian
-            if (magicNumber != 0x6D736100) // '\0asm'
+            try
             {
-                throw new FormatException("Invalid magic number for WebAssembly module.");
-            }
+                uint magicNumber = reader.ReadUInt32(); //Exactly 4bytes, little endian
+                if (magicNumber != 0x6D736100) // '\0asm'
+                {
+                    throw new FormatException("Invalid magic number for WebAssembly module.");
+                }
 
-            uint version = reader.ReadUInt32(); //Exactly 4bytes, little endian
-            if (version != 1)
-            {
-                throw new NotSupportedException($"Unsupported WebAssembly version: {version}");
-            }
+                uint version = reader.ReadUInt32(); //Exactly 4bytes, little endian
+                if (version != 1)
+                {
+                    throw new NotSupportedException($"Unsupported WebAssembly version: {version}");
+                }
 
-            // Parse sections
-            while (stream.Position < stream.Length)
+                // Parse sections
+                while (stream.Position < stream.Length)
+                {
+                    ParseSection(reader, module);
+                }
+            }
+        
+            catch (EndOfStreamException e)
             {
-                ParseSection(reader, module);
+                throw new FormatException($"Encountered premature end of stream {e.Message}");
             }
 
             FinalizeModule(module);
@@ -175,7 +183,7 @@ namespace Wacs.Core
                     break;
                 case SectionId.Custom: break; //Handled below 
                 default:
-                    throw new InvalidDataException($"Unknown section ID: {sectionId} at offset {start}.");
+                    throw new FormatException($"Unknown section ID: {sectionId} at offset {start}.");
             }
 
             // Custom sections
@@ -209,7 +217,7 @@ namespace Wacs.Core
 
             if (reader.BaseStream.Position != payloadEnd)
             {
-                throw new InvalidDataException(
+                throw new FormatException(
                     $"Section size mismatch. Expected {payloadLength} bytes, but got {reader.BaseStream.Position - payloadStart}.");
             }
         }

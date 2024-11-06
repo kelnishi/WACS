@@ -111,7 +111,7 @@ namespace Wacs.Core
                 reader.ReadByte() switch {
                     0x00 => ReferenceType.Funcref,
                     var b =>
-                        throw new InvalidDataException($"Invalid ElementKind {b} at {reader.BaseStream.Position - 1:x}")
+                        throw new FormatException($"Invalid ElementKind {b} at {reader.BaseStream.Position - 1:x}")
                 };
 
             private static TableIdx ParseTableIndex(BinaryReader reader) =>
@@ -163,7 +163,7 @@ namespace Wacs.Core
                             ReferenceTypeParser.Parse(reader),
                             reader.ParseVector(Expression.Parse),
                             new ElementMode.DeclarativeMode()),
-                    _ => throw new InvalidDataException($"Invalid Element at {reader.BaseStream.Position}")
+                    _ => throw new FormatException($"Invalid Element at {reader.BaseStream.Position}")
                 };
 
             private bool IsAllRefFunc()

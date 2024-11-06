@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 
 namespace Wacs.Core.Types
@@ -41,7 +42,7 @@ namespace Wacs.Core.Types
                 ExternalKind.Table => ExternalKind.Table,
                 ExternalKind.Memory => ExternalKind.Memory,
                 ExternalKind.Global => ExternalKind.Global,
-                _ => throw new InvalidDataException($"Invalid Import kind type at offset {reader.BaseStream.Position}.")
+                _ => throw new FormatException($"Invalid Import kind type at offset {reader.BaseStream.Position}.")
             };
     }
 }

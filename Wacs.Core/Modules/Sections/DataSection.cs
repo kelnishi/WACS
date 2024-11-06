@@ -69,7 +69,7 @@ namespace Wacs.Core
                         new Data(new DataMode.ActiveMode((MemIdx)reader.ReadLeb128_u32(), Expression.Parse(reader)), ParseByteVector(reader)),
                     DataFlags.Passive => 
                         new Data(DataMode.Passive, ParseByteVector(reader)),
-                    _ => throw new InvalidDataException($"Malformed Data section at {reader.BaseStream.Position}")
+                    _ => throw new FormatException($"Malformed Data section at {reader.BaseStream.Position}")
                 };
 
             /// <summary>

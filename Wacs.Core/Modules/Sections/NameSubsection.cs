@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -83,11 +84,11 @@ namespace Wacs.Core
                             break;
                         
                         default:
-                            throw new InvalidDataException($"Name Subsection had invalid id: {subsectionId}");
+                            throw new FormatException($"Name Subsection had invalid id: {subsectionId}");
                     }
 
                     if (reader.BaseStream.Position != end)
-                        throw new InvalidDataException(
+                        throw new FormatException(
                             $"Name Subsection size mismatch. Expected {size} bytes, but got {reader.BaseStream.Position - start}");
                 }
 

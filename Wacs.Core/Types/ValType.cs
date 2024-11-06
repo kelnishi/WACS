@@ -152,7 +152,7 @@ namespace Wacs.Core.Types
                 //Reference Types
                 ValType.Funcref => ValType.Funcref,
                 ValType.Externref => ValType.Externref,
-                _ => throw new InvalidDataException($"Invalid value type at offset {reader.BaseStream.Position}.")
+                _ => throw new FormatException($"Invalid value type at offset {reader.BaseStream.Position}.")
             };
     }
 }

@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -49,7 +50,7 @@ namespace Wacs.Core.Instructions
         {
             M = (MemIdx)reader.ReadByte();
             if (M != 0x00)
-                throw new InvalidDataException(
+                throw new FormatException(
                     $"Invalid memory.size. Multiple memories are not yet supported. memidx:{M}");
 
             return this;
@@ -110,7 +111,7 @@ namespace Wacs.Core.Instructions
         {
             M = (MemIdx)reader.ReadByte();
             if (M != 0x00)
-                throw new InvalidDataException(
+                throw new FormatException(
                     $"Invalid memory.grow. Multiple memories are not yet supported. memidx:{M}");
 
             return this;
@@ -223,7 +224,7 @@ namespace Wacs.Core.Instructions
             Y = (MemIdx)reader.ReadByte();
 
             if (Y != 0x00)
-                throw new InvalidDataException(
+                throw new FormatException(
                     $"Invalid memory.init. Multiple memories are not yet supported. memidx:{Y}");
 
             return this;
@@ -404,7 +405,7 @@ namespace Wacs.Core.Instructions
 
             if (SrcX != 0x00 || DstY != 0x00)
             {
-                throw new InvalidDataException(
+                throw new FormatException(
                     $"Invalid memory.copy. Multiple memories are not yet supported. {SrcX} -> {DstY}");
             }
 
@@ -493,7 +494,7 @@ namespace Wacs.Core.Instructions
         {
             X = (MemIdx)reader.ReadByte();
             if (X.Value != 0x00)
-                throw new InvalidDataException($"Invalid memory.fill. Multiple memories are not yet supported. {X}");
+                throw new FormatException($"Invalid memory.fill. Multiple memories are not yet supported. {X}");
 
             return this;
         }

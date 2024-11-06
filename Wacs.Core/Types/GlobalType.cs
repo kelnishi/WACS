@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using FluentValidation;
 
@@ -62,7 +63,7 @@ namespace Wacs.Core.Types
             {
                 Mutability.Immutable => Mutability.Immutable, //const
                 Mutability.Mutable => Mutability.Mutable,     //var
-                var flag => throw new InvalidDataException($"Invalid Mutability flag {flag} at offset {reader.BaseStream.Position}.")
+                var flag => throw new FormatException($"Invalid Mutability flag {flag} at offset {reader.BaseStream.Position}.")
             };
     }
 

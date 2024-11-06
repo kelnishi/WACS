@@ -142,7 +142,7 @@ namespace Wacs.Core
                 ExternalKind.Memory => new Module.ExportDesc.MemDesc { MemoryIndex = (MemIdx)reader.ReadLeb128_u32() },
                 ExternalKind.Global => new Module.ExportDesc.GlobalDesc
                     { GlobalIndex = (GlobalIdx)reader.ReadLeb128_u32() },
-                var kind => throw new InvalidDataException(
+                var kind => throw new FormatException(
                     $"Malformed Module Export section {kind} at {reader.BaseStream.Position - 1}")
             };
 

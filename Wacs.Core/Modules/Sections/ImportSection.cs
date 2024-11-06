@@ -172,7 +172,7 @@ namespace Wacs.Core
                 ExternalKind.Table => new Module.ImportDesc.TableDesc { TableDef = TableType.Parse(reader) },
                 ExternalKind.Memory => new Module.ImportDesc.MemDesc { MemDef = MemoryType.Parse(reader) },
                 ExternalKind.Global => new Module.ImportDesc.GlobalDesc { GlobalDef = GlobalType.Parse(reader) },
-                var kind => throw new InvalidDataException($"Malformed Module Import section {kind} at {reader.BaseStream.Position}")
+                var kind => throw new FormatException($"Malformed Module Import section {kind} at {reader.BaseStream.Position}")
             };
 
         private static Module.Import ParseImport(BinaryReader reader) => 

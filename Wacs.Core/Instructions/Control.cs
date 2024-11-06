@@ -320,11 +320,11 @@ namespace Wacs.Core.Instructions
                         IInstruction.IsEnd))
                 };
                 if (ElseBlock.Length == 0)
-                    throw new InvalidDataException($"Explicit Else block contained no instructions.");
+                    throw new FormatException($"Explicit Else block contained no instructions.");
             }
             else
             {
-                throw new InvalidDataException($"If block did not terminate correctly.");
+                throw new FormatException($"If block did not terminate correctly.");
             }
 
             return this;
