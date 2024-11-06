@@ -150,7 +150,7 @@ namespace Wacs.Core
         public void Assert([NotNull] object? objIsNotNull, string message) { objIsNotNull = NonNull; }
 
         public Stack<ValidationControlFrame> ControlStack { get; } = new();
-        public ValidationControlFrame ControlFrame { get; } = null!;
+        public ValidationControlFrame ControlFrame => ControlStack.Peek();
 
         public void PushControlFrame(ByteCode opCode, FunctionType types)
         {
