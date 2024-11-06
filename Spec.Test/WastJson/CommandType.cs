@@ -9,6 +9,9 @@ namespace Spec.Test.WastJson
         [EnumMember(Value = "module")]
         Module,
 
+        [EnumMember(Value = "action")]
+        Action,
+        
         [EnumMember(Value = "assert_return")]
         AssertReturn,
 
