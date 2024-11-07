@@ -18,6 +18,16 @@ namespace Wacs.Core.Types
             Limits = limits;
 
         /// <summary>
+        /// Manually define a MemoryType for HostBinding
+        /// </summary>
+        /// <param name="minimum"></param>
+        /// <param name="maximum"></param>
+        public MemoryType(uint minimum, uint? maximum = null)
+        {
+            Limits = new Limits(minimum, maximum);
+        }
+
+        /// <summary>
         /// The limits specifying the minimum and optional maximum number of memory pages.
         /// </summary>
         public Limits Limits { get; }
@@ -31,6 +41,15 @@ namespace Wacs.Core.Types
             var memText = $"{indent}(memory{id} {memType})";
             
             writer.WriteLine(memText);
+        }
+
+        public override string ToString() => $"MemoryType: {Limits}";
+
+        public bool IsCompatibleWith(MemoryType imported)
+        {
+            if (imported.Limits.Minimum < Limits.Minimum)
+                return false;
+            return !Limits.Maximum.HasValue || !imported.Limits.Maximum.HasValue || Limits.Maximum.Value <= imported.Limits.Maximum.Value;
         }
 
         /// <summary>

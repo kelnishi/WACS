@@ -504,6 +504,12 @@ namespace Wacs.Core.Runtime
             }
         }
 
+        public void BindHostMemory((string module, string entity) id, MemoryType memType)
+        {
+            var memAddr = AllocateMemory(Store, memType);
+            _entityBindings[id] = memAddr;
+        }
+
         /// <summary>
         /// @Spec 4.5.3.10. Modules Allocation
         /// *We also evaluate globals and elements here, per instantiation
@@ -554,7 +560,7 @@ namespace Wacs.Core.Runtime
                             throw new NotSupportedException(
                                 $"The imported Memory was not provided by the environment: {entityId.module}.{entityId.entity}");
                         var memInstance = Store[memAddr];
-                        if (memInstance.Type != memType)
+                        if (!memType.IsCompatibleWith(memInstance.Type))
                             throw new NotSupportedException(
                                 $"Type mismatch while importing Memory {entityId.module}.{entityId.entity}: expected {memType}, env provided Memory {memInstance.Type}");
                         //16. external imported addresses first

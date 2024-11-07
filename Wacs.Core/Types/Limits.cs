@@ -16,7 +16,7 @@ namespace Wacs.Core.Types
         /// </summary>
         /// <param name="minimum">The minimum number of units.</param>
         /// <param name="maximum">The optional maximum number of units.</param>
-        private Limits(uint minimum, uint? maximum = null) {
+        public Limits(uint minimum, uint? maximum = null) {
             Minimum = minimum;
             Maximum = maximum;
         }
@@ -49,6 +49,7 @@ namespace Wacs.Core.Types
             };
 
         public string ToWat() => Maximum != null ? $"{Minimum} {Maximum}" : $"{Minimum}";
+        public override string ToString() => Maximum != null ? $"Limits: [{Minimum}, {Maximum}]" : $"Limits: [{Minimum},?]";
 
         /// <summary>
         /// @Spec 3.2.1. Limits
