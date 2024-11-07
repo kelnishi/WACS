@@ -7,14 +7,14 @@ namespace Spec.Test.WastJson
 {
     public class InvokeAction : IAction
     {
-        [JsonPropertyName("expected")] public List<Argument> Expected { get; set; } = new();
+        // [JsonPropertyName("expected")] public List<Argument> Expected { get; set; } = new();
         public ActionType Type => ActionType.Invoke;
 
         [JsonPropertyName("field")] public string Field { get; set; } = "";
 
         [JsonPropertyName("args")] public List<Argument> Args { get; set; } = new();
 
-        public override string ToString() => $"{Field} - Args: {string.Join(", ", Args)} - Expected: {string.Join(", ", Expected)}";
+        public override string ToString() => $"{Field} - Args: {string.Join(", ", Args)}";
     }
     
     public class GetAction : IAction
