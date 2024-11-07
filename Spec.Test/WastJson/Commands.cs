@@ -1,12 +1,20 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using FluentValidation;
+using Wacs.Core;
+using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
 
 namespace Spec.Test.WastJson
 {
     public class ModuleCommand : ICommand
     {
+        private SpecTestEnv _env = new SpecTestEnv();
+
         [JsonPropertyName("filename")]
         public string Filename { get; set; }
 
@@ -14,6 +22,22 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            List<Exception> errors = new();
+            runtime = new WasmRuntime();
+            _env.BindToRuntime(runtime);
+
+            var filepath = Path.Combine(testDefinition.Path, this.Filename);
+            using var fileStream = new FileStream(filepath, FileMode.Open);
+            module = BinaryModuleParser.ParseWasm(fileStream);
+            var modInst = runtime.InstantiateModule(module);
+            var moduleName = $"{filepath}"; 
+            module.SetName(moduleName);
+            runtime.RegisterModule(module.Name, modInst);
+            return errors;
+        }
 
         public override string ToString() => $"ModuleCommand {{ Filename = {Filename}, Line = {Line} }}";
     }
@@ -27,6 +51,26 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            List<Exception> errors = new();
+            var action = this.Action;
+            switch (action.Type)
+            {
+                case ActionType.Invoke:
+                    if (!runtime.TryGetExportedFunction((module.Name, action.Field), out var addr))
+                        throw new InvalidDataException(
+                            $"Could not get exported function {module.Name}.{action.Field}");
+                    //Compute type from action.Args and action.Expected
+                    var invoker = runtime.CreateStackInvoker(addr);
+
+                    var pVals = action.Args.Select(arg => arg.AsValue).ToArray();
+                    var result = invoker(pVals);
+                    break;
+            }
+            return errors;
+        }
     }
 
     public class AssertReturnCommand : ICommand
@@ -41,6 +85,30 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            List<Exception> errors = new();
+            var action1 = this.Action;
+            switch (action1.Type)
+            {
+                case ActionType.Invoke:
+                    if (!runtime.TryGetExportedFunction((module.Name, action1.Field), out var addr))
+                        throw new InvalidDataException(
+                            $"Could not get exported function {module.Name}.{action1.Field}");
+                    //Compute type from action.Args and action.Expected
+                    var invoker = runtime.CreateStackInvoker(addr);
+
+                    var pVals = action1.Args.Select(arg => arg.AsValue).ToArray();
+                    var result = invoker(pVals);
+                    if (!result.SequenceEqual(this.Expected.Select(e => e.AsValue)))
+                        throw new TestException(
+                            $"Test failed {this} \"{action1.Field}\": Expected [{string.Join(" ", this.Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
+
+                    break;
+            }
+            return errors;
+        }
 
         public override string ToString() => $"AssertReturnCommand {{ Action = {Action}, Expected = [{string.Join(", ", Expected)}], Line = {Line} }}";
     }
@@ -58,6 +126,40 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            List<Exception> errors = new();
+            var action2 = this.Action;
+            switch (action2.Type)
+            {
+                case ActionType.Invoke:
+                    if (!runtime.TryGetExportedFunction((module?.Name, action2.Field), out var addr))
+                        throw new ArgumentException(
+                            $"Could not get exported function {module?.Name}.{action2.Field}");
+                    //Compute type from action.Args and action.Expected
+                    var invoker = runtime.CreateStackInvoker(addr);
+
+                    var pVals = action2.Args.Select(arg => arg.AsValue).ToArray();
+                    bool didTrap = false;
+                    string trapMessage = "";
+                    try
+                    {
+                        var result = invoker(pVals);
+                    }
+                    catch (TrapException e)
+                    {
+                        didTrap = true;
+                        trapMessage = e.Message;
+                    }
+
+                    if (!didTrap)
+                        throw new TestException($"Test failed {this} \"{trapMessage}\"");
+                    break;
+            }
+
+            return errors;
+        }
+
         public override string ToString() => $"AssertTrapCommand {{ Action = {Action}, Text = {Text}, Line = {Line} }}";
     }
 
@@ -70,6 +172,14 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            List<Exception> errors = new();
+
+
+            return errors;
+        }
 
         public override string ToString() => $"AssertExhaustionCommand {{ Action = {Action}, Line = {Line} }}";
     }
@@ -90,6 +200,45 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            List<Exception> errors = new();
+            
+            runtime = new WasmRuntime();
+            var filepath = Path.Combine(testDefinition.Path, this.Filename);
+            bool didAssert = false;
+            string assertionMessage = "";
+            try
+            {
+                using var fileStream = new FileStream(filepath, FileMode.Open);
+                module = BinaryModuleParser.ParseWasm(fileStream);
+                module.SetName(filepath);
+                var modInstInvalid = runtime.InstantiateModule(module);
+            }
+            catch (ValidationException exc)
+            {
+                didAssert = true;
+                assertionMessage = exc.Message;
+            }
+            catch (InvalidDataException exc)
+            {
+                didAssert = true;
+                assertionMessage = exc.Message;
+            }
+            catch (FormatException exc)
+            {
+                didAssert = true;
+                assertionMessage = exc.Message;
+            }
+
+            if (!didAssert)
+            {
+                throw new TestException($"Test failed {this}");
+            }
+
+            return errors;
+        }
+
         public override string ToString() => $"AssertInvalidCommand {{ Filename = {Filename}, ModuleType = {ModuleType}, Text = {Text}, Line = {Line} }}";
     }
 
@@ -109,6 +258,44 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            var errors = new List<Exception>();
+            if (ModuleType == "text")
+                errors.Add(new Exception(
+                    $"Assert Malformed line {this.Line}: Skipping assert_malformed. No WAT parsing."));
+
+            runtime = new WasmRuntime();
+            var filepath = Path.Combine(testDefinition.Path, this.Filename);
+            bool didAssert1 = false;
+            string assertionMessage = "";
+            try
+            {
+                using var fileStream = new FileStream(filepath, FileMode.Open);
+                module = BinaryModuleParser.ParseWasm(fileStream);
+                module.SetName(filepath);
+                var modInstInvalid = runtime.InstantiateModule(module);
+            }
+            catch (FormatException exc)
+            {
+                didAssert1 = true;
+                assertionMessage = exc.Message;
+            }
+            catch (NotSupportedException exc)
+            {
+                didAssert1 = true;
+                assertionMessage = exc.Message;
+            }
+
+            if (!didAssert1)
+            {
+                throw new TestException($"Test failed {this}");
+            }
+
+            return errors;
+        }
+
         public override string ToString() => $"AssertMalformedCommand {{ Filename = {Filename}, Line = {Line}, Text = {Text}, ModuleType = {ModuleType} }}";
     }
 
@@ -122,6 +309,11 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
+
         public override string ToString() => $"AssertUnlinkableCommand {{ Module = {Module}, Line = {Line} }}";
     }
 
@@ -134,6 +326,11 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
 
         public override string ToString() => $"AssertUninstantiableCommand {{ Module = {Module}, Line = {Line} }}";
     }
@@ -154,6 +351,11 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
+
         public override string ToString() => $"InvokeCommand {{ Module = {Module}, Name = {Name}, Args = [{string.Join(", ", Args)}], Line = {Line} }}";
     }
 
@@ -169,6 +371,11 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
 
         public override string ToString() => $"GetCommand {{ Module = {Module}, Name = {Name}, Line = {Line} }}";
     }
@@ -189,6 +396,11 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
+
         public override string ToString() => $"SetCommand {{ Module = {Module}, Name = {Name}, Value = {Value}, Line = {Line} }}";
     }
 
@@ -201,6 +413,11 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
 
         public override string ToString() => $"StartCommand {{ Module = {Module}, Line = {Line} }}";
     }
@@ -218,6 +435,11 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
+
         public override string ToString() => $"AssertReturnCanonicalNansCommand {{ Action = {Action}, Expected = [{string.Join(", ", Expected)}], Line = {Line} }}";
     }
 
@@ -234,6 +456,11 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
+
         public override string ToString() => $"AssertReturnArithmeticNansCommand {{ Action = {Action}, Expected = [{string.Join(", ", Expected)}], Line = {Line} }}";
     }
 
@@ -246,6 +473,11 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
 
         public override string ToString() => $"AssertReturnDetachedCommand {{ Action = {Action}, Line = {Line} }}";
     }
@@ -260,6 +492,11 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
+
         public override string ToString() => $"AssertTerminatedCommand {{ Module = {Module}, Line = {Line} }}";
     }
 
@@ -272,6 +509,11 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
 
         public override string ToString() => $"AssertUndefinedCommand {{ Module = {Module}, Line = {Line} }}";
     }
@@ -286,6 +528,11 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
+
         public override string ToString() => $"AssertExcludeFromMustCommand {{ Module = {Module}, Line = {Line} }}";
     }
 
@@ -298,6 +545,11 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
 
         public override string ToString() => $"ModuleInstanceCommand {{ Module = {Module}, Line = {Line} }}";
     }
@@ -312,6 +564,11 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
+
         public override string ToString() => $"ModuleExclusiveCommand {{ Module = {Module}, Line = {Line} }}";
     }
 
@@ -325,6 +582,11 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
+
         public override string ToString() => $"PumpCommand {{ Action = {Action}, Line = {Line} }}";
     }
 
@@ -337,6 +599,11 @@ namespace Spec.Test.WastJson
 
         [JsonPropertyName("line")]
         public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+        }
 
         public override string ToString() => $"MaybeCommand {{ Command = {Command}, Line = {Line} }}";
     }
