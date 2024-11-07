@@ -28,6 +28,14 @@ namespace Wacs.Core
         public NameMap FuncMap => Names?.FunctionNames?.Names ?? NameMap.Empty;
         public IndirectNameMap LocalMap => Names?.LocalNames?.Names ?? IndirectNameMap.Empty;
 
+        public void SetName(string name)
+        {
+            if (Names == null)
+                Names = new NameSection();
+            
+            Names.ModuleName = new NameSubsection.ModuleNameSubsection { Name = name };
+        }
+
         public class NameSection
         {
             public NameSubsection.ModuleNameSubsection? ModuleName { get; internal set; }

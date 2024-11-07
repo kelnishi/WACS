@@ -23,6 +23,9 @@ namespace Wacs.Core
         //Function[100].Expression[34].NumericInst
         public (int line, string instruction) CalculateLine(string validationPath, bool print = false, bool functionRelative = false)
         {
+            if (!validationPath.StartsWith("Function["))
+                return (-1, "???");
+            
             int line = 1;
 
             string foundInstruction = "";

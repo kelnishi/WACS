@@ -5,6 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
@@ -13,6 +14,10 @@ namespace Wacs.Core.Runtime
     public class RuntimeAttributes
     {
         public bool Live = true;
+
+        public int MaxCallStack = 1024;
+
+        public int MaxOpStack = 1024;
         public IInstructionFactory InstructionFactory { get; set; } = ReferenceFactory.Factory;
         public double FloatingPointTolerance { get; set; } = 1e-10;
     }
@@ -45,6 +50,8 @@ namespace Wacs.Core.Runtime
             );
             _currentSequence = _hostReturnSequence;
             _sequenceIndex = -1;
+
+            OpStack = new(Attributes.MaxCallStack);
         }
 
         public Stopwatch ProcessTimer { get; set; } = new();
@@ -53,7 +60,7 @@ namespace Wacs.Core.Runtime
         public IInstructionFactory InstructionFactory => Attributes.InstructionFactory;
 
         public Store Store { get; }
-        public OpStack OpStack { get; } = new();
+        public OpStack OpStack { get; }
         private Stack<Frame> CallStack { get; } = new();
 
         public Frame Frame => CallStack.Peek();
@@ -76,6 +83,9 @@ namespace Wacs.Core.Runtime
 
         public void PushFrame(Frame frame)
         {
+            if (CallStack.Count >= Attributes.MaxCallStack)
+                throw new WasmRuntimeException($"Runtime call stack exhausted {CallStack.Count}");
+            
             CallStack.Push(frame);
         }
 
