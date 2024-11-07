@@ -701,16 +701,8 @@ namespace Wacs.Core.Runtime
             }
 
             ModuleInstance moduleInstance;
-            try
-            {
-                //2, 3, 4 Checks if imports are satisfied
-                moduleInstance = AllocateModule(module);
-            }
-            catch (NotSupportedException exc)
-            {
-                _ = exc;
-                throw;
-            }
+            //2, 3, 4 Checks if imports are satisfied
+            moduleInstance = AllocateModule(module);
 
             //12.
             var auxFrame = new Frame(moduleInstance, FunctionType.Empty) { Locals = new LocalsSpace() };
