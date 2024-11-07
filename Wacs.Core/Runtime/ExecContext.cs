@@ -30,16 +30,21 @@ namespace Wacs.Core.Runtime
         private Stack<Value> _asideVals = new();
 
         private InstructionSequence _currentSequence;
+
+        private InstructionSequence _hostReturnSequence;
         private int _sequenceIndex;
 
         public Dictionary<ushort, ExecStat> Stats = new();
 
-        public ExecContext(Store store, InstructionSequence seq, RuntimeAttributes? attributes = default)
+        public ExecContext(Store store, RuntimeAttributes? attributes = default)
         {
             Store = store;
-            _currentSequence = seq;
-            _sequenceIndex = -1;
             Attributes = attributes ?? new RuntimeAttributes();
+            _hostReturnSequence = new InstructionSequence(
+                InstructionFactory.CreateInstruction<InstFuncReturn>(OpCode.Func)
+            );
+            _currentSequence = _hostReturnSequence;
+            _sequenceIndex = -1;
         }
 
         public Stopwatch ProcessTimer { get; set; } = new();
@@ -85,6 +90,18 @@ namespace Wacs.Core.Runtime
             {
                 OpStack.PopAny();
             }
+        }
+
+
+        public void FlushCallStack()
+        {
+            while (CallStack.Count > 0)
+                PopFrame();
+            while (OpStack.Count > 0)
+                OpStack.PopAny();
+
+            _currentSequence = _hostReturnSequence;
+            _sequenceIndex = -1;
         }
 
         private void EnterSequence(InstructionSequence seq) =>
@@ -165,7 +182,8 @@ namespace Wacs.Core.Runtime
             {
                 ContinuationAddress = GetPointer(),
                 Locals = new LocalsSpace(funcType.ParameterTypes.Types, t),
-                Index = idx
+                Index = idx,
+                FuncId = wasmFunc.Id,
             };
             int li = 0;
             int localCount = funcType.ParameterTypes.Arity + t.Length;
@@ -224,7 +242,7 @@ namespace Wacs.Core.Runtime
 
         public IInstruction? Next()
         {
-            if (_currentSequence.IsEmpty)
+            if (_currentSequence == _hostReturnSequence)
                 return null;
 
             //Advance to the next instruction first.

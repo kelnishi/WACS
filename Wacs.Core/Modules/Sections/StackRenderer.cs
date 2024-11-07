@@ -244,7 +244,7 @@ namespace Wacs.Core
                 }
             }
             
-            var dummyContext = new ExecContext(store, InstructionSequence.Empty, new RuntimeAttributes { Live = false } );
+            var dummyContext = new ExecContext(store, new RuntimeAttributes { Live = false } );
             dummyContext.PushFrame(execFrame);
             return dummyContext;
         }

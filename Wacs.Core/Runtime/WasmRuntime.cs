@@ -60,7 +60,7 @@ namespace Wacs.Core.Runtime
         public WasmRuntime(RuntimeAttributes? attributes = null)
         {
             Store = new Store();
-            Context = new ExecContext(Store, InstructionSequence.Empty, attributes);
+            Context = new ExecContext(Store, attributes);
         }
 
         private Store Store { get; }
@@ -183,13 +183,12 @@ namespace Wacs.Core.Runtime
 
         private Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
         {
-            var funcInst = Context.Store[funcAddr];
-            var funcType = funcInst.Type;
-
             return GenericDelegate;
-
             object[] GenericDelegate(params object[] args)
             {
+                var funcInst = Context.Store[funcAddr];
+                var funcType = funcInst.Type;
+                
                 Context.OpStack.PushScalars(funcType.ParameterTypes, args);
 
                 if (options.CollectStats)
@@ -270,21 +269,20 @@ namespace Wacs.Core.Runtime
         public Delegates.StackFunc CreateStackInvoker(FuncAddr funcAddr, InvokerOptions? options = default)
         {
             options ??= new InvokerOptions();
-            var funcInst = Context.Store[funcAddr];
-            var funcType = funcInst.Type;
             var invoker = CreateInvoker(funcAddr, options);
-            return StackFunc;
-            
-            Value[] StackFunc(Value[] parameters)
+            return parameters =>
             {
-                object[] results = invoker(parameters.Select(v=> (object)v).ToArray());
+                var funcInst = Context.Store[funcAddr];
+                var funcType = funcInst.Type;
+                object[] results = invoker(parameters.Select(v => (object)v).ToArray());
                 var stackResult = new Value[funcType.ResultType.Arity];
                 for (int i = 0, l = funcType.ResultType.Arity; i < l; ++i)
                 {
                     stackResult[i] = new Value(funcType.ResultType.Types[i], results[i]);
                 }
+
                 return stackResult;
-            }
+            };
         }
 
         public bool ProcessThread(InvokerOptions options, int steps)
@@ -340,6 +338,9 @@ namespace Wacs.Core.Runtime
                 
                     throw new TrapException(exc.Message + $":line {line} instruction #{steps}\n{path}");
                 }
+                
+                //Flush the stack before throwing...
+                Context.FlushCallStack();
                 throw;
             }
             catch (SignalException exc)
@@ -360,6 +361,10 @@ namespace Wacs.Core.Runtime
                     (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
                     message = exc.Message + $":line {line} instruction #{steps}\n{path}";
                 }
+                
+                //Flush the stack before throwing...
+                Context.FlushCallStack();
+                
                 var exType = exc.GetType();
                 var ctr = exType.GetConstructor(new Type[] { typeof(int), typeof(string) });
                 throw ctr?.Invoke(new object[] {exc.Signal, message}) as Exception ?? exc;           
