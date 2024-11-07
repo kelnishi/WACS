@@ -504,10 +504,21 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public void BindHostMemory((string module, string entity) id, MemoryType memType)
+        public MemoryInstance BindHostMemory((string module, string entity) id, MemoryType memType)
         {
             var memAddr = AllocateMemory(Store, memType);
             _entityBindings[id] = memAddr;
+            return Store[memAddr];
+        }
+
+        public GlobalInstance BindHostGlobal((string module, string entity) id, GlobalType globalType, Value val)
+        {
+            if (globalType.ContentType != val.Type)
+                throw new ArgumentException(
+                    $"Global {globalType.ContentType} must be defined with matching type value {val}");
+            var globAddr = AllocateGlobal(Store, globalType, val);
+            _entityBindings[id] = globAddr;
+            return Store[globAddr];
         }
 
         /// <summary>
@@ -574,7 +585,7 @@ namespace Wacs.Core.Runtime
                         var globalInstance = Store[globalAddr];
                         if (globalInstance.Type != globalType)
                             throw new NotSupportedException(
-                                $"Type mismatch while importing table {entityId.module}.{entityId.entity}: expected {globalType}, env provided table {globalInstance.Type}");
+                                $"Type mismatch while importing Global {entityId.module}.{entityId.entity}: expected {globalType}, env provided Global {globalInstance.Type}");
                         //17. external imported addresses first
                         moduleInstance.GlobalAddrs.Add(globalAddr);
                         break;
