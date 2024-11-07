@@ -88,12 +88,7 @@ namespace Wacs.Core.Instructions.Numeric
             float z2 = context.OpStack.PopF32();
             float z1 = context.OpStack.PopF32();
             float result = z1 / z2;
-            if (float.IsInfinity(result))
-                context.OpStack.PushF32(float.PositiveInfinity);
-            else if (float.IsNaN(result))
-                context.OpStack.PushF32(float.NaN);
-            else
-                context.OpStack.PushF32(result);
+            context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Min(ExecContext context)
