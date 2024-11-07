@@ -14,6 +14,6 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module);
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module);
     }
 }

@@ -18,7 +18,7 @@ namespace Spec.Test.WastJson
         public CommandType Type { get; }
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             Debugger.Break();
             return new();
@@ -40,13 +40,9 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
-            
-            //Make a clean runtime
-            runtime = new WasmRuntime();
-            _env.BindToRuntime(runtime);
 
             var filepath = Path.Combine(testDefinition.Path, Filename);
             using var fileStream = new FileStream(filepath, FileMode.Open);
@@ -66,8 +62,6 @@ namespace Spec.Test.WastJson
 
     public class RegisterCommand : ICommand
     {
-        private SpecTestEnv _env = new SpecTestEnv();
-
         [JsonPropertyName("name")]
         public string Name { get; set; }
 
@@ -79,7 +73,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
 
@@ -101,7 +95,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
             var action = Action;
@@ -135,7 +129,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
             var action1 = Action;
@@ -175,7 +169,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
             var action2 = Action;
@@ -225,7 +219,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
             var action = Action;
@@ -276,7 +270,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
             
@@ -334,7 +328,7 @@ namespace Spec.Test.WastJson
         public int Line { get; set; }
 
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             var errors = new List<Exception>();
             if (ModuleType == "text")
@@ -383,7 +377,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -407,7 +401,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
             
@@ -469,7 +463,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -490,7 +484,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -514,7 +508,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -532,7 +526,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -553,7 +547,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -574,7 +568,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -592,7 +586,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -610,7 +604,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -628,7 +622,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -646,7 +640,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -664,7 +658,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -682,7 +676,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -700,7 +694,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
@@ -718,7 +712,7 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("line")]
         public int Line { get; set; }
 
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
