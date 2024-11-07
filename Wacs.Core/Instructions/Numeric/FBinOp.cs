@@ -159,12 +159,7 @@ namespace Wacs.Core.Instructions.Numeric
             double z2 = context.OpStack.PopF64();
             double z1 = context.OpStack.PopF64();
             var result = z1 / z2;
-            if (double.IsInfinity(result))
-                context.OpStack.PushF64(double.PositiveInfinity);
-            else if (double.IsNaN(result))
-                context.OpStack.PushF64(double.NaN);
-            else
-                context.OpStack.PushF64(result);
+            context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64Min(ExecContext context)

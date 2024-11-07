@@ -45,7 +45,7 @@ namespace Wacs.Core.Instructions.Numeric
             float i2 = context.OpStack.PopF32();
             float i1 = context.OpStack.PopF32();
 
-            int result = CompareF32(i1, i2, context.Attributes.FloatingPointTolerance);
+            int result = CompareF32(i1, i2, context.Attributes.FloatTolerance);
 
             context.OpStack.PushI32(result);
         }
@@ -55,7 +55,7 @@ namespace Wacs.Core.Instructions.Numeric
             float i2 = context.OpStack.PopF32();
             float i1 = context.OpStack.PopF32();
 
-            int result = CompareF32(i1, i2, context.Attributes.FloatingPointTolerance);
+            int result = CompareF32(i1, i2, context.Attributes.FloatTolerance);
             result = result == 1 ? 0 : 1;
 
             context.OpStack.PushI32(result);

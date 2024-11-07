@@ -1,4 +1,3 @@
-using System;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -25,15 +24,23 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F64Ge = new(OpCode.F64Ge, ExecuteF64Ge,
             ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.I32));
 
+        private static int CompareF64(double i1, double i2, double epsilon)
+        {
+            int result = 0;
+            result = i1 == i2 ? 1 : 0 ;
+            if (double.IsNaN(i1) || double.IsNaN(i2))
+                result = 0;
+
+            return result;
+        }
+
         private static void ExecuteF64Eq(ExecContext context)
         {
             double i2 = context.OpStack.PopF64();
             double i1 = context.OpStack.PopF64();
 
-            int result = Math.Abs(i1 - i2) < context.Attributes.FloatingPointTolerance ? 1 : 0;
-            if (double.IsNaN(i1) || double.IsNaN(i2))
-                result = 0;
-
+            int result = CompareF64(i1, i2, context.Attributes.FloatTolerance);
+            
             context.OpStack.PushI32(result);
         }
 
@@ -42,9 +49,8 @@ namespace Wacs.Core.Instructions.Numeric
             double i2 = context.OpStack.PopF64();
             double i1 = context.OpStack.PopF64();
 
-            int result = Math.Abs(i1 - i2) > context.Attributes.FloatingPointTolerance ? 1 : 0;
-            if (double.IsNaN(i1) || double.IsNaN(i2))
-                result = 0;
+            int result = CompareF64(i1, i2, context.Attributes.FloatTolerance);
+            result = result == 1 ? 0 : 1;
 
             context.OpStack.PushI32(result);
         }
