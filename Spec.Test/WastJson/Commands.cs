@@ -57,7 +57,7 @@ namespace Spec.Test.WastJson
             return errors;
         }
 
-        public override string ToString() => $"ModuleCommand {{ Filename = {Filename}, Line = {Line} }}";
+        public override string ToString() => $"ModuleCommand {{ Line = {Line}, Filename = {Filename} }}";
     }
 
     public class RegisterCommand : ICommand
@@ -82,7 +82,7 @@ namespace Spec.Test.WastJson
             return errors;
         }
 
-        public override string ToString() => $"RegisterCommand {{ Name = {Name}, As = {As}, Line = {Line} }}";
+        public override string ToString() => $"RegisterCommand {{ Line = {Line}, Name = {Name}, As = {As} }}";
     }
     
     public class ActionCommand : ICommand
@@ -153,7 +153,7 @@ namespace Spec.Test.WastJson
             return errors;
         }
 
-        public override string ToString() => $"AssertReturnCommand {{ Action = {Action}, Expected = [{string.Join(", ", Expected)}], Line = {Line} }}";
+        public override string ToString() => $"AssertReturnCommand {{ Line = {Line}, Action = {Action}, Expected = [{string.Join(", ", Expected)}] }}";
     }
     
     public class AssertTrapCommand : ICommand
@@ -203,7 +203,7 @@ namespace Spec.Test.WastJson
             return errors;
         }
 
-        public override string ToString() => $"AssertTrapCommand {{ Action = {Action}, Text = {Text}, Line = {Line} }}";
+        public override string ToString() => $"AssertTrapCommand {{ Line = {Line}, Action = {Action}, Text = {Text} }}";
     }
 
     public class AssertExhaustionCommand : ICommand
@@ -251,7 +251,7 @@ namespace Spec.Test.WastJson
             return errors;
         }
 
-        public override string ToString() => $"AssertExhaustionCommand {{ Action = {Action}, Line = {Line} }}";
+        public override string ToString() => $"AssertExhaustionCommand {{ Line = {Line}, Action = {Action} }}";
     }
 
     public class AssertInvalidCommand : ICommand
@@ -308,7 +308,7 @@ namespace Spec.Test.WastJson
             return errors;
         }
 
-        public override string ToString() => $"AssertInvalidCommand {{ Filename = {Filename}, ModuleType = {ModuleType}, Text = {Text}, Line = {Line} }}";
+        public override string ToString() => $"AssertInvalidCommand {{ Line = {Line}, Filename = {Filename}, ModuleType = {ModuleType}, Text = {Text} }}";
     }
 
     public class AssertMalformedCommand : ICommand
@@ -364,7 +364,7 @@ namespace Spec.Test.WastJson
             return errors;
         }
 
-        public override string ToString() => $"AssertMalformedCommand {{ Filename = {Filename}, Line = {Line}, Text = {Text}, ModuleType = {ModuleType} }}";
+        public override string ToString() => $"AssertMalformedCommand {{ Line = {Line}, Filename = {Filename}, Text = {Text}, ModuleType = {ModuleType} }}";
     }
 
     public class AssertUnlinkableCommand : ICommand
@@ -382,7 +382,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"AssertUnlinkableCommand {{ Module = {Module}, Line = {Line} }}";
+        public override string ToString() => $"AssertUnlinkableCommand {{ Line = {Line}, Module = {Module} }}";
     }
 
     public class AssertUninstantiableCommand : ICommand
@@ -444,7 +444,7 @@ namespace Spec.Test.WastJson
             return errors;
         }
 
-        public override string ToString() => $"AssertUninstantiableCommand {{ Filename = {Filename}, ModuleType = {ModuleType}, Text = {Text}, Line = {Line} }}";
+        public override string ToString() => $"AssertUninstantiableCommand {{ Line = {Line}, Filename = {Filename}, ModuleType = {ModuleType}, Text = {Text} }}";
     }
 
     public class InvokeCommand : ICommand
@@ -468,7 +468,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"InvokeCommand {{ Module = {Module}, Name = {Name}, Args = [{string.Join(", ", Args)}], Line = {Line} }}";
+        public override string ToString() => $"InvokeCommand {{ Line = {Line}, Module = {Module}, Name = {Name}, Args = [{string.Join(", ", Args)}] }}";
     }
 
     public class GetCommand : ICommand
@@ -489,7 +489,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"GetCommand {{ Module = {Module}, Name = {Name}, Line = {Line} }}";
+        public override string ToString() => $"GetCommand {{ Line = {Line}, Module = {Module}, Name = {Name} }}";
     }
 
     public class SetCommand : ICommand
@@ -513,7 +513,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"SetCommand {{ Module = {Module}, Name = {Name}, Value = {Value}, Line = {Line} }}";
+        public override string ToString() => $"SetCommand {{ Line = {Line}, Module = {Module}, Name = {Name}, Value = {Value} }}";
     }
 
     public class StartCommand : ICommand
@@ -531,7 +531,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"StartCommand {{ Module = {Module}, Line = {Line} }}";
+        public override string ToString() => $"StartCommand {{ Line = {Line}, Module = {Module} }}";
     }
 
     public class AssertReturnCanonicalNansCommand : ICommand
@@ -552,7 +552,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"AssertReturnCanonicalNansCommand {{ Action = {Action}, Expected = [{string.Join(", ", Expected)}], Line = {Line} }}";
+        public override string ToString() => $"AssertReturnCanonicalNansCommand {{ Line = {Line}, Action = {Action}, Expected = [{string.Join(", ", Expected)}] }}";
     }
 
     public class AssertReturnArithmeticNansCommand : ICommand
@@ -573,7 +573,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"AssertReturnArithmeticNansCommand {{ Action = {Action}, Expected = [{string.Join(", ", Expected)}], Line = {Line} }}";
+        public override string ToString() => $"AssertReturnArithmeticNansCommand {{ Action = {Action}, Expected = [{string.Join(", ", Expected)}] }}";
     }
 
     public class AssertReturnDetachedCommand : ICommand
@@ -591,7 +591,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"AssertReturnDetachedCommand {{ Action = {Action}, Line = {Line} }}";
+        public override string ToString() => $"AssertReturnDetachedCommand {{ Action = {Action} }}";
     }
 
     public class AssertTerminatedCommand : ICommand
@@ -609,7 +609,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"AssertTerminatedCommand {{ Module = {Module}, Line = {Line} }}";
+        public override string ToString() => $"AssertTerminatedCommand {{ Module = {Module} }}";
     }
 
     public class AssertUndefinedCommand : ICommand
@@ -627,7 +627,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"AssertUndefinedCommand {{ Module = {Module}, Line = {Line} }}";
+        public override string ToString() => $"AssertUndefinedCommand {{ Module = {Module} }}";
     }
 
     public class AssertExcludeFromMustCommand : ICommand
@@ -645,7 +645,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"AssertExcludeFromMustCommand {{ Module = {Module}, Line = {Line} }}";
+        public override string ToString() => $"AssertExcludeFromMustCommand {{ Line = {Line}, Module = {Module} }}";
     }
 
     public class ModuleInstanceCommand : ICommand
@@ -663,7 +663,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"ModuleInstanceCommand {{ Module = {Module}, Line = {Line} }}";
+        public override string ToString() => $"ModuleInstanceCommand {{ Line = {Line}, Module = {Module} }}";
     }
 
     public class ModuleExclusiveCommand : ICommand
@@ -681,7 +681,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"ModuleExclusiveCommand {{ Module = {Module}, Line = {Line} }}";
+        public override string ToString() => $"ModuleExclusiveCommand {{ Line = {Line}, Module = {Module} }}";
     }
 
     public class PumpCommand : ICommand
@@ -699,7 +699,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"PumpCommand {{ Action = {Action}, Line = {Line} }}";
+        public override string ToString() => $"PumpCommand {{ Line = {Line}, Action = {Action} }}";
     }
 
     public class MaybeCommand : ICommand
@@ -717,7 +717,7 @@ namespace Spec.Test.WastJson
             throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
         }
 
-        public override string ToString() => $"MaybeCommand {{ Command = {Command}, Line = {Line} }}";
+        public override string ToString() => $"MaybeCommand {{ Line = {Line}, Command = {Command} }}";
     }
     
     public class CommandJsonConverter : JsonConverter<ICommand>
