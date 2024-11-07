@@ -117,6 +117,91 @@ namespace Wacs.Core.Runtime
             }
         }
 
+        public Value(ValType type, string text)
+        {
+            this = default;
+            Type = type;
+            switch (Type)
+            {
+                case ValType.I32:
+                    Int32 = BitBashInt(text);
+                    break;
+                case ValType.I64:
+                    Int64 = BitBashLong(text);
+                    break;
+                case ValType.F32:
+                    Float32 = BitBashFloat(text);
+                    break;
+                case ValType.F64:
+                    Float64 = BitBashDouble(text);
+                    break;
+                case ValType.Funcref:
+                    Ptr = BitBashRef(text);
+                    break;
+                case ValType.Externref:
+                    Ptr = BitBashRef(text);
+                    break;
+                default:
+                    throw new InvalidDataException($"Cannot define StackValue of type {type}");
+            }
+        }
+
+        private int BitBashInt(string intVal)
+        {
+            decimal value = decimal.Parse(intVal);
+            if (value > uint.MaxValue)
+                throw new InvalidDataException($"Integer value {intVal} out of range");
+            if (value < int.MinValue)
+                throw new InvalidDataException($"Integer value {intVal} out of range");
+                
+            if (value > int.MaxValue && value <= uint.MaxValue)
+            {
+                return (int)(uint)value;
+            }
+            return (int)value;
+        }
+        
+        private long BitBashLong(string intVal)
+        {
+            decimal value = decimal.Parse(intVal);
+            if (value > ulong.MaxValue)
+                throw new InvalidDataException($"Integer value {intVal} out of range");
+            if (value < long.MinValue)
+                throw new InvalidDataException($"Integer value {intVal} out of range");
+                
+            if (value > long.MaxValue && value <= ulong.MaxValue)
+            {
+                return (long)(ulong)value;
+            }
+            return (long)value;
+        }
+
+        private int BitBashRef(string textVal)
+        {
+            if (textVal == "null")
+                return -1;
+            uint v = uint.Parse(textVal);
+            return (int)v;
+        }
+        
+        private float BitBashFloat(string intval)
+        {
+            if (intval.StartsWith("nan:"))
+                return float.NaN;
+            
+            uint v = uint.Parse(intval);
+            return BitConverter.ToSingle(BitConverter.GetBytes(v));
+        }
+
+        private double BitBashDouble(string longval)
+        {
+            if (longval.StartsWith("nan:"))
+                return double.NaN;
+            
+            ulong v = ulong.Parse(longval);
+            return BitConverter.ToDouble(BitConverter.GetBytes(v));
+        }
+
         public Value(ValType type, uint idx)
         {
             this = default;
