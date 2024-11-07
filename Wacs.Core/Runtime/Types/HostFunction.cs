@@ -254,6 +254,8 @@ namespace Wacs.Core.Runtime.Types
             }
         }
 
+        public override string ToString() => $"HostFunction[{Id}] (Type: {Type})";
+
         delegate object ConversionHelper(object value);
     }
 }
