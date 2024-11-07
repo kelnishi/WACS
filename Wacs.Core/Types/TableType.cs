@@ -16,6 +16,9 @@ namespace Wacs.Core.Types
         {
         }
 
+        public TableType(ReferenceType elementType, Limits limits) =>
+            (ElementType, Limits) = (elementType, limits);
+
         private TableType(BinaryReader reader) =>
             (ElementType, Limits) = (ReferenceTypeParser.Parse(reader), Limits.Parse(reader));
 
@@ -49,10 +52,19 @@ namespace Wacs.Core.Types
             writer.WriteLine(tableText);
         }
 
+        public override string ToString() => $"TableType({ElementType}[{Limits}])";
+
         /// <summary>
         /// @Spec 5.3.9. Table Types
         /// </summary>
         public static TableType Parse(BinaryReader reader) => new(reader);
+
+        public bool IsCompatibleWith(TableType imported)
+        {
+            if (imported.Limits.Minimum < Limits.Minimum)
+                return false;
+            return !Limits.Maximum.HasValue || !imported.Limits.Maximum.HasValue || Limits.Maximum.Value <= imported.Limits.Maximum.Value;
+        }
 
         /// <summary>
         /// @Spec 3.2.4. Table Types

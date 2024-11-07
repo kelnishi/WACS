@@ -538,6 +538,16 @@ namespace Wacs.Core.Runtime
             return Store[globAddr];
         }
 
+        public TableInstance BindHostTable((string module, string entity) id, TableType tableType, Value val)
+        {
+            if (tableType.ElementType.StackType() != val.Type)
+                throw new ArgumentException(
+                    $"Table {tableType.ElementType} must be defined with matching element type value {val}");
+            var tableAddr = AllocateTable(Store, tableType, val);
+            _entityBindings[id] = tableAddr;
+            return Store[tableAddr];
+        }
+
         /// <summary>
         /// @Spec 4.5.3.10. Modules Allocation
         /// *We also evaluate globals and elements here, per instantiation
@@ -576,7 +586,7 @@ namespace Wacs.Core.Runtime
                             throw new NotSupportedException(
                                 $"The imported Table was not provided by the environment: {entityId.module}.{entityId.entity}");
                         var tableInstance = Store[tableAddr];
-                        if (tableInstance.Type != tableType)
+                        if (!tableType.IsCompatibleWith(tableInstance.Type))
                             throw new NotSupportedException(
                                 $"Type mismatch while importing Table {entityId.module}.{entityId.entity}: expected {tableType}, env provided Table {tableInstance.Type}");
                         //15. external imported addresses first
