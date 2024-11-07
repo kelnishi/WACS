@@ -325,20 +325,20 @@ namespace Wacs.Core.Runtime
                 Context.ProcessTimer.Stop();
                 if (options.LogProgressEvery > 0)
                     Console.Error.WriteLine();
-                if (options.CollectStats) 
+                if (options.CollectStats)
                     PrintStats();
                 if (options.LogGas)
                     Console.Error.WriteLine($"Process used {steps} gas. {Context.ProcessTimer.Elapsed}");
-                
+
                 if (options.CalculateLineNumbers)
                 {
                     var ptr = Context.ComputePointerPath();
                     var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
                     (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
-                
+
                     throw new TrapException(exc.Message + $":line {line} instruction #{steps}\n{path}");
                 }
-                
+
                 //Flush the stack before throwing...
                 Context.FlushCallStack();
                 throw;
@@ -348,7 +348,7 @@ namespace Wacs.Core.Runtime
                 Context.ProcessTimer.Stop();
                 if (options.LogProgressEvery > 0)
                     Console.Error.WriteLine();
-                if (options.CollectStats) 
+                if (options.CollectStats)
                     PrintStats();
                 if (options.LogGas)
                     Console.Error.WriteLine($"Process used {steps} gas. {Context.ProcessTimer.Elapsed}");
@@ -361,13 +361,19 @@ namespace Wacs.Core.Runtime
                     (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
                     message = exc.Message + $":line {line} instruction #{steps}\n{path}";
                 }
-                
+
                 //Flush the stack before throwing...
                 Context.FlushCallStack();
-                
+
                 var exType = exc.GetType();
                 var ctr = exType.GetConstructor(new Type[] { typeof(int), typeof(string) });
-                throw ctr?.Invoke(new object[] {exc.Signal, message}) as Exception ?? exc;           
+                throw ctr?.Invoke(new object[] { exc.Signal, message }) as Exception ?? exc;
+            }
+            catch (WasmRuntimeException exc)
+            {
+                //Maybe Log?
+                Context.FlushCallStack();
+                throw;
             }
 
             lastInstruction = inst;
