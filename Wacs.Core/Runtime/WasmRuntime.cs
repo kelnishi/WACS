@@ -682,8 +682,13 @@ namespace Wacs.Core.Runtime
 
             //18. Collect exports
             //Process Exports, keep them, so they can be bound with a module name and imported by later modules.
+            HashSet<string> exportedEntities = new();
             foreach (var export in module.Exports)
             {
+                if (exportedEntities.Contains(export.Name))
+                    throw new InvalidDataException($"Module had multiple exports named {export.Name}");
+                exportedEntities.Add(export.Name);
+                
                 var desc = export.Desc;
                 ExternalValue val = desc switch
                 {
