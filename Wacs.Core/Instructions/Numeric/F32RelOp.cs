@@ -25,14 +25,27 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F32Ge = new(OpCode.F32Ge, ExecuteF32Ge,
             ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
 
+        private static int CompareF32(float i1, float i2, double epsilon)
+        {
+            int result = 0;
+
+            if (float.IsFinite(i1) && float.IsFinite(i2))
+                result = Math.Abs(i1 - i2) < epsilon ? 1 : 0;
+            else
+                result = i1 == i2 ? 1 : 0 ;
+            
+            if (float.IsNaN(i1) || float.IsNaN(i2))
+                result = 0;
+
+            return result;
+        }
+
         private static void ExecuteF32Eq(ExecContext context)
         {
             float i2 = context.OpStack.PopF32();
             float i1 = context.OpStack.PopF32();
 
-            int result = Math.Abs(i1 - i2) < context.Attributes.FloatingPointTolerance ? 1 : 0;
-            if (float.IsNaN(i1) || float.IsNaN(i2))
-                result = 0;
+            int result = CompareF32(i1, i2, context.Attributes.FloatingPointTolerance);
 
             context.OpStack.PushI32(result);
         }
@@ -42,9 +55,8 @@ namespace Wacs.Core.Instructions.Numeric
             float i2 = context.OpStack.PopF32();
             float i1 = context.OpStack.PopF32();
 
-            int result = Math.Abs(i1 - i2) > context.Attributes.FloatingPointTolerance ? 1 : 0;
-            if (float.IsNaN(i1) || float.IsNaN(i2))
-                result = 0;
+            int result = CompareF32(i1, i2, context.Attributes.FloatingPointTolerance);
+            result = result == 1 ? 0 : 1;
 
             context.OpStack.PushI32(result);
         }
