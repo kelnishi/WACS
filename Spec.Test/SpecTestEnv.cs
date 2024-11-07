@@ -10,7 +10,7 @@ namespace Spec.Test
         {
             string module = "spectest";
             runtime.BindHostFunction<Action<int>>((module, "print_i32"), Print_I32);
-            runtime.BindHostMemory((module, "memory"), new MemoryType(minimum:64, maximum:128));
+            runtime.BindHostMemory((module, "memory"), new MemoryType(minimum:1, maximum:3));
             runtime.BindHostGlobal((module, "global_i32"), new GlobalType(ValType.I32, Mutability.Immutable),
                 new Value(ValType.I32, 666));
             runtime.BindHostGlobal((module, "global_i64"), new GlobalType(ValType.I64, Mutability.Immutable),

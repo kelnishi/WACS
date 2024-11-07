@@ -17,20 +17,34 @@ namespace Wacs.Core.Types
 
     public readonly struct FuncIdx : IEquatable<Index>, IIndex
     {
+        
         public uint Value { get; }
         private FuncIdx(uint value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;
         public static explicit operator Index(FuncIdx functionIndex) => new((int)functionIndex.Value);
         public static explicit operator FuncIdx(int value) => new((uint)value);
         public static explicit operator FuncIdx(uint value) => new(value);
-
-        public static readonly FuncIdx Default = new(uint.MaxValue);
-        
         public static bool operator ==(FuncIdx left, FuncIdx right) => left.Value.Equals(right.Value);
         public static bool operator !=(FuncIdx left, FuncIdx right) => !left.Value.Equals(right.Value);
         public override bool Equals(object? obj) => obj is FuncIdx other && this == other;
         public override int GetHashCode() => Value.GetHashCode();
         
+        
+        public static readonly FuncIdx Default = new(uint.MaxValue);
+        public static readonly FuncIdx GlobalInitializers = new(uint.MaxValue - 1);
+        public static readonly FuncIdx ElementInitializers = new(uint.MaxValue - 2);
+        public static readonly FuncIdx ElementInitialization = new(uint.MaxValue - 3);
+        public static readonly FuncIdx ExpressionEvaluation = new(uint.MaxValue - 4);
+
+        public override string ToString() => Value switch
+        {
+            uint.MaxValue => "Default",
+            uint.MaxValue - 1 => "GlobalInitializers",
+            uint.MaxValue - 2 => "ElementInitializers",
+            uint.MaxValue - 3 => "ElementInitialization",
+            uint.MaxValue - 4 => "ExpressionEvaluation",
+            _ => Value.ToString()
+        };
     }
 
     public readonly struct TableIdx : IEquatable<Index>, IIndex

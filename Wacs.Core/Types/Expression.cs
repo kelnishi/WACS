@@ -34,6 +34,7 @@ namespace Wacs.Core.Types
         public void Execute(ExecContext context)
         {
             var frame = new Frame(context.Frame.Module, FunctionType.Empty);
+            frame.Index = FuncIdx.ExpressionEvaluation;
             var label = new Label(ResultType.Empty, new InstructionPointer(Instructions, 1), OpCode.Nop);
             frame.Labels.Push(label);
             context.PushFrame(frame);
