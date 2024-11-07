@@ -40,6 +40,8 @@ namespace Spec.Test.WastJson
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
         {
             List<Exception> errors = new();
+            
+            //Make a clean runtime
             runtime = new WasmRuntime();
             _env.BindToRuntime(runtime);
 
@@ -245,7 +247,6 @@ namespace Spec.Test.WastJson
         {
             List<Exception> errors = new();
             
-            runtime = new WasmRuntime();
             var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert = false;
             string assertionMessage = "";
@@ -306,8 +307,7 @@ namespace Spec.Test.WastJson
             if (ModuleType == "text")
                 errors.Add(new Exception(
                     $"Assert Malformed line {Line}: Skipping assert_malformed. No WAT parsing."));
-
-            runtime = new WasmRuntime();
+            
             var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert1 = false;
             string assertionMessage = "";
@@ -360,8 +360,14 @@ namespace Spec.Test.WastJson
 
     public class AssertUninstantiableCommand : ICommand
     {
-        [JsonPropertyName("module")]
-        public string Module { get; set; }
+        [JsonPropertyName("filename")]
+        public string Filename { get; set; }
+
+        [JsonPropertyName("module_type")]
+        public string ModuleType { get; set; }
+
+        [JsonPropertyName("text")]
+        public string Text { get; set; }
 
         public CommandType Type => CommandType.AssertUninstantiable;
 
@@ -370,10 +376,48 @@ namespace Spec.Test.WastJson
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
         {
-            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+            List<Exception> errors = new();
+            
+            var filepath = Path.Combine(testDefinition.Path, Filename);
+            bool didAssert = false;
+            string assertionMessage = "";
+            try
+            {
+                using var fileStream = new FileStream(filepath, FileMode.Open);
+                module = BinaryModuleParser.ParseWasm(fileStream);
+                module.SetName(filepath);
+                var modInstInvalid = runtime.InstantiateModule(module);
+            }
+            catch (ValidationException exc)
+            {
+                didAssert = true;
+                assertionMessage = exc.Message;
+            }
+            catch (InvalidDataException exc)
+            {
+                didAssert = true;
+                assertionMessage = exc.Message;
+            }
+            catch (FormatException exc)
+            {
+                didAssert = true;
+                assertionMessage = exc.Message;
+            }
+            catch (TrapException exc)
+            {
+                didAssert = true;
+                assertionMessage = exc.Message;
+            }
+
+            if (!didAssert)
+            {
+                throw new TestException($"Test failed {this}");
+            }
+
+            return errors;
         }
 
-        public override string ToString() => $"AssertUninstantiableCommand {{ Module = {Module}, Line = {Line} }}";
+        public override string ToString() => $"AssertUninstantiableCommand {{ Filename = {Filename}, ModuleType = {ModuleType}, Text = {Text}, Line = {Line} }}";
     }
 
     public class InvokeCommand : ICommand
