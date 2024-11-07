@@ -24,11 +24,30 @@ namespace Spec.Test
                 return;
             }
 
+            string skip = "";
+            if (args.Contains("--skip"))
+            {
+                int skipVar = Array.IndexOf(args, "--skip");
+                if (skipVar + 1 < args.Length)
+                {
+                    skip = args[skipVar + 1];
+                }
+                args = args.Where((_, index) => index != skipVar && index != skipVar + 1).ToArray();
+            }
+
             var jsonFiles = args
                 .Select(file => $"{file}.json")
                 .SelectMany(path => FindFileInDirectory(testsDir, path))
-                .Where(path => !string.IsNullOrEmpty(path));
+                .Where(path => !string.IsNullOrEmpty(path))
+                .ToList();
 
+            if (!string.IsNullOrEmpty(skip))
+            {
+                var lastSkip = FindFileInDirectory(testsDir, $"{skip}.json").Last();
+                int skipIndex = jsonFiles.IndexOf(lastSkip);
+                jsonFiles.RemoveRange(0, skipIndex + 1);
+            }
+            
             foreach (var filePath in jsonFiles)
             {
                 var testDefinition = LoadTestDefinition(filePath);
@@ -105,11 +124,6 @@ namespace Spec.Test
                     RenderModule(module);
                     throw;
                 }
-                // catch (Exception)
-                // {
-                //     Console.Error.WriteLine($"Exception in command {command}");
-                //     throw;
-                // }
             }
         }
 
