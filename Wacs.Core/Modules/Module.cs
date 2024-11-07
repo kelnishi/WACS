@@ -104,7 +104,6 @@ namespace Wacs.Core
                     }
                 }
             }
-        
             catch (EndOfStreamException e)
             {
                 throw new FormatException($"Encountered premature end of stream {e.Message}");
@@ -126,6 +125,9 @@ namespace Wacs.Core
             var payloadStart = reader.BaseStream.Position;
             var payloadEnd = (uint)(payloadStart + payloadLength);
 
+            if (payloadEnd > reader.BaseStream.Length)
+                throw new FormatException("Section end out of bounds");
+            
             // Console.WriteLine($"Section: {(SectionId)sectionId}");
             // @Spec 2.5. Modules
             switch (sectionId)
@@ -250,6 +252,9 @@ namespace Wacs.Core
                         // string sectionString = System.Text.Encoding.UTF8.GetString(sectionData);
                         // Console.WriteLine($"    {sectionString}");
 
+                        if (reader.BaseStream.Position > payloadEnd)
+                            throw new FormatException("Unexpected end to Custom section");
+                        
                         //Discard and fast-forward to the end of the section payload
                         reader.BaseStream.Position = payloadEnd;
                         break;
