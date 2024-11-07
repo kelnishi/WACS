@@ -8,10 +8,12 @@ using Wacs.Core.Validation;
 namespace Wacs.Core.Instructions.Numeric
 {
     //0x41
-    public class InstI32Const : InstructionBase
+    public class InstI32Const : InstructionBase, IConstInstruction
     {
         public override ByteCode Op => OpCode.I32Const;
         private int Value { get; set; }
+
+        public bool IsConstant(IWasmValidationContext? ctx) => true;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -41,10 +43,12 @@ namespace Wacs.Core.Instructions.Numeric
     }
     
     //0x42
-    public class InstI64Const : InstructionBase
+    public class InstI64Const : InstructionBase, IConstInstruction
     {
         public override ByteCode Op => OpCode.I64Const;
         private long Value { get; set; }
+
+        public bool IsConstant(IWasmValidationContext? ctx) => true;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -68,10 +72,12 @@ namespace Wacs.Core.Instructions.Numeric
     }
     
     //0x43
-    public class InstF32Const : InstructionBase
+    public class InstF32Const : InstructionBase, IConstInstruction
     {
         public override ByteCode Op => OpCode.F32Const;
         private float Value { get; set; }
+
+        public bool IsConstant(IWasmValidationContext? ctx) => true;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -103,10 +109,12 @@ namespace Wacs.Core.Instructions.Numeric
     }
     
     //0x44
-    public class InstF64Const : InstructionBase
+    public class InstF64Const : InstructionBase, IConstInstruction
     {
         public override ByteCode Op => OpCode.F64Const;
         private double Value { get; set; }
+
+        public bool IsConstant(IWasmValidationContext? ctx) => true;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const

@@ -50,7 +50,7 @@ namespace Wacs.Core
                 var data = Mode switch
                 {
                     DataMode.PassiveMode => datastring,
-                    DataMode.ActiveMode { MemoryIndex: { Value: 0 }, Offset: { IsConstant: true } } am => $"{am.Offset.ToWat()} {datastring}",
+                    DataMode.ActiveMode am when am.MemoryIndex is { Value: 0 } && am.Offset.Instructions.IsConstant(null) => $"{am.Offset.ToWat()} {datastring}",
                     DataMode.ActiveMode am => $" (memory {am.MemoryIndex.Value}) (offset{am.Offset.ToWat()}) {datastring}",
                     _ => throw new InvalidDataException($"Unkown datamode: {Mode}")
                 };

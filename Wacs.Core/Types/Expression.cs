@@ -27,8 +27,6 @@ namespace Wacs.Core.Types
 
         public int Size => Instructions.Size;
 
-        public bool IsConstant => Instructions.IsConstant;
-
         /// <summary>
         /// Leaves the result on the OpStack
         /// </summary>
@@ -78,11 +76,12 @@ namespace Wacs.Core.Types
 
                 RuleFor(e => e).Custom((e, ctx) =>
                 {
+                    var validationContext = ctx.GetValidationContext();
+                    
                     if (isConstant)
-                        if (!e.IsConstant)
+                        if (!e.Instructions.IsConstant(validationContext))
                             ctx.AddFailure($"Expression must be constant");
 
-                    var validationContext = ctx.GetValidationContext();
 
                     var funcType = new FunctionType(ResultType.Empty, resultType);
                     validationContext.PushControlFrame(OpCode.Expr, funcType); //The root frame

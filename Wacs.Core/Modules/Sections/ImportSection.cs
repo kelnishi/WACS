@@ -42,7 +42,7 @@ namespace Wacs.Core
             Imports
                 .Select(import => import.Desc)
                 .OfType<ImportDesc.GlobalDesc>()
-                .Select(globDesc => new Global(globDesc.GlobalDef))
+                .Select(globDesc => new Global(globDesc.GlobalDef){IsImport = true})
                 .ToList().AsReadOnly();
 
         /// <summary>

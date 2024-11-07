@@ -12,11 +12,11 @@ using Wacs.Core.Validation;
 namespace Wacs.Core.Instructions
 {
     //0xD0
-    public class InstRefNull : InstructionBase
+    public class InstRefNull : InstructionBase, IConstInstruction
     {
         public override ByteCode Op => OpCode.RefNull;
-        
         public ReferenceType Type { get; internal set; }
+        public bool IsConstant(IWasmValidationContext? ctx) => true;
 
         // @Spec 3.3.2.1. ref.null t
         public override void Validate(IWasmValidationContext context)
@@ -65,11 +65,12 @@ namespace Wacs.Core.Instructions
         
     
     //0xD2
-    public class InstRefFunc : InstructionBase
+    public class InstRefFunc : InstructionBase, IConstInstruction
     {
         public override ByteCode Op => OpCode.RefFunc;
-        
         public FuncIdx FunctionIndex { get; internal set; }
+        
+        public bool IsConstant(IWasmValidationContext? ctx) => true;
         
         // @Spec 3.3.2.3. ref.func x
         public override void Validate(IWasmValidationContext context)

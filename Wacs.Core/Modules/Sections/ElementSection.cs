@@ -70,7 +70,7 @@ namespace Wacs.Core
                 var modeText = Mode switch
                 {
                     ElementMode.PassiveMode => "",
-                    ElementMode.ActiveMode { TableIndex: { Value: 0 }, Offset: { Instructions: { IsConstant: true } } } am =>
+                    ElementMode.ActiveMode am when am.TableIndex is { Value: 0 } && am.Offset.Instructions.IsConstant(null) =>
                         $"{ am.Offset.ToWat() }",
                     ElementMode.ActiveMode am => $" (table {am.TableIndex.Value}) (offset{am.Offset.ToWat()})",
                     ElementMode.DeclarativeMode => $" declare",
