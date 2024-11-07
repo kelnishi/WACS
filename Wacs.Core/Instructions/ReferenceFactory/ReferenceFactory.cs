@@ -38,7 +38,7 @@ namespace Wacs.Core.Instructions
             OpCode.CallIndirect      => new InstCallIndirect(),
             
             //When invoking externally
-            OpCode.Func              => new InstCall(),
+            OpCode.Func              => new InstFuncReturn(),
                  
             // Reference Types 
             OpCode.RefNull           => new InstRefNull(),
