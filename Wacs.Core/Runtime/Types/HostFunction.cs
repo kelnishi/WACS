@@ -73,6 +73,12 @@ namespace Wacs.Core.Runtime.Types
         public void SetName(string value) {}
         public string Id => $"{ModuleName}.{Name}";
 
+        public bool IsExport
+        {
+            get => true;
+            set => throw new NotImplementedException("Host functions are inherently exported.");
+        }
+
         public FunctionType Type { get; }
 
         public Span<object> GetParameterBuf(ExecContext ctx)

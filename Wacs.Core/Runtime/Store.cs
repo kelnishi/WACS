@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
@@ -52,6 +53,13 @@ namespace Wacs.Core.Runtime
             var addr = new FuncAddr(Funcs.Count);
             Funcs.Add(func);
             return addr;
+        }
+
+        public IEnumerable<FuncAddr> GetFuncExportAddrs(string entity)
+        {
+            return Funcs.Select((inst, index) => (inst, index))
+                .Where(t => t.inst.IsExport && t.inst.Name == entity)
+                .Select(t => new FuncAddr(t.index));
         }
 
         public TableAddr AddTable(TableInstance table)

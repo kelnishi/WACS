@@ -32,6 +32,9 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("filename")]
         public string Filename { get; set; }
 
+        [JsonPropertyName("name")]
+        public string Name { get; set; }
+
         public CommandType Type => CommandType.Module;
 
         [JsonPropertyName("line")]
@@ -49,9 +52,12 @@ namespace Spec.Test.WastJson
             using var fileStream = new FileStream(filepath, FileMode.Open);
             module = BinaryModuleParser.ParseWasm(fileStream);
             var modInst = runtime.InstantiateModule(module);
-            var moduleName = $"{filepath}"; 
+            var moduleName = $"{filepath}";
             module.SetName(moduleName);
-            runtime.RegisterModule(module.Name, modInst);
+            
+            if (!string.IsNullOrEmpty(Name))
+                modInst.Name = Name;
+            
             return errors;
         }
 
@@ -102,7 +108,7 @@ namespace Spec.Test.WastJson
             switch (action.Type)
             {
                 case ActionType.Invoke:
-                    if (!runtime.TryGetExportedFunction((module.Name, action.Field), out var addr))
+                    if (!runtime.TryGetExportedFunction(action.Field, out var addr))
                         throw new InvalidDataException(
                             $"Could not get exported function {module.Name}.{action.Field}");
                     //Compute type from action.Args and action.Expected
@@ -136,7 +142,7 @@ namespace Spec.Test.WastJson
             switch (action1.Type)
             {
                 case ActionType.Invoke:
-                    if (!runtime.TryGetExportedFunction((module.Name, action1.Field), out var addr))
+                    if (!runtime.TryGetExportedFunction(action1.Field, out var addr))
                         throw new InvalidDataException(
                             $"Could not get exported function {module.Name}.{action1.Field}");
                     //Compute type from action.Args and action.Expected
@@ -176,7 +182,7 @@ namespace Spec.Test.WastJson
             switch (action2.Type)
             {
                 case ActionType.Invoke:
-                    if (!runtime.TryGetExportedFunction((module?.Name, action2.Field), out var addr))
+                    if (!runtime.TryGetExportedFunction(action2.Field, out var addr))
                         throw new ArgumentException(
                             $"Could not get exported function {module?.Name}.{action2.Field}");
                     //Compute type from action.Args and action.Expected
@@ -226,7 +232,7 @@ namespace Spec.Test.WastJson
             switch (action.Type)
             {
                 case ActionType.Invoke:
-                    if (!runtime.TryGetExportedFunction((module.Name, action.Field), out var addr))
+                    if (!runtime.TryGetExportedFunction(action.Field, out var addr))
                         throw new InvalidDataException(
                             $"Could not get exported function {module.Name}.{action.Field}");
                     //Compute type from action.Args and action.Expected
