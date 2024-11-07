@@ -105,7 +105,12 @@ namespace Wacs.Core.Runtime
 
         public bool TryGetExportedFunction(string entity, out FuncAddr addr)
         {
-            addr = Store.GetFuncExportAddrs(entity).LastOrDefault();
+            var exports = _moduleInstances.SelectMany(modInst => modInst.Exports)
+                .Where(export => export.Name == entity)
+                .Select(export => export.Value)
+                .Cast<ExternalValue.Function>()
+                .Select(func => func.Address);
+            addr = exports.LastOrDefault();
             return addr != null;
         }
 

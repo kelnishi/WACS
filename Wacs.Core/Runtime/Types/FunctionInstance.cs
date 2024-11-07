@@ -35,7 +35,7 @@ namespace Wacs.Core.Runtime.Types
         public string Name { get; set; } = "";
 
         public FunctionType Type { get; }
-        public void SetName(string value) => Name = value;
+        public void SetName(string value) => Name = $"{Name};{value}";
         public string Id => string.IsNullOrEmpty(Name)?"":$"{ModuleName}.{Name}";
         public bool IsExport { get; set; }
 
