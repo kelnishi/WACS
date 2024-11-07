@@ -10,7 +10,7 @@ namespace Wacs.Core.Types
     /// </summary>
     public class GlobalType
     {
-        private GlobalType(ValType valtype, Mutability mut) =>
+        public GlobalType(ValType valtype, Mutability mut) =>
             (ContentType, Mutability) = (valtype, mut);
 
         /// <summary>
@@ -24,6 +24,24 @@ namespace Wacs.Core.Types
         public ValType ContentType { get; }
 
         public ResultType ResultType => ContentType.SingleResult();
+
+        public override string ToString() =>
+            $"GlobalType({(Mutability == Mutability.Immutable ? "const" : "var")} {ContentType})";
+
+        public override bool Equals(object obj) =>
+            obj is GlobalType other &&
+            ContentType == other.ContentType &&
+            Mutability == other.Mutability;
+
+        public override int GetHashCode() =>
+            HashCode.Combine(ContentType, Mutability);
+
+        public static bool operator ==(GlobalType left, GlobalType right) =>
+            Equals(left, right);
+
+        public static bool operator !=(GlobalType left, GlobalType right) =>
+            !Equals(left, right);
+
 
         /// <summary>
         /// @Spec 5.3.10. Global Types
