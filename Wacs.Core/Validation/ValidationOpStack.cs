@@ -104,7 +104,7 @@ namespace Wacs.Core.Validation
 
         public void PushFuncref(Value value)
         {
-            if (value.Type != ValType.Funcref)
+            if (!value.Type.IsCompatible(ValType.Funcref))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.Funcref}");
             _stack.Push(value);
@@ -112,7 +112,7 @@ namespace Wacs.Core.Validation
 
         public void PushExternref(Value value)
         {
-            if (value.Type != ValType.Externref)
+            if (!value.Type.IsCompatible(ValType.Externref))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.Externref}");
             _stack.Push(value);
@@ -137,7 +137,8 @@ namespace Wacs.Core.Validation
                 throw new ValidationException("Operand stack underflow. pop(i32)");
 
             Value value = _stack.Pop();
-            if (value.Type != ValType.I32)
+            
+            if (!value.Type.IsCompatible(ValType.I32))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.I32}");
             return value;
@@ -151,7 +152,7 @@ namespace Wacs.Core.Validation
                 throw new ValidationException("Operand stack underflow. pop(i64)");
 
             Value value = _stack.Pop();
-            if (value.Type != ValType.I64)
+            if (!value.Type.IsCompatible(ValType.I64))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.I64}");
             return value;
@@ -165,7 +166,7 @@ namespace Wacs.Core.Validation
                 throw new ValidationException("Operand stack underflow. pop(f32)");
 
             Value value = _stack.Pop();
-            if (value.Type != ValType.F32)
+            if (!value.Type.IsCompatible(ValType.F32))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.F32}");
             return value;
@@ -179,7 +180,7 @@ namespace Wacs.Core.Validation
                 throw new ValidationException("Operand stack underflow. pop(f64)");
 
             Value value = _stack.Pop();
-            if (value.Type != ValType.F64)
+            if (!value.Type.IsCompatible(ValType.F64))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.F64}");
             return value;
@@ -193,7 +194,7 @@ namespace Wacs.Core.Validation
                 throw new ValidationException("Operand stack underflow. pop(v128)");
 
             Value value = _stack.Pop();
-            if (value.Type != ValType.V128)
+            if (!value.Type.IsCompatible(ValType.V128))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected {ValType.V128}");
             return value;
