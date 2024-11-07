@@ -119,92 +119,36 @@ namespace Wacs.Core.Utilities
             byte[] bytes = reader.ReadBytes(4);
             if (bytes.Length < 4)
                 throw new FormatException("Not enough bytes to read a float.");
-
-            uint intValue = BitConverter.ToUInt32(bytes, 0);
-            int sign = (int)(intValue >> 31) & 0x01;
-            int exponent = (int)((intValue >> 23) & 0xFF);
-            uint fraction = intValue & 0x7FFFFF;
-
-            if (exponent == 0 && fraction == 0)
-                return 0.0f; // Handle the zero case
-
-            float result;
-
-            if (exponent == 255)
-            {
-                if (fraction != 0)
-                    result = float.NaN; // NaN
-                else
-                    result = sign == 0 ? float.PositiveInfinity : float.NegativeInfinity; // Infinity
-            }
-            else
-            {
-                if (exponent == 0)
-                {
-                    // Denormalized number
-                    exponent += 1; // Adjust exponent for denormalized numbers
-                }
-                else
-                {
-                    exponent -= 127; // Bias removal
-                }
-
-                // Convert to float
-                result = (float)(Math.Pow(-1, sign) * Math.Pow(2, exponent) * (1 + fraction / (float)(1 << 23)));
-            }
-
-            return result;
+            
+            int bits = BitConverter.ToInt32(bytes, 0);
+            return BitConverter.Int32BitsToSingle(bits);
         }
 
         public static double Read_f64(this BinaryReader reader)
         {
             byte[] bytes = reader.ReadBytes(8);
             if (bytes.Length < 8)
-                throw new EndOfStreamException("Not enough bytes to read a double.");
-
-            ulong ulongValue = BitConverter.ToUInt64(bytes, 0);
-            int sign = (int)(ulongValue >> 63) & 0x01;
-            int exponent = (int)((ulongValue >> 52) & 0x7FF);
-            ulong fraction = ulongValue & 0xFFFFFFFFFFFFF;
-
-            if (exponent == 0 && fraction == 0)
-                return 0.0; // Handle the zero case
-
-            double result;
-
-            if (exponent == 0x7FF)
-            {
-                if (fraction != 0)
-                    result = double.NaN; // NaN
-                else
-                    result = sign == 0 ? double.PositiveInfinity : double.NegativeInfinity; // Infinity
-            }
-            else
-            {
-                if (exponent == 0)
-                {
-                    // Denormalized number
-                    exponent += 1; // Adjust exponent for denormalized numbers
-                }
-                else
-                {
-                    exponent -= 1023; // Bias removal
-                }
-
-                // Convert to double
-                result = (double)(Math.Pow(-1, sign) * Math.Pow(2, exponent) *
-                                  (1 + (double)fraction / (double)(1ul << 52)));
-            }
-
-            return result;
+                throw new FormatException("Not enough bytes to read a double.");
+            
+            long bits = BitConverter.ToInt64(bytes, 0);
+            return BitConverter.Int64BitsToDouble(bits);
         }
-
 
         public static string ReadUtf8String(this BinaryReader reader)
         {
             uint length = ReadLeb128_u32(reader);
             byte[] bytes = reader.ReadBytes((int)length);
-            return Encoding.UTF8.GetString(bytes);
+            if (bytes == null)
+                throw new FormatException($"No bytes in utf-8 string");
+
+            try
+            {
+                return Encoding.UTF8.GetString(bytes);
+            }
+            catch (ArgumentException exc)
+            {
+                throw new FormatException($"Failed to decode utf-8 string: {exc.Message}");
+            }
         }
 
         public static T[] ParseVector<T>(this BinaryReader reader, Func<BinaryReader, T> elementParser, PostProcess<T>? postProcess = null)
