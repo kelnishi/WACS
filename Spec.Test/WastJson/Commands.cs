@@ -58,6 +58,33 @@ namespace Spec.Test.WastJson
         public override string ToString() => $"ModuleCommand {{ Filename = {Filename}, Line = {Line} }}";
     }
 
+    public class RegisterCommand : ICommand
+    {
+        private SpecTestEnv _env = new SpecTestEnv();
+
+        [JsonPropertyName("name")]
+        public string Name { get; set; }
+
+        [JsonPropertyName("as")]
+        public string As { get; set; }
+
+        public CommandType Type => CommandType.Module;
+
+        [JsonPropertyName("line")]
+        public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            List<Exception> errors = new();
+
+            var modInst = runtime.GetModule(Name);
+            runtime.RegisterModule(As, modInst);
+            return errors;
+        }
+
+        public override string ToString() => $"RegisterCommand {{ Name = {Name}, As = {As}, Line = {Line} }}";
+    }
+    
     public class ActionCommand : ICommand
     {
         [JsonPropertyName("action")]
@@ -706,6 +733,7 @@ namespace Spec.Test.WastJson
             ICommand? command = type switch {
                 CommandType.DebuggerBreak =>JsonSerializer.Deserialize<DebuggerBreak>(root.GetRawText(), options), 
                 CommandType.Module => JsonSerializer.Deserialize<ModuleCommand>(root.GetRawText(), options),
+                CommandType.Register => JsonSerializer.Deserialize<RegisterCommand>(root.GetRawText(), options),
                 CommandType.Action => JsonSerializer.Deserialize<ActionCommand>(root.GetRawText(), options),
                 CommandType.AssertReturn => JsonSerializer.Deserialize<AssertReturnCommand>(root.GetRawText(), options),
                 CommandType.AssertTrap => JsonSerializer.Deserialize<AssertTrapCommand>(root.GetRawText(), options),

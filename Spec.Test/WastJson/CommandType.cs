@@ -8,6 +8,9 @@ namespace Spec.Test.WastJson
     {
         [EnumMember(Value = "module")]
         Module,
+        
+        [EnumMember(Value = "register")]
+        Register,
 
         [EnumMember(Value = "action")]
         Action,
