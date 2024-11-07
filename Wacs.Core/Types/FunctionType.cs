@@ -64,6 +64,9 @@ namespace Wacs.Core.Types
                     $"Invalid function type form {form} at offset {reader.BaseStream.Position}.")
             };
 
+        public override string ToString() =>
+            $"FunctionType({ToNotation()})";
+
         /// <summary>
         /// 3.2.3. Function Types
         /// Always valid

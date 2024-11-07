@@ -38,5 +38,7 @@ namespace Wacs.Core.Runtime.Types
         public void SetName(string value) => Name = value;
         public string Id => string.IsNullOrEmpty(Name)?"":$"{ModuleName}.{Name}";
         public bool IsExport { get; set; }
+
+        public override string ToString() => $"FunctionInstance[{Id}] (Type: {Type}, IsExport: {IsExport})";
     }
 }
