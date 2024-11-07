@@ -43,7 +43,7 @@ namespace Spec.Test.WastJson
             runtime = new WasmRuntime();
             _env.BindToRuntime(runtime);
 
-            var filepath = Path.Combine(testDefinition.Path, this.Filename);
+            var filepath = Path.Combine(testDefinition.Path, Filename);
             using var fileStream = new FileStream(filepath, FileMode.Open);
             module = BinaryModuleParser.ParseWasm(fileStream);
             var modInst = runtime.InstantiateModule(module);
@@ -69,7 +69,7 @@ namespace Spec.Test.WastJson
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
         {
             List<Exception> errors = new();
-            var action = this.Action;
+            var action = Action;
             switch (action.Type)
             {
                 case ActionType.Invoke:
@@ -103,7 +103,7 @@ namespace Spec.Test.WastJson
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
         {
             List<Exception> errors = new();
-            var action1 = this.Action;
+            var action1 = Action;
             switch (action1.Type)
             {
                 case ActionType.Invoke:
@@ -115,9 +115,9 @@ namespace Spec.Test.WastJson
 
                     var pVals = action1.Args.Select(arg => arg.AsValue).ToArray();
                     var result = invoker(pVals);
-                    if (!result.SequenceEqual(this.Expected.Select(e => e.AsValue)))
+                    if (!result.SequenceEqual(Expected.Select(e => e.AsValue)))
                         throw new TestException(
-                            $"Test failed {this} \"{action1.Field}\": Expected [{string.Join(" ", this.Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
+                            $"Test failed {this} \"{action1.Field}\": Expected [{string.Join(" ", Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
 
                     break;
             }
@@ -143,7 +143,7 @@ namespace Spec.Test.WastJson
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
         {
             List<Exception> errors = new();
-            var action2 = this.Action;
+            var action2 = Action;
             switch (action2.Type)
             {
                 case ActionType.Invoke:
@@ -193,7 +193,7 @@ namespace Spec.Test.WastJson
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
         {
             List<Exception> errors = new();
-            var action = this.Action;
+            var action = Action;
             switch (action.Type)
             {
                 case ActionType.Invoke:
@@ -213,7 +213,7 @@ namespace Spec.Test.WastJson
                     catch (WasmRuntimeException exc)
                     {
                         didThrow = true;
-                        throwMessage = this.Text;
+                        throwMessage = Text;
                     }
                     if (!didThrow)
                         throw new TestException($"Test failed {this} \"{throwMessage}\"");
@@ -246,7 +246,7 @@ namespace Spec.Test.WastJson
             List<Exception> errors = new();
             
             runtime = new WasmRuntime();
-            var filepath = Path.Combine(testDefinition.Path, this.Filename);
+            var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert = false;
             string assertionMessage = "";
             try
@@ -305,10 +305,10 @@ namespace Spec.Test.WastJson
             var errors = new List<Exception>();
             if (ModuleType == "text")
                 errors.Add(new Exception(
-                    $"Assert Malformed line {this.Line}: Skipping assert_malformed. No WAT parsing."));
+                    $"Assert Malformed line {Line}: Skipping assert_malformed. No WAT parsing."));
 
             runtime = new WasmRuntime();
-            var filepath = Path.Combine(testDefinition.Path, this.Filename);
+            var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert1 = false;
             string assertionMessage = "";
             try
