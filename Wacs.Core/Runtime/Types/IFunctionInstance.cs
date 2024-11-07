@@ -9,6 +9,8 @@ namespace Wacs.Core.Runtime.Types
     {
         FunctionType Type { get; }
         public string Id { get; }
+        public string Name { get; }
+        public bool IsExport { get; set; }
         public void SetName(string name);
     }
 }

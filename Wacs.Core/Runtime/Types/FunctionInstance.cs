@@ -32,10 +32,11 @@ namespace Wacs.Core.Runtime.Types
         public FuncIdx Index { get; }
 
         public string ModuleName => Module.Name;
-        private string Name { get; set; } = "";
+        public string Name { get; set; } = "";
 
         public FunctionType Type { get; }
         public void SetName(string value) => Name = value;
         public string Id => string.IsNullOrEmpty(Name)?"":$"{ModuleName}.{Name}";
+        public bool IsExport { get; set; }
     }
 }

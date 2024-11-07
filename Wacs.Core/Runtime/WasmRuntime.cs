@@ -53,7 +53,8 @@ namespace Wacs.Core.Runtime
         private static readonly MethodInfo GenericFuncsInvoke = typeof(Delegates.GenericFuncs).GetMethod("Invoke")!;
         private readonly Dictionary<(string module, string entity), IAddress> _entityBindings = new();
 
-        private readonly Dictionary<string, ModuleInstance> _modules = new();
+        private readonly List<ModuleInstance> _moduleInstances = new();
+        private readonly Dictionary<string, ModuleInstance> _registeredModules = new();
 
         private IInstruction? lastInstruction = null;
 
@@ -71,7 +72,7 @@ namespace Wacs.Core.Runtime
 
         public void RegisterModule(string moduleName, ModuleInstance moduleInstance)
         {
-            _modules[moduleName] = moduleInstance;
+            _registeredModules[moduleName] = moduleInstance;
 
             //Bind exports
             foreach (var export in moduleInstance.Exports)
@@ -90,12 +91,28 @@ namespace Wacs.Core.Runtime
 
         public ModuleInstance GetModule(string moduleName)
         {
-            if (_modules.TryGetValue(moduleName, out var moduleInstance))
+            if (_registeredModules.TryGetValue(moduleName, out var moduleInstance))
             {
                 return moduleInstance;
             }
-
+            
+            var anonInstance = _moduleInstances.FirstOrDefault(m => m.Name == moduleName);
+            if (anonInstance != null)
+                return anonInstance;
+            
             throw new Exception($"Module '{moduleName}' not found.");
+        }
+
+        public bool TryGetExportedFunction(string entity, out FuncAddr addr)
+        {
+            var addrs = Store.GetFuncExportAddrs(entity).ToList();
+            if (addrs.Count == 1)
+            {
+                addr = addrs[0];
+                return true;
+            }
+            addr = FuncAddr.Null;
+            return false;
         }
 
         public bool TryGetExportedFunction((string module, string entity) id, out FuncAddr addr)
@@ -686,6 +703,7 @@ namespace Wacs.Core.Runtime
                 var funcAddr = funcDesc!.Address;
                 var funcInst = Store[funcAddr];
                 funcInst.SetName(export.Name);
+                funcInst.IsExport = true;
             }
 
             return moduleInstance;
@@ -825,6 +843,8 @@ namespace Wacs.Core.Runtime
                     throw new WasmRuntimeException("Execution fault in Module Instantiation.");
                 //19.
                 Context.PopFrame();
+                
+                _moduleInstances.Add(moduleInstance);
 
                 return moduleInstance;
             }
