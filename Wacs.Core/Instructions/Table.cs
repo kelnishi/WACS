@@ -110,15 +110,15 @@ namespace Wacs.Core.Instructions
             context.Assert( context.OpStack.Peek().IsI32,
                  $"Instruction table.set found incorrect type on top of the Stack");
             //9.
-            int i = context.OpStack.PopI32();
+            uint i = context.OpStack.PopI32();
             //10.
             if (i >= tab.Elements.Count)
             {
-                throw new TrapException("Trap in table.set");
+                throw new TrapException("table.set index exceeds table size.");
             }
 
             //11.
-            tab.Elements[i] = val;
+            tab.Elements[(int)i] = val;
         }
 
         // @Spec 5.4.5. Table Instructions

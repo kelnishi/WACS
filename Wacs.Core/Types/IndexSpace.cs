@@ -119,8 +119,10 @@ namespace Wacs.Core.Types
             set => throw new InvalidOperationException(InvalidSetterMessage);
         }
 
+        public int Count => _imports.Count + _tableTypes.Count;
+
         public override bool Contains(TableIdx idx) =>
-            idx.Value < _imports.Count + _tableTypes.Count;
+            idx.Value < Count;
     }
 
     public class MemSpace : AbstractIndexSpace<MemIdx, MemoryType>

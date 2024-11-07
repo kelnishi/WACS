@@ -106,11 +106,16 @@ namespace Spec.Test
         {
             List<Exception> errors = new List<Exception>();
             Console.WriteLine($"\n===== Running test {testDefinition.TestName} =====");
-
-            WasmRuntime? runtime = null;
+            
+            SpecTestEnv env = new SpecTestEnv();
+            
+            WasmRuntime runtime = new();
+            env.BindToRuntime(runtime);
+            
             Module? module = null;
             string moduleName = "";
-
+            
+            
             using var progress = new ProgressBar(testDefinition.Commands.Count, "Processing");
             foreach (var command in testDefinition.Commands)
             {

@@ -246,8 +246,12 @@ namespace Wacs.Core
                         RuleFor(mode => mode)
                             .Custom((mode, ctx) =>
                             {
-                                var tableType = ctx.GetValidationContext().Tables[mode.TableIndex];
                                 var validationContext = ctx.GetValidationContext();
+                                if (!validationContext.Tables.Contains(mode.TableIndex))
+                                    throw new ValidationException(
+                                        $"Table index {mode.TableIndex.Value} exceeds table size {validationContext.Tables.Count}");
+                                
+                                var tableType = validationContext.Tables[mode.TableIndex];
                                 var exprValidator = new Expression.Validator(ValType.I32.SingleResult(), isConstant: true);
                                 var subContext = validationContext.PushSubContext(mode.Offset);
                                 var result = exprValidator.Validate(subContext);
