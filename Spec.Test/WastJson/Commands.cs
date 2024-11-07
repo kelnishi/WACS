@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -12,6 +13,18 @@ using Wacs.Core.Runtime.Types;
 
 namespace Spec.Test.WastJson
 {
+    public class DebuggerBreak : ICommand
+    {
+        public CommandType Type { get; }
+        public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
+        {
+            Debugger.Break();
+            return new();
+        }
+    }
+    
     public class ModuleCommand : ICommand
     {
         private SpecTestEnv _env = new SpecTestEnv();
@@ -647,6 +660,7 @@ namespace Spec.Test.WastJson
             CommandType type = EnumHelper.GetEnumValueFromString<CommandType>(typeString);
 
             ICommand? command = type switch {
+                CommandType.DebuggerBreak =>JsonSerializer.Deserialize<DebuggerBreak>(root.GetRawText(), options), 
                 CommandType.Module => JsonSerializer.Deserialize<ModuleCommand>(root.GetRawText(), options),
                 CommandType.Action => JsonSerializer.Deserialize<ActionCommand>(root.GetRawText(), options),
                 CommandType.AssertReturn => JsonSerializer.Deserialize<AssertReturnCommand>(root.GetRawText(), options),

@@ -74,5 +74,8 @@ namespace Spec.Test.WastJson
 
         [EnumMember(Value = "maybe")]
         Maybe,
+        
+        [EnumMember(Value = "break")]
+        DebuggerBreak,
     }
 }
