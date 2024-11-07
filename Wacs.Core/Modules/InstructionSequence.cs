@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core
 {
@@ -26,22 +27,6 @@ namespace Wacs.Core
 
         public InstructionSequence(IInstruction single) =>
             _instructions.Add(single);
-
-        public bool IsConstant =>
-            _instructions.Count - (HasExplicitEnd ? 1 : 0) == 1 &&
-            !_instructions.Any(inst => inst.Op switch
-            {
-                { x00: OpCode.I32Const } => false,
-                { x00: OpCode.I64Const } => false,
-                { x00: OpCode.F32Const } => false,
-                { x00: OpCode.F64Const } => false,
-                { x00: OpCode.GlobalGet } => false,
-                { x00: OpCode.RefNull } => false,
-                { x00: OpCode.RefFunc } => false,
-                { xFD: SimdCode.V128Const } => false,
-                { x00: OpCode.End } => false,
-                _ => true
-            });
 
         public bool HasExplicitEnd => _instructions[^1].Op == OpCode.End;
         public bool EndsWithElse => _instructions[^1].Op == OpCode.Else;
@@ -87,6 +72,15 @@ namespace Wacs.Core
         public IEnumerator<IInstruction> GetEnumerator() => _instructions.GetEnumerator();
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public bool IsConstant(IWasmValidationContext? ctx) =>
+            _instructions.Count - (HasExplicitEnd ? 1 : 0) == 1 &&
+            !_instructions.Any(inst => inst switch
+            {
+                IConstInstruction constInstruction => !constInstruction.IsConstant(ctx),
+                InstEnd => false,
+                _ => true
+            });
 
         public void SwapElseEnd()
         {

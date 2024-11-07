@@ -131,7 +131,7 @@ namespace Wacs.Core.Instructions
         private delegate void ValidationDelegate(IWasmValidationContext context, LocalIdx localIndex);
     }
     
-    public class GlobalVariableInst : InstructionBase
+    public class GlobalVariableInst : InstructionBase, IConstInstruction
     {
         private readonly ExecuteDelegate _execute;
 
@@ -142,6 +142,9 @@ namespace Wacs.Core.Instructions
 
         public override ByteCode Op { get; }
         private GlobalIdx Index { get; set; }
+
+        public bool IsConstant(IWasmValidationContext? context) => 
+            context == null || context.Globals.Contains(Index) && context.Globals[Index].IsImport && context.Globals[Index].Type.Mutability == Mutability.Immutable;
 
         public override void Validate(IWasmValidationContext context) => _validate(context, Index);
         public override void Execute(ExecContext context) => _execute(context, Index);

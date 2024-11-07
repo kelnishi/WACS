@@ -6,10 +6,12 @@ using Wacs.Core.Validation;
 namespace Wacs.Core.Instructions.Simd
 {
     //0x41
-    public class InstV128Const : InstructionBase
+    public class InstV128Const : InstructionBase, IConstInstruction
     {
         public override ByteCode Op => SimdCode.V128Const;
         private V128 V128 { get; set; }
+
+        public bool IsConstant(IWasmValidationContext? ctx) => true;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
