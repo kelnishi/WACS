@@ -121,11 +121,12 @@ namespace Spec.Test
             {
                 try
                 {
-                    progress.Tick($"{moduleName}:{command}");
+                    progress.Tick($"{module?.Name}:{command}");
                     command.RunTest(testDefinition, ref runtime, ref module);
                 }
                 catch (TestException exc)
                 {
+                    Console.Error.WriteLine($"\n\nLast module:{module?.Name}\n");
                     RenderModule(module);
                     throw;
                 }
