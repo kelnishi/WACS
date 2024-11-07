@@ -1,6 +1,7 @@
 using System;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -46,12 +47,12 @@ namespace Wacs.Core.Instructions.Numeric
         {
             float value = context.OpStack.PopF32();
             if (float.IsNaN(value) || float.IsInfinity(value)) 
-                throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i32.trunc_f32_s.");
+                throw new TrapException("Cannot convert NaN or infinity to integer in i32.trunc_f32_s.");
             
-            float truncated = (float)Math.Truncate(value);
+            double truncated = Math.Truncate(value);
 
             if (truncated is < int.MinValue or > int.MaxValue) 
-                throw new OverflowException("Integer overflow in i32.trunc_f32_s.");
+                throw new TrapException("Integer overflow in i32.trunc_f32_s.");
             
             int result = (int)truncated;
             context.OpStack.PushI32(result);
@@ -61,12 +62,12 @@ namespace Wacs.Core.Instructions.Numeric
         {
             float value = context.OpStack.PopF32();
             if (float.IsNaN(value) || float.IsInfinity(value))
-                throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i32.trunc_f32_u.");
+                throw new TrapException("Cannot convert NaN or infinity to integer in i32.trunc_f32_u.");
             
-            float truncated = (float)Math.Truncate(value);
+            double truncated = Math.Truncate(value);
 
             if (truncated is < 0.0f or > uint.MaxValue)
-                throw new OverflowException("Integer overflow in i32.trunc_f32_u.");
+                throw new TrapException("Integer overflow in i32.trunc_f32_u.");
             
             uint result = (uint)truncated;
 
@@ -77,12 +78,12 @@ namespace Wacs.Core.Instructions.Numeric
         {
             double value = context.OpStack.PopF64();
             if (double.IsNaN(value) || double.IsInfinity(value))
-                throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i32.trunc_f64_s.");
+                throw new TrapException("Cannot convert NaN or infinity to integer in i32.trunc_f64_s.");
 
             double truncated = Math.Truncate(value);
             
             if (truncated is < int.MinValue or > int.MaxValue)
-                throw new OverflowException("Integer overflow in i32.trunc_f64_s.");
+                throw new TrapException("Integer overflow in i32.trunc_f64_s.");
             
             int result = (int)truncated;
             context.OpStack.PushI32(result);
@@ -92,12 +93,12 @@ namespace Wacs.Core.Instructions.Numeric
         {
             double value = context.OpStack.PopF64();
             if (double.IsNaN(value) || double.IsInfinity(value))
-                throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i32.trunc_f64_u.");
+                throw new TrapException("Cannot convert NaN or infinity to integer in i32.trunc_f64_u.");
 
             double truncated = Math.Truncate(value);
             
             if (truncated is < 0.0 or > uint.MaxValue) 
-                throw new OverflowException("Integer overflow in i32.trunc_f64_u.");
+                throw new TrapException("Integer overflow in i32.trunc_f64_u.");
 
             uint result = (uint)truncated;
             context.OpStack.PushI32((int)result);
@@ -121,12 +122,16 @@ namespace Wacs.Core.Instructions.Numeric
         {
             float value = context.OpStack.PopF32();
             if (float.IsNaN(value) || float.IsInfinity(value)) 
-                throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i64.trunc_f32_s.");
+                throw new TrapException("Cannot convert NaN or infinity to integer in i64.trunc_f32_s.");
             
-            float truncated = (float)Math.Truncate(value);
+            double truncated = Math.Truncate(value);
 
-            if (truncated is < long.MinValue or > long.MaxValue) 
-                throw new OverflowException("Integer overflow in i64.trunc_f32_s.");
+            if (truncated is > 0 and >= 9.2233720368547758E+18)
+                if (decimal.Parse(truncated.ToString("G19")) > (decimal)long.MaxValue)
+                    throw new TrapException("Integer overflow in i64.trunc_f32_s.");
+            if (truncated is < 0 and <= -9.2233720368547758E+18)
+                if (decimal.Parse(truncated.ToString("G19")) < (decimal)long.MinValue)
+                    throw new TrapException("Integer overflow in i64.trunc_f32_s.");
             
             long result = (long)truncated;
             context.OpStack.PushI64(result);
@@ -136,12 +141,14 @@ namespace Wacs.Core.Instructions.Numeric
         {
             float value = context.OpStack.PopF32();
             if (float.IsNaN(value) || float.IsInfinity(value)) 
-                throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i64.trunc_f32_u.");
+                throw new TrapException("Cannot convert NaN or infinity to integer in i64.trunc_f32_u.");
             
-            float truncated = (float)Math.Truncate(value);
-
-            if (truncated < 0.0 || truncated > ulong.MaxValue) 
-                throw new OverflowException("Integer overflow in i64.trunc_f32_u.");
+            double truncated = Math.Truncate(value);
+            if (truncated is > 0 and >= 1.8446744073709552E+19)
+                if (decimal.Parse(truncated.ToString("G20")) > (decimal)ulong.MaxValue)
+                    throw new TrapException("Integer overflow in i64.trunc_f32_u.");
+            if (truncated < 0.0) 
+                throw new TrapException("Integer overflow in i64.trunc_f32_u.");
             
             ulong result = (ulong)truncated;
             context.OpStack.PushI64((long)result);
@@ -151,12 +158,16 @@ namespace Wacs.Core.Instructions.Numeric
         {
             double value = context.OpStack.PopF64();
             if (double.IsNaN(value) || double.IsInfinity(value)) 
-                throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i64.trunc_f64_s.");
+                throw new TrapException("Cannot convert NaN or infinity to integer in i64.trunc_f64_s.");
             
             double truncated = Math.Truncate(value);
 
-            if (truncated is < long.MinValue or > long.MaxValue) 
-                throw new OverflowException("Integer overflow in i64.trunc_f64_s.");
+            if (truncated is > 0 and >= 9.2233720368547758E+18)
+                if (decimal.Parse(truncated.ToString("G19")) > (decimal)long.MaxValue)
+                    throw new TrapException("Integer overflow in i64.trunc_f64_s.");
+            if (truncated is < 0 and <= -9.2233720368547758E+18)
+                if (decimal.Parse(truncated.ToString("G19")) < (decimal)long.MinValue)
+                    throw new TrapException("Integer overflow in i64.trunc_f64_s.");
             
             long result = (long)truncated;
             context.OpStack.PushI64(result);
@@ -166,12 +177,14 @@ namespace Wacs.Core.Instructions.Numeric
         {
             double value = context.OpStack.PopF64();
             if (double.IsNaN(value) || double.IsInfinity(value)) 
-                throw new InvalidOperationException("Cannot convert NaN or infinity to integer in i64.trunc_f64_u.");
+                throw new TrapException("Cannot convert NaN or infinity to integer in i64.trunc_f64_u.");
             
             double truncated = Math.Truncate(value);
-
-            if (truncated is < 0.0 or > ulong.MaxValue) 
-                throw new OverflowException("Integer overflow in i64.trunc_f64_u.");
+            if (truncated is > 0 and >= 1.8446744073709552E+19)
+                if (decimal.Parse(truncated.ToString("G20")) > (decimal)ulong.MaxValue)
+                    throw new TrapException("Integer overflow in i64.trunc_f32_u.");
+            if (truncated < 0.0) 
+                throw new TrapException("Integer overflow in i64.trunc_f32_u.");
             
             ulong result = (ulong)truncated;
             context.OpStack.PushI64((long)result);
@@ -275,7 +288,7 @@ namespace Wacs.Core.Instructions.Numeric
         {
             long value = context.OpStack.PopI64();
             byte[] bytes = BitConverter.GetBytes(value);
-            double result = BitConverter.ToSingle(bytes, 0);
+            double result = BitConverter.ToDouble(bytes, 0);
             context.OpStack.PushF64(result);
         }
     }

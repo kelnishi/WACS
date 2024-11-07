@@ -27,14 +27,17 @@ namespace Spec.Test.WastJson
 
         private float BitBashFloat(string intval)
         {
+            if (intval.StartsWith("nan:"))
+                return float.NaN;
+            
             uint v = uint.Parse(intval);
             return BitConverter.ToSingle(BitConverter.GetBytes(v));
         }
 
         private double BitBashDouble(string longval)
         {
-            // if (longval.StartsWith("nan"))
-            //     return double.NaN;
+            if (longval.StartsWith("nan:"))
+                return double.NaN;
             
             ulong v = ulong.Parse(longval);
             return BitConverter.ToDouble(BitConverter.GetBytes(v));
