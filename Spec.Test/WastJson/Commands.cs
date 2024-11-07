@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using FluentValidation;
 using Wacs.Core;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 
 namespace Spec.Test.WastJson
@@ -168,6 +169,9 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("action")]
         public IAction Action { get; set; }
 
+        [JsonPropertyName("text")]
+        public string Text { get; set; }
+
         public CommandType Type => CommandType.AssertExhaustion;
 
         [JsonPropertyName("line")]
@@ -176,8 +180,32 @@ namespace Spec.Test.WastJson
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime? runtime, ref Module? module)
         {
             List<Exception> errors = new();
+            var action = this.Action;
+            switch (action.Type)
+            {
+                case ActionType.Invoke:
+                    if (!runtime.TryGetExportedFunction((module.Name, action.Field), out var addr))
+                        throw new InvalidDataException(
+                            $"Could not get exported function {module.Name}.{action.Field}");
+                    //Compute type from action.Args and action.Expected
+                    bool didThrow = false;
+                    string throwMessage = "";
+                    try
+                    {
+                        var invoker = runtime.CreateStackInvoker(addr);
 
-
+                        var pVals = action.Args.Select(arg => arg.AsValue).ToArray();
+                        var result = invoker(pVals);
+                    }
+                    catch (WasmRuntimeException exc)
+                    {
+                        didThrow = true;
+                        throwMessage = this.Text;
+                    }
+                    if (!didThrow)
+                        throw new TestException($"Test failed {this} \"{throwMessage}\"");
+                    break;
+            }
             return errors;
         }
 
