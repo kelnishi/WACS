@@ -613,8 +613,12 @@ namespace Wacs.Core.Runtime
                 moduleInstance.MemAddrs.Add(AllocateMemory(Store, mem));
             }
 
-            // @Spec 4.5.4 Step 7
-            var initFrame = new Frame(moduleInstance, FunctionType.Empty) { Locals = new LocalsSpace() };
+            //@Spec 4.5.4 Step 7
+            Frame initFrame = new(moduleInstance, FunctionType.Empty)
+            {
+                Locals = new LocalsSpace(),
+                Index = FuncIdx.GlobalInitializers
+            };
             Context.PushFrame(initFrame);
 
             //5. Allocate Globals and capture their addresses in the Store
@@ -626,6 +630,11 @@ namespace Wacs.Core.Runtime
                     throw new TrapException($"Call stack was manipulated while initializing globals");
                 moduleInstance.GlobalAddrs.Add(AllocateGlobal(Store, global.Type, val));
             }
+
+            Context.PopFrame();
+            initFrame.Index = FuncIdx.ElementInitializers;
+            initFrame.ForceLabels(0);
+            Context.PushFrame(initFrame);
 
             //6. Allocate Elements
             //12. index ordered element addresses
@@ -700,115 +709,130 @@ namespace Wacs.Core.Runtime
                 throw;
             }
 
-            ModuleInstance moduleInstance;
-            //2, 3, 4 Checks if imports are satisfied
-            moduleInstance = AllocateModule(module);
-
-            //12.
-            var auxFrame = new Frame(moduleInstance, FunctionType.Empty) { Locals = new LocalsSpace() };
-            //13.
-            Context.PushFrame(auxFrame);
-
-            //14, 15
-            for (int i = 0, l = module.Elements.Length; i < l; ++i)
+            try
             {
-                var elem = module.Elements[i];
-                switch (elem.Mode)
-                {
-                    case Module.ElementMode.ActiveMode activeMode:
-                        var n = elem.Initializers.Length;
-                        activeMode.Offset
-                            .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(0)
-                            .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(n)
-                            .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstTableInit>(ExtCode.TableInit)
-                            .Immediate(activeMode.TableIndex, (ElemIdx)i)
-                            .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop).Immediate((ElemIdx)i)
-                            .Execute(Context);
-                        break;
-                    case Module.ElementMode.DeclarativeMode declarativeMode:
-                        _ = declarativeMode;
-                        Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop).Immediate((ElemIdx)i)
-                            .Execute(Context);
-                        break;
-                }
-            }
+                ModuleInstance moduleInstance;
+                //2, 3, 4 Checks if imports are satisfied
+                moduleInstance = AllocateModule(module);
 
-            //16.
-            for (int i = 0, l = module.Datas.Length; i < l; ++i)
-            {
-                var data = module.Datas[i];
-                switch (data.Mode)
-                {
-                    case Module.DataMode.ActiveMode activeMode:
-                        if (activeMode.MemoryIndex != 0)
-                            throw new NotSupportedException(
-                                "Module could not be instantiated: Multiple Memories are not supported.");
-                        var n = data.Init.Length;
-                        activeMode.Offset
-                            .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(0)
-                            .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(n)
-                            .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstMemoryInit>(ExtCode.MemoryInit).Immediate((DataIdx)i)
-                            .Execute(Context);
-                        Context.InstructionFactory.CreateInstruction<InstDataDrop>(ExtCode.DataDrop).Immediate((DataIdx)i)
-                            .Execute(Context);
-                        break;
-                    case Module.DataMode.PassiveMode: //Do nothing
-                        break;
-                }
-            }
+                //12.
+                var auxFrame = new Frame(moduleInstance, FunctionType.Empty) { Locals = new LocalsSpace() };
+                auxFrame.Index = FuncIdx.ElementInitialization;
+                //13.
+                Context.PushFrame(auxFrame);
 
-            //17. 
-            if (module.StartIndex != FuncIdx.Default)
-            {
-                if (!moduleInstance.FuncAddrs.Contains(module.StartIndex))
-                    throw new EntryPointNotFoundException("Module StartFunction index was invalid");
-                var startAddr = moduleInstance.FuncAddrs[module.StartIndex];
-                if (!Context.Store.Contains(startAddr))
-                    throw new EntryPointNotFoundException("Module StartFunction address not found in the Store.");
-
-                moduleInstance.StartFunc = startAddr;
-                    
-                // //Invoke the function!
-                // if (!options.SkipStartFunction)
-                //     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Func).Immediate(module.StartIndex)
-                //         .Execute(Context);
-            }
-            else
-            {   // Look for WASI/Emscripten _start in the exports
-                int fIdx = 0;
-                foreach (var export in moduleInstance.Exports.Where(export => export.Value is ExternalValue.Function))
+                //14, 15
+                for (int i = 0, l = module.Elements.Length; i < l; ++i)
                 {
-                    var exportedFunc = export.Value as ExternalValue.Function;
-                    if (export.Name == "_start")
+                    var elem = module.Elements[i];
+                    switch (elem.Mode)
                     {
-                        moduleInstance.StartFunc = exportedFunc!.Address;
-                        
-                        // //Invoke the function!
-                        // if (!options.SkipStartFunction)
-                        //     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Func).Immediate((FuncIdx)fIdx)
-                        //         .Execute(Context);
-                        
-                        break;
+                        case Module.ElementMode.ActiveMode activeMode:
+                            var n = elem.Initializers.Length;
+                            activeMode.Offset
+                                .Execute(Context);
+                            Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(0)
+                                .Execute(Context);
+                            Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(n)
+                                .Execute(Context);
+                            Context.InstructionFactory.CreateInstruction<InstTableInit>(ExtCode.TableInit)
+                                .Immediate(activeMode.TableIndex, (ElemIdx)i)
+                                .Execute(Context);
+                            Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)
+                                .Immediate((ElemIdx)i)
+                                .Execute(Context);
+                            break;
+                        case Module.ElementMode.DeclarativeMode declarativeMode:
+                            _ = declarativeMode;
+                            Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)
+                                .Immediate((ElemIdx)i)
+                                .Execute(Context);
+                            break;
                     }
-
-                    fIdx++;
                 }
+
+                //16.
+                for (int i = 0, l = module.Datas.Length; i < l; ++i)
+                {
+                    var data = module.Datas[i];
+                    switch (data.Mode)
+                    {
+                        case Module.DataMode.ActiveMode activeMode:
+                            if (activeMode.MemoryIndex != 0)
+                                throw new NotSupportedException(
+                                    "Module could not be instantiated: Multiple Memories are not supported.");
+                            var n = data.Init.Length;
+                            activeMode.Offset
+                                .Execute(Context);
+                            Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(0)
+                                .Execute(Context);
+                            Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(n)
+                                .Execute(Context);
+                            Context.InstructionFactory.CreateInstruction<InstMemoryInit>(ExtCode.MemoryInit)
+                                .Immediate((DataIdx)i)
+                                .Execute(Context);
+                            Context.InstructionFactory.CreateInstruction<InstDataDrop>(ExtCode.DataDrop)
+                                .Immediate((DataIdx)i)
+                                .Execute(Context);
+                            break;
+                        case Module.DataMode.PassiveMode: //Do nothing
+                            break;
+                    }
+                }
+
+                //17. 
+                if (module.StartIndex != FuncIdx.Default)
+                {
+                    if (!moduleInstance.FuncAddrs.Contains(module.StartIndex))
+                        throw new EntryPointNotFoundException("Module StartFunction index was invalid");
+                    var startAddr = moduleInstance.FuncAddrs[module.StartIndex];
+                    if (!Context.Store.Contains(startAddr))
+                        throw new EntryPointNotFoundException("Module StartFunction address not found in the Store.");
+
+                    moduleInstance.StartFunc = startAddr;
+
+                    // //Invoke the function!
+                    // if (!options.SkipStartFunction)
+                    //     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Func).Immediate(module.StartIndex)
+                    //         .Execute(Context);
+                }
+                else
+                {
+                    // Look for WASI/Emscripten _start in the exports
+                    int fIdx = 0;
+                    foreach (var export in moduleInstance.Exports.Where(
+                                 export => export.Value is ExternalValue.Function))
+                    {
+                        var exportedFunc = export.Value as ExternalValue.Function;
+                        if (export.Name == "_start")
+                        {
+                            moduleInstance.StartFunc = exportedFunc!.Address;
+
+                            // //Invoke the function!
+                            // if (!options.SkipStartFunction)
+                            //     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Func).Immediate((FuncIdx)fIdx)
+                            //         .Execute(Context);
+
+                            break;
+                        }
+
+                        fIdx++;
+                    }
+                }
+
+                //18.
+                if (Context.Frame != auxFrame)
+                    throw new WasmRuntimeException("Execution fault in Module Instantiation.");
+                //19.
+                Context.PopFrame();
+
+                return moduleInstance;
             }
-
-            //18.
-            if (Context.Frame != auxFrame)
-                throw new WasmRuntimeException("Execution fault in Module Instantiation.");
-            //19.
-            Context.PopFrame();
-
-            return moduleInstance;
+            catch (TrapException exc)
+            {
+                Context.FlushCallStack();
+                throw;
+            }
         }
 
 

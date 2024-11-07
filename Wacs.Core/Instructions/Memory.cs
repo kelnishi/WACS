@@ -247,9 +247,9 @@ namespace Wacs.Core.Instructions
             context.Assert( context.OpStack.Peek().IsI32,
                  $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            int i = context.OpStack.PopI32();
+            uint i = context.OpStack.PopI32();
             //10.
-            int ea = i + (int)M.Offset;
+            uint ea = i + M.Offset;
             //11.
             // We set the Width in the InstructionFactory
             // Floating point width will always match their type
@@ -257,7 +257,7 @@ namespace Wacs.Core.Instructions
             if (ea + WidthN.ByteSize() > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
-            Span<byte> bs = mem.Data.AsSpan(ea, WidthN.ByteSize());
+            Span<byte> bs = mem.Data.AsSpan((int)ea, WidthN.ByteSize());
             switch (WidthN)
             {
                 case BitWidth.S8:
