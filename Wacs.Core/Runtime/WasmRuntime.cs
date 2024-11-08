@@ -897,6 +897,7 @@ namespace Wacs.Core.Runtime
                 //The spec after v1 says to just keep active elements?
                 // see linking.wast:264
                 Store.CommitTransaction();
+                Store.OpenTransaction();
                 //Store.DiscardTransaction();
 
                 Context.FlushCallStack();
