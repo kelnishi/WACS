@@ -399,6 +399,7 @@ namespace Wacs.Core.Runtime
         public static implicit operator uint(Value value) => unchecked((uint)value.Int32);
 
         public static implicit operator Value(long value) => new(value);
+        public static implicit operator Value(ulong value) => new(value);
 
         public static implicit operator long(Value value) => value.Int64;
         public static implicit operator ulong(Value value) => unchecked((ulong)value.Int64);
