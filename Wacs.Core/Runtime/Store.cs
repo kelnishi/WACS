@@ -118,6 +118,22 @@ namespace Wacs.Core.Runtime
             return addr;
         }
 
+        public TableInstance GetMutableTable(TableAddr addr)
+        {
+            if (CurrentTransaction == null)
+                throw new InvalidOperationException("Cannot add to Store without a transaction.");
+            if (!Contains(addr))
+                throw new InvalidOperationException("Table does not exist in Store.");
+            
+            if (!CurrentTransaction.Tables.ContainsKey(addr))
+            {
+                CurrentTransaction.Tables.Add(addr, this[addr].Clone());
+            }
+
+            return CurrentTransaction.Tables[addr];
+        }
+
+
         public MemAddr AddMemory(MemoryInstance mem)
         {
             var addr = new MemAddr(Mems.Count);
@@ -164,6 +180,13 @@ namespace Wacs.Core.Runtime
             if (CurrentTransaction == null)
                 throw new InvalidOperationException("Cannot remove from Store without a transaction.");
             CurrentTransaction.Datas[addr] = DataInstance.Empty;
+        }
+
+        public void DropElement(ElemAddr addr)
+        {
+            if (CurrentTransaction == null)
+                throw new InvalidOperationException("Cannot remove from Store without a transaction.");
+            CurrentTransaction.Elems[addr] = ElementInstance.Empty;
         }
     }
 }

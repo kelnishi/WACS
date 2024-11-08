@@ -8,6 +8,8 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class ElementInstance
     {
+        public readonly static ElementInstance Empty = new(ReferenceType.Funcref, new List<Value>());
+
         public ElementInstance(ReferenceType type, List<Value> refs) =>
             (Type, Elements) = (type, refs);
 
@@ -15,10 +17,5 @@ namespace Wacs.Core.Runtime.Types
 
         //Refs
         public List<Value> Elements { get; }
-
-        public void Drop()
-        {
-            Elements.Clear();
-        }
     }
 }

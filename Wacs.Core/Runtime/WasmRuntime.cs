@@ -200,17 +200,11 @@ namespace Wacs.Core.Runtime
                 }
             }
 
-            try
-            {
-                Store.OpenTransaction();
-                var type = new FunctionType(paramValTypes, returnValType);
-                var funcAddr = AllocateHostFunc(Store, id, type, funcType, func);
-                _entityBindings[id] = funcAddr;
-            }
-            finally
-            {
-                Store.CommitTransaction();
-            }
+            Store.OpenTransaction();
+            var type = new FunctionType(paramValTypes, returnValType);
+            var funcAddr = AllocateHostFunc(Store, id, type, funcType, func);
+            Store.CommitTransaction();
+            _entityBindings[id] = funcAddr;
         }
 
         public string GetFunctionName(FuncAddr funcAddr)
@@ -546,17 +540,11 @@ namespace Wacs.Core.Runtime
 
         public MemoryInstance BindHostMemory((string module, string entity) id, MemoryType memType)
         {
-            try
-            {
-                Store.OpenTransaction();
-                var memAddr = AllocateMemory(Store, memType);
-                _entityBindings[id] = memAddr;
-                return Store[memAddr];
-            }
-            finally
-            {
-                Store.CommitTransaction();
-            }
+            Store.OpenTransaction();
+            var memAddr = AllocateMemory(Store, memType);
+            _entityBindings[id] = memAddr;
+            Store.CommitTransaction();
+            return Store[memAddr];
         }
 
         public GlobalInstance BindHostGlobal((string module, string entity) id, GlobalType globalType, Value val)
@@ -564,17 +552,12 @@ namespace Wacs.Core.Runtime
             if (globalType.ContentType != val.Type)
                 throw new ArgumentException(
                     $"Global {globalType.ContentType} must be defined with matching type value {val}");
-            try
-            {
-                Store.OpenTransaction();
-                var globAddr = AllocateGlobal(Store, globalType, val);
-                _entityBindings[id] = globAddr;
-                return Store[globAddr];
-            }
-            finally
-            {
-                Store.CommitTransaction();
-            }
+            
+            Store.OpenTransaction();
+            var globAddr = AllocateGlobal(Store, globalType, val);
+            _entityBindings[id] = globAddr;
+            Store.CommitTransaction();
+            return Store[globAddr];
         }
 
         public TableInstance BindHostTable((string module, string entity) id, TableType tableType, Value val)
@@ -582,17 +565,12 @@ namespace Wacs.Core.Runtime
             if (tableType.ElementType.StackType() != val.Type)
                 throw new ArgumentException(
                     $"Table {tableType.ElementType} must be defined with matching element type value {val}");
-            try
-            {
-                Store.OpenTransaction();
-                var tableAddr = AllocateTable(Store, tableType, val);
-                _entityBindings[id] = tableAddr;
-                return Store[tableAddr];
-            }
-            finally
-            {
-                Store.CommitTransaction();
-            }
+            
+            Store.OpenTransaction();
+            var tableAddr = AllocateTable(Store, tableType, val);
+            _entityBindings[id] = tableAddr;
+            Store.CommitTransaction();
+            return Store[tableAddr];
         }
 
         /// <summary>
@@ -869,10 +847,10 @@ namespace Wacs.Core.Runtime
                 if (module.StartIndex != FuncIdx.Default)
                 {
                     if (!moduleInstance.FuncAddrs.Contains(module.StartIndex))
-                        throw new EntryPointNotFoundException("Module StartFunction index was invalid");
+                        throw new WasmRuntimeException("Module StartFunction index was invalid");
                     var startAddr = moduleInstance.FuncAddrs[module.StartIndex];
                     if (!Context.Store.Contains(startAddr))
-                        throw new EntryPointNotFoundException("Module StartFunction address not found in the Store.");
+                        throw new WasmRuntimeException("Module StartFunction address not found in the Store.");
 
                     moduleInstance.StartFunc = startAddr;
 
@@ -915,7 +893,32 @@ namespace Wacs.Core.Runtime
 
                 return moduleInstance;
             }
-            catch (TrapException exc)
+            catch (WasmRuntimeException)
+            {
+                Store.DiscardTransaction();
+                Context.FlushCallStack();
+                Store.OpenTransaction();
+                throw;
+            }
+            catch (OutOfBoundsTableAccessException)
+            {
+                //The spec after v1 says to just keep active elements?
+                // see linking.wast:264
+                Store.CommitTransaction();
+                //Store.DiscardTransaction();
+
+                Context.FlushCallStack();
+                Store.OpenTransaction();
+                throw;
+            }
+            catch (TrapException)
+            {
+                Store.DiscardTransaction();
+                Context.FlushCallStack();
+                Store.OpenTransaction();
+                throw;
+            }
+            catch (NotSupportedException)
             {
                 Store.DiscardTransaction();
                 Context.FlushCallStack();
