@@ -120,10 +120,11 @@ namespace Wacs.Core.Runtime
 
         public TableInstance GetMutableTable(TableAddr addr)
         {
-            if (CurrentTransaction == null)
-                throw new InvalidOperationException("Cannot add to Store without a transaction.");
             if (!Contains(addr))
                 throw new InvalidOperationException("Table does not exist in Store.");
+            
+            if (CurrentTransaction == null)
+                return Tables[(Index)addr];
             
             if (!CurrentTransaction.Tables.ContainsKey(addr))
             {
@@ -177,16 +178,29 @@ namespace Wacs.Core.Runtime
 
         public void DropData(DataAddr addr)
         {
-            if (CurrentTransaction == null)
-                throw new InvalidOperationException("Cannot remove from Store without a transaction.");
-            CurrentTransaction.Datas[addr] = DataInstance.Empty;
+            // if (CurrentTransaction == null)
+            //     throw new InvalidOperationException("Cannot remove from Store without a transaction.");
+
+            if (CurrentTransaction != null)
+            {
+                CurrentTransaction.Datas[addr] = DataInstance.Empty;    
+            }
+            else
+            {
+                Datas[(Index)addr] = DataInstance.Empty;
+            }
         }
 
         public void DropElement(ElemAddr addr)
         {
-            if (CurrentTransaction == null)
-                throw new InvalidOperationException("Cannot remove from Store without a transaction.");
-            CurrentTransaction.Elems[addr] = ElementInstance.Empty;
+            if (CurrentTransaction != null)
+            {
+                CurrentTransaction.Elems[addr] = ElementInstance.Empty;    
+            }
+            else
+            {
+                Elems[(Index)addr] = ElementInstance.Empty;
+            }
         }
     }
 }
