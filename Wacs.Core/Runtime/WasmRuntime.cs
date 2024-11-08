@@ -89,8 +89,11 @@ namespace Wacs.Core.Runtime
             moduleInstance.Name = moduleName;
         }
 
-        public ModuleInstance GetModule(string moduleName)
+        public ModuleInstance GetModule(string? moduleName)
         {
+            if (moduleName == null)
+                return _moduleInstances.Last();
+            
             if (_registeredModules.TryGetValue(moduleName, out var moduleInstance))
             {
                 return moduleInstance;
@@ -716,8 +719,11 @@ namespace Wacs.Core.Runtime
                 var funcDesc = export.Value as ExternalValue.Function;
                 var funcAddr = funcDesc!.Address;
                 var funcInst = Store[funcAddr];
-                funcInst.SetName(export.Name);
-                funcInst.IsExport = true;
+                if (!funcInst.IsExport)
+                {
+                    funcInst.SetName(export.Name);
+                    funcInst.IsExport = true;
+                }
             }
 
             return moduleInstance;
