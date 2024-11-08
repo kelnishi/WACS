@@ -71,6 +71,8 @@ namespace Wacs.Core
                                         line += Funcs[i].Size; //other (func
                                     }
                                 }
+                                if (index < 0)
+                                    return (-1, "???");
 
                                 if (print)
                                     Console.WriteLine($"{indent}Function[{index + Imports.Length}]:{line}");

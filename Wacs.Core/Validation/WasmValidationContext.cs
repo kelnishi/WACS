@@ -175,10 +175,9 @@ namespace Wacs.Core.Validation
 
         public void PopValidationContext() => _contextStack.Pop();
 
-        public void SetExecFrame(Module.Function func)
+        public void SetExecFrame(FunctionType funcType, ValType[] localTypes)
         {
-            var funcType = Types[func.TypeIndex];
-            var locals = new LocalsSpace(funcType.ParameterTypes.Types, func.Locals);
+            var locals = new LocalsSpace(funcType.ParameterTypes.Types, localTypes);
             ExecFrame = new Frame(ValidationModule, funcType) { Locals = locals };
         }
 
