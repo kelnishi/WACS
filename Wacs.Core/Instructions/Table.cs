@@ -100,7 +100,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Store.Contains(a),
                  $"Instruction table.set failed to get table at address {a} from Store");
             //5.
-            var tab = context.Store[a];
+            var tab = context.Store.GetMutableTable(a);
             //6.
             context.Assert( context.OpStack.Peek().IsRef,
                  $"Instruction table.set found non reftype on top of the Stack");
@@ -165,7 +165,7 @@ namespace Wacs.Core.Instructions
             //4.
             context.Assert( context.Store.Contains(ta),  $"Instruction table.init failed. Invalid table address.");
             //5.
-            var tab = context.Store[ta];
+            var tab = context.Store.GetMutableTable(ta);
             //6.
             context.Assert( context.Frame.Module.ElemAddrs.Contains(Y),
                  $"Instruction table.init failed. Element address not found in the context.");
@@ -197,7 +197,7 @@ namespace Wacs.Core.Instructions
                 //16.
                 if (s + n > elem.Elements.Count || d + n > tab.Elements.Count)
                 {
-                    throw new TrapException("Trap in table.init");
+                    throw new OutOfBoundsTableAccessException("Trap in table.init");
                 }
                 else if (n == 0)
                 {
@@ -272,7 +272,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Store.Contains(a),
                  $"Instruction elem.drop failed. Element {a} was not in the Store.");
             //5.
-            context.Store[a].Drop();
+            context.Store.DropElement(a);
         }
 
         // @Spec 5.4.5. Table Instructions
@@ -326,7 +326,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Store.Contains(taX),
                  $"Instruction table.copy failed. Address was not present in the Store.");
             //5.
-            var tabX = context.Store[taX];
+            var tabX = context.Store.GetMutableTable(taX);
             //6.
             context.Assert( context.Frame.Module.TableAddrs.Contains(SrcY),
                  $"Instruction table.copy did not find destination table {SrcY} in the Context");
@@ -447,7 +447,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Store.Contains(addr),
                  $"Instruction table.set failed to get table at address {addr} from Store");
             //5.
-            var tab = context.Store[addr];
+            var tab = context.Store.GetMutableTable(addr);
             //6.
             int sz = tab.Elements.Count;
             //7.
@@ -557,7 +557,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Store.Contains(addr),
                  $"Instruction table.set failed to get table at address {addr} from Store");
             //5.
-            var tab = context.Store[addr];
+            var tab = context.Store.GetMutableTable(addr);
 
             //Tail recursive call alternative loop
             while (true)

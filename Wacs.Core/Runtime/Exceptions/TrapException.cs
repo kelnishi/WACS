@@ -8,4 +8,11 @@ namespace Wacs.Core.Runtime.Types
         {
         }
     }
+
+    public class OutOfBoundsTableAccessException : TrapException
+    {
+        public OutOfBoundsTableAccessException(string message) : base(message)
+        {
+        }
+    }
 }
