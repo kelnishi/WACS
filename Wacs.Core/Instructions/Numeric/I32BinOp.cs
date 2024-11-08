@@ -1,6 +1,6 @@
-using System;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -86,7 +86,9 @@ namespace Wacs.Core.Instructions.Numeric
             int j2 = context.OpStack.PopI32();
             int j1 = context.OpStack.PopI32();
             if (j2 == 0)
-                throw new InvalidOperationException("Cannot divide by zero");
+                throw new TrapException("Cannot divide by zero");
+            if (j2 == -1 && j1 == int.MinValue)
+                throw new TrapException("Operation results in arithmetic overflow");
             int quotient = j1 / j2;
             context.OpStack.PushI32(quotient);
         }
@@ -97,7 +99,7 @@ namespace Wacs.Core.Instructions.Numeric
             uint i2 = context.OpStack.PopI32();
             uint i1 = context.OpStack.PopI32();
             if (i2 == 0)
-                throw new InvalidOperationException("Cannot divide by zero");
+                throw new TrapException("Cannot divide by zero");
             uint quotient = i1 / i2;
             context.OpStack.PushI32((int)quotient);
         }
@@ -108,9 +110,17 @@ namespace Wacs.Core.Instructions.Numeric
             int j2 = context.OpStack.PopI32();
             int j1 = context.OpStack.PopI32();
             if (j2 == 0)
-                throw new InvalidOperationException("Cannot divide by zero");
-            int remainder = j1 % j2;
-            context.OpStack.PushI32(remainder);
+                throw new TrapException("Cannot divide by zero");
+            //Special case for arithmetic overflow
+            if (j2 == -1 && j1 == int.MinValue)
+            {
+                context.OpStack.PushI32(0);
+            }
+            else
+            {
+                int remainder = j1 % j2;
+                context.OpStack.PushI32(remainder);
+            }
         }
 
         // @Spec 4.3.2.8. irem_u
@@ -119,7 +129,7 @@ namespace Wacs.Core.Instructions.Numeric
             uint i2 = context.OpStack.PopI32();
             uint i1 = context.OpStack.PopI32();
             if (i2 == 0)
-                throw new InvalidOperationException("Cannot divide by zero");
+                throw new TrapException("Cannot divide by zero");
             uint remainder = i1 % i2;
             context.OpStack.PushI32((int)remainder);
         }
