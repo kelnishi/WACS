@@ -38,7 +38,7 @@ find "$base_dir" -type f -name "*.wast" | while read -r wast_file; do
       wat_output="${wasm_file%.wasm}.wat"
       
       # Call wasm2wat to convert .wasm to .wat
-      wasm2wat "$wasm_file" -o "$wat_output"
+      wasm2wat "$wasm_file" -o "$wat_output" --no-check
     done
 
     echo "Converted $wast_file to $json_output"
