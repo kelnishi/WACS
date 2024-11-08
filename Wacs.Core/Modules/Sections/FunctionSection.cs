@@ -170,7 +170,7 @@ namespace Wacs.Core
                             var types = vContext.Types;
                             if (!types.Contains(func.TypeIndex))
                             {
-                                ctx.AddFailure($"{ctx.PropertyPath}: Function.TypeIndex not within Module.Types");
+                                throw new ValidationException($"Function.TypeIndex not within Module.Types");
                             }
 
                             var funcType = types[func.TypeIndex];
