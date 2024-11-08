@@ -1,6 +1,6 @@
-using System;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -82,7 +82,9 @@ namespace Wacs.Core.Instructions.Numeric
             long j2 = context.OpStack.PopI64();
             long j1 = context.OpStack.PopI64();
             if (j2 == 0)
-                throw new InvalidOperationException("Cannot divide by zero");
+                throw new TrapException("Cannot divide by zero");
+            if (j2 == -1 && j1 == long.MinValue)
+                throw new TrapException("Operation results in arithmetic overflow");
             long quotient = j1 / j2;
             context.OpStack.PushI64(quotient);
         }
@@ -92,7 +94,7 @@ namespace Wacs.Core.Instructions.Numeric
             ulong j2 = context.OpStack.PopI64();
             ulong j1 = context.OpStack.PopI64();
             if (j2 == 0)
-                throw new InvalidOperationException("Cannot divide by zero");
+                throw new TrapException("Cannot divide by zero");
             ulong quotient = j1 / j2;
             context.OpStack.PushI64((long)quotient);
         }
@@ -102,9 +104,20 @@ namespace Wacs.Core.Instructions.Numeric
             long j2 = context.OpStack.PopI64();
             long j1 = context.OpStack.PopI64();
             if (j2 == 0)
-                throw new InvalidOperationException("Cannot divide by zero");
-            long remainder = j1 % j2;
-            context.OpStack.PushI64(remainder);
+                throw new TrapException("Cannot divide by zero");
+            if (j2 == -1 && j1 == long.MinValue)
+                throw new TrapException("Operation results in arithmetic overflow");
+            
+            //Special case for arithmetic overflow
+            if (j2 == -1 && j1 == long.MinValue)
+            {
+                context.OpStack.PushI64(0);
+            }
+            else
+            {
+                long remainder = j1 % j2;
+                context.OpStack.PushI64(remainder);
+            }
         }
 
         private static void ExecuteI64RemU(ExecContext context)
@@ -112,7 +125,7 @@ namespace Wacs.Core.Instructions.Numeric
             ulong j2 = context.OpStack.PopI64();
             ulong j1 = context.OpStack.PopI64();
             if (j2 == 0)
-                throw new InvalidOperationException("Cannot divide by zero");
+                throw new TrapException("Cannot divide by zero");
             ulong remainder = j1 % j2;
             context.OpStack.PushI64((long)remainder);
         }
