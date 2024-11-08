@@ -439,6 +439,9 @@ namespace Wacs.Core.Instructions
             
             //Validate results, but leave them on the stack
             context.OpStack.PopValues(nthFrame.LabelTypes);
+
+            if (!context.Unreachable)
+                nthFrame.ConditionallyReachable = true;
             
             context.SetUnreachable();
         }
@@ -525,6 +528,9 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopI32();
             
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
+            if (!context.Unreachable)
+                nthFrame.ConditionallyReachable = true;
+            
             //Pop values like we branch
             context.OpStack.PopValues(nthFrame.LabelTypes);
             //But actually, we don't, so push them back on.
@@ -583,6 +589,9 @@ namespace Wacs.Core.Instructions
             var mthFrame = context.ControlStack.PeekAt((int)Ln.Value);
             var arity = mthFrame.LabelTypes.Arity;
             
+            if (!context.Unreachable)
+                mthFrame.ConditionallyReachable = true;
+            
             foreach (var lidx in Ls)
             {
                 context.Assert(context.ContainsLabel(lidx.Value),
@@ -592,6 +601,9 @@ namespace Wacs.Core.Instructions
                 context.Assert(nthFrame.LabelTypes.Arity == arity,
                     $"Instruction br_table invalid. Label {lidx} had different arity {nthFrame.LabelTypes.Arity} =/= {arity}");
 
+                if (!context.Unreachable)
+                    nthFrame.ConditionallyReachable = true;
+                
                 var vals = context.OpStack.PopValues(nthFrame.LabelTypes);
                 context.OpStack.PushValues(vals);
             }

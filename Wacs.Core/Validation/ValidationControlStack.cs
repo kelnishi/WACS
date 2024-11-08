@@ -13,7 +13,7 @@ namespace Wacs.Core.Validation
         public ResultType LabelTypes => Opcode == OpCode.Loop ? StartTypes : EndTypes;
         public int Height { get; set; }
 
-        public bool Unreachable { get; set; }
+        public bool ConditionallyReachable { get; set; }
     }
     
     public class ValidationControlStack

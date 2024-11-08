@@ -131,7 +131,7 @@ namespace Wacs.Core.Validation
 
         public Value PopI32()
         {
-            if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
+            if (_stack.Count == _context.ControlFrame.Height && _context.Unreachable)
                 return Value.Unknown;
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow. pop(i32)");
@@ -146,7 +146,7 @@ namespace Wacs.Core.Validation
 
         public Value PopI64()
         {
-            if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
+            if (_stack.Count == _context.ControlFrame.Height && _context.Unreachable)
                 return Value.Unknown;
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow. pop(i64)");
@@ -160,7 +160,7 @@ namespace Wacs.Core.Validation
 
         public Value PopF32()
         {
-            if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
+            if (_stack.Count == _context.ControlFrame.Height && _context.Unreachable)
                 return Value.Unknown;
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow. pop(f32)");
@@ -174,7 +174,7 @@ namespace Wacs.Core.Validation
 
         public Value PopF64()
         {
-            if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
+            if (_stack.Count == _context.ControlFrame.Height && _context.Unreachable)
                 return Value.Unknown;
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow. pop(f64)");
@@ -188,7 +188,7 @@ namespace Wacs.Core.Validation
 
         public Value PopV128()
         {
-            if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
+            if (_stack.Count == _context.ControlFrame.Height && _context.Unreachable)
                 return Value.Unknown;
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow. pop(v128)");
@@ -202,7 +202,7 @@ namespace Wacs.Core.Validation
 
         public Value PopRefType()
         {
-            if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
+            if (_stack.Count == _context.ControlFrame.Height && _context.Unreachable)
                 return Value.Unknown;
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow. pop(ref)");
@@ -221,7 +221,7 @@ namespace Wacs.Core.Validation
 
         public Value PopType(ValType expectedType)
         {
-            if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
+            if (_stack.Count == _context.ControlFrame.Height && _context.Unreachable)
                 return Value.Unknown;
             if (_stack.Count <= _context.ControlFrame.Height)
                 throw new ValidationException($"Operand stack underflow. pop({expectedType})");
@@ -254,7 +254,7 @@ namespace Wacs.Core.Validation
 
         public Value PopAny()
         {
-            if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
+            if (_stack.Count == _context.ControlFrame.Height && _context.Unreachable)
                 return Value.Unknown;
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow. pop(any)");
