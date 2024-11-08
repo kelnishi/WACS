@@ -183,17 +183,17 @@ namespace Wacs.Core.Instructions
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction table.init failed. Expected i32 on top of the stack.");
                 //11.
-                int n = context.OpStack.PopI32();
+                long n = (uint)context.OpStack.PopI32();
                 //12.
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction table.init failed. Expected i32 on top of the stack.");
                 //13.
-                int s = context.OpStack.PopI32();
+                long s = (uint)context.OpStack.PopI32();
                 //14.
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction table.init failed. Expected i32 on top of the stack.");
                 //15.
-                int d = context.OpStack.PopI32();
+                long d = (uint)context.OpStack.PopI32();
                 //16.
                 if (s + n > elem.Elements.Count || d + n > tab.Elements.Count)
                 {
@@ -205,25 +205,25 @@ namespace Wacs.Core.Instructions
                 }
 
                 //18.
-                var val = elem.Elements[s];
+                var val = elem.Elements[(int)s];
                 //19.
-                context.OpStack.PushI32(d);
+                context.OpStack.PushI32((uint)d);
                 //20.
                 context.OpStack.PushRef(val);
                 //21.
                 InstTableSet.ExecuteInstruction(context, X);
                 //22.
-                long check = (long)d + 1;
+                long check = d + 1L;
                 context.Assert( check < Constants.TwoTo32,  $"Instruction table.init failed. Invalid table size");
                 //23.
-                context.OpStack.PushI32(d + 1);
+                context.OpStack.PushI32((uint)(d + 1L));
                 //24.
-                check = (long)s + 1;
+                check = s + 1L;
                 context.Assert( check < Constants.TwoTo32,  $"Instruction table.init failed. Invalid table size");
                 //25.
-                context.OpStack.PushI32(s + 1);
+                context.OpStack.PushI32((uint)(s + 1L));
                 //26.
-                context.OpStack.PushI32(n - 1);
+                context.OpStack.PushI32((uint)(n - 1L));
                 //27.
             }
         }
@@ -345,17 +345,17 @@ namespace Wacs.Core.Instructions
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction table.copy failed. Expected i32 on top of the stack.");
                 //11.
-                int n = context.OpStack.PopI32();
+                long n = (uint)context.OpStack.PopI32();
                 //12.
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction table.copy failed. Expected i32 on top of the stack.");
                 //13.
-                int s = context.OpStack.PopI32();
+                long s = (uint)context.OpStack.PopI32();
                 //14.
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction table.copy failed. Expected i32 on top of the stack.");
                 //15.
-                int d = context.OpStack.PopI32();
+                long d = (uint)context.OpStack.PopI32();
                 //16.
                 if (s + n > tabY.Elements.Count || d + n > tabX.Elements.Count)
                 {
@@ -370,38 +370,38 @@ namespace Wacs.Core.Instructions
                 //18.
                 if (d <= s)
                 {
-                    context.OpStack.PushI32(d);
-                    context.OpStack.PushI32(s);
+                    context.OpStack.PushI32((uint)d);
+                    context.OpStack.PushI32((uint)s);
                     InstTableGet.ExecuteInstruction(context, SrcY);
                     InstTableSet.ExecuteInstruction(context, DstX);
-                    long check = (long)d + 1;
+                    long check = d + 1L;
                     context.Assert( check < Constants.TwoTo32,
                          "Instruction table.copy failed. Table size overflow");
-                    context.OpStack.PushI32(d + 1);
-                    check = (long)s + 1;
+                    context.OpStack.PushI32((uint)(d + 1L));
+                    check = s + 1L;
                     context.Assert( check < Constants.TwoTo32,
                          "Instruction table.copy failed. Table size overflow");
-                    context.OpStack.PushI32(s + 1);
+                    context.OpStack.PushI32((uint)(s + 1L));
                 }
                 //19.
                 else
                 {
-                    long check = (long)d + n - 1;
+                    long check = d + n - 1L;
                     context.Assert( check < Constants.TwoTo32,
                          "Intruction table.copy failed. Table size overflow");
-                    context.OpStack.PushI32(d + n - 1);
+                    context.OpStack.PushI32((uint)(d + n - 1L));
                     check = (long)s + n - 1;
                     context.Assert( check < Constants.TwoTo32,
                          "Intruction table.copy failed. Table size overflow");
-                    context.OpStack.PushI32(s + n - 1);
+                    context.OpStack.PushI32((uint)(s + n - 1L));
                     InstTableGet.ExecuteInstruction(context, SrcY);
                     InstTableSet.ExecuteInstruction(context, DstX);
-                    context.OpStack.PushI32(d);
-                    context.OpStack.PushI32(s);
+                    context.OpStack.PushI32((uint)d);
+                    context.OpStack.PushI32((uint)s);
                 }
 
                 //20.
-                context.OpStack.PushI32(n - 1);
+                context.OpStack.PushI32((uint)(n - 1L));
                 //21.
             }
         }
