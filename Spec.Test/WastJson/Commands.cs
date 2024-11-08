@@ -254,9 +254,9 @@ namespace Spec.Test.WastJson
             try
             {
                 using var fileStream = new FileStream(filepath, FileMode.Open);
-                module = BinaryModuleParser.ParseWasm(fileStream);
-                module.SetName(filepath);
-                var modInstInvalid = runtime.InstantiateModule(module);
+                var stubmodule = BinaryModuleParser.ParseWasm(fileStream);
+                stubmodule.SetName(filepath);
+                var modInstInvalid = runtime.InstantiateModule(stubmodule);
             }
             catch (ValidationException exc)
             {
@@ -315,9 +315,9 @@ namespace Spec.Test.WastJson
             try
             {
                 using var fileStream = new FileStream(filepath, FileMode.Open);
-                module = BinaryModuleParser.ParseWasm(fileStream);
-                module.SetName(filepath);
-                var modInstInvalid = runtime.InstantiateModule(module);
+                var stubmodule = BinaryModuleParser.ParseWasm(fileStream);
+                stubmodule.SetName(filepath);
+                var modInstInvalid = runtime.InstantiateModule(stubmodule);
             }
             catch (FormatException exc)
             {
@@ -370,9 +370,9 @@ namespace Spec.Test.WastJson
             try
             {
                 using var fileStream = new FileStream(filepath, FileMode.Open);
-                module = BinaryModuleParser.ParseWasm(fileStream);
-                module.SetName(filepath);
-                var modInstInvalid = runtime.InstantiateModule(module);
+                var stubmodule = BinaryModuleParser.ParseWasm(fileStream);
+                stubmodule.SetName(filepath);
+                var modInstInvalid = runtime.InstantiateModule(stubmodule);
             }
             catch (NotSupportedException exc)
             {
@@ -417,9 +417,9 @@ namespace Spec.Test.WastJson
             try
             {
                 using var fileStream = new FileStream(filepath, FileMode.Open);
-                module = BinaryModuleParser.ParseWasm(fileStream);
-                module.SetName(filepath);
-                var modInst = runtime.InstantiateModule(module);
+                var stubmodule = BinaryModuleParser.ParseWasm(fileStream);
+                stubmodule.SetName(filepath);
+                var modInst = runtime.InstantiateModule(stubmodule);
             }
             catch (ValidationException exc)
             {
