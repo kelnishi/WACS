@@ -844,7 +844,7 @@ namespace Wacs.Core.Runtime
                     }
                 }
 
-                
+
                 //17. 
                 if (module.StartIndex != FuncIdx.Default)
                 {
@@ -880,8 +880,6 @@ namespace Wacs.Core.Runtime
                     throw new WasmRuntimeException("Execution fault in Module Instantiation.");
                 //19.
                 Context.PopFrame();
-                
-                Store.CommitTransaction();
 
                 _moduleInstances.Add(moduleInstance);
 
@@ -890,6 +888,7 @@ namespace Wacs.Core.Runtime
             catch (WasmRuntimeException)
             {
                 Store.DiscardTransaction();
+                Store.OpenTransaction();
                 Context.FlushCallStack();
                 throw;
             }
@@ -906,14 +905,20 @@ namespace Wacs.Core.Runtime
             catch (TrapException)
             {
                 Store.DiscardTransaction();
+                Store.OpenTransaction();
                 Context.FlushCallStack();
                 throw;
             }
             catch (NotSupportedException)
             {
                 Store.DiscardTransaction();
+                Store.OpenTransaction();
                 Context.FlushCallStack();
                 throw;
+            }
+            finally
+            {
+                Store.CommitTransaction();
             }
         }
 
