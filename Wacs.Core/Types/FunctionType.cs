@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using FluentValidation;
 
 namespace Wacs.Core.Types
@@ -50,6 +52,34 @@ namespace Wacs.Core.Types
         public bool Matches(FunctionType other) =>
             ParameterTypes.Matches(other.ParameterTypes) &&
             ResultType.Matches(other.ResultType);
+
+        /// <summary>
+        /// Determine if the stack deltas are equivalent.
+        /// </summary>
+        /// <param name="other"></param>
+        /// <returns></returns>
+        public bool Equivalent(FunctionType other)
+        {
+            var myDelta = GetDelta();
+            var otDelta = other.GetDelta();
+            return myDelta.parameters.SequenceEqual(otDelta.parameters)
+                   && myDelta.results.SequenceEqual(otDelta.results);
+        }
+
+        public (ValType[] parameters, ValType[] results) GetDelta()
+        {
+            var stackIn = new Stack<ValType>();
+            var stackOut = new Stack<ValType>();
+            foreach (var v in ParameterTypes.Types) stackIn.Push(v);
+            foreach (var v in ResultType.Types) stackOut.Push(v);
+            while (stackIn.Count > 0 && stackOut.Count > 0 && stackIn.Peek() == stackOut.Peek())
+            {
+                stackIn.Pop();
+                stackOut.Pop();
+            }
+
+            return (stackIn.ToArray(), stackOut.ToArray());
+        }
 
         public string ToNotation() =>
             $"{ParameterTypes.ToNotation()} -> {ResultType.ToNotation()}";
