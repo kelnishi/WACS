@@ -192,7 +192,7 @@ namespace Wacs.Core.Instructions
                 //3.
                 context.Assert(funcType, $"Invalid BlockType: {Block.Type}");
                 //4.
-                var label = new Label(funcType.ResultType, context.GetPointer(), OpCode.Loop);
+                var label = new Label(funcType.ParameterTypes, context.GetPointer(), OpCode.Loop);
                 //5.
                 context.Assert( context.OpStack.Count >= funcType.ParameterTypes.Length,
                     $"Instruction loop failed. Operand Stack underflow.");
