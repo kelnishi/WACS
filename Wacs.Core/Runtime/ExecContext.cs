@@ -19,11 +19,6 @@ namespace Wacs.Core.Runtime
 
         public int MaxOpStack = 1024;
         public IInstructionFactory InstructionFactory { get; set; } = ReferenceFactory.Factory;
-
-        public double FloatTolerance { get; set; } = 1e-46;
-
-        //We're just doing direct comparison for now
-        public double DoubleTolerance { get; set; } = 4.9406564584124653E-324;
     }
 
     public struct ExecStat

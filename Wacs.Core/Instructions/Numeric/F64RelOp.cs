@@ -39,7 +39,7 @@ namespace Wacs.Core.Instructions.Numeric
             double i2 = context.OpStack.PopF64();
             double i1 = context.OpStack.PopF64();
 
-            int result = CompareF64(i1, i2, context.Attributes.FloatTolerance);
+            int result = i1 == i2 ? 1 : 0;
             
             context.OpStack.PushI32(result);
         }
@@ -49,8 +49,7 @@ namespace Wacs.Core.Instructions.Numeric
             double i2 = context.OpStack.PopF64();
             double i1 = context.OpStack.PopF64();
 
-            int result = CompareF64(i1, i2, context.Attributes.FloatTolerance);
-            result = result == 1 ? 0 : 1;
+            int result = i1 != i2 ? 1 : 0;
 
             context.OpStack.PushI32(result);
         }
