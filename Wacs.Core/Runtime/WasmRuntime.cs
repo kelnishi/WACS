@@ -20,6 +20,7 @@ namespace Wacs.Core.Runtime
     public class RuntimeOptions
     {
         public bool SkipModuleValidation = false;
+        public bool SkipStartFunction = false;
     }
 
     [Flags]
@@ -843,6 +844,7 @@ namespace Wacs.Core.Runtime
                     }
                 }
 
+                
                 //17. 
                 if (module.StartIndex != FuncIdx.Default)
                 {
@@ -854,32 +856,22 @@ namespace Wacs.Core.Runtime
 
                     moduleInstance.StartFunc = startAddr;
 
-                    // //Invoke the function!
-                    // if (!options.SkipStartFunction)
-                    //     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Func).Immediate(module.StartIndex)
-                    //         .Execute(Context);
-                }
-                else
-                {
-                    // Look for WASI/Emscripten _start in the exports
-                    int fIdx = 0;
-                    foreach (var export in moduleInstance.Exports.Where(
-                                 export => export.Value is ExternalValue.Function))
+                    //Invoke the function!
+                    if (!options.SkipStartFunction)
                     {
-                        var exportedFunc = export.Value as ExternalValue.Function;
-                        if (export.Name == "_start")
+                        try
                         {
-                            moduleInstance.StartFunc = exportedFunc!.Address;
-
-                            // //Invoke the function!
-                            // if (!options.SkipStartFunction)
-                            //     Context.InstructionFactory.CreateInstruction<InstCall>(OpCode.Func).Immediate((FuncIdx)fIdx)
-                            //         .Execute(Context);
-
-                            break;
+                            var startInvoker = CreateInvoker<Action>(startAddr);
+                            startInvoker();
                         }
-
-                        fIdx++;
+                        catch (TrapException)
+                        {
+                            //see linking.wast: line 412
+                            // We're supposed to commit if the start function traps I guess...
+                            Store.CommitTransaction();
+                            Store.OpenTransaction();
+                            throw;
+                        }
                     }
                 }
 
@@ -888,6 +880,8 @@ namespace Wacs.Core.Runtime
                     throw new WasmRuntimeException("Execution fault in Module Instantiation.");
                 //19.
                 Context.PopFrame();
+                
+                Store.CommitTransaction();
 
                 _moduleInstances.Add(moduleInstance);
 
@@ -897,7 +891,6 @@ namespace Wacs.Core.Runtime
             {
                 Store.DiscardTransaction();
                 Context.FlushCallStack();
-                Store.OpenTransaction();
                 throw;
             }
             catch (OutOfBoundsTableAccessException)
@@ -908,26 +901,19 @@ namespace Wacs.Core.Runtime
                 //Store.DiscardTransaction();
 
                 Context.FlushCallStack();
-                Store.OpenTransaction();
                 throw;
             }
             catch (TrapException)
             {
                 Store.DiscardTransaction();
                 Context.FlushCallStack();
-                Store.OpenTransaction();
                 throw;
             }
             catch (NotSupportedException)
             {
                 Store.DiscardTransaction();
                 Context.FlushCallStack();
-                Store.OpenTransaction();
                 throw;
-            }
-            finally
-            {
-                Store.CommitTransaction();
             }
         }
 
