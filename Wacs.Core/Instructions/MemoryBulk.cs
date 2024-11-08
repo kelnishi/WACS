@@ -174,17 +174,17 @@ namespace Wacs.Core.Instructions
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //11.
-                int n = context.OpStack.PopI32();
+                long n = (uint)context.OpStack.PopI32();
                 //12.
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //13.
-                int s = context.OpStack.PopI32();
+                long s = (uint)context.OpStack.PopI32();
                 //14.
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //15.
-                int d = context.OpStack.PopI32();
+                long d = (uint)context.OpStack.PopI32();
                 //16.
                 if (s + n > data.Data.Length)
                     throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Data underflow.");
@@ -196,25 +196,25 @@ namespace Wacs.Core.Instructions
                 //18.
                 byte b = data.Data[s];
                 //19.
-                context.OpStack.PushI32(d);
+                context.OpStack.PushI32((uint)d);
                 //20.
                 context.OpStack.PushI32(b);
                 //21.
                 context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0))
                     .Execute(context);
                 //22.
-                long check = d + 1;
+                long check = d + 1L;
                 context.Assert( check < Constants.TwoTo32,
                      $"Instruction {Op.GetMnemonic()} failed. Memory overflow.");
                 //23.
-                context.OpStack.PushI32(d + 1);
+                context.OpStack.PushI32((uint)(d + 1L));
                 //24.
-                check = s + 1;
+                check = s + 1L;
                 context.Assert( check < Constants.TwoTo32,
                      $"Instruction {Op.GetMnemonic()} failed. Data overflow.");
                 //25.
-                context.OpStack.PushI32(s + 1);
-                context.OpStack.PushI32(n - 1);
+                context.OpStack.PushI32((uint)(s + 1L));
+                context.OpStack.PushI32((uint)(n - 1L));
             }
         }
 
@@ -333,17 +333,17 @@ namespace Wacs.Core.Instructions
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //7.
-                int n = context.OpStack.PopI32();
+                long n = (uint)context.OpStack.PopI32();
                 //8.
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //9.
-                int s = context.OpStack.PopI32();
+                long s = (uint)context.OpStack.PopI32();
                 //10.
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //11.
-                int d = context.OpStack.PopI32();
+                long d = (uint)context.OpStack.PopI32();
                 //12
                 long check = s + n;
                 if (check > memX.Data.Length)
@@ -358,42 +358,42 @@ namespace Wacs.Core.Instructions
                 //14.
                 if (d <= s)
                 {
-                    context.OpStack.PushI32(d);
-                    context.OpStack.PushI32(s);
+                    context.OpStack.PushI32((uint)d);
+                    context.OpStack.PushI32((uint)s);
                     context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0))
                         .Execute(context);
                     context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0))
                         .Execute(context);
-                    check = d + 1;
+                    check = d + 1L;
                     context.Assert( check < Constants.TwoTo32,
                          $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
-                    context.OpStack.PushI32(d + 1);
-                    check = s + 1;
+                    context.OpStack.PushI32((uint)(d + 1L));
+                    check = s + 1L;
                     context.Assert( check < Constants.TwoTo32,
                          $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
-                    context.OpStack.PushI32(s + 1);
+                    context.OpStack.PushI32((uint)(s + 1L));
                 }
                 //15.
                 else
                 {
-                    check = d + n - 1;
+                    check = d + n - 1L;
                     context.Assert( check < Constants.TwoTo32,
                          $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
-                    context.OpStack.PushI32(d + n - 1);
-                    check = s + n - 1;
+                    context.OpStack.PushI32((uint)(d + n - 1));
+                    check = s + n - 1L;
                     context.Assert( check < Constants.TwoTo32,
                          $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
-                    context.OpStack.PushI32(s + n - 1);
+                    context.OpStack.PushI32((uint)(s + n - 1));
                     context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0))
                         .Execute(context);
                     context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0))
                         .Execute(context);
-                    context.OpStack.PushI32(d);
-                    context.OpStack.PushI32(s);
+                    context.OpStack.PushI32((uint)d);
+                    context.OpStack.PushI32((uint)s);
                 }
 
                 //16.
-                context.OpStack.PushI32(n - 1);
+                context.OpStack.PushI32((uint)n - 1);
                 //17.
             }
         }
@@ -454,14 +454,14 @@ namespace Wacs.Core.Instructions
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //7.
-                int n = context.OpStack.PopI32();
+                long n = (uint)context.OpStack.PopI32();
                 //8,9. YOLO
                 var val = context.OpStack.PopAny();
                 //10.
                 context.Assert( context.OpStack.Peek().IsI32,
                      $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //11.
-                int d = context.OpStack.PopI32();
+                long d = (uint)context.OpStack.PopI32();
                 //12.
                 if (d + n > mem.Data.Length)
                     throw new TrapException("Instruction memory.fill failed. Buffer overflow");
@@ -469,7 +469,7 @@ namespace Wacs.Core.Instructions
                 if (n == 0)
                     return;
                 //14.
-                context.OpStack.PushI32(d);
+                context.OpStack.PushI32((uint)d);
                 //15.
                 context.OpStack.PushValue(val);
                 //16.
@@ -477,15 +477,15 @@ namespace Wacs.Core.Instructions
                 context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0))
                     .Execute(context);
                 //17.
-                long check = d + 1;
+                long check = d + 1L;
                 context.Assert( check < Constants.TwoTo32,
                      $"Instruction memory.fill failed. Buffer overflow");
                 //18.
-                context.OpStack.PushI32(d + 1);
+                context.OpStack.PushI32((uint)(d + 1));
                 //19.
                 context.OpStack.PushValue(val);
                 //20.
-                context.OpStack.PushI32(n - 1);
+                context.OpStack.PushI32((uint)(n - 1));
                 //21.
             }
         }
