@@ -46,6 +46,7 @@ namespace Wacs.Core.Instructions
 
         /// <summary>
         /// @Spec 3.3.4.2. select
+        /// @Spec Appendix A.3 #validation-of-opcode-sequences①
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
@@ -66,7 +67,7 @@ namespace Wacs.Core.Instructions
                 Value val1 = context.OpStack.PopAny();
                 context.Assert(val1.Type.IsCompatible(val2.Type),
                     $"Select instruction expected matching types on the stack: {val1.Type} == {val2.Type}");
-                context.OpStack.PushType(val1.Type);
+                context.OpStack.PushType(val1.Type == ValType.Unknown ? val2.Type : val1.Type);
             }
         }
 
