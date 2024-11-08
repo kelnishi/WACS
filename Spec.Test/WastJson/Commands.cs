@@ -273,6 +273,9 @@ namespace Spec.Test.WastJson
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
+            if (ModuleType == "text")
+                errors.Add(new Exception(
+                    $"Assert Malformed line {Line}: Skipping assert_malformed. No WAT parsing."));
             
             var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert = false;
@@ -369,8 +372,14 @@ namespace Spec.Test.WastJson
 
     public class AssertUnlinkableCommand : ICommand
     {
-        [JsonPropertyName("module")]
-        public string Module { get; set; }
+        [JsonPropertyName("filename")]
+        public string Filename { get; set; }
+
+        [JsonPropertyName("text")]
+        public string Text { get; set; }
+
+        [JsonPropertyName("module_type")]
+        public string ModuleType { get; set; }
 
         public CommandType Type => CommandType.AssertUnlinkable;
 
@@ -379,10 +388,36 @@ namespace Spec.Test.WastJson
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
-            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
+            List<Exception> errors = new();
+            if (ModuleType == "text")
+                errors.Add(new Exception(
+                    $"Assert Malformed line {Line}: Skipping assert_malformed. No WAT parsing."));
+            
+            var filepath = Path.Combine(testDefinition.Path, Filename);
+            bool didAssert = false;
+            string assertionMessage = "";
+            try
+            {
+                using var fileStream = new FileStream(filepath, FileMode.Open);
+                module = BinaryModuleParser.ParseWasm(fileStream);
+                module.SetName(filepath);
+                var modInstInvalid = runtime.InstantiateModule(module);
+            }
+            catch (NotSupportedException exc)
+            {
+                didAssert = true;
+                assertionMessage = exc.Message;
+            }
+
+            if (!didAssert)
+            {
+                throw new TestException($"Test failed {this}");
+            }
+
+            return errors;
         }
 
-        public override string ToString() => $"AssertUnlinkableCommand {{ Line = {Line}, Module = {Module} }}";
+        public override string ToString() => $"AssertUnlinkableCommand {{ Line = {Line}, Filename = {Filename}, Text = {Text}, ModuleType = {ModuleType} }}";
     }
 
     public class AssertUninstantiableCommand : ICommand
