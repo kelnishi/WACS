@@ -7,7 +7,7 @@ namespace Wacs.Core.Types
 {
     public class Block
     {
-        public static readonly Block Empty = new(BlockType.Empty);
+        public static readonly Block Empty = new(BlockType.Empty) { Instructions = InstructionSequence.Empty };
 
         public Block(BlockType type) => Type = type;
         public BlockType Type { get; }

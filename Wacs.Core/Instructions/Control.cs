@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using FluentValidation;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -250,22 +251,26 @@ namespace Wacs.Core.Instructions
         {
             try
             {
-                var funcType = context.Types.ResolveBlockType(IfBlock.Type);
-                context.Assert(funcType,  $"Invalid BlockType: {IfBlock.Type}");
+                var ifType = context.Types.ResolveBlockType(IfBlock.Type);
+                context.Assert(ifType,  $"Invalid BlockType: {IfBlock.Type}");
 
                 //Pop the predicate
                 context.OpStack.PopI32();
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(funcType.ParameterTypes);
+                context.OpStack.PopValues(ifType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
-                context.PushControlFrame(Op, funcType);
+                context.PushControlFrame(Op, ifType);
 
                 //Continue on to instructions in sequence
                 // *any (end) contained within will pop the control frame and check values
                 // *any (else) contained within will pop and repush the control frame
                 context.ValidateBlock(IfBlock);
+                
+                var elseType = context.Types.ResolveBlockType(ElseBlock.Type);
+                if (!ifType.Equivalent(elseType))
+                    throw new ValidationException($"If block returned type {ifType} without matching else block");
                 
                 if (ElseBlock.Length == 0)
                     return;
@@ -308,21 +313,15 @@ namespace Wacs.Core.Instructions
                     IInstruction.IsElseOrEnd))
             };
 
-            if (IfBlock.Instructions.HasExplicitEnd)
-            {
-                ElseBlock.Instructions = InstructionSequence.Empty;
-            }
-            else if (IfBlock.Instructions.EndsWithElse)
+            if (IfBlock.Instructions.EndsWithElse)
             {
                 ElseBlock = new Block(type: IfBlock.Type)
                 {
                     Instructions = new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
                         IInstruction.IsEnd))
                 };
-                if (ElseBlock.Length == 0)
-                    throw new FormatException($"Explicit Else block contained no instructions.");
             }
-            else
+            else if (!IfBlock.Instructions.HasExplicitEnd)
             {
                 throw new FormatException($"If block did not terminate correctly.");
             }
