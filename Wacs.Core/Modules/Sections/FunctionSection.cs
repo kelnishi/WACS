@@ -175,6 +175,7 @@ namespace Wacs.Core
 
                             var funcType = types[func.TypeIndex];
                             vContext.SetExecFrame(funcType, func.Locals);
+                            vContext.Unreachable = false;
                             
                             //*Expression Validator also validates result types
                             var exprValidator = new Expression.Validator(funcType.ResultType);

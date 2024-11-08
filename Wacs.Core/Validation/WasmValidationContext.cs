@@ -66,19 +66,15 @@ namespace Wacs.Core.Validation
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
 
-        public bool Unreachable
-        {
-            get => ControlFrame.Unreachable;
-            set => ControlFrame.Unreachable = value;
-        }
+        public bool Unreachable { get; set; }
 
         /// <summary>
         /// @Spec A.3 Validation Algorithm
         /// </summary>
         public void SetUnreachable()
         {
+            Unreachable = true;
             PopOperandsToHeight(ControlFrame.Height);
-            ControlFrame.Unreachable = true;
         }
 
         public void Assert(bool factIsTrue, string message)
@@ -149,7 +145,12 @@ namespace Wacs.Core.Validation
                 throw new ValidationException(
                     $"Operand stack height {OpStack.Height} differed from Control Frame height {ControlFrame.Height}");
             
-            return ControlStack.Pop();
+            var poppedFrame = ControlStack.Pop();
+
+            if (ControlStack.Count > 0 && ControlFrame.ConditionallyReachable)
+                Unreachable = false;
+                
+            return poppedFrame;
         }
 
         public bool ContainsLabel(uint label) => ControlStack.Count - 2 >= label;

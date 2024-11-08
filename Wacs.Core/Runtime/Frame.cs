@@ -27,7 +27,7 @@ namespace Wacs.Core.Runtime
         public int Arity => (int)Type.ResultType.Length;
 
         //For validation
-        public bool Unreachable { get; set; }
+        public bool ConditionallyReachable { get; set; }
 
         public bool Contains(LabelIdx index) =>
             index.Value < Labels.Count;
