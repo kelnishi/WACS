@@ -29,6 +29,7 @@ namespace Wacs.Core.Runtime
         public void PushI32(int value) => PushValue(value);
         public void PushI32(uint value) => PushValue(value);
         public void PushI64(long value) => PushValue(value);
+        public void PushI64(ulong value) => PushValue(value);
         public void PushF32(float value) => PushValue(value);
         public void PushF64(double value) => PushValue(value);
         public void PushV128(Value value) => PushValue(value);

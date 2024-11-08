@@ -105,8 +105,6 @@ namespace Wacs.Core.Instructions.Numeric
             long j1 = context.OpStack.PopI64();
             if (j2 == 0)
                 throw new TrapException("Cannot divide by zero");
-            if (j2 == -1 && j1 == long.MinValue)
-                throw new TrapException("Operation results in arithmetic overflow");
             
             //Special case for arithmetic overflow
             if (j2 == -1 && j1 == long.MinValue)
