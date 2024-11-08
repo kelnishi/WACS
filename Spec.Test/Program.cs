@@ -127,19 +127,9 @@ namespace Spec.Test
                 catch (TestException exc)
                 {
                     Console.Error.WriteLine($"\n\nLast module:{module?.Name}\n");
-                    RenderModule(module);
                     throw;
                 }
             }
-        }
-
-        static void RenderModule(Module? module)
-        {
-            if (module == null)
-                return;
-            string outputFilePath = Path.ChangeExtension(module.Name, ".wat");
-            using var outputStream = new FileStream(outputFilePath, FileMode.Create);
-            ModuleRenderer.RenderWatToStream(outputStream, module);
         }
     }
 }
