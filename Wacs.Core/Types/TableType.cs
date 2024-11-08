@@ -66,6 +66,8 @@ namespace Wacs.Core.Types
         /// <returns>True when the import fits inside the definition</returns>
         public bool IsCompatibleWith(TableType imported)
         {
+            if (ElementType != imported.ElementType)
+                return false;
             if (imported.Limits.Minimum < Limits.Minimum)
                 return false;
             if (!Limits.Maximum.HasValue)
