@@ -11,6 +11,8 @@ namespace Wacs.Core
         /// @Spec 2.5.5. Memories
         /// </summary>
         public List<MemoryType> Memories { get; internal set; } = new();
+
+        public int MemoryCount => ImportedMems.Count + Memories.Count;
     }
     
     public static partial class BinaryModuleParser
