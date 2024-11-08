@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using FluentValidation;
@@ -66,6 +67,9 @@ namespace Wacs.Core
                         {
                             var validationContext = ctx.GetValidationContext();
                             var subContext = validationContext.PushSubContext(expr);
+
+                            var funcType = FunctionType.Empty;
+                            validationContext.SetExecFrame(funcType, Array.Empty<ValType>());
                             
                             var g = ctx.InstanceToValidate;
                             var exprValidator = new Expression.Validator(g.Type.ResultType, isConstant: true);
