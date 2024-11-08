@@ -51,7 +51,7 @@ namespace Wacs.Core.Runtime
     public class WasmRuntime
     {
         private static readonly MethodInfo GenericFuncsInvoke = typeof(Delegates.GenericFuncs).GetMethod("Invoke")!;
-        private readonly Dictionary<(string module, string entity), IAddress> _entityBindings = new();
+        private readonly Dictionary<(string module, string entity), IAddress?> _entityBindings = new();
 
         private readonly List<ModuleInstance> _moduleInstances = new();
         private readonly Dictionary<string, ModuleInstance> _registeredModules = new();
@@ -199,10 +199,18 @@ namespace Wacs.Core.Runtime
                     paramValTypes = new ResultType(paramValTypes.Types.Skip(1).ToArray());
                 }
             }
-            
-            var type = new FunctionType(paramValTypes, returnValType);
-            var funcAddr = AllocateHostFunc(Store, id, type, funcType, func);
-            _entityBindings[id] = funcAddr;
+
+            try
+            {
+                Store.OpenTransaction();
+                var type = new FunctionType(paramValTypes, returnValType);
+                var funcAddr = AllocateHostFunc(Store, id, type, funcType, func);
+                _entityBindings[id] = funcAddr;
+            }
+            finally
+            {
+                Store.CommitTransaction();
+            }
         }
 
         public string GetFunctionName(FuncAddr funcAddr)
@@ -538,9 +546,17 @@ namespace Wacs.Core.Runtime
 
         public MemoryInstance BindHostMemory((string module, string entity) id, MemoryType memType)
         {
-            var memAddr = AllocateMemory(Store, memType);
-            _entityBindings[id] = memAddr;
-            return Store[memAddr];
+            try
+            {
+                Store.OpenTransaction();
+                var memAddr = AllocateMemory(Store, memType);
+                _entityBindings[id] = memAddr;
+                return Store[memAddr];
+            }
+            finally
+            {
+                Store.CommitTransaction();
+            }
         }
 
         public GlobalInstance BindHostGlobal((string module, string entity) id, GlobalType globalType, Value val)
@@ -548,9 +564,17 @@ namespace Wacs.Core.Runtime
             if (globalType.ContentType != val.Type)
                 throw new ArgumentException(
                     $"Global {globalType.ContentType} must be defined with matching type value {val}");
-            var globAddr = AllocateGlobal(Store, globalType, val);
-            _entityBindings[id] = globAddr;
-            return Store[globAddr];
+            try
+            {
+                Store.OpenTransaction();
+                var globAddr = AllocateGlobal(Store, globalType, val);
+                _entityBindings[id] = globAddr;
+                return Store[globAddr];
+            }
+            finally
+            {
+                Store.CommitTransaction();
+            }
         }
 
         public TableInstance BindHostTable((string module, string entity) id, TableType tableType, Value val)
@@ -558,9 +582,17 @@ namespace Wacs.Core.Runtime
             if (tableType.ElementType.StackType() != val.Type)
                 throw new ArgumentException(
                     $"Table {tableType.ElementType} must be defined with matching element type value {val}");
-            var tableAddr = AllocateTable(Store, tableType, val);
-            _entityBindings[id] = tableAddr;
-            return Store[tableAddr];
+            try
+            {
+                Store.OpenTransaction();
+                var tableAddr = AllocateTable(Store, tableType, val);
+                _entityBindings[id] = tableAddr;
+                return Store[tableAddr];
+            }
+            finally
+            {
+                Store.CommitTransaction();
+            }
         }
 
         /// <summary>
@@ -762,6 +794,8 @@ namespace Wacs.Core.Runtime
 
             try
             {
+                Store.OpenTransaction();
+
                 ModuleInstance moduleInstance;
                 //2, 3, 4 Checks if imports are satisfied
                 moduleInstance = AllocateModule(module);
@@ -876,15 +910,21 @@ namespace Wacs.Core.Runtime
                     throw new WasmRuntimeException("Execution fault in Module Instantiation.");
                 //19.
                 Context.PopFrame();
-                
+
                 _moduleInstances.Add(moduleInstance);
 
                 return moduleInstance;
             }
             catch (TrapException exc)
             {
+                Store.DiscardTransaction();
                 Context.FlushCallStack();
+                Store.OpenTransaction();
                 throw;
+            }
+            finally
+            {
+                Store.CommitTransaction();
             }
         }
 

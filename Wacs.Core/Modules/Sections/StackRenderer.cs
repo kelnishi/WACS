@@ -208,6 +208,7 @@ namespace Wacs.Core
         private ExecContext BuildDummyContext(Module module, ModuleInstance moduleInst, Frame execFrame)
         {
             var store = new Store();
+            store.OpenTransaction();
             FakeHostDelegate fakeHostFunc = () => { };
             foreach (var import in module.Imports)
             {

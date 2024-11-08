@@ -419,6 +419,7 @@ namespace Spec.Test.WastJson
                 using var fileStream = new FileStream(filepath, FileMode.Open);
                 module = BinaryModuleParser.ParseWasm(fileStream);
                 module.SetName(filepath);
+                var modInst = runtime.InstantiateModule(module);
             }
             catch (ValidationException exc)
             {
@@ -440,7 +441,7 @@ namespace Spec.Test.WastJson
                 didAssert = true;
                 assertionMessage = exc.Message;
             }
-
+            
             if (!didAssert)
             {
                 throw new TestException($"Test failed {this}");
