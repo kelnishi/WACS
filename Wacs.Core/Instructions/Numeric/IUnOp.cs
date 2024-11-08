@@ -17,76 +17,111 @@ namespace Wacs.Core.Instructions.Numeric
         // @Spec 4.3.2.20 iclz
         private static void ExecuteI32Clz(ExecContext context)
         {
-            int value = context.OpStack.PopI32();
-            uint clz = 0;
-            while (value != 0) 
+            uint x = context.OpStack.PopI32();
+            if (x != 0)
             {
-                clz++;
-                value >>= 1;
+                int count = 0;
+                // Shift bits to the left until the most significant bit is 1
+                while ((x & 0x80000000) == 0)
+                {
+                    x <<= 1;
+                    count++;
+                }
+                context.OpStack.PushI32(count);
             }
-            context.OpStack.PushI32((int)clz);
+            // Handle the case when x is 0 (all bits are 0)
+            else
+            {
+                context.OpStack.PushI32(32);
+            }
         }
 
         // @Spec 4.3.2.21 ictz
         private static void ExecuteI32Ctz(ExecContext context)
         {
-            int value = context.OpStack.PopI32();
-            uint ctz = 0;
-            while ((value & 1) == 0) 
+            uint x = context.OpStack.PopI32();
+            if (x != 0)
             {
-                ctz++;
-                value >>= 1;
+                int count = 0;
+                // Check each bit from the least significant bit (rightmost) upwards
+                while ((x & 1) == 0)
+                {
+                    x >>= 1;
+                    count++;
+                }
+
+                context.OpStack.PushI32(count);
             }
-            context.OpStack.PushI32((int)ctz);
+            // Handle the case when x is 0 (all bits are 0)
+            else
+            {
+                context.OpStack.PushI32(32);
+                return;
+            }
         }
 
         // @Spec 4.3.2.22 ipopcnt
         private static void ExecuteI32Popcnt(ExecContext context)
         {
-            int x = context.OpStack.PopI32();
-            uint popcnt = 0;
-            while ((x & 1) != 0)
+            uint x = context.OpStack.PopI32();
+            uint count = 0;
+            while (x != 0)
             {
-                popcnt++;
-                x >>= 1;
+                count += x & 1;  // Add 1 to count if the least significant bit is 1
+                x >>= 1;         // Right shift x by 1 to process the next bit
             }
-            context.OpStack.PushI32((int)popcnt);
+            context.OpStack.PushI32(count);
         }
 
         private static void ExecuteI64Clz(ExecContext context)
         {
-            long value = context.OpStack.PopI64();
-            long clz = 0;
-            while (value != 0) 
+            ulong x = context.OpStack.PopI64();
+            if (x != 0)
             {
-                clz++;
-                value >>= 1;
+                int count = 0;
+                while ((x & 0x8000000000000000) == 0)
+                {
+                    x <<= 1;
+                    count++;
+                }
+                context.OpStack.PushI64(count);
             }
-            context.OpStack.PushI64(clz);
+            else
+            {
+                context.OpStack.PushI64(64);
+            }
         }
 
         private static void ExecuteI64Ctz(ExecContext context)
         {
-            long value = context.OpStack.PopI64();
-            long ctz = 0;
-            while ((value & 1) == 0) 
+            ulong x = context.OpStack.PopI64();
+            if (x != 0)
             {
-                ctz++;
-                value >>= 1;
+                int count = 0;
+                while ((x & 1) == 0)
+                {
+                    x >>= 1;
+                    count++;
+                }
+                context.OpStack.PushI64(count);
             }
-            context.OpStack.PushI64(ctz);
+            else
+            {
+                context.OpStack.PushI64(64);
+            }
         }
 
         private static void ExecuteI64Popcnt(ExecContext context)
         {
-            long x = context.OpStack.PopI64();
-            long popcnt = 0;
-            while ((x & 1) != 0)
+            ulong x = context.OpStack.PopI64();
+            ulong count = 0;
+            while (x != 0)
             {
-                popcnt++;
-                x >>= 1;
+                count += x & 1;  // Add 1 to count if the least significant bit is 1
+                x >>= 1;         // Right shift x by 1 to process the next bit
             }
-            context.OpStack.PushI64(popcnt);
+            context.OpStack.PushI64(count);
+            
         }
     }
 }
