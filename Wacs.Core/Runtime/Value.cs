@@ -436,6 +436,7 @@ namespace Wacs.Core.Runtime
                 ValType.V128 => $"v128={V128.ToString()}",
                 ValType.Funcref => $"Funcref: {Ptr}",
                 ValType.Externref => $"Externref: {Ptr}",
+                ValType.Unknown => "Unknown",
                 _ => "Undefined",
             };
         }
