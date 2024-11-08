@@ -419,7 +419,6 @@ namespace Spec.Test.WastJson
                 using var fileStream = new FileStream(filepath, FileMode.Open);
                 module = BinaryModuleParser.ParseWasm(fileStream);
                 module.SetName(filepath);
-                var modInstInvalid = runtime.InstantiateModule(module);
             }
             catch (ValidationException exc)
             {
