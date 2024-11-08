@@ -116,7 +116,7 @@ namespace Spec.Test
             string moduleName = "";
             
             
-            using var progress = new ProgressBar(testDefinition.Commands.Count, "Processing");
+            using var progress = new ProgressBar(testDefinition.Commands.Count+1, "Processing");
             foreach (var command in testDefinition.Commands)
             {
                 try
