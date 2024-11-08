@@ -145,12 +145,10 @@ namespace Wacs.Core.Validation
                 throw new ValidationException(
                     $"Operand stack height {OpStack.Height} differed from Control Frame height {ControlFrame.Height}");
             
-            var poppedFrame = ControlStack.Pop();
-
-            if (ControlStack.Count > 0 && ControlFrame.ConditionallyReachable)
+            if (ControlFrame.ConditionallyReachable)
                 Unreachable = false;
-                
-            return poppedFrame;
+
+            return ControlStack.Pop();
         }
 
         public bool ContainsLabel(uint label) => ControlStack.Count - 2 >= label;
