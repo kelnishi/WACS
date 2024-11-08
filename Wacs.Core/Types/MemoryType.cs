@@ -49,7 +49,13 @@ namespace Wacs.Core.Types
         {
             if (imported.Limits.Minimum < Limits.Minimum)
                 return false;
-            return !Limits.Maximum.HasValue || !imported.Limits.Maximum.HasValue || Limits.Maximum.Value <= imported.Limits.Maximum.Value;
+            if (!Limits.Maximum.HasValue)
+                return true;
+            if (!imported.Limits.Maximum.HasValue)
+                return false;
+            if (imported.Limits.Maximum > Limits.Maximum)
+                return false;
+            return true;
         }
 
         /// <summary>

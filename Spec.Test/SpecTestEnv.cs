@@ -42,7 +42,7 @@ namespace Spec.Test
             runtime.BindHostTable((module, "table"), new TableType(ReferenceType.Funcref,new Limits(10,20)),
                 new Value(ValType.Funcref));
             
-            runtime.BindHostMemory((module, "memory"), new MemoryType(minimum:1, maximum:3));
+            runtime.BindHostMemory((module, "memory"), new MemoryType(minimum:1, maximum:2));
         }
     }
 }
