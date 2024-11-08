@@ -59,11 +59,22 @@ namespace Wacs.Core.Types
         /// </summary>
         public static TableType Parse(BinaryReader reader) => new(reader);
 
+        /// <summary>
+        /// Tables imported from host or other modules must fit within the import definition.
+        /// </summary>
+        /// <param name="imported">The table exported from host or other module.</param>
+        /// <returns>True when the import fits inside the definition</returns>
         public bool IsCompatibleWith(TableType imported)
         {
             if (imported.Limits.Minimum < Limits.Minimum)
                 return false;
-            return !Limits.Maximum.HasValue || !imported.Limits.Maximum.HasValue || Limits.Maximum.Value <= imported.Limits.Maximum.Value;
+            if (!Limits.Maximum.HasValue)
+                return true;
+            if (!imported.Limits.Maximum.HasValue)
+                return false;
+            if (imported.Limits.Maximum > Limits.Maximum)
+                return false;
+            return true;
         }
 
         /// <summary>
