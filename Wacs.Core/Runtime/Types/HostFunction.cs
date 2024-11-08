@@ -41,7 +41,7 @@ namespace Wacs.Core.Runtime.Types
             (ModuleName, Name) = id;
 
             var invokerParams = _invoker.GetParameters();
-            if (invokerParams[0].ParameterType == typeof(ExecContext))
+            if (invokerParams.Length > 0 && invokerParams[0].ParameterType == typeof(ExecContext))
             {
                 PassExecContext = true;
             }
@@ -136,6 +136,9 @@ namespace Wacs.Core.Runtime.Types
             for (; idx < Type.ResultType.Length; ++idx)
             {
                 int pIdx = parameters.Length - idx - 1;
+                if (pIdx < 0 || pIdx >= parameters.Length)
+                    break;
+                
                 var outType = parameters[pIdx].ParameterType;
                 var paramType = outType.GetElementType();
                 _resultConversions[idx] = paramType switch

@@ -48,7 +48,7 @@ namespace Spec.Test.WastJson
             using var fileStream = new FileStream(filepath, FileMode.Open);
             module = BinaryModuleParser.ParseWasm(fileStream);
             var modInst = runtime.InstantiateModule(module);
-            var moduleName = $"{filepath}";
+            var moduleName = !string.IsNullOrEmpty(Name)?Name:$"{filepath}";
             module.SetName(moduleName);
             
             if (!string.IsNullOrEmpty(Name))
@@ -98,18 +98,10 @@ namespace Spec.Test.WastJson
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
-            var action = Action;
-            switch (action.Type)
+            switch (Action)
             {
-                case ActionType.Invoke:
-                    if (!runtime.TryGetExportedFunction(action.Field, out var addr))
-                        throw new InvalidDataException(
-                            $"Could not get exported function {module.Name}.{action.Field}");
-                    //Compute type from action.Args and action.Expected
-                    var invoker = runtime.CreateStackInvoker(addr);
-
-                    var pVals = action.Args.Select(arg => arg.AsValue).ToArray();
-                    var result = invoker(pVals);
+                case InvokeAction invokeAction:
+                    invokeAction.Invoke(ref runtime, ref module);
                     break;
             }
             return errors;
@@ -132,22 +124,14 @@ namespace Spec.Test.WastJson
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
-            var action1 = Action;
-            switch (action1.Type)
+            
+            switch (Action)
             {
-                case ActionType.Invoke:
-                    if (!runtime.TryGetExportedFunction(action1.Field, out var addr))
-                        throw new InvalidDataException(
-                            $"Could not get exported function {module.Name}.{action1.Field}");
-                    //Compute type from action.Args and action.Expected
-                    var invoker = runtime.CreateStackInvoker(addr);
-
-                    var pVals = action1.Args.Select(arg => arg.AsValue).ToArray();
-                    var result = invoker(pVals);
+                case InvokeAction invokeAction:
+                    var result = invokeAction.Invoke(ref runtime, ref module);
                     if (!result.SequenceEqual(Expected.Select(e => e.AsValue)))
                         throw new TestException(
-                            $"Test failed {this} \"{action1.Field}\": Expected [{string.Join(" ", Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
-
+                            $"Test failed {this} \"{invokeAction.Field}\": Expected [{string.Join(" ", Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
                     break;
             }
             return errors;
@@ -172,22 +156,15 @@ namespace Spec.Test.WastJson
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
-            var action2 = Action;
-            switch (action2.Type)
+            
+            switch (Action)
             {
-                case ActionType.Invoke:
-                    if (!runtime.TryGetExportedFunction(action2.Field, out var addr))
-                        throw new ArgumentException(
-                            $"Could not get exported function {module?.Name}.{action2.Field}");
-                    //Compute type from action.Args and action.Expected
-                    var invoker = runtime.CreateStackInvoker(addr);
-
-                    var pVals = action2.Args.Select(arg => arg.AsValue).ToArray();
+                case InvokeAction invokeAction:
                     bool didTrap = false;
                     string trapMessage = "";
                     try
                     {
-                        var result = invoker(pVals);
+                        var result = invokeAction.Invoke(ref runtime, ref module);
                     }
                     catch (TrapException e)
                     {
@@ -222,22 +199,16 @@ namespace Spec.Test.WastJson
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
-            var action = Action;
-            switch (action.Type)
+            
+            switch (Action)
             {
-                case ActionType.Invoke:
-                    if (!runtime.TryGetExportedFunction(action.Field, out var addr))
-                        throw new InvalidDataException(
-                            $"Could not get exported function {module.Name}.{action.Field}");
+                case InvokeAction invokeAction:
                     //Compute type from action.Args and action.Expected
                     bool didThrow = false;
                     string throwMessage = "";
                     try
                     {
-                        var invoker = runtime.CreateStackInvoker(addr);
-
-                        var pVals = action.Args.Select(arg => arg.AsValue).ToArray();
-                        var result = invoker(pVals);
+                        var result = invokeAction.Invoke(ref runtime, ref module);
                     }
                     catch (WasmRuntimeException exc)
                     {

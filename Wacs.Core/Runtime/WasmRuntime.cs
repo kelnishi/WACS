@@ -86,7 +86,6 @@ namespace Wacs.Core.Runtime
                     _ => throw new InvalidDataException($"Corrupted Export Instance in {moduleName} ({export.Name})"),
                 };
             }
-            moduleInstance.Name = moduleName;
         }
 
         public ModuleInstance GetModule(string? moduleName)
@@ -126,6 +125,20 @@ namespace Wacs.Core.Runtime
             }
             catch (UnboundEntityException)
             {
+                var exports = _moduleInstances
+                    .Where(modInst => modInst.Name == id.module)
+                    .SelectMany(modInst => modInst.Exports)
+                    .Where(export => export.Name == id.entity)
+                    .Select(export => export.Value)
+                    .Cast<ExternalValue.Function>()
+                    .Select(func => func.Address)
+                    .ToList();
+
+                if (exports.Count > 0)
+                {
+                    addr = exports.Last();
+                    return true;
+                }
                 addr = FuncAddr.Null;
                 return false;
             }
