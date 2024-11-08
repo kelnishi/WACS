@@ -130,6 +130,7 @@ namespace Spec.Test
                     throw;
                 }
             }
+            progress.Tick($"{testDefinition.TestName} complete!");
         }
     }
 }
