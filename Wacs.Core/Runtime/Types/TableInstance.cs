@@ -45,9 +45,9 @@ namespace Wacs.Core.Runtime.Types
         /// @Spec 4.5.3.8. Growing tables
         /// </summary>
         /// <returns>true on succes</returns>
-        public bool Grow(int numEntries, Value refInit)
+        public bool Grow(long numEntries, Value refInit)
         {
-            long len = (long)Elements.Count + numEntries;
+            long len = numEntries + Elements.Count;
             if (len > Constants.MaxTableSize)
                 return false;
 

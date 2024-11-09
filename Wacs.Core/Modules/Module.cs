@@ -300,6 +300,25 @@ namespace Wacs.Core
         {
             PatchFuncSection(module);
 
+            HashSet<FuncIdx> fullyDeclared = new();
+            var funcDescs = module.Exports
+                .Select(export => export.Desc)
+                .OfType<Module.ExportDesc.FuncDesc>();
+            foreach (var funcDesc in funcDescs) fullyDeclared.Add(funcDesc.FunctionIndex);
+
+            var elementIni = module.Elements
+                .Where(elem => elem.Type == ReferenceType.Funcref)
+                .SelectMany(elem => elem.Initializers)
+                .SelectMany(ini => ini.Instructions)
+                .OfType<InstRefFunc>();
+            foreach (var refFunc in elementIni) fullyDeclared.Add(refFunc.FunctionIndex);
+
+            var globalIni = module.Globals
+                .Where(global => global.Type.ContentType == ValType.Funcref)
+                .SelectMany(global => global.Initializer.Instructions)
+                .OfType<InstRefFunc>();
+            foreach (var refFunc in globalIni) fullyDeclared.Add(refFunc.FunctionIndex);
+            
             foreach (var func in module.Funcs)
             {
                 if (func.Body.ContainsInstructions(MemoryInstructions))
@@ -307,6 +326,8 @@ namespace Wacs.Core
                     if (module.DataCount == uint.MaxValue)
                         throw new FormatException($"memory.init instruction requires Data Count section");
                 }
+                
+                func.IsFullyDeclared = fullyDeclared.Contains(func.Index);
             }
             
             if (module.DataCount == uint.MaxValue)
