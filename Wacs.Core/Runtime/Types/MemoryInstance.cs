@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
 using FluentValidation;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
@@ -16,11 +17,15 @@ namespace Wacs.Core.Runtime.Types
         public MemoryInstance(MemoryType type)
         {
             Type = type;
+
+            if (type.Limits.Minimum > Constants.HostMaxPages)
+                throw new InstantiationException($"Cannot allocate memory of size {type.Limits.Minimum}");
+            
             uint initialSize = (type.Limits.Minimum)* Constants.PageSize;
             _data = new byte[initialSize];
         }
 
-        public MemoryType Type { get; }
+        public MemoryType Type { get; private set; }
         public byte[] Data => _data;
 
         public long Size => _data.Length / Constants.PageSize;
@@ -33,17 +38,18 @@ namespace Wacs.Core.Runtime.Types
         /// </summary>
         public bool Grow(uint numPages)
         {
-            uint oldSize = (uint)(Data.Length / Constants.PageSize);
-            uint len = oldSize + numPages;
+            uint oldNumPages = (uint)(Data.Length / Constants.PageSize);
+            uint newNumPages = oldNumPages + numPages;
 
-            if (len > Type.Limits.Maximum)
-            {
-                return false; // Cannot grow beyond maximum limit
-            }
-
+            if (newNumPages > Constants.HostMaxPages)
+                return false;
+            
+            if (newNumPages > Type.Limits.Maximum)
+                return false;
+            
             var newLimits = new Limits(Type.Limits)
             {
-                Minimum = len
+                Minimum = newNumPages
             };
             var validator = TableType.Validator.Limits;
             try
@@ -56,7 +62,11 @@ namespace Wacs.Core.Runtime.Types
                 return false;
             }
 
-            Array.Resize(ref _data, (int)(len * Constants.PageSize));
+            int len = (int)(newNumPages * Constants.PageSize);
+
+            Array.Resize(ref _data, len);
+
+            Type = new MemoryType(newLimits);
 
             return true;
         }

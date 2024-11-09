@@ -14,7 +14,7 @@ namespace Wacs.Core.Types
         /// Initializes a new instance of the <see cref="MemoryType"/> class with the specified limits.
         /// </summary>
         /// <param name="limits">The limits of the memory.</param>
-        private MemoryType(Limits limits) =>
+        public MemoryType(Limits limits) =>
             Limits = limits;
 
         /// <summary>
@@ -71,7 +71,7 @@ namespace Wacs.Core.Types
             public Validator()
             {
                 // @Spec 3.2.5.1. limits
-                RuleFor(mt => mt.Limits).SetValidator(new Limits.Validator(Constants.MaxPages));
+                RuleFor(mt => mt.Limits).SetValidator(new Limits.Validator(Constants.WasmMaxPages));
             }
         }
     }
