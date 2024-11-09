@@ -1,8 +1,6 @@
-using System;
-
 namespace Wacs.Core.Runtime.Exceptions
 {
-    public class InstantiationException : Exception
+    public class InstantiationException : WasmRuntimeException
     {
         public InstantiationException(string message) : base(message) {}
     }
