@@ -100,12 +100,12 @@ namespace Wacs.Core
     public class FakeContext : IWasmValidationContext
     {
         private static readonly object NonNull = new();
+
+        private readonly Stack<string> fakeStack = new();
         private Module _module;
         private FakeOpStack _opStack;
 
-        public Stack<string> fakeStack = new();
-
-        public string lastEvent = "";
+        public string LastEvent = "";
 
         public FakeContext(Module module, Module.Function func)
         {
@@ -136,6 +136,7 @@ namespace Wacs.Core
 
             ReturnType = funcType.ResultType;
             PushControlFrame(OpCode.Block, fakeType);
+            Attributes = new RuntimeAttributes();
         }
 
         private ModuleInstance ModuleInst { get; }
@@ -260,7 +261,7 @@ namespace Wacs.Core
 
         public void Push(ValType type)
         {
-            lastEvent += ">";
+            LastEvent += ">";
             switch (type)
             {
                 case ValType.I32: fakeStack.Push("I"); break;
@@ -285,7 +286,7 @@ namespace Wacs.Core
                     if (top == "|")
                         break;
                     
-                    lastEvent += "x";
+                    LastEvent += "x";
                 }
                 return Value.NullFuncRef;
             }
@@ -296,15 +297,15 @@ namespace Wacs.Core
             
             string op = fakeStack.Pop();
             if (op == "|")
-                lastEvent += "{=U=}";
+                LastEvent += "{=U=}";
             else
-                lastEvent += "<";
+                LastEvent += "<";
             return new Value(type);
         }
 
         public string GetString()
         {
-            return string.Join("", fakeStack.ToArray().Reverse()) + " " + lastEvent;
+            return string.Join("", fakeStack.ToArray().Reverse()) + " " + LastEvent;
         }
 
         delegate void FakeHostDelegate();
@@ -330,7 +331,7 @@ namespace Wacs.Core
 
         public void ProcessInstruction(IInstruction inst)
         {
-            FakeContext.lastEvent = "";
+            FakeContext.LastEvent = "";
             inst.Validate(FakeContext);
         }
 

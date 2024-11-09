@@ -58,8 +58,11 @@ namespace Wacs.Core.Types
         /// </summary>
         /// <param name="other"></param>
         /// <returns></returns>
-        public bool Equivalent(FunctionType other)
+        public bool Equivalent(FunctionType? other)
         {
+            if (other == null)
+                return false;
+            
             var myDelta = GetDelta();
             var otDelta = other.GetDelta();
             return myDelta.parameters.SequenceEqual(otDelta.parameters)
