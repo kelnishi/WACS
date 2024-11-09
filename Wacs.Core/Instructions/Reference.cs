@@ -75,6 +75,8 @@ namespace Wacs.Core.Instructions
         // @Spec 3.3.2.3. ref.func x
         public override void Validate(IWasmValidationContext context)
         { 
+            context.Assert(context.FunctionIndex != FunctionIndex,
+                $"No self-referential function references");
             context.Assert(context.Funcs.Contains(FunctionIndex),
                 $"Instruction ref.func is invalid. Function {FunctionIndex} was not in the context.");
             //Seems like C.Refs isn't strictly necessary since FunctionSpace collects all the references

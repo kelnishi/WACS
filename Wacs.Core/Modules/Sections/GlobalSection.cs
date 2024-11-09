@@ -69,6 +69,7 @@ namespace Wacs.Core
                             var subContext = validationContext.PushSubContext(expr);
 
                             var funcType = FunctionType.Empty;
+                            validationContext.FunctionIndex = FuncIdx.Default;
                             validationContext.SetExecFrame(funcType, Array.Empty<ValType>());
                             
                             var g = ctx.InstanceToValidate;

@@ -11,6 +11,8 @@ namespace Wacs.Core.Validation
 
         public Stack<ValidationControlFrame> ControlStack { get; }
 
+        public FuncIdx FunctionIndex { get; }
+
         //Reference to the top of the control stack
         public ValidationControlFrame ControlFrame { get; }
         public ResultType ReturnType { get; }
