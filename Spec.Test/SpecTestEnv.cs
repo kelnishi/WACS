@@ -9,6 +9,8 @@ namespace Spec.Test
         public void BindToRuntime(WasmRuntime runtime)
         {
             string module = "spectest";
+            runtime.BindHostFunction<Action>((module, "print"),
+                () => Console.WriteLine($"print called from webassembly."));
             runtime.BindHostFunction<Action<int>>((module, "print_i32"),
                 value => Console.WriteLine($"{value}"));
             runtime.BindHostFunction<Action<long>>((module, "print_i64"),
