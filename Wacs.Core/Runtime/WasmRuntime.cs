@@ -849,7 +849,8 @@ namespace Wacs.Core.Runtime
                 if (module.StartIndex != FuncIdx.Default)
                 {
                     if (!moduleInstance.FuncAddrs.Contains(module.StartIndex))
-                        throw new WasmRuntimeException("Module StartFunction index was invalid");
+                        throw new ValidationException("Module StartFunction index was invalid");
+                    
                     var startAddr = moduleInstance.FuncAddrs[module.StartIndex];
                     if (!Context.Store.Contains(startAddr))
                         throw new WasmRuntimeException("Module StartFunction address not found in the Store.");
@@ -877,7 +878,7 @@ namespace Wacs.Core.Runtime
 
                 //18.
                 if (Context.Frame != auxFrame)
-                    throw new WasmRuntimeException("Execution fault in Module Instantiation.");
+                    throw new InstantiationException("Execution fault in Module Instantiation.");
                 //19.
                 Context.PopFrame();
 

@@ -43,7 +43,7 @@ namespace Wacs.Core.Validation
                         ctx.AddFailure($"Invalid Start function with type: {type}");
                     }
                 })
-                .When(module => (int)module.StartIndex.Value >= 0);
+                .When(module => module.StartIndex.Value < module.Funcs.Count);
         }
     }
 }
