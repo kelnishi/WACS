@@ -101,7 +101,7 @@ namespace Wacs.Core.Runtime
             var addr = new FuncAddr(Funcs.Count);
             if (CurrentTransaction == null)
                 throw new InvalidOperationException("Cannot add to Store without a transaction.");
-            Funcs.Add(null);
+            Funcs.Add(null!);
             CurrentTransaction.Funcs.Add(addr, func);
             
             return addr;
@@ -112,7 +112,7 @@ namespace Wacs.Core.Runtime
             var addr = new TableAddr(Tables.Count);
             if (CurrentTransaction == null)
                 throw new InvalidOperationException("Cannot add to Store without a transaction.");
-            Tables.Add(null);
+            Tables.Add(null!);
             CurrentTransaction.Tables.Add(addr, table);
 
             return addr;
@@ -140,7 +140,7 @@ namespace Wacs.Core.Runtime
             var addr = new MemAddr(Mems.Count);
             if (CurrentTransaction == null)
                 throw new InvalidOperationException("Cannot add to Store without a transaction.");
-            Mems.Add(null);
+            Mems.Add(null!);
             CurrentTransaction.Mems.Add(addr, mem);
             return addr;
         }
@@ -150,7 +150,7 @@ namespace Wacs.Core.Runtime
             var addr = new GlobalAddr(Globals.Count);
             if (CurrentTransaction == null)
                 throw new InvalidOperationException("Cannot add to Store without a transaction.");
-            Globals.Add(null);
+            Globals.Add(null!);
             CurrentTransaction.Globals.Add(addr, global);
             
             return addr;
@@ -161,7 +161,7 @@ namespace Wacs.Core.Runtime
             var addr = new ElemAddr(Elems.Count);
             if (CurrentTransaction == null)
                 throw new InvalidOperationException("Cannot add to Store without a transaction.");
-            Elems.Add(null);
+            Elems.Add(null!);
             CurrentTransaction.Elems.Add(addr, elem);
             return addr;
         }
@@ -171,7 +171,7 @@ namespace Wacs.Core.Runtime
             var addr = new DataAddr(Datas.Count);
             if (CurrentTransaction == null)
                 throw new InvalidOperationException("Cannot add to Store without a transaction.");
-            Datas.Add(null);
+            Datas.Add(null!);
             CurrentTransaction.Datas.Add(addr, data);
             return addr;
         }

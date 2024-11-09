@@ -84,7 +84,7 @@ namespace Wacs.Core
                         case IBlockInstruction blockInst:
                         {
                             depth += 1;
-                            stackRenderer.FakeContext.lastEvent = "[";
+                            stackRenderer.FakeContext.LastEvent = "[";
                             var mnemonic = inst.Op.GetMnemonic();
                             var funcType = ComputeBlockType(blockInst.Type, module);
                             var blockParams = funcType.ParameterTypes.Length > 0
@@ -102,7 +102,7 @@ namespace Wacs.Core
                         
                             for (int b = 0; b < blockInst.Count; ++b)
                             {
-                                stackRenderer.FakeContext.lastEvent = "[";
+                                stackRenderer.FakeContext.LastEvent = "[";
                                 stackRenderer.ProcessInstruction(inst);
                                 
                                 var blockSeq = blockInst.GetBlock(b);
@@ -112,7 +112,7 @@ namespace Wacs.Core
                                 var lastInst = blockSeq.LastInstruction;
                                 if (IInstruction.IsElseOrEnd(lastInst))
                                 {
-                                    stackRenderer.FakeContext.lastEvent = IInstruction.IsEnd(lastInst) ? "[" : "][";
+                                    stackRenderer.FakeContext.LastEvent = IInstruction.IsEnd(lastInst) ? "[" : "][";
                                     stackRenderer.ProcessInstruction(inst);
                                     stackRenderer.FakeContext.DummyContext.Frame.ForceLabels(depth);
                                     var endLabel = $" (;< @{depth} ;)";

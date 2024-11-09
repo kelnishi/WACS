@@ -7,7 +7,7 @@ namespace Wacs.Core.Runtime
 {
     public class Frame
     {
-        public readonly Stack<Label> Labels = new(256);
+        public readonly Stack<Label> Labels = new();
 
         public Frame(ModuleInstance moduleInstance, FunctionType type) =>
             (Module, Type) = (moduleInstance, type);
@@ -22,7 +22,7 @@ namespace Wacs.Core.Runtime
 
         public FuncIdx Index { get; set; }
 
-        public string FuncId { get; set; }
+        public string FuncId { get; set; } = "";
 
         public int Arity => (int)Type.ResultType.Length;
 

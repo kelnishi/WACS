@@ -404,7 +404,7 @@ namespace Wacs.Core.Runtime
                 var ctr = exType.GetConstructor(new Type[] { typeof(int), typeof(string) });
                 throw ctr?.Invoke(new object[] { exc.Signal, message }) as Exception ?? exc;
             }
-            catch (WasmRuntimeException exc)
+            catch (WasmRuntimeException)
             {
                 //Maybe Log?
                 Context.FlushCallStack();
