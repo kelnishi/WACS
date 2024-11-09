@@ -134,21 +134,94 @@ namespace Wacs.Core.Utilities
             return BitConverter.Int64BitsToDouble(bits);
         }
 
+        private static bool IsValidUtf8(ReadOnlySpan<byte> bytes)
+        {
+            if (bytes == null || bytes.Length == 0)
+                return true;
+
+            int expectedContinuationBytes = 0;
+            int accumulator = 0;
+            int minExpectedValue = 0;
+
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                byte b = bytes[i];
+
+                if (expectedContinuationBytes > 0)
+                {
+                    // Check if this is a valid continuation byte (10xxxxxx)
+                    if ((b & 0xC0) != 0x80)
+                        return false;
+
+                    // Accumulate the value
+                    accumulator = (accumulator << 6) | (b & 0x3F);
+                    expectedContinuationBytes--;
+
+                    // If this was the last continuation byte, validate the complete sequence
+                    if (expectedContinuationBytes == 0)
+                    {
+                        // Check for over-long encoding
+                        if (accumulator < minExpectedValue)
+                            return false;
+
+                        // Check for invalid Unicode code points
+                        if (accumulator > 0x10FFFF)
+                            return false;
+
+                        // Check for UTF-16 surrogate pairs range
+                        if (accumulator >= 0xD800 && accumulator <= 0xDFFF)
+                            return false;
+                    }
+                }
+                else
+                {
+                    // Start of a new character
+                    if ((b & 0x80) == 0) // Single byte (0xxxxxxx)
+                    {
+                        expectedContinuationBytes = 0;
+                        accumulator = b;
+                        minExpectedValue = 0;
+                    }
+                    else if ((b & 0xE0) == 0xC0) // Two bytes (110xxxxx)
+                    {
+                        expectedContinuationBytes = 1;
+                        accumulator = b & 0x1F;
+                        minExpectedValue = 0x80;  // Minimum value that requires 2 bytes
+                    }
+                    else if ((b & 0xF0) == 0xE0) // Three bytes (1110xxxx)
+                    {
+                        expectedContinuationBytes = 2;
+                        accumulator = b & 0x0F;
+                        minExpectedValue = 0x800;  // Minimum value that requires 3 bytes
+                    }
+                    else if ((b & 0xF8) == 0xF0) // Four bytes (11110xxx)
+                    {
+                        expectedContinuationBytes = 3;
+                        accumulator = b & 0x07;
+                        minExpectedValue = 0x10000;  // Minimum value that requires 4 bytes
+                    }
+                    else // Invalid start byte
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            // Check if we're still expecting continuation bytes at the end
+            return expectedContinuationBytes == 0;
+        }
+
         public static string ReadUtf8String(this BinaryReader reader)
         {
             uint length = ReadLeb128_u32(reader);
-            byte[] bytes = reader.ReadBytes((int)length);
+            ReadOnlySpan<byte> bytes = reader.ReadBytes((int)length);
             if (bytes == null)
                 throw new FormatException($"No bytes in utf-8 string");
-
-            try
-            {
-                return Encoding.UTF8.GetString(bytes);
-            }
-            catch (ArgumentException exc)
-            {
-                throw new FormatException($"Failed to decode utf-8 string: {exc.Message}");
-            }
+            
+            if (!IsValidUtf8(bytes))
+                throw new FormatException("Badly formed utf-8 string");
+            
+            return Encoding.UTF8.GetString(bytes);
         }
 
         public static T[] ParseVector<T>(this BinaryReader reader, Func<BinaryReader, T> elementParser, PostProcess<T>? postProcess = null)
