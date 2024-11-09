@@ -427,7 +427,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                 $"Instruction table.set failed to get table {X} from context");
+                 $"Instruction table.grow failed to get table {X} from context");
             var type = context.Tables[X];
             context.OpStack.PopI32();
             context.OpStack.PopType(type.ElementType.StackType());
@@ -449,12 +449,12 @@ namespace Wacs.Core.Instructions
             //5.
             var tab = context.Store.GetMutableTable(addr);
             //6.
-            int sz = tab.Elements.Count;
+            long sz = tab.Elements.Count;
             //7.
             context.Assert( context.OpStack.Peek().IsI32,
                  "Instruction table.grow found incorrect type on top of the Stack");
             //8.
-            int n = context.OpStack.PopI32();
+            long n = (uint)context.OpStack.PopI32();
             //9.
             context.Assert( context.OpStack.Peek().IsRef,
                  "Instruction table.grow found incorrect type on top of the Stack");
@@ -463,7 +463,7 @@ namespace Wacs.Core.Instructions
             //12, 13. TODO: implement optional constraints on table.grow
             if (tab.Grow(n, val))
             {
-                context.OpStack.PushI32(sz);
+                context.OpStack.PushI32((uint)sz);
             }
             else
             {
