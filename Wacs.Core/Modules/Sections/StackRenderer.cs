@@ -149,6 +149,8 @@ namespace Wacs.Core
         public void Assert(bool factIsTrue, string message) {}
         public void Assert([NotNull] object? objIsNotNull, string message) { objIsNotNull = NonNull; }
 
+        public FuncIdx FunctionIndex => FuncIdx.Default;
+
         public Stack<ValidationControlFrame> ControlStack { get; } = new();
         public ValidationControlFrame ControlFrame => ControlStack.Peek();
 

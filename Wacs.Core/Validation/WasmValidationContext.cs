@@ -43,13 +43,14 @@ namespace Wacs.Core.Validation
         }
 
         private Frame ExecFrame { get; set; } = null!;
-
         private ValidationOpStack Stack { get; }
 
         public ValidationContext<Module> RootContext { get; }
 
         public ResultType Return => ControlFrame.EndTypes;
         private ModuleInstance ValidationModule { get; }
+
+        public FuncIdx FunctionIndex { get; set; } = FuncIdx.Default;
         public IValidationOpStack OpStack => Stack;
 
         public ResultType ReturnType => ExecFrame.Type.ResultType;

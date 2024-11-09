@@ -174,6 +174,7 @@ namespace Wacs.Core
                             }
 
                             var funcType = types[func.TypeIndex];
+                            vContext.FunctionIndex = func.Index;
                             vContext.SetExecFrame(funcType, func.Locals);
                             vContext.Unreachable = false;
                             
