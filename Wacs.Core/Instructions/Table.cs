@@ -46,15 +46,15 @@ namespace Wacs.Core.Instructions
             context.Assert( context.OpStack.Peek().IsI32,
                  $"Instruction table.get failed. Wrong type on stack.");
             //7.
-            int i = context.OpStack.PopI32();
+            long i = (uint)context.OpStack.PopI32();
             //8.
-            if (i >= tab.Elements.Count)
+            if (i >= tab.Elements.Count || (i > (long)int.MaxValue))
             {
                 throw new TrapException("Trap in table.get");
             }
 
             //9.
-            var val = tab.Elements[i];
+            var val = tab.Elements[(int)i];
             //10.
             context.OpStack.PushValue(val);
         }
