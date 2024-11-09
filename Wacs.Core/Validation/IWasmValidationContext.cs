@@ -1,12 +1,15 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Validation
 {
     public interface IWasmValidationContext
     {
+        public RuntimeAttributes Attributes { get; }
+
         public IValidationOpStack OpStack { get; }
 
         public Stack<ValidationControlFrame> ControlStack { get; }

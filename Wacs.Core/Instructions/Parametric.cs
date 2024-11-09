@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using FluentValidation;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -67,6 +68,22 @@ namespace Wacs.Core.Instructions
                 Value val1 = context.OpStack.PopAny();
                 context.Assert(val1.Type.IsCompatible(val2.Type),
                     $"Select instruction expected matching types on the stack: {val1.Type} == {val2.Type}");
+
+                if (!context.Attributes.Configure_RefTypes)
+                {
+                    switch (val1.Type)
+                    {
+                        case ValType.I32:
+                        case ValType.I64:
+                        case ValType.F32:
+                        case ValType.F64:
+                        case ValType.Unknown:
+                            break;
+                        default:
+                            throw new ValidationException($"select does not support {val1.Type} in MVP");
+                    }
+                }
+                
                 context.OpStack.PushType(val1.Type == ValType.Unknown ? val2.Type : val1.Type);
             }
         }

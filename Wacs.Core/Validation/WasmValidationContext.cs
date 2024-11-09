@@ -49,6 +49,7 @@ namespace Wacs.Core.Validation
 
         public ResultType Return => ControlFrame.EndTypes;
         private ModuleInstance ValidationModule { get; }
+        public RuntimeAttributes Attributes { get; set; } = new();
 
         public FuncIdx FunctionIndex { get; set; } = FuncIdx.Default;
         public IValidationOpStack OpStack => Stack;
