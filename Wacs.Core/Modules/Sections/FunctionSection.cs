@@ -167,6 +167,11 @@ namespace Wacs.Core
                                 return;
                             
                             var vContext = ctx.GetValidationContext();
+                            
+                            if (func.Locals.Length > vContext.Attributes.MaxFunctionLocals)
+                                throw new ValidationException(
+                                    $"Function[{func.Index}] locals count {func.Locals.Length} exceeds maximum allowed {vContext.Attributes.MaxFunctionLocals}");
+                            
                             var types = vContext.Types;
                             if (!types.Contains(func.TypeIndex))
                             {
