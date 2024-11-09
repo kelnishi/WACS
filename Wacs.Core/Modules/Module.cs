@@ -34,8 +34,8 @@ namespace Wacs.Core
     {
         //Add Ids to objects while parsing
         public static bool AnnotateWhileParsing = true;
-
         public static bool SkipFinalization = false;
+        public static uint MaximumFunctionLocals = 2048;
 
         private static IInstructionFactory _instructionFactory = ReferenceFactory.Factory;
 

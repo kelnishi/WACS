@@ -60,8 +60,6 @@ namespace Wacs.Core
     
     public static partial class BinaryModuleParser
     {
-        public static uint MaximumFunctionLocals = 1024;
-
         /// <summary>
         /// @Spec 5.5.13. Code Section
         /// </summary>
@@ -79,6 +77,9 @@ namespace Wacs.Core
             for (int i = 0, l = module.Codes.Length; i < l; ++i)
             {
                 var localsbody = module.Codes[i].Code;
+                if (localsbody.NumberOfLocals > MaximumFunctionLocals)
+                    throw new FormatException($"Function[{i}] locals count {localsbody.NumberOfLocals} exceeds maximum allowed {MaximumFunctionLocals}");
+                
                 module.Funcs[i].Locals = localsbody.Locals;
                 module.Funcs[i].Body = localsbody.Body;
             }
