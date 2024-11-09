@@ -212,6 +212,7 @@ namespace Wacs.Core.Validation
             {
                 case ValType.Funcref:
                 case ValType.Externref:
+                case ValType.Unknown:
                     return value;
                 default:
                     throw new ValidationException(
