@@ -13,6 +13,7 @@ namespace Wacs.Core.Runtime
 {
     public class RuntimeAttributes
     {
+        public bool Configure_RefTypes = false;
         public bool Live = true;
 
         public int MaxCallStack = 1024;

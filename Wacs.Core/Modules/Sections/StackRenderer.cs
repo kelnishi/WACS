@@ -143,6 +143,7 @@ namespace Wacs.Core
         public IValidationOpStack ReturnStack => _opStack;
 
         internal ExecContext DummyContext { get; set; }
+        public RuntimeAttributes Attributes { get; set; }
 
         public IValidationOpStack OpStack => _opStack;
 
