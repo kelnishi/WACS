@@ -196,7 +196,8 @@ namespace Wacs.Core
         public void SetUnreachable()
         {
             //reset the height to the controlstack height
-            Unreachable = true;
+            // Unreachable = true;
+            ControlFrame.Unreachable = true;
         }
 
         public TypesSpace Types => ModuleInst.Types;

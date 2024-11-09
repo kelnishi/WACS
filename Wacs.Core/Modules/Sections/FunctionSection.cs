@@ -183,7 +183,7 @@ namespace Wacs.Core
                             var funcType = types[func.TypeIndex];
                             vContext.FunctionIndex = func.Index;
                             vContext.SetExecFrame(funcType, func.Locals);
-                            vContext.Unreachable = false;
+                            // vContext.Unreachable = false;
                             
                             //*Expression Validator also validates result types
                             var exprValidator = new Expression.Validator(funcType.ResultType);
