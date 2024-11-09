@@ -75,8 +75,9 @@ namespace Wacs.Core.Validation
         /// </summary>
         public void SetUnreachable()
         {
-            Unreachable = true;
+            // Unreachable = true;
             PopOperandsToHeight(ControlFrame.Height);
+            ControlFrame.Unreachable = true;
         }
 
         public void Assert(bool factIsTrue, string message)
@@ -147,8 +148,8 @@ namespace Wacs.Core.Validation
                 throw new ValidationException(
                     $"Operand stack height {OpStack.Height} differed from Control Frame height {ControlFrame.Height}");
             
-            if (ControlFrame.ConditionallyReachable)
-                Unreachable = false;
+            // if (ControlFrame.ConditionallyReachable)
+            //     Unreachable = false;
 
             return ControlStack.Pop();
         }
