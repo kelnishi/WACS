@@ -22,6 +22,8 @@ namespace Wacs.Core
         /// </summary>
         public class Function : IRenderable
         {
+            public bool IsFullyDeclared = false;
+
             public bool IsImport = false;
             public string Id { get; set; } = "";
             public FuncIdx Index { get; set; }
@@ -163,21 +165,21 @@ namespace Wacs.Core
                     RuleFor(func => func)
                         .Custom((func, ctx) =>
                         {
-                            if (func.IsImport)
-                                return;
-                            
                             var vContext = ctx.GetValidationContext();
-                            
-                            if (func.Locals.Length > vContext.Attributes.MaxFunctionLocals)
-                                throw new ValidationException(
-                                    $"Function[{func.Index}] locals count {func.Locals.Length} exceeds maximum allowed {vContext.Attributes.MaxFunctionLocals}");
                             
                             var types = vContext.Types;
                             if (!types.Contains(func.TypeIndex))
                             {
                                 throw new ValidationException($"Function.TypeIndex not within Module.Types");
                             }
-
+                            
+                            if (func.IsImport)
+                                return;
+                            
+                            if (func.Locals.Length > vContext.Attributes.MaxFunctionLocals)
+                                throw new ValidationException(
+                                    $"Function[{func.Index}] locals count {func.Locals.Length} exceeds maximum allowed {vContext.Attributes.MaxFunctionLocals}");
+                            
                             var funcType = types[func.TypeIndex];
                             vContext.FunctionIndex = func.Index;
                             vContext.SetExecFrame(funcType, func.Locals);

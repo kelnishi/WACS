@@ -63,8 +63,8 @@ namespace Wacs.Core.Types
             return instText;
         }
 
-        public bool ContainsInstructions(HashSet<ByteCode> opcode) => 
-            Instructions.ContainsInstruction(opcode);
+        public bool ContainsInstructions(HashSet<ByteCode> opcodes) => 
+            Instructions.ContainsInstruction(opcodes);
 
         /// <summary>
         /// @Spec 3.3.10. Expressions
