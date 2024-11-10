@@ -358,7 +358,7 @@ namespace Wacs.Core.Runtime
                     Float64 = (double)externalValue;
                     break;
                 case ValType.V128:
-                    V128 = new V128((byte[])externalValue);
+                    V128 = (V128)externalValue;
                     break;
                 case ValType.Funcref:
                     Ptr = (int)externalValue;
