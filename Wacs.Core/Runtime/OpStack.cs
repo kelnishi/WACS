@@ -32,7 +32,7 @@ namespace Wacs.Core.Runtime
         public void PushI64(ulong value) => PushValue(value);
         public void PushF32(float value) => PushValue(value);
         public void PushF64(double value) => PushValue(value);
-        public void PushV128(Value value) => PushValue(value);
+        public void PushV128(V128 value) => PushValue(value);
 
         public void PushFuncref(Value value)
         {

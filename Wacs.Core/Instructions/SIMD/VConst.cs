@@ -28,7 +28,7 @@ namespace Wacs.Core.Instructions.Simd
 
         public override IInstruction Parse(BinaryReader reader)
         {
-            V128 = reader.ReadBytes(16);
+            V128 = new V128(reader.ReadBytes(16));
             return this;
         }
 

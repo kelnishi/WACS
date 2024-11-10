@@ -1,4 +1,5 @@
-using System.Linq;
+using System;
+using System.IO;
 using System.Runtime.InteropServices;
 
 // ReSharper disable InconsistentNaming
@@ -249,26 +250,227 @@ namespace Wacs.Core.Runtime
         public static implicit operator V128((ulong, ulong) tuple) => 
             new(tuple.Item1, tuple.Item2);
 
-        public V128(byte[] data)
+        public V128(Span<byte> data)
         {
+            if (data.Length != 16)
+                throw new InvalidDataException($"Cannot create V128 from {data.Length} bytes");
+            
             this = default;
-            B8x16_0 = data.ElementAtOrDefault(0x0);
-            B8x16_1 = data.ElementAtOrDefault(0x1);
-            B8x16_2 = data.ElementAtOrDefault(0x2);
-            B8x16_3 = data.ElementAtOrDefault(0x3);
-            B8x16_4 = data.ElementAtOrDefault(0x4);
-            B8x16_5 = data.ElementAtOrDefault(0x5);
-            B8x16_6 = data.ElementAtOrDefault(0x6);
-            B8x16_7 = data.ElementAtOrDefault(0x7);
-            B8x16_8 = data.ElementAtOrDefault(0x8);
-            B8x16_9 = data.ElementAtOrDefault(0x9);
-            B8x16_A = data.ElementAtOrDefault(0xA);
-            B8x16_B = data.ElementAtOrDefault(0xB);
-            B8x16_C = data.ElementAtOrDefault(0xC);
-            B8x16_D = data.ElementAtOrDefault(0xD);
-            B8x16_E = data.ElementAtOrDefault(0xE);
-            B8x16_F = data.ElementAtOrDefault(0xF);
+            B8x16_0 = data[0x0];
+            B8x16_1 = data[0x1];
+            B8x16_2 = data[0x2];
+            B8x16_3 = data[0x3];
+            B8x16_4 = data[0x4];
+            B8x16_5 = data[0x5];
+            B8x16_6 = data[0x6];
+            B8x16_7 = data[0x7];
+            B8x16_8 = data[0x8];
+            B8x16_9 = data[0x9];
+            B8x16_A = data[0xA];
+            B8x16_B = data[0xB];
+            B8x16_C = data[0xC];
+            B8x16_D = data[0xD];
+            B8x16_E = data[0xE];
+            B8x16_F = data[0xF];
         }
-        public static implicit operator V128(byte[] data) => new(data);
+    }
+
+    //Mutable version
+    [StructLayout(LayoutKind.Explicit)]
+    public struct MV128
+    {
+        [FieldOffset(0x0)] public sbyte I8x16_0;
+        [FieldOffset(0x1)] public sbyte I8x16_1;
+        [FieldOffset(0x2)] public sbyte I8x16_2;
+        [FieldOffset(0x3)] public sbyte I8x16_3;
+        [FieldOffset(0x4)] public sbyte I8x16_4;
+        [FieldOffset(0x5)] public sbyte I8x16_5;
+        [FieldOffset(0x6)] public sbyte I8x16_6;
+        [FieldOffset(0x7)] public sbyte I8x16_7;
+        [FieldOffset(0x8)] public sbyte I8x16_8;
+        [FieldOffset(0x9)] public sbyte I8x16_9;
+        [FieldOffset(0xA)] public sbyte I8x16_A;
+        [FieldOffset(0xB)] public sbyte I8x16_B;
+        [FieldOffset(0xC)] public sbyte I8x16_C;
+        [FieldOffset(0xD)] public sbyte I8x16_D;
+        [FieldOffset(0xE)] public sbyte I8x16_E;
+        [FieldOffset(0xF)] public sbyte I8x16_F;
+
+        [FieldOffset(0x0)] public short I16x8_0;
+        [FieldOffset(0x2)] public short I16x8_1;
+        [FieldOffset(0x4)] public short I16x8_2;
+        [FieldOffset(0x6)] public short I16x8_3;
+        [FieldOffset(0x8)] public short I16x8_4;
+        [FieldOffset(0xA)] public short I16x8_5;
+        [FieldOffset(0xC)] public short I16x8_6;
+        [FieldOffset(0xE)] public short I16x8_7;
+
+        [FieldOffset(0x0)] public int I32x4_0;
+        [FieldOffset(0x4)] public int I32x4_1;
+        [FieldOffset(0x8)] public int I32x4_2;
+        [FieldOffset(0xC)] public int I32x4_3;
+
+        [FieldOffset(0x0)] public long I64x2_0;
+        [FieldOffset(0x8)] public long I64x2_1;
+
+        [FieldOffset(0x0)] public float F32x4_0;
+        [FieldOffset(0x4)] public float F32x4_1;
+        [FieldOffset(0x8)] public float F32x4_2;
+        [FieldOffset(0xC)] public float F32x4_3;
+
+        [FieldOffset(0x0)] public double F64x2_0;
+        [FieldOffset(0x8)] public double F64x2_1;
+
+        [FieldOffset(0x0)] public byte B8x16_0;
+        [FieldOffset(0x1)] public byte B8x16_1;
+        [FieldOffset(0x2)] public byte B8x16_2;
+        [FieldOffset(0x3)] public byte B8x16_3;
+        [FieldOffset(0x4)] public byte B8x16_4;
+        [FieldOffset(0x5)] public byte B8x16_5;
+        [FieldOffset(0x6)] public byte B8x16_6;
+        [FieldOffset(0x7)] public byte B8x16_7;
+        [FieldOffset(0x8)] public byte B8x16_8;
+        [FieldOffset(0x9)] public byte B8x16_9;
+        [FieldOffset(0xA)] public byte B8x16_A;
+        [FieldOffset(0xB)] public byte B8x16_B;
+        [FieldOffset(0xC)] public byte B8x16_C;
+        [FieldOffset(0xD)] public byte B8x16_D;
+        [FieldOffset(0xE)] public byte B8x16_E;
+        [FieldOffset(0xF)] public byte B8x16_F;
+
+        [FieldOffset(0x0)] public ushort B16x8_0;
+        [FieldOffset(0x2)] public ushort B16x8_1;
+        [FieldOffset(0x4)] public ushort B16x8_2;
+        [FieldOffset(0x6)] public ushort B16x8_3;
+        [FieldOffset(0x8)] public ushort B16x8_4;
+        [FieldOffset(0xA)] public ushort B16x8_5;
+        [FieldOffset(0xC)] public ushort B16x8_6;
+        [FieldOffset(0xE)] public ushort B16x8_7;
+
+        [FieldOffset(0x0)] public uint B32x4_0;
+        [FieldOffset(0x4)] public uint B32x4_1;
+        [FieldOffset(0x8)] public uint B32x4_2;
+        [FieldOffset(0xC)] public uint B32x4_3;
+
+        [FieldOffset(0x0)] public ulong B64x2_0;
+        [FieldOffset(0x8)] public ulong B64x2_1;
+
+        public byte this[byte index]
+        {
+            get => index switch {
+                    0x0 => B8x16_0,
+                    0x1 => B8x16_1,
+                    0x2 => B8x16_2,
+                    0x3 => B8x16_3,
+                    0x4 => B8x16_4,
+                    0x5 => B8x16_5,
+                    0x6 => B8x16_6,
+                    0x7 => B8x16_7,
+                    0x8 => B8x16_8,
+                    0x9 => B8x16_9,
+                    0xA => B8x16_A,
+                    0xB => B8x16_B,
+                    0xC => B8x16_C,
+                    0xD => B8x16_D,
+                    0xE => B8x16_E,
+                    0xF => B8x16_F,
+                    _ => throw new ArgumentOutOfRangeException($"Cannot get byte index {index} of MV128")
+                };
+            set {
+                switch (index)
+                {
+                    case 0x0: B8x16_0 = value; break;
+                    case 0x1: B8x16_1 = value; break;
+                    case 0x2: B8x16_2 = value; break;
+                    case 0x3: B8x16_3 = value; break;
+                    case 0x4: B8x16_4 = value; break;
+                    case 0x5: B8x16_5 = value; break;
+                    case 0x6: B8x16_6 = value; break;
+                    case 0x7: B8x16_7 = value; break;
+                    case 0x8: B8x16_8 = value; break;
+                    case 0x9: B8x16_9 = value; break;
+                    case 0xA: B8x16_A = value; break;
+                    case 0xB: B8x16_B = value; break;
+                    case 0xC: B8x16_C = value; break;
+                    case 0xD: B8x16_D = value; break;
+                    case 0xE: B8x16_E = value; break;
+                    case 0xF: B8x16_F = value; break;
+                    default: throw new ArgumentOutOfRangeException($"Cannot get byte index {index} of MV128");
+                }
+            }
+        }
+        
+        public short this[short index]
+        {
+            get => index switch {
+                0x0 => I16x8_0,
+                0x1 => I16x8_1,
+                0x2 => I16x8_2,
+                0x3 => I16x8_3,
+                0x4 => I16x8_4,
+                0x5 => I16x8_5,
+                0x6 => I16x8_6,
+                0x7 => I16x8_7,
+                _ => throw new ArgumentOutOfRangeException($"Cannot get i16 index {index} of MV128")
+            };
+            set {
+                switch (index)
+                {
+                    case 0x0: I16x8_0 = value; break;
+                    case 0x1: I16x8_1 = value; break;
+                    case 0x2: I16x8_2 = value; break;
+                    case 0x3: I16x8_3 = value; break;
+                    case 0x4: I16x8_4 = value; break;
+                    case 0x5: I16x8_5 = value; break;
+                    case 0x6: I16x8_6 = value; break;
+                    case 0x7: I16x8_7 = value; break;
+                    default: throw new ArgumentOutOfRangeException($"Cannot get i16 index {index} of MV128");
+                }
+            }
+        }
+        
+        public int this[int index]
+        {
+            get => index switch {
+                0x0 => I32x4_0,
+                0x1 => I32x4_1,
+                0x2 => I32x4_2,
+                0x3 => I32x4_3,
+                _ => throw new ArgumentOutOfRangeException($"Cannot get i32 index {index} of MV128")
+            };
+            set {
+                switch (index)
+                {
+                    case 0x0: I32x4_0 = value; break;
+                    case 0x1: I32x4_1 = value; break;
+                    case 0x2: I32x4_2 = value; break;
+                    case 0x3: I32x4_3 = value; break;
+                    default: throw new ArgumentOutOfRangeException($"Cannot get i32 index {index} of MV128");
+                }
+            }
+        }
+        
+        public long this[long index]
+        {
+            get => index switch {
+                0x0 => I64x2_0,
+                0x1 => I64x2_1,
+                _ => throw new ArgumentOutOfRangeException($"Cannot get i32 index {index} of MV128")
+            };
+            set {
+                switch (index)
+                {
+                    case 0x0: I64x2_0 = value; break;
+                    case 0x1: I64x2_1 = value; break;
+                    default: throw new ArgumentOutOfRangeException($"Cannot get i32 index {index} of MV128");
+                }
+            }
+        }
+        
+        public static implicit operator V128(MV128 mv128) => 
+            MemoryMarshal.Cast<MV128, V128>(MemoryMarshal.CreateSpan(ref mv128, 1))[0];
+        public static implicit operator MV128(V128 v128) => 
+            MemoryMarshal.Cast<V128, MV128>(MemoryMarshal.CreateSpan(ref v128, 1))[0];
+        
     }
 }
