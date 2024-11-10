@@ -247,8 +247,11 @@ namespace Spec.Test.WastJson
         {
             List<Exception> errors = new();
             if (ModuleType == "text")
+            {
                 errors.Add(new Exception(
                     $"Assert Malformed line {Line}: Skipping assert_malformed. No WAT parsing."));
+                return errors;
+            }
             
             var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert = false;
@@ -308,8 +311,11 @@ namespace Spec.Test.WastJson
         {
             var errors = new List<Exception>();
             if (ModuleType == "text")
+            {
                 errors.Add(new Exception(
                     $"Assert Malformed line {Line}: Skipping assert_malformed. No WAT parsing."));
+                return errors;
+            }
             
             var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert1 = false;
@@ -363,8 +369,11 @@ namespace Spec.Test.WastJson
         {
             List<Exception> errors = new();
             if (ModuleType == "text")
+            {
                 errors.Add(new Exception(
                     $"Assert Malformed line {Line}: Skipping assert_malformed. No WAT parsing."));
+                return errors;
+            }
             
             var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert = false;
