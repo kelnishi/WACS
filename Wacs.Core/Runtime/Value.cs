@@ -421,6 +421,8 @@ namespace Wacs.Core.Runtime
 
         public static implicit operator Value(V128 v128) => new(v128);
         
+        public static implicit operator V128(Value value) => value.V128;
+        
         public static bool operator ==(Value left, Value right) => left.Type == right.Type && left.Scalar.Equals(right.Scalar);
         
         public static bool operator !=(Value left, Value right) => !(left == right);

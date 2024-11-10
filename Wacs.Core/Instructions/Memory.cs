@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -13,20 +14,20 @@ namespace Wacs.Core.Instructions
     public class InstMemoryLoad : InstructionBase
     {
         public InstMemoryLoad(ValType type, BitWidth width) =>
-            (Type, WidthN) = (type, width);
+            (Type, WidthT) = (type, width);
 
         public override ByteCode Op => Type switch
         {
-            ValType.I32 => WidthN switch
+            ValType.I32 => WidthT switch
             {
                 BitWidth.U32 => OpCode.I32Load, //0x28
                 BitWidth.S8 => OpCode.I32Load8S, //0x2C
                 BitWidth.U8 => OpCode.I32Load8U, //0x2D
                 BitWidth.S16 => OpCode.I32Load16S, //0x2E
                 BitWidth.U16 => OpCode.I32Load16U, //0x2F
-                _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {Type} {WidthN}")
+                _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {Type} {WidthT}")
             },
-            ValType.I64 => WidthN switch
+            ValType.I64 => WidthT switch
             {
                 BitWidth.U64 => OpCode.I64Load, //0x29
                 BitWidth.S8 => OpCode.I64Load8S, //0x30
@@ -35,7 +36,18 @@ namespace Wacs.Core.Instructions
                 BitWidth.U16 => OpCode.I64Load16U, //0x33
                 BitWidth.S32 => OpCode.I64Load32S, //0x34
                 BitWidth.U32 => OpCode.I64Load32U, //0x35
-                _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {Type} {WidthN}")
+                _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {Type} {WidthT}")
+            },
+            ValType.V128 => WidthT switch
+            {
+                BitWidth.S8 => SimdCode.V128Load8x8S,
+                BitWidth.U8 => SimdCode.V128Load8x8U,
+                BitWidth.S16 => SimdCode.V128Load16x4S,
+                BitWidth.U16 => SimdCode.V128Load16x4U,
+                BitWidth.S32 => SimdCode.V128Load32x2S,
+                BitWidth.U32 => SimdCode.V128Load32x2U,
+                BitWidth.V128 => SimdCode.V128Load,
+                _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {Type} {WidthT}")
             },
             ValType.F32 => OpCode.F32Load, //0x2A
             ValType.F64 => OpCode.F64Load, //0x2B
@@ -43,7 +55,7 @@ namespace Wacs.Core.Instructions
         };
 
         private ValType Type { get; }
-        private BitWidth WidthN { get; }
+        private BitWidth WidthT { get; }
 
         private MemArg M { get; set; }
 
@@ -55,8 +67,8 @@ namespace Wacs.Core.Instructions
         {
             context.Assert(context.Mems.Contains((MemIdx)0),
                  $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(M.Align <= WidthN.ByteSize(),
-                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align} <= {WidthN}/8");
+            context.Assert(M.AlignBits <= WidthT.BitSize(),
+                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.AlignBits} <= {WidthT}/8");
 
             context.OpStack.PopI32();
             context.OpStack.PushType(Type);
@@ -83,14 +95,12 @@ namespace Wacs.Core.Instructions
             //8.
             long ea = (long)i + (long)M.Offset;
             //9.
-            // We set the Width in the InstructionFactory
-            // Floating point width will always match their type
+            int n = M.AlignBits > 0 ? M.AlignBytes : WidthT.ByteSize();
             //10.
-            if (ea + WidthN.ByteSize() > mem.Data.Length)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthN.ByteSize()} out of bounds ({mem.Data.Length}).");
+            if (ea + n > mem.Data.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{n} out of bounds ({mem.Data.Length}).");
             //11.
-            // var bs = mem.Data[ea..WidthN.ByteSize()];
-            var bs = mem.Data.AsSpan((int)ea, WidthN.ByteSize());
+            var bs = mem.Data.AsSpan((int)ea, n);
             //12,13,14
             switch (Type)
             {
@@ -106,8 +116,13 @@ namespace Wacs.Core.Instructions
                     context.OpStack.PushF64(cF64);
                     break;
                 }
+                case ValType.V128:
+                {
+                    context.OpStack.PushV128(new V128(bs));
+                    break;
+                }
                 default:
-                    switch (WidthN)
+                    switch (WidthT)
                     {
                         case BitWidth.S8:
                             int cS8 = (sbyte)bs[0];
@@ -139,7 +154,6 @@ namespace Wacs.Core.Instructions
                             break;
                         default: throw new ArgumentOutOfRangeException();
                     }
-
                     break;
             }
         }
@@ -163,42 +177,43 @@ namespace Wacs.Core.Instructions
                 if (context.Attributes.Live && context.OpStack.Count > 0)
                 {
                     var loadedValue = context.OpStack.Peek();
-                    return $"{base.RenderText(context)}{M.ToWat(WidthN)} (;>{loadedValue}<;)";
+                    return $"{base.RenderText(context)}{M.ToWat(WidthT)} (;>{loadedValue}<;)";
                 }
             }
-            return $"{base.RenderText(context)}{M.ToWat(WidthN)}";
+            return $"{base.RenderText(context)}{M.ToWat(WidthT)}";
         }
     }
 
     public class InstMemoryStore : InstructionBase
     {
         public InstMemoryStore(ValType type, BitWidth width) =>
-            (Type, WidthN) = (type, width);
+            (Type, TWidth) = (type, width);
 
         public override ByteCode Op => Type switch
         {
-            ValType.I32 => WidthN switch
+            ValType.I32 => TWidth switch
             {
                 BitWidth.U8 => OpCode.I32Store8,
                 BitWidth.U16 => OpCode.I32Store16,
                 BitWidth.U32 => OpCode.I32Store,
-                _ => throw new InvalidDataException($"InstMemoryStore instruction is malformed: {Type} {WidthN}")
+                _ => throw new InvalidDataException($"InstMemoryStore instruction is malformed: {Type} {TWidth}")
             },
-            ValType.I64 => WidthN switch
+            ValType.I64 => TWidth switch
             {
                 BitWidth.U8 => OpCode.I64Store8,
                 BitWidth.U16 => OpCode.I64Store16,
                 BitWidth.U32 => OpCode.I64Store32,
                 BitWidth.U64 => OpCode.I64Store,
-                _ => throw new InvalidDataException($"InstMemoryStore instruction is malformed: {Type} {WidthN}")
+                _ => throw new InvalidDataException($"InstMemoryStore instruction is malformed: {Type} {TWidth}")
             },
             ValType.F32 => OpCode.F32Store,
             ValType.F64 => OpCode.F64Store,
+            ValType.V128 => SimdCode.V128Store,
             _ => throw new InvalidDataException($"InstMemoryStore instruction is malformed: {Type}"),
         };
 
         private ValType Type { get; }
-        private BitWidth WidthN { get; }
+        private BitWidth TWidth { get; }
         private MemArg M { get; set; }
 
         public IInstruction Immediate(MemArg m)
@@ -215,9 +230,9 @@ namespace Wacs.Core.Instructions
         {
             context.Assert(context.Mems.Contains((MemIdx)0),
                  $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(M.Align <= WidthN.ByteSize(),
+            context.Assert(M.AlignBits <= TWidth.BitSize(),
                 
-                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align} <= {WidthN}/8");
+                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.AlignBits} <= {TWidth}/8");
 
             //Pop parameters from right to left
             context.OpStack.PopType(Type);
@@ -254,11 +269,11 @@ namespace Wacs.Core.Instructions
             // We set the Width in the InstructionFactory
             // Floating point width will always match their type
             //12.
-            if (ea + WidthN.ByteSize() > mem.Data.Length)
+            if (ea + TWidth.ByteSize() > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
-            Span<byte> bs = mem.Data.AsSpan((int)ea, WidthN.ByteSize());
-            switch (WidthN)
+            Span<byte> bs = mem.Data.AsSpan((int)ea, TWidth.ByteSize());
+            switch (TWidth)
             {
                 case BitWidth.S8:
                 case BitWidth.U8:
@@ -279,6 +294,11 @@ namespace Wacs.Core.Instructions
                     byte[] cU64 = BitConverter.GetBytes((ulong)c.Int64);
                     cU64.CopyTo(bs);
                     break;
+                case BitWidth.V128:
+                    V128 cV128 = c.V128;
+                    var cData = MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref cV128, 1));
+                    cData.CopyTo(bs);
+                    break;
             }
         }
 
@@ -295,10 +315,10 @@ namespace Wacs.Core.Instructions
                 if (context.Attributes.Live && context.OpStack.Count > 0)
                 {
                     var storeValue = context.OpStack.Peek();
-                    return $"{base.RenderText(context)}{M.ToWat(WidthN)} (;>{storeValue}<;)";
+                    return $"{base.RenderText(context)}{M.ToWat(TWidth)} (;>{storeValue}<;)";
                 }
             }
-            return $"{base.RenderText(context)}{M.ToWat(WidthN)}";
+            return $"{base.RenderText(context)}{M.ToWat(TWidth)}";
         }
     }
 
@@ -306,6 +326,9 @@ namespace Wacs.Core.Instructions
     {
         public uint Offset;
         public uint Align;
+
+        public int AlignBits => 1 << (int)Align;
+        public int AlignBytes => AlignBits >> 3;
 
         public MemArg(uint align, uint offset)
         {
@@ -321,7 +344,7 @@ namespace Wacs.Core.Instructions
             uint offset = reader.ReadLeb128_u32();
             return new MemArg
             {
-                Align = (uint)(1 << (int)bits),
+                Align = bits,
                 Offset = offset,
             };
         }
@@ -329,12 +352,12 @@ namespace Wacs.Core.Instructions
         public string ToWat(BitWidth naturalAlign)
         {
             var offset = Offset != 0 ? $" offset={Offset}" : "";
-            var align = Align != naturalAlign.ByteSize() ? $" align={Align}" : "";
+            var align = AlignBytes != naturalAlign.ByteSize() ? $" align={Align}" : "";
             return $"{offset}{align}";
         }
     }
 
-    public enum BitWidth : sbyte
+    public enum BitWidth : short
     {
         S8 = -8,
         S16 = -16,
@@ -344,6 +367,8 @@ namespace Wacs.Core.Instructions
         U16 = 16,
         U32 = 32,
         U64 = 64,
+        
+        V128 = 128,
     }
 
     public static class BitWidthHelpers
@@ -358,20 +383,22 @@ namespace Wacs.Core.Instructions
                 BitWidth.U16 => 2,
                 BitWidth.U32 => 4,
                 BitWidth.U64 => 8,
-                _ => (byte)width / 8
+                BitWidth.V128 => 16,
+                _ => (short)width / 8
             };
 
-        public static bool IsSigned(this BitWidth width) =>
+        public static int BitSize(this BitWidth width) =>
             width switch
             {
-                BitWidth.S8 => true,
-                BitWidth.S16 => true,
-                BitWidth.S32 => true,
-                BitWidth.U8 => false,
-                BitWidth.U16 => false,
-                BitWidth.U32 => false,
-                BitWidth.U64 => false,
-                _ => false
+                BitWidth.S8 => 8,
+                BitWidth.S16 => 16,
+                BitWidth.S32 => 32,
+                BitWidth.U8 => 8,
+                BitWidth.U16 => 16,
+                BitWidth.U32 => 32,
+                BitWidth.U64 => 64,
+                BitWidth.V128 => 128,
+                _ => Math.Abs((short)width)
             };
     }
 }
