@@ -95,7 +95,7 @@ namespace Wacs.Core.Instructions
             //8.
             long ea = (long)i + (long)M.Offset;
             //9.
-            int n = M.AlignBits > 0 ? M.AlignBytes : WidthT.ByteSize();
+            int n = WidthT.ByteSize();
             //10.
             if (ea + n > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{n} out of bounds ({mem.Data.Length}).");
@@ -327,8 +327,8 @@ namespace Wacs.Core.Instructions
         public uint Offset;
         public uint Align;
 
-        public int AlignBits => 1 << (int)Align;
-        public int AlignBytes => AlignBits >> 3;
+        public int AlignBytes => Align != 0 ? 1 << (int)Align : 0;
+        public int AlignBits => AlignBytes << 3;
 
         public MemArg(uint align, uint offset)
         {

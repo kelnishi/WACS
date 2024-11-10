@@ -54,16 +54,18 @@ namespace Wacs.Core.Instructions
             SimdCode.V128Load32Splat => new InstMemoryLoadSplat(BitWidth.U32),
             SimdCode.V128Load64Splat => new InstMemoryLoadSplat(BitWidth.U64),
             
-            SimdCode.V128Load8Lane => null,  
-            SimdCode.V128Load16Lane => null, 
-            SimdCode.V128Load32Lane => null, 
-            SimdCode.V128Load64Lane => null, 
-            SimdCode.V128Store8Lane => null, 
-            SimdCode.V128Store16Lane => null,
-            SimdCode.V128Store32Lane => null,
-            SimdCode.V128Store64Lane => null,
-            SimdCode.V128Load32Zero => null, 
-            SimdCode.V128Load64Zero => null, 
+            SimdCode.V128Load32Zero => new InstMemoryLoadZero(BitWidth.U32),
+            SimdCode.V128Load64Zero => new InstMemoryLoadZero(BitWidth.U64),
+            
+            SimdCode.V128Load8Lane  => new InstMemoryLoadLane(BitWidth.U8),  
+            SimdCode.V128Load16Lane => new InstMemoryLoadLane(BitWidth.U16), 
+            SimdCode.V128Load32Lane => new InstMemoryLoadLane(BitWidth.U32), 
+            SimdCode.V128Load64Lane => new InstMemoryLoadLane(BitWidth.U64), 
+            
+            SimdCode.V128Store8Lane  => new InstMemoryStoreLane(BitWidth.U8), 
+            SimdCode.V128Store16Lane => new InstMemoryStoreLane(BitWidth.U16),
+            SimdCode.V128Store32Lane => new InstMemoryStoreLane(BitWidth.U32),
+            SimdCode.V128Store64Lane => new InstMemoryStoreLane(BitWidth.U64), 
             
             _ => throw new InvalidDataException($"Unsupported instruction {opcode.GetMnemonic()}. ByteCode: 0xFD{(byte)opcode:X2}")
         };

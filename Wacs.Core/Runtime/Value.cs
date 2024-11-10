@@ -397,6 +397,7 @@ namespace Wacs.Core.Runtime
         };
 
         public bool IsI32 => Type == ValType.I32;
+        public bool IsV128 => Type == ValType.V128;
         public bool IsRef => Type == ValType.Funcref || Type == ValType.Externref;
         public bool IsNullRef => IsRef && Ptr == -1;
         public static implicit operator Value(int value) => new(value);
