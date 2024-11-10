@@ -5,10 +5,10 @@ using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions
 {
-    public partial class ReferenceFactory : IInstructionFactory
+    public partial class SpecFactory : IInstructionFactory
     {
-        public static readonly ReferenceFactory Factory = new();
-        public ReferenceFactory() {}
+        public static readonly SpecFactory Factory = new();
+        public SpecFactory() {}
 
         public T CreateInstruction<T>(ByteCode code)
             where T : InstructionBase =>

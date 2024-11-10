@@ -37,7 +37,7 @@ namespace Wacs.Core
         public static bool SkipFinalization = false;
         public static uint MaximumFunctionLocals = 2048;
 
-        private static IInstructionFactory _instructionFactory = ReferenceFactory.Factory;
+        private static IInstructionFactory _instructionFactory = SpecFactory.Factory;
 
         public static int InstructionsParsed = 0;
 
