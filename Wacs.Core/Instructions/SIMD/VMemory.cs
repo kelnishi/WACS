@@ -47,42 +47,42 @@ namespace Wacs.Core.Instructions.SIMD
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains((MemIdx)0),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+                $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
             context.Assert(M.AlignBytes <= WidthT.ByteSize() * CountN,
-                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.AlignBytes} <= {WidthT}/8");
+                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.AlignBytes} <= {WidthT}/8");
 
             context.OpStack.PopI32();
             context.OpStack.PushV128();
         }
 
-        // @Spec 4.4.7.1. t.load and t.loadN_sx
+        // @Spec 4.4.7.2. v128.loadMxN_sx memarg
         public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains((MemIdx)0),
-                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
             //3.
             var a = context.Frame.Module.MemAddrs[(MemIdx)0];
             //4.
             context.Assert( context.Store.Contains(a),
-                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             //5.
             var mem = context.Store[a];
             //6.
             context.Assert( context.OpStack.Peek().IsI32,
-                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
             uint i = context.OpStack.PopI32();
             //8.
             long ea = (long)i + (long)M.Offset;
             //9.
-            int mn = M.AlignBytes * CountN;
+            int mn = WidthT.ByteSize() * CountN;
             if (ea + mn > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{mn} out of bounds ({mem.Data.Length}).");
             //10.
             var bs = mem.Data.AsSpan((int)ea, mn);
             //11,12,13,14
-            int m = M.AlignBytes;
+            int m = WidthT.ByteSize();
             MV128 c = new MV128();
             for (int k = 0; k < CountN; ++k)
             {
@@ -181,15 +181,11 @@ namespace Wacs.Core.Instructions.SIMD
             //8.
             long ea = (long)i + (long)M.Offset;
             //9.
-            // We set the Width in the InstructionFactory
-            // Floating point width will always match their type
-            //10.
             if (ea + WidthN.ByteSize() > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthN.ByteSize()} out of bounds ({mem.Data.Length}).");
-            //11.
-            // var bs = mem.Data[ea..WidthN.ByteSize()];
+            //10.
             var bs = mem.Data.AsSpan((int)ea, WidthN.ByteSize());
-            //12,13,14
+            //11,12,13,14
             switch (WidthN)
             {
                 case BitWidth.U8:
@@ -238,9 +234,9 @@ namespace Wacs.Core.Instructions.SIMD
         }
     }
     
-    public class InstMemoryLoadLane : InstructionBase
+    public class InstMemoryLoadZero : InstructionBase
     {
-        public InstMemoryLoadLane(BitWidth width) => WidthN = width;
+        public InstMemoryLoadZero(BitWidth width) => WidthN = width;
 
         public override ByteCode Op => WidthN switch
         {
@@ -255,11 +251,8 @@ namespace Wacs.Core.Instructions.SIMD
 
         private MemArg M { get; set; }
 
-        private LaneIdx L { get; set; }
-
         /// <summary>
-        /// @Spec 3.3.7.1. t.load
-        /// @Spec 3.3.7.2. t.loadN_sx
+        /// @Spec 3.3.7.7. v128.loadN_zero memarg
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
@@ -267,19 +260,14 @@ namespace Wacs.Core.Instructions.SIMD
                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
             context.Assert(M.Align <= BitWidth.V128.ByteSize(),
                 $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align} <= {BitWidth.V128}/8");
-            context.Assert(L < 16/WidthN.ByteSize(),
-                $"Instruction {Op.GetMnemonic()} failed with invalid laneidx {L} <= {16/WidthN.ByteSize()}");
-            
-            context.OpStack.PopV128();
+
             context.OpStack.PopI32();
             context.OpStack.PushV128();
         }
 
-        // @Spec 4.4.7.1. t.load and t.loadN_sx
+        // @Spec 4.4.7.7. v128.loadN_zero memarg
         public override void Execute(ExecContext context)
         {
-            MV128 value = (V128)context.OpStack.PopV128();
-            
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains((MemIdx)0),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
@@ -298,36 +286,20 @@ namespace Wacs.Core.Instructions.SIMD
             //8.
             long ea = (long)i + (long)M.Offset;
             //9.
-            // We set the Width in the InstructionFactory
-            // Floating point width will always match their type
-            //10.
             if (ea + WidthN.ByteSize() > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthN.ByteSize()} out of bounds ({mem.Data.Length}).");
-            //11.
-            // var bs = mem.Data[ea..WidthN.ByteSize()];
+            //10.
             var bs = mem.Data.AsSpan((int)ea, WidthN.ByteSize());
-            //12,13,14
+            //11,12,13
             switch (WidthN)
             {
-                case BitWidth.U8:
-                    
-                    switch (L)
-                    {
-                        case 0: value.B8x16_0 = bs[0]; break;
-                    }
-                    context.OpStack.PushV128(value);
-                    break;
-                case BitWidth.U16:
-                    ushort cU16 = BitConverter.ToUInt16(bs);
-                    context.OpStack.PushValue(new V128(cU16,cU16,cU16,cU16,cU16,cU16,cU16,cU16));
-                    break;
                 case BitWidth.U32:
                     uint cU32 = BitConverter.ToUInt32(bs);
-                    context.OpStack.PushValue(new V128(cU32,cU32,cU32,cU32));
+                    context.OpStack.PushValue(new V128(cU32,0,0,0));
                     break;
                 case BitWidth.U64:
                     ulong cU64 = BitConverter.ToUInt64(bs);
-                    context.OpStack.PushValue(new V128(cU64, cU64));
+                    context.OpStack.PushValue(new V128(cU64, 0));
                     break;
                 default: throw new ArgumentOutOfRangeException();
             }
@@ -336,14 +308,12 @@ namespace Wacs.Core.Instructions.SIMD
         public IInstruction Immediate(MemArg m, LaneIdx l)
         {
             M = m;
-            L = l;
             return this;
         }
 
         public override IInstruction Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
-            L = reader.ReadByte();
             return this;
         }
 
@@ -360,6 +330,238 @@ namespace Wacs.Core.Instructions.SIMD
             return $"{base.RenderText(context)}{M.ToWat(WidthN)}";
         }
     }
-        
+    
+    public class InstMemoryLoadLane : InstructionBase
+    {
+        public InstMemoryLoadLane(BitWidth width) => WidthN = width;
 
+        public override ByteCode Op => WidthN switch
+        {
+            BitWidth.U8 => SimdCode.V128Load8Lane,
+            BitWidth.U16 => SimdCode.V128Load16Lane,
+            BitWidth.U32 => SimdCode.V128Load32Lane,
+            BitWidth.U64 => SimdCode.V128Load64Lane,
+            _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
+        };
+
+        private BitWidth WidthN { get; }
+
+        private MemArg M { get; set; }
+
+        private LaneIdx X { get; set; }
+
+        /// <summary>
+        /// @Spec 3.3.7.8. v128.loadN_lane memarge laneidx
+        /// </summary>
+        public override void Validate(IWasmValidationContext context)
+        {
+            context.Assert(X < 128/WidthN.BitSize(),
+                $"Instruction {Op.GetMnemonic()} failed with invalid laneidx {X} <= {128/WidthN.BitSize()}");
+            context.Assert(context.Mems.Contains((MemIdx)0),
+                $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+            context.Assert(M.AlignBytes <= WidthN.ByteSize(),
+                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.AlignBytes} <= {WidthN}/8");
+            
+            context.OpStack.PopV128();
+            context.OpStack.PopI32();
+            context.OpStack.PushV128();
+        }
+
+        // @Spec 4.4.7.5. v128.loadN_lane memarg x
+        public override void Execute(ExecContext context)
+        {
+            
+            //2.
+            context.Assert( context.Frame.Module.MemAddrs.Contains((MemIdx)0),
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+            //3.
+            var a = context.Frame.Module.MemAddrs[(MemIdx)0];
+            //4.
+            context.Assert( context.Store.Contains(a),
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+            //5.
+            var mem = context.Store[a];
+            //6.
+            context.Assert( context.OpStack.Peek().IsV128,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //7.
+            MV128 value = (V128)context.OpStack.PopV128();
+            //8.
+            context.Assert( context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //9.
+            uint i = context.OpStack.PopI32();
+            //10.
+            long ea = (long)i + (long)M.Offset;
+            //11.
+            if (ea + WidthN.ByteSize() > mem.Data.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthN.ByteSize()} out of bounds ({mem.Data.Length}).");
+            //12.
+            var bs = mem.Data.AsSpan((int)ea, WidthN.ByteSize());
+            //13,14,15,16
+            switch (WidthN)
+            {
+                case BitWidth.U8: value[(byte)X] = bs[0]; break;
+                case BitWidth.U16: value[(ushort)X] = BitConverter.ToUInt16(bs);  break;
+                case BitWidth.U32: value[(uint)X] = BitConverter.ToUInt32(bs); break;
+                case BitWidth.U64: value[(ulong)X] = BitConverter.ToUInt64(bs); break;
+                default: throw new ArgumentOutOfRangeException($"Instruction {Op.GetMnemonic()} failed. Cannot convert bytes to {WidthN}.");
+            }
+            //17.
+            context.OpStack.PushV128(value);
+        }
+
+        public IInstruction Immediate(MemArg m, LaneIdx l)
+        {
+            M = m;
+            X = l;
+            return this;
+        }
+
+        public override IInstruction Parse(BinaryReader reader)
+        {
+            M = MemArg.Parse(reader);
+            X = reader.ReadByte();
+            return this;
+        }
+
+        public override string RenderText(ExecContext? context)
+        {
+            if (context != null)
+            {
+                if (context.Attributes.Live && context.OpStack.Count > 0)
+                {
+                    var loadedValue = context.OpStack.Peek();
+                    return $"{base.RenderText(context)}{M.ToWat(WidthN)} {X} (;>{loadedValue}<;)";
+                }
+            }
+            return $"{base.RenderText(context)}{M.ToWat(WidthN)} {X}";
+        }
+    }
+        
+    public class InstMemoryStoreLane : InstructionBase
+    {
+        public InstMemoryStoreLane(BitWidth width) => WidthN = width;
+
+        public override ByteCode Op => WidthN switch
+        {
+            BitWidth.U8 =>  SimdCode.V128Store8Lane,
+            BitWidth.U16 => SimdCode.V128Store16Lane,
+            BitWidth.U32 => SimdCode.V128Store32Lane,
+            BitWidth.U64 => SimdCode.V128Store64Lane,
+            _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
+        };
+
+        private BitWidth WidthN { get; }
+        private MemArg M { get; set; }
+
+        private LaneIdx X { get; set; }
+
+        public IInstruction Immediate(MemArg m)
+        {
+            M = m;
+            return this;
+        }
+
+        /// <summary>
+        /// @Spec 3.3.7.9. v128.storeN_lane memarg laneidx
+        /// </summary>
+        public override void Validate(IWasmValidationContext context)
+        {
+            context.Assert(X < 128/WidthN.BitSize(),
+                $"Instruction {Op.GetMnemonic()} failed with invalid laneidx {X} <= {128/WidthN.BitSize()}");
+            context.Assert(context.Mems.Contains((MemIdx)0),
+                $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+            context.Assert(M.AlignBytes <= WidthN.ByteSize(),
+                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.AlignBytes} <= {WidthN}/8");
+
+            
+            context.OpStack.PopV128();
+            context.OpStack.PopI32();
+            context.OpStack.PushV128();
+        }
+
+        // @Spec 4.4.7.7. v128.storeN_lane memarg x
+        public override void Execute(ExecContext context)
+        {
+            //2.
+            context.Assert( context.Frame.Module.MemAddrs.Contains((MemIdx)0),
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+            //3.
+            var a = context.Frame.Module.MemAddrs[(MemIdx)0];
+            //4.
+            context.Assert( context.Store.Contains(a),
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+            //5.
+            var mem = context.Store[a];
+            //6.
+            context.Assert( context.OpStack.Peek().IsV128,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //7.
+            V128 c = context.OpStack.PopV128();
+            //8.
+            context.Assert( context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //9.
+            uint i = context.OpStack.PopI32();
+            //10.
+            uint ea = i + M.Offset;
+            //11.
+            if (ea + WidthN.ByteSize() > mem.Data.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
+            
+            //12,13,14,15
+            Span<byte> bs = mem.Data.AsSpan((int)ea, 16);
+            switch (WidthN)
+            {
+                case BitWidth.S8:
+                case BitWidth.U8:
+                    bs[X * 1] = c[(byte)X];
+                    break;
+                case BitWidth.S16:
+                case BitWidth.U16:
+                    int shortStart = X * 2;
+                    int shortEnd = shortStart + 2;
+                    var shortLane = bs[shortStart..shortEnd];
+                    byte[] cU16 = BitConverter.GetBytes(c[(ushort)X]);
+                    cU16.CopyTo(shortLane);
+                    break;
+                case BitWidth.S32:
+                case BitWidth.U32:
+                    int intStart = X * 4;
+                    int intEnd = intStart + 4;
+                    var intLane = bs[intStart..intEnd];
+                    byte[] cU32 = BitConverter.GetBytes(c[(uint)X]);
+                    cU32.CopyTo(intLane);
+                    break;
+                case BitWidth.U64:
+                    int longStart = X * 8;
+                    int longEnd = longStart + 8;
+                    var longLane = bs[longStart..longEnd];
+                    byte[] cU64 = BitConverter.GetBytes(c[(ulong)X]);
+                    cU64.CopyTo(longLane);
+                    break;
+            }
+        }
+
+        public override IInstruction Parse(BinaryReader reader)
+        {
+            M = MemArg.Parse(reader);
+            X = reader.ReadByte();
+            return this;
+        }
+
+        public override string RenderText(ExecContext? context)
+        {
+            if (context != null)
+            {
+                if (context.Attributes.Live && context.OpStack.Count > 0)
+                {
+                    var storeValue = context.OpStack.Peek();
+                    return $"{base.RenderText(context)}{M.ToWat(WidthN)} {X}(;>{storeValue}<;)";
+                }
+            }
+            return $"{base.RenderText(context)}{M.ToWat(WidthN)} {X}";
+        }
+    }
 }

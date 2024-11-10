@@ -126,10 +126,10 @@ namespace Wacs.Core.Runtime
             sbyte, sbyte, sbyte, sbyte, 
             sbyte, sbyte, sbyte, sbyte, 
             sbyte, sbyte, sbyte, sbyte) tuple) => 
-                new(tuple.Item1, tuple.Item2, tuple.Item3, tuple.Item4, 
-                    tuple.Item5, tuple.Item6, tuple.Item7, tuple.Item8, 
-                    tuple.Item9, tuple.Item10, tuple.Item11, tuple.Item12, 
-                    tuple.Item13, tuple.Item14, tuple.Item15, tuple.Item16);
+            new(tuple.Item1, tuple.Item2, tuple.Item3, tuple.Item4, 
+                tuple.Item5, tuple.Item6, tuple.Item7, tuple.Item8, 
+                tuple.Item9, tuple.Item10, tuple.Item11, tuple.Item12, 
+                tuple.Item13, tuple.Item14, tuple.Item15, tuple.Item16);
 
         public V128(
             short i16x8_0, short i16x8_1, short i16x8_2, short i16x8_3, 
@@ -273,6 +273,62 @@ namespace Wacs.Core.Runtime
             B8x16_E = data[0xE];
             B8x16_F = data[0xF];
         }
+        
+        public byte this[byte index] => index switch {
+            0x0 => B8x16_0,
+            0x1 => B8x16_1,
+            0x2 => B8x16_2,
+            0x3 => B8x16_3,
+            0x4 => B8x16_4,
+            0x5 => B8x16_5,
+            0x6 => B8x16_6,
+            0x7 => B8x16_7,
+            0x8 => B8x16_8,
+            0x9 => B8x16_9,
+            0xA => B8x16_A,
+            0xB => B8x16_B,
+            0xC => B8x16_C,
+            0xD => B8x16_D,
+            0xE => B8x16_E,
+            0xF => B8x16_F,
+            _ => throw new ArgumentOutOfRangeException($"Cannot get byte index {index} of MV128")
+        };
+        
+        
+        public short this[short index] => index switch {
+            0x0 => I16x8_0,
+            0x1 => I16x8_1,
+            0x2 => I16x8_2,
+            0x3 => I16x8_3,
+            0x4 => I16x8_4,
+            0x5 => I16x8_5,
+            0x6 => I16x8_6,
+            0x7 => I16x8_7,
+            _ => throw new ArgumentOutOfRangeException($"Cannot get i16 index {index} of MV128")
+        };
+        
+        
+        public int this[int index] => index switch {
+            0x0 => I32x4_0,
+            0x1 => I32x4_1,
+            0x2 => I32x4_2,
+            0x3 => I32x4_3,
+            _ => throw new ArgumentOutOfRangeException($"Cannot get i32 index {index} of MV128")
+        };
+        
+        
+        public long this[long index]=> index switch {
+            0x0 => I64x2_0,
+            0x1 => I64x2_1,
+            _ => throw new ArgumentOutOfRangeException($"Cannot get i64 index {index} of MV128")
+        };
+        
+        
+        public ulong this[ulong index] => index switch {
+            0x0 => B64x2_0,
+            0x1 => B64x2_1,
+            _ => throw new ArgumentOutOfRangeException($"Cannot get i64 index {index} of MV128")
+        };
     }
 
     //Mutable version
@@ -358,24 +414,24 @@ namespace Wacs.Core.Runtime
         public byte this[byte index]
         {
             get => index switch {
-                    0x0 => B8x16_0,
-                    0x1 => B8x16_1,
-                    0x2 => B8x16_2,
-                    0x3 => B8x16_3,
-                    0x4 => B8x16_4,
-                    0x5 => B8x16_5,
-                    0x6 => B8x16_6,
-                    0x7 => B8x16_7,
-                    0x8 => B8x16_8,
-                    0x9 => B8x16_9,
-                    0xA => B8x16_A,
-                    0xB => B8x16_B,
-                    0xC => B8x16_C,
-                    0xD => B8x16_D,
-                    0xE => B8x16_E,
-                    0xF => B8x16_F,
-                    _ => throw new ArgumentOutOfRangeException($"Cannot get byte index {index} of MV128")
-                };
+                0x0 => B8x16_0,
+                0x1 => B8x16_1,
+                0x2 => B8x16_2,
+                0x3 => B8x16_3,
+                0x4 => B8x16_4,
+                0x5 => B8x16_5,
+                0x6 => B8x16_6,
+                0x7 => B8x16_7,
+                0x8 => B8x16_8,
+                0x9 => B8x16_9,
+                0xA => B8x16_A,
+                0xB => B8x16_B,
+                0xC => B8x16_C,
+                0xD => B8x16_D,
+                0xE => B8x16_E,
+                0xF => B8x16_F,
+                _ => throw new ArgumentOutOfRangeException($"Cannot get byte index {index} of MV128")
+            };
             set {
                 switch (index)
                 {
@@ -455,14 +511,31 @@ namespace Wacs.Core.Runtime
             get => index switch {
                 0x0 => I64x2_0,
                 0x1 => I64x2_1,
-                _ => throw new ArgumentOutOfRangeException($"Cannot get i32 index {index} of MV128")
+                _ => throw new ArgumentOutOfRangeException($"Cannot get i64 index {index} of MV128")
             };
             set {
                 switch (index)
                 {
                     case 0x0: I64x2_0 = value; break;
                     case 0x1: I64x2_1 = value; break;
-                    default: throw new ArgumentOutOfRangeException($"Cannot get i32 index {index} of MV128");
+                    default: throw new ArgumentOutOfRangeException($"Cannot get i64 index {index} of MV128");
+                }
+            }
+        }
+        
+        public ulong this[ulong index]
+        {
+            get => index switch {
+                0x0 => B64x2_0,
+                0x1 => B64x2_1,
+                _ => throw new ArgumentOutOfRangeException($"Cannot get i64 index {index} of MV128")
+            };
+            set {
+                switch (index)
+                {
+                    case 0x0: B64x2_0 = value; break;
+                    case 0x1: B64x2_1 = value; break;
+                    default: throw new ArgumentOutOfRangeException($"Cannot get i64 index {index} of MV128");
                 }
             }
         }
