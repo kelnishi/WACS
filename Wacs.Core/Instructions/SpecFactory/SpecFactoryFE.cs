@@ -3,7 +3,7 @@ using Wacs.Core.OpCodes;
 
 namespace Wacs.Core.Instructions
 {
-    public partial class ReferenceFactory
+    public partial class SpecFactory
     {
         public static IInstruction? CreateInstruction(AtomCode opcode) => opcode switch
         {
