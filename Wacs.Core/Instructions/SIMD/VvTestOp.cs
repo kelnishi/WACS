@@ -12,7 +12,7 @@ namespace Wacs.Core.Instructions.Numeric
         private static void ExecuteV128AnyTrue(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
-            int result = (c.B64x2_0 & 0xFFFF_FFFF_FFFF_FFFF) != 0UL || (c.B64x2_1 & 0xFFFF_FFFF_FFFF_FFFF) != 0UL ? 1 : 0;
+            int result = (c.U64x2_0 & 0xFFFF_FFFF_FFFF_FFFF) != 0UL || (c.U64x2_1 & 0xFFFF_FFFF_FFFF_FFFF) != 0UL ? 1 : 0;
             context.OpStack.PushI32(result);
         }
     }
