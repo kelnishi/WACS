@@ -329,6 +329,19 @@ namespace Wacs.Core.Runtime
             0x1 => B64x2_1,
             _ => throw new ArgumentOutOfRangeException($"Cannot get i64 index {index} of MV128")
         };
+        
+        public static V128 operator &(V128 left, V128 right) =>
+            new(left.B64x2_0 & right.B64x2_0, left.B64x2_1 & right.B64x2_1);
+
+        public static V128 operator |(V128 left, V128 right) =>
+            new(left.B64x2_0 | right.B64x2_0, left.B64x2_1 | right.B64x2_1);
+
+        public static V128 operator ^(V128 left, V128 right) =>
+            new(left.B64x2_0 ^ right.B64x2_0, left.B64x2_1 ^ right.B64x2_1);
+        
+        public static V128 operator ~(V128 value) =>
+            new(~value.B64x2_0, ~value.B64x2_1);
+        
     }
 
     //Mutable version

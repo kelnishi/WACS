@@ -13,33 +13,6 @@ namespace Wacs.Core.Instructions
         {
             SimdCode.V128Const => new InstV128Const(),
             
-            //UnOps
-            SimdCode.I8x16Abs => NumericInst.I8x16Abs,
-            SimdCode.I16x8Abs => NumericInst.I16x8Abs,
-            SimdCode.I32x4Abs => NumericInst.I32x4Abs,
-            SimdCode.I64x2Abs => NumericInst.I64x2Abs,
-            SimdCode.F32x4Abs => NumericInst.F32x4Abs,
-            SimdCode.F64x2Abs => NumericInst.F64x2Abs,
-
-            SimdCode.I8x16Neg => NumericInst.I8x16Neg,
-            SimdCode.I16x8Neg => NumericInst.I16x8Neg,
-            SimdCode.I32x4Neg => NumericInst.I32x4Neg,
-            SimdCode.I64x2Neg => NumericInst.I64x2Neg,
-            SimdCode.F32x4Neg => NumericInst.F32x4Neg,
-            SimdCode.F64x2Neg => NumericInst.F64x2Neg,
-
-            SimdCode.F32x4Sqrt => NumericInst.F32x4Sqrt,
-            SimdCode.F64x2Sqrt => NumericInst.F64x2Sqrt,
-
-            SimdCode.F32x4Ceil => NumericInst.F32x4Ceil,
-            SimdCode.F64x2Ceil => NumericInst.F64x2Ceil,
-            SimdCode.F32x4Floor => NumericInst.F32x4Floor,
-            SimdCode.F64x2Floor => NumericInst.F64x2Floor,
-            SimdCode.F32x4Trunc => NumericInst.F32x4Trunc,
-            SimdCode.F64x2Trunc => NumericInst.F64x2Trunc,
-            SimdCode.F32x4Nearest => NumericInst.F32x4Nearest,
-            SimdCode.F64x2Nearest => NumericInst.F64x2Nearest,
-            
             //Memory
             SimdCode.V128Load        => new InstMemoryLoad(ValType.V128, BitWidth.V128),
             SimdCode.V128Store       => new InstMemoryStore(ValType.V128, BitWidth.V128),
@@ -53,19 +26,65 @@ namespace Wacs.Core.Instructions
             SimdCode.V128Load16Splat => new InstMemoryLoadSplat(BitWidth.U16),
             SimdCode.V128Load32Splat => new InstMemoryLoadSplat(BitWidth.U32),
             SimdCode.V128Load64Splat => new InstMemoryLoadSplat(BitWidth.U64),
-            
             SimdCode.V128Load32Zero => new InstMemoryLoadZero(BitWidth.U32),
             SimdCode.V128Load64Zero => new InstMemoryLoadZero(BitWidth.U64),
-            
             SimdCode.V128Load8Lane  => new InstMemoryLoadLane(BitWidth.U8),  
             SimdCode.V128Load16Lane => new InstMemoryLoadLane(BitWidth.U16), 
             SimdCode.V128Load32Lane => new InstMemoryLoadLane(BitWidth.U32), 
             SimdCode.V128Load64Lane => new InstMemoryLoadLane(BitWidth.U64), 
-            
             SimdCode.V128Store8Lane  => new InstMemoryStoreLane(BitWidth.U8), 
             SimdCode.V128Store16Lane => new InstMemoryStoreLane(BitWidth.U16),
             SimdCode.V128Store32Lane => new InstMemoryStoreLane(BitWidth.U32),
             SimdCode.V128Store64Lane => new InstMemoryStoreLane(BitWidth.U64), 
+            
+            //VvUnOp
+            SimdCode.V128Not    => NumericInst.V128Not,
+            
+            //VvBinOps
+            SimdCode.V128And    => NumericInst.V128And,
+            SimdCode.V128AndNot => NumericInst.V128AndNot,
+            SimdCode.V128Or     => NumericInst.V128Or,
+            SimdCode.V128Xor    => NumericInst.V128Xor,
+            
+            //ViUnOps
+            SimdCode.I8x16Abs => NumericInst.I8x16Abs,
+            SimdCode.I16x8Abs => NumericInst.I16x8Abs,
+            SimdCode.I32x4Abs => NumericInst.I32x4Abs,
+            SimdCode.I64x2Abs => NumericInst.I64x2Abs,
+            SimdCode.I8x16Neg => NumericInst.I8x16Neg,
+            SimdCode.I16x8Neg => NumericInst.I16x8Neg,
+            SimdCode.I32x4Neg => NumericInst.I32x4Neg,
+            SimdCode.I64x2Neg => NumericInst.I64x2Neg,
+            
+            //VfUnOps
+            SimdCode.F32x4Abs => NumericInst.F32x4Abs,
+            SimdCode.F64x2Abs => NumericInst.F64x2Abs,
+            SimdCode.F32x4Neg => NumericInst.F32x4Neg,
+            SimdCode.F64x2Neg => NumericInst.F64x2Neg,
+            SimdCode.F32x4Sqrt => NumericInst.F32x4Sqrt,
+            SimdCode.F64x2Sqrt => NumericInst.F64x2Sqrt,
+            SimdCode.F32x4Ceil => NumericInst.F32x4Ceil,
+            SimdCode.F64x2Ceil => NumericInst.F64x2Ceil,
+            SimdCode.F32x4Floor => NumericInst.F32x4Floor,
+            SimdCode.F64x2Floor => NumericInst.F64x2Floor,
+            SimdCode.F32x4Trunc => NumericInst.F32x4Trunc,
+            SimdCode.F64x2Trunc => NumericInst.F64x2Trunc,
+            SimdCode.F32x4Nearest => NumericInst.F32x4Nearest,
+            SimdCode.F64x2Nearest => NumericInst.F64x2Nearest,
+            
+            //VvTernOp
+            SimdCode.V128BitSelect => NumericInst.V128BitSelect,
+            
+            //VvTestOp
+            SimdCode.V128AnyTrue => NumericInst.V128AnyTrue,
+            
+            //ViTestOps
+            SimdCode.I8x16AllTrue => NumericInst.I8x16AllTrue,
+            SimdCode.I16x8AllTrue => NumericInst.I16x8AllTrue,
+            SimdCode.I32x4AllTrue => NumericInst.I32x4AllTrue,
+            SimdCode.I64x2AllTrue => NumericInst.I64x2AllTrue,
+
+            
             
             _ => throw new InvalidDataException($"Unsupported instruction {opcode.GetMnemonic()}. ByteCode: 0xFD{(byte)opcode:X2}")
         };
