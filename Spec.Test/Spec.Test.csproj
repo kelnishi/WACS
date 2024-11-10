@@ -5,6 +5,11 @@
         <TargetFramework>net6.0</TargetFramework>
         <LangVersion>9</LangVersion>
         <Nullable>enable</Nullable>
+        <Title>WebAssembly Spec Wast Test suite harness</Title>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Company>Kelvin Nishikawa</Company>
+        <Product>WACS</Product>
+        <AssemblyVersion>1.0.0</AssemblyVersion>
     </PropertyGroup>
 
     <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
@@ -12,12 +17,22 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <None Include="testsettings.json">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup>
       <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
       <ProjectReference Include="..\Wacs.WASIp1\Wacs.WASIp1.csproj" />
     </ItemGroup>
 
     <ItemGroup>
+      <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+      <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
+      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
       <PackageReference Include="ShellProgressBar" Version="5.2.0" />
+      <PackageReference Include="xunit" Version="2.9.2" />
     </ItemGroup>
 
 </Project>

@@ -1,8 +1,31 @@
 #!/bin/zsh
 
-# Define the base directory containing the .wast files
+# Default values for base_dir and out_dir
 base_dir="./spec/test/core"
-out_dir="./json"
+out_dir="./generated-json"
+generate_wat=false
+
+# Parse command-line options
+while getopts "w:b:o:" opt; do
+  case ${opt} in
+    w )
+      generate_wat=true
+      ;;
+    b )
+      base_dir="$OPTARG"
+      ;;
+    o )
+      out_dir="$OPTARG"
+      ;;
+    \? )
+      echo "Usage: $0 [-w] [-b base_directory] [-o output_directory]"
+      echo "  -w                 Generate .wat files"
+      echo "  -b base_directory  Specify base directory (default: ./spec/test/core)"
+      echo "  -o output_directory Specify output directory (default: ./generated-json)"
+      exit 1
+      ;;
+  esac
+done
 
 # Clean up the output directory before processing
 rm -rf "$out_dir"
@@ -37,8 +60,11 @@ find "$base_dir" -type f -name "*.wast" | while read -r wast_file; do
       # Construct the output wat file path
       wat_output="${wasm_file%.wasm}.wat"
       
-      # Call wasm2wat to convert .wasm to .wat
-      wasm2wat "$wasm_file" -o "$wat_output" --no-check
+      # Call wasm2wat to convert .wasm to .wat if the option was set
+      if $generate_wat; then
+        wasm2wat "$wasm_file" -o "$wat_output" --no-check
+        echo "Converted $wasm_file to $wat_output"
+      fi
     done
 
     echo "Converted $wast_file to $json_output"
@@ -47,7 +73,7 @@ find "$base_dir" -type f -name "*.wast" | while read -r wast_file; do
 done
 
 # Get the current git tag or commit hash
-git_info=$(git -C ./spec describe --tags --always)
+git_info=$(git -C "./spec" describe --tags --always)
 
 # Create a record file in the output directory
 echo "$git_info" > "$out_dir/git_info.txt"

@@ -13,7 +13,7 @@ namespace Spec.Test
 {
     class Program
     {
-        static void Main(string[] args)
+        static void NotMain(string[] args)
         {
             string testsDir = "./json";
 
