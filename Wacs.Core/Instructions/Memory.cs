@@ -91,7 +91,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.OpStack.Peek().IsI32,
                  $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            uint i = context.OpStack.PopI32();
+            long i = context.OpStack.PopI32();
             //8.
             long ea = (long)i + (long)M.Offset;
             //9.
@@ -262,9 +262,9 @@ namespace Wacs.Core.Instructions
             context.Assert( context.OpStack.Peek().IsI32,
                  $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            uint i = context.OpStack.PopI32();
+            long i = context.OpStack.PopI32();
             //10.
-            uint ea = i + M.Offset;
+            long ea = i + M.Offset;
             //11.
             // We set the Width in the InstructionFactory
             // Floating point width will always match their type
