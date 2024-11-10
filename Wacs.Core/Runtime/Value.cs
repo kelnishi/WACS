@@ -94,6 +94,13 @@ namespace Wacs.Core.Runtime
             V128 = value;
         }
 
+        public Value(uint v0, uint v1, uint v2, uint v3)
+        {
+            this = default;
+            Type = ValType.V128;
+            V128 = new V128(v0, v1, v2, v3);
+        }
+
         public Value(ValType type, int idx)
         {
             this = default;
