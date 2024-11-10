@@ -15,5 +15,7 @@ namespace Spec.Test.WastJson
             System.IO.Path.GetFileName(SourceFilename);
 
         public string Path { get; set; }
+
+        public override string ToString() => $"{SourceFilename}";
     }
 }

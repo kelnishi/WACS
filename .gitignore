@@ -83,7 +83,7 @@ obj/
 riderModule.iml
 /_ReSharper.Caches/
 
-/Spec.Test/json/**
+/Spec.Test/generated-json/**
 /Wacs.Console/Data/**
 
 .DS_Store
