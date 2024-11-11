@@ -138,6 +138,30 @@ namespace Wacs.Core.Instructions
             SimdCode.I32x4Mul       => NumericInst.I32x4Mul,
             SimdCode.I64x2Mul       => NumericInst.I64x2Mul,
             
+            SimdCode.I8x16AvgrU        => NumericInst.I8x16AvgrU,
+            SimdCode.I16x8AvgrU        => NumericInst.I16x8AvgrU,
+            
+            SimdCode.I16x8ExtAddPairwiseI8x16S => NumericInst.I16x8ExtAddPairwiseI8x16S,
+            SimdCode.I16x8ExtAddPairwiseI8x16U => NumericInst.I16x8ExtAddPairwiseI8x16U,
+            SimdCode.I32x4ExtAddPairwiseI16x8S => NumericInst.I32x4ExtAddPairwiseI16x8S,
+            SimdCode.I32x4ExtAddPairwiseI16x8U => NumericInst.I32x4ExtAddPairwiseI16x8U,
+            
+            SimdCode.I16x8ExtMulLowI8x16S  => NumericInst.I16x8ExtMulLowI8x16S,
+            SimdCode.I16x8ExtMulHighI8x16S => NumericInst.I16x8ExtMulHighI8x16S,
+            SimdCode.I16x8ExtMulLowI8x16U  => NumericInst.I16x8ExtMulLowI8x16U,
+            SimdCode.I16x8ExtMulHighI8x16U => NumericInst.I16x8ExtMulHighI8x16U,
+            SimdCode.I32x4ExtMulLowI16x8S  => NumericInst.I32x4ExtMulLowI16x8S,
+            SimdCode.I32x4ExtMulHighI16x8S => NumericInst.I32x4ExtMulHighI16x8S,
+            SimdCode.I32x4ExtMulLowI16x8U  => NumericInst.I32x4ExtMulLowI16x8U,
+            SimdCode.I32x4ExtMulHighI16x8U => NumericInst.I32x4ExtMulHighI16x8U,
+            SimdCode.I64x2ExtMulLowI32x4S  => NumericInst.I64x2ExtMulLowI32x4S,
+            SimdCode.I64x2ExtMulHighI32x4S => NumericInst.I64x2ExtMulHighI32x4S,
+            SimdCode.I64x2ExtMulLowI32x4U  => NumericInst.I64x2ExtMulLowI32x4U,
+            SimdCode.I64x2ExtMulHighI32x4U => NumericInst.I64x2ExtMulHighI32x4U,
+            
+            SimdCode.I32x4DotI16x8S => NumericInst.I32x4DotI16x8S,
+            SimdCode.I16x8Q15MulRSatS => NumericInst.I16x8Q15MulRSatS,
+            
             //ViMinMaxOps
             SimdCode.I8x16MinS       => NumericInst.I8x16MinS,
             SimdCode.I8x16MaxS       => NumericInst.I8x16MaxS,
@@ -205,12 +229,6 @@ namespace Wacs.Core.Instructions
             SimdCode.F64x2Max          => NumericInst.F64x2Max,
             SimdCode.F64x2PMin         => NumericInst.F64x2PMin,
             SimdCode.F64x2PMax         => NumericInst.F64x2PMax,
-            SimdCode.I8x16NarrowI16x8S => NumericInst.I8x16NarrowI16x8S,
-            SimdCode.I8x16NarrowI16x8U => NumericInst.I8x16NarrowI16x8U,
-            SimdCode.I16x8NarrowI32x4S => NumericInst.I16x8NarrowI32x4S,
-            SimdCode.I16x8NarrowI32x4U => NumericInst.I16x8NarrowI32x4U,
-            SimdCode.I8x16AvgrU        => NumericInst.I8x16AvgrU,
-            SimdCode.I16x8AvgrU        => NumericInst.I16x8AvgrU,
             
             //ViInjectOps
             SimdCode.I8x16Splat       => NumericInst.I8x16Splat,
@@ -235,6 +253,28 @@ namespace Wacs.Core.Instructions
             SimdCode.F64x2ConvertLowI32x4U => NumericInst.F64x2ConvertLowI32x4U,
             SimdCode.F32x4DemoteF64x2Zero  => NumericInst.F32x4DemoteF64x2Zero, 
             SimdCode.F64x2PromoteLowF32x4  => NumericInst.F64x2PromoteLowF32x4, 
+            
+            //ViConvert
+            SimdCode.I32x4TruncSatF32x4S     => NumericInst.I32x4TruncSatF32x4S,
+            SimdCode.I32x4TruncSatF32x4U     => NumericInst.I32x4TruncSatF32x4U,
+            SimdCode.I32x4TruncSatF64x2SZero => NumericInst.I32x4TruncSatF64x2SZero,
+            SimdCode.I32x4TruncSatF64x2UZero => NumericInst.I32x4TruncSatF64x2UZero,
+            SimdCode.I8x16NarrowI16x8S       => NumericInst.I8x16NarrowI16x8S,
+            SimdCode.I8x16NarrowI16x8U       => NumericInst.I8x16NarrowI16x8U,
+            SimdCode.I16x8NarrowI32x4S       => NumericInst.I16x8NarrowI32x4S,
+            SimdCode.I16x8NarrowI32x4U       => NumericInst.I16x8NarrowI32x4U,
+            SimdCode.I16x8ExtendLowI8x16S    => NumericInst.I16x8ExtendLowI8x16S,
+            SimdCode.I16x8ExtendHighI8x16S   => NumericInst.I16x8ExtendHighI8x16S,
+            SimdCode.I16x8ExtendLowI8x16U    => NumericInst.I16x8ExtendLowI8x16U,
+            SimdCode.I16x8ExtendHighI8x16U   => NumericInst.I16x8ExtendHighI8x16U,
+            SimdCode.I32x4ExtendLowI16x8S    => NumericInst.I32x4ExtendLowI16x8S,
+            SimdCode.I32x4ExtendHighI16x8S   => NumericInst.I32x4ExtendHighI16x8S,
+            SimdCode.I32x4ExtendLowI16x8U    => NumericInst.I32x4ExtendLowI16x8U,
+            SimdCode.I32x4ExtendHighI16x8U   => NumericInst.I32x4ExtendHighI16x8U,
+            SimdCode.I64x2ExtendLowI32x4S    => NumericInst.I64x2ExtendLowI32x4S,
+            SimdCode.I64x2ExtendHighI32x4S   => NumericInst.I64x2ExtendHighI32x4S,
+            SimdCode.I64x2ExtendLowI32x4U    => NumericInst.I64x2ExtendLowI32x4U,
+            SimdCode.I64x2ExtendHighI32x4U   => NumericInst.I64x2ExtendHighI32x4U,
             
             //VLaneOps
             SimdCode.I8x16ExtractLaneS => InstLaneOp.I8x16ExtractLaneS,
