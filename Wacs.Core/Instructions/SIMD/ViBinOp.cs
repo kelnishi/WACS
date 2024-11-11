@@ -6,31 +6,22 @@ namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst
     {
-        // Vector Integer (VI) Binary Operations
+        public static readonly NumericInst I8x16Add = new(SimdCode.I8x16Add, ExecuteI8x16Add, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I8x16Sub = new(SimdCode.I8x16Sub, ExecuteI8x16Sub, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
 
-        public static readonly NumericInst I8x16Add = new(SimdCode.I8x16Add, ExecuteI8x16Add,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I16x8Add = new(SimdCode.I16x8Add, ExecuteI16x8Add, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I16x8Sub = new(SimdCode.I16x8Sub, ExecuteI16x8Sub, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
 
-        public static readonly NumericInst I8x16Sub = new(SimdCode.I8x16Sub, ExecuteI8x16Sub,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I32x4Add = new(SimdCode.I32x4Add, ExecuteI32x4Add, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I32x4Sub = new(SimdCode.I32x4Sub, ExecuteI32x4Sub, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
 
-        public static readonly NumericInst I16x8Add = new(SimdCode.I16x8Add, ExecuteI16x8Add,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I64x2Add = new(SimdCode.I64x2Add, ExecuteI64x2Add, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I64x2Sub = new(SimdCode.I64x2Sub, ExecuteI64x2Sub, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
 
-        public static readonly NumericInst I16x8Sub = new(SimdCode.I16x8Sub, ExecuteI16x8Sub,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I16x8Mul = new(SimdCode.I16x8Mul, ExecuteI16x8Mul, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I32x4Mul = new(SimdCode.I32x4Mul, ExecuteI32x4Mul, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I64x2Mul = new(SimdCode.I64x2Mul, ExecuteI64x2Mul, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
 
-        public static readonly NumericInst I32x4Add = new(SimdCode.I32x4Add, ExecuteI32x4Add,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-
-        public static readonly NumericInst I32x4Sub = new(SimdCode.I32x4Sub, ExecuteI32x4Sub,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-
-        public static readonly NumericInst I64x2Add = new(SimdCode.I64x2Add, ExecuteI64x2Add,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-
-        public static readonly NumericInst I64x2Sub = new(SimdCode.I64x2Sub, ExecuteI64x2Sub,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
 
         // Execute methods
         private static void ExecuteI8x16Add(ExecContext context)
@@ -161,6 +152,47 @@ namespace Wacs.Core.Instructions.Numeric
             V128 result = new V128(
                 v1.I64x2_0 - v2.I64x2_0,
                 v1.I64x2_1 - v2.I64x2_1
+            );
+            context.OpStack.PushV128(result);
+        }
+
+        private static void ExecuteI16x8Mul(ExecContext context)
+        {
+            V128 v2 = context.OpStack.PopV128();
+            V128 v1 = context.OpStack.PopV128();
+            V128 result = new V128(
+                (short)(v1.I16x8_0 * v2.I16x8_0),
+                (short)(v1.I16x8_1 * v2.I16x8_1),
+                (short)(v1.I16x8_2 * v2.I16x8_2),
+                (short)(v1.I16x8_3 * v2.I16x8_3),
+                (short)(v1.I16x8_4 * v2.I16x8_4),
+                (short)(v1.I16x8_5 * v2.I16x8_5),
+                (short)(v1.I16x8_6 * v2.I16x8_6),
+                (short)(v1.I16x8_7 * v2.I16x8_7)
+            );
+            context.OpStack.PushV128(result);
+        }
+
+        private static void ExecuteI32x4Mul(ExecContext context)
+        {
+            V128 v2 = context.OpStack.PopV128();
+            V128 v1 = context.OpStack.PopV128();
+            V128 result = new V128(
+                v1.I32x4_0 * v2.I32x4_0,
+                v1.I32x4_1 * v2.I32x4_1,
+                v1.I32x4_2 * v2.I32x4_2,
+                v1.I32x4_3 * v2.I32x4_3
+            );
+            context.OpStack.PushV128(result);
+        }
+
+        private static void ExecuteI64x2Mul(ExecContext context)
+        {
+            V128 v2 = context.OpStack.PopV128();
+            V128 v1 = context.OpStack.PopV128();
+            V128 result = new V128(
+                v1.I64x2_0 * v2.I64x2_0,
+                v1.I64x2_1 * v2.I64x2_1
             );
             context.OpStack.PushV128(result);
         }

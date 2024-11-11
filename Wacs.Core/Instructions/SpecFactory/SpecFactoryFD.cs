@@ -56,22 +56,6 @@ namespace Wacs.Core.Instructions
             SimdCode.I32x4Neg    => NumericInst.I32x4Neg,
             SimdCode.I64x2Neg    => NumericInst.I64x2Neg,
             SimdCode.I8x16Popcnt => NumericInst.I8x16Popcnt,
-            
-            //VfUnOps
-            SimdCode.F32x4Abs      => NumericInst.F32x4Abs,
-            SimdCode.F64x2Abs      => NumericInst.F64x2Abs,
-            SimdCode.F32x4Neg      => NumericInst.F32x4Neg,
-            SimdCode.F64x2Neg      => NumericInst.F64x2Neg,
-            SimdCode.F32x4Sqrt     => NumericInst.F32x4Sqrt,
-            SimdCode.F64x2Sqrt     => NumericInst.F64x2Sqrt,
-            SimdCode.F32x4Ceil     => NumericInst.F32x4Ceil,
-            SimdCode.F64x2Ceil     => NumericInst.F64x2Ceil,
-            SimdCode.F32x4Floor    => NumericInst.F32x4Floor,
-            SimdCode.F64x2Floor    => NumericInst.F64x2Floor,
-            SimdCode.F32x4Trunc    => NumericInst.F32x4Trunc,
-            SimdCode.F64x2Trunc    => NumericInst.F64x2Trunc,
-            SimdCode.F32x4Nearest  => NumericInst.F32x4Nearest,
-            SimdCode.F64x2Nearest  => NumericInst.F64x2Nearest,
              
             //VvTernOp
             SimdCode.V128BitSelect => NumericInst.V128BitSelect,
@@ -146,6 +130,9 @@ namespace Wacs.Core.Instructions
             SimdCode.I32x4Sub       => NumericInst.I32x4Sub,
             SimdCode.I64x2Add       => NumericInst.I64x2Add,
             SimdCode.I64x2Sub       => NumericInst.I64x2Sub,
+            SimdCode.I16x8Mul       => NumericInst.I16x8Mul,
+            SimdCode.I32x4Mul       => NumericInst.I32x4Mul,
+            SimdCode.I64x2Mul       => NumericInst.I64x2Mul,
             
             //ViMinMaxOps
             SimdCode.I8x16MinS       => NumericInst.I8x16MinS,
@@ -160,6 +147,60 @@ namespace Wacs.Core.Instructions
             SimdCode.I16x8MaxU       => NumericInst.I16x8MaxU,
             SimdCode.I32x4MinU       => NumericInst.I32x4MinU,
             SimdCode.I32x4MaxU       => NumericInst.I32x4MaxU,
+            
+            //ViSatBinOps
+            SimdCode.I8x16AddSatS  => NumericInst.I8x16AddSatS,
+            SimdCode.I8x16AddSatU  => NumericInst.I8x16AddSatU,
+            SimdCode.I16x8AddSatS   => NumericInst.I16x8AddSatS,
+            SimdCode.I16x8AddSatU   => NumericInst.I16x8AddSatU,
+            
+            //ViShiftOps
+            SimdCode.I8x16Shl       => NumericInst.I8x16Shl,
+            SimdCode.I8x16ShrS      => NumericInst.I8x16ShrS,
+            SimdCode.I8x16ShrU      => NumericInst.I8x16ShrU,
+            SimdCode.I16x8Shl       => NumericInst.I16x8Shl,
+            SimdCode.I16x8ShrS      => NumericInst.I16x8ShrS,
+            SimdCode.I16x8ShrU      => NumericInst.I16x8ShrU,
+            SimdCode.I32x4Shl       => NumericInst.I32x4Shl,
+            SimdCode.I32x4ShrS      => NumericInst.I32x4ShrS,
+            SimdCode.I32x4ShrU      => NumericInst.I32x4ShrU,
+            SimdCode.I64x2Shl       => NumericInst.I64x2Shl,
+            SimdCode.I64x2ShrS      => NumericInst.I64x2ShrS,
+            SimdCode.I64x2ShrU      => NumericInst.I64x2ShrU,
+            
+            //VfUnOps
+            SimdCode.F32x4Abs      => NumericInst.F32x4Abs,
+            SimdCode.F64x2Abs      => NumericInst.F64x2Abs,
+            SimdCode.F32x4Neg      => NumericInst.F32x4Neg,
+            SimdCode.F64x2Neg      => NumericInst.F64x2Neg,
+            SimdCode.F32x4Sqrt     => NumericInst.F32x4Sqrt,
+            SimdCode.F64x2Sqrt     => NumericInst.F64x2Sqrt,
+            SimdCode.F32x4Ceil     => NumericInst.F32x4Ceil,
+            SimdCode.F64x2Ceil     => NumericInst.F64x2Ceil,
+            SimdCode.F32x4Floor    => NumericInst.F32x4Floor,
+            SimdCode.F64x2Floor    => NumericInst.F64x2Floor,
+            SimdCode.F32x4Trunc    => NumericInst.F32x4Trunc,
+            SimdCode.F64x2Trunc    => NumericInst.F64x2Trunc,
+            SimdCode.F32x4Nearest  => NumericInst.F32x4Nearest,
+            SimdCode.F64x2Nearest  => NumericInst.F64x2Nearest,
+            
+            //VfBinOps
+            SimdCode.F32x4Add       => NumericInst.F32x4Add,
+            SimdCode.F32x4Sub       => NumericInst.F32x4Sub,
+            SimdCode.F32x4Mul       => NumericInst.F32x4Mul,
+            SimdCode.F32x4Div       => NumericInst.F32x4Div,
+            SimdCode.F32x4Min       => NumericInst.F32x4Min,
+            SimdCode.F32x4Max       => NumericInst.F32x4Max,
+            SimdCode.F32x4PMin      => NumericInst.F32x4PMin,
+            SimdCode.F32x4PMax      => NumericInst.F32x4PMax,
+            SimdCode.F64x2Add       => NumericInst.F64x2Add,
+            SimdCode.F64x2Sub       => NumericInst.F64x2Sub,
+            SimdCode.F64x2Mul       => NumericInst.F64x2Mul,
+            SimdCode.F64x2Div       => NumericInst.F64x2Div,
+            SimdCode.F64x2Min       => NumericInst.F64x2Min,
+            SimdCode.F64x2Max       => NumericInst.F64x2Max,
+            SimdCode.F64x2PMin      => NumericInst.F64x2PMin,
+            SimdCode.F64x2PMax      => NumericInst.F64x2PMax,
             
             
             
