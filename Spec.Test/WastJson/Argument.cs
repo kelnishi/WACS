@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Wacs.Core.Runtime;
@@ -33,57 +34,67 @@ namespace Spec.Test.WastJson
                 _ => throw new ArgumentException($"Cannot parse value {Value} of type {Type}")
             };
 
+
         private Value ParseV128(object value)
         {
             if (value is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.Array)
             {
-                var arrayValues = new List<decimal>();
-                foreach (var item in jsonElement.EnumerateArray())
-                {
-                    arrayValues.Add(decimal.Parse(item.ToString()));
-                }
+                var strVals = jsonElement.EnumerateArray().Select(js => js.ToString()).ToList();
 
-                switch (arrayValues.Count)
+                switch (strVals.Count)
                 {
-                    case 2: return new Value(new V128(
-                        (ulong)arrayValues[0],
-                        (ulong)arrayValues[1]));
-                    case 4: return new Value(new V128(
-                        (uint)arrayValues[0],
-                        (uint)arrayValues[1],
-                        (uint)arrayValues[2],
-                        (uint)arrayValues[3]));
+                    case 2: return Parse2(strVals);
+                    case 4: return Parse4(strVals);
                     case 8: return new Value(new V128(
-                        (ushort)arrayValues[0],
-                        (ushort)arrayValues[1],
-                        (ushort)arrayValues[2],
-                        (ushort)arrayValues[3],
-                        (ushort)arrayValues[4],
-                        (ushort)arrayValues[5],
-                        (ushort)arrayValues[6],
-                        (ushort)arrayValues[7]));
+                        (ushort)BitBashInt(strVals[0]),
+                        (ushort)BitBashInt(strVals[1]),
+                        (ushort)BitBashInt(strVals[2]),
+                        (ushort)BitBashInt(strVals[3]),
+                        (ushort)BitBashInt(strVals[4]),
+                        (ushort)BitBashInt(strVals[5]),
+                        (ushort)BitBashInt(strVals[6]),
+                        (ushort)BitBashInt(strVals[7])));
                     case 16: return new Value(new V128(
-                        (byte)arrayValues[0],
-                        (byte)arrayValues[1],
-                        (byte)arrayValues[2],
-                        (byte)arrayValues[3],
-                        (byte)arrayValues[4],
-                        (byte)arrayValues[5],
-                        (byte)arrayValues[6],
-                        (byte)arrayValues[7],
-                        (byte)arrayValues[8],
-                        (byte)arrayValues[9],
-                        (byte)arrayValues[10],
-                        (byte)arrayValues[11],
-                        (byte)arrayValues[12],
-                        (byte)arrayValues[13],
-                        (byte)arrayValues[14],
-                        (byte)arrayValues[15]));
+                        (byte)BitBashInt(strVals[0x0]),
+                        (byte)BitBashInt(strVals[0x1]),
+                        (byte)BitBashInt(strVals[0x2]),
+                        (byte)BitBashInt(strVals[0x3]),
+                        (byte)BitBashInt(strVals[0x4]),
+                        (byte)BitBashInt(strVals[0x5]),
+                        (byte)BitBashInt(strVals[0x6]),
+                        (byte)BitBashInt(strVals[0x7]),
+                        (byte)BitBashInt(strVals[0x8]),
+                        (byte)BitBashInt(strVals[0x9]),
+                        (byte)BitBashInt(strVals[0xA]),
+                        (byte)BitBashInt(strVals[0xB]),
+                        (byte)BitBashInt(strVals[0xC]),
+                        (byte)BitBashInt(strVals[0xD]),
+                        (byte)BitBashInt(strVals[0xE]),
+                        (byte)BitBashInt(strVals[0xF])));
                     default:
                         throw new ArgumentException($"Invalid value in v128 array: {value}");
                 }
             }
             throw new ArgumentException($"Invalid value for v128: {value}");
+        }
+
+        private static Value Parse2(List<string> vals)
+        {
+            //Doubles
+            if (vals.Any(v=> v.Contains(":") || v.Contains(".")))
+            {
+                return new V128(BitBashDouble(vals[0]), BitBashDouble(vals[1]));
+            }
+            return new V128(BitBashLong(vals[0]), BitBashLong(vals[1]));
+        }
+
+        private static Value Parse4(List<string> vals)
+        {
+            if (vals.Any(v=> v.Contains(":") || v.Contains(".")))
+            {
+                return new V128(BitBashFloat(vals[0]), BitBashFloat(vals[1]),BitBashFloat(vals[2]), BitBashFloat(vals[3]));
+            }
+            return new V128(BitBashInt(vals[0]), BitBashInt(vals[1]),BitBashInt(vals[2]), BitBashInt(vals[3]));
         }
 
         private static uint BitBashInt(string intVal)
@@ -95,6 +106,29 @@ namespace Spec.Test.WastJson
                 throw new InvalidDataException($"Integer value {intVal} out of range");
 
             return (uint)value;
+        }
+
+        private static float BitBashFloat(string intval)
+        {
+            if (intval.StartsWith("nan:"))
+                return float.NaN;
+            
+            uint v = uint.Parse(intval);
+            return BitConverter.ToSingle(BitConverter.GetBytes(v));
+        }
+
+        private static ulong BitBashLong(string longval)
+        {
+            return ulong.Parse(longval);
+        }
+
+        private static double BitBashDouble(string longval)
+        {
+            if (longval.StartsWith("nan:"))
+                return double.NaN;
+            
+            ulong v = ulong.Parse(longval);
+            return BitConverter.ToDouble(BitConverter.GetBytes(v));
         }
 
         public override string ToString() => $"{Type}={Value}";
