@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 
 // ReSharper disable InconsistentNaming
 
@@ -293,7 +294,25 @@ namespace Wacs.Core.Runtime
             0xF => U8x16_F,
             _ => throw new ArgumentOutOfRangeException($"Cannot get byte index {index} of MV128")
         };
-        
+        public sbyte this[sbyte index] => index switch {
+            0x0 => I8x16_0,
+            0x1 => I8x16_1,
+            0x2 => I8x16_2,
+            0x3 => I8x16_3,
+            0x4 => I8x16_4,
+            0x5 => I8x16_5,
+            0x6 => I8x16_6,
+            0x7 => I8x16_7,
+            0x8 => I8x16_8,
+            0x9 => I8x16_9,
+            0xA => I8x16_A,
+            0xB => I8x16_B,
+            0xC => I8x16_C,
+            0xD => I8x16_D,
+            0xE => I8x16_E,
+            0xF => I8x16_F,
+            _ => throw new ArgumentOutOfRangeException($"Cannot get byte index {index} of MV128")
+        };
         
         public short this[short index] => index switch {
             0x0 => I16x8_0,
@@ -306,13 +325,30 @@ namespace Wacs.Core.Runtime
             0x7 => I16x8_7,
             _ => throw new ArgumentOutOfRangeException($"Cannot get i16 index {index} of MV128")
         };
-        
+        public ushort this[ushort index] => index switch {
+            0x0 => U16x8_0,
+            0x1 => U16x8_1,
+            0x2 => U16x8_2,
+            0x3 => U16x8_3,
+            0x4 => U16x8_4,
+            0x5 => U16x8_5,
+            0x6 => U16x8_6,
+            0x7 => U16x8_7,
+            _ => throw new ArgumentOutOfRangeException($"Cannot get i16 index {index} of MV128")
+        };
         
         public int this[int index] => index switch {
             0x0 => I32x4_0,
             0x1 => I32x4_1,
             0x2 => I32x4_2,
             0x3 => I32x4_3,
+            _ => throw new ArgumentOutOfRangeException($"Cannot get i32 index {index} of MV128")
+        };
+        public uint this[uint index] => index switch {
+            0x0 => U32x4_0,
+            0x1 => U32x4_1,
+            0x2 => U32x4_2,
+            0x3 => U32x4_3,
             _ => throw new ArgumentOutOfRangeException($"Cannot get i32 index {index} of MV128")
         };
         
@@ -353,6 +389,21 @@ namespace Wacs.Core.Runtime
         
         public static V128 operator ~(V128 value) =>
             new(~value.U64x2_0, ~value.U64x2_1);
+        
+        public override string ToString()
+        {
+            var stringBuilder = new StringBuilder("0x");
+            for (byte i = 0; i < 16; i++)
+            {
+                stringBuilder.Append(this[i].ToString("X2"));
+                if ((i + 1) % 4 == 0 && i < 16 - 1)
+                {
+                    stringBuilder.Append('_');
+                }
+            }
+
+            return stringBuilder.ToString();
+        }
         
     }
 
@@ -480,6 +531,50 @@ namespace Wacs.Core.Runtime
                 }
             }
         }
+        public sbyte this[sbyte index]
+        {
+            get => index switch {
+                0x0 => I8x16_0,
+                0x1 => I8x16_1,
+                0x2 => I8x16_2,
+                0x3 => I8x16_3,
+                0x4 => I8x16_4,
+                0x5 => I8x16_5,
+                0x6 => I8x16_6,
+                0x7 => I8x16_7,
+                0x8 => I8x16_8,
+                0x9 => I8x16_9,
+                0xA => I8x16_A,
+                0xB => I8x16_B,
+                0xC => I8x16_C,
+                0xD => I8x16_D,
+                0xE => I8x16_E,
+                0xF => I8x16_F,
+                _ => throw new ArgumentOutOfRangeException($"Cannot get byte index {index} of MV128")
+            };
+            set {
+                switch (index)
+                {
+                    case 0x0: I8x16_0 = value; break;
+                    case 0x1: I8x16_1 = value; break;
+                    case 0x2: I8x16_2 = value; break;
+                    case 0x3: I8x16_3 = value; break;
+                    case 0x4: I8x16_4 = value; break;
+                    case 0x5: I8x16_5 = value; break;
+                    case 0x6: I8x16_6 = value; break;
+                    case 0x7: I8x16_7 = value; break;
+                    case 0x8: I8x16_8 = value; break;
+                    case 0x9: I8x16_9 = value; break;
+                    case 0xA: I8x16_A = value; break;
+                    case 0xB: I8x16_B = value; break;
+                    case 0xC: I8x16_C = value; break;
+                    case 0xD: I8x16_D = value; break;
+                    case 0xE: I8x16_E = value; break;
+                    case 0xF: I8x16_F = value; break;
+                    default: throw new ArgumentOutOfRangeException($"Cannot get byte index {index} of MV128");
+                }
+            }
+        }
         
         public short this[short index]
         {
@@ -509,6 +604,34 @@ namespace Wacs.Core.Runtime
                 }
             }
         }
+        public ushort this[ushort index]
+        {
+            get => index switch {
+                0x0 => U16x8_0,
+                0x1 => U16x8_1,
+                0x2 => U16x8_2,
+                0x3 => U16x8_3,
+                0x4 => U16x8_4,
+                0x5 => U16x8_5,
+                0x6 => U16x8_6,
+                0x7 => U16x8_7,
+                _ => throw new ArgumentOutOfRangeException($"Cannot get i16 index {index} of MV128")
+            };
+            set {
+                switch (index)
+                {
+                    case 0x0: U16x8_0 = value; break;
+                    case 0x1: U16x8_1 = value; break;
+                    case 0x2: U16x8_2 = value; break;
+                    case 0x3: U16x8_3 = value; break;
+                    case 0x4: U16x8_4 = value; break;
+                    case 0x5: U16x8_5 = value; break;
+                    case 0x6: U16x8_6 = value; break;
+                    case 0x7: U16x8_7 = value; break;
+                    default: throw new ArgumentOutOfRangeException($"Cannot get i16 index {index} of MV128");
+                }
+            }
+        }
         
         public int this[int index]
         {
@@ -526,6 +649,26 @@ namespace Wacs.Core.Runtime
                     case 0x1: I32x4_1 = value; break;
                     case 0x2: I32x4_2 = value; break;
                     case 0x3: I32x4_3 = value; break;
+                    default: throw new ArgumentOutOfRangeException($"Cannot get i32 index {index} of MV128");
+                }
+            }
+        }
+        public uint this[uint index]
+        {
+            get => index switch {
+                0x0 => U32x4_0,
+                0x1 => U32x4_1,
+                0x2 => U32x4_2,
+                0x3 => U32x4_3,
+                _ => throw new ArgumentOutOfRangeException($"Cannot get i32 index {index} of MV128")
+            };
+            set {
+                switch (index)
+                {
+                    case 0x0: U32x4_0 = value; break;
+                    case 0x1: U32x4_1 = value; break;
+                    case 0x2: U32x4_2 = value; break;
+                    case 0x3: U32x4_3 = value; break;
                     default: throw new ArgumentOutOfRangeException($"Cannot get i32 index {index} of MV128");
                 }
             }

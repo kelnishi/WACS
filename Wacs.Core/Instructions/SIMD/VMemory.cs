@@ -153,7 +153,7 @@ namespace Wacs.Core.Instructions.SIMD
         {
             context.Assert(context.Mems.Contains((MemIdx)0),
                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(M.Align <= WidthN.ByteSize(),
+            context.Assert(M.AlignBytes <= WidthN.ByteSize(),
                 $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align} <= {BitWidth.V128}/8");
 
             context.OpStack.PopI32();
