@@ -50,7 +50,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I32x4DotI16x8S = new (SimdCode.I32x4DotI16x8S, ExecuteI32x4DotI16x8S, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
 
         public static readonly NumericInst I16x8Q15MulRSatS = new(SimdCode.I16x8Q15MulRSatS, ExecuteI16x8Q15MulRSatS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        // public static readonly NumericInst I8x16Swizzle = new(SimdCode.I8x16Swizzle, ExecuteI8x16Swizzle, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I8x16Swizzle = new(SimdCode.I8x16Swizzle, ExecuteI8x16Swizzle, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
 
 
         //extadd_pairwise 8/16
@@ -538,27 +538,15 @@ namespace Wacs.Core.Instructions.Numeric
         // @Spec 4.4.3.6. i8x16.swizzle
         private static void ExecuteI8x16Swizzle(ExecContext context)
         {
-            // V128 c2 = context.OpStack.PopV128();
-            // V128 c1 = context.OpStack.PopV128();
-            // V128 result = new V128(
-            //     c1[(byte)(c2.U8x16_0 & 0x0F)],
-            //     c1[(byte)(c2.U8x16_1 & 0x0F)],
-            //     c1[(byte)(c2.U8x16_2 & 0x0F)],
-            //     c1[(byte)(c2.U8x16_3 & 0x0F)],
-            //     c1[(byte)(c2.U8x16_4 & 0x0F)],
-            //     c1[(byte)(c2.U8x16_5 & 0x0F)],
-            //     c1[(byte)(c2.U8x16_6 & 0x0F)],
-            //     c1[(byte)(c2.U8x16_7 & 0x0F)],
-            //     c1[(byte)(c2.U8x16_8 & 0x0F)],
-            //     c1[(byte)(c2.U8x16_9 & 0x0F)],
-            //     c1[(byte)(c2.U8x16_A & 0x0F)],
-            //     c1[(byte)(c2.U8x16_B & 0x0F)],
-            //     c1[(byte)(c2.U8x16_C & 0x0F)],
-            //     c1[(byte)(c2.U8x16_D & 0x0F)],
-            //     c1[(byte)(c2.U8x16_E & 0x0F)],
-            //     c1[(byte)(c2.U8x16_F & 0x0F)]
-            // );
-            // context.OpStack.PushV128(result);
+            V128 c2 = context.OpStack.PopV128();
+            V128 c1 = context.OpStack.PopV128();
+            MV128 result = new();
+            for (byte i = 0; i < 16; ++i)
+            {
+                byte index = c2[i];
+                result[i] = index >= 16 ? (byte)0 : c1[index];
+            }
+            context.OpStack.PushV128(result);
         }
     }
     

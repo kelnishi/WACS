@@ -1,4 +1,3 @@
-using System;
 using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -31,7 +30,15 @@ namespace Wacs.Core.Instructions
         /// <param name="context"></param>
         public override void Execute(ExecContext context)
         {
-            throw new NotImplementedException("Shuffle Not Yet Implemented");
+            V128 b = context.OpStack.PopV128();
+            V128 a = context.OpStack.PopV128();
+            MV128 result = new();
+            for (byte i = 0; i < 16; ++i)
+            {
+                byte laneIndex = X[i];
+                result[i] = laneIndex < 16 ? a[laneIndex] : b[(byte)(laneIndex - 16)];
+            }
+            context.OpStack.PushV128(result);
         }
 
         public static V128 ParseLanes(BinaryReader reader) => 

@@ -243,8 +243,8 @@ namespace Wacs.Core.Instructions
             SimdCode.F64x2Splat       => NumericInst.F64x2Splat,
             
             //ViReorderOps
-            // SimdCode.I8x16Shuffle     => new InstShuffleOp(),
-            // SimdCode.I8x16Swizzle     => NumericInst.I8x16Swizzle,
+            SimdCode.I8x16Shuffle     => new InstShuffleOp(),
+            SimdCode.I8x16Swizzle     => NumericInst.I8x16Swizzle,
             
             //VfConvert
             SimdCode.F32x4ConvertI32x4S    => NumericInst.F32x4ConvertI32x4S,
