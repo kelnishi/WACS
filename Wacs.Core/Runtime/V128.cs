@@ -316,6 +316,13 @@ namespace Wacs.Core.Runtime
             _ => throw new ArgumentOutOfRangeException($"Cannot get i32 index {index} of MV128")
         };
         
+        public float this[float index] => index switch {
+            0f => F32x4_0,
+            1f => F32x4_1,
+            2f => F32x4_2,
+            3f => F32x4_3,
+            _ => throw new ArgumentOutOfRangeException($"Cannot get float index {index} of MV128")
+        };
         
         public long this[long index]=> index switch {
             0x0 => I64x2_0,
@@ -323,11 +330,16 @@ namespace Wacs.Core.Runtime
             _ => throw new ArgumentOutOfRangeException($"Cannot get i64 index {index} of MV128")
         };
         
-        
         public ulong this[ulong index] => index switch {
             0x0 => U64x2_0,
             0x1 => U64x2_1,
             _ => throw new ArgumentOutOfRangeException($"Cannot get i64 index {index} of MV128")
+        };
+        
+        public double this[double index] => index switch {
+            0.0 => F64x2_0,
+            1.0 => F64x2_1,
+            _ => throw new ArgumentOutOfRangeException($"Cannot get double index {index} of MV128")
         };
         
         public static V128 operator &(V128 left, V128 right) =>
@@ -519,6 +531,28 @@ namespace Wacs.Core.Runtime
             }
         }
         
+        public float this[float index]
+        {
+            get => index switch
+            {
+                0f => F32x4_0,
+                1f => F32x4_1,
+                2f => F32x4_2,
+                3f => F32x4_3,
+                _ => throw new ArgumentOutOfRangeException($"Cannot get float index {index} of MV128")
+            };
+            set {
+                switch (index)
+                {
+                    case 0f: F32x4_0 = value; break;
+                    case 1f: F32x4_1 = value; break;
+                    case 2f: F32x4_2 = value; break;
+                    case 3f: F32x4_3 = value; break;
+                    default: throw new ArgumentOutOfRangeException($"Cannot set float index {index} of MV128");
+                }
+            }
+        }
+
         public long this[long index]
         {
             get => index switch {
@@ -549,6 +583,24 @@ namespace Wacs.Core.Runtime
                     case 0x0: U64x2_0 = value; break;
                     case 0x1: U64x2_1 = value; break;
                     default: throw new ArgumentOutOfRangeException($"Cannot get i64 index {index} of MV128");
+                }
+            }
+        }
+        
+        public double this[double index]
+        {
+            get => index switch
+            {
+                0.0 => F64x2_0,
+                1.0 => F64x2_1,
+                _ => throw new ArgumentOutOfRangeException($"Cannot get double index {index} of MV128")
+            };
+            set {
+                switch (index)
+                {
+                    case 0.0: F64x2_0 = value; break;
+                    case 1.0: F64x2_1 = value; break;
+                    default: throw new ArgumentOutOfRangeException($"Cannot set double index {index} of MV128");
                 }
             }
         }
