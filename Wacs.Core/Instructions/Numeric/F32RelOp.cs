@@ -1,4 +1,3 @@
-using System;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -24,21 +23,6 @@ namespace Wacs.Core.Instructions.Numeric
 
         public static readonly NumericInst F32Ge = new(OpCode.F32Ge, ExecuteF32Ge,
             ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
-
-        private static int CompareF32(float i1, float i2, double epsilon)
-        {
-            int result = 0;
-
-            if (float.IsFinite(i1) && float.IsFinite(i2))
-                result = Math.Abs(i1 - i2) < epsilon ? 1 : 0;
-            else
-                result = i1 == i2 ? 1 : 0 ;
-            
-            if (float.IsNaN(i1) || float.IsNaN(i2))
-                result = 0;
-
-            return result;
-        }
 
         private static void ExecuteF32Eq(ExecContext context)
         {

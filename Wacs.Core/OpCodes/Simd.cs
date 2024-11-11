@@ -108,7 +108,7 @@ namespace Wacs.Core.OpCodes
         [OpCode("f64x2.promote_low_f32x4")]       F64x2PromoteLowF32x4      = 0x5F,
         [OpCode("i8x16.abs")]                     I8x16Abs                  = 0x60,
         [OpCode("i8x16.neg")]                     I8x16Neg                  = 0x61,
-        [OpCode("i8x16.popcnt")]                  I8x16PopCnt               = 0x62,
+        [OpCode("i8x16.popcnt")]                  I8x16Popcnt               = 0x62,
         [OpCode("i8x16.all_true")]                I8x16AllTrue              = 0x63,
         [OpCode("i8x16.bitmask")]                 I8x16Bitmask              = 0x64,
         [OpCode("i8x16.narrow_i16x8_s")]          I8x16NarrowI16x8S         = 0x65,

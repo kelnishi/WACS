@@ -2,6 +2,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
+// ReSharper disable InconsistentNaming
 namespace Wacs.Core.Instructions.Numeric
 {
     // @Spec 4.4.3.13 txN.vrelop

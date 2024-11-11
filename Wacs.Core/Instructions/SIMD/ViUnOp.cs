@@ -17,6 +17,8 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I32x4Neg     = new (SimdCode.I32x4Neg     , ExecuteI32x4Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
         public static readonly NumericInst I64x2Neg     = new (SimdCode.I64x2Neg     , ExecuteI64x2Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
 
+        public static readonly NumericInst I8x16Popcnt  = new (SimdCode.I8x16Popcnt  , ExecuteI8x16Popcnt , ValidateOperands(pop: ValType.V128, push: ValType.V128));
+
         private static void ExecuteI8x16Abs(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
@@ -138,6 +140,40 @@ namespace Wacs.Core.Instructions.Numeric
                 val.I64x2_1 == long.MinValue ? long.MinValue : -val.I64x2_1
             );
             context.OpStack.PushV128(result);
+        }
+
+        private static void ExecuteI8x16Popcnt(ExecContext context)
+        {
+            V128 val = context.OpStack.PopV128();
+            V128 result = new V128(
+                PopCount(val.I8x16_0),
+                PopCount(val.I8x16_1),
+                PopCount(val.I8x16_2),
+                PopCount(val.I8x16_3),
+                PopCount(val.I8x16_4),
+                PopCount(val.I8x16_5),
+                PopCount(val.I8x16_6),
+                PopCount(val.I8x16_7),
+                PopCount(val.I8x16_8),
+                PopCount(val.I8x16_9),
+                PopCount(val.I8x16_A),
+                PopCount(val.I8x16_B),
+                PopCount(val.I8x16_C),
+                PopCount(val.I8x16_D),
+                PopCount(val.I8x16_E),
+                PopCount(val.I8x16_F)
+            );
+            context.OpStack.PushV128(result);
+        }
+
+        private static byte PopCount(sbyte value)
+        {
+            byte count = 0;
+            for (int i = 0; i < 8; i++)
+            {
+                count += (byte)((value >> i) & 1);
+            }
+            return count;
         }
     }
 }
