@@ -123,22 +123,22 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i8x16.eq failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.U8x16_0 == c2.U8x16_0 ? (byte)1 : (byte)0,
-                c1.U8x16_1 == c2.U8x16_1 ? (byte)1 : (byte)0,
-                c1.U8x16_2 == c2.U8x16_2 ? (byte)1 : (byte)0,
-                c1.U8x16_3 == c2.U8x16_3 ? (byte)1 : (byte)0,
-                c1.U8x16_4 == c2.U8x16_4 ? (byte)1 : (byte)0,
-                c1.U8x16_5 == c2.U8x16_5 ? (byte)1 : (byte)0,
-                c1.U8x16_6 == c2.U8x16_6 ? (byte)1 : (byte)0,
-                c1.U8x16_7 == c2.U8x16_7 ? (byte)1 : (byte)0,
-                c1.U8x16_8 == c2.U8x16_8 ? (byte)1 : (byte)0,
-                c1.U8x16_9 == c2.U8x16_9 ? (byte)1 : (byte)0,
-                c1.U8x16_A == c2.U8x16_A ? (byte)1 : (byte)0,
-                c1.U8x16_B == c2.U8x16_B ? (byte)1 : (byte)0,
-                c1.U8x16_C == c2.U8x16_C ? (byte)1 : (byte)0,
-                c1.U8x16_D == c2.U8x16_D ? (byte)1 : (byte)0,
-                c1.U8x16_E == c2.U8x16_E ? (byte)1 : (byte)0,
-                c1.U8x16_F == c2.U8x16_F ? (byte)1 : (byte)0);
+                c1.U8x16_0 == c2.U8x16_0 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_1 == c2.U8x16_1 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_2 == c2.U8x16_2 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_3 == c2.U8x16_3 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_4 == c2.U8x16_4 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_5 == c2.U8x16_5 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_6 == c2.U8x16_6 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_7 == c2.U8x16_7 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_8 == c2.U8x16_8 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_9 == c2.U8x16_9 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_A == c2.U8x16_A ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_B == c2.U8x16_B ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_C == c2.U8x16_C ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_D == c2.U8x16_D ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_E == c2.U8x16_E ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_F == c2.U8x16_F ? (sbyte)-1 : (sbyte)0);
             context.OpStack.PushV128(c);
         }
 
@@ -149,22 +149,22 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i8x16.eq failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.U8x16_0 != c2.U8x16_0 ? (byte)1 : (byte)0,
-                c1.U8x16_1 != c2.U8x16_1 ? (byte)1 : (byte)0,
-                c1.U8x16_2 != c2.U8x16_2 ? (byte)1 : (byte)0,
-                c1.U8x16_3 != c2.U8x16_3 ? (byte)1 : (byte)0,
-                c1.U8x16_4 != c2.U8x16_4 ? (byte)1 : (byte)0,
-                c1.U8x16_5 != c2.U8x16_5 ? (byte)1 : (byte)0,
-                c1.U8x16_6 != c2.U8x16_6 ? (byte)1 : (byte)0,
-                c1.U8x16_7 != c2.U8x16_7 ? (byte)1 : (byte)0,
-                c1.U8x16_8 != c2.U8x16_8 ? (byte)1 : (byte)0,
-                c1.U8x16_9 != c2.U8x16_9 ? (byte)1 : (byte)0,
-                c1.U8x16_A != c2.U8x16_A ? (byte)1 : (byte)0,
-                c1.U8x16_B != c2.U8x16_B ? (byte)1 : (byte)0,
-                c1.U8x16_C != c2.U8x16_C ? (byte)1 : (byte)0,
-                c1.U8x16_D != c2.U8x16_D ? (byte)1 : (byte)0,
-                c1.U8x16_E != c2.U8x16_E ? (byte)1 : (byte)0,
-                c1.U8x16_F != c2.U8x16_F ? (byte)1 : (byte)0);
+                c1.U8x16_0 != c2.U8x16_0 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_1 != c2.U8x16_1 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_2 != c2.U8x16_2 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_3 != c2.U8x16_3 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_4 != c2.U8x16_4 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_5 != c2.U8x16_5 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_6 != c2.U8x16_6 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_7 != c2.U8x16_7 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_8 != c2.U8x16_8 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_9 != c2.U8x16_9 ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_A != c2.U8x16_A ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_B != c2.U8x16_B ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_C != c2.U8x16_C ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_D != c2.U8x16_D ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_E != c2.U8x16_E ? (sbyte)-1 : (sbyte)0,
+                c1.U8x16_F != c2.U8x16_F ? (sbyte)-1 : (sbyte)0);
             context.OpStack.PushV128(c);
         }
 
@@ -175,22 +175,22 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i8x16.lt_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I8x16_0 < c2.I8x16_0 ? (byte)1 : (byte)0,
-                c1.I8x16_1 < c2.I8x16_1 ? (byte)1 : (byte)0,
-                c1.I8x16_2 < c2.I8x16_2 ? (byte)1 : (byte)0,
-                c1.I8x16_3 < c2.I8x16_3 ? (byte)1 : (byte)0,
-                c1.I8x16_4 < c2.I8x16_4 ? (byte)1 : (byte)0,
-                c1.I8x16_5 < c2.I8x16_5 ? (byte)1 : (byte)0,
-                c1.I8x16_6 < c2.I8x16_6 ? (byte)1 : (byte)0,
-                c1.I8x16_7 < c2.I8x16_7 ? (byte)1 : (byte)0,
-                c1.I8x16_8 < c2.I8x16_8 ? (byte)1 : (byte)0,
-                c1.I8x16_9 < c2.I8x16_9 ? (byte)1 : (byte)0,
-                c1.I8x16_A < c2.I8x16_A ? (byte)1 : (byte)0,
-                c1.I8x16_B < c2.I8x16_B ? (byte)1 : (byte)0,
-                c1.I8x16_C < c2.I8x16_C ? (byte)1 : (byte)0,
-                c1.I8x16_D < c2.I8x16_D ? (byte)1 : (byte)0,
-                c1.I8x16_E < c2.I8x16_E ? (byte)1 : (byte)0,
-                c1.I8x16_F < c2.I8x16_F ? (byte)1 : (byte)0);
+                c1.I8x16_0 < c2.I8x16_0 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_1 < c2.I8x16_1 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_2 < c2.I8x16_2 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_3 < c2.I8x16_3 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_4 < c2.I8x16_4 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_5 < c2.I8x16_5 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_6 < c2.I8x16_6 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_7 < c2.I8x16_7 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_8 < c2.I8x16_8 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_9 < c2.I8x16_9 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_A < c2.I8x16_A ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_B < c2.I8x16_B ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_C < c2.I8x16_C ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_D < c2.I8x16_D ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_E < c2.I8x16_E ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_F < c2.I8x16_F ? (sbyte)-1 : (sbyte)0);
             context.OpStack.PushV128(c);
         }
 
@@ -201,22 +201,22 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i8x16.lt_u failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                (c1.U8x16_0 < c2.U8x16_0) ? (byte)1 : (byte)0,
-                (c1.U8x16_1 < c2.U8x16_1) ? (byte)1 : (byte)0,
-                (c1.U8x16_2 < c2.U8x16_2) ? (byte)1 : (byte)0,
-                (c1.U8x16_3 < c2.U8x16_3) ? (byte)1 : (byte)0,
-                (c1.U8x16_4 < c2.U8x16_4) ? (byte)1 : (byte)0,
-                (c1.U8x16_5 < c2.U8x16_5) ? (byte)1 : (byte)0,
-                (c1.U8x16_6 < c2.U8x16_6) ? (byte)1 : (byte)0,
-                (c1.U8x16_7 < c2.U8x16_7) ? (byte)1 : (byte)0,
-                (c1.U8x16_8 < c2.U8x16_8) ? (byte)1 : (byte)0,
-                (c1.U8x16_9 < c2.U8x16_9) ? (byte)1 : (byte)0,
-                (c1.U8x16_A < c2.U8x16_A) ? (byte)1 : (byte)0,
-                (c1.U8x16_B < c2.U8x16_B) ? (byte)1 : (byte)0,
-                (c1.U8x16_C < c2.U8x16_C) ? (byte)1 : (byte)0,
-                (c1.U8x16_D < c2.U8x16_D) ? (byte)1 : (byte)0,
-                (c1.U8x16_E < c2.U8x16_E) ? (byte)1 : (byte)0,
-                (c1.U8x16_F < c2.U8x16_F) ? (byte)1 : (byte)0);
+                (c1.U8x16_0 < c2.U8x16_0) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_1 < c2.U8x16_1) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_2 < c2.U8x16_2) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_3 < c2.U8x16_3) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_4 < c2.U8x16_4) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_5 < c2.U8x16_5) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_6 < c2.U8x16_6) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_7 < c2.U8x16_7) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_8 < c2.U8x16_8) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_9 < c2.U8x16_9) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_A < c2.U8x16_A) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_B < c2.U8x16_B) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_C < c2.U8x16_C) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_D < c2.U8x16_D) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_E < c2.U8x16_E) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_F < c2.U8x16_F) ? (sbyte)-1 : (sbyte)0);
             context.OpStack.PushV128(c);
         }
 
@@ -227,22 +227,22 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i8x16.gt_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I8x16_0 > c2.I8x16_0 ? (byte)1 : (byte)0,
-                c1.I8x16_1 > c2.I8x16_1 ? (byte)1 : (byte)0,
-                c1.I8x16_2 > c2.I8x16_2 ? (byte)1 : (byte)0,
-                c1.I8x16_3 > c2.I8x16_3 ? (byte)1 : (byte)0,
-                c1.I8x16_4 > c2.I8x16_4 ? (byte)1 : (byte)0,
-                c1.I8x16_5 > c2.I8x16_5 ? (byte)1 : (byte)0,
-                c1.I8x16_6 > c2.I8x16_6 ? (byte)1 : (byte)0,
-                c1.I8x16_7 > c2.I8x16_7 ? (byte)1 : (byte)0,
-                c1.I8x16_8 > c2.I8x16_8 ? (byte)1 : (byte)0,
-                c1.I8x16_9 > c2.I8x16_9 ? (byte)1 : (byte)0,
-                c1.I8x16_A > c2.I8x16_A ? (byte)1 : (byte)0,
-                c1.I8x16_B > c2.I8x16_B ? (byte)1 : (byte)0,
-                c1.I8x16_C > c2.I8x16_C ? (byte)1 : (byte)0,
-                c1.I8x16_D > c2.I8x16_D ? (byte)1 : (byte)0,
-                c1.I8x16_E > c2.I8x16_E ? (byte)1 : (byte)0,
-                c1.I8x16_F > c2.I8x16_F ? (byte)1 : (byte)0);
+                c1.I8x16_0 > c2.I8x16_0 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_1 > c2.I8x16_1 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_2 > c2.I8x16_2 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_3 > c2.I8x16_3 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_4 > c2.I8x16_4 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_5 > c2.I8x16_5 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_6 > c2.I8x16_6 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_7 > c2.I8x16_7 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_8 > c2.I8x16_8 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_9 > c2.I8x16_9 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_A > c2.I8x16_A ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_B > c2.I8x16_B ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_C > c2.I8x16_C ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_D > c2.I8x16_D ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_E > c2.I8x16_E ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_F > c2.I8x16_F ? (sbyte)-1 : (sbyte)0);
             context.OpStack.PushV128(c);
         }
 
@@ -253,22 +253,22 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i8x16.gt_u failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                (c1.U8x16_0 > c2.U8x16_0) ? (byte)1 : (byte)0,
-                (c1.U8x16_1 > c2.U8x16_1) ? (byte)1 : (byte)0,
-                (c1.U8x16_2 > c2.U8x16_2) ? (byte)1 : (byte)0,
-                (c1.U8x16_3 > c2.U8x16_3) ? (byte)1 : (byte)0,
-                (c1.U8x16_4 > c2.U8x16_4) ? (byte)1 : (byte)0,
-                (c1.U8x16_5 > c2.U8x16_5) ? (byte)1 : (byte)0,
-                (c1.U8x16_6 > c2.U8x16_6) ? (byte)1 : (byte)0,
-                (c1.U8x16_7 > c2.U8x16_7) ? (byte)1 : (byte)0,
-                (c1.U8x16_8 > c2.U8x16_8) ? (byte)1 : (byte)0,
-                (c1.U8x16_9 > c2.U8x16_9) ? (byte)1 : (byte)0,
-                (c1.U8x16_A > c2.U8x16_A) ? (byte)1 : (byte)0,
-                (c1.U8x16_B > c2.U8x16_B) ? (byte)1 : (byte)0,
-                (c1.U8x16_C > c2.U8x16_C) ? (byte)1 : (byte)0,
-                (c1.U8x16_D > c2.U8x16_D) ? (byte)1 : (byte)0,
-                (c1.U8x16_E > c2.U8x16_E) ? (byte)1 : (byte)0,
-                (c1.U8x16_F > c2.U8x16_F) ? (byte)1 : (byte)0);
+                (c1.U8x16_0 > c2.U8x16_0) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_1 > c2.U8x16_1) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_2 > c2.U8x16_2) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_3 > c2.U8x16_3) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_4 > c2.U8x16_4) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_5 > c2.U8x16_5) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_6 > c2.U8x16_6) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_7 > c2.U8x16_7) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_8 > c2.U8x16_8) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_9 > c2.U8x16_9) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_A > c2.U8x16_A) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_B > c2.U8x16_B) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_C > c2.U8x16_C) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_D > c2.U8x16_D) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_E > c2.U8x16_E) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_F > c2.U8x16_F) ? (sbyte)-1 : (sbyte)0);
             context.OpStack.PushV128(c);
         }
 
@@ -279,22 +279,22 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i8x16.le_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I8x16_0 <= c2.I8x16_0 ? (byte)1 : (byte)0,
-                c1.I8x16_1 <= c2.I8x16_1 ? (byte)1 : (byte)0,
-                c1.I8x16_2 <= c2.I8x16_2 ? (byte)1 : (byte)0,
-                c1.I8x16_3 <= c2.I8x16_3 ? (byte)1 : (byte)0,
-                c1.I8x16_4 <= c2.I8x16_4 ? (byte)1 : (byte)0,
-                c1.I8x16_5 <= c2.I8x16_5 ? (byte)1 : (byte)0,
-                c1.I8x16_6 <= c2.I8x16_6 ? (byte)1 : (byte)0,
-                c1.I8x16_7 <= c2.I8x16_7 ? (byte)1 : (byte)0,
-                c1.I8x16_8 <= c2.I8x16_8 ? (byte)1 : (byte)0,
-                c1.I8x16_9 <= c2.I8x16_9 ? (byte)1 : (byte)0,
-                c1.I8x16_A <= c2.I8x16_A ? (byte)1 : (byte)0,
-                c1.I8x16_B <= c2.I8x16_B ? (byte)1 : (byte)0,
-                c1.I8x16_C <= c2.I8x16_C ? (byte)1 : (byte)0,
-                c1.I8x16_D <= c2.I8x16_D ? (byte)1 : (byte)0,
-                c1.I8x16_E <= c2.I8x16_E ? (byte)1 : (byte)0,
-                c1.I8x16_F <= c2.I8x16_F ? (byte)1 : (byte)0);
+                c1.I8x16_0 <= c2.I8x16_0 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_1 <= c2.I8x16_1 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_2 <= c2.I8x16_2 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_3 <= c2.I8x16_3 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_4 <= c2.I8x16_4 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_5 <= c2.I8x16_5 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_6 <= c2.I8x16_6 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_7 <= c2.I8x16_7 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_8 <= c2.I8x16_8 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_9 <= c2.I8x16_9 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_A <= c2.I8x16_A ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_B <= c2.I8x16_B ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_C <= c2.I8x16_C ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_D <= c2.I8x16_D ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_E <= c2.I8x16_E ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_F <= c2.I8x16_F ? (sbyte)-1 : (sbyte)0);
             context.OpStack.PushV128(c);
         }
 
@@ -305,22 +305,22 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i8x16.le_u failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                (c1.U8x16_0 <= c2.U8x16_0) ? (byte)1 : (byte)0,
-                (c1.U8x16_1 <= c2.U8x16_1) ? (byte)1 : (byte)0,
-                (c1.U8x16_2 <= c2.U8x16_2) ? (byte)1 : (byte)0,
-                (c1.U8x16_3 <= c2.U8x16_3) ? (byte)1 : (byte)0,
-                (c1.U8x16_4 <= c2.U8x16_4) ? (byte)1 : (byte)0,
-                (c1.U8x16_5 <= c2.U8x16_5) ? (byte)1 : (byte)0,
-                (c1.U8x16_6 <= c2.U8x16_6) ? (byte)1 : (byte)0,
-                (c1.U8x16_7 <= c2.U8x16_7) ? (byte)1 : (byte)0,
-                (c1.U8x16_8 <= c2.U8x16_8) ? (byte)1 : (byte)0,
-                (c1.U8x16_9 <= c2.U8x16_9) ? (byte)1 : (byte)0,
-                (c1.U8x16_A <= c2.U8x16_A) ? (byte)1 : (byte)0,
-                (c1.U8x16_B <= c2.U8x16_B) ? (byte)1 : (byte)0,
-                (c1.U8x16_C <= c2.U8x16_C) ? (byte)1 : (byte)0,
-                (c1.U8x16_D <= c2.U8x16_D) ? (byte)1 : (byte)0,
-                (c1.U8x16_E <= c2.U8x16_E) ? (byte)1 : (byte)0,
-                (c1.U8x16_F <= c2.U8x16_F) ? (byte)1 : (byte)0);
+                (c1.U8x16_0 <= c2.U8x16_0) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_1 <= c2.U8x16_1) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_2 <= c2.U8x16_2) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_3 <= c2.U8x16_3) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_4 <= c2.U8x16_4) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_5 <= c2.U8x16_5) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_6 <= c2.U8x16_6) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_7 <= c2.U8x16_7) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_8 <= c2.U8x16_8) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_9 <= c2.U8x16_9) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_A <= c2.U8x16_A) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_B <= c2.U8x16_B) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_C <= c2.U8x16_C) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_D <= c2.U8x16_D) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_E <= c2.U8x16_E) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_F <= c2.U8x16_F) ? (sbyte)-1 : (sbyte)0);
             context.OpStack.PushV128(c);
         }
 
@@ -331,22 +331,22 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i8x16.ge_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I8x16_0 >= c2.I8x16_0 ? (byte)1 : (byte)0,
-                c1.I8x16_1 >= c2.I8x16_1 ? (byte)1 : (byte)0,
-                c1.I8x16_2 >= c2.I8x16_2 ? (byte)1 : (byte)0,
-                c1.I8x16_3 >= c2.I8x16_3 ? (byte)1 : (byte)0,
-                c1.I8x16_4 >= c2.I8x16_4 ? (byte)1 : (byte)0,
-                c1.I8x16_5 >= c2.I8x16_5 ? (byte)1 : (byte)0,
-                c1.I8x16_6 >= c2.I8x16_6 ? (byte)1 : (byte)0,
-                c1.I8x16_7 >= c2.I8x16_7 ? (byte)1 : (byte)0,
-                c1.I8x16_8 >= c2.I8x16_8 ? (byte)1 : (byte)0,
-                c1.I8x16_9 >= c2.I8x16_9 ? (byte)1 : (byte)0,
-                c1.I8x16_A >= c2.I8x16_A ? (byte)1 : (byte)0,
-                c1.I8x16_B >= c2.I8x16_B ? (byte)1 : (byte)0,
-                c1.I8x16_C >= c2.I8x16_C ? (byte)1 : (byte)0,
-                c1.I8x16_D >= c2.I8x16_D ? (byte)1 : (byte)0,
-                c1.I8x16_E >= c2.I8x16_E ? (byte)1 : (byte)0,
-                c1.I8x16_F >= c2.I8x16_F ? (byte)1 : (byte)0);
+                c1.I8x16_0 >= c2.I8x16_0 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_1 >= c2.I8x16_1 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_2 >= c2.I8x16_2 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_3 >= c2.I8x16_3 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_4 >= c2.I8x16_4 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_5 >= c2.I8x16_5 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_6 >= c2.I8x16_6 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_7 >= c2.I8x16_7 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_8 >= c2.I8x16_8 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_9 >= c2.I8x16_9 ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_A >= c2.I8x16_A ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_B >= c2.I8x16_B ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_C >= c2.I8x16_C ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_D >= c2.I8x16_D ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_E >= c2.I8x16_E ? (sbyte)-1 : (sbyte)0,
+                c1.I8x16_F >= c2.I8x16_F ? (sbyte)-1 : (sbyte)0);
             context.OpStack.PushV128(c);
         }
 
@@ -357,22 +357,22 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i8x16.ge_u failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                (c1.U8x16_0 >= c2.U8x16_0) ? (byte)1 : (byte)0,
-                (c1.U8x16_1 >= c2.U8x16_1) ? (byte)1 : (byte)0,
-                (c1.U8x16_2 >= c2.U8x16_2) ? (byte)1 : (byte)0,
-                (c1.U8x16_3 >= c2.U8x16_3) ? (byte)1 : (byte)0,
-                (c1.U8x16_4 >= c2.U8x16_4) ? (byte)1 : (byte)0,
-                (c1.U8x16_5 >= c2.U8x16_5) ? (byte)1 : (byte)0,
-                (c1.U8x16_6 >= c2.U8x16_6) ? (byte)1 : (byte)0,
-                (c1.U8x16_7 >= c2.U8x16_7) ? (byte)1 : (byte)0,
-                (c1.U8x16_8 >= c2.U8x16_8) ? (byte)1 : (byte)0,
-                (c1.U8x16_9 >= c2.U8x16_9) ? (byte)1 : (byte)0,
-                (c1.U8x16_A >= c2.U8x16_A) ? (byte)1 : (byte)0,
-                (c1.U8x16_B >= c2.U8x16_B) ? (byte)1 : (byte)0,
-                (c1.U8x16_C >= c2.U8x16_C) ? (byte)1 : (byte)0,
-                (c1.U8x16_D >= c2.U8x16_D) ? (byte)1 : (byte)0,
-                (c1.U8x16_E >= c2.U8x16_E) ? (byte)1 : (byte)0,
-                (c1.U8x16_F >= c2.U8x16_F) ? (byte)1 : (byte)0);
+                (c1.U8x16_0 >= c2.U8x16_0) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_1 >= c2.U8x16_1) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_2 >= c2.U8x16_2) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_3 >= c2.U8x16_3) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_4 >= c2.U8x16_4) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_5 >= c2.U8x16_5) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_6 >= c2.U8x16_6) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_7 >= c2.U8x16_7) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_8 >= c2.U8x16_8) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_9 >= c2.U8x16_9) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_A >= c2.U8x16_A) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_B >= c2.U8x16_B) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_C >= c2.U8x16_C) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_D >= c2.U8x16_D) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_E >= c2.U8x16_E) ? (sbyte)-1 : (sbyte)0,
+                (c1.U8x16_F >= c2.U8x16_F) ? (sbyte)-1 : (sbyte)0);
             context.OpStack.PushV128(c);
         }
 
@@ -383,14 +383,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i16x8.eq failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I16x8_0 == c2.I16x8_0 ? (short)1 : (short)0,
-                c1.I16x8_1 == c2.I16x8_1 ? (short)1 : (short)0,
-                c1.I16x8_2 == c2.I16x8_2 ? (short)1 : (short)0,
-                c1.I16x8_3 == c2.I16x8_3 ? (short)1 : (short)0,
-                c1.I16x8_4 == c2.I16x8_4 ? (short)1 : (short)0,
-                c1.I16x8_5 == c2.I16x8_5 ? (short)1 : (short)0,
-                c1.I16x8_6 == c2.I16x8_6 ? (short)1 : (short)0,
-                c1.I16x8_7 == c2.I16x8_7 ? (short)1 : (short)0);
+                c1.I16x8_0 == c2.I16x8_0 ? (short)-1 : (short)0,
+                c1.I16x8_1 == c2.I16x8_1 ? (short)-1 : (short)0,
+                c1.I16x8_2 == c2.I16x8_2 ? (short)-1 : (short)0,
+                c1.I16x8_3 == c2.I16x8_3 ? (short)-1 : (short)0,
+                c1.I16x8_4 == c2.I16x8_4 ? (short)-1 : (short)0,
+                c1.I16x8_5 == c2.I16x8_5 ? (short)-1 : (short)0,
+                c1.I16x8_6 == c2.I16x8_6 ? (short)-1 : (short)0,
+                c1.I16x8_7 == c2.I16x8_7 ? (short)-1 : (short)0);
             context.OpStack.PushV128(c);
         }
 
@@ -401,14 +401,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i16x8.ne failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I16x8_0 != c2.I16x8_0 ? (short)1 : (short)0,
-                c1.I16x8_1 != c2.I16x8_1 ? (short)1 : (short)0,
-                c1.I16x8_2 != c2.I16x8_2 ? (short)1 : (short)0,
-                c1.I16x8_3 != c2.I16x8_3 ? (short)1 : (short)0,
-                c1.I16x8_4 != c2.I16x8_4 ? (short)1 : (short)0,
-                c1.I16x8_5 != c2.I16x8_5 ? (short)1 : (short)0,
-                c1.I16x8_6 != c2.I16x8_6 ? (short)1 : (short)0,
-                c1.I16x8_7 != c2.I16x8_7 ? (short)1 : (short)0);
+                c1.I16x8_0 != c2.I16x8_0 ? (short)-1 : (short)0,
+                c1.I16x8_1 != c2.I16x8_1 ? (short)-1 : (short)0,
+                c1.I16x8_2 != c2.I16x8_2 ? (short)-1 : (short)0,
+                c1.I16x8_3 != c2.I16x8_3 ? (short)-1 : (short)0,
+                c1.I16x8_4 != c2.I16x8_4 ? (short)-1 : (short)0,
+                c1.I16x8_5 != c2.I16x8_5 ? (short)-1 : (short)0,
+                c1.I16x8_6 != c2.I16x8_6 ? (short)-1 : (short)0,
+                c1.I16x8_7 != c2.I16x8_7 ? (short)-1 : (short)0);
             context.OpStack.PushV128(c);
         }
 
@@ -419,14 +419,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i16x8.lt_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I16x8_0 < c2.I16x8_0 ? (short)1 : (short)0,
-                c1.I16x8_1 < c2.I16x8_1 ? (short)1 : (short)0,
-                c1.I16x8_2 < c2.I16x8_2 ? (short)1 : (short)0,
-                c1.I16x8_3 < c2.I16x8_3 ? (short)1 : (short)0,
-                c1.I16x8_4 < c2.I16x8_4 ? (short)1 : (short)0,
-                c1.I16x8_5 < c2.I16x8_5 ? (short)1 : (short)0,
-                c1.I16x8_6 < c2.I16x8_6 ? (short)1 : (short)0,
-                c1.I16x8_7 < c2.I16x8_7 ? (short)1 : (short)0);
+                c1.I16x8_0 < c2.I16x8_0 ? (short)-1 : (short)0,
+                c1.I16x8_1 < c2.I16x8_1 ? (short)-1 : (short)0,
+                c1.I16x8_2 < c2.I16x8_2 ? (short)-1 : (short)0,
+                c1.I16x8_3 < c2.I16x8_3 ? (short)-1 : (short)0,
+                c1.I16x8_4 < c2.I16x8_4 ? (short)-1 : (short)0,
+                c1.I16x8_5 < c2.I16x8_5 ? (short)-1 : (short)0,
+                c1.I16x8_6 < c2.I16x8_6 ? (short)-1 : (short)0,
+                c1.I16x8_7 < c2.I16x8_7 ? (short)-1 : (short)0);
             context.OpStack.PushV128(c);
         }
 
@@ -437,14 +437,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i16x8.lt_u failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                (c1.U16x8_0 < c2.U16x8_0) ? (short)1 : (short)0,
-                (c1.U16x8_1 < c2.U16x8_1) ? (short)1 : (short)0,
-                (c1.U16x8_2 < c2.U16x8_2) ? (short)1 : (short)0,
-                (c1.U16x8_3 < c2.U16x8_3) ? (short)1 : (short)0,
-                (c1.U16x8_4 < c2.U16x8_4) ? (short)1 : (short)0,
-                (c1.U16x8_5 < c2.U16x8_5) ? (short)1 : (short)0,
-                (c1.U16x8_6 < c2.U16x8_6) ? (short)1 : (short)0,
-                (c1.U16x8_7 < c2.U16x8_7) ? (short)1 : (short)0);
+                (c1.U16x8_0 < c2.U16x8_0) ? (short)-1 : (short)0,
+                (c1.U16x8_1 < c2.U16x8_1) ? (short)-1 : (short)0,
+                (c1.U16x8_2 < c2.U16x8_2) ? (short)-1 : (short)0,
+                (c1.U16x8_3 < c2.U16x8_3) ? (short)-1 : (short)0,
+                (c1.U16x8_4 < c2.U16x8_4) ? (short)-1 : (short)0,
+                (c1.U16x8_5 < c2.U16x8_5) ? (short)-1 : (short)0,
+                (c1.U16x8_6 < c2.U16x8_6) ? (short)-1 : (short)0,
+                (c1.U16x8_7 < c2.U16x8_7) ? (short)-1 : (short)0);
             context.OpStack.PushV128(c);
         }
 
@@ -455,14 +455,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i16x8.gt_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I16x8_0 > c2.I16x8_0 ? (short)1 : (short)0,
-                c1.I16x8_1 > c2.I16x8_1 ? (short)1 : (short)0,
-                c1.I16x8_2 > c2.I16x8_2 ? (short)1 : (short)0,
-                c1.I16x8_3 > c2.I16x8_3 ? (short)1 : (short)0,
-                c1.I16x8_4 > c2.I16x8_4 ? (short)1 : (short)0,
-                c1.I16x8_5 > c2.I16x8_5 ? (short)1 : (short)0,
-                c1.I16x8_6 > c2.I16x8_6 ? (short)1 : (short)0,
-                c1.I16x8_7 > c2.I16x8_7 ? (short)1 : (short)0);
+                c1.I16x8_0 > c2.I16x8_0 ? (short)-1 : (short)0,
+                c1.I16x8_1 > c2.I16x8_1 ? (short)-1 : (short)0,
+                c1.I16x8_2 > c2.I16x8_2 ? (short)-1 : (short)0,
+                c1.I16x8_3 > c2.I16x8_3 ? (short)-1 : (short)0,
+                c1.I16x8_4 > c2.I16x8_4 ? (short)-1 : (short)0,
+                c1.I16x8_5 > c2.I16x8_5 ? (short)-1 : (short)0,
+                c1.I16x8_6 > c2.I16x8_6 ? (short)-1 : (short)0,
+                c1.I16x8_7 > c2.I16x8_7 ? (short)-1 : (short)0);
             context.OpStack.PushV128(c);
         }
 
@@ -473,14 +473,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i16x8.gt_u failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                (c1.U16x8_0 > c2.U16x8_0) ? (short)1 : (short)0,
-                (c1.U16x8_1 > c2.U16x8_1) ? (short)1 : (short)0,
-                (c1.U16x8_2 > c2.U16x8_2) ? (short)1 : (short)0,
-                (c1.U16x8_3 > c2.U16x8_3) ? (short)1 : (short)0,
-                (c1.U16x8_4 > c2.U16x8_4) ? (short)1 : (short)0,
-                (c1.U16x8_5 > c2.U16x8_5) ? (short)1 : (short)0,
-                (c1.U16x8_6 > c2.U16x8_6) ? (short)1 : (short)0,
-                (c1.U16x8_7 > c2.U16x8_7) ? (short)1 : (short)0);
+                (c1.U16x8_0 > c2.U16x8_0) ? (short)-1 : (short)0,
+                (c1.U16x8_1 > c2.U16x8_1) ? (short)-1 : (short)0,
+                (c1.U16x8_2 > c2.U16x8_2) ? (short)-1 : (short)0,
+                (c1.U16x8_3 > c2.U16x8_3) ? (short)-1 : (short)0,
+                (c1.U16x8_4 > c2.U16x8_4) ? (short)-1 : (short)0,
+                (c1.U16x8_5 > c2.U16x8_5) ? (short)-1 : (short)0,
+                (c1.U16x8_6 > c2.U16x8_6) ? (short)-1 : (short)0,
+                (c1.U16x8_7 > c2.U16x8_7) ? (short)-1 : (short)0);
             context.OpStack.PushV128(c);
         }
 
@@ -491,14 +491,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i16x8.le_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I16x8_0 <= c2.I16x8_0 ? (short)1 : (short)0,
-                c1.I16x8_1 <= c2.I16x8_1 ? (short)1 : (short)0,
-                c1.I16x8_2 <= c2.I16x8_2 ? (short)1 : (short)0,
-                c1.I16x8_3 <= c2.I16x8_3 ? (short)1 : (short)0,
-                c1.I16x8_4 <= c2.I16x8_4 ? (short)1 : (short)0,
-                c1.I16x8_5 <= c2.I16x8_5 ? (short)1 : (short)0,
-                c1.I16x8_6 <= c2.I16x8_6 ? (short)1 : (short)0,
-                c1.I16x8_7 <= c2.I16x8_7 ? (short)1 : (short)0);
+                c1.I16x8_0 <= c2.I16x8_0 ? (short)-1 : (short)0,
+                c1.I16x8_1 <= c2.I16x8_1 ? (short)-1 : (short)0,
+                c1.I16x8_2 <= c2.I16x8_2 ? (short)-1 : (short)0,
+                c1.I16x8_3 <= c2.I16x8_3 ? (short)-1 : (short)0,
+                c1.I16x8_4 <= c2.I16x8_4 ? (short)-1 : (short)0,
+                c1.I16x8_5 <= c2.I16x8_5 ? (short)-1 : (short)0,
+                c1.I16x8_6 <= c2.I16x8_6 ? (short)-1 : (short)0,
+                c1.I16x8_7 <= c2.I16x8_7 ? (short)-1 : (short)0);
             context.OpStack.PushV128(c);
         }
 
@@ -509,14 +509,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i16x8.le_u failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                (c1.U16x8_0 <= c2.U16x8_0) ? (short)1 : (short)0,
-                (c1.U16x8_1 <= c2.U16x8_1) ? (short)1 : (short)0,
-                (c1.U16x8_2 <= c2.U16x8_2) ? (short)1 : (short)0,
-                (c1.U16x8_3 <= c2.U16x8_3) ? (short)1 : (short)0,
-                (c1.U16x8_4 <= c2.U16x8_4) ? (short)1 : (short)0,
-                (c1.U16x8_5 <= c2.U16x8_5) ? (short)1 : (short)0,
-                (c1.U16x8_6 <= c2.U16x8_6) ? (short)1 : (short)0,
-                (c1.U16x8_7 <= c2.U16x8_7) ? (short)1 : (short)0);
+                (c1.U16x8_0 <= c2.U16x8_0) ? (short)-1 : (short)0,
+                (c1.U16x8_1 <= c2.U16x8_1) ? (short)-1 : (short)0,
+                (c1.U16x8_2 <= c2.U16x8_2) ? (short)-1 : (short)0,
+                (c1.U16x8_3 <= c2.U16x8_3) ? (short)-1 : (short)0,
+                (c1.U16x8_4 <= c2.U16x8_4) ? (short)-1 : (short)0,
+                (c1.U16x8_5 <= c2.U16x8_5) ? (short)-1 : (short)0,
+                (c1.U16x8_6 <= c2.U16x8_6) ? (short)-1 : (short)0,
+                (c1.U16x8_7 <= c2.U16x8_7) ? (short)-1 : (short)0);
             context.OpStack.PushV128(c);
         }
 
@@ -527,14 +527,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i16x8.ge_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I16x8_0 >= c2.I16x8_0 ? (short)1 : (short)0,
-                c1.I16x8_1 >= c2.I16x8_1 ? (short)1 : (short)0,
-                c1.I16x8_2 >= c2.I16x8_2 ? (short)1 : (short)0,
-                c1.I16x8_3 >= c2.I16x8_3 ? (short)1 : (short)0,
-                c1.I16x8_4 >= c2.I16x8_4 ? (short)1 : (short)0,
-                c1.I16x8_5 >= c2.I16x8_5 ? (short)1 : (short)0,
-                c1.I16x8_6 >= c2.I16x8_6 ? (short)1 : (short)0,
-                c1.I16x8_7 >= c2.I16x8_7 ? (short)1 : (short)0);
+                c1.I16x8_0 >= c2.I16x8_0 ? (short)-1 : (short)0,
+                c1.I16x8_1 >= c2.I16x8_1 ? (short)-1 : (short)0,
+                c1.I16x8_2 >= c2.I16x8_2 ? (short)-1 : (short)0,
+                c1.I16x8_3 >= c2.I16x8_3 ? (short)-1 : (short)0,
+                c1.I16x8_4 >= c2.I16x8_4 ? (short)-1 : (short)0,
+                c1.I16x8_5 >= c2.I16x8_5 ? (short)-1 : (short)0,
+                c1.I16x8_6 >= c2.I16x8_6 ? (short)-1 : (short)0,
+                c1.I16x8_7 >= c2.I16x8_7 ? (short)-1 : (short)0);
             context.OpStack.PushV128(c);
         }
 
@@ -545,14 +545,14 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i16x8.ge_u failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                (c1.U16x8_0 >= c2.U16x8_0) ? (short)1 : (short)0,
-                (c1.U16x8_1 >= c2.U16x8_1) ? (short)1 : (short)0,
-                (c1.U16x8_2 >= c2.U16x8_2) ? (short)1 : (short)0,
-                (c1.U16x8_3 >= c2.U16x8_3) ? (short)1 : (short)0,
-                (c1.U16x8_4 >= c2.U16x8_4) ? (short)1 : (short)0,
-                (c1.U16x8_5 >= c2.U16x8_5) ? (short)1 : (short)0,
-                (c1.U16x8_6 >= c2.U16x8_6) ? (short)1 : (short)0,
-                (c1.U16x8_7 >= c2.U16x8_7) ? (short)1 : (short)0);
+                (c1.U16x8_0 >= c2.U16x8_0) ? (short)-1 : (short)0,
+                (c1.U16x8_1 >= c2.U16x8_1) ? (short)-1 : (short)0,
+                (c1.U16x8_2 >= c2.U16x8_2) ? (short)-1 : (short)0,
+                (c1.U16x8_3 >= c2.U16x8_3) ? (short)-1 : (short)0,
+                (c1.U16x8_4 >= c2.U16x8_4) ? (short)-1 : (short)0,
+                (c1.U16x8_5 >= c2.U16x8_5) ? (short)-1 : (short)0,
+                (c1.U16x8_6 >= c2.U16x8_6) ? (short)-1 : (short)0,
+                (c1.U16x8_7 >= c2.U16x8_7) ? (short)-1 : (short)0);
             context.OpStack.PushV128(c);
         }
 
@@ -563,10 +563,10 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i32x4.eq failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I32x4_0 == c2.I32x4_0 ? (int)1 : (int)0,
-                c1.I32x4_1 == c2.I32x4_1 ? (int)1 : (int)0,
-                c1.I32x4_2 == c2.I32x4_2 ? (int)1 : (int)0,
-                c1.I32x4_3 == c2.I32x4_3 ? (int)1 : (int)0);
+                c1.I32x4_0 == c2.I32x4_0 ? (int)-1 : (int)0,
+                c1.I32x4_1 == c2.I32x4_1 ? (int)-1 : (int)0,
+                c1.I32x4_2 == c2.I32x4_2 ? (int)-1 : (int)0,
+                c1.I32x4_3 == c2.I32x4_3 ? (int)-1 : (int)0);
             context.OpStack.PushV128(c);
         }
 
@@ -577,10 +577,10 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i32x4.ne failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I32x4_0 != c2.I32x4_0 ? (int)1 : (int)0,
-                c1.I32x4_1 != c2.I32x4_1 ? (int)1 : (int)0,
-                c1.I32x4_2 != c2.I32x4_2 ? (int)1 : (int)0,
-                c1.I32x4_3 != c2.I32x4_3 ? (int)1 : (int)0);
+                c1.I32x4_0 != c2.I32x4_0 ? (int)-1 : (int)0,
+                c1.I32x4_1 != c2.I32x4_1 ? (int)-1 : (int)0,
+                c1.I32x4_2 != c2.I32x4_2 ? (int)-1 : (int)0,
+                c1.I32x4_3 != c2.I32x4_3 ? (int)-1 : (int)0);
             context.OpStack.PushV128(c);
         }
 
@@ -591,10 +591,10 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i32x4.lt_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I32x4_0 < c2.I32x4_0 ? (int)1 : (int)0,
-                c1.I32x4_1 < c2.I32x4_1 ? (int)1 : (int)0,
-                c1.I32x4_2 < c2.I32x4_2 ? (int)1 : (int)0,
-                c1.I32x4_3 < c2.I32x4_3 ? (int)1 : (int)0);
+                c1.I32x4_0 < c2.I32x4_0 ? (int)-1 : (int)0,
+                c1.I32x4_1 < c2.I32x4_1 ? (int)-1 : (int)0,
+                c1.I32x4_2 < c2.I32x4_2 ? (int)-1 : (int)0,
+                c1.I32x4_3 < c2.I32x4_3 ? (int)-1 : (int)0);
             context.OpStack.PushV128(c);
         }
 
@@ -605,10 +605,10 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i32x4.lt_u failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                (c1.U32x4_0 < c2.U32x4_0) ? (int)1 : (int)0,
-                (c1.U32x4_1 < c2.U32x4_1) ? (int)1 : (int)0,
-                (c1.U32x4_2 < c2.U32x4_2) ? (int)1 : (int)0,
-                (c1.U32x4_3 < c2.U32x4_3) ? (int)1 : (int)0);
+                (c1.U32x4_0 < c2.U32x4_0) ? (int)-1 : (int)0,
+                (c1.U32x4_1 < c2.U32x4_1) ? (int)-1 : (int)0,
+                (c1.U32x4_2 < c2.U32x4_2) ? (int)-1 : (int)0,
+                (c1.U32x4_3 < c2.U32x4_3) ? (int)-1 : (int)0);
             context.OpStack.PushV128(c);
         }
 
@@ -619,10 +619,10 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i32x4.gt_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I32x4_0 > c2.I32x4_0 ? (int)1 : (int)0,
-                c1.I32x4_1 > c2.I32x4_1 ? (int)1 : (int)0,
-                c1.I32x4_2 > c2.I32x4_2 ? (int)1 : (int)0,
-                c1.I32x4_3 > c2.I32x4_3 ? (int)1 : (int)0);
+                c1.I32x4_0 > c2.I32x4_0 ? (int)-1 : (int)0,
+                c1.I32x4_1 > c2.I32x4_1 ? (int)-1 : (int)0,
+                c1.I32x4_2 > c2.I32x4_2 ? (int)-1 : (int)0,
+                c1.I32x4_3 > c2.I32x4_3 ? (int)-1 : (int)0);
             context.OpStack.PushV128(c);
         }
 
@@ -633,10 +633,10 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i32x4.gt_u failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                (c1.U32x4_0 > c2.U32x4_0) ? (int)1 : (int)0,
-                (c1.U32x4_1 > c2.U32x4_1) ? (int)1 : (int)0,
-                (c1.U32x4_2 > c2.U32x4_2) ? (int)1 : (int)0,
-                (c1.U32x4_3 > c2.U32x4_3) ? (int)1 : (int)0);
+                (c1.U32x4_0 > c2.U32x4_0) ? (int)-1 : (int)0,
+                (c1.U32x4_1 > c2.U32x4_1) ? (int)-1 : (int)0,
+                (c1.U32x4_2 > c2.U32x4_2) ? (int)-1 : (int)0,
+                (c1.U32x4_3 > c2.U32x4_3) ? (int)-1 : (int)0);
             context.OpStack.PushV128(c);
         }
 
@@ -647,10 +647,10 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i32x4.le_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I32x4_0 <= c2.I32x4_0 ? (int)1 : (int)0,
-                c1.I32x4_1 <= c2.I32x4_1 ? (int)1 : (int)0,
-                c1.I32x4_2 <= c2.I32x4_2 ? (int)1 : (int)0,
-                c1.I32x4_3 <= c2.I32x4_3 ? (int)1 : (int)0);
+                c1.I32x4_0 <= c2.I32x4_0 ? (int)-1 : (int)0,
+                c1.I32x4_1 <= c2.I32x4_1 ? (int)-1 : (int)0,
+                c1.I32x4_2 <= c2.I32x4_2 ? (int)-1 : (int)0,
+                c1.I32x4_3 <= c2.I32x4_3 ? (int)-1 : (int)0);
             context.OpStack.PushV128(c);
         }
 
@@ -661,10 +661,10 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i32x4.le_u failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                (c1.U32x4_0 <= c2.U32x4_0) ? (int)1 : (int)0,
-                (c1.U32x4_1 <= c2.U32x4_1) ? (int)1 : (int)0,
-                (c1.U32x4_2 <= c2.U32x4_2) ? (int)1 : (int)0,
-                (c1.U32x4_3 <= c2.U32x4_3) ? (int)1 : (int)0);
+                (c1.U32x4_0 <= c2.U32x4_0) ? (int)-1 : (int)0,
+                (c1.U32x4_1 <= c2.U32x4_1) ? (int)-1 : (int)0,
+                (c1.U32x4_2 <= c2.U32x4_2) ? (int)-1 : (int)0,
+                (c1.U32x4_3 <= c2.U32x4_3) ? (int)-1 : (int)0);
             context.OpStack.PushV128(c);
         }
 
@@ -675,10 +675,10 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i32x4.ge_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I32x4_0 >= c2.I32x4_0 ? (int)1 : (int)0,
-                c1.I32x4_1 >= c2.I32x4_1 ? (int)1 : (int)0,
-                c1.I32x4_2 >= c2.I32x4_2 ? (int)1 : (int)0,
-                c1.I32x4_3 >= c2.I32x4_3 ? (int)1 : (int)0);
+                c1.I32x4_0 >= c2.I32x4_0 ? (int)-1 : (int)0,
+                c1.I32x4_1 >= c2.I32x4_1 ? (int)-1 : (int)0,
+                c1.I32x4_2 >= c2.I32x4_2 ? (int)-1 : (int)0,
+                c1.I32x4_3 >= c2.I32x4_3 ? (int)-1 : (int)0);
             context.OpStack.PushV128(c);
         }
 
@@ -689,10 +689,10 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i32x4.ge_u failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                (c1.U32x4_0 >= c2.U32x4_0) ? (int)1 : (int)0,
-                (c1.U32x4_1 >= c2.U32x4_1) ? (int)1 : (int)0,
-                (c1.U32x4_2 >= c2.U32x4_2) ? (int)1 : (int)0,
-                (c1.U32x4_3 >= c2.U32x4_3) ? (int)1 : (int)0);
+                (c1.U32x4_0 >= c2.U32x4_0) ? (int)-1 : (int)0,
+                (c1.U32x4_1 >= c2.U32x4_1) ? (int)-1 : (int)0,
+                (c1.U32x4_2 >= c2.U32x4_2) ? (int)-1 : (int)0,
+                (c1.U32x4_3 >= c2.U32x4_3) ? (int)-1 : (int)0);
             context.OpStack.PushV128(c);
         }
 
@@ -703,8 +703,8 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i64x2.eq failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I64x2_0 == c2.I64x2_0 ? (long)1 : (long)0,
-                c1.I64x2_1 == c2.I64x2_1 ? (long)1 : (long)0);
+                c1.I64x2_0 == c2.I64x2_0 ? (long)-1 : (long)0,
+                c1.I64x2_1 == c2.I64x2_1 ? (long)-1 : (long)0);
             context.OpStack.PushV128(c);
         }
 
@@ -715,8 +715,8 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i64x2.ne failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I64x2_0 != c2.I64x2_0 ? (long)1 : (long)0,
-                c1.I64x2_1 != c2.I64x2_1 ? (long)1 : (long)0);
+                c1.I64x2_0 != c2.I64x2_0 ? (long)-1 : (long)0,
+                c1.I64x2_1 != c2.I64x2_1 ? (long)-1 : (long)0);
             context.OpStack.PushV128(c);
         }
 
@@ -727,8 +727,8 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i64x2.lt_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I64x2_0 < c2.I64x2_0 ? (long)1 : (long)0,
-                c1.I64x2_1 < c2.I64x2_1 ? (long)1 : (long)0);
+                c1.I64x2_0 < c2.I64x2_0 ? (long)-1 : (long)0,
+                c1.I64x2_1 < c2.I64x2_1 ? (long)-1 : (long)0);
             context.OpStack.PushV128(c);
         }
 
@@ -739,8 +739,8 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i64x2.gt_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I64x2_0 > c2.I64x2_0 ? (long)1 : (long)0,
-                c1.I64x2_1 > c2.I64x2_1 ? (long)1 : (long)0);
+                c1.I64x2_0 > c2.I64x2_0 ? (long)-1 : (long)0,
+                c1.I64x2_1 > c2.I64x2_1 ? (long)-1 : (long)0);
             context.OpStack.PushV128(c);
         }
 
@@ -751,8 +751,8 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i64x2.le_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I64x2_0 <= c2.I64x2_0 ? (long)1 : (long)0,
-                c1.I64x2_1 <= c2.I64x2_1 ? (long)1 : (long)0);
+                c1.I64x2_0 <= c2.I64x2_0 ? (long)-1 : (long)0,
+                c1.I64x2_1 <= c2.I64x2_1 ? (long)-1 : (long)0);
             context.OpStack.PushV128(c);
         }
 
@@ -763,8 +763,8 @@ namespace Wacs.Core.Instructions.Numeric
             context.Assert(context.OpStack.Peek().IsV128, $"Instruction i64x2.ge_s failed. Wrong type on stack.");
             V128 c1 = context.OpStack.PopV128();
             V128 c = new V128(
-                c1.I64x2_0 >= c2.I64x2_0 ? (long)1 : (long)0,
-                c1.I64x2_1 >= c2.I64x2_1 ? (long)1 : (long)0);
+                c1.I64x2_0 >= c2.I64x2_0 ? (long)-1 : (long)0,
+                c1.I64x2_1 >= c2.I64x2_1 ? (long)-1 : (long)0);
             context.OpStack.PushV128(c);
         }
     }
