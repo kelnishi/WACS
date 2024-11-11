@@ -112,22 +112,22 @@ namespace Wacs.Core.Instructions.Numeric
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (sbyte)Math.Min(Math.Max(v1.I16x8_0, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v1.I16x8_1, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v1.I16x8_2, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v1.I16x8_3, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v1.I16x8_4, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v1.I16x8_5, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v1.I16x8_6, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v1.I16x8_7, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v2.I16x8_0, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v2.I16x8_1, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v2.I16x8_2, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v2.I16x8_3, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v2.I16x8_4, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v2.I16x8_5, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v2.I16x8_6, byte.MinValue), byte.MaxValue),
-                (sbyte)Math.Min(Math.Max(v2.I16x8_7, byte.MinValue), byte.MaxValue)
+                (sbyte)Math.Min(Math.Max(v1.I16x8_0, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v1.I16x8_1, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v1.I16x8_2, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v1.I16x8_3, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v1.I16x8_4, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v1.I16x8_5, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v1.I16x8_6, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v1.I16x8_7, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v2.I16x8_0, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v2.I16x8_1, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v2.I16x8_2, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v2.I16x8_3, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v2.I16x8_4, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v2.I16x8_5, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v2.I16x8_6, sbyte.MinValue), sbyte.MaxValue),
+                (sbyte)Math.Min(Math.Max(v2.I16x8_7, sbyte.MinValue), sbyte.MaxValue)
             );
             context.OpStack.PushV128(result);
         }
@@ -137,22 +137,22 @@ namespace Wacs.Core.Instructions.Numeric
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (byte)Math.Min(v1.U16x8_0, byte.MaxValue),
-                (byte)Math.Min(v1.U16x8_1, byte.MaxValue),
-                (byte)Math.Min(v1.U16x8_2, byte.MaxValue),
-                (byte)Math.Min(v1.U16x8_3, byte.MaxValue),
-                (byte)Math.Min(v1.U16x8_4, byte.MaxValue),
-                (byte)Math.Min(v1.U16x8_5, byte.MaxValue),
-                (byte)Math.Min(v1.U16x8_6, byte.MaxValue),
-                (byte)Math.Min(v1.U16x8_7, byte.MaxValue),
-                (byte)Math.Min(v2.U16x8_0, byte.MaxValue),
-                (byte)Math.Min(v2.U16x8_1, byte.MaxValue),
-                (byte)Math.Min(v2.U16x8_2, byte.MaxValue),
-                (byte)Math.Min(v2.U16x8_3, byte.MaxValue),
-                (byte)Math.Min(v2.U16x8_4, byte.MaxValue),
-                (byte)Math.Min(v2.U16x8_5, byte.MaxValue),
-                (byte)Math.Min(v2.U16x8_6, byte.MaxValue),
-                (byte)Math.Min(v2.U16x8_7, byte.MaxValue)
+                (byte)Math.Min(Math.Max(v1.I16x8_0, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v1.I16x8_1, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v1.I16x8_2, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v1.I16x8_3, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v1.I16x8_4, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v1.I16x8_5, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v1.I16x8_6, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v1.I16x8_7, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v2.I16x8_0, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v2.I16x8_1, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v2.I16x8_2, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v2.I16x8_3, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v2.I16x8_4, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v2.I16x8_5, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v2.I16x8_6, byte.MinValue), byte.MaxValue),
+                (byte)Math.Min(Math.Max(v2.I16x8_7, byte.MinValue), byte.MaxValue)
             );
             context.OpStack.PushV128(result);
         }
@@ -162,14 +162,14 @@ namespace Wacs.Core.Instructions.Numeric
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (short)Math.Min(Math.Max(v1.I32x4_0, sbyte.MinValue), sbyte.MaxValue),
-                (short)Math.Min(Math.Max(v1.I32x4_1, sbyte.MinValue), sbyte.MaxValue),
-                (short)Math.Min(Math.Max(v1.I32x4_2, sbyte.MinValue), sbyte.MaxValue),
-                (short)Math.Min(Math.Max(v1.I32x4_3, sbyte.MinValue), sbyte.MaxValue),
-                (short)Math.Min(Math.Max(v2.I32x4_0, sbyte.MinValue), sbyte.MaxValue),
-                (short)Math.Min(Math.Max(v2.I32x4_1, sbyte.MinValue), sbyte.MaxValue),
-                (short)Math.Min(Math.Max(v2.I32x4_2, sbyte.MinValue), sbyte.MaxValue),
-                (short)Math.Min(Math.Max(v2.I32x4_3, sbyte.MinValue), sbyte.MaxValue)
+                (short)Math.Min(Math.Max(v1.I32x4_0, short.MinValue), short.MaxValue),
+                (short)Math.Min(Math.Max(v1.I32x4_1, short.MinValue), short.MaxValue),
+                (short)Math.Min(Math.Max(v1.I32x4_2, short.MinValue), short.MaxValue),
+                (short)Math.Min(Math.Max(v1.I32x4_3, short.MinValue), short.MaxValue),
+                (short)Math.Min(Math.Max(v2.I32x4_0, short.MinValue), short.MaxValue),
+                (short)Math.Min(Math.Max(v2.I32x4_1, short.MinValue), short.MaxValue),
+                (short)Math.Min(Math.Max(v2.I32x4_2, short.MinValue), short.MaxValue),
+                (short)Math.Min(Math.Max(v2.I32x4_3, short.MinValue), short.MaxValue)
             );
             context.OpStack.PushV128(result);
         }
@@ -179,14 +179,14 @@ namespace Wacs.Core.Instructions.Numeric
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (ushort)Math.Min(v1.I32x4_0, ushort.MaxValue),
-                (ushort)Math.Min(v1.I32x4_1, ushort.MaxValue),
-                (ushort)Math.Min(v1.I32x4_2, ushort.MaxValue),
-                (ushort)Math.Min(v1.I32x4_3, ushort.MaxValue),
-                (ushort)Math.Min(v2.I32x4_0, ushort.MaxValue),
-                (ushort)Math.Min(v2.I32x4_1, ushort.MaxValue),
-                (ushort)Math.Min(v2.I32x4_2, ushort.MaxValue),
-                (ushort)Math.Min(v2.I32x4_3, ushort.MaxValue)
+                (ushort)Math.Min(Math.Max(v1.I32x4_0, ushort.MinValue), ushort.MaxValue),
+                (ushort)Math.Min(Math.Max(v1.I32x4_1, ushort.MinValue), ushort.MaxValue),
+                (ushort)Math.Min(Math.Max(v1.I32x4_2, ushort.MinValue), ushort.MaxValue),
+                (ushort)Math.Min(Math.Max(v1.I32x4_3, ushort.MinValue), ushort.MaxValue),
+                (ushort)Math.Min(Math.Max(v2.I32x4_0, ushort.MinValue), ushort.MaxValue),
+                (ushort)Math.Min(Math.Max(v2.I32x4_1, ushort.MinValue), ushort.MaxValue),
+                (ushort)Math.Min(Math.Max(v2.I32x4_2, ushort.MinValue), ushort.MaxValue),
+                (ushort)Math.Min(Math.Max(v2.I32x4_3, ushort.MinValue), ushort.MaxValue)
             );
             context.OpStack.PushV128(result);
         }
