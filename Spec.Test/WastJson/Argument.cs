@@ -78,22 +78,23 @@ namespace Spec.Test.WastJson
             throw new ArgumentException($"Invalid value for v128: {value}");
         }
 
-        private static Value Parse2(List<string> vals)
+        private Value Parse2(List<string> vals)
         {
             //Doubles
-            if (vals.Any(v=> v.Contains(":") || v.Contains(".")))
+            if (LaneType=="f64" || vals.Any(v=> v.Contains(":") || v.Contains(".")))
             {
                 return new V128(BitBashDouble(vals[0]), BitBashDouble(vals[1]));
             }
             return new V128(BitBashLong(vals[0]), BitBashLong(vals[1]));
         }
 
-        private static Value Parse4(List<string> vals)
+        private Value Parse4(List<string> vals)
         {
-            if (vals.Any(v=> v.Contains(":") || v.Contains(".")))
+            if (LaneType=="f32" || vals.Any(v=> v.Contains(":") || v.Contains(".")))
             {
                 return new V128(BitBashFloat(vals[0]), BitBashFloat(vals[1]),BitBashFloat(vals[2]), BitBashFloat(vals[3]));
             }
+            
             return new V128(BitBashInt(vals[0]), BitBashInt(vals[1]),BitBashInt(vals[2]), BitBashInt(vals[3]));
         }
 
