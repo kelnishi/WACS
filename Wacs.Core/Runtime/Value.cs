@@ -423,9 +423,30 @@ namespace Wacs.Core.Runtime
         public static implicit operator Value(V128 v128) => new(v128);
         
         public static implicit operator V128(Value value) => value.V128;
-        
-        public static bool operator ==(Value left, Value right) => left.Type == right.Type && left.Scalar.Equals(right.Scalar);
-        
+
+        private static bool EqualFloats(float a, float b)
+        {
+            if (float.IsNaN(a) && float.IsNaN(b))
+                return true;
+            if (float.IsPositiveInfinity(a) && float.IsPositiveInfinity(b))
+                return true;
+            if (float.IsNegativeInfinity(a) && float.IsNegativeInfinity(b))
+                return true;
+            return a == b;
+        }
+        public static bool operator ==(Value left, Value right)
+        {
+            if (left.Type == ValType.V128 && right.Type == ValType.V128)
+            {
+                if (EqualFloats(left.V128.F32x4_0, right.V128.F32x4_0)
+                    && EqualFloats(left.V128.F32x4_1, right.V128.F32x4_1)
+                    && EqualFloats(left.V128.F32x4_2, right.V128.F32x4_2)
+                    && EqualFloats(left.V128.F32x4_3, right.V128.F32x4_3))
+                    return true;
+            }
+            return left.Type == right.Type && left.Scalar.Equals(right.Scalar);
+        }
+
         public static bool operator !=(Value left, Value right) => !(left == right);
 
         public int CompareTo(Value other) => Type == other.Type ? ((double)Scalar).CompareTo(((double)other.Scalar)) : Type.CompareTo(other.Type);
