@@ -36,17 +36,6 @@ namespace Wacs.Core.Instructions.Numeric
         public override ByteCode Op { get; }
         private LaneIdx X { get; set; }
 
-
-        //iNxM.extend_half_iN 
-        // ′
-        //  xM 
-        // ′
-        //  _sx
-        // 
-        // i8x16.narrow_i16x8_sx
-        // 
-        // i16x8.narrow_i32x4_sx
-
         public static void ExecuteI8x16ExtractLaneS(ExecContext context, LaneIdx laneidx)
         {
             V128 c = context.OpStack.PopV128();
