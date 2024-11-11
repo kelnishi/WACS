@@ -393,10 +393,11 @@ namespace Wacs.Core.Runtime
         public override string ToString()
         {
             var stringBuilder = new StringBuilder("0x");
-            for (byte i = 0; i < 16; i++)
+            for (int j = 16; j > 0; --j)
             {
+                byte i = (byte)(j - 1);
                 stringBuilder.Append(this[i].ToString("X2"));
-                if ((i + 1) % 4 == 0 && i < 16 - 1)
+                if (i % 4 == 0 && i < 15 && i > 0)
                 {
                     stringBuilder.Append('_');
                 }
