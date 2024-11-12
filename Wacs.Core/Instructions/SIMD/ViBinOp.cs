@@ -403,10 +403,10 @@ namespace Wacs.Core.Instructions.Numeric
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (int)((int)v1.I8x16_0 * (int)v2.I8x16_0),
-                (int)((int)v1.I8x16_1 * (int)v2.I8x16_1),
-                (int)((int)v1.I8x16_2 * (int)v2.I8x16_2),
-                (int)((int)v1.I8x16_3 * (int)v2.I8x16_3)
+                (int)((int)v1.I16x8_0 * (int)v2.I16x8_0),
+                (int)((int)v1.I16x8_1 * (int)v2.I16x8_1),
+                (int)((int)v1.I16x8_2 * (int)v2.I16x8_2),
+                (int)((int)v1.I16x8_3 * (int)v2.I16x8_3)
             );
             context.OpStack.PushV128(result);
         }
@@ -416,10 +416,10 @@ namespace Wacs.Core.Instructions.Numeric
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (int)((int)v1.I8x16_4 * (int)v2.I8x16_4),
-                (int)((int)v1.I8x16_5 * (int)v2.I8x16_5),
-                (int)((int)v1.I8x16_6 * (int)v2.I8x16_6),
-                (int)((int)v1.I8x16_7 * (int)v2.I8x16_7)
+                (int)((int)v1.I16x8_4 * (int)v2.I16x8_4),
+                (int)((int)v1.I16x8_5 * (int)v2.I16x8_5),
+                (int)((int)v1.I16x8_6 * (int)v2.I16x8_6),
+                (int)((int)v1.I16x8_7 * (int)v2.I16x8_7)
             );
             context.OpStack.PushV128(result);
         }
@@ -429,10 +429,10 @@ namespace Wacs.Core.Instructions.Numeric
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (uint)((uint)v1.U8x16_0 * (uint)v2.U8x16_0),
-                (uint)((uint)v1.U8x16_1 * (uint)v2.U8x16_1),
-                (uint)((uint)v1.U8x16_2 * (uint)v2.U8x16_2),
-                (uint)((uint)v1.U8x16_3 * (uint)v2.U8x16_3)
+                (uint)((uint)v1.U16x8_0 * (uint)v2.U16x8_0),
+                (uint)((uint)v1.U16x8_1 * (uint)v2.U16x8_1),
+                (uint)((uint)v1.U16x8_2 * (uint)v2.U16x8_2),
+                (uint)((uint)v1.U16x8_3 * (uint)v2.U16x8_3)
             );
             context.OpStack.PushV128(result);
         }
@@ -442,10 +442,10 @@ namespace Wacs.Core.Instructions.Numeric
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (uint)((uint)v1.U8x16_4 * (uint)v2.U8x16_4),
-                (uint)((uint)v1.U8x16_5 * (uint)v2.U8x16_5),
-                (uint)((uint)v1.U8x16_6 * (uint)v2.U8x16_6),
-                (uint)((uint)v1.U8x16_7 * (uint)v2.U8x16_7)
+                (uint)((uint)v1.U16x8_4 * (uint)v2.U16x8_4),
+                (uint)((uint)v1.U16x8_5 * (uint)v2.U16x8_5),
+                (uint)((uint)v1.U16x8_6 * (uint)v2.U16x8_6),
+                (uint)((uint)v1.U16x8_7 * (uint)v2.U16x8_7)
             );
             context.OpStack.PushV128(result);
         }
