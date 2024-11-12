@@ -153,6 +153,29 @@ namespace Wacs.Core.Instructions.Numeric
         private static ValidationDelegate ValidateFromLane(V128Shape shape) =>
             (context, op, l) =>
             {
+                switch (shape)
+                {
+                    case V128Shape.I8x16: 
+                        context.Assert(l < 16, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        break;
+                    case V128Shape.I16x8:
+                        context.Assert(l < 8, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        break;
+                    case V128Shape.I32x4:
+                        context.Assert(l < 4, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        break;
+                    case V128Shape.I64x2: 
+                        context.Assert(l < 2, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        break;
+                    case V128Shape.F32x4:
+                        context.Assert(l < 4, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        break;
+                    case V128Shape.F64x2:
+                        context.Assert(l < 2, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        break;
+                    default: throw new InvalidOperationException("Unsupported lane shape");
+                }
+                
                 context.OpStack.PopV128();
                 switch (shape)
                 {
