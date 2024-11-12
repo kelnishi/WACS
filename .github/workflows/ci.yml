@@ -1,0 +1,47 @@
+name: .NET CI
+
+on:
+  push:
+    branches: [ main ]  # Trigger on pushes to the main branch
+  pull_request:
+    branches: [ main ]  # Trigger on pull requests targeting the main branch
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest  # Use the latest Ubuntu runner
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Synchronize Submodules
+        run: git submodule sync --recursive
+
+      - name: Update Submodules
+        run: git submodule update --init --recursive
+
+      - name: Verify Submodule Status
+        run: git submodule status
+        
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '6.0.x'  # Specify your .NET version (e.g., '6.0.x' or '7.0.x')
+
+      - name: Run build_tests.sh script
+        working-directory: ./Spec.Test
+        run: |
+          chmod +x build_spec_tests.sh
+          ./build_spec_tests.sh
+
+      - name: Restore Dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run Tests
+        run: dotnet test --configuration Release --no-build --verbosity normal
