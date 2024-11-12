@@ -1,3 +1,19 @@
+// /*
+//  * Copyright 2024 Kelvin Nishikawa
+//  *
+//  * Licensed under the Apache License, Version 2.0 (the "License");
+//  * you may not use this file except in compliance with the License.
+//  * You may obtain a copy of the License at
+//  *
+//  *     http://www.apache.org/licenses/LICENSE-2.0
+//  *
+//  * Unless required by applicable law or agreed to in writing, software
+//  * distributed under the License is distributed on an "AS IS" BASIS,
+//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  * See the License for the specific language governing permissions and
+//  * limitations under the License.
+//  */
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -37,8 +53,6 @@ namespace Wacs.Core
         public static bool SkipFinalization = false;
         public static uint MaximumFunctionLocals = 2048;
 
-        private static IInstructionFactory _instructionFactory = SpecFactory.Factory;
-
         public static int InstructionsParsed = 0;
 
         public static readonly SectionId[] SectionOrder = new[]
@@ -58,10 +72,10 @@ namespace Wacs.Core
         };
 
         static readonly HashSet<ByteCode> MemoryInstructions = new HashSet<ByteCode> { ExtCode.MemoryInit, ExtCode.DataDrop };
-        public static IInstructionFactory InstructionFactory => _instructionFactory;
+        public static IInstructionFactory InstructionFactory { get; private set; } = SpecFactory.Factory;
 
         public static void UseInstructionFactory(IInstructionFactory factory) =>
-            _instructionFactory = factory;
+            InstructionFactory = factory;
 
         /// <summary>
         /// @Spec 5.5.16. Modules
@@ -288,7 +302,7 @@ namespace Wacs.Core
             int traceIdx = InstructionsParsed;
             try
             {
-                return _instructionFactory.CreateInstruction(opcode)?.Parse(reader);
+                return InstructionFactory.CreateInstruction(opcode)?.Parse(reader);
             }
             catch (InvalidDataException exc)
             {
