@@ -134,8 +134,8 @@ namespace Wacs.Core.Instructions.Numeric
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
             V128 result = new V128(
-                val1.F32x4_0 + val2.F32x4_0,
-                val1.F32x4_1 + val2.F32x4_1
+                val1.F64x2_0 + val2.F64x2_0,
+                val1.F64x2_1 + val2.F64x2_1
             );
             context.OpStack.PushV128(result);
         }
@@ -145,8 +145,8 @@ namespace Wacs.Core.Instructions.Numeric
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
             V128 result = new V128(
-                val1.F32x4_0 - val2.F32x4_0,
-                val1.F32x4_1 - val2.F32x4_1
+                val1.F64x2_0 - val2.F64x2_0,
+                val1.F64x2_1 - val2.F64x2_1
             );
             context.OpStack.PushV128(result);
         }
@@ -156,8 +156,8 @@ namespace Wacs.Core.Instructions.Numeric
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
             V128 result = new V128(
-                val1.F32x4_0 * val2.F32x4_0,
-                val1.F32x4_1 * val2.F32x4_1
+                val1.F64x2_0 * val2.F64x2_0,
+                val1.F64x2_1 * val2.F64x2_1
             );
             context.OpStack.PushV128(result);
         }
@@ -167,8 +167,8 @@ namespace Wacs.Core.Instructions.Numeric
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
             V128 result = new V128(
-                val1.F32x4_0 / val2.F32x4_0,
-                val1.F32x4_1 / val2.F32x4_1
+                val1.F64x2_0 / val2.F64x2_0,
+                val1.F64x2_1 / val2.F64x2_1
             );
             context.OpStack.PushV128(result);
         }
@@ -178,8 +178,8 @@ namespace Wacs.Core.Instructions.Numeric
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
             V128 result = new V128(
-                Math.Min(val1.F32x4_0, val2.F32x4_0),
-                Math.Min(val1.F32x4_1, val2.F32x4_1)
+                Math.Min(val1.F64x2_0, val2.F64x2_0),
+                Math.Min(val1.F64x2_1, val2.F64x2_1)
             );
             context.OpStack.PushV128(result);
         }
@@ -189,8 +189,8 @@ namespace Wacs.Core.Instructions.Numeric
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
             V128 result = new V128(
-                Math.Max(val1.F32x4_0, val2.F32x4_0),
-                Math.Max(val1.F32x4_1, val2.F32x4_1)
+                Math.Max(val1.F64x2_0, val2.F64x2_0),
+                Math.Max(val1.F64x2_1, val2.F64x2_1)
             );
             context.OpStack.PushV128(result);
         }
@@ -200,8 +200,8 @@ namespace Wacs.Core.Instructions.Numeric
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (val1.F32x4_0 < val2.F32x4_0) ? val1.F32x4_0 : val2.F32x4_0,
-                (val1.F32x4_1 < val2.F32x4_1) ? val1.F32x4_1 : val2.F32x4_1
+                (val1.F64x2_0 < val2.F64x2_0) ? val1.F64x2_0 : val2.F64x2_0,
+                (val1.F64x2_1 < val2.F64x2_1) ? val1.F64x2_1 : val2.F64x2_1
             );
             context.OpStack.PushV128(result);
         }
@@ -211,8 +211,8 @@ namespace Wacs.Core.Instructions.Numeric
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (val1.F32x4_0 > val2.F32x4_0) ? val1.F32x4_0 : val2.F32x4_0,
-                (val1.F32x4_1 > val2.F32x4_1) ? val1.F32x4_1 : val2.F32x4_1
+                (val1.F64x2_0 > val2.F64x2_0) ? val1.F64x2_0 : val2.F64x2_0,
+                (val1.F64x2_1 > val2.F64x2_1) ? val1.F64x2_1 : val2.F64x2_1
             );
             context.OpStack.PushV128(result);
         }

@@ -478,7 +478,6 @@ namespace Wacs.Core.Instructions.SIMD
             
             context.OpStack.PopV128();
             context.OpStack.PopI32();
-            context.OpStack.PushV128();
         }
 
         // @Spec 4.4.7.7. v128.storeN_lane memarg x
