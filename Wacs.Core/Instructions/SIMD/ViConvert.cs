@@ -40,7 +40,20 @@ namespace Wacs.Core.Instructions.Numeric
                 float.NegativeInfinity => int.MinValue,
                 < int.MinValue => int.MinValue,
                 > int.MaxValue => int.MaxValue,
-                _ => (int)(float)Math.Truncate(f32)
+                _ => (int)Math.Truncate(f32)
+            };
+        }
+
+        private static int TruncSatF32S(double f64)
+        {
+            return Math.Truncate(f64) switch
+            {
+                double.NaN => 0,
+                double.PositiveInfinity => int.MaxValue,
+                double.NegativeInfinity => int.MinValue,
+                < int.MinValue => int.MinValue,
+                > int.MaxValue => int.MaxValue,
+                _ => (int)Math.Truncate(f64)
             };
         }
 
@@ -70,6 +83,20 @@ namespace Wacs.Core.Instructions.Numeric
             };
         }
 
+        private static uint TruncSatF32U(double f64)
+        {
+            double truncated = Math.Truncate(f64);
+            return truncated switch
+            {
+                double.NaN => 0,
+                double.PositiveInfinity => uint.MaxValue,
+                double.NegativeInfinity => 0,
+                < 0 => 0,
+                > uint.MaxValue => uint.MaxValue,
+                _ => (uint)truncated
+            };
+        }
+
         private static void ExecuteI32x4TruncSatF32x4U(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
@@ -86,8 +113,8 @@ namespace Wacs.Core.Instructions.Numeric
         {
             V128 c = context.OpStack.PopV128();
             V128 result = new V128(
-                TruncSatF32S((float)c.F64x2_0),
-                TruncSatF32S((float)c.F64x2_1),
+                TruncSatF32S(c.F64x2_0),
+                TruncSatF32S(c.F64x2_1),
                 0,
                 0
             );
@@ -98,8 +125,8 @@ namespace Wacs.Core.Instructions.Numeric
         {
             V128 c = context.OpStack.PopV128();
             V128 result = new V128(
-                TruncSatF32U((float)c.F64x2_0),
-                TruncSatF32U((float)c.F64x2_1),
+                TruncSatF32U(c.F64x2_0),
+                TruncSatF32U(c.F64x2_1),
                 0,
                 0
             );
