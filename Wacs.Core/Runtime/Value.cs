@@ -457,7 +457,8 @@ namespace Wacs.Core.Runtime
                 return true;
             if (float.IsNegativeInfinity(a) && float.IsNegativeInfinity(b))
                 return true;
-            return a == b;
+            float epsilon = 1E-6f;
+            return Math.Abs(a - b) < epsilon;
         }
         public static bool operator ==(Value left, Value right)
         {
@@ -487,8 +488,8 @@ namespace Wacs.Core.Runtime
             {
                 ValType.I32 => $"i32={Int32.ToString()}",
                 ValType.I64 => $"i64={Int64.ToString()}",
-                ValType.F32 => $"f32={Float32.ToString("G", CultureInfo.InvariantCulture)}",
-                ValType.F64 => $"f64={Float64.ToString("G", CultureInfo.InvariantCulture)}",
+                ValType.F32 => $"f32={Float32.ToString("G10", CultureInfo.InvariantCulture)}",
+                ValType.F64 => $"f64={Float64.ToString("G10", CultureInfo.InvariantCulture)}",
                 ValType.V128 => $"v128={V128.ToString()}",
                 ValType.Funcref => $"Funcref: {Ptr}",
                 ValType.Externref => $"Externref: {Ptr}",

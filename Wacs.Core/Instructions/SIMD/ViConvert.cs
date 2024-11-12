@@ -47,32 +47,6 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I64x2ExtendLowI32x4U  = new(SimdCode.I64x2ExtendLowI32x4U,  ExecuteI64x2ExtendLowI32x4U,  ValidateOperands(pop: ValType.V128, push: ValType.V128));
         public static readonly NumericInst I64x2ExtendHighI32x4U = new(SimdCode.I64x2ExtendHighI32x4U, ExecuteI64x2ExtendHighI32x4U, ValidateOperands(pop: ValType.V128, push: ValType.V128));
 
-        private static int TruncSatF32S(float f32)
-        {
-            return (float)Math.Truncate(f32) switch
-            {
-                float.NaN => 0,
-                float.PositiveInfinity => int.MaxValue,
-                float.NegativeInfinity => int.MinValue,
-                < int.MinValue => int.MinValue,
-                > int.MaxValue => int.MaxValue,
-                _ => (int)Math.Truncate(f32)
-            };
-        }
-
-        private static int TruncSatF32S(double f64)
-        {
-            return Math.Truncate(f64) switch
-            {
-                double.NaN => 0,
-                double.PositiveInfinity => int.MaxValue,
-                double.NegativeInfinity => int.MinValue,
-                < int.MinValue => int.MinValue,
-                > int.MaxValue => int.MaxValue,
-                _ => (int)Math.Truncate(f64)
-            };
-        }
-
         private static void ExecuteI32x4TruncSatF32x4S(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
@@ -83,34 +57,6 @@ namespace Wacs.Core.Instructions.Numeric
                 TruncSatF32S(c.F32x4_3)
                 );
             context.OpStack.PushV128(result);
-        }
-
-        private static uint TruncSatF32U(float f32)
-        {
-            float truncated = (float)Math.Truncate(f32);
-            return truncated switch
-            {
-                float.NaN => 0,
-                float.PositiveInfinity => uint.MaxValue,
-                float.NegativeInfinity => 0,
-                < 0 => 0,
-                > uint.MaxValue => uint.MaxValue,
-                _ => (uint)truncated
-            };
-        }
-
-        private static uint TruncSatF32U(double f64)
-        {
-            double truncated = Math.Truncate(f64);
-            return truncated switch
-            {
-                double.NaN => 0,
-                double.PositiveInfinity => uint.MaxValue,
-                double.NegativeInfinity => 0,
-                < 0 => 0,
-                > uint.MaxValue => uint.MaxValue,
-                _ => (uint)truncated
-            };
         }
 
         private static void ExecuteI32x4TruncSatF32x4U(ExecContext context)
@@ -129,8 +75,8 @@ namespace Wacs.Core.Instructions.Numeric
         {
             V128 c = context.OpStack.PopV128();
             V128 result = new V128(
-                TruncSatF32S(c.F64x2_0),
-                TruncSatF32S(c.F64x2_1),
+                TruncSatF64S(c.F64x2_0),
+                TruncSatF64S(c.F64x2_1),
                 0,
                 0
             );
@@ -141,8 +87,8 @@ namespace Wacs.Core.Instructions.Numeric
         {
             V128 c = context.OpStack.PopV128();
             V128 result = new V128(
-                TruncSatF32U(c.F64x2_0),
-                TruncSatF32U(c.F64x2_1),
+                TruncSatF64U(c.F64x2_0),
+                TruncSatF64U(c.F64x2_1),
                 0,
                 0
             );
