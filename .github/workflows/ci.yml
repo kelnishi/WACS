@@ -26,10 +26,12 @@ jobs:
       - name: Verify Submodule Status
         run: git submodule status
 
-      - name: Install WABT
+      - name: Install WABT 1.0.36
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wabt
+          wget https://github.com/WebAssembly/wabt/releases/download/1.0.36/wabt-1.0.36-ubuntu-20.04.tar.gz -O wabt.tar.gz
+          mkdir wabt
+          tar -xzf wabt.tar.gz -C wabt --strip-components=1
+          sudo cp wabt/bin/* /usr/local/bin/
 
       - name: Verify WABT Installation
         run: wast2json --version
