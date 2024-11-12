@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 
 # Default values for base_dir and out_dir
 base_dir="./spec/test/core"

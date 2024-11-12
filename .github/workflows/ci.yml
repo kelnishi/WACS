@@ -25,11 +25,14 @@ jobs:
 
       - name: Verify Submodule Status
         run: git submodule status
-        
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v3
-        with:
-          dotnet-version: '6.0.x'  # Specify your .NET version (e.g., '6.0.x' or '7.0.x')
+
+      - name: Install WABT
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wabt
+
+      - name: Verify WABT Installation
+        run: wast2json --version
 
       - name: Run build_tests.sh script
         working-directory: ./Spec.Test
@@ -37,6 +40,11 @@ jobs:
           chmod +x build_spec_tests.sh
           ./build_spec_tests.sh
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '6.0.x'
+          
       - name: Restore Dependencies
         run: dotnet restore
 
