@@ -279,7 +279,7 @@ namespace Wacs.Core
                                 
                                 if (mode.SegmentType != tableType.ElementType)
                                 {
-                                    ctx.AddFailure($"Active ElementMode {mode.SegmentType} is valid only for table type {tableType.ElementType}");                                    
+                                    ctx.AddFailure($"Active ElementMode {mode.SegmentType} is not valid for table type {tableType.ElementType}");                                    
                                 }
                             });
                     }
