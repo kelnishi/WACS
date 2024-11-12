@@ -131,9 +131,14 @@ namespace Spec.Test.WastJson
         {
             if (longval.StartsWith("nan:"))
                 return double.NaN;
+            decimal value = decimal.Parse(longval);
+            if (value > long.MaxValue && value <= ulong.MaxValue)
+            {
+                long v = (long)(ulong)value;
+                return BitConverter.ToDouble(BitConverter.GetBytes(v));
+            }
             
-            ulong v = ulong.Parse(longval);
-            return BitConverter.ToDouble(BitConverter.GetBytes(v));
+            return BitConverter.ToDouble(BitConverter.GetBytes((long)value));
         }
 
         public override string ToString() => $"{Type}={Value}";
