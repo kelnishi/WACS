@@ -103,17 +103,35 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        private static float PseudoMin(float a, float b)
+        {
+            if (float.IsNaN(a))
+                return float.NaN;
+            if (float.IsNaN(b))
+                return a;
+            return a < b ? a : b;
+        }
+
         private static void ExecuteF32x4PMin(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (val1.F32x4_0 < val2.F32x4_0) ? val1.F32x4_0 : val2.F32x4_0,
-                (val1.F32x4_1 < val2.F32x4_1) ? val1.F32x4_1 : val2.F32x4_1,
-                (val1.F32x4_2 < val2.F32x4_2) ? val1.F32x4_2 : val2.F32x4_2,
-                (val1.F32x4_3 < val2.F32x4_3) ? val1.F32x4_3 : val2.F32x4_3
+                PseudoMin(val1.F32x4_0, val2.F32x4_0),
+                PseudoMin(val1.F32x4_1, val2.F32x4_1),
+                PseudoMin(val1.F32x4_2, val2.F32x4_2),
+                PseudoMin(val1.F32x4_3, val2.F32x4_3)
             );
             context.OpStack.PushV128(result);
+        }
+
+        private static float PseudoMax(float a, float b)
+        {
+            if (float.IsNaN(a))
+                return float.NaN;
+            if (float.IsNaN(b))
+                return a;
+            return a > b ? a : b;
         }
 
         private static void ExecuteF32x4PMax(ExecContext context)
@@ -121,10 +139,10 @@ namespace Wacs.Core.Instructions.Numeric
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (val1.F32x4_0 > val2.F32x4_0) ? val1.F32x4_0 : val2.F32x4_0,
-                (val1.F32x4_1 > val2.F32x4_1) ? val1.F32x4_1 : val2.F32x4_1,
-                (val1.F32x4_2 > val2.F32x4_2) ? val1.F32x4_2 : val2.F32x4_2,
-                (val1.F32x4_3 > val2.F32x4_3) ? val1.F32x4_3 : val2.F32x4_3
+                PseudoMax(val1.F32x4_0, val2.F32x4_0),
+                PseudoMax(val1.F32x4_1, val2.F32x4_1),
+                PseudoMax(val1.F32x4_2, val2.F32x4_2),
+                PseudoMax(val1.F32x4_3, val2.F32x4_3)
             );
             context.OpStack.PushV128(result);
         }
@@ -195,15 +213,33 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        private static double PseudoMin(double a, double b)
+        {
+            if (double.IsNaN(a))
+                return double.NaN;
+            if (double.IsNaN(b))
+                return a;
+            return a < b ? a : b;
+        }
+
         private static void ExecuteF64x2PMin(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (val1.F64x2_0 < val2.F64x2_0) ? val1.F64x2_0 : val2.F64x2_0,
-                (val1.F64x2_1 < val2.F64x2_1) ? val1.F64x2_1 : val2.F64x2_1
+                PseudoMin(val1.F64x2_0, val2.F64x2_0),
+                PseudoMin(val1.F64x2_1, val2.F64x2_1)
             );
             context.OpStack.PushV128(result);
+        }
+
+        private static double PseudoMax(double a, double b)
+        {
+            if (double.IsNaN(a))
+                return double.NaN;
+            if (double.IsNaN(b))
+                return a;
+            return a > b ? a : b;
         }
 
         private static void ExecuteF64x2PMax(ExecContext context)
@@ -211,8 +247,8 @@ namespace Wacs.Core.Instructions.Numeric
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (val1.F64x2_0 > val2.F64x2_0) ? val1.F64x2_0 : val2.F64x2_0,
-                (val1.F64x2_1 > val2.F64x2_1) ? val1.F64x2_1 : val2.F64x2_1
+                PseudoMax(val1.F64x2_0, val2.F64x2_0),
+                PseudoMax(val1.F64x2_1, val2.F64x2_1) 
             );
             context.OpStack.PushV128(result);
         }
