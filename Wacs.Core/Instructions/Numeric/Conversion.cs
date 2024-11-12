@@ -19,6 +19,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Instructions.Numeric
 {
@@ -223,14 +224,14 @@ namespace Wacs.Core.Instructions.Numeric
         private static void ExecuteF32ConvertI64S(ExecContext context)
         {
             long value = context.OpStack.PopI64();
-            float result = value;
+            float result = FloatConversion.LongToFloat(value);
             context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32ConvertI64U(ExecContext context)
         {
             ulong value = context.OpStack.PopI64();
-            float result = value;
+            float result = FloatConversion.ULongToFloat(value);
             context.OpStack.PushF32(result);
         }
 
@@ -258,14 +259,14 @@ namespace Wacs.Core.Instructions.Numeric
         private static void ExecuteF64ConvertI64S(ExecContext context)
         {
             long value = context.OpStack.PopI64();
-            double result = value;
+            double result = FloatConversion.LongToDouble(value);
             context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64ConvertI64U(ExecContext context)
         {
             ulong value = context.OpStack.PopI64();
-            double result = value;
+            double result = FloatConversion.ULongToDouble(value);
             context.OpStack.PushF64(result);
         }
 

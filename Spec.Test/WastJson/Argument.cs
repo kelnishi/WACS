@@ -136,10 +136,11 @@ namespace Spec.Test.WastJson
             decimal value = decimal.Parse(intval);
             if (value > int.MaxValue && value <= uint.MaxValue)
             {
-                int v = (int)(uint)value;
-                return BitConverter.ToSingle(BitConverter.GetBytes(v));
+                uint v = (uint)value;
+                return BitConverter.UInt32BitsToSingle(v);
             }
-            return BitConverter.ToSingle(BitConverter.GetBytes((int)value));
+
+            return BitConverter.Int32BitsToSingle((int)value);
         }
 
         private static ulong BitBashLong(string longval)
@@ -154,11 +155,11 @@ namespace Spec.Test.WastJson
             decimal value = decimal.Parse(longval);
             if (value > long.MaxValue && value <= ulong.MaxValue)
             {
-                long v = (long)(ulong)value;
-                return BitConverter.ToDouble(BitConverter.GetBytes(v));
+                ulong v = (ulong)value;
+                return BitConverter.UInt64BitsToDouble(v);
             }
-            
-            return BitConverter.ToDouble(BitConverter.GetBytes((long)value));
+
+            return BitConverter.Int64BitsToDouble((long)value);
         }
 
         public override string ToString() => $"{Type}={Value}";
