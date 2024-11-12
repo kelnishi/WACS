@@ -27,10 +27,10 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I8x16AvgrU = new(SimdCode.I8x16AvgrU, ExecuteI8x16AvgrU, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
         public static readonly NumericInst I16x8AvgrU = new(SimdCode.I16x8AvgrU, ExecuteI16x8AvgrU, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
 
-        public static readonly NumericInst I16x8ExtAddPairwiseI8x16S = new (SimdCode.I16x8ExtAddPairwiseI8x16S, ExecuteI16x8ExtAddPairwiseI8x16S, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8ExtAddPairwiseI8x16U = new (SimdCode.I16x8ExtAddPairwiseI8x16U, ExecuteI16x8ExtAddPairwiseI8x16U, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4ExtAddPairwiseI16x8S = new (SimdCode.I32x4ExtAddPairwiseI16x8S, ExecuteI32x4ExtAddPairwiseI16x8S, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4ExtAddPairwiseI16x8U = new (SimdCode.I32x4ExtAddPairwiseI16x8U, ExecuteI32x4ExtAddPairwiseI16x8U, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I16x8ExtAddPairwiseI8x16S = new (SimdCode.I16x8ExtAddPairwiseI8x16S, ExecuteI16x8ExtAddPairwiseI8x16S, ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I16x8ExtAddPairwiseI8x16U = new (SimdCode.I16x8ExtAddPairwiseI8x16U, ExecuteI16x8ExtAddPairwiseI8x16U, ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I32x4ExtAddPairwiseI16x8S = new (SimdCode.I32x4ExtAddPairwiseI16x8S, ExecuteI32x4ExtAddPairwiseI16x8S, ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I32x4ExtAddPairwiseI16x8U = new (SimdCode.I32x4ExtAddPairwiseI16x8U, ExecuteI32x4ExtAddPairwiseI16x8U, ValidateOperands(pop: ValType.V128, push: ValType.V128));
 
         public static readonly NumericInst I16x8ExtMulLowI8x16S  = new (SimdCode.I16x8ExtMulLowI8x16S , ExecuteI16x8ExtMulLowI8x16S , ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
         public static readonly NumericInst I16x8ExtMulHighI8x16S = new (SimdCode.I16x8ExtMulHighI8x16S, ExecuteI16x8ExtMulHighI8x16S, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
@@ -276,60 +276,56 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI16x8ExtAddPairwiseI8x16S(ExecContext context)
         {
-            V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (short)((short)v1.I8x16_0 + (short)v2.I8x16_0),
-                (short)((short)v1.I8x16_1 + (short)v2.I8x16_1),
-                (short)((short)v1.I8x16_2 + (short)v2.I8x16_2),
-                (short)((short)v1.I8x16_3 + (short)v2.I8x16_3),
-                (short)((short)v1.I8x16_4 + (short)v2.I8x16_4),
-                (short)((short)v1.I8x16_5 + (short)v2.I8x16_5),
-                (short)((short)v1.I8x16_6 + (short)v2.I8x16_6),
-                (short)((short)v1.I8x16_7 + (short)v2.I8x16_7)
+                (short)((short)v1.I8x16_0 + (short)v1.I8x16_1),
+                (short)((short)v1.I8x16_2 + (short)v1.I8x16_3),
+                (short)((short)v1.I8x16_4 + (short)v1.I8x16_5),
+                (short)((short)v1.I8x16_6 + (short)v1.I8x16_7),
+                (short)((short)v1.I8x16_8 + (short)v1.I8x16_9),
+                (short)((short)v1.I8x16_A + (short)v1.I8x16_B),
+                (short)((short)v1.I8x16_C + (short)v1.I8x16_D),
+                (short)((short)v1.I8x16_E + (short)v1.I8x16_F)
             );
             context.OpStack.PushV128(result);
         }
 
         private static void ExecuteI16x8ExtAddPairwiseI8x16U(ExecContext context)
         {
-            V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (ushort)((ushort)v1.U8x16_0 + (ushort)v2.U8x16_0),
-                (ushort)((ushort)v1.U8x16_1 + (ushort)v2.U8x16_1),
-                (ushort)((ushort)v1.U8x16_2 + (ushort)v2.U8x16_2),
-                (ushort)((ushort)v1.U8x16_3 + (ushort)v2.U8x16_3),
-                (ushort)((ushort)v1.U8x16_4 + (ushort)v2.U8x16_4),
-                (ushort)((ushort)v1.U8x16_5 + (ushort)v2.U8x16_5),
-                (ushort)((ushort)v1.U8x16_6 + (ushort)v2.U8x16_6),
-                (ushort)((ushort)v1.U8x16_7 + (ushort)v2.U8x16_7)
+                (ushort)((short)v1.U8x16_0 + (short)v1.U8x16_1),
+                (ushort)((short)v1.U8x16_2 + (short)v1.U8x16_3),
+                (ushort)((short)v1.U8x16_4 + (short)v1.U8x16_5),
+                (ushort)((short)v1.U8x16_6 + (short)v1.U8x16_7),
+                (ushort)((short)v1.U8x16_8 + (short)v1.U8x16_9),
+                (ushort)((short)v1.U8x16_A + (short)v1.U8x16_B),
+                (ushort)((short)v1.U8x16_C + (short)v1.U8x16_D),
+                (ushort)((short)v1.U8x16_E + (short)v1.U8x16_F)
             );
             context.OpStack.PushV128(result);
         }
 
         private static void ExecuteI32x4ExtAddPairwiseI16x8S(ExecContext context)
         {
-            V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (int)((int)v1.I16x8_0 + (int)v2.I16x8_0),
-                (int)((int)v1.I16x8_1 + (int)v2.I16x8_1),
-                (int)((int)v1.I16x8_2 + (int)v2.I16x8_2),
-                (int)((int)v1.I16x8_3 + (int)v2.I16x8_3)
+                (int)((int)v1.I16x8_0 + (int)v1.I16x8_1),
+                (int)((int)v1.I16x8_2 + (int)v1.I16x8_3),
+                (int)((int)v1.I16x8_4 + (int)v1.I16x8_5),
+                (int)((int)v1.I16x8_6 + (int)v1.I16x8_7)
             );
             context.OpStack.PushV128(result);
         }
 
         private static void ExecuteI32x4ExtAddPairwiseI16x8U(ExecContext context)
         {
-            V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
             V128 result = new V128(
-                (uint)((uint)v1.U16x8_0 + (uint)v2.U16x8_0),
-                (uint)((uint)v1.U16x8_2 + (uint)v2.U16x8_2),
-                (uint)((uint)v1.U16x8_4 + (uint)v2.U16x8_4),
-                (uint)((uint)v1.U16x8_6 + (uint)v2.U16x8_6)
+                (uint)((uint)v1.U16x8_0 + (uint)v1.U16x8_1),
+                (uint)((uint)v1.U16x8_2 + (uint)v1.U16x8_3),
+                (uint)((uint)v1.U16x8_4 + (uint)v1.U16x8_5),
+                (uint)((uint)v1.U16x8_6 + (uint)v1.U16x8_7)
             );
             context.OpStack.PushV128(result);
         }
