@@ -98,14 +98,18 @@ namespace Spec.Test.WastJson
             return new V128(BitBashInt(vals[0]), BitBashInt(vals[1]),BitBashInt(vals[2]), BitBashInt(vals[3]));
         }
 
-        private static int BitBashInt(string intVal)
+        private int BitBashInt(string intVal)
         {
             decimal value = decimal.Parse(intVal);
             if (value > uint.MaxValue)
                 throw new InvalidDataException($"Integer value {intVal} out of range");
             if (value < int.MinValue)
                 throw new InvalidDataException($"Integer value {intVal} out of range");
-
+                
+            if (value > int.MaxValue && value <= uint.MaxValue)
+            {
+                return (int)(uint)value;
+            }
             return (int)value;
         }
 
