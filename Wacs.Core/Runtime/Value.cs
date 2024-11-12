@@ -153,7 +153,7 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        private int BitBashInt(string intVal)
+        private static int BitBashInt(string intVal)
         {
             decimal value = decimal.Parse(intVal);
             if (value > uint.MaxValue)
@@ -168,7 +168,7 @@ namespace Wacs.Core.Runtime
             return (int)value;
         }
         
-        private long BitBashLong(string intVal)
+        private static long BitBashLong(string intVal)
         {
             decimal value = decimal.Parse(intVal);
             if (value > ulong.MaxValue)
@@ -183,7 +183,7 @@ namespace Wacs.Core.Runtime
             return (long)value;
         }
 
-        private int BitBashRef(string textVal)
+        private static int BitBashRef(string textVal)
         {
             if (textVal == "null")
                 return -1;
@@ -191,22 +191,31 @@ namespace Wacs.Core.Runtime
             return (int)v;
         }
         
-        private float BitBashFloat(string intval)
+        private static float BitBashFloat(string intval)
         {
             if (intval.StartsWith("nan:"))
                 return float.NaN;
-            
-            uint v = uint.Parse(intval);
-            return BitConverter.ToSingle(BitConverter.GetBytes(v));
+            decimal value = decimal.Parse(intval);
+            if (value > int.MaxValue && value <= uint.MaxValue)
+            {
+                int v = (int)(uint)value;
+                return BitConverter.ToSingle(BitConverter.GetBytes(v));
+            }
+            return BitConverter.ToSingle(BitConverter.GetBytes((int)value));
         }
 
-        private double BitBashDouble(string longval)
+        private static double BitBashDouble(string longval)
         {
             if (longval.StartsWith("nan:"))
                 return double.NaN;
+            decimal value = decimal.Parse(longval);
+            if (value > long.MaxValue && value <= ulong.MaxValue)
+            {
+                long v = (long)(ulong)value;
+                return BitConverter.ToDouble(BitConverter.GetBytes(v));
+            }
             
-            ulong v = ulong.Parse(longval);
-            return BitConverter.ToDouble(BitConverter.GetBytes(v));
+            return BitConverter.ToDouble(BitConverter.GetBytes((long)value));
         }
 
         public Value(ValType type, uint idx)
