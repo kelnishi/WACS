@@ -149,6 +149,8 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
+
+        // @Spec 3.3.3.9. shape.extract_lane_sx
         private static ValidationDelegate ValidateFromLane(V128Shape shape) =>
             (context, op, l) =>
             {
@@ -165,6 +167,7 @@ namespace Wacs.Core.Instructions.Numeric
                 }
             };
 
+        // @Spec 3.3.3.10. shape.replace_lane laneidx
         private static ValidationDelegate ValidateToLane(V128Shape shape) =>
             (context, op, l) =>
             {
@@ -196,6 +199,7 @@ namespace Wacs.Core.Instructions.Numeric
                         break;
                     default: throw new InvalidOperationException("Unsupported lane shape");
                 }
+                context.OpStack.PopV128();
                 context.OpStack.PushV128();
             };
 
