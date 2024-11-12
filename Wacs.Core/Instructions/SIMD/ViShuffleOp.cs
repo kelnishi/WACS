@@ -9,7 +9,7 @@ namespace Wacs.Core.Instructions
     {
         private V128 X { get; set; }
 
-        public override ByteCode Op { get; } // => SimdCode.I8x16Shuffle;
+        public override ByteCode Op => SimdCode.I8x16Shuffle;
 
         public override void Validate(IWasmValidationContext context)
         {
