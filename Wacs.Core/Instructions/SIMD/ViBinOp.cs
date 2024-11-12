@@ -504,10 +504,10 @@ namespace Wacs.Core.Instructions.Numeric
             V128 v1 = context.OpStack.PopV128();
 
             V128 result = new V128(
-                ((int)v1.U16x8_0 * (int)v2.U16x8_0 + (int)v1.U16x8_1 * (int)v2.U16x8_1),
-                ((int)v1.U16x8_2 * (int)v2.U16x8_2 + (int)v1.U16x8_3 * (int)v2.U16x8_3),
-                ((int)v1.U16x8_4 * (int)v2.U16x8_4 + (int)v1.U16x8_5 * (int)v2.U16x8_5),
-                ((int)v1.U16x8_6 * (int)v2.U16x8_6 + (int)v1.U16x8_7 * (int)v2.U16x8_7)
+                ((int)v1.I16x8_0 * (int)v2.I16x8_0 + (int)v1.I16x8_1 * (int)v2.I16x8_1),
+                ((int)v1.I16x8_2 * (int)v2.I16x8_2 + (int)v1.I16x8_3 * (int)v2.I16x8_3),
+                ((int)v1.I16x8_4 * (int)v2.I16x8_4 + (int)v1.I16x8_5 * (int)v2.I16x8_5),
+                ((int)v1.I16x8_6 * (int)v2.I16x8_6 + (int)v1.I16x8_7 * (int)v2.I16x8_7)
             );
             
             context.OpStack.PushV128(result);
