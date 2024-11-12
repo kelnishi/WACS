@@ -49,11 +49,11 @@ namespace Wacs.Core.Types
     public static class ReferenceTypeParser
     {
         public static ReferenceType Parse(BinaryReader reader) =>
-            (ReferenceType)(byte)reader.ReadSByte() switch
+            (ReferenceType)reader.ReadByte() switch
             {
                 ReferenceType.Funcref => ReferenceType.Funcref,
                 ReferenceType.Externref => ReferenceType.Externref,
-                _ => throw new FormatException($"Invalid reference type: {reader.ReadSByte():x8}"),
+                _ => throw new FormatException($"Invalid reference type: {reader.ReadByte():x8}"),
             };
     }
 
