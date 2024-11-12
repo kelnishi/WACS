@@ -474,7 +474,6 @@ namespace Wacs.Core.Instructions.SIMD
                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
             context.Assert(M.AlignBytes <= WidthN.ByteSize(),
                 $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.AlignBytes} <= {WidthN}/8");
-
             
             context.OpStack.PopV128();
             context.OpStack.PopI32();
@@ -515,30 +514,21 @@ namespace Wacs.Core.Instructions.SIMD
             {
                 case BitWidth.S8:
                 case BitWidth.U8:
-                    bs[X * 1] = c[(byte)X];
+                    bs[0] = c[(byte)X];
                     break;
                 case BitWidth.S16:
                 case BitWidth.U16:
-                    int shortStart = X * 2;
-                    int shortEnd = shortStart + 2;
-                    var shortLane = bs[shortStart..shortEnd];
                     byte[] cU16 = BitConverter.GetBytes(c[(ushort)X]);
-                    cU16.CopyTo(shortLane);
+                    cU16.CopyTo(bs);
                     break;
                 case BitWidth.S32:
                 case BitWidth.U32:
-                    int intStart = X * 4;
-                    int intEnd = intStart + 4;
-                    var intLane = bs[intStart..intEnd];
                     byte[] cU32 = BitConverter.GetBytes(c[(uint)X]);
-                    cU32.CopyTo(intLane);
+                    cU32.CopyTo(bs);
                     break;
                 case BitWidth.U64:
-                    int longStart = X * 8;
-                    int longEnd = longStart + 8;
-                    var longLane = bs[longStart..longEnd];
                     byte[] cU64 = BitConverter.GetBytes(c[(ulong)X]);
-                    cU64.CopyTo(longLane);
+                    cU64.CopyTo(bs);
                     break;
             }
         }
