@@ -117,9 +117,13 @@ namespace Spec.Test.WastJson
         {
             if (intval.StartsWith("nan:"))
                 return float.NaN;
-            
-            uint v = uint.Parse(intval);
-            return BitConverter.ToSingle(BitConverter.GetBytes(v));
+            decimal value = decimal.Parse(intval);
+            if (value > int.MaxValue && value <= uint.MaxValue)
+            {
+                int v = (int)(uint)value;
+                return BitConverter.ToSingle(BitConverter.GetBytes(v));
+            }
+            return BitConverter.ToSingle(BitConverter.GetBytes((int)value));
         }
 
         private static ulong BitBashLong(string longval)
