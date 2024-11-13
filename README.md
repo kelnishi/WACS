@@ -5,7 +5,7 @@
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including AOT environments like Unity's IL2CPP.
 The architecture is my literal interpretation of the WebAssembly spec, so it should be conceptually similar to the OCaml reference interpreter.
-I've commented the chapters and sections from the spec throughout the source code, so it should serve as a good reference for others. 
+The chapters and sections from the spec are commented throughout the source code and should serve as a good reference for others. 
 
 ![Wasm in Unity](UnityScreenshot.png)
 
@@ -102,7 +102,7 @@ WACS works out-of-the-box with Unity, even in AOT IL2CPP modes for iOS. Simply a
 ## Interop Bindings
 
 WACS simplifies host function bindings, allowing you to easily call .NET functions from WebAssembly modules.
-This allows seamless communication between your host environment and WebAssembly, without boilerplate code.
+This allows seamless communication between your host environment and WebAssembly without boilerplate code.
 Similarly, calling into wasm code is done by generating a typed delegate.
 
 Example from WASIp1:
@@ -148,7 +148,7 @@ public ErrNo ArgsGet(ExecContext ctx, ptr argvPtr, ptr argvBufPtr)
 
 ## Customization
 
-If you'd like to customize the wasm runtime environment, I recommend downloading getting the full source for examples.
+If you'd like to customize the wasm runtime environment, I recommend downloading the full source for examples.
 
 The `Wacs.WASIp1` implementation is a good starting point for how to set up your own library of bindings.
 It also contains examples of more advanced usage like binding multiple return values and full operand stack access.
@@ -160,7 +160,7 @@ Custom Instruction implementations can be patched in by replacing or inheriting 
 
 ## Roadmap
 
-My current TODO list:
+The current TODO list includes:
 
 - **ExecAsync:** Thread scheduling and advanced gas metering.
 - **Wasm Garbage Collection**: Support  wasm-gc and heaptypes.
