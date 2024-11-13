@@ -1,4 +1,4 @@
-name: .NET CI
+name: wasm wast spec
 
 on:
   push:
