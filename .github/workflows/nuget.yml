@@ -1,0 +1,51 @@
+name: Publish Updated Packages to NuGet
+
+on:
+  push:
+    tags:
+      - 'WACS-v*.*.*'
+      - 'WASIp1-v*.*.*'
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project:
+          - path: Wacs.Core
+            package_name: WACS
+          - path: Wacs.WASIp1
+            package_name: WACS.WASIp1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: '6.x' # Set to your .NET version
+
+      - name: Determine if package should be built
+        id: check_changes
+        run: |
+          if git diff --name-only HEAD^ HEAD | grep -q "${{ matrix.project.path }}"; then
+            echo "build=true" >> $GITHUB_ENV
+          else
+            echo "build=false" >> $GITHUB_ENV
+          fi
+
+      - name: Build project
+        if: env.build == 'true'
+        run: dotnet build ${{ matrix.project.path }} --configuration Release --no-restore
+
+      - name: Pack project
+        if: env.build == 'true'
+        run: dotnet pack ${{ matrix.project.path }} --configuration Release --no-build -o output
+
+      - name: Push to NuGet
+        if: env.build == 'true'
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push "output/*.nupkg" --api-key $NUGET_API_KEY --source https://api.nuget.org/v3/index.json

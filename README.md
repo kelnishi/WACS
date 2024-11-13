@@ -1,8 +1,11 @@
 # WACS (C# WebAssembly Interpreter)
-![wasm wast spec](https://github.com/kelnishi/WACS/actions/workflows/ci.yml/badge.svg?branch=main)
+[![NuGet version](https://img.shields.io/nuget/v/WACS.svg?style=flat-square)](https://www.nuget.org/packages/WACS/)
+![wasm wast spec](https://github.com/kelnishi/WACS/actions/workflows/ci.yml/badge.svg?branch=main) 
 ## Overview
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including AOT environments like Unity's IL2CPP.
+The architecture is my literal interpretation of the WebAssembly spec, so it should be conceptually similar to the OCaml reference interpreter.
+I've commented the chapters and sections from the spec throughout the source code, so it should serve as a good reference for others. 
 
 ![Wasm in Unity](UnityScreenshot.png)
 
@@ -14,23 +17,31 @@
 - [Usage](#usage)
 - [Integration with Unity](#integration-with-unity)
 - [Interop Bindings](#interop-bindings)
+- [Customization](#customization)
 - [Roadmap](#roadmap)
 - [License](#license)
 
 ## Features
 
 - **Pure C# Implementation**: Written in C# 9.0/.NET Standard 2.1. (No unsafe code)
-- **No Complex Dependencies**: Uses [FluentValidation](https://github.com/FluentValidation/FluentValidation) as its only dependency.
-- **Unity Compatibility**: Compatible with **Unity 2021.3+** including AOT/IL2CPP modes for iOS.
+- **No Complex Dependencies**: Uses [FluentValidation](https://github.com/FluentValidation/FluentValidation) as its only dependency.
+- **Unity Compatibility**: Compatible with **Unity 2021.3+** including AOT/IL2CPP modes for iOS.
 - **Full WebAssembly MVP Compliance**: Passes the  **WebAssembly  spec test suite**.
-- **Magical Interop Bindings**: Host bindings are created through reflection, no boilerplate code required.
+- **Magical Interop**: Host bindings are validated with reflection, no boilerplate code required.
 - **WASI:** Wacs.WASIp1 provides a wasi\_snapshot\_preview1 implementation.
 
 ## Getting Started
 
 ### Installation
 
-Clone the repository and build it using .NET SDK.
+The easiest way to use WACS is to add the package from NuGet
+
+```bash
+dotnet add package WACS
+dotnet add package WACS.WASIp1
+````
+
+If you prefer to build WACS from source, you can clone the repo and build it with the .NET SDK:
 
 ```bash
 git clone https://github.com/kelnishi/WACS.git
@@ -91,6 +102,8 @@ WACS works out-of-the-box with Unity, even in AOT IL2CPP modes for iOS. Simply a
 ## Interop Bindings
 
 WACS simplifies host function bindings, allowing you to easily call .NET functions from WebAssembly modules.
+This allows seamless communication between your host environment and WebAssembly, without boilerplate code.
+Similarly, calling into wasm code is done by generating a typed delegate.
 
 Example from WASIp1:
 
@@ -133,13 +146,23 @@ public ErrNo ArgsGet(ExecContext ctx, ptr argvPtr, ptr argvBufPtr)
 }
 ```
 
-This allows seamless communication between your host environment and WebAssembly, without boilerplate code.
+## Customization
+
+If you'd like to customize the wasm runtime environment, I recommend downloading getting the full source for examples.
+
+The `Wacs.WASIp1` implementation is a good starting point for how to set up your own library of bindings.
+It also contains examples of more advanced usage like binding multiple return values and full operand stack access.
+
+The `Spec.Test` project runs the wasm spec test suite. This also contains examples for binding other runtime environment
+objects like Tables, Memories, and Variables.
+
+Custom Instruction implementations can be patched in by replacing or inheriting from `SpecFactory`.
 
 ## Roadmap
 
 My current TODO list:
 
-- **ExecAsync:** Thread scheduling and advanced gas metering.
+- **ExecAsync:** Thread scheduling and advanced gas metering.
 - **Wasm Garbage Collection**: Support  wasm-gc and heaptypes.
 - **Text Format Parsing**: Add support for WebAssembly text format.
 - **WASI p1 Test Suite**: Validate WASIp1 with the test suite for improved standard compliance.
@@ -165,7 +188,7 @@ WACS is distributed under the [Apache 2.0 License](./LICENSE). This permissive l
 
 ---
 
-I would love for you to get involved and contribute to WACS! Whether it's bug fixes, new features, or improvements to documentation, your can help make WACS better for everyone.
+I would love for you to get involved and contribute to WACS! Whether it's bug fixes, new features, or improvements to documentation, your help can make WACS better for everyone.
 
 **Star this project on GitHub if you find WACS helpful!** ⭐
 
