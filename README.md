@@ -26,9 +26,9 @@ The chapters and sections from the spec are commented throughout the source code
 - **Pure C# Implementation**: Written in C# 9.0/.NET Standard 2.1. (No unsafe code)
 - **No Complex Dependencies**: Uses [FluentValidation](https://github.com/FluentValidation/FluentValidation) as its only dependency.
 - **Unity Compatibility**: Compatible with **Unity 2021.3+** including AOT/IL2CPP modes for iOS.
-- **Full WebAssembly MVP Compliance**: Passes the  **WebAssembly  spec test suite**.
+- **Full WebAssembly MVP Compliance**: Passes the  [WebAssembly spec test suite](https://github.com/WebAssembly/spec/tree/main/test/core).
 - **Magical Interop**: Host bindings are validated with reflection, no boilerplate code required.
-- **WASI:** Wacs.WASIp1 provides a wasi\_snapshot\_preview1 implementation.
+- **WASI:** Wacs.WASIp1 provides a [wasi\_snapshot\_preview1](https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md) implementation.
 
 ## Getting Started
 
