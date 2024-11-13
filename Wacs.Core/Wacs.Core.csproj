@@ -5,21 +5,30 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>9</LangVersion>
-    <AssemblyVersion>0.0.1</AssemblyVersion>
-    <FileVersion>0.0.1</FileVersion>
-    <Version>0.0.1</Version>
+    <AssemblyVersion>0.1.0</AssemblyVersion>
+    <FileVersion>0.1.0</FileVersion>
+    <Version>0.1.0</Version>
     <Authors>Kelvin Nishikawa</Authors>
-    <PublishSingleFile>true</PublishSingleFile>
+    <Description>A Pure C# WebAssembly Interpreter</Description>
     <TrimUnusedDependencies>true</TrimUnusedDependencies>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <Title>Wacs</Title>
+    <Copyright>(c) 2024 Kelvin Nishikawa</Copyright>
+    <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DefineConstants>TRACE;</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <DebugSymbols>true</DebugSymbols>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="FluentValidation" Version="11.10.0" />
-    <PackageReference Include="System.Numerics.Vectors" Version="4.5.0" />
   </ItemGroup>
 
   <ItemGroup>
