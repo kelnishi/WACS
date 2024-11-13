@@ -45,7 +45,9 @@ jobs:
 
       - name: Push to NuGet
         if: env.build == 'true'
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: |
-          dotnet nuget push "output/*.nupkg" --api-key $NUGET_API_KEY --source https://api.nuget.org/v3/index.json
+        run: dotnet nuget push "output/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+
+      - name: Push to GitHub Packages
+        if: env.build == 'true'
+        run: dotnet nuget push "output/*.nupkg" --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --api-key ${{secrets.GITHUB_TOKEN}}
+          
