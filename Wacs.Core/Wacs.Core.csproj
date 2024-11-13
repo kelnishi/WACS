@@ -14,6 +14,7 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <Title>Wacs</Title>
+    <AssemblyName>Wacs.Core</AssemblyName>
     <PackageId>WACS</PackageId>
     <Copyright>(c) 2024 Kelvin Nishikawa</Copyright>
     <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
