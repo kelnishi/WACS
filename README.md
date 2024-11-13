@@ -1,0 +1,171 @@
+# WACS (C# WebAssembly Interpreter)
+![wasm wast spec](https://github.com/kelnishi/WACS/actions/workflows/ci.yml/badge.svg?branch=main)
+## Overview
+
+**WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including AOT environments like Unity's IL2CPP.
+
+![Wasm in Unity](UnityScreenshot.png)
+
+## Table of Contents
+
+- [Features](#features)
+- [Getting Started](#getting-started)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Integration with Unity](#integration-with-unity)
+- [Interop Bindings](#interop-bindings)
+- [Roadmap](#roadmap)
+- [License](#license)
+
+## Features
+
+- **Pure C# Implementation**: Written in C# 9.0/.NET Standard 2.1. (No unsafe code)
+- **No Complex Dependencies**: Uses [FluentValidation](https://github.com/FluentValidation/FluentValidation) as its only dependency.
+- **Unity Compatibility**: Compatible with **Unity 2021.3+** including AOT/IL2CPP modes for iOS.
+- **Full WebAssembly MVP Compliance**: Passes the  **WebAssembly  spec test suite**.
+- **Magical Interop Bindings**: Host bindings are created through reflection, no boilerplate code required.
+- **WASI:** Wacs.WASIp1 provides a wasi\_snapshot\_preview1 implementation.
+
+## Getting Started
+
+### Installation
+
+Clone the repository and build it using .NET SDK.
+
+```bash
+git clone https://github.com/kelnishi/WACS.git
+cd WACS
+dotnet build
+```
+
+## Usage
+
+Basic usage example, how to load and run a WebAssembly module:
+
+```csharp
+using System;
+using System.IO;
+using Wacs.Core;
+using Wacs.Core.Runtime;
+
+//Create a runtime
+var runtime = new WasmRuntime();
+
+//Bind a host function
+//  This can be any regular C# delegate.
+//  The type here will be validated against module imports.
+runtime.BindHostFunction<Action<char>>(("env", "sayc"), c =>
+{
+    System.Console.Write(c);
+});
+
+//Load a module from a binary file
+using var fileStream = new FileStream("HelloWorld.wasm", FileMode.Open);
+var module = BinaryModuleParser.ParseWasm(fileStream);
+
+//Instantiate the module
+var modInst = runtime.InstantiateModule(module);
+
+//Register the module to add its exported functions to the export table
+runtime.RegisterModule("hello", modInst);
+
+//Get the module's exported function
+if (runtime.TryGetExportedFunction(("hello", "main"), out var mainAddr))
+{
+    //For wasm functions you can expect return types as Wacs.Core.Runtime.Value
+    //  Value has implicit conversion to many useful primitive types
+    var mainInvoker = runtime.CreateInvoker<Func<Value>>(mainAddr);
+    
+    //Call the wasm function and get the result
+    //  Implicit conversion from Value to int
+    int result = mainInvoker();
+    
+    System.Console.Error.WriteLine($"hello.main() => {result}");
+}
+```
+
+## Integration with Unity
+
+WACS works out-of-the-box with Unity, even in AOT IL2CPP modes for iOS. Simply add the Wacs.Core and FluentValidation assemblies to your project. See the example repo for details.
+
+## Interop Bindings
+
+WACS simplifies host function bindings, allowing you to easily call .NET functions from WebAssembly modules.
+
+Example from WASIp1:
+
+```csharp
+//Alias your types for readability
+using ptr = System.Int32;
+
+//WACS can bit-convert types like Enums and explicit layout structs
+[WasmType(nameof(ValType.I32))]
+public enum ErrNo : ushort
+{
+    Success = 0,
+    ...
+}
+
+//Supply the delegate definition when binding
+//  ExecContext is an optional first parameter for Memory and Stack manipulation
+runtime.BindHostFunction<Func<ExecContext,ptr,ptr,ErrNo>>(
+   (module, "args_get"), ArgsGet);
+
+// WASIp1's args_get
+public ErrNo ArgsGet(ExecContext ctx, ptr argvPtr, ptr argvBufPtr)
+{
+    var mem = ctx.DefaultMemory;
+            
+    foreach (string arg in _config.Arguments)
+    {
+        // Copy argument string to argvBufPtr.
+        int strLen = mem.WriteUtf8String((uint)argvBufPtr, arg, true);
+                
+        // Write pointer to argument in argvPtr.
+        mem.WriteInt32(argvPtr, argvBufPtr);
+
+        // Update offsets.
+        argvBufPtr += strLen;
+        argvPtr += sizeof(ptr);
+    }
+
+    return ErrNo.Success;
+}
+```
+
+This allows seamless communication between your host environment and WebAssembly, without boilerplate code.
+
+## Roadmap
+
+My current TODO list:
+
+- **ExecAsync:** Thread scheduling and advanced gas metering.
+- **Wasm Garbage Collection**: Support  wasm-gc and heaptypes.
+- **Text Format Parsing**: Add support for WebAssembly text format.
+- **WASI p1 Test Suite**: Validate WASIp1 with the test suite for improved standard compliance.
+- **WASI p2 and Component Model**: Implement the component model proposal.
+- **SIMD Intrinsics**: Add hardware-accelerated SIMD (software implementation included in Wacs.Core).
+- **Unity Bindings for SDL**: Implement SDL2 with Unity bindings.
+- **Instantiation-time Optimization**: Improvements like superinstruction threading and selective inlining for better performance.
+- **JavaScript Proxy Bindings**: Maybe support common JS env functions.
+- **Phase 5 WASM Extensions**: Upcoming features as WebAssembly evolves.
+
+## Sponsorship & Collaboration
+
+I built and maintain WACS as a solo developer. 
+
+If you find it useful, please consider supporting me through sponsorship or work opportunities. 
+Your support can help me continue improving WACS to make WebAssembly accessible for everyone. 
+
+[Sponsor me](https://github.com/sponsors/kelnishi) or [connect with me on LinkedIn](https://www.linkedin.com/in/kelnishi) if you're interested in collaborating!
+
+## License
+
+WACS is distributed under the [Apache 2.0 License](./LICENSE). This permissive license allows you to use WACS freely in both open and closed source projects.
+
+---
+
+I would love for you to get involved and contribute to WACS! Whether it's bug fixes, new features, or improvements to documentation, your can help make WACS better for everyone.
+
+**Star this project on GitHub if you find WACS helpful!** ⭐
+
