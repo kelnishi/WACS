@@ -8,7 +8,7 @@
         <Title>WebAssembly Spec Wast Test suite harness</Title>
         <Authors>Kelvin Nishikawa</Authors>
         <Company>Kelvin Nishikawa</Company>
-        <Product>WACS</Product>
+        <Product>Spec.Test</Product>
         <AssemblyVersion>1.0.0</AssemblyVersion>
     </PropertyGroup>
 
