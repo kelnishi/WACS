@@ -413,6 +413,7 @@ namespace Wacs.Core.Runtime
 
         public static readonly Value NullFuncRef = new(ValType.Funcref);
         public static readonly Value NullExternRef = new(ValType.Externref);
+        public static readonly Value Void = new (ValType.Nil);
 
         public static Value RefNull(ReferenceType type) => type switch
         {
@@ -448,7 +449,7 @@ namespace Wacs.Core.Runtime
         public static implicit operator Value(V128 v128) => new(v128);
         
         public static implicit operator V128(Value value) => value.V128;
-
+        
         private static bool EqualFloats(float a, float b)
         {
             if (float.IsNaN(a) && float.IsNaN(b))

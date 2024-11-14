@@ -18,6 +18,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using Wacs.Core.Types;
+using Expression = System.Linq.Expressions.Expression;
 
 namespace Wacs.Core.Runtime
 {
@@ -57,6 +58,8 @@ namespace Wacs.Core.Runtime
             {
                 Type expectedType = ConvertValTypeToSystemType(functionType.ParameterTypes.Types[i]);
                 var pType = parameters[i].ParameterType;
+                if (pType == expectedType)
+                    continue;
                 // Check if pType has a constructor that takes expectedType
                 if (pType.GetConstructor(new[] { expectedType }) == null)
                 {
@@ -144,7 +147,50 @@ namespace Wacs.Core.Runtime
 
         private static TDelegate CreateTypedDelegateInternal<TDelegate>(Delegate genericDelegate) where TDelegate : Delegate
         {
-            return (TDelegate)Delegate.CreateDelegate(typeof(TDelegate), genericDelegate.Target, genericDelegate.Method);
+            // Get the 'Invoke' method of the desired delegate type
+            var delegateInvokeMethod = typeof(TDelegate).GetMethod("Invoke");
+            var delegateParameters = delegateInvokeMethod?.GetParameters();
+
+            if ((delegateParameters?.Length ?? 0) == 0)
+            {
+                return (TDelegate)Delegate.CreateDelegate(typeof(TDelegate), genericDelegate.Target, genericDelegate.Method);
+            }
+            
+            // Create parameter expressions matching the desired delegate's parameters
+            var parameterExpressions = delegateParameters
+                .Select(p => Expression.Parameter(p.ParameterType, p.Name))
+                .ToArray();
+
+            // Convert the parameters to 'object' type for the generic delegate
+            var convertedParameters = parameterExpressions
+                .Select(p => Expression.Convert(p, typeof(object)))
+                .ToArray();
+
+            // Create an array of 'object' to pass to the generic delegate
+            var parametersArray = Expression.NewArrayInit(typeof(object), convertedParameters);
+
+            // Create the method call expression to invoke the generic delegate
+            var callExpression = Expression.Invoke(
+                Expression.Constant(genericDelegate),
+                parametersArray
+            );
+
+            // Handle the return type if necessary
+            Expression body;
+            if (delegateInvokeMethod.ReturnType == typeof(void))
+            {
+                body = callExpression;
+            }
+            else
+            {
+                body = Expression.Convert(callExpression, delegateInvokeMethod.ReturnType);
+            }
+
+            // Create the lambda expression
+            var lambda = Expression.Lambda<TDelegate>(body, parameterExpressions);
+
+            // Compile and return the delegate
+            return lambda.Compile();
         }
 
         private static FunctionType GetFunctionTypeFromDelegate(Delegate del)

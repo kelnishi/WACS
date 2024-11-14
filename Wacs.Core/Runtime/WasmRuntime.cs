@@ -232,6 +232,14 @@ namespace Wacs.Core.Runtime
             return funcInst.Id;
         }
 
+        public FunctionType GetFunctionType(FuncAddr funcAddr)
+        {
+            if (!Context.Store.Contains(funcAddr))
+                throw new ArgumentException($"Runtime did not contain function address.");
+            var funcInst = Context.Store[funcAddr];
+            return funcInst.Type;
+        }
+
         private Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
         {
             return GenericDelegate;
@@ -294,6 +302,9 @@ namespace Wacs.Core.Runtime
             options ??= new InvokerOptions();
             var funcInst = Context.Store[funcAddr];
             var funcType = funcInst.Type;
+
+            if (funcType.ResultType.Types.Length > 1)
+                throw new WasmRuntimeException("Binding multiple return values from wasm are not yet supported.");
             
             Delegates.ValidateFunctionTypeCompatibility(funcType, typeof(TDelegate));
             var inner = CreateInvoker(funcAddr, options);
@@ -301,10 +312,11 @@ namespace Wacs.Core.Runtime
             {
                 try
                 {
-                    object[] results = (object[])GenericFuncsInvoke.Invoke(inner, new object[] { args });
+                    object[] results = funcType.ParameterTypes.Arity == 0
+                        ? inner()
+                        : (object[])GenericFuncsInvoke.Invoke(inner, args);
                     if (funcType.ResultType.Types.Length == 1)
                         return results[0];
-                
                     return results;
                 }
                 catch (TargetInvocationException exc)
