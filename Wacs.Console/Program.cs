@@ -80,7 +80,20 @@ namespace Wacs.Console
             }
             
             var args = new List<string> { opts.WasmModule };
-            args.AddRange(opts.ExecutableArgs);
+            var moreArgs = opts.ExecutableArgs.ToList();
+            for (int a = 0; a < moreArgs.Count; ++a)
+            {
+                if (moreArgs[a].StartsWith("--invoke"))
+                {
+                    if (a + 1 < moreArgs.Count)
+                    {
+                        a += 1;
+                        opts.InvokeFunction = moreArgs[a];
+                    }
+                    continue;
+                }
+                args.Add(moreArgs[a]);
+            }
 
             // Validate directories
             foreach (var dir in opts.Directories)
@@ -232,20 +245,61 @@ namespace Wacs.Console
                     }
                 }
             }
-            else if (runtime.TryGetExportedFunction((moduleName, "main"), out var mainAddr))
+            else if (runtime.TryGetExportedFunction((moduleName, "_start"), out var startAddr))
             {
                 if (opts.LogProg)
-                    System.Console.Error.WriteLine("Calling main");
+                    System.Console.Error.WriteLine("Calling start");
                 
-                var caller = runtime.CreateInvoker<Func<Value>>(mainAddr, callOptions);
+                var caller = runtime.CreateInvoker<Action>(startAddr, callOptions);
                 
                 using (IDisposable _ = opts.Profile? new ProfilingSession(): new NoOpProfilingSession())
                 {
                     try
                     {
-                        int result = caller();
+                        caller();
+                    }
+                    catch (TrapException exc)
+                    {
+                        System.Console.Error.WriteLine(exc);
+                        return 1;
+                    }
+                    catch (SignalException exc)
+                    {
+                        ErrNo sig = (ErrNo)exc.Signal;
+                        if (opts.LogProg)
+                            System.Console.Error.WriteLine($"{sig.HumanReadable()}");
+                        return exc.Signal;
+                    }
+                }
+            }
+            else if (runtime.TryGetExportedFunction((moduleName, opts.InvokeFunction), out var invokeAddr))
+            {
+                if (opts.LogProg)
+                    System.Console.Error.WriteLine($"Calling {opts.InvokeFunction}");
 
-                        return result;
+                var caller = runtime.CreateStackInvoker(invokeAddr, callOptions);
+                
+                using (IDisposable _ = opts.Profile? new ProfilingSession(): new NoOpProfilingSession())
+                {
+                    try
+                    {
+                        var type = runtime.GetFunctionType(invokeAddr);
+                        var provided = args.Skip(1).ToList();
+                        if (type.ParameterTypes.Arity != provided.Count)
+                        {
+                            var pStrs = string.Join(" ", provided);
+                            System.Console.Error.WriteLine($"Number of parameters [{pStrs}] != function[{opts.InvokeFunction}] {type.ParameterTypes.Arity}");
+                            return 1;
+                        }
+
+                        var pVals = new List<Value>();
+                        for (int i = 0; i < provided.Count; i++)
+                        {
+                            pVals.Add(new Value(type.ParameterTypes.Types[i], provided[i]));
+                        }
+                        var result = caller(pVals.ToArray());
+                        
+                        System.Console.WriteLine($"Result:[{string.Join(" ",result)}]");
                     }
                     catch (TrapException exc)
                     {
