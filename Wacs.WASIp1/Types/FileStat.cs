@@ -19,7 +19,7 @@ using device = System.UInt64;
 using inode = System.UInt64;
 using linkcount = System.UInt64;
 using filesize = System.UInt64;
-using timestamp = System.UInt64;
+using timestamp = System.Int64;
 
 namespace Wacs.WASIp1.Types
 {

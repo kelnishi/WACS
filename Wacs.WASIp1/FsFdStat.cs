@@ -25,7 +25,7 @@ using ptr = System.UInt32;
 using fd = System.UInt32;
 using filesize = System.UInt64;
 using size = System.UInt32;
-using timestamp = System.UInt64;
+using timestamp = System.Int64;
 
 namespace Wacs.WASIp1
 {
