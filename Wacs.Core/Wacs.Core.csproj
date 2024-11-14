@@ -5,9 +5,9 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>9</LangVersion>
-    <AssemblyVersion>0.1.1</AssemblyVersion>
-    <FileVersion>0.1.1</FileVersion>
-    <Version>0.1.1</Version>
+    <AssemblyVersion>0.1.2</AssemblyVersion>
+    <FileVersion>0.1.2</FileVersion>
+    <Version>0.1.2</Version>
     <Authors>Kelvin Nishikawa</Authors>
     <Description>A Pure C# WebAssembly Interpreter</Description>
     <TrimUnusedDependencies>true</TrimUnusedDependencies>
@@ -21,6 +21,7 @@
     <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
   <PropertyGroup>
