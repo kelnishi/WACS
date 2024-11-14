@@ -56,6 +56,9 @@ namespace Wacs.Console
         [Option('p', "profile", HelpText = "Bracket execution with a JetBrains profiling session.", Default = false)]
         public bool Profile { get; set; }
 
+        [Option('i', "invoke", HelpText = "Call a specific function.")]
+        public string InvokeFunction { get; set; } = "";
+
         // This will capture all values that aren't tied to an option
         [Value(0, Required = true, MetaName = "WasmModule", HelpText = "Path to the executable")]
         public string WasmModule { get; set; } = "";
