@@ -21,7 +21,7 @@ using Wacs.Core.WASIp1;
 using Wacs.WASIp1.Types;
 using ptr = System.Int32;
 
-using timestamp = System.UInt64;
+using timestamp = System.Int64;
 
 namespace Wacs.WASIp1
 {
@@ -107,11 +107,11 @@ namespace Wacs.WASIp1
                 case ClockId.Monotonic:
                     long ticks = Stopwatch.GetTimestamp();
                     double nanosecondsPerTick = 1_000_000_000.0 / Stopwatch.Frequency;
-                    timestamp = (ulong)(ticks * nanosecondsPerTick);
+                    timestamp = (long)(ticks * nanosecondsPerTick);
                     break;
                 case ClockId.ProcessCputimeId:
                     TimeSpan cpuTime = Process.GetCurrentProcess().TotalProcessorTime;
-                    timestamp = (ulong)cpuTime.TotalMilliseconds * 1_000_000; // Convert milliseconds to nanoseconds.
+                    timestamp = (long)cpuTime.TotalMilliseconds * 1_000_000; // Convert milliseconds to nanoseconds.
                     break;
                 case ClockId.ThreadCputimeId:
                     return ErrNo.NoSys;
