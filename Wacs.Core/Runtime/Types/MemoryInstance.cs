@@ -152,6 +152,24 @@ namespace Wacs.Core.Runtime.Types
             Buffer.BlockCopy(scratchBuffer, 0, _data, (int)ptr, sizeof(uint));
         }
 
+        public void WriteInt64(int ptr, long x)
+        {
+            if (!Contains(ptr, sizeof(long)))
+                throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
+            
+            var scratchBuffer = BitConverter.GetBytes(x);
+            Buffer.BlockCopy(scratchBuffer, 0, _data, ptr, sizeof(long));
+        }
+
+        public void WriteInt64(uint ptr, long x)
+        {
+            if (!Contains((int)ptr, sizeof(long)))
+                throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
+            
+            var scratchBuffer = BitConverter.GetBytes(x);
+            Buffer.BlockCopy(scratchBuffer, 0, _data, (int)ptr, sizeof(long));
+        }
+
         public void WriteInt64(int ptr, ulong x)
         {
             if (!Contains(ptr, sizeof(ulong)))

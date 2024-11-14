@@ -31,9 +31,9 @@ namespace Wacs.WASIp1.Types
     {
         [FieldOffset(0)] public ClockId Id;
 
-        [FieldOffset(8)] public ulong Timeout;
+        [FieldOffset(8)] public long Timeout;
 
-        [FieldOffset(16)] public ulong Precision;
+        [FieldOffset(16)] public long Precision;
 
         [FieldOffset(24)] public SubclockFlags Flags;
     }
