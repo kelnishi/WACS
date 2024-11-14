@@ -119,7 +119,11 @@ namespace Wacs.Core.Runtime
         {
             for (int i = 0, l = type.Arity; i < l; ++i)
             {
-                PushValue((Value)(scalars[i]));
+                var scalar = scalars[i];
+                if (scalar is Value v)
+                    PushValue(v);
+                else
+                    PushValue(new Value(type.Types[i], scalar));
             }
         }
     }
