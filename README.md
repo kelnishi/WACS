@@ -97,7 +97,11 @@ if (runtime.TryGetExportedFunction(("hello", "main"), out var mainAddr))
 
 ## Integration with Unity
 
-WACS works out-of-the-box with Unity, even in AOT IL2CPP modes for iOS. Simply add the Wacs.Core and FluentValidation assemblies to your project. See the example repo for details.
+To add WACS to a Unity project, you'll need to add the following DLLs to your Assets directory:
+- Wacs.Core.dll
+- FluentValidation.dll
+
+Set **Player Settings>Other Settings>Api Compatibility Level** to **.NET Standard 2.1**.
 
 ## Interop Bindings
 
@@ -162,7 +166,8 @@ Custom Instruction implementations can be patched in by replacing or inheriting 
 
 The current TODO list includes:
 
-- **ExecAsync:** Thread scheduling and advanced gas metering.
+- **Unity Package Install**: A Unity Asset Store install option.
+- **ExecAsync**: Thread scheduling and advanced gas metering.
 - **Wasm Garbage Collection**: Support  wasm-gc and heaptypes.
 - **Text Format Parsing**: Add support for WebAssembly text format.
 - **WASI p1 Test Suite**: Validate WASIp1 with the test suite for improved standard compliance.
