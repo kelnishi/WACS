@@ -13,9 +13,10 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASIp1</AssemblyName>
-        <AssemblyVersion>0.9.0</AssemblyVersion>
+        <AssemblyVersion>0.9.1</AssemblyVersion>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <Version>0.9.0</Version>
+        <Version>0.9.1</Version>
+        <RepositoryType>git</RepositoryType>
     </PropertyGroup>
 
     <PropertyGroup>
