@@ -1,6 +1,9 @@
 # WACS (C# WebAssembly Interpreter)
-[![NuGet version](https://img.shields.io/nuget/v/WACS.svg?style=flat-square)](https://www.nuget.org/packages/WACS/)
 ![wasm wast spec](https://github.com/kelnishi/WACS/actions/workflows/ci.yml/badge.svg?branch=main) 
+![Platform](https://img.shields.io/badge/platform-.NET%20Standard%202.1-blue)
+[![License](https://img.shields.io/github/license/kelnishi/WACS)](LICENSE)
+[![NuGet](https://img.shields.io/nuget/v/WACS)](https://www.nuget.org/packages/WACS)
+[![Downloads](https://img.shields.io/nuget/dt/WACS)](https://www.nuget.org/packages/WACS)
 ## Overview
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including AOT environments like Unity's IL2CPP.
