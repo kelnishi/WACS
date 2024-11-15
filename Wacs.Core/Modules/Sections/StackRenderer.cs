@@ -262,8 +262,11 @@ namespace Wacs.Core
             
             var funcType = Types[modFunc.TypeIndex];
             var dummyContext = new ExecContext(store, new RuntimeAttributes { Live = false } );
-            var execFrame = dummyContext.ReserveFrame(ModuleInst, new FunctionType(ResultType.Empty, funcType.ResultType), modFunc.Index);
-            execFrame.Locals = new LocalsSpace(funcType.ParameterTypes.Types, modFunc.Locals);
+            var execFrame = dummyContext.ReserveFrame(
+                ModuleInst, 
+                new FunctionType(ResultType.Empty, funcType.ResultType), 
+                modFunc.Index,
+                modFunc.Locals);
             
             dummyContext.PushFrame(execFrame);
             return dummyContext;

@@ -46,6 +46,7 @@
   
   <ItemGroup>
     <PackageReference Include="FluentValidation" Version="11.10.0" />
+    <PackageReference Include="Microsoft.Extensions.ObjectPool" Version="9.0.0" />
   </ItemGroup>
 
 </Project>

@@ -19,6 +19,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Exceptions;
@@ -53,6 +54,10 @@ namespace Wacs.Core.Runtime
             FrameStack = new(Attributes.InitialCallStack, Attributes.GrowCallStack);
             LabelStack = new(Attributes.InitialCallStack * 2, Attributes.GrowCallStack);
             CallStack = FrameStack.GetSubStack();
+
+            var poolPolicy = new LocalsSpacePooledObjectPolicy();
+            LocalsPool = new DefaultObjectPool<LocalsSpace>(poolPolicy, Attributes.InitialCallStack);
+            
             _hostReturnSequence = new InstructionSequence(
                 InstructionFactory.CreateInstruction<InstFuncReturn>(OpCode.Func)
             );
@@ -73,6 +78,8 @@ namespace Wacs.Core.Runtime
         private ReusableStack<Frame> FrameStack { get; }
         private SubStack<Frame> CallStack { get; }
         private ReusableStack<Label> LabelStack { get; }
+        
+        private DefaultObjectPool<LocalsSpace> LocalsPool { get; }
 
         public Frame Frame => CallStack.Peek();
 
@@ -95,15 +102,19 @@ namespace Wacs.Core.Runtime
         public Frame ReserveFrame(
             ModuleInstance module,
             FunctionType type,
-            FuncIdx index
-        )
+            FuncIdx index,
+            ValType[]? locals = default)
         {
+            locals ??= Array.Empty<ValType>();
+            
             var frame = CallStack.Reserve();
             frame.Module = module;
             frame.Type = type;
             frame.Labels = LabelStack.GetSubStack();
             frame.Index = index;
             frame.ContinuationAddress = GetPointer();
+            frame.Locals = LocalsPool.Get();
+            frame.Locals.Enscribe(type.ParameterTypes.Types, locals);
             
             return frame;
         }
@@ -121,6 +132,10 @@ namespace Wacs.Core.Runtime
         {
             var frame = CallStack.Pop();
             frame.Labels.Drop();
+            
+            LocalsPool.Return(frame.Locals);
+            frame.Locals = null!;
+            
             return frame;
         }
 
@@ -220,8 +235,7 @@ namespace Wacs.Core.Runtime
             OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
             //8.
             //Push the frame and operate on the frame on the stack.
-            var frame = ReserveFrame(wasmFunc.Module, funcType, idx);
-            frame.Locals = new LocalsSpace(funcType.ParameterTypes.Types, t);
+            var frame = ReserveFrame(wasmFunc.Module, funcType, idx, t);
             // frame.FuncId = wasmFunc.Id;
                 
             int li = 0;
