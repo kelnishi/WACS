@@ -662,7 +662,6 @@ namespace Wacs.Core.Runtime
 
             //@Spec 4.5.4 Step 7
             Frame initFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.GlobalInitializers);
-            initFrame.Locals = new LocalsSpace();
             Context.PushFrame(initFrame);
 
             //5. Allocate Globals and capture their addresses in the Store
@@ -772,7 +771,6 @@ namespace Wacs.Core.Runtime
 
                 //12.
                 var auxFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.ElementInitialization);
-                auxFrame.Locals = new LocalsSpace();
                 //13.
                 Context.PushFrame(auxFrame);
 
