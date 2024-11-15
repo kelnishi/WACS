@@ -98,9 +98,11 @@ namespace Wacs.Core.Runtime
 
         public Value Peek() => _stack.Peek();
 
-        public void PopResults(ResultType type, ref Stack<Value> results)
+        public void PopResults(ResultType type, ref Stack<Value> results) => PopResults(type.Arity, ref results);
+
+        public void PopResults(int arity, ref Stack<Value> results)
         {
-            for (int i = 0, l = type.Arity; i < l; ++i)
+            for (int i = 0, l = arity; i < l; ++i)
             {
                 //We could check the types here, but the spec just says to YOLO it.
                 results.Push(PopAny());
@@ -112,6 +114,14 @@ namespace Wacs.Core.Runtime
             for (int i = type.Arity - 1; i >= 0; --i)
             {
                 targetBuf[i] = PopAny().Scalar;
+            }
+        }
+
+        public void PopScalars(ResultType type, Span<Value> targetBuf)
+        {
+            for (int i = type.Arity - 1; i >= 0; --i)
+            {
+                targetBuf[i] = PopAny();
             }
         }
 
