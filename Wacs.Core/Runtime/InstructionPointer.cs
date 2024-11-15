@@ -14,9 +14,11 @@
 //  * limitations under the License.
 //  */
 
+using System;
+
 namespace Wacs.Core.Runtime
 {
-    public struct InstructionPointer
+    public readonly struct InstructionPointer : IEquatable<InstructionPointer>
     {
         public readonly InstructionSequence Sequence;
         public readonly int Index;
@@ -27,5 +29,20 @@ namespace Wacs.Core.Runtime
         public static InstructionPointer Nil = new(InstructionSequence.Empty, 0);
 
         public InstructionPointer Previous => new(Sequence, Index - 1);
+
+        public bool Equals(InstructionPointer other)
+        {
+            return ReferenceEquals(Sequence, other.Sequence) && Index == other.Index;
+        }
+
+        public override bool Equals(object? obj)
+        {
+            return obj is InstructionPointer other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(Sequence, Index);
+        }
     }
 }

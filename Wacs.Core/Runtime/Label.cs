@@ -16,27 +16,41 @@
 
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime
 {
-    public struct Label
+    public class Label : IReusable<Label>
     {
+        public int Arity;
+
+        public InstructionPointer ContinuationAddress;
+
+        public ByteCode Instruction;
         public int StackHeight;
 
-        public Label(ResultType type, InstructionPointer continuationAddress, ByteCode inst)
+        public void Clear()
         {
-            Type = type;
-            ContinuationAddress = continuationAddress;
-            Instruction = inst;
-            StackHeight = 0;
+            Arity = default;
+            Instruction = default;
+            ContinuationAddress = default;
+            StackHeight = default;
         }
 
-        public ResultType Type { get; }
+        public bool Equals(Label other)
+        {
+            return StackHeight == other.StackHeight &&
+                   Arity == other.Arity &&
+                   Instruction.Equals(other.Instruction) &&
+                   ContinuationAddress.Equals(other.ContinuationAddress);
+        }
 
-        public int Arity => Type.Arity;
-
-        public ByteCode Instruction { get; }
-
-        public InstructionPointer ContinuationAddress { get; } // The instruction index to jump to on branch
+        public void Set(ResultType type, InstructionPointer address, ByteCode inst, int stackHeight)
+        {
+            StackHeight = stackHeight;
+            Arity = type.Arity;
+            Instruction = inst;
+            ContinuationAddress = address;
+        }
     }
 }

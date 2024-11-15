@@ -357,6 +357,10 @@ namespace Wacs.Core.Runtime
                     Type = ValType.V128;
                     V128 = v128;
                     break;
+                case Value value:
+                    Type = value.Type;
+                    V128 = value.V128;
+                    break;
                 default:
                     throw new InvalidDataException(
                         $"Cannot convert object to stack value of type {typeof(ExternalValue)}");

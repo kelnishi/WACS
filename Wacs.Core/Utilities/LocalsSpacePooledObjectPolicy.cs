@@ -14,24 +14,21 @@
 //  * limitations under the License.
 //  */
 
-using System.Collections.Generic;
-using System.Text.Json.Serialization;
+using Microsoft.Extensions.ObjectPool;
+using Wacs.Core.Types;
 
-namespace Spec.Test.WastJson
+namespace Wacs.Core.Utilities
 {
-    public class WastJson
+    public class LocalsSpacePooledObjectPolicy : PooledObjectPolicy<LocalsSpace>
     {
-        [JsonPropertyName("source_filename")]
-        public string? SourceFilename { get; set; }
+        public override LocalsSpace Create() => new LocalsSpace();
 
-        [JsonPropertyName("commands")]
-        public List<ICommand> Commands { get; set; } = null!;
-
-        public string TestName => 
-            System.IO.Path.GetFileName(SourceFilename) ?? "";
-
-        public string Path { get; set; } = "";
-
-        public override string ToString() => $"{SourceFilename}";
+        public override bool Return(LocalsSpace? obj)
+        {
+            if (obj == null)
+                return false;
+            obj.Reset();
+            return true; 
+        }
     }
 }

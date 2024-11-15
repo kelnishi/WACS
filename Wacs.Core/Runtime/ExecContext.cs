@@ -19,26 +19,16 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime
 {
-    public class RuntimeAttributes
-    {
-        public bool Configure_RefTypes = false;
-        public bool Live = true;
-
-        public int MaxCallStack = 1024;
-        public int MaxFunctionLocals = 2048;
-
-        public int MaxOpStack = 1024;
-        public IInstructionFactory InstructionFactory { get; set; } = SpecFactory.Factory;
-    }
-
     public struct ExecStat
     {
         public long duration;
@@ -61,13 +51,20 @@ namespace Wacs.Core.Runtime
         {
             Store = store;
             Attributes = attributes ?? new RuntimeAttributes();
+            FrameStack = new(Attributes.InitialCallStack, Attributes.GrowCallStack);
+            LabelStack = new(Attributes.InitialCallStack * 2, Attributes.GrowCallStack);
+            CallStack = FrameStack.GetSubStack();
+
+            var poolPolicy = new LocalsSpacePooledObjectPolicy();
+            LocalsPool = new DefaultObjectPool<LocalsSpace>(poolPolicy, Attributes.InitialCallStack);
+            
             _hostReturnSequence = new InstructionSequence(
                 InstructionFactory.CreateInstruction<InstFuncReturn>(OpCode.Func)
             );
             _currentSequence = _hostReturnSequence;
             _sequenceIndex = -1;
 
-            OpStack = new(Attributes.MaxCallStack);
+            OpStack = new(Attributes.MaxOpStack);
         }
 
         public Stopwatch ProcessTimer { get; set; } = new();
@@ -77,7 +74,12 @@ namespace Wacs.Core.Runtime
 
         public Store Store { get; }
         public OpStack OpStack { get; }
-        private Stack<Frame> CallStack { get; } = new();
+
+        private ReusableStack<Frame> FrameStack { get; }
+        private SubStack<Frame> CallStack { get; }
+        private ReusableStack<Label> LabelStack { get; }
+
+        private DefaultObjectPool<LocalsSpace> LocalsPool { get; }
 
         public Frame Frame => CallStack.Peek();
 
@@ -97,17 +99,44 @@ namespace Wacs.Core.Runtime
                 throw new TrapException(message);
         }
 
+        public Frame ReserveFrame(
+            ModuleInstance module,
+            FunctionType type,
+            FuncIdx index,
+            ValType[]? locals = default)
+        {
+            locals ??= Array.Empty<ValType>();
+            
+            var frame = CallStack.Reserve();
+            frame.Module = module;
+            frame.Type = type;
+            frame.Labels = LabelStack.GetSubStack();
+            frame.Index = index;
+            frame.ContinuationAddress = GetPointer();
+            frame.Locals = LocalsPool.Get();
+            frame.Locals.Enscribe(type.ParameterTypes.Types, locals);
+            
+            return frame;
+        }
+
         public void PushFrame(Frame frame)
         {
             if (CallStack.Count >= Attributes.MaxCallStack)
                 throw new WasmRuntimeException($"Runtime call stack exhausted {CallStack.Count}");
             
             CallStack.Push(frame);
+            frame.Labels = LabelStack.GetSubStack();
         }
 
         public Frame PopFrame()
         {
-            return CallStack.Pop();
+            var frame = CallStack.Pop();
+            frame.Labels.Drop();
+            
+            LocalsPool.Return(frame.Locals);
+            frame.Locals = null!;
+            
+            return frame;
         }
 
         public void ResetStack(Label label)
@@ -151,10 +180,11 @@ namespace Wacs.Core.Runtime
         public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
 
         // @Spec 4.4.9.1. Enter Block
-        public void EnterBlock(Label label, Block block, Stack<Value> vals)
+        public void EnterBlock(Block block, ResultType resultType, ByteCode inst, Stack<Value> vals)
         {
-            label.StackHeight = OpStack.Count;
             OpStack.Push(vals);
+            var label = Frame.ReserveLabel();
+            label.Set(resultType, this.GetPointer(), inst, OpStack.Count);
             Frame.Labels.Push(label);
             //Sets the Pointer to the start of the block sequence
             EnterSequence(block.Instructions);
@@ -174,7 +204,7 @@ namespace Wacs.Core.Runtime
         {
             //1.
             Assert( Store.Contains(addr),
-                 $"Failure in Function Invocation. Address does not exist {addr}");
+                $"Failure in Function Invocation. Address does not exist {addr}");
             //2.
             var funcInst = Store[addr];
             switch (funcInst)
@@ -198,19 +228,16 @@ namespace Wacs.Core.Runtime
             //var seq = wasmFunc.Definition.Body;
             //6.
             Assert( OpStack.Count >= funcType.ParameterTypes.Arity,
-                 $"Function invocation failed. Operand Stack underflow.");
+                $"Function invocation failed. Operand Stack underflow.");
             //7.
             Assert(_asideVals.Count == 0,
                 $"Shared temporary stack had values left in it.");
             OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
             //8.
-            var frame = new Frame(wasmFunc.Module, funcType)
-            {
-                ContinuationAddress = GetPointer(),
-                Locals = new LocalsSpace(funcType.ParameterTypes.Types, t),
-                Index = idx,
-                FuncId = wasmFunc.Id,
-            };
+            //Push the frame and operate on the frame on the stack.
+            var frame = ReserveFrame(wasmFunc.Module, funcType, idx, t);
+            // frame.FuncId = wasmFunc.Id;
+                
             int li = 0;
             int localCount = funcType.ParameterTypes.Arity + t.Length;
             //Load parameters
@@ -227,11 +254,10 @@ namespace Wacs.Core.Runtime
 
             //9.
             PushFrame(frame);
+            
             //10.
-            var label = new Label(funcType.ResultType, GetPointer(), OpCode.Expr)
-            {
-                StackHeight = OpStack.Count,
-            };
+            var label = frame.ReserveLabel();
+            label.Set(funcType.ResultType, GetPointer(), OpCode.Expr, OpStack.Count);
             frame.Labels.Push(label);
             EnterSequence(wasmFunc.Definition.Body.Instructions);
         }
@@ -255,7 +281,7 @@ namespace Wacs.Core.Runtime
         {
             //3.
             Assert( OpStack.Count >= Frame.Arity,
-                 $"Function Return failed. Stack did not contain return values");
+                $"Function Return failed. Stack did not contain return values");
             //4. Since we have a split stack, we can leave the results in place.
             // var vals = OpStack.PopResults(Frame.Type.ResultType);
             //5.
@@ -309,13 +335,6 @@ namespace Wacs.Core.Runtime
             ascent.Push(("Function", (int)Frame.Index.Value));
 
             return ascent.Select(a => a).ToList();
-        }
-
-        public void SetFrame(Frame frame)
-        {
-            while (CallStack.Count > 0)
-                CallStack.Pop();
-            CallStack.Push(frame);
         }
 
         public void ResetStats()

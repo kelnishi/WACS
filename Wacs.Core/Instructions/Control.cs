@@ -120,7 +120,7 @@ namespace Wacs.Core.Instructions
                 //3.
                 context.Assert(funcType, $"Invalid BlockType: {block.Type}");
                 //4.
-                var label = new Label(funcType.ResultType, context.GetPointer(), inst);
+                // var label = new Label(funcType.ResultType, context.GetPointer(), inst);
                 //5.
                 context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Length,
                     $"Instruction block failed. Operand Stack underflow.");
@@ -129,7 +129,7 @@ namespace Wacs.Core.Instructions
                     "Shared temporary stack had values left in it.");
                 context.OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
                 //7.
-                context.EnterBlock(label, block, _asideVals);
+                context.EnterBlock(block, funcType.ResultType, inst, _asideVals);
             }
             catch (IndexOutOfRangeException exc)
             {
@@ -209,7 +209,7 @@ namespace Wacs.Core.Instructions
                 //3.
                 context.Assert(funcType, $"Invalid BlockType: {Block.Type}");
                 //4.
-                var label = new Label(funcType.ParameterTypes, context.GetPointer(), OpCode.Loop);
+                // var label = new Label(funcType.ParameterTypes, context.GetPointer(), OpCode.Loop);
                 //5.
                 context.Assert( context.OpStack.Count >= funcType.ParameterTypes.Length,
                     $"Instruction loop failed. Operand Stack underflow.");
@@ -218,7 +218,7 @@ namespace Wacs.Core.Instructions
                     "Shared temporary stack had values left in it.");
                 context.OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
                 //7.
-                context.EnterBlock(label, Block, _asideVals);
+                context.EnterBlock(Block, funcType.ParameterTypes, OpCode.Loop, _asideVals);
             }
             catch (IndexOutOfRangeException exc)
             {
@@ -485,7 +485,7 @@ namespace Wacs.Core.Instructions
             //5.
             context.Assert(_asideVals.Count == 0,
                 "Shared temporary stack had values left in it.");
-            context.OpStack.PopResults(label.Type, ref _asideVals);
+            context.OpStack.PopResults(label.Arity, ref _asideVals);
             //6.
             while (context.OpStack.Count > label.StackHeight)
             {

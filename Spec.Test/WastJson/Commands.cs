@@ -44,23 +44,17 @@ namespace Spec.Test.WastJson
     public class ModuleCommand : ICommand
     {
         private SpecTestEnv _env = new SpecTestEnv();
-
-        [JsonPropertyName("filename")]
-        public string Filename { get; set; }
-
-        [JsonPropertyName("name")]
-        public string Name { get; set; }
+        [JsonPropertyName("filename")] public string? Filename { get; set; }
+        [JsonPropertyName("name")] public string? Name { get; set; }
 
         public CommandType Type => CommandType.Module;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
 
-            var filepath = Path.Combine(testDefinition.Path, Filename);
+            var filepath = Path.Combine(testDefinition.Path, Filename!);
             using var fileStream = new FileStream(filepath, FileMode.Open);
             module = BinaryModuleParser.ParseWasm(fileStream);
             var modInst = runtime.InstantiateModule(module);
@@ -78,21 +72,17 @@ namespace Spec.Test.WastJson
 
     public class RegisterCommand : ICommand
     {
-        [JsonPropertyName("name")]
-        public string Name { get; set; }
-
-        [JsonPropertyName("as")]
-        public string As { get; set; }
-
+        [JsonPropertyName("name")] public string? Name { get; set; }
+        [JsonPropertyName("as")] public string? As { get; set; }
         public CommandType Type => CommandType.Module;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
-
+            if (As == null)
+                throw new ArgumentException("Json missing `as` field");
+            
             var modInst = runtime.GetModule(Name);
             runtime.RegisterModule(As, modInst);
             return errors;
@@ -103,13 +93,9 @@ namespace Spec.Test.WastJson
     
     public class ActionCommand : ICommand
     {
-        [JsonPropertyName("action")]
-        public IAction Action { get; set; }
-
+        [JsonPropertyName("action")] public IAction? Action { get; set; }
         public CommandType Type => CommandType.Action;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -128,16 +114,10 @@ namespace Spec.Test.WastJson
 
     public class AssertReturnCommand : ICommand
     {
-        [JsonPropertyName("action")]
-        public IAction Action { get; set; }
-
-        [JsonPropertyName("expected")]
-        public List<Argument> Expected { get; set; }
-
+        [JsonPropertyName("action")] public IAction? Action { get; set; }
+        [JsonPropertyName("expected")] public List<Argument> Expected { get; set; } = new();
         public CommandType Type => CommandType.AssertReturn;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -160,16 +140,10 @@ namespace Spec.Test.WastJson
     
     public class AssertTrapCommand : ICommand
     {
-        [JsonPropertyName("action")]
-        public IAction Action { get; set; }
-
-        [JsonPropertyName("text")]
-        public string Text { get; set; }
-
+        [JsonPropertyName("action")] public IAction? Action { get; set; }
+        [JsonPropertyName("text")] public string? Text { get; set; }
         public CommandType Type => CommandType.AssertTrap;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -203,16 +177,10 @@ namespace Spec.Test.WastJson
 
     public class AssertExhaustionCommand : ICommand
     {
-        [JsonPropertyName("action")]
-        public IAction Action { get; set; }
-
-        [JsonPropertyName("text")]
-        public string Text { get; set; }
-
+        [JsonPropertyName("action")] public IAction? Action { get; set; }
+        [JsonPropertyName("text")] public string? Text { get; set; }
         public CommandType Type => CommandType.AssertExhaustion;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -228,10 +196,10 @@ namespace Spec.Test.WastJson
                     {
                         var result = invokeAction.Invoke(ref runtime, ref module);
                     }
-                    catch (WasmRuntimeException exc)
+                    catch (WasmRuntimeException)
                     {
                         didThrow = true;
-                        throwMessage = Text;
+                        throwMessage = Text ?? "";
                     }
                     if (!didThrow)
                         throw new TestException($"Test failed {this} \"{throwMessage}\"");
@@ -245,19 +213,11 @@ namespace Spec.Test.WastJson
 
     public class AssertInvalidCommand : ICommand
     {
-        [JsonPropertyName("filename")]
-        public string Filename { get; set; }
-
-        [JsonPropertyName("module_type")]
-        public string ModuleType { get; set; }
-
-        [JsonPropertyName("text")]
-        public string Text { get; set; }
-
+        [JsonPropertyName("filename")] public string? Filename { get; set; }
+        [JsonPropertyName("module_type")] public string? ModuleType { get; set; }
+        [JsonPropertyName("text")] public string? Text { get; set; }
         public CommandType Type => CommandType.AssertInvalid;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -268,6 +228,9 @@ namespace Spec.Test.WastJson
                     $"Assert Malformed line {Line}: Skipping assert_malformed. No WAT parsing."));
                 return errors;
             }
+            
+            if (Filename == null)
+                throw new ArgumentException("Json missing `filename` field");
             
             var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert = false;
@@ -308,19 +271,11 @@ namespace Spec.Test.WastJson
 
     public class AssertMalformedCommand : ICommand
     {
-        [JsonPropertyName("filename")]
-        public string Filename { get; set; }
-
-        [JsonPropertyName("text")]
-        public string Text { get; set; }
-
-        [JsonPropertyName("module_type")]
-        public string ModuleType { get; set; }
-
+        [JsonPropertyName("filename")] public string? Filename { get; set; }
+        [JsonPropertyName("text")] public string? Text { get; set; }
+        [JsonPropertyName("module_type")] public string? ModuleType { get; set; }
         public CommandType Type => CommandType.AssertMalformed;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
@@ -333,9 +288,11 @@ namespace Spec.Test.WastJson
                 return errors;
             }
             
+            if (Filename == null)
+                throw new ArgumentException("Json missing `filename` field");
+            
             var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert1 = false;
-            string assertionMessage = "";
             try
             {
                 using var fileStream = new FileStream(filepath, FileMode.Open);
@@ -343,15 +300,13 @@ namespace Spec.Test.WastJson
                 stubmodule.SetName(filepath);
                 var modInstInvalid = runtime.InstantiateModule(stubmodule);
             }
-            catch (FormatException exc)
+            catch (FormatException)
             {
                 didAssert1 = true;
-                assertionMessage = exc.Message;
             }
-            catch (NotSupportedException exc)
+            catch (NotSupportedException)
             {
                 didAssert1 = true;
-                assertionMessage = exc.Message;
             }
 
             if (!didAssert1)
@@ -367,19 +322,11 @@ namespace Spec.Test.WastJson
 
     public class AssertUnlinkableCommand : ICommand
     {
-        [JsonPropertyName("filename")]
-        public string Filename { get; set; }
-
-        [JsonPropertyName("text")]
-        public string Text { get; set; }
-
-        [JsonPropertyName("module_type")]
-        public string ModuleType { get; set; }
-
+        [JsonPropertyName("filename")] public string? Filename { get; set; }
+        [JsonPropertyName("text")] public string? Text { get; set; }
+        [JsonPropertyName("module_type")] public string? ModuleType { get; set; }
         public CommandType Type => CommandType.AssertUnlinkable;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -390,10 +337,11 @@ namespace Spec.Test.WastJson
                     $"Assert Malformed line {Line}: Skipping assert_malformed. No WAT parsing."));
                 return errors;
             }
+            if (Filename == null)
+                throw new ArgumentException("Json missing `filename` field");
             
             var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert = false;
-            string assertionMessage = "";
             try
             {
                 using var fileStream = new FileStream(filepath, FileMode.Open);
@@ -401,10 +349,9 @@ namespace Spec.Test.WastJson
                 stubmodule.SetName(filepath);
                 var modInstInvalid = runtime.InstantiateModule(stubmodule);
             }
-            catch (NotSupportedException exc)
+            catch (NotSupportedException)
             {
                 didAssert = true;
-                assertionMessage = exc.Message;
             }
 
             if (!didAssert)
@@ -420,27 +367,21 @@ namespace Spec.Test.WastJson
 
     public class AssertUninstantiableCommand : ICommand
     {
-        [JsonPropertyName("filename")]
-        public string Filename { get; set; }
-
-        [JsonPropertyName("module_type")]
-        public string ModuleType { get; set; }
-
-        [JsonPropertyName("text")]
-        public string Text { get; set; }
-
+        [JsonPropertyName("filename")] public string? Filename { get; set; }
+        [JsonPropertyName("module_type")] public string? ModuleType { get; set; }
+        [JsonPropertyName("text")] public string? Text { get; set; }
         public CommandType Type => CommandType.AssertUninstantiable;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
             
+            if (Filename == null)
+                throw new ArgumentException("Json missing `filename` field");
+            
             var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert = false;
-            string assertionMessage = "";
             try
             {
                 using var fileStream = new FileStream(filepath, FileMode.Open);
@@ -448,25 +389,21 @@ namespace Spec.Test.WastJson
                 stubmodule.SetName(filepath);
                 var modInst = runtime.InstantiateModule(stubmodule);
             }
-            catch (ValidationException exc)
+            catch (ValidationException)
             {
                 didAssert = true;
-                assertionMessage = exc.Message;
             }
-            catch (InvalidDataException exc)
+            catch (InvalidDataException)
             {
                 didAssert = true;
-                assertionMessage = exc.Message;
             }
-            catch (FormatException exc)
+            catch (FormatException)
             {
                 didAssert = true;
-                assertionMessage = exc.Message;
             }
-            catch (TrapException exc)
+            catch (TrapException)
             {
                 didAssert = true;
-                assertionMessage = exc.Message;
             }
             
             if (!didAssert)
@@ -482,19 +419,11 @@ namespace Spec.Test.WastJson
 
     public class InvokeCommand : ICommand
     {
-        [JsonPropertyName("module")]
-        public string Module { get; set; }
-
-        [JsonPropertyName("name")]
-        public string Name { get; set; }
-
-        [JsonPropertyName("args")]
-        public List<object> Args { get; set; } = new List<object>();
-
+        [JsonPropertyName("module")] public string? Module { get; set; }
+        [JsonPropertyName("name")] public string? Name { get; set; }
+        [JsonPropertyName("args")] public List<object> Args { get; set; } = new List<object>();
         public CommandType Type => CommandType.Invoke;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -506,16 +435,10 @@ namespace Spec.Test.WastJson
 
     public class GetCommand : ICommand
     {
-        [JsonPropertyName("module")]
-        public string Module { get; set; }
-
-        [JsonPropertyName("name")]
-        public string Name { get; set; }
-
+        [JsonPropertyName("module")] public string? Module { get; set; }
+        [JsonPropertyName("name")] public string? Name { get; set; }
         public CommandType Type => CommandType.Get;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -527,19 +450,11 @@ namespace Spec.Test.WastJson
 
     public class SetCommand : ICommand
     {
-        [JsonPropertyName("module")]
-        public string Module { get; set; }
-
-        [JsonPropertyName("name")]
-        public string Name { get; set; }
-
-        [JsonPropertyName("value")]
-        public object Value { get; set; }
-
+        [JsonPropertyName("module")] public string? Module { get; set; }
+        [JsonPropertyName("name")] public string? Name { get; set; }
+        [JsonPropertyName("value")] public object? Value { get; set; }
         public CommandType Type => CommandType.Set;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -551,13 +466,9 @@ namespace Spec.Test.WastJson
 
     public class StartCommand : ICommand
     {
-        [JsonPropertyName("module")]
-        public string Module { get; set; }
-
+        [JsonPropertyName("module")] public string? Module { get; set; }
         public CommandType Type => CommandType.Start;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -569,16 +480,10 @@ namespace Spec.Test.WastJson
 
     public class AssertReturnCanonicalNansCommand : ICommand
     {
-        [JsonPropertyName("action")]
-        public IAction Action { get; set; }
-
-        [JsonPropertyName("expected")]
-        public List<object> Expected { get; set; } = new List<object>();
-
+        [JsonPropertyName("action")] public IAction? Action { get; set; }
+        [JsonPropertyName("expected")] public List<object> Expected { get; set; } = new List<object>();
         public CommandType Type => CommandType.AssertReturnCanonicalNans;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -590,16 +495,10 @@ namespace Spec.Test.WastJson
 
     public class AssertReturnArithmeticNansCommand : ICommand
     {
-        [JsonPropertyName("action")]
-        public IAction Action { get; set; }
-
-        [JsonPropertyName("expected")]
-        public List<object> Expected { get; set; } = new List<object>();
-
+        [JsonPropertyName("action")] public IAction? Action { get; set; }
+        [JsonPropertyName("expected")] public List<object> Expected { get; set; } = new List<object>();
         public CommandType Type => CommandType.AssertReturnArithmeticNans;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -611,13 +510,9 @@ namespace Spec.Test.WastJson
 
     public class AssertReturnDetachedCommand : ICommand
     {
-        [JsonPropertyName("action")]
-        public IAction Action { get; set; }
-
+        [JsonPropertyName("action")] public IAction? Action { get; set; }
         public CommandType Type => CommandType.AssertReturnDetached;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -629,13 +524,9 @@ namespace Spec.Test.WastJson
 
     public class AssertTerminatedCommand : ICommand
     {
-        [JsonPropertyName("module")]
-        public string Module { get; set; }
-
+        [JsonPropertyName("module")] public string? Module { get; set; }
         public CommandType Type => CommandType.AssertTerminated;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -647,13 +538,9 @@ namespace Spec.Test.WastJson
 
     public class AssertUndefinedCommand : ICommand
     {
-        [JsonPropertyName("module")]
-        public string Module { get; set; }
-
+        [JsonPropertyName("module")] public string? Module { get; set; }
         public CommandType Type => CommandType.AssertUndefined;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -665,13 +552,9 @@ namespace Spec.Test.WastJson
 
     public class AssertExcludeFromMustCommand : ICommand
     {
-        [JsonPropertyName("module")]
-        public string Module { get; set; }
-
+        [JsonPropertyName("module")] public string? Module { get; set; }
         public CommandType Type => CommandType.AssertExcludeFromMust;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -683,13 +566,9 @@ namespace Spec.Test.WastJson
 
     public class ModuleInstanceCommand : ICommand
     {
-        [JsonPropertyName("module")]
-        public string Module { get; set; }
-
+        [JsonPropertyName("module")] public string? Module { get; set; }
         public CommandType Type => CommandType.ModuleInstance;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -701,13 +580,9 @@ namespace Spec.Test.WastJson
 
     public class ModuleExclusiveCommand : ICommand
     {
-        [JsonPropertyName("module")]
-        public string Module { get; set; }
-
+        [JsonPropertyName("module")] public string? Module { get; set; }
         public CommandType Type => CommandType.ModuleExclusive;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -719,13 +594,9 @@ namespace Spec.Test.WastJson
 
     public class PumpCommand : ICommand
     {
-        [JsonPropertyName("action")]
-        public IAction Action { get; set; }
-
+        [JsonPropertyName("action")] public IAction? Action { get; set; }
         public CommandType Type => CommandType.Pump;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -737,13 +608,9 @@ namespace Spec.Test.WastJson
 
     public class MaybeCommand : ICommand
     {
-        [JsonPropertyName("command")]
-        public ICommand Command { get; set; }
-
+        [JsonPropertyName("command")] public ICommand? Command { get; set; }
         public CommandType Type => CommandType.Maybe;
-
-        [JsonPropertyName("line")]
-        public int Line { get; set; }
+        [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {

@@ -211,6 +211,7 @@ namespace Wacs.Console
 
             var callOptions = new InvokerOptions {
                 LogGas = opts.LogGas,
+                GasLimit = opts.LimitGas,
                 LogProgressEvery = opts.LogProgressEvery, 
                 LogInstructionExecution = opts.LogInstructionExecution,
                 CalculateLineNumbers = opts.CalculateLineNumbers,
@@ -292,14 +293,15 @@ namespace Wacs.Console
                             return 1;
                         }
 
-                        var pVals = new List<Value>();
+                        var pVals = new Value[provided.Count];
                         for (int i = 0; i < provided.Count; i++)
                         {
-                            pVals.Add(new Value(type.ParameterTypes.Types[i], provided[i]));
+                            pVals[i] = new Value(type.ParameterTypes.Types[i], provided[i]);
                         }
-                        var result = caller(pVals.ToArray());
+
+                        Value [] result = caller(pVals);
                         
-                        System.Console.WriteLine($"Result:[{string.Join(" ",result)}]");
+                        System.Console.WriteLine($"Result:[{string.Join(" ", result)}]");
                     }
                     catch (TrapException exc)
                     {

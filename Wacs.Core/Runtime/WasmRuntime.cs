@@ -33,38 +33,6 @@ using Wacs.Core.WASIp1;
 
 namespace Wacs.Core.Runtime
 {
-    public class RuntimeOptions
-    {
-        public bool SkipModuleValidation = false;
-        public bool SkipStartFunction = false;
-    }
-
-    [Flags]
-    public enum InstructionLogging
-    {
-        None = 0,
-        Calls = 1 << 0,
-        Blocks = 1 << 1,
-        Branches = 1 << 2,
-        Computes = 1 << 3,
-        Binds = 1 << 4,
-        
-        Control = Calls | Blocks | Branches | Binds,
-        All = Calls | Blocks | Branches | Computes | Binds,
-    }
-
-    public class InvokerOptions
-    {
-        public bool CalculateLineNumbers = false;
-
-        public bool CollectStats = false;
-        public int GasLimit = 0;
-        public bool LogGas = false;
-        public InstructionLogging LogInstructionExecution = InstructionLogging.None;
-        public int LogProgressEvery = -1;
-        public bool ShowPath = false;
-    }
-
     public class WasmRuntime
     {
         private static readonly MethodInfo GenericFuncsInvoke = typeof(Delegates.GenericFuncs).GetMethod("Invoke")!;
@@ -243,7 +211,7 @@ namespace Wacs.Core.Runtime
         private Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
         {
             return GenericDelegate;
-            object[] GenericDelegate(params object[] args)
+            Value[] GenericDelegate(params object[] args)
             {
                 var funcInst = Context.Store[funcAddr];
                 var funcType = funcInst.Type;
@@ -288,7 +256,7 @@ namespace Wacs.Core.Runtime
                 if (options.CollectStats) PrintStats();
                 if (options.LogGas) Console.Error.WriteLine($"Process used {steps} gas. {Context.ProcessTimer.Elapsed}");
 
-                object[] results = new object[funcType.ResultType.Arity];
+                Value[] results = new Value[funcType.ResultType.Arity];
                 var span = results.AsSpan();
                 Context.OpStack.PopScalars(funcType.ResultType, span);
 
@@ -312,9 +280,9 @@ namespace Wacs.Core.Runtime
             {
                 try
                 {
-                    object[] results = funcType.ParameterTypes.Arity == 0
+                    Value[] results = funcType.ParameterTypes.Arity == 0
                         ? inner()
-                        : (object[])GenericFuncsInvoke.Invoke(inner, args);
+                        : (Value[])GenericFuncsInvoke.Invoke(inner, args);
                     if (funcType.ResultType.Types.Length == 1)
                         return results[0];
                     return results;
@@ -333,18 +301,16 @@ namespace Wacs.Core.Runtime
         {
             options ??= new InvokerOptions();
             var invoker = CreateInvoker(funcAddr, options);
-            return parameters =>
+            var funcInst = Context.Store[funcAddr];
+            var funcType = funcInst.Type;
+            object[] p = new object[funcType.ParameterTypes.Arity];
+            
+            return valueParams =>
             {
-                var funcInst = Context.Store[funcAddr];
-                var funcType = funcInst.Type;
-                object[] results = invoker(parameters.Select(v => (object)v).ToArray());
-                var stackResult = new Value[funcType.ResultType.Arity];
-                for (int i = 0, l = funcType.ResultType.Arity; i < l; ++i)
-                {
-                    stackResult[i] = new Value(funcType.ResultType.Types[i], results[i]);
-                }
+                for (int i = 0; i < funcType.ParameterTypes.Arity; ++i)
+                    p[i] = valueParams[i];
 
-                return stackResult;
+                return invoker(p);
             };
         }
 
@@ -378,7 +344,7 @@ namespace Wacs.Core.Runtime
                     inst.Execute(Context);
                 }
 
-                if (options.LogInstructionExecution.HasFlag(InstructionLogging.Computes))
+                if (options.LogInstructionExecution.Has(InstructionLogging.Computes))
                 {
                     LogPostInstruction(options, inst);
                 }
@@ -452,30 +418,30 @@ namespace Wacs.Core.Runtime
                 case var _ when IInstruction.IsVar(inst): break;
                 case var _ when IInstruction.IsLoad(inst): break;
                 
-                case OpCode.Call when options.LogInstructionExecution.HasFlag(InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
-                case OpCode.CallIndirect when options.LogInstructionExecution.HasFlag(InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
-                // case OpCode.CallRef when options.LogInstructionExecution.HasFlag(InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
+                case OpCode.Call when options.LogInstructionExecution.Has(InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
+                case OpCode.CallIndirect when options.LogInstructionExecution.Has(InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
+                // case OpCode.CallRef when options.LogInstructionExecution.Has(InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
                 
-                case OpCode.Call when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls):
-                case OpCode.CallIndirect when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls):
-                // case OpCode.CallRef when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls):
-                case OpCode.Return when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls):
-                case OpCode.ReturnCallIndirect when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls):
-                case OpCode.ReturnCall when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls):
-                case OpCode.End when options.LogInstructionExecution.HasFlag(InstructionLogging.Calls) && Context.GetEndFor() == OpCode.Func:
+                case OpCode.Call when options.LogInstructionExecution.Has(InstructionLogging.Calls):
+                case OpCode.CallIndirect when options.LogInstructionExecution.Has(InstructionLogging.Calls):
+                // case OpCode.CallRef when options.LogInstructionExecution.Has(InstructionLogging.Calls):
+                case OpCode.Return when options.LogInstructionExecution.Has(InstructionLogging.Calls):
+                case OpCode.ReturnCallIndirect when options.LogInstructionExecution.Has(InstructionLogging.Calls):
+                case OpCode.ReturnCall when options.LogInstructionExecution.Has(InstructionLogging.Calls):
+                case OpCode.End when options.LogInstructionExecution.Has(InstructionLogging.Calls) && Context.GetEndFor() == OpCode.Func:
                         
-                case OpCode.Block when options.LogInstructionExecution.HasFlag(InstructionLogging.Blocks):
-                case OpCode.Loop when options.LogInstructionExecution.HasFlag(InstructionLogging.Blocks):
-                case OpCode.If when options.LogInstructionExecution.HasFlag(InstructionLogging.Blocks):
-                case OpCode.Else when options.LogInstructionExecution.HasFlag(InstructionLogging.Blocks):
-                case OpCode.End when options.LogInstructionExecution.HasFlag(InstructionLogging.Blocks) && Context.GetEndFor() == OpCode.Block:
+                case OpCode.Block when options.LogInstructionExecution.Has(InstructionLogging.Blocks):
+                case OpCode.Loop when options.LogInstructionExecution.Has(InstructionLogging.Blocks):
+                case OpCode.If when options.LogInstructionExecution.Has(InstructionLogging.Blocks):
+                case OpCode.Else when options.LogInstructionExecution.Has(InstructionLogging.Blocks):
+                case OpCode.End when options.LogInstructionExecution.Has(InstructionLogging.Blocks) && Context.GetEndFor() == OpCode.Block:
                             
-                case OpCode.Br when options.LogInstructionExecution.HasFlag(InstructionLogging.Branches):
-                case OpCode.BrIf when options.LogInstructionExecution.HasFlag(InstructionLogging.Branches):
-                case OpCode.BrTable when options.LogInstructionExecution.HasFlag(InstructionLogging.Branches):
+                case OpCode.Br when options.LogInstructionExecution.Has(InstructionLogging.Branches):
+                case OpCode.BrIf when options.LogInstructionExecution.Has(InstructionLogging.Branches):
+                case OpCode.BrTable when options.LogInstructionExecution.Has(InstructionLogging.Branches):
                 
-                case var _ when IInstruction.IsBranch(lastInstruction) && options.LogInstructionExecution.HasFlag(InstructionLogging.Branches):
-                case var _ when options.LogInstructionExecution.HasFlag(InstructionLogging.Computes):
+                case var _ when IInstruction.IsBranch(lastInstruction) && options.LogInstructionExecution.Has(InstructionLogging.Branches):
+                case var _ when options.LogInstructionExecution.Has(InstructionLogging.Computes):
                     string location = "";
                     if (options.CalculateLineNumbers)
                     {
@@ -695,11 +661,7 @@ namespace Wacs.Core.Runtime
             }
 
             //@Spec 4.5.4 Step 7
-            Frame initFrame = new(moduleInstance, FunctionType.Empty)
-            {
-                Locals = new LocalsSpace(),
-                Index = FuncIdx.GlobalInitializers
-            };
+            Frame initFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.GlobalInitializers);
             Context.PushFrame(initFrame);
 
             //5. Allocate Globals and capture their addresses in the Store
@@ -808,8 +770,7 @@ namespace Wacs.Core.Runtime
                 moduleInstance = AllocateModule(module);
 
                 //12.
-                var auxFrame = new Frame(moduleInstance, FunctionType.Empty) { Locals = new LocalsSpace() };
-                auxFrame.Index = FuncIdx.ElementInitialization;
+                var auxFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.ElementInitialization);
                 //13.
                 Context.PushFrame(auxFrame);
 

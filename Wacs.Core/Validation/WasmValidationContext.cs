@@ -195,8 +195,14 @@ namespace Wacs.Core.Validation
 
         public void SetExecFrame(FunctionType funcType, ValType[] localTypes)
         {
-            var locals = new LocalsSpace(funcType.ParameterTypes.Types, localTypes);
-            ExecFrame = new Frame(ValidationModule, funcType) { Locals = locals };
+            var locals = new LocalsSpace();
+            locals.Enscribe(funcType.ParameterTypes.Types, localTypes);
+            ExecFrame = new Frame
+            {
+                Module = ValidationModule,
+                Type = funcType,
+                Locals = locals
+            };
         }
 
         public class InstructionValidator : AbstractValidator<IInstruction>
