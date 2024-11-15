@@ -26,7 +26,7 @@ namespace Wacs.Core.Runtime
     {
         public delegate object GenericFunc(params object[] args);
 
-        public delegate object[] GenericFuncs(params object[] args);
+        public delegate Value[] GenericFuncs(params object[] args);
 
         public delegate Value[] StackFunc(Value[] parameters);
 
