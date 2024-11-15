@@ -14,24 +14,23 @@
 //  * limitations under the License.
 //  */
 
-using System.Collections.Generic;
-using System.Text.Json.Serialization;
+using Wacs.Core.Instructions;
 
-namespace Spec.Test.WastJson
+namespace Wacs.Core.Runtime
 {
-    public class WastJson
+    public class RuntimeAttributes
     {
-        [JsonPropertyName("source_filename")]
-        public string? SourceFilename { get; set; }
+        public bool Configure_RefTypes = false;
+        public int GrowCallStack = 512;
 
-        [JsonPropertyName("commands")]
-        public List<ICommand> Commands { get; set; } = null!;
+        public int InitialCallStack = 512;
+        public bool Live = true;
+        public int MaxCallStack = 2048;
 
-        public string TestName => 
-            System.IO.Path.GetFileName(SourceFilename) ?? "";
+        public int MaxFunctionLocals = 2048;
 
-        public string Path { get; set; } = "";
-
-        public override string ToString() => $"{SourceFilename}";
+        public int MaxOpStack = 1024;
+        public IInstructionFactory InstructionFactory { get; set; } = SpecFactory.Factory;
     }
+
 }
