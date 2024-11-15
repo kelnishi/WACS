@@ -14,45 +14,53 @@
 //  * limitations under the License.
 //  */
 
-using System.Collections.Generic;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime
 {
-    public class Frame
+    public class Frame : IReusable<Frame>
     {
-        public readonly Stack<Label> Labels = new();
-
-        public Frame(ModuleInstance moduleInstance, FunctionType type) =>
-            (Module, Type) = (moduleInstance, type);
-
-        public ModuleInstance Module { get; }
-        public LocalsSpace Locals { get; set; } = new();
+        public SubStack<Label> Labels;
+        public ModuleInstance Module { get; set; } = null!;
+        public LocalsSpace Locals { get; set; } = null!;
         public InstructionPointer ContinuationAddress { get; set; } = InstructionPointer.Nil;
-
-        public Label Label => Labels.Peek();
-
-        public FunctionType Type { get; }
-
+        public FunctionType Type { get; set; } = null!;
         public FuncIdx Index { get; set; }
-
         public string FuncId { get; set; } = "";
 
+        public Label Label => Labels.Peek();
         public int Arity => (int)Type.ResultType.Length;
 
-        //For validation
-        public bool ConditionallyReachable { get; set; }
+        public void Clear()
+        {
+            Labels = default;
+            Module = default!;
+            Locals = default!;
+            ContinuationAddress = default;
+            Type = default!;
+            Index = default!;
+            FuncId = string.Empty;
+        }
+
+        public bool Equals(Frame other)
+        {
+            return ReferenceEquals(this, other);
+        }
 
         public bool Contains(LabelIdx index) =>
             index.Value < Labels.Count;
+
+        public Label ReserveLabel() => Labels.Reserve();
 
         public void ForceLabels(int depth)
         {
             while (Labels.Count < depth)
             {
-                var fakeLabel = new Label(ResultType.Empty, InstructionPointer.Nil, OpCode.Nop);
+                var fakeLabel = ReserveLabel();
+                fakeLabel.Set(ResultType.Empty, InstructionPointer.Nil, OpCode.Nop, 0);
                 Labels.Push(fakeLabel);
             }
 

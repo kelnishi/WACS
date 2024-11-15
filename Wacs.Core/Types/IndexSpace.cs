@@ -17,7 +17,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Linq;
 using Wacs.Core.Runtime;
 
 namespace Wacs.Core.Types
@@ -182,19 +181,25 @@ namespace Wacs.Core.Types
 
     public class LocalsSpace : AbstractIndexSpace<LocalIdx, Value>
     {
-        private readonly List<Value> _data;
-        private readonly ReadOnlyCollection<ValType> _locals;
+        private readonly Value[] _data;
 
         public LocalsSpace()
         {
-            _locals = Array.Empty<ValType>().ToList().AsReadOnly();
-            _data = Array.Empty<Value>().ToList();
+            _data = Array.Empty<Value>();
         }
 
-        public LocalsSpace(params IEnumerable<ValType>[] types)
+        public LocalsSpace(ValType[] parameters, ValType[] locals)
         {
-            _locals = types.SelectMany(collection => collection).ToList().AsReadOnly();
-            _data = _locals.Select(t => new Value(t)).ToList();
+            _data = new Value[parameters.Length + locals.Length];
+            int i = 0;
+            foreach (var t in parameters)
+            {
+                _data[i++] = new Value(t);
+            }
+            foreach (var t in locals)
+            {
+                _data[i++] = new Value(t);
+            }
         }
 
         public override Value this[LocalIdx idx]
@@ -204,7 +209,7 @@ namespace Wacs.Core.Types
         }
 
         public override bool Contains(LocalIdx idx) =>
-            idx.Value < _locals.Count;
+            idx.Value < _data.Length;
     }
 
     public class ElementsSpace : AbstractIndexSpace<ElemIdx, Module.ElementSegment>
