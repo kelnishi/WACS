@@ -182,9 +182,15 @@ namespace Wacs.Core.Types
     public class LocalsSpace : AbstractIndexSpace<LocalIdx, Value>
     {
         private readonly List<Value> _data = new();
-        
+
         public LocalsSpace() { }
-        
+
+        public override Value this[LocalIdx idx]
+        {
+            get => _data[(Index)idx];
+            set => _data[(Index)idx] = value;
+        }
+
         public void Enscribe(ValType[] parameters, ValType[] locals)
         {
             _data.Clear();
@@ -205,16 +211,8 @@ namespace Wacs.Core.Types
             _data.Clear();
         }
 
-        public override Value this[LocalIdx idx]
-        {
-            get => _data[(Index)idx];
-            set => _data[(Index)idx] = value;
-        }
-
         public override bool Contains(LocalIdx idx) =>
             idx.Value < _data.Count;
-
-        
     }
 
     public class ElementsSpace : AbstractIndexSpace<ElemIdx, Module.ElementSegment>

@@ -23,8 +23,8 @@ namespace Wacs.Core.Utilities
     public class ReusableStack<T>
         where T : IReusable<T>, new()
     {
-        internal T[] _backingArray;
         private readonly int _growSize;
+        internal T[] _backingArray;
 
         internal int Top;
 

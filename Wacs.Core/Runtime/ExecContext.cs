@@ -78,7 +78,7 @@ namespace Wacs.Core.Runtime
         private ReusableStack<Frame> FrameStack { get; }
         private SubStack<Frame> CallStack { get; }
         private ReusableStack<Label> LabelStack { get; }
-        
+
         private DefaultObjectPool<LocalsSpace> LocalsPool { get; }
 
         public Frame Frame => CallStack.Peek();

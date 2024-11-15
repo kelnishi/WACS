@@ -28,30 +28,30 @@ namespace Spec.Test.WastJson
     public class Argument
     {
         [JsonPropertyName("type")]
-        public string Type { get; set; }
+        public string? Type { get; set; }
 
         [JsonPropertyName("lane_type")]
-        public string LaneType { get; set; }
+        public string? LaneType { get; set; }
 
         [JsonPropertyName("value")]
-        public object Value { get; set; }
+        public object? Value { get; set; }
 
 
         public Value AsValue =>
             Type switch
             {
-                "i32" => new Value(ValType.I32, Value.ToString()),
-                "i64" => new Value(ValType.I64, Value.ToString()),
-                "f32" => new Value(ValType.F32, Value.ToString()),
-                "f64" => new Value(ValType.F64, Value.ToString()),
+                "i32" => new Value(ValType.I32, Value?.ToString()??""),
+                "i64" => new Value(ValType.I64, Value?.ToString()??""),
+                "f32" => new Value(ValType.F32, Value?.ToString()??""),
+                "f64" => new Value(ValType.F64, Value?.ToString()??""),
                 "v128" => ParseV128(Value),
-                "funcref" => new Value(ValType.Funcref, Value.ToString()),
-                "externref" => new Value(ValType.Externref, Value.ToString()),
+                "funcref" => new Value(ValType.Funcref, Value?.ToString()??"null"),
+                "externref" => new Value(ValType.Externref, Value?.ToString()??"null"),
                 _ => throw new ArgumentException($"Cannot parse value {Value} of type {Type}")
             };
 
 
-        private Value ParseV128(object value)
+        private Value ParseV128(object? value)
         {
             if (value is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.Array)
             {

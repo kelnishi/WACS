@@ -29,12 +29,12 @@ namespace Spec.Test.WastJson
                 if (Attribute.GetCustomAttribute(field, typeof(EnumMemberAttribute)) is EnumMemberAttribute attribute)
                 {
                     if (attribute.Value == value)
-                        return (TEnum)field.GetValue(null);
+                        return (TEnum)field.GetValue(null)!;
                 }
                 else
                 {
                     if (field.Name.Equals(value, StringComparison.OrdinalIgnoreCase))
-                        return (TEnum)field.GetValue(null);
+                        return (TEnum)field.GetValue(null)!;
                 }
             }
             throw new ArgumentException($"Unknown value '{value}' for enum {typeof(TEnum).Name}");

@@ -28,15 +28,11 @@ namespace Spec.Test.WastJson
     public class InvokeAction : IAction
     {
         [JsonPropertyName("module")] public string Module { get; set; } = "";
-
-        // [JsonPropertyName("expected")] public List<Argument> Expected { get; set; } = new();
+        [JsonPropertyName("args")] public List<Argument> Args { get; set; } = new();
         public ActionType Type => ActionType.Invoke;
-
         [JsonPropertyName("field")] public string Field { get; set; } = "";
 
-        [JsonPropertyName("args")] public List<Argument> Args { get; set; } = new();
-
-        public override string ToString() => $"{Field} - Args: {string.Join(", ", Args)}";
+        public override string ToString() => $"{Field} - Args: {string.Join(", ", Args ?? new List<Argument>())}";
 
         public Value[] Invoke(ref WasmRuntime runtime, ref Module? module)
         {
@@ -68,7 +64,7 @@ namespace Spec.Test.WastJson
     public class GetAction : IAction
     {
         [JsonPropertyName("expected")]
-        public List<Argument> Expected {
+        public List<Argument>? Expected {
             get => null;
             set => throw new NotSupportedException("GetAction does not support results.");
         }
@@ -76,12 +72,6 @@ namespace Spec.Test.WastJson
         public ActionType Type => ActionType.Get;
 
         [JsonPropertyName("field")] public string Field { get; set; } = "";
-
-        public List<Argument> Args
-        {
-            get => null;
-            set => throw new NotSupportedException("GetAction does not support arguments.");
-        }
     }
     
     public class ActionJsonConverter : JsonConverter<IAction>
