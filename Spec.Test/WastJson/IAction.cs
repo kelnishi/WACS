@@ -14,8 +14,6 @@
 //  * limitations under the License.
 //  */
 
-using System.Collections.Generic;
-
 namespace Spec.Test.WastJson
 {
     public interface IAction
@@ -23,7 +21,5 @@ namespace Spec.Test.WastJson
         ActionType Type { get; }
 
         string Field { get; set; }
-
-        List<Argument> Args { get; set; }
     }
 }
