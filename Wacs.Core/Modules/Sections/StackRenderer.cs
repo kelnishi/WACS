@@ -141,14 +141,8 @@ namespace Wacs.Core
             
             var funcType = Types[func.TypeIndex];
             var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
-            var locals = new LocalsSpace(funcType.ParameterTypes.Types, func.Locals);
-            var execFrame = new Frame(ModuleInst, fakeType)
-            {
-                Locals = locals,
-                Index = func.Index
-            };
 
-            DummyContext = BuildDummyContext(module, ModuleInst, execFrame);
+            DummyContext = BuildDummyContext(module, ModuleInst, func);
 
             ReturnType = funcType.ResultType;
             PushControlFrame(OpCode.Block, fakeType);
@@ -226,7 +220,7 @@ namespace Wacs.Core
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
 
-        private ExecContext BuildDummyContext(Module module, ModuleInstance moduleInst, Frame execFrame)
+        private ExecContext BuildDummyContext(Module module, ModuleInstance moduleInst, Module.Function modFunc)
         {
             var store = new Store();
             store.OpenTransaction();
@@ -266,7 +260,14 @@ namespace Wacs.Core
                 }
             }
             
+            var funcType = Types[modFunc.TypeIndex];
             var dummyContext = new ExecContext(store, new RuntimeAttributes { Live = false } );
+            var execFrame = dummyContext.ReserveFrame(
+                ModuleInst, 
+                new FunctionType(ResultType.Empty, funcType.ResultType), 
+                modFunc.Index,
+                modFunc.Locals);
+            
             dummyContext.PushFrame(execFrame);
             return dummyContext;
         }

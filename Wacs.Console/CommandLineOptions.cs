@@ -41,6 +41,9 @@ namespace Wacs.Console
         [Option('g', "log_gas", HelpText = "Print total instructions executed.", Default = false)]
         public bool LogGas { get; set; }
 
+        [Option('y', "limit_gas", HelpText = "Limit dispatched instructions.", Default = 0)]
+        public int LimitGas { get; set; }
+
         [Option('n',"log_progress", HelpText = "Print a . every n instructions.", Default = -1)]
         public int LogProgressEvery { get; set; }
 

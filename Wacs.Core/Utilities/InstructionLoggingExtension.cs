@@ -14,24 +14,13 @@
 //  * limitations under the License.
 //  */
 
-using System.Collections.Generic;
-using System.Text.Json.Serialization;
+using Wacs.Core.Runtime;
 
-namespace Spec.Test.WastJson
+namespace Wacs.Core.Utilities
 {
-    public class WastJson
+    public static class InstructionLoggingExtension
     {
-        [JsonPropertyName("source_filename")]
-        public string? SourceFilename { get; set; }
-
-        [JsonPropertyName("commands")]
-        public List<ICommand> Commands { get; set; } = null!;
-
-        public string TestName => 
-            System.IO.Path.GetFileName(SourceFilename) ?? "";
-
-        public string Path { get; set; } = "";
-
-        public override string ToString() => $"{SourceFilename}";
+        public static bool Has(this InstructionLogging logging, InstructionLogging flags) => 
+            ((int)logging & (int)flags) != 0;
     }
 }

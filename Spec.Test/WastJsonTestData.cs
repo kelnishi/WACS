@@ -39,7 +39,7 @@ namespace Spec.Test
                 .Build();
         }
 
-        private static string JsonDirectory => Path.Combine(AppContext.BaseDirectory,Configuration["JsonDirectory"]);
+        private static string JsonDirectory => Path.Combine(AppContext.BaseDirectory, Configuration["JsonDirectory"] ?? "");
 
         public IEnumerator<object[]> GetEnumerator()
         {
