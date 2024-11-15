@@ -21,14 +21,14 @@ namespace Wacs.Core.Runtime
     public class RuntimeAttributes
     {
         public bool Configure_RefTypes = false;
-        public bool Live = true;
+        public int GrowCallStack = 512;
 
         public int InitialCallStack = 512;
-        public int GrowCallStack = 512;
+        public bool Live = true;
         public int MaxCallStack = 2048;
-        
+
         public int MaxFunctionLocals = 2048;
-        
+
         public int MaxOpStack = 1024;
         public IInstructionFactory InstructionFactory { get; set; } = SpecFactory.Factory;
     }

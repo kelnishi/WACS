@@ -22,22 +22,13 @@ namespace Wacs.Core.Runtime
 {
     public class Label : IReusable<Label>
     {
-        public int StackHeight;
-        
         public int Arity;
-
-        public ByteCode Instruction;
 
         public InstructionPointer ContinuationAddress;
 
-        public void Set(ResultType type, InstructionPointer address, ByteCode inst, int stackHeight)
-        {
-            StackHeight = stackHeight;
-            Arity = type.Arity;
-            Instruction = inst;
-            ContinuationAddress = address;
-        }
-        
+        public ByteCode Instruction;
+        public int StackHeight;
+
         public void Clear()
         {
             Arity = default;
@@ -45,13 +36,21 @@ namespace Wacs.Core.Runtime
             ContinuationAddress = default;
             StackHeight = default;
         }
-        
+
         public bool Equals(Label other)
         {
             return StackHeight == other.StackHeight &&
                    Arity == other.Arity &&
                    Instruction.Equals(other.Instruction) &&
                    ContinuationAddress.Equals(other.ContinuationAddress);
+        }
+
+        public void Set(ResultType type, InstructionPointer address, ByteCode inst, int stackHeight)
+        {
+            StackHeight = stackHeight;
+            Arity = type.Arity;
+            Instruction = inst;
+            ContinuationAddress = address;
         }
     }
 }

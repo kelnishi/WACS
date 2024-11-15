@@ -149,7 +149,10 @@ namespace Wacs.Core.Runtime
         {
             // Get the 'Invoke' method of the desired delegate type
             var delegateInvokeMethod = typeof(TDelegate).GetMethod("Invoke");
-            var delegateParameters = delegateInvokeMethod?.GetParameters();
+            if (delegateInvokeMethod == null)
+                throw new ArgumentException($"Delegate type {typeof(TDelegate)} did not have Invoke() method");
+            
+            var delegateParameters = delegateInvokeMethod.GetParameters();
 
             if ((delegateParameters?.Length ?? 0) == 0)
             {
