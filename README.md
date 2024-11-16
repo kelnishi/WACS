@@ -103,6 +103,7 @@ if (runtime.TryGetExportedFunction(("hello", "main"), out var mainAddr))
 To add WACS to a Unity project, you'll need to add the following DLLs to your Assets directory:
 - Wacs.Core.dll
 - FluentValidation.dll
+- Microsoft.Extensions.ObjectPool.dll
 
 Set **Player Settings>Other Settings>Api Compatibility Level** to **.NET Standard 2.1**.
 
