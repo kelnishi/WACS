@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Package Unity" type="CompoundRunConfigurationType">
+    <toRun name="Wacs.Core Publish Wacs.Core.dll" type="ShConfigurationType" />
+    <toRun name="Wacs.Core Publish Wacs.WASIp1.dll" type="ShConfigurationType" />
+    <method v="2" />
+  </configuration>
+</component>
