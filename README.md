@@ -100,7 +100,17 @@ if (runtime.TryGetExportedFunction(("hello", "main"), out var mainAddr))
 
 ## Integration with Unity
 
-To add WACS to a Unity project, you'll need to add the following DLLs to your Assets directory:
+### With Unity Package Manager
+1. Window>Package Manager
+2. Click + Add package from git URL...
+3. Enter the package repo URL: ```git@github.com:kelnishi/WACS-Unity.git```
+4. Click Add
+
+This will put the DLLs into your project. 
+Import the WasmRunner sample to get started.
+
+### Manually
+To manually add WACS to a Unity project, you'll need to add the following DLLs to your Assets directory:
 - Wacs.Core.dll
 - FluentValidation.dll
 - Microsoft.Extensions.ObjectPool.dll
