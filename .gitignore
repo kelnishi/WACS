@@ -84,8 +84,6 @@ output/
 riderModule.iml
 /_ReSharper.Caches/
 
-/Feature.Detect/generated-wasm/**
-/Spec.Test/generated-json/**
 /Wacs.Console/Data/**
 
 .DS_Store
