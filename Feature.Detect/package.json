@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "wabt": "^1.0.36"
+  }
+}
