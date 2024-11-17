@@ -7,3 +7,6 @@
 [submodule "unity"]
 	path = unity
 	url = git@github.com:kelnishi/WACS-Unity.git
+[submodule "Feature.Detect/wasm-feature-detect"]
+	path = Feature.Detect/wasm-feature-detect
+	url = git@github.com:GoogleChromeLabs/wasm-feature-detect.git
