@@ -46,20 +46,6 @@ function extractProposalInfo(content) {
     }
 }
 
-// Function to transform JS code to remove imports and exports
-function transformCode(sourceCode) {
-    // Remove import statements
-    sourceCode = sourceCode.replace(/import[^;]+;/g, '');
-
-    // Extract the main function body
-    const functionMatch = sourceCode.match(/export default async \(\) => {([\s\S]+)}/);
-    if (functionMatch) {
-        return `async () => {${functionMatch[1]}}`;
-    }
-
-    return sourceCode;
-}
-
 // Helper function to convert various input types to Uint8Array
 function toUint8Array(bufferSource) {
     if (bufferSource instanceof Uint8Array) {
@@ -84,8 +70,13 @@ async function processWatFile(watPath, outputBasePath) {
         const proposalInfo = extractProposalInfo(watContent);
 
         // Initialize wabt and convert WAT to WASM
+        let features = proposalInfo.features ?? [];
         const wabtInstance = await wabt();
-        const wasmModule = wabtInstance.parseWat('module.wat', watContent);
+        const wasmModule = wabtInstance.parseWat(
+            'module.wat',
+            watContent,
+            Object.fromEntries(features.map((flag) => [flag, true])),);
+        
         const { buffer } = wasmModule.toBinary({});
 
         // Write WASM file
@@ -93,10 +84,13 @@ async function processWatFile(watPath, outputBasePath) {
         fs.writeFileSync(outputWasmPath, Buffer.from(buffer));
         console.log(`Wrote ${buffer.byteLength} bytes to ${outputWasmPath}`);
 
+        const outputFilename = path.basename(outputWasmPath);
+        
         // Write metadata
         const metadata = {
             source: 'wat2wasm',
             timestamp: new Date().toISOString(),
+            module: outputFilename,
             ...proposalInfo,
         };
 
@@ -141,30 +135,49 @@ function writeWasmBuffer(bufferSource, source, sourceFile) {
         fs.writeFileSync(outputWasmPath, uint8Array);
         console.log(`Wrote ${uint8Array.length} bytes to ${outputWasmPath} (source: ${source})`);
         captured = true;
-        return uint8Array;
+
+        const outputFilename = path.basename(outputWasmPath);
+        return outputFilename;
     } catch (error) {
         console.error('Error writing WASM buffer:', error);
         throw error;
     }
 }
 
+const handler = {
+    has(target, prop) {
+        // Log the property being checked with "in"
+        // console.log(`Checking presence of property "${String(prop)}" in WebAssembly`);
+        writeMetadata({
+            source: `"${String(prop)}" in WebAssembly`,
+        }, indexPath);
+        
+        // Return the result of the default behavior
+        return Reflect.has(target, prop);
+    }
+};
+
+// Create a proxy for the WebAssembly object
+const webAssemblyProxy = new Proxy(WebAssembly, handler);
 
 // Monkey patch WebAssembly.Module
-WebAssembly.Module = function(bufferSource) {
-    const bytes = writeWasmBuffer(bufferSource, 'Module', indexPath);
+webAssemblyProxy.Module = function(bufferSource) {
+    const outfile = writeWasmBuffer(bufferSource, 'Module', indexPath);
     writeMetadata({
         source: 'WebAssembly.Module',
+        module: outfile,
     }, indexPath);
     
     return 'Intercepted WebAssembly.Module call';
 };
 
 // Monkey patch WebAssembly.instantiate
-WebAssembly.instantiate = function(bufferSource, importObject, options) {
-    const bytes = writeWasmBuffer(bufferSource, 'instantiate', indexPath);
+webAssemblyProxy.instantiate = function(bufferSource, importObject, options) {
+    const outfile = writeWasmBuffer(bufferSource, 'instantiate', indexPath);
 
     const metadata = {
         source: 'WebAssembly.instantiate',
+        module: outfile,
         options: options || {},
     };
 
@@ -173,17 +186,20 @@ WebAssembly.instantiate = function(bufferSource, importObject, options) {
 };
 
 // Monkey patch WebAssembly.validate
-WebAssembly.validate = function(bufferSource) {
-    const bytes = writeWasmBuffer(bufferSource, 'validate', indexPath);
+webAssemblyProxy.validate = function(bufferSource) {
+    const outfile = writeWasmBuffer(bufferSource, 'validate', indexPath);
 
     const metadata = {
         source: 'WebAssembly.validate',
+        module: outfile,
     };
 
     writeMetadata(metadata, indexPath);
     return 'Intercepted WebAssembly.validate call';
 };
 
+// Replace the original WebAssembly with the proxy
+global.WebAssembly = webAssemblyProxy;
 
 // Main function to process directory
 async function processDirectory(inputDir) {
@@ -198,6 +214,7 @@ async function processDirectory(inputDir) {
             // Read and transform the source code
             const module = await import("./"+indexPath);
             const result = await module.default();
+            
             console.log('Function executed:', result);
             return true;
         } catch (error) {
