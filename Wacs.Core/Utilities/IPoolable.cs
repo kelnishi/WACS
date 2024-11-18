@@ -14,27 +14,10 @@
 //  * limitations under the License.
 //  */
 
-using Wacs.Core.Instructions;
-
-namespace Wacs.Core.Runtime
+namespace Wacs.Core.Utilities
 {
-    public class RuntimeAttributes
+    public interface IPoolable
     {
-        public bool Configure_RefTypes = false;
-        public int GrowCallStack = 512;
-
-        public int InitialCallStack = 512;
-        public bool Live = true;
-        public int MaxCallStack = 2048;
-
-        public int GrowLabelsStack = 512;
-        public int InitialLabelsStack = 2048;
-
-        public int MaxFunctionLocals = 2048;
-        public int LocalPoolSize = 64;
-
-        public int MaxOpStack = 1024;
-        public IInstructionFactory InstructionFactory { get; set; } = SpecFactory.Factory;
+        public void Clear();
     }
-
 }
