@@ -14,6 +14,9 @@
 //  * limitations under the License.
 //  */
 
+using System.Buffers;
+using System.Collections.Generic;
+using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -21,11 +24,15 @@ using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime
 {
-    public class Frame : IReusable<Frame>
+    public class Frame : IPoolable
     {
+        // public ObjectPool<Label>? LabelPool = null;
+        
         public SubStack<Label> Labels;
+
+        // public readonly Stack<Label> Labels = new();
         public ModuleInstance Module { get; set; } = null!;
-        public LocalsSpace Locals { get; set; } = null!;
+        public LocalsSpace Locals { get; set; }
         public InstructionPointer ContinuationAddress { get; set; } = InstructionPointer.Nil;
         public FunctionType Type { get; set; } = null!;
         public FuncIdx Index { get; set; }
@@ -38,11 +45,17 @@ namespace Wacs.Core.Runtime
         {
             Labels = default;
             Module = default!;
-            Locals = default!;
+            Locals = default;
             ContinuationAddress = default;
             Type = default!;
             Index = default!;
             FuncId = string.Empty;
+        }
+
+        public void ReturnLocals(ArrayPool<Value> dataPool)
+        {
+            dataPool.Return(Locals.Data);
+            Locals = default!;
         }
 
         public bool Equals(Frame other)
@@ -66,8 +79,16 @@ namespace Wacs.Core.Runtime
 
             while (Labels.Count > depth)
             {
-                Labels.Pop();
+                PopLabel();
             }
+        }
+
+        public InstructionPointer PopLabel()
+        {
+            var label = Labels.Pop();
+            var addr = label.ContinuationAddress;
+            // LabelPool?.Return(label);
+            return addr;
         }
     }
 }

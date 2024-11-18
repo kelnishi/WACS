@@ -14,12 +14,23 @@
 //  * limitations under the License.
 //  */
 
-using System;
+using Microsoft.Extensions.ObjectPool;
+using Wacs.Core.Runtime;
+using Wacs.Core.Types;
 
 namespace Wacs.Core.Utilities
 {
-    public interface IReusable<T> : IEquatable<T>
+    public class StackPoolPolicy<T> : PooledObjectPolicy<T>
+    where T : class, IPoolable, new()
     {
-        public void Clear();
+        public override T Create() => new T();
+        public override bool Return(T? obj)
+        {
+            if (obj == null)
+                return false;
+            
+            obj.Clear();
+            return true; 
+        }
     }
 }

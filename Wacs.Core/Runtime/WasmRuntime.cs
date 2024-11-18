@@ -675,9 +675,8 @@ namespace Wacs.Core.Runtime
             }
 
             Context.PopFrame();
-            initFrame.Index = FuncIdx.ElementInitializers;
-            initFrame.ForceLabels(0);
-            Context.PushFrame(initFrame);
+            Frame initFrame2 = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.ElementInitializers);
+            Context.PushFrame(initFrame2);
 
             //6. Allocate Elements
             //12. index ordered element addresses

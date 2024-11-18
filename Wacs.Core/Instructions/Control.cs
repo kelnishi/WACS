@@ -723,8 +723,8 @@ namespace Wacs.Core.Instructions
                 $"Instruction return failed. Operand stack underflow");
             //We're managing separate stacks, so we won't need to shift the operands
             // var vals = context.OpStack.PopResults(context.Frame.Type.ResultType);
-            var frame = context.PopFrame();
-            context.ResumeSequence(frame.ContinuationAddress);
+            var address = context.PopFrame();
+            context.ResumeSequence(address);
         }
     }
 

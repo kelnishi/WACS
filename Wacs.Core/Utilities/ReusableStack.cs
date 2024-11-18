@@ -21,7 +21,7 @@ using System.Collections.Generic;
 namespace Wacs.Core.Utilities
 {
     public class ReusableStack<T>
-        where T : IReusable<T>, new()
+        where T : IPoolable, new()
     {
         private readonly int _growSize;
         internal T[] _backingArray;
@@ -92,7 +92,7 @@ namespace Wacs.Core.Utilities
         }
     }
 
-    public struct SubStack<T> : IEnumerable<T> where T : IReusable<T>, new()
+    public struct SubStack<T> : IEnumerable<T> where T : IPoolable, new()
     {
         private readonly int _zeroElement;
         private readonly ReusableStack<T> _stack;

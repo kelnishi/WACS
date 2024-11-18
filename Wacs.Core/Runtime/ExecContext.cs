@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -51,13 +52,15 @@ namespace Wacs.Core.Runtime
         {
             Store = store;
             Attributes = attributes ?? new RuntimeAttributes();
-            FrameStack = new(Attributes.InitialCallStack, Attributes.GrowCallStack);
-            LabelStack = new(Attributes.InitialCallStack * 2, Attributes.GrowCallStack);
-            CallStack = FrameStack.GetSubStack();
 
-            var poolPolicy = new LocalsSpacePooledObjectPolicy();
-            LocalsPool = new DefaultObjectPool<LocalsSpace>(poolPolicy, Attributes.InitialCallStack);
+            FramePool = new DefaultObjectPool<Frame>(new StackPoolPolicy<Frame>(), Attributes.MaxCallStack)
+                .Prime(Attributes.InitialCallStack);
             
+            LocalsDataPool = ArrayPool<Value>.Create(Attributes.MaxFunctionLocals, Attributes.LocalPoolSize);
+            
+            CallStack = new (Attributes.InitialCallStack);
+            LabelStack = new(Attributes.InitialLabelsStack, Attributes.GrowLabelsStack);
+
             _hostReturnSequence = new InstructionSequence(
                 InstructionFactory.CreateInstruction<InstFuncReturn>(OpCode.Func)
             );
@@ -75,11 +78,10 @@ namespace Wacs.Core.Runtime
         public Store Store { get; }
         public OpStack OpStack { get; }
 
-        private ReusableStack<Frame> FrameStack { get; }
-        private SubStack<Frame> CallStack { get; }
         private ReusableStack<Label> LabelStack { get; }
-
-        private DefaultObjectPool<LocalsSpace> LocalsPool { get; }
+        private ObjectPool<Frame> FramePool { get; }
+        private ArrayPool<Value> LocalsDataPool { get; }
+        private Stack<Frame> CallStack { get; }
 
         public Frame Frame => CallStack.Peek();
 
@@ -107,14 +109,16 @@ namespace Wacs.Core.Runtime
         {
             locals ??= Array.Empty<ValType>();
             
-            var frame = CallStack.Reserve();
+            var frame = FramePool.Get();
             frame.Module = module;
             frame.Type = type;
             frame.Labels = LabelStack.GetSubStack();
             frame.Index = index;
             frame.ContinuationAddress = GetPointer();
-            frame.Locals = LocalsPool.Get();
-            frame.Locals.Enscribe(type.ParameterTypes.Types, locals);
+            
+            int capacity = type.ParameterTypes.Types.Length + locals.Length;
+            var localData = LocalsDataPool.Rent(capacity);
+            frame.Locals = new(localData, type.ParameterTypes.Types, locals);
             
             return frame;
         }
@@ -125,18 +129,18 @@ namespace Wacs.Core.Runtime
                 throw new WasmRuntimeException($"Runtime call stack exhausted {CallStack.Count}");
             
             CallStack.Push(frame);
-            frame.Labels = LabelStack.GetSubStack();
         }
 
-        public Frame PopFrame()
+        public InstructionPointer PopFrame()
         {
             var frame = CallStack.Pop();
             frame.Labels.Drop();
-            
-            LocalsPool.Return(frame.Locals);
-            frame.Locals = null!;
-            
-            return frame;
+            if (frame.Locals.Data != null)
+                frame.ReturnLocals(LocalsDataPool);
+
+            var address = frame.ContinuationAddress;
+            FramePool.Return(frame);
+            return address;
         }
 
         public void ResetStack(Label label)
@@ -146,7 +150,6 @@ namespace Wacs.Core.Runtime
                 OpStack.PopAny();
             }
         }
-
 
         public void FlushCallStack()
         {
@@ -193,10 +196,10 @@ namespace Wacs.Core.Runtime
         // @Spec 4.4.9.2. Exit Block
         public void ExitBlock()
         {
-            var label = Frame.Labels.Pop();
+            var addr = Frame.PopLabel();
             // We manage separate stacks, so we don't need to relocate the operands
             // var vals = OpStack.PopResults(label.Type);
-            ResumeSequence(label.ContinuationAddress);
+            ResumeSequence(addr);
         }
 
         // @Spec 4.4.10.1 Function Invocation
@@ -243,13 +246,13 @@ namespace Wacs.Core.Runtime
             //Load parameters
             while (_asideVals.Count > 0)
             {
-                frame.Locals[(LocalIdx)li] = _asideVals.Pop();
+                frame.Locals.Set((LocalIdx)li, _asideVals.Pop());
                 li += 1;
             }
             //Set the Locals to default
             for (int ti = 0; li < localCount; ++li, ++ti)
             {
-                frame.Locals[(LocalIdx)li] = new Value(t[ti]);
+                frame.Locals.Set((LocalIdx)li, new Value(t[ti]));
             }
 
             //9.
@@ -286,10 +289,10 @@ namespace Wacs.Core.Runtime
             // var vals = OpStack.PopResults(Frame.Type.ResultType);
             //5.
             //6.
-            var frame = PopFrame();
+            var address = PopFrame();
             //7. split stack, values left in place 
             //8.
-            ResumeSequence(frame.ContinuationAddress);
+            ResumeSequence(address);
         }
 
         public IInstruction? Next()
