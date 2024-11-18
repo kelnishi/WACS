@@ -221,7 +221,7 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |[Sign-extension operators](https://github.com/WebAssembly/sign-extension-ops)||✅|
 |[Fixed-Width SIMD](https://github.com/webassembly/simd)||✅|
 |[Streaming Compilation](https://webassembly.github.io/spec/web-api/index.html#streaming-modules)|streaming_compilation|<span title="Browser idioms, not directly supported">🌐</span>|
-|[Tail call](https://github.com/webassembly/tail-call)|tail_call|❌|
+|[Tail call](https://github.com/webassembly/tail-call)|tail_call|✅|
 |[Threads](https://github.com/webassembly/threads)|threads|❌|
 |[Type Reflection](https://github.com/WebAssembly/js-types)|type-reflection|<span title="Browser idioms, not directly supported">🌐</span>|
 |[Typed function references](https://github.com/WebAssembly/function-references)|function-references|❌|
