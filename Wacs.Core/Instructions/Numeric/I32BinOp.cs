@@ -25,13 +25,13 @@ namespace Wacs.Core.Instructions.Numeric
     {
         // @Spec 3.3.1.3. i.binop
         public static readonly NumericInst I32Add = new(OpCode.I32Add, ExecuteI32Add,
-            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32), isConst: true);
 
         public static readonly NumericInst I32Sub = new(OpCode.I32Sub, ExecuteI32Sub,
-            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32), isConst: true);
 
         public static readonly NumericInst I32Mul = new(OpCode.I32Mul, ExecuteI32Mul,
-            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32), isConst: true);
 
         public static readonly NumericInst I32DivS = new(OpCode.I32DivS, ExecuteI32DivS,
             ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));

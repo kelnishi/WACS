@@ -25,13 +25,13 @@ namespace Wacs.Core.Instructions.Numeric
     {
         // @Spec 3.3.1.3. i.binop
         public static readonly NumericInst I64Add = new(OpCode.I64Add, ExecuteI64Add,
-            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64), isConst: true);
 
         public static readonly NumericInst I64Sub = new(OpCode.I64Sub, ExecuteI64Sub,
-            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64), isConst: true);
 
         public static readonly NumericInst I64Mul = new(OpCode.I64Mul, ExecuteI64Mul,
-            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
+            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64), isConst: true);
 
         public static readonly NumericInst I64DivS = new(OpCode.I64DivS, ExecuteI64DivS,
             ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));

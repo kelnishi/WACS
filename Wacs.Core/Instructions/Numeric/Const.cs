@@ -29,8 +29,6 @@ namespace Wacs.Core.Instructions.Numeric
         public override ByteCode Op => OpCode.I32Const;
         private int Value { get; set; }
 
-        public bool IsConstant(IWasmValidationContext? ctx) => true;
-
         /// <summary>
         /// @Spec 3.3.1.1 t.const
         /// </summary>
@@ -64,8 +62,6 @@ namespace Wacs.Core.Instructions.Numeric
         public override ByteCode Op => OpCode.I64Const;
         private long Value { get; set; }
 
-        public bool IsConstant(IWasmValidationContext? ctx) => true;
-
         /// <summary>
         /// @Spec 3.3.1.1 t.const
         /// </summary>
@@ -92,8 +88,6 @@ namespace Wacs.Core.Instructions.Numeric
     {
         public override ByteCode Op => OpCode.F32Const;
         private float Value { get; set; }
-
-        public bool IsConstant(IWasmValidationContext? ctx) => true;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -129,8 +123,6 @@ namespace Wacs.Core.Instructions.Numeric
     {
         public override ByteCode Op => OpCode.F64Const;
         private double Value { get; set; }
-
-        public bool IsConstant(IWasmValidationContext? ctx) => true;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
