@@ -14,7 +14,9 @@
 //  * limitations under the License.
 //  */
 
+using System.Text;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Primitives;
 
 namespace Feature.Detect.FeatureJson;
 
@@ -24,6 +26,9 @@ public class FeatureJson
     public string? Source { get; set; }
     
     public string? Path { get; set; }
+    
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
     
     [JsonPropertyName("module")]
     public string? Module { get; set; }
@@ -42,7 +47,15 @@ public class FeatureJson
 
     public override string ToString()
     {
-        return $"Name: {Name}\n Proposal: {Proposal}\n Features: {string.Join(", ", Features ?? new List<string>())}\n Module: {Module}\n Options: {Options}";
+        var feats = (Features ?? new List<string>()).Select(f => $"\"{f}\"");
+        var sb = new StringBuilder();
+        sb.Append("{")
+            .Append("\"Name\": \"").Append(Name).Append("\",\n")
+            .Append("\"Proposal\": \"").Append(Proposal).Append("\",\n")
+            .Append("\"Features\": [").Append(string.Join(", ", feats)).Append("],\n")
+            .Append("\"Id\": \"").Append(Id).Append("\"\n")
+            .Append("}");
+        return sb.ToString();
     }
     
 }

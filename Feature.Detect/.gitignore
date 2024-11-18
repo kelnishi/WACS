@@ -35,3 +35,6 @@ temp/
 
 #generated files
 /generated-wasm/**
+
+#test run
+/TestResults/**
