@@ -104,7 +104,10 @@ if (runtime.TryGetExportedFunction(("hello", "main"), out var mainAddr))
 ### With Unity Package Manager
 1. Window>Package Manager
 2. Click + Add package from git URL...
-3. Enter the package repo URL: ```git@github.com:kelnishi/WACS-Unity.git```
+3. Enter the package repo URL:
+ ```text
+ git@github.com:kelnishi/WACS-Unity.git
+ ```
 4. Click Add
 
 This will put the DLLs into your project. 
