@@ -216,7 +216,7 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |[Multi-value](https://github.com/WebAssembly/multi-value)|multi_value|✅|
 |[Importable/Exportable mutable globals]()||✅|
 |[Reference Types](https://github.com/WebAssembly/reference-types)||✅|
-|[Relaxed SIMD](https://github.com/webassembly/relaxed-simd)|relaxed_simd|❌|
+|[Relaxed SIMD](https://github.com/webassembly/relaxed-simd)|relaxed_simd|✅|
 |[Non-trapping float-to-int conversions](https://github.com/WebAssembly/nontrapping-float-to-int-conversions)||✅|
 |[Sign-extension operators](https://github.com/WebAssembly/sign-extension-ops)||✅|
 |[Fixed-Width SIMD](https://github.com/webassembly/simd)||✅|
