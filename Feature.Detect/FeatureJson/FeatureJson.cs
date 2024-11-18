@@ -14,54 +14,48 @@
 //  * limitations under the License.
 //  */
 
+using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.Primitives;
 
-namespace Feature.Detect.FeatureJson;
-
-public class FeatureJson
+namespace Feature.Detect.FeatureJson
 {
-    [JsonPropertyName("source")]
-    public string? Source { get; set; }
-    
-    public string? Path { get; set; }
-    
-    [JsonPropertyName("id")]
-    public string? Id { get; set; }
-    
-    [JsonPropertyName("module")]
-    public string? Module { get; set; }
-
-    [JsonPropertyName("options")]
-    public Options? Options { get; set; }
-
-    [JsonPropertyName("name")]
-    public string? Name { get; set; }
-
-    [JsonPropertyName("proposal")]
-    public string? Proposal { get; set; }
-    
-    [JsonPropertyName("features")]
-    public List<string>? Features { get; set; }  // New property for features list
-
-    public override string ToString()
+    public class FeatureJson
     {
-        var feats = (Features ?? new List<string>()).Select(f => $"\"{f}\"");
-        var sb = new StringBuilder();
-        sb.Append("{")
-            .Append("\"Name\": \"").Append(Name).Append("\",\n")
-            .Append("\"Proposal\": \"").Append(Proposal).Append("\",\n")
-            .Append("\"Features\": [").Append(string.Join(", ", feats)).Append("],\n")
-            .Append("\"Id\": \"").Append(Id).Append("\"\n")
-            .Append("}");
-        return sb.ToString();
-    }
-    
-}
+        [JsonPropertyName("source")] public string? Source { get; set; }
 
-public class Options
-{
-    [JsonPropertyName("builtins")]
-    public List<string>? Builtins { get; set; }
+        public string? Path { get; set; }
+
+        [JsonPropertyName("id")] public string? Id { get; set; }
+
+        [JsonPropertyName("module")] public string? Module { get; set; }
+
+        [JsonPropertyName("options")] public Options? Options { get; set; }
+
+        [JsonPropertyName("name")] public string? Name { get; set; }
+
+        [JsonPropertyName("proposal")] public string? Proposal { get; set; }
+
+        [JsonPropertyName("features")] public List<string>? Features { get; set; } // New property for features list
+
+        public override string ToString()
+        {
+            var feats = (Features ?? new List<string>()).Select(f => $"\"{f}\"");
+            var sb = new StringBuilder();
+            sb.Append("{")
+                .Append("\"Name\": \"").Append(Name).Append("\",\n")
+                .Append("\"Proposal\": \"").Append(Proposal).Append("\",\n")
+                .Append("\"Features\": [").Append(string.Join(", ", feats)).Append("],\n")
+                .Append("\"Id\": \"").Append(Id).Append("\"\n")
+                .Append("}");
+            return sb.ToString();
+        }
+
+    }
+
+    public class Options
+    {
+        [JsonPropertyName("builtins")] public List<string>? Builtins { get; set; }
+    }
 }
