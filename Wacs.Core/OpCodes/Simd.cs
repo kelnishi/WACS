@@ -24,7 +24,7 @@ namespace Wacs.Core.OpCodes
     /// Theoretically, these could be u32, but I'll keep them as bytes so long as they fit.
     /// </summary>
     // https://www.w3.org/TR/2024/WD-wasm-core-2-20240911/#a7-index-of-instructions
-    public enum SimdCode : byte
+    public enum SimdCode : ushort
     {
         [OpCode("v128.load")]                     V128Load                  = 0x00,
         [OpCode("v128.load8x8_s")]                V128Load8x8S              = 0x01,
@@ -262,6 +262,46 @@ namespace Wacs.Core.OpCodes
         [OpCode("i32x4.trunc_sat_f64x2_u_zero")]  I32x4TruncSatF64x2UZero   = 0xFD,
         [OpCode("f64x2.convert_low_i32x4_s")]     F64x2ConvertLowI32x4S     = 0xFE,
         [OpCode("f64x2.convert_low_i32x4_u")]     F64x2ConvertLowI32x4U     = 0xFF,
+        
+        //Relaxed SIMD
+        [OpCode("i8x16.relaxed_swizzle")]               I8x16RelaxedSwizzle           = 0x100,
+        [OpCode("i32x4.relaxed_trunc_f32x4_s")]         I32x4RelaxedTruncF32x4S       = 0x101,
+        [OpCode("i32x4.relaxed_trunc_f32x4_u")]         I32x4RelaxedTruncF32x4U       = 0x102,
+        [OpCode("i32x4.relaxed_trunc_f64x2_s_zero")]    I32x4RelaxedTruncF64x2SZero   = 0x103,
+        [OpCode("i32x4.relaxed_trunc_f64x2_u_zero")]    I32x4RelaxedTruncF64x2UZero   = 0x104,
+        [OpCode("f32x4.relaxed_madd")]                  F32x4RelaxedMAdd              = 0x105,
+        [OpCode("f32x4.relaxed_nmadd")]                 F32x4RelaxedNMAdd             = 0x106,
+        [OpCode("f64x2.relaxed_madd")]                  F64x2RelaxedMAdd              = 0x107,
+        [OpCode("f64x2.relaxed_nmadd")]                 F64x2RelaxedNMAdd             = 0x108,
+        [OpCode("i8x16.relaxed_laneselect")]            I8x16RelaxedLaneselect        = 0x109,
+        [OpCode("i16x8.relaxed_laneselect")]            I16x8RelaxedLaneselect        = 0x10A,
+        [OpCode("i32x4.relaxed_laneselect")]            I32x4RelaxedLaneselect        = 0x10B,
+        [OpCode("i64x2.relaxed_laneselect")]            I64x2RelaxedLaneselect        = 0x10C,
+        [OpCode("f32x4.relaxed_min")]                   F32x4RelaxedMin               = 0x10D,
+        [OpCode("f32x4.relaxed_max")]                   F32x4RelaxedMax               = 0x10E,
+        [OpCode("f64x2.relaxed_min")]                   F64x2RelaxedMin               = 0x10F,
+        [OpCode("f64x2.relaxed_max")]                   F64x2RelaxedMax               = 0x110,
+        [OpCode("i16x8.relaxed_q15mulr_s")]             I16x8RelaxedQ15MulrS          = 0x111,
+        [OpCode("i16x8.relaxed_dot_i8x16_i7x16_s")]     I16x8RelaxedDotI8x16I7x16S    = 0x112,
+        [OpCode("i32x4.relaxed_dot_i8x16_i7x16_add_s")] I32x4RelaxedDotI8x16I7x16AddS = 0x113,
+
+        [OpCode("i8x16.relaxed_swizzle","prototype")]                Prototype_I8x16RelaxedSwizzle           = 0xA2,
+        [OpCode("i32x4.relaxed_trunc_f32x4_s","prototype")]          Prototype_I32x4RelaxedTruncF32x4S       = 0xA5,
+        [OpCode("i32x4.relaxed_trunc_f32x4_u","prototype")]          Prototype_I32x4RelaxedTruncF32x4U       = 0xA6,
+        [OpCode("i32x4.relaxed_trunc_f64x2_s_zero","prototype")]     Prototype_I32x4RelaxedTruncF64x2SZero   = 0xC5,
+        [OpCode("i32x4.relaxed_trunc_f64x2_u_zero","prototype")]     Prototype_I32x4RelaxedTruncF64x2UZero   = 0xC6,
+        [OpCode("f32x4.relaxed_madd","prototype")]                   Prototype_F32x4RelaxedMAdd              = 0xAF,
+        [OpCode("f32x4.relaxed_nmadd","prototype")]                  Prototype_F32x4RelaxedNMAdd             = 0xB0,
+        [OpCode("f64x2.relaxed_madd","prototype")]                   Prototype_F64x2RelaxedMAdd              = 0xCF,
+        [OpCode("f64x2.relaxed_nmadd","prototype")]                  Prototype_F64x2RelaxedNMAdd             = 0xD0,
+        [OpCode("i8x16.relaxed_laneselect","prototype")]             Prototype_I8x16RelaxedLaneselect        = 0xB2,
+        [OpCode("i16x8.relaxed_laneselect","prototype")]             Prototype_I16x8RelaxedLaneselect        = 0xB3,
+        [OpCode("i32x4.relaxed_laneselect","prototype")]             Prototype_I32x4RelaxedLaneselect        = 0xD2,
+        [OpCode("i64x2.relaxed_laneselect","prototype")]             Prototype_I64x2RelaxedLaneselect        = 0xD3,
+        [OpCode("f32x4.relaxed_min","prototype")]                    Prototype_F32x4RelaxedMin               = 0xB4,
+        [OpCode("f32x4.relaxed_max","prototype")]                    Prototype_F32x4RelaxedMax               = 0xE2,
+        [OpCode("f64x2.relaxed_min","prototype")]                    Prototype_F64x2RelaxedMin               = 0xD4,
+        [OpCode("f64x2.relaxed_max","prototype")]                    Prototype_F64x2RelaxedMax               = 0xEE,
     }
 
 }
