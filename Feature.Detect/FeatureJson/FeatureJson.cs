@@ -45,9 +45,10 @@ namespace Feature.Detect.FeatureJson
             var sb = new StringBuilder();
             sb.Append("{")
                 .Append("\"Name\": \"").Append(Name).Append("\",\n")
+                .Append("\"Source\": \"").Append(Source).Append("\",\n")
                 .Append("\"Proposal\": \"").Append(Proposal).Append("\",\n")
-                .Append("\"Features\": [").Append(string.Join(", ", feats)).Append("],\n")
-                .Append("\"Id\": \"").Append(Id).Append("\"\n")
+                .Append("\"Id\": \"").Append(Id).Append("\",\n")
+                .Append("\"Features\": [").Append(string.Join(", ", feats)).Append("]\n")
                 .Append("}");
             return sb.ToString();
         }

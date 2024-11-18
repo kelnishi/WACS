@@ -150,7 +150,7 @@ const handler = {
         // Log the property being checked with "in"
         // console.log(`Checking presence of property "${String(prop)}" in WebAssembly`);
         writeMetadata({
-            source: `"${String(prop)}" in WebAssembly`,
+            source: `\'${String(prop)}' in WebAssembly`,
             id: outputFileName,
         }, indexPath);
         
