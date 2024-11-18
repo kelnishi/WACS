@@ -147,7 +147,7 @@ namespace Wacs.Core.Instructions
         private delegate void ValidationDelegate(IWasmValidationContext context, LocalIdx localIndex);
     }
     
-    public class GlobalVariableInst : InstructionBase, IConstInstruction
+    public class GlobalVariableInst : InstructionBase, IContextConstInstruction
     {
         private readonly ExecuteDelegate _execute;
 

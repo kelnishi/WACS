@@ -27,8 +27,6 @@ namespace Wacs.Core.Instructions.Simd
         public override ByteCode Op => SimdCode.V128Const;
         private V128 V128 { get; set; }
 
-        public bool IsConstant(IWasmValidationContext? ctx) => true;
-
         /// <summary>
         /// @Spec 3.3.1.1 t.const
         /// </summary>

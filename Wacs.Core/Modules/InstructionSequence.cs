@@ -90,10 +90,11 @@ namespace Wacs.Core
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
         public bool IsConstant(IWasmValidationContext? ctx) =>
-            _instructions.Count - (HasExplicitEnd ? 1 : 0) == 1 &&
             !_instructions.Any(inst => inst switch
             {
-                IConstInstruction constInstruction => !constInstruction.IsConstant(ctx),
+                IContextConstInstruction ctxInstruction => !ctxInstruction.IsConstant(ctx), 
+                IConstInstruction => false,
+                IConstOpInstruction opInst => !opInst.IsConstant,
                 InstEnd => false,
                 _ => true
             });

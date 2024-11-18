@@ -4,7 +4,7 @@
 |[Bulk memory operations](https://github.com/webassembly/bulk-memory-operations)||✅|
 |[Legacy Exception Handling](https://github.com/WebAssembly/exception-handling)|exceptions|❌|
 |[Exception Handling with exnref](https://github.com/WebAssembly/exception-handling)|exceptions|❌|
-|[Extented Const Expressesions](https://github.com/WebAssembly/extended-const)|extended_const|❌|
+|[Extented Const Expressesions](https://github.com/WebAssembly/extended-const)|extended_const|✅|
 |[Garbage Collection](https://github.com/WebAssembly/gc)|gc|❌|
 |[JS String Builtins Proposal for WebAssembly](https://github.com/WebAssembly/js-string-builtins)||❌|
 |[JavaScript Promise Integration](https://github.com/WebAssembly/js-promise-integration)|jspi|<span title="Browser idioms, not directly supported">🌐</span>|
