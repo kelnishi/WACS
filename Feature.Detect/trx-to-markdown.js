@@ -38,7 +38,11 @@ class TrxToMarkdown {
 
             const json = decodeHtmlEntities(jsonString);
             const testDef = JSON.parse(json);
-            testDef['outcome'] = test.outcome;
+            if (testDef['Source'].includes('in WebAssembly'))
+                testDef['outcome'] = 'Javascript';
+            else
+                testDef['outcome'] = test.outcome;
+                
             
             tests.push(testDef);
         });
@@ -51,7 +55,13 @@ class TrxToMarkdown {
         tests.sort((a, b) => (a.Id || '').localeCompare(b.Id || ''));
         
         tests.forEach(testDef => {
-            markdown.push(`|[${testDef['Name']}](${testDef['Proposal']})|${testDef['Features']}|${testDef['outcome'] === 'Failed'?'❌':'✅'}|`);
+            let status = '❔';
+            switch (testDef['outcome']) {
+                case 'Passed': status = '✅'; break;
+                case 'Javascript': status = '<span title="Browser idioms, not directly supported">🌐</span>'; break;
+                case 'Failed': status = '❌'; break;
+            }
+            markdown.push(`|[${testDef['Name']}](${testDef['Proposal']})|${testDef['Features']}|${status}|`);
         });
         
         return markdown.join('\n');
