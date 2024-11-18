@@ -21,14 +21,18 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public partial class NumericInst : InstructionBase
+    public partial class NumericInst : InstructionBase, IConstOpInstruction
     {
         private readonly ExecuteDelegate _execute;
 
         private readonly ValidationDelegate _validate;
 
-        private NumericInst(ByteCode op, ExecuteDelegate execute, ValidationDelegate validate) =>
-            (Op, _execute, _validate) = (op, execute, validate);
+        private readonly bool _isConst;
+
+        private NumericInst(ByteCode op, ExecuteDelegate execute, ValidationDelegate validate, bool isConst = false) =>
+            (Op, _execute, _validate, _isConst) = (op, execute, validate, isConst);
+
+        public bool IsConstant => _isConst;
 
         public override ByteCode Op { get; }
 

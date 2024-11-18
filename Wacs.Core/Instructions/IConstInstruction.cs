@@ -18,8 +18,15 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions
 {
-    public interface IConstInstruction
+    public interface IConstInstruction { }
+
+    public interface IContextConstInstruction
     {
         public bool IsConstant(IWasmValidationContext? context);
+    }
+
+    public interface IConstOpInstruction
+    {
+        public bool IsConstant { get; }
     }
 }
