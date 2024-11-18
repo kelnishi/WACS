@@ -22,6 +22,7 @@ The chapters and sections from the spec are commented throughout the source code
 - [Interop Bindings](#interop-bindings)
 - [Customization](#customization)
 - [Roadmap](#roadmap)
+- [WebAssembly Feature Extensions](#webassembly-feature-extensions)
 - [License](#license)
 
 ## Features
@@ -180,7 +181,6 @@ Custom Instruction implementations can be patched in by replacing or inheriting 
 
 The current TODO list includes:
 
-- **Unity Package Install**: A Unity Asset Store install option.
 - **ExecAsync**: Thread scheduling and advanced gas metering.
 - **Wasm Garbage Collection**: Support  wasm-gc and heaptypes.
 - **Text Format Parsing**: Add support for WebAssembly text format.
@@ -190,7 +190,40 @@ The current TODO list includes:
 - **Unity Bindings for SDL**: Implement SDL2 with Unity bindings.
 - **Instantiation-time Optimization**: Improvements like superinstruction threading and selective inlining for better performance.
 - **JavaScript Proxy Bindings**: Maybe support common JS env functions.
-- **Phase 5 WASM Extensions**: Upcoming features as WebAssembly evolves.
+
+## WebAssembly Feature Extensions
+I started building WACS based on the WebAssembly Core 2 spec, so some of these are already supported.
+I'll be implementing and adding support for as many phase 5 features as I can. Depends mostly on complexity and non-javascriptiness. 
+Here's what's supported so far.
+
+Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs/wasm-feature-detect) as compares to [other runtimes](https://webassembly.org/features/):
+
+|Proposal |Features|    |
+|------|-------|----|
+|[BigInt integration](https://github.com/WebAssembly/JS-BigInt-integration)||✅|
+|[Bulk memory operations](https://github.com/webassembly/bulk-memory-operations)||✅|
+|[Legacy Exception Handling](https://github.com/WebAssembly/exception-handling)|exceptions|❌|
+|[Exception Handling with exnref](https://github.com/WebAssembly/exception-handling)|exceptions|❌|
+|[Extented Const Expressesions](https://github.com/WebAssembly/extended-const)|extended_const|❌|
+|[Garbage Collection](https://github.com/WebAssembly/gc)|gc|❌|
+|[JS String Builtins Proposal for WebAssembly](https://github.com/WebAssembly/js-string-builtins)||❌|
+|[JavaScript Promise Integration](https://github.com/WebAssembly/js-promise-integration)|jspi|❌|
+|[Memory64](https://github.com/WebAssembly/memory64)|memory64|❌|
+|[Multiple Memories](https://github.com/WebAssembly/multi-memory)|multi-memory|❌|
+|[Multi-value](https://github.com/WebAssembly/multi-value)|multi_value|✅|
+|[Importable/Exportable mutable globals]()||✅|
+|[Reference Types](https://github.com/WebAssembly/reference-types)||✅|
+|[Relaxed SIMD](https://github.com/webassembly/relaxed-simd)|relaxed_simd|❌|
+|[Non-trapping float-to-int conversions](https://github.com/WebAssembly/nontrapping-float-to-int-conversions)||✅|
+|[Sign-extension operators](https://github.com/WebAssembly/sign-extension-ops)||✅|
+|[Fixed-Width SIMD](https://github.com/webassembly/simd)||✅|
+|[Streaming Compilation](https://webassembly.github.io/spec/web-api/index.html#streaming-modules)|streaming_compilation|❌|
+|[Tail call](https://github.com/webassembly/tail-call)|tail_call|❌|
+|[Threads](https://github.com/webassembly/threads)|threads|❌|
+|[Type Reflection](https://github.com/WebAssembly/js-types)|type-reflection|❌|
+|[Typed function references](https://github.com/WebAssembly/function-references)|function-references|❌|
+
+This table was generated with the Feature.Detect test harness.
 
 ## Sponsorship & Collaboration
 
