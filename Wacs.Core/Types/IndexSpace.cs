@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Wacs.Core.Runtime;
@@ -179,40 +180,46 @@ namespace Wacs.Core.Types
             idx.Value < _imports.Count + _globals.Count;
     }
 
-    public class LocalsSpace : AbstractIndexSpace<LocalIdx, Value>
+    public struct LocalsSpace
     {
-        private readonly List<Value> _data = new();
+        public Value[]? Data;
+        private int _capacity;
 
-        public LocalsSpace() { }
-
-        public override Value this[LocalIdx idx]
+        public int Capacity => _capacity;
+        
+        public Value Get(LocalIdx idx)
         {
-            get => _data[(Index)idx];
-            set => _data[(Index)idx] = value;
+            if (Data == null)
+                throw new InvalidOperationException("LocalSpace was used uninitialized.");
+                
+            return Data[(Index)idx];
         }
 
-        public void Enscribe(ValType[] parameters, ValType[] locals)
+        public void Set(LocalIdx idx, Value value)
         {
-            _data.Clear();
-            // _data.Capacity = parameters.Length + locals.Length;
-            
+            if (Data == null)
+                throw new InvalidOperationException("LocalSpace was used uninitialized.");
+                
+            Data[(Index)idx] = value;
+        }
+
+        public LocalsSpace(Value[] data, ValType[] parameters, ValType[] locals)
+        {
+            _capacity = parameters.Length + locals.Length;
+            Data = data;
+            int idx = 0;
             foreach (var t in parameters)
             {
-                _data.Add(new Value(t));
+                Data[idx++] = new Value(t);
             }
             foreach (var t in locals)
             {
-                _data.Add(new Value(t));
+                Data[idx++] = new Value(t);
             }
         }
 
-        public void Reset()
-        {
-            _data.Clear();
-        }
-
-        public override bool Contains(LocalIdx idx) =>
-            idx.Value < _data.Count;
+        public bool Contains(LocalIdx idx) =>
+            idx.Value < _capacity;
     }
 
     public class ElementsSpace : AbstractIndexSpace<ElemIdx, Module.ElementSegment>
