@@ -54,7 +54,7 @@ namespace Wacs.Core.Instructions
             if (!context.Frame.Locals.Contains(Index))
                 return $"{base.RenderText(context)} {Index.Value}";
             
-            var value = context.Frame.Locals[Index];
+            var value = context.Frame.Locals.Get(Index);
             string valStr = $" (;>{value}<;)";
             return $"{base.RenderText(context)} {Index.Value}{valStr}";
         }
@@ -70,7 +70,7 @@ namespace Wacs.Core.Instructions
         {
             context.Assert(context.Locals.Contains(localIndex),
                 $"Instruction local.get was invalid. Context Locals did not contain {localIndex}");
-            var value = context.Locals[localIndex];
+            var value = context.Locals.Get(localIndex);
             context.OpStack.PushType(value.Type);
         }
 
@@ -81,7 +81,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Frame.Locals.Contains(localIndex),
                 $"Instruction local.get could not get Local {localIndex}");
             //3.
-            var value = context.Frame.Locals[localIndex];
+            var value = context.Frame.Locals.Get(localIndex);
             //4.
             context.OpStack.PushValue(value);
         }
@@ -91,7 +91,7 @@ namespace Wacs.Core.Instructions
         {
             context.Assert(context.Locals.Contains(localIndex),
                 $"Instruction local.set was invalid. Context Locals did not contain {localIndex}");
-            var value = context.Locals[localIndex];
+            var value = context.Locals.Get(localIndex);
             context.OpStack.PopType(value.Type);
         }
 
@@ -104,12 +104,12 @@ namespace Wacs.Core.Instructions
             //3.
             context.Assert( context.OpStack.HasValue,
                 $"Operand Stack underflow in instruction local.set");
-            var localValue = context.Frame.Locals[localIndex];
+            var localValue = context.Frame.Locals.Get(localIndex);
             var type = localValue.Type;
             //4.
             var value = context.OpStack.PopType(type);
             //5.
-            context.Frame.Locals[localIndex] = value;
+            context.Frame.Locals.Set(localIndex, value);
         }
 
         //0x22
@@ -118,7 +118,7 @@ namespace Wacs.Core.Instructions
         {
             context.Assert(context.Locals.Contains(localIndex),
                 $"Instruction local.tee was invalid. Context Locals did not contain {localIndex}");
-            var value = context.Locals[localIndex];
+            var value = context.Locals.Get(localIndex);
             context.OpStack.PopType(value.Type);
             context.OpStack.PushType(value.Type);
             context.OpStack.PushType(value.Type);
@@ -131,7 +131,7 @@ namespace Wacs.Core.Instructions
             //1.
             context.Assert( context.OpStack.HasValue,
                 $"Operand Stack underflow in instruction local.tee");
-            var localValue = context.Frame.Locals[localIndex];
+            var localValue = context.Frame.Locals.Get(localIndex);
             //2.
             var value = context.OpStack.PopType(localValue.Type);
             //3.
