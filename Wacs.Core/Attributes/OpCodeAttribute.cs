@@ -28,8 +28,10 @@ namespace Wacs.Core.Attributes
         /// Initializes a new instance of the <see cref="OpCodeAttribute"/> class.
         /// </summary>
         /// <param name="mnemonic">The WAT mnemonic associated with the opcode.</param>
-        public OpCodeAttribute(string mnemonic)
+        /// <param name="category">For annotation, doesn't stick</param>
+        public OpCodeAttribute(string mnemonic, string category = "")
         {
+            _ = category;
             Mnemonic = mnemonic;
         }
 
