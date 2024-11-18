@@ -90,6 +90,7 @@ async function processWatFile(watPath, outputBasePath) {
         const metadata = {
             source: 'wat2wasm',
             timestamp: new Date().toISOString(),
+            id: outputFileName,
             module: outputFilename,
             ...proposalInfo,
         };
@@ -150,6 +151,7 @@ const handler = {
         // console.log(`Checking presence of property "${String(prop)}" in WebAssembly`);
         writeMetadata({
             source: `"${String(prop)}" in WebAssembly`,
+            id: outputFileName,
         }, indexPath);
         
         // Return the result of the default behavior
@@ -165,6 +167,7 @@ webAssemblyProxy.Module = function(bufferSource) {
     const outfile = writeWasmBuffer(bufferSource, 'Module', indexPath);
     writeMetadata({
         source: 'WebAssembly.Module',
+        id: outputFileName,
         module: outfile,
     }, indexPath);
     
@@ -177,6 +180,7 @@ webAssemblyProxy.instantiate = function(bufferSource, importObject, options) {
 
     const metadata = {
         source: 'WebAssembly.instantiate',
+        id: outputFileName,
         module: outfile,
         options: options || {},
     };
@@ -191,6 +195,7 @@ webAssemblyProxy.validate = function(bufferSource) {
 
     const metadata = {
         source: 'WebAssembly.validate',
+        id: outputFileName,
         module: outfile,
     };
 
