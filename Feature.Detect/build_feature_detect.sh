@@ -16,3 +16,9 @@ for dir in "$PARENT_DIR"/*/; do
         node convert_detector.mjs "$dir" "$OUTPUT_DIR"
     fi
 done
+
+#run detection
+dotnet test --logger "trx;LogFileName=TestResults.trx"
+
+#publish support matrix
+node trx-to-markdown.js TestResults/TestResults.trx ../features.md
