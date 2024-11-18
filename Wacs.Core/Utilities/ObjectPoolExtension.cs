@@ -14,21 +14,25 @@
 //  * limitations under the License.
 //  */
 
+using System;
+using System.Collections.Generic;
 using Microsoft.Extensions.ObjectPool;
-using Wacs.Core.Types;
 
 namespace Wacs.Core.Utilities
 {
-    public class LocalsSpacePooledObjectPolicy : PooledObjectPolicy<LocalsSpace>
+    public static class ObjectPoolExtension
     {
-        public override LocalsSpace Create() => new LocalsSpace();
-
-        public override bool Return(LocalsSpace? obj)
+        public static ObjectPool<T> Prime<T>(this ObjectPool<T> pool, int count) where T : class, new()
         {
-            if (obj == null)
-                return false;
-            obj.Reset();
-            return true; 
+            var list = new List<T>();
+            for (int i = 0; i < count; i++)
+            {
+                list.Add(pool.Get());
+            }
+            foreach (var obj in list)
+                pool.Return(obj);
+            
+            return pool;
         }
     }
 }
