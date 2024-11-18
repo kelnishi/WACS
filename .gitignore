@@ -84,7 +84,6 @@ output/
 riderModule.iml
 /_ReSharper.Caches/
 
-/Spec.Test/generated-json/**
 /Wacs.Console/Data/**
 
 .DS_Store
