@@ -62,10 +62,10 @@ namespace Wacs.Core.Instructions.SIMD
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.Mems.Contains((MemIdx)0),
+            context.Assert(context.Mems.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(M.AlignBytes <= WidthT.ByteSize() * CountN,
-                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.AlignBytes} <= {WidthT}/8");
+            context.Assert(M.Align.LinearSize() <= WidthT.ByteSize() * CountN,
+                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align.LinearSize()} <= {WidthT}/8");
 
             context.OpStack.PopI32();
             context.OpStack.PushV128();
@@ -75,10 +75,10 @@ namespace Wacs.Core.Instructions.SIMD
         public override void Execute(ExecContext context)
         {
             //2.
-            context.Assert( context.Frame.Module.MemAddrs.Contains((MemIdx)0),
+            context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
             //3.
-            var a = context.Frame.Module.MemAddrs[(MemIdx)0];
+            var a = context.Frame.Module.MemAddrs[M.M];
             //4.
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
@@ -167,9 +167,9 @@ namespace Wacs.Core.Instructions.SIMD
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.Mems.Contains((MemIdx)0),
+            context.Assert(context.Mems.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(M.AlignBytes <= WidthN.ByteSize(),
+            context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
                 $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align} <= {BitWidth.V128}/8");
 
             context.OpStack.PopI32();
@@ -180,10 +180,10 @@ namespace Wacs.Core.Instructions.SIMD
         public override void Execute(ExecContext context)
         {
             //2.
-            context.Assert( context.Frame.Module.MemAddrs.Contains((MemIdx)0),
+            context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
             //3.
-            var a = context.Frame.Module.MemAddrs[(MemIdx)0];
+            var a = context.Frame.Module.MemAddrs[M.M];
             //4.
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
@@ -272,10 +272,10 @@ namespace Wacs.Core.Instructions.SIMD
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.Mems.Contains((MemIdx)0),
+            context.Assert(context.Mems.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(M.Align <= BitWidth.V128.ByteSize(),
-                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align} <= {BitWidth.V128}/8");
+            context.Assert(M.Align.LinearSize() <= BitWidth.V128.ByteSize(),
+                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align.LinearSize()} <= {BitWidth.V128}/8");
 
             context.OpStack.PopI32();
             context.OpStack.PushV128();
@@ -285,10 +285,10 @@ namespace Wacs.Core.Instructions.SIMD
         public override void Execute(ExecContext context)
         {
             //2.
-            context.Assert( context.Frame.Module.MemAddrs.Contains((MemIdx)0),
+            context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
             //3.
-            var a = context.Frame.Module.MemAddrs[(MemIdx)0];
+            var a = context.Frame.Module.MemAddrs[M.M];
             //4.
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
@@ -373,10 +373,10 @@ namespace Wacs.Core.Instructions.SIMD
         {
             context.Assert(X < 128/WidthN.BitSize(),
                 $"Instruction {Op.GetMnemonic()} failed with invalid laneidx {X} <= {128/WidthN.BitSize()}");
-            context.Assert(context.Mems.Contains((MemIdx)0),
+            context.Assert(context.Mems.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(M.AlignBytes <= WidthN.ByteSize(),
-                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.AlignBytes} <= {WidthN}/8");
+            context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
+                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align.LinearSize()} <= {WidthN}/8");
             
             context.OpStack.PopV128();
             context.OpStack.PopI32();
@@ -388,10 +388,10 @@ namespace Wacs.Core.Instructions.SIMD
         {
             
             //2.
-            context.Assert( context.Frame.Module.MemAddrs.Contains((MemIdx)0),
+            context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
             //3.
-            var a = context.Frame.Module.MemAddrs[(MemIdx)0];
+            var a = context.Frame.Module.MemAddrs[M.M];
             //4.
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
@@ -486,10 +486,10 @@ namespace Wacs.Core.Instructions.SIMD
         {
             context.Assert(X < 128/WidthN.BitSize(),
                 $"Instruction {Op.GetMnemonic()} failed with invalid laneidx {X} <= {128/WidthN.BitSize()}");
-            context.Assert(context.Mems.Contains((MemIdx)0),
+            context.Assert(context.Mems.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(M.AlignBytes <= WidthN.ByteSize(),
-                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.AlignBytes} <= {WidthN}/8");
+            context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
+                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align.LinearSize()} <= {WidthN}/8");
             
             context.OpStack.PopV128();
             context.OpStack.PopI32();
@@ -499,10 +499,10 @@ namespace Wacs.Core.Instructions.SIMD
         public override void Execute(ExecContext context)
         {
             //2.
-            context.Assert( context.Frame.Module.MemAddrs.Contains((MemIdx)0),
+            context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
             //3.
-            var a = context.Frame.Module.MemAddrs[(MemIdx)0];
+            var a = context.Frame.Module.MemAddrs[M.M];
             //4.
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
