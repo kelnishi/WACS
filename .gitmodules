@@ -10,3 +10,6 @@
 [submodule "Feature.Detect/wasm-feature-detect"]
 	path = Feature.Detect/wasm-feature-detect
 	url = git@github.com:GoogleChromeLabs/wasm-feature-detect.git
+[submodule "Feature.Detect/proposals"]
+	path = Feature.Detect/proposals
+	url = git@github.com:WebAssembly/proposals.git
