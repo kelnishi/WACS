@@ -16,6 +16,7 @@
 
 using Wacs.Core;
 using Wacs.Core.Runtime;
+using Wacs.Core.Validation;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -38,6 +39,9 @@ namespace Spec.Test
             SpecTestEnv env = new SpecTestEnv();
             WasmRuntime runtime = new();
             env.BindToRuntime(runtime);
+
+            //Make multiple memories fail validation
+            ModuleValidator.ValidateMultipleMemories = false;
             
             Module? module = null;
             foreach (var command in file.Commands)

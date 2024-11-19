@@ -43,12 +43,12 @@ namespace Wacs.Core.Types
                 throw new InvalidDataException($"Memory alignment exceeds page size");
 
             MemIdx idx = default;
-#if MULTI_MEMORY
+
             if (align.HasFlag(Alignment.MemIdxSet))
             {
                 idx = (MemIdx)reader.ReadLeb128_s32();
             }
-#endif
+
             uint offset = reader.ReadLeb128_u32();
             return new MemArg(align, offset, idx);
         }
