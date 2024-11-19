@@ -5,7 +5,7 @@
 |[Bulk memory operations](https://github.com/webassembly/bulk-memory-operations)||✅|
 |[Extended Constant Expressions](https://github.com/WebAssembly/extended-const)|extended_const|✅|
 |[Garbage collection](https://github.com/WebAssembly/gc)|gc|❌|
-|[Multiple memories](https://github.com/WebAssembly/multi-memory)|multi-memory|❌|
+|[Multiple memories](https://github.com/WebAssembly/multi-memory)|multi-memory|✅|
 |[Multi-value](https://github.com/WebAssembly/multi-value)|multi_value|✅|
 |[Import/Export of Mutable Globals](https://github.com/WebAssembly/mutable-global)||✅|
 |[Reference Types](https://github.com/WebAssembly/reference-types)||✅|

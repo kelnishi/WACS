@@ -14,7 +14,6 @@
 //  * limitations under the License.
 //  */
 
-using System;
 using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -38,8 +37,8 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.Mems.Contains((MemIdx)0),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+            context.Assert(context.Mems.Contains(M),
+                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory {M}.");
             context.OpStack.PushI32();
         }
 
@@ -65,10 +64,6 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             M = (MemIdx)reader.ReadByte();
-            if (M != 0x00)
-                throw new FormatException(
-                    $"Invalid memory.size. Multiple memories are not yet supported. memidx:{M}");
-
             return this;
         }
     }
@@ -84,8 +79,8 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.Mems.Contains((MemIdx)0),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+            context.Assert(context.Mems.Contains(M),
+                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory {M}.");
             context.OpStack.PopI32();
             context.OpStack.PushI32();
         }
@@ -126,10 +121,6 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             M = (MemIdx)reader.ReadByte();
-            if (M != 0x00)
-                throw new FormatException(
-                    $"Invalid memory.grow. Multiple memories are not yet supported. memidx:{M}");
-
             return this;
         }
     }
@@ -146,8 +137,8 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.Mems.Contains((MemIdx)0),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+            context.Assert(context.Mems.Contains(Y),
+                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory {Y}.");
 
             context.Assert(context.Datas.Contains(X),
                  $"Instruction {Op.GetMnemonic()} failed with invalid context data {X}.");
@@ -216,7 +207,7 @@ namespace Wacs.Core.Instructions
                 //20.
                 context.OpStack.PushI32(b);
                 //21.
-                context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0))
+                context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, Y))
                     .Execute(context);
                 //22.
                 long check = d + 1L;
@@ -238,11 +229,7 @@ namespace Wacs.Core.Instructions
         {
             X = (DataIdx)reader.ReadLeb128_u32();
             Y = (MemIdx)reader.ReadByte();
-
-            if (Y != 0x00)
-                throw new FormatException(
-                    $"Invalid memory.init. Multiple memories are not yet supported. memidx:{Y}");
-
+            
             return this;
         }
 
@@ -312,8 +299,10 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.Mems.Contains((MemIdx)0),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+            context.Assert(context.Mems.Contains(SrcX),
+                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory {SrcX}.");
+            context.Assert(context.Mems.Contains(DstY),
+                $"Instruction {Op.GetMnemonic()} failed with invalid context memory {DstY}.");
 
             context.OpStack.PopI32();
             context.OpStack.PopI32();
@@ -376,9 +365,9 @@ namespace Wacs.Core.Instructions
                 {
                     context.OpStack.PushI32((uint)d);
                     context.OpStack.PushI32((uint)s);
-                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0))
+                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, SrcX))
                         .Execute(context);
-                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0))
+                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, DstY))
                         .Execute(context);
                     check = d + 1L;
                     context.Assert( check < Constants.TwoTo32,
@@ -400,9 +389,9 @@ namespace Wacs.Core.Instructions
                     context.Assert( check < Constants.TwoTo32,
                          $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
                     context.OpStack.PushI32((uint)(s + n - 1));
-                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0))
+                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, SrcX))
                         .Execute(context);
-                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0))
+                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, DstY))
                         .Execute(context);
                     context.OpStack.PushI32((uint)d);
                     context.OpStack.PushI32((uint)s);
@@ -418,13 +407,6 @@ namespace Wacs.Core.Instructions
         {
             SrcX = (MemIdx)reader.ReadByte();
             DstY = (MemIdx)reader.ReadByte();
-
-            if (SrcX != 0x00 || DstY != 0x00)
-            {
-                throw new FormatException(
-                    $"Invalid memory.copy. Multiple memories are not yet supported. {SrcX} -> {DstY}");
-            }
-
             return this;
         }
     }
@@ -490,7 +472,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PushValue(val);
                 //16.
                 
-                context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0))
+                context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, X))
                     .Execute(context);
                 //17.
                 long check = d + 1L;
@@ -509,9 +491,6 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             X = (MemIdx)reader.ReadByte();
-            if (X.Value != 0x00)
-                throw new FormatException($"Invalid memory.fill. Multiple memories are not yet supported. {X}");
-
             return this;
         }
     }

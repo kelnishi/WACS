@@ -292,7 +292,7 @@ namespace Spec.Test.WastJson
                 throw new ArgumentException("Json missing `filename` field");
             
             var filepath = Path.Combine(testDefinition.Path, Filename);
-            bool didAssert1 = false;
+            bool didAssert = false;
             try
             {
                 using var fileStream = new FileStream(filepath, FileMode.Open);
@@ -302,14 +302,18 @@ namespace Spec.Test.WastJson
             }
             catch (FormatException)
             {
-                didAssert1 = true;
+                didAssert = true;
             }
             catch (NotSupportedException)
             {
-                didAssert1 = true;
+                didAssert = true;
+            }
+            catch (ValidationException)
+            {
+                didAssert = true;
             }
 
-            if (!didAssert1)
+            if (!didAssert)
             {
                 throw new TestException($"Test failed {this}");
             }
