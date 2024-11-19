@@ -86,7 +86,7 @@ namespace Wacs.Core
                 (DataFlags)reader.ReadLeb128_u32() switch
                 {
                     DataFlags.ActiveDefault => 
-                        new Data(new DataMode.ActiveMode((MemIdx)0, Expression.Parse(reader)), ParseByteVector(reader)),
+                        new Data(new DataMode.ActiveMode(default, Expression.Parse(reader)), ParseByteVector(reader)),
                     DataFlags.ActiveExplicit => 
                         new Data(new DataMode.ActiveMode((MemIdx)reader.ReadLeb128_u32(), Expression.Parse(reader)), ParseByteVector(reader)),
                     DataFlags.Passive => 

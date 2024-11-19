@@ -85,7 +85,7 @@ namespace Wacs.Core.Runtime
 
         public Frame Frame => CallStack.Peek();
 
-        public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[(MemIdx)0]];
+        public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[default]];
 
         [Conditional("STRICT_EXECUTION")]
         public void Assert([NotNull] object? objIsNotNull, string message)
