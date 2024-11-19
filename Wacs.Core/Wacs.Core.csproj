@@ -36,11 +36,12 @@
   </ItemGroup>
   
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
-    <DefineConstants>TRACE;</DefineConstants>
+    <DefineConstants>TRACE;MULTI_MEMORY</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
     <DebugSymbols>true</DebugSymbols>
+    <DefineConstants>TRACE;MULTI_MEMORY</DefineConstants>
   </PropertyGroup>
 
   
