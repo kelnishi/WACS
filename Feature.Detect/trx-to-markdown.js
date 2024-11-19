@@ -2,6 +2,8 @@ const fs = require('fs').promises;
 const xml2js = require('xml2js');
 const path = require('path');
 const he = require("he");
+const proposals = require('./proposals.json');
+
 
 class TrxToMarkdown {
     constructor() {
@@ -38,6 +40,26 @@ class TrxToMarkdown {
 
             const json = decodeHtmlEntities(jsonString);
             const testDef = JSON.parse(json);
+            
+            //Special case garbage
+            if (testDef.Id === 'mutable-globals')
+                testDef.Proposal = 'https://github.com/WebAssembly/mutable-global';
+            if (testDef.Id === 'exceptions')
+                testDef.Proposal = " " + testDef.Proposal; 
+            
+            let url = testDef['Proposal'];
+            
+            const proposalRecord = proposals.find(record => record.url.toLowerCase() === url.toLowerCase());
+            if (proposalRecord)
+            {
+                testDef['Name'] = proposalRecord.name;
+                testDef['Phase'] = proposalRecord.phase;
+            }
+            else
+            {
+                testDef['Phase'] = 0;
+            }
+            
             if (testDef['Source'].includes('in WebAssembly'))
                 testDef['outcome'] = 'Javascript';
             else
@@ -48,13 +70,30 @@ class TrxToMarkdown {
         });
         
         let markdown = [];
+        let phase = -1;
         
+        tests.sort((a, b) => {
+            // Sort by Phase descending
+            const phaseComparison = (b.Phase || 0) - (a.Phase || 0);
+            if (phaseComparison !== 0) return phaseComparison;
+
+            // If the phases are equal, sort by Id ascending
+            return (a.Id || '').localeCompare(b.Id || '');
+        });
+
         markdown.push(`|Proposal |Features|    |`);
         markdown.push(`|------|-------|----|`);
         
-        tests.sort((a, b) => (a.Id || '').localeCompare(b.Id || ''));
-        
         tests.forEach(testDef => {
+            if (testDef['Phase'] != phase)
+            {
+                phase = testDef['Phase'];
+                if (phase)
+                    markdown.push(`|Phase ${phase}|`);
+                else
+                    markdown.push(`||`);
+            }
+            
             let status = '❔';
             switch (testDef['outcome']) {
                 case 'Passed': status = '✅'; break;

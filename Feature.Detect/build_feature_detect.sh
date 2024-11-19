@@ -17,6 +17,9 @@ for dir in "$PARENT_DIR"/*/; do
     fi
 done
 
+#extract proposal meta data
+node extractProposals.js
+
 #run detection
 dotnet test --logger "trx;LogFileName=TestResults.trx"
 
