@@ -64,11 +64,6 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             M = (MemIdx)reader.ReadByte();
-#if !MULTI_MEMORY
-            if (M != 0x00)
-                throw new FormatException(
-                    $"Invalid memory.size. Multiple memories are not yet supported. memidx:{M}");
-#endif
             return this;
         }
     }
@@ -126,11 +121,6 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             M = (MemIdx)reader.ReadByte();
-#if !MULTI_MEMORY
-            if (M != 0x00)
-                throw new FormatException(
-                    $"Invalid memory.grow. Multiple memories are not yet supported. memidx:{M}");
-#endif
             return this;
         }
     }
@@ -239,12 +229,7 @@ namespace Wacs.Core.Instructions
         {
             X = (DataIdx)reader.ReadLeb128_u32();
             Y = (MemIdx)reader.ReadByte();
-
-#if !MULTI_MEMORY
-            if (Y != 0x00)
-                throw new FormatException(
-                    $"Invalid memory.init. Multiple memories are not yet supported. memidx:{Y}");
-#endif
+            
             return this;
         }
 
@@ -422,13 +407,6 @@ namespace Wacs.Core.Instructions
         {
             SrcX = (MemIdx)reader.ReadByte();
             DstY = (MemIdx)reader.ReadByte();
-#if !MULTI_MEMORY
-            if (SrcX != 0x00 || DstY != 0x00)
-            {
-                throw new FormatException(
-                    $"Invalid memory.copy. Multiple memories are not yet supported. {SrcX} -> {DstY}");
-            }
-#endif
             return this;
         }
     }
@@ -513,10 +491,6 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             X = (MemIdx)reader.ReadByte();
-#if !MULTI_MEMORY
-            if (X.Value != 0x00)
-                throw new FormatException($"Invalid memory.fill. Multiple memories are not yet supported. {X}");
-#endif
             return this;
         }
     }
