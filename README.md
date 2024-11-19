@@ -195,9 +195,9 @@ The current TODO list includes:
 - **JavaScript Proxy Bindings**: Maybe support common JS env functions.
 
 ## WebAssembly Feature Extensions
-I started building WACS based on the WebAssembly Core 2 spec, so some of these are already supported.
-I'll be implementing and adding support for as many phase 5 features as I can. Depends mostly on complexity and non-javascriptiness. 
-Here's what's supported so far.
+WACS is based on the WebAssembly Core 2 spec.
+I am implementing and adding support for as many phase 5 extensions as I can.
+Progress depends mostly on complexity and non-javascriptiness.
 
 Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs/wasm-feature-detect) as compares to [other runtimes](https://webassembly.org/features/):
 
@@ -208,7 +208,7 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |[Bulk memory operations](https://github.com/webassembly/bulk-memory-operations)||✅|
 |[Extended Constant Expressions](https://github.com/WebAssembly/extended-const)|extended_const|✅|
 |[Garbage collection](https://github.com/WebAssembly/gc)|gc|❌|
-|[Multiple memories](https://github.com/WebAssembly/multi-memory)|multi-memory|❌|
+|[Multiple memories](https://github.com/WebAssembly/multi-memory)|multi-memory|✅|
 |[Multi-value](https://github.com/WebAssembly/multi-value)|multi_value|✅|
 |[Import/Export of Mutable Globals](https://github.com/WebAssembly/mutable-global)||✅|
 |[Reference Types](https://github.com/WebAssembly/reference-types)||✅|
