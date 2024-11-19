@@ -38,3 +38,5 @@ temp/
 
 #test run
 /TestResults/**
+
+proposals.json
