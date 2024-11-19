@@ -90,7 +90,9 @@ namespace Wacs.Core.Types
         public static bool operator !=(MemIdx left, byte right) => left.Value != right;
         public override bool Equals(object? obj) => obj is MemIdx other && this == other;
         public override int GetHashCode() => Value.GetHashCode();
-        
+
+        public override string ToString() => $"MemIdx[{Value}]";
+
     }
 
     public readonly struct GlobalIdx : IEquatable<Index>, IIndex

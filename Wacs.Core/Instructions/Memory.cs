@@ -21,7 +21,6 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
-using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
 // 5.4.6 Memory Instructions
@@ -81,10 +80,10 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.Mems.Contains((MemIdx)0),
+            context.Assert(context.Mems.Contains(M.M),
                  $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(M.AlignBits <= WidthT.BitSize(),
-                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.AlignBits} <= {WidthT}/8");
+            context.Assert(M.Align.LinearSize() <= WidthT.ByteSize(),
+                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align.LinearSize()} <= {WidthT}/8");
 
             context.OpStack.PopI32();
             context.OpStack.PushType(Type);
@@ -94,10 +93,10 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             //2.
-            context.Assert( context.Frame.Module.MemAddrs.Contains((MemIdx)0),
+            context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
                  $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
             //3.
-            var a = context.Frame.Module.MemAddrs[(MemIdx)0];
+            var a = context.Frame.Module.MemAddrs[M.M];
             //4.
             context.Assert( context.Store.Contains(a),
                  $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
@@ -244,11 +243,11 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.Mems.Contains((MemIdx)0),
+            context.Assert(context.Mems.Contains(M.M),
                  $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
-            context.Assert(M.AlignBits <= TWidth.BitSize(),
+            context.Assert(M.Align.LinearSize() <= TWidth.ByteSize(),
                 
-                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.AlignBits} <= {TWidth}/8");
+                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align.LinearSize()} <= {TWidth}/8");
 
             //Pop parameters from right to left
             context.OpStack.PopType(Type);
@@ -260,10 +259,10 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             //2.
-            context.Assert( context.Frame.Module.MemAddrs.Contains((MemIdx)0),
+            context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
                  $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
             //3.
-            var a = context.Frame.Module.MemAddrs[(MemIdx)0];
+            var a = context.Frame.Module.MemAddrs[M.M];
             //4.
             context.Assert( context.Store.Contains(a),
                  $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
@@ -338,83 +337,7 @@ namespace Wacs.Core.Instructions
         }
     }
 
-    public struct MemArg
-    {
-        public uint Offset;
-        public uint Align;
+    
 
-        public int AlignBytes => Align != 0 ? 1 << (int)Align : 0;
-        public int AlignBits => AlignBytes << 3;
-
-        public MemArg(uint align, uint offset)
-        {
-            Align = align;
-            Offset = offset;
-        }
-
-        public static MemArg Parse(BinaryReader reader)
-        {
-            uint bits = reader.ReadLeb128_u32();
-            if (bits > 16)
-                throw new InvalidDataException($"Memory alignment exceeds page size");
-            uint offset = reader.ReadLeb128_u32();
-            return new MemArg
-            {
-                Align = bits,
-                Offset = offset,
-            };
-        }
-
-        public string ToWat(BitWidth naturalAlign)
-        {
-            var offset = Offset != 0 ? $" offset={Offset}" : "";
-            var align = AlignBytes != naturalAlign.ByteSize() ? $" align={Align}" : "";
-            return $"{offset}{align}";
-        }
-    }
-
-    public enum BitWidth : short
-    {
-        S8 = -8,
-        S16 = -16,
-        S32 = -32,
-
-        U8 = 8,
-        U16 = 16,
-        U32 = 32,
-        U64 = 64,
-        
-        V128 = 128,
-    }
-
-    public static class BitWidthHelpers
-    {
-        public static int ByteSize(this BitWidth width) =>
-            width switch
-            {
-                BitWidth.S8 => 1,
-                BitWidth.S16 => 2,
-                BitWidth.S32 => 4,
-                BitWidth.U8 => 1,
-                BitWidth.U16 => 2,
-                BitWidth.U32 => 4,
-                BitWidth.U64 => 8,
-                BitWidth.V128 => 16,
-                _ => (short)width / 8
-            };
-
-        public static int BitSize(this BitWidth width) =>
-            width switch
-            {
-                BitWidth.S8 => 8,
-                BitWidth.S16 => 16,
-                BitWidth.S32 => 32,
-                BitWidth.U8 => 8,
-                BitWidth.U16 => 16,
-                BitWidth.U32 => 32,
-                BitWidth.U64 => 64,
-                BitWidth.V128 => 128,
-                _ => Math.Abs((short)width)
-            };
-    }
+    
 }
