@@ -37,7 +37,7 @@ namespace Wacs.Core.Types
             Instructions = seq;
 
         public Expression(IInstruction single) =>
-            Instructions = new InstructionSequence(single);
+            Instructions = new InstructionSequence(new List<IInstruction>{single});
 
         public InstructionSequence Instructions { get; }
 
