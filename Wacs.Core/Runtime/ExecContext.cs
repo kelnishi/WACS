@@ -201,7 +201,7 @@ namespace Wacs.Core.Runtime
         // @Spec 4.4.9.1. Enter Block
         public void EnterBlock(Block block, ResultType resultType, ByteCode inst, Stack<Value> vals)
         {
-            OpStack.Push(vals);
+            OpStack.PushResults(vals);
             var label = Frame.ReserveLabel();
             label.Set(resultType, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count);
             Frame.Labels.Push(label);

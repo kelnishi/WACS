@@ -499,7 +499,7 @@ namespace Wacs.Core.Instructions
             //     labels.Pop();
             context.ResetStack(label);
             //7.
-            context.OpStack.Push(_asideVals);
+            context.OpStack.PushResults(_asideVals);
             //8. 
             if (label.Instruction.x00 == OpCode.Loop)
             {

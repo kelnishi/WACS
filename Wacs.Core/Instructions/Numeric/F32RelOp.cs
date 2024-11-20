@@ -42,8 +42,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF32Eq(ExecContext context)
         {
-            float i2 = context.OpStack.PopF32();
-            float i1 = context.OpStack.PopF32();
+            float i2 = context.OpStack.PopF32().Float32;
+            float i1 = context.OpStack.PopF32().Float32;
 
             int result = i1 == i2 ? 1 : 0;
 
@@ -52,8 +52,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF32Ne(ExecContext context)
         {
-            float i2 = context.OpStack.PopF32();
-            float i1 = context.OpStack.PopF32();
+            float i2 = context.OpStack.PopF32().Float32;
+            float i1 = context.OpStack.PopF32().Float32;
 
             int result = i1 != i2 ? 1 : 0;
 
@@ -62,8 +62,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF32Lt(ExecContext context)
         {
-            float i2 = context.OpStack.PopF32();
-            float i1 = context.OpStack.PopF32();
+            float i2 = context.OpStack.PopF32().Float32;
+            float i1 = context.OpStack.PopF32().Float32;
 
             int result = i1 < i2 ? 1 : 0;
             if (float.IsNaN(i1) || float.IsNaN(i2))
@@ -74,8 +74,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF32Gt(ExecContext context)
         {
-            float i2 = context.OpStack.PopF32();
-            float i1 = context.OpStack.PopF32();
+            float i2 = context.OpStack.PopF32().Float32;
+            float i1 = context.OpStack.PopF32().Float32;
 
             int result = i1 > i2 ? 1 : 0;
             if (float.IsNaN(i1) || float.IsNaN(i2))
@@ -86,8 +86,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF32Le(ExecContext context)
         {
-            float i2 = context.OpStack.PopF32();
-            float i1 = context.OpStack.PopF32();
+            float i2 = context.OpStack.PopF32().Float32;
+            float i1 = context.OpStack.PopF32().Float32;
 
             int result = i1 <= i2 ? 1 : 0;
             if (float.IsNaN(i1) || float.IsNaN(i2))
@@ -98,8 +98,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF32Ge(ExecContext context)
         {
-            float i2 = context.OpStack.PopF32();
-            float i1 = context.OpStack.PopF32();
+            float i2 = context.OpStack.PopF32().Float32;
+            float i1 = context.OpStack.PopF32().Float32;
 
             int result = i1 >= i2 ? 1 : 0;
             if (float.IsNaN(i1) || float.IsNaN(i2))
