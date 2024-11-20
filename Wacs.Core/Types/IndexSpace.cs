@@ -15,7 +15,6 @@
 //  */
 
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Wacs.Core.Runtime;
@@ -192,7 +191,7 @@ namespace Wacs.Core.Types
             if (Data == null)
                 throw new InvalidOperationException("LocalSpace was used uninitialized.");
                 
-            return Data[(Index)idx];
+            return Data[idx.Value];
         }
 
         public void Set(LocalIdx idx, Value value)
@@ -200,7 +199,7 @@ namespace Wacs.Core.Types
             if (Data == null)
                 throw new InvalidOperationException("LocalSpace was used uninitialized.");
                 
-            Data[(Index)idx] = value;
+            Data[idx.Value] = value;
         }
 
         public LocalsSpace(Value[] data, ValType[] parameters, ValType[] locals)

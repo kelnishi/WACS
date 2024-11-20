@@ -142,7 +142,7 @@ namespace Wacs.Core
                                     pointerInst = blTerm;
                                 }
 
-                                foundInstruction = term.Op.GetMnemonic();
+                                foundInstruction = term?.Op.GetMnemonic() ?? "null";
                                 break;
                             }
                             case "InstBlock":
