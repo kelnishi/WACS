@@ -161,7 +161,7 @@ namespace Wacs.Core.Runtime
             
             var returnTypeInfo = funcType.GetMethod("Invoke")?.ReturnType;
             
-            var paramValTypes = new ResultType(paramTypes.Select(t => t.ToValType()).ToArray());
+            var paramValTypes = new ResultType(paramTypes);
             var outValTypes = outTypes.Select(t => ValTypeUtilities.UnpackRef(t)).ToArray();
             var returnType = returnTypeInfo?.ToValType() ?? ValType.Nil;
 

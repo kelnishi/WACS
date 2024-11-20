@@ -106,6 +106,22 @@ namespace Wacs.Core.OpCodes
                 OpCode.FE => HashCode.Combine(x00,xFE),
                 _ => HashCode.Combine(x00)
             };
+
+        public static bool operator ==(ByteCode left, OpCode right) => left.x00 == right;
+        public static bool operator !=(ByteCode left, OpCode right) => !(left == right);
+        
+        public static bool operator ==(ByteCode left, GcCode right) => 
+            left.x00 == OpCode.FB && left.xFB == right;
+        public static bool operator !=(ByteCode left, GcCode right) => !(left == right);
+        public static bool operator ==(ByteCode left, ExtCode right) => 
+            left.x00 == OpCode.FC && left.xFC == right;
+        public static bool operator !=(ByteCode left, ExtCode right) => !(left == right);
+        public static bool operator ==(ByteCode left, SimdCode right) => 
+            left.x00 == OpCode.FD && left.xFD == right;
+        public static bool operator !=(ByteCode left, SimdCode right) => !(left == right);
+        public static bool operator ==(ByteCode left, AtomCode right) => 
+            left.x00 == OpCode.FE && left.xFE == right;
+        public static bool operator !=(ByteCode left, AtomCode right) => !(left == right);
         public static bool operator ==(ByteCode left, ByteCode right) => left.Equals(right);
         public static bool operator !=(ByteCode left, ByteCode right) => !(left == right);
 

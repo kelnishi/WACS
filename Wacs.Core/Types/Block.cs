@@ -23,10 +23,17 @@ namespace Wacs.Core.Types
 {
     public class Block
     {
-        public static readonly Block Empty = new(BlockType.Empty) { Instructions = InstructionSequence.Empty };
+        public static readonly Block Empty = new(BlockType.Empty, InstructionSequence.Empty);
 
-        public Block(BlockType type) => Type = type;
-        public BlockType Type { get; }
+        public readonly InstructionSequence Instructions;
+
+        public readonly BlockType Type;
+
+        public Block(BlockType type, InstructionSequence seq)
+        {
+            Type = type;
+            Instructions = seq;
+        }
 
         private ValType ValType => Type switch {
             BlockType.Empty => ValType.Nil,
@@ -41,8 +48,6 @@ namespace Wacs.Core.Types
         };
 
         private TypeIdx TypeIndex => !Enum.IsDefined(typeof(BlockType), Type) ? (TypeIdx)(uint)Type : (TypeIdx)uint.MaxValue;
-
-        public InstructionSequence Instructions { get; set; } = new();
 
 
         /// <summary>

@@ -49,30 +49,13 @@ namespace Wacs.Core.Instructions
 
         public static bool IsEnd(IInstruction inst) => inst.Op.x00 == OpCode.End;
 
-        public static bool IsElseOrEnd(IInstruction inst) => inst.Op.x00 switch
-        {
-            OpCode.Else => true,
-            OpCode.End => true,
-            _ => false
-        };
+        public static bool IsElseOrEnd(IInstruction inst) => inst is InstEnd;
 
-        public static bool IsBranch(IInstruction? inst) => inst?.Op.x00 switch
-        {
-            OpCode.Br => true,
-            OpCode.BrIf => true,
-            OpCode.BrTable => true,
-            _ => false
-        };
+        public static bool IsBranch(IInstruction? inst) => inst is IBranchInstruction;
 
         public static bool IsNumeric(IInstruction? inst) => inst is NumericInst;
 
-        public static bool IsVar(IInstruction? inst) =>
-            inst switch
-            {
-                LocalVariableInst _ => true,
-                GlobalVariableInst _ => true,
-                _ => false,
-            };
+        public static bool IsVar(IInstruction? inst) => inst is IVarInstruction;
 
         public static bool IsLoad(IInstruction? inst) => inst is InstMemoryLoad;
 
