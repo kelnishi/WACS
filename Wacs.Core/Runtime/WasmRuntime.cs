@@ -41,6 +41,10 @@ namespace Wacs.Core.Runtime
         private readonly List<ModuleInstance> _moduleInstances = new();
         private readonly Dictionary<string, ModuleInstance> _registeredModules = new();
 
+        private readonly ExecContext Context;
+
+        private readonly Store Store;
+
         private IInstruction? lastInstruction = null;
 
         public WasmRuntime(RuntimeAttributes? attributes = null)
@@ -48,10 +52,6 @@ namespace Wacs.Core.Runtime
             Store = new Store();
             Context = new ExecContext(Store, attributes);
         }
-
-        private Store Store { get; }
-
-        private ExecContext Context { get; }
 
         public IInstructionFactory InstructionFactory => Context.InstructionFactory;
 
