@@ -53,7 +53,7 @@ namespace Wacs.Core.Types
         /// <summary>
         /// The number of immediate child instructions 
         /// </summary>
-        public int Length => Instructions.Length;
+        public int Length => Instructions.Count;
 
         /// <summary>
         /// The total number of instructions in the tree below

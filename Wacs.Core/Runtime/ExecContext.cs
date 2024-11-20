@@ -74,10 +74,9 @@ namespace Wacs.Core.Runtime
             
             _callStack = new (Attributes.InitialCallStack);
             _labelStack = new(Attributes.InitialLabelsStack, Attributes.GrowLabelsStack);
-
-            _hostReturnSequence = new InstructionSequence(
-                InstructionFactory.CreateInstruction<InstFuncReturn>(OpCode.Func)
-            );
+            
+            _hostReturnSequence = InstructionSequence.Empty;
+            
             _currentSequence = _hostReturnSequence;
             _sequenceIndex = -1;
 
@@ -188,7 +187,7 @@ namespace Wacs.Core.Runtime
         public void FastForwardSequence()
         {
             //Go to penultimate instruction since we pre-increment on pointer advance.
-            _sequenceIndex = _currentSequence.Length - 2;
+            _sequenceIndex = _currentSequence.Count - 2;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -313,16 +312,8 @@ namespace Wacs.Core.Runtime
 
         public IInstruction? Next()
         {
-            if (_currentSequence == _hostReturnSequence)
-                return null;
-
             //Advance to the next instruction first.
-            ++_sequenceIndex;
-            
-            if (_sequenceIndex >= _currentSequence.Count)
-                return null;
-
-            return _currentSequence[_sequenceIndex];
+            return _currentSequence[++_sequenceIndex];
         }
 
         public List<(string, int)> ComputePointerPath()
