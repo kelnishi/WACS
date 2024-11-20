@@ -55,80 +55,80 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64Eq(ExecContext context)
         {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
+            long i2 = context.OpStack.PopI64().Int64;
+            long i1 = context.OpStack.PopI64().Int64;
             int result = i1 == i2 ? 1 : 0;
             context.OpStack.PushI32(result);
         }
 
         private static void ExecuteI64Ne(ExecContext context)
         {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
+            long i2 = context.OpStack.PopI64().Int64;
+            long i1 = context.OpStack.PopI64().Int64;
             int result = i1 != i2 ? 1 : 0;
             context.OpStack.PushI32(result);
         }
 
         private static void ExecuteI64LtS(ExecContext context)
         {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
+            long i2 = context.OpStack.PopI64().Int64;
+            long i1 = context.OpStack.PopI64().Int64;
             int result = i1 < i2 ? 1 : 0;
             context.OpStack.PushI32(result);
         }
 
         private static void ExecuteI64LtU(ExecContext context)
         {
-            ulong i2 = context.OpStack.PopI64();
-            ulong i1 = context.OpStack.PopI64();
+            ulong i2 = context.OpStack.PopI64().UInt64;
+            ulong i1 = context.OpStack.PopI64().UInt64;
             int result = i1 < i2 ? 1 : 0;
             context.OpStack.PushI32(result);
         }
 
         private static void ExecuteI64GtS(ExecContext context)
         {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
+            long i2 = context.OpStack.PopI64().Int64;
+            long i1 = context.OpStack.PopI64().Int64;
             int result = i1 > i2 ? 1 : 0;
             context.OpStack.PushI32(result);
         }
 
         private static void ExecuteI64GtU(ExecContext context)
         {
-            ulong i2 = context.OpStack.PopI64();
-            ulong i1 = context.OpStack.PopI64();
+            ulong i2 = context.OpStack.PopI64().UInt64;
+            ulong i1 = context.OpStack.PopI64().UInt64;
             int result = i1 > i2 ? 1 : 0;
             context.OpStack.PushI32(result);
         }
 
         private static void ExecuteI64LeS(ExecContext context)
         {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
+            long i2 = context.OpStack.PopI64().Int64;
+            long i1 = context.OpStack.PopI64().Int64;
             int result = i1 <= i2 ? 1 : 0;
             context.OpStack.PushI32(result);
         }
 
         private static void ExecuteI64LeU(ExecContext context)
         {
-            ulong i2 = context.OpStack.PopI64();
-            ulong i1 = context.OpStack.PopI64();
+            ulong i2 = context.OpStack.PopI64().UInt64;
+            ulong i1 = context.OpStack.PopI64().UInt64;
             int result = i1 <= i2 ? 1 : 0;
             context.OpStack.PushI32(result);
         }
 
         private static void ExecuteI64GeS(ExecContext context)
         {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
+            long i2 = context.OpStack.PopI64().Int64;
+            long i1 = context.OpStack.PopI64().Int64;
             int result = i1 >= i2 ? 1 : 0;
             context.OpStack.PushI32(result);
         }
 
         private static void ExecuteI64GeU(ExecContext context)
         {
-            ulong i2 = context.OpStack.PopI64();
-            ulong i1 = context.OpStack.PopI64();
+            ulong i2 = context.OpStack.PopI64().UInt64;
+            ulong i1 = context.OpStack.PopI64().UInt64;
             int result = i1 >= i2 ? 1 : 0;
             context.OpStack.PushI32(result);
         }

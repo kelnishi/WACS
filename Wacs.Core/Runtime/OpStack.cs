@@ -37,18 +37,66 @@ namespace Wacs.Core.Runtime
 
         public int Count => _stack.Count;
 
-        public void Push(Stack<Value> vals)
+        public void PushResults(Stack<Value> vals)
         {
             while (vals.Count > 0) PushValue(vals.Pop());
         }
 
-        public void PushI32(int value) => PushValue(value);
-        public void PushI32(uint value) => PushValue(value);
-        public void PushI64(long value) => PushValue(value);
-        public void PushI64(ulong value) => PushValue(value);
-        public void PushF32(float value) => PushValue(value);
-        public void PushF64(double value) => PushValue(value);
-        public void PushV128(V128 value) => PushValue(value);
+        public void PushI32(int value)
+        {
+            if (_stack.Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            
+            _stack.Push(new Value(value));
+        }
+
+        public void PushI32(uint value)
+        {
+            if (_stack.Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            
+            _stack.Push(new Value(value));
+        }
+
+        public void PushI64(long value)
+        {
+            if (_stack.Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            
+            _stack.Push(new Value(value));
+        }
+
+        public void PushI64(ulong value)
+        {
+            if (_stack.Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            
+            _stack.Push(new Value(value));
+        }
+
+        public void PushF32(float value)
+        {
+            if (_stack.Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            
+            _stack.Push(new Value(value));
+        }
+
+        public void PushF64(double value)
+        {
+            if (_stack.Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            
+            _stack.Push(new Value(value));
+        }
+
+        public void PushV128(V128 value)
+        {
+            if (_stack.Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            
+            _stack.Push(new Value(value));
+        }
 
         public void PushFuncref(Value value)
         {

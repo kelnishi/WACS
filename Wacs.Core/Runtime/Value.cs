@@ -41,12 +41,14 @@ namespace Wacs.Core.Runtime
         
         // 32-bit integer
         [FieldOffset(1)] public readonly int Int32;
+        [FieldOffset(1)] public readonly uint UInt32;
         
         // Ref Address
         [FieldOffset(1)] public readonly int Ptr;
 
         // 64-bit integer
         [FieldOffset(1)] public readonly long Int64;
+        [FieldOffset(1)] public readonly ulong UInt64;
 
         // 32-bit float
         [FieldOffset(1)] public readonly float Float32;

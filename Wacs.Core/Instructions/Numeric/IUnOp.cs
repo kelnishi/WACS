@@ -33,7 +33,7 @@ namespace Wacs.Core.Instructions.Numeric
         // @Spec 4.3.2.20 iclz
         private static void ExecuteI32Clz(ExecContext context)
         {
-            uint x = context.OpStack.PopI32();
+            uint x = context.OpStack.PopI32().UInt32;
             if (x != 0)
             {
                 int count = 0;
@@ -55,7 +55,7 @@ namespace Wacs.Core.Instructions.Numeric
         // @Spec 4.3.2.21 ictz
         private static void ExecuteI32Ctz(ExecContext context)
         {
-            uint x = context.OpStack.PopI32();
+            uint x = context.OpStack.PopI32().UInt32;
             if (x != 0)
             {
                 int count = 0;
@@ -79,7 +79,7 @@ namespace Wacs.Core.Instructions.Numeric
         // @Spec 4.3.2.22 ipopcnt
         private static void ExecuteI32Popcnt(ExecContext context)
         {
-            uint x = context.OpStack.PopI32();
+            uint x = context.OpStack.PopI32().UInt32;
             uint count = 0;
             while (x != 0)
             {
@@ -91,7 +91,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64Clz(ExecContext context)
         {
-            ulong x = context.OpStack.PopI64();
+            ulong x = context.OpStack.PopI64().UInt64;
             if (x != 0)
             {
                 int count = 0;
@@ -110,7 +110,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64Ctz(ExecContext context)
         {
-            ulong x = context.OpStack.PopI64();
+            ulong x = context.OpStack.PopI64().UInt64;
             if (x != 0)
             {
                 int count = 0;
@@ -129,7 +129,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64Popcnt(ExecContext context)
         {
-            ulong x = context.OpStack.PopI64();
+            ulong x = context.OpStack.PopI64().UInt64;
             ulong count = 0;
             while (x != 0)
             {
