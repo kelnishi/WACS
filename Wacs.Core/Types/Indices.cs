@@ -73,9 +73,9 @@ namespace Wacs.Core.Types
         public static explicit operator TableIdx(uint value) => new(value);
     }
 
-    public readonly struct MemIdx : IEquatable<Index>, IIndex
+    public readonly struct MemIdx : IEquatable<Index>
     {
-        public uint Value { get; }
+        public readonly uint Value;
         private MemIdx(uint value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;
         public static explicit operator Index(MemIdx memIdx) => new((int)memIdx.Value);
