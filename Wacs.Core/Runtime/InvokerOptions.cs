@@ -42,5 +42,20 @@ namespace Wacs.Core.Runtime
         public InstructionLogging LogInstructionExecution = InstructionLogging.None;
         public int LogProgressEvery = -1;
         public bool ShowPath = false;
+
+        public bool UseFastPath()
+        {
+            if (LogInstructionExecution != InstructionLogging.None)
+                return false;
+            if (LogGas)
+                return false;
+            if (LogProgressEvery > 0)
+                return false;
+            if (ShowPath)
+                return false;
+            if (CollectStats)
+                return false;
+            return true;
+        }
     }
 }
