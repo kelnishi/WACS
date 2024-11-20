@@ -228,8 +228,7 @@ namespace Wacs.Core.Runtime
 
                 Context.Invoke(funcAddr);
 
-                int steps = 0;
-                int gasLimit = options.GasLimit > 0 ? options.GasLimit : int.MaxValue;
+                long steps = 0;
                 bool fastPath = options.UseFastPath();
 
                 try
@@ -239,10 +238,13 @@ namespace Wacs.Core.Runtime
                         while (ProcessThread())
                         {
                             steps += 1;
-                            if (steps >= gasLimit)
+                            if (options.GasLimit > 0)
                             {
-                                throw new InsufficientGasException(
-                                    $"Invocation ran out of gas (limit:{options.GasLimit}).");
+                                if (steps >= options.GasLimit)
+                                {
+                                    throw new InsufficientGasException(
+                                        $"Invocation ran out of gas (limit:{options.GasLimit}).");
+                                }    
                             }
                         }
                     }
@@ -252,10 +254,13 @@ namespace Wacs.Core.Runtime
                         {
                             steps += 1;
 
-                            if (steps >= gasLimit)
+                            if (options.GasLimit > 0)
                             {
-                                throw new InsufficientGasException(
-                                    $"Invocation ran out of gas (limit:{options.GasLimit}).");
+                                if (steps >= options.GasLimit)
+                                {
+                                    throw new InsufficientGasException(
+                                        $"Invocation ran out of gas (limit:{options.GasLimit}).");
+                                }    
                             }
 
                             if (options.LogGas && options.LogProgressEvery > 0)
