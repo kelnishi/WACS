@@ -14,7 +14,6 @@
 //  * limitations under the License.
 //  */
 
-using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -31,40 +30,29 @@ namespace Wacs.Core
     /// </summary>
     public class InstructionSequence : IEnumerable<IInstruction>
     {
-        public static readonly InstructionSequence Empty = new();
-        private readonly List<IInstruction> _instructions = new();
+        public static readonly InstructionSequence Empty = new(new List<IInstruction>());
+        private readonly IInstruction[] _instructions;
 
-        public InstructionSequence()
+        public readonly int Count;
+
+        public InstructionSequence(IList<IInstruction> list)
         {
+            _instructions = list.ToArray();
+            Count = _instructions.Length;
         }
 
-        public InstructionSequence(IList<IInstruction> list) =>
-            _instructions.AddRange(list);
-
-        public InstructionSequence(IInstruction single) =>
-            _instructions.Add(single);
-
-        public bool HasExplicitEnd => _instructions[^1].Op == OpCode.End;
-        public bool EndsWithElse => _instructions[^1].Op == OpCode.Else;
-        public bool IsEmpty => _instructions.Count == 0;
-
-        public int Count => _instructions.Count;
-
-        public IInstruction this[int index]
+        public IInstruction? this[int index]
         {
             get
             {
-                if (index >= _instructions.Count)
-                    throw new IndexOutOfRangeException(
-                        $"Instruction sequence index {index} exceeds range [0,{_instructions.Count}]");
+                if (index >= Count)
+                    return null;
                 return _instructions[index];
             }
         }
 
-        /// <summary>
-        /// The number of instructions in this sequence
-        /// </summary>
-        public int Length => _instructions.Count;
+        public bool HasExplicitEnd => _instructions[^1].Op == OpCode.End;
+        public bool EndsWithElse => _instructions[^1].Op == OpCode.Else;
 
         /// <summary>
         /// The total number of instructions in this sequence and subsequences (blocks)
@@ -74,7 +62,7 @@ namespace Wacs.Core
             get
             {
                 int sum = 0;
-                for (int index = 0; index < _instructions.Count; index++)
+                for (int index = 0; index < Count; index++)
                 {
                     var inst = _instructions[index];
                     sum += inst is IBlockInstruction blockInst ? blockInst.Size : 1;
@@ -85,8 +73,7 @@ namespace Wacs.Core
 
         public IInstruction LastInstruction => _instructions[^1];
 
-        public IEnumerator<IInstruction> GetEnumerator() => _instructions.GetEnumerator();
-
+        public IEnumerator<IInstruction> GetEnumerator() => ((IEnumerable<IInstruction>)_instructions).GetEnumerator();
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
         public bool IsConstant(IWasmValidationContext? ctx) =>
@@ -98,11 +85,6 @@ namespace Wacs.Core
                 InstEnd => false,
                 _ => true
             });
-
-        public void SwapElseEnd()
-        {
-            _instructions[^1] = InstEnd.Inst;
-        }
 
         public bool ContainsInstruction(HashSet<ByteCode> opcodes)
         {
