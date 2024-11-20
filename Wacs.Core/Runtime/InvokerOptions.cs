@@ -37,7 +37,7 @@ namespace Wacs.Core.Runtime
         public bool CalculateLineNumbers = false;
 
         public bool CollectStats = false;
-        public int GasLimit = 0;
+        public long GasLimit = 0;
         public bool LogGas = false;
         public InstructionLogging LogInstructionExecution = InstructionLogging.None;
         public int LogProgressEvery = -1;
