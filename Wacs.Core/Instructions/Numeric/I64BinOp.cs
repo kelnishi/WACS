@@ -71,32 +71,32 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64Add(ExecContext context)
         {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
+            long i2 = context.OpStack.PopI64().Int64;
+            long i1 = context.OpStack.PopI64().Int64;
             long result = i1 + i2;
             context.OpStack.PushI64(result);
         }
 
         private static void ExecuteI64Sub(ExecContext context)
         {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
+            long i2 = context.OpStack.PopI64().Int64;
+            long i1 = context.OpStack.PopI64().Int64;
             long result = i1 - i2;
             context.OpStack.PushI64(result);
         }
 
         private static void ExecuteI64Mul(ExecContext context)
         {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
+            long i2 = context.OpStack.PopI64().Int64;
+            long i1 = context.OpStack.PopI64().Int64;
             long result = unchecked(i1 * i2);
             context.OpStack.PushI64(result);
         }
 
         private static void ExecuteI64DivS(ExecContext context)
         {
-            long j2 = context.OpStack.PopI64();
-            long j1 = context.OpStack.PopI64();
+            long j2 = context.OpStack.PopI64().Int64;
+            long j1 = context.OpStack.PopI64().Int64;
             if (j2 == 0)
                 throw new TrapException("Cannot divide by zero");
             if (j2 == -1 && j1 == long.MinValue)
@@ -107,8 +107,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64DivU(ExecContext context)
         {
-            ulong j2 = context.OpStack.PopI64();
-            ulong j1 = context.OpStack.PopI64();
+            ulong j2 = context.OpStack.PopI64().UInt64;
+            ulong j1 = context.OpStack.PopI64().UInt64;
             if (j2 == 0)
                 throw new TrapException("Cannot divide by zero");
             ulong quotient = j1 / j2;
@@ -117,8 +117,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64RemS(ExecContext context)
         {
-            long j2 = context.OpStack.PopI64();
-            long j1 = context.OpStack.PopI64();
+            long j2 = context.OpStack.PopI64().Int64;
+            long j1 = context.OpStack.PopI64().Int64;
             if (j2 == 0)
                 throw new TrapException("Cannot divide by zero");
             
@@ -136,8 +136,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64RemU(ExecContext context)
         {
-            ulong j2 = context.OpStack.PopI64();
-            ulong j1 = context.OpStack.PopI64();
+            ulong j2 = context.OpStack.PopI64().UInt64;
+            ulong j1 = context.OpStack.PopI64().UInt64;
             if (j2 == 0)
                 throw new TrapException("Cannot divide by zero");
             ulong remainder = j1 % j2;
@@ -146,56 +146,56 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64And(ExecContext context)
         {
-            ulong i2 = context.OpStack.PopI64();
-            ulong i1 = context.OpStack.PopI64();
+            ulong i2 = context.OpStack.PopI64().UInt64;
+            ulong i1 = context.OpStack.PopI64().UInt64;
             ulong result = i1 & i2;
             context.OpStack.PushI64((long)result);
         }
 
         private static void ExecuteI64Or(ExecContext context)
         {
-            ulong i2 = context.OpStack.PopI64();
-            ulong i1 = context.OpStack.PopI64();
+            ulong i2 = context.OpStack.PopI64().UInt64;
+            ulong i1 = context.OpStack.PopI64().UInt64;
             ulong result = i1 | i2;
             context.OpStack.PushI64((long)result);
         }
 
         private static void ExecuteI64Xor(ExecContext context)
         {
-            ulong i2 = context.OpStack.PopI64();
-            ulong i1 = context.OpStack.PopI64();
+            ulong i2 = context.OpStack.PopI64().UInt64;
+            ulong i1 = context.OpStack.PopI64().UInt64;
             ulong result = i1 ^ i2;
             context.OpStack.PushI64((long)result);
         }
 
         private static void ExecuteI64Shl(ExecContext context)
         {
-            int k = context.OpStack.PopI64() & 0x3F;
-            ulong i1 = context.OpStack.PopI64();
+            int k = context.OpStack.PopI64().Int32 & 0x3F;
+            ulong i1 = context.OpStack.PopI64().UInt64;
             ulong result = i1 << k;
             context.OpStack.PushI64((long)result);
         }
 
         private static void ExecuteI64ShrS(ExecContext context)
         {
-            int k = context.OpStack.PopI64() & 0x3F;
-            long i1 = context.OpStack.PopI64();
+            int k = context.OpStack.PopI64().Int32 & 0x3F;
+            long i1 = context.OpStack.PopI64().Int64;
             long result = i1 >> k;
             context.OpStack.PushI64(result);
         }
 
         private static void ExecuteI64ShrU(ExecContext context)
         {
-            int k = context.OpStack.PopI64() & 0x3F;
-            ulong i1 = context.OpStack.PopI64();
+            int k = context.OpStack.PopI64().Int32 & 0x3F;
+            ulong i1 = context.OpStack.PopI64().UInt64;
             ulong result = i1 >> k;
             context.OpStack.PushI64((long)result);
         }
 
         private static void ExecuteI64Rotl(ExecContext context)
         {
-            int k = context.OpStack.PopI64() & 0x3F;
-            ulong i1 = context.OpStack.PopI64();
+            int k = context.OpStack.PopI64().Int32 & 0x3F;
+            ulong i1 = context.OpStack.PopI64().UInt64;
 
             ulong result = i1 << k;
             if (k != 0)
@@ -206,8 +206,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64Rotr(ExecContext context)
         {
-            int k = context.OpStack.PopI64() & 0x3F;
-            ulong i1 = context.OpStack.PopI64();
+            int k = context.OpStack.PopI64().Int32 & 0x3F;
+            ulong i1 = context.OpStack.PopI64().UInt64;
             ulong result = (i1 >> k) | (i1 << (64 - k));
             context.OpStack.PushI64((long)result);
         }
