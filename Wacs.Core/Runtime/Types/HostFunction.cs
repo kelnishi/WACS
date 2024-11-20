@@ -132,7 +132,7 @@ namespace Wacs.Core.Runtime.Types
                 };
             }
             
-            _resultConversions = new ConversionHelper?[Type.ResultType.Length];
+            _resultConversions = new ConversionHelper?[Type.ResultType.Arity];
             int idx = 0;
             if (_captureReturn)
             {
@@ -149,7 +149,7 @@ namespace Wacs.Core.Runtime.Types
                 };
             }
 
-            for (; idx < Type.ResultType.Length; ++idx)
+            for (; idx < Type.ResultType.Arity; ++idx)
             {
                 int pIdx = parameters.Length - idx - 1;
                 if (pIdx < 0 || pIdx >= parameters.Length)

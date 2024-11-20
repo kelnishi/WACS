@@ -28,21 +28,44 @@ namespace Wacs.Core.Types
     public class ResultType
     {
         public static readonly ResultType Empty = new();
+        public readonly int Arity;
 
-        private ResultType() => Types = Array.Empty<ValType>();
-        public ResultType(ValType single) => Types = new[] { single };
-        public ResultType(ValType[] types) => Types = types;
+        public readonly ValType[] Types;
 
-        private ResultType(BinaryReader reader) =>
+        private ResultType()
+        {
+            Types = Array.Empty<ValType>();
+            Arity = 0;
+        }
+
+        public ResultType(ValType single)
+        {
+            Types = new[] { single };
+            Arity = Types.Length;
+        }
+
+        public ResultType(ValType[] types)
+        {
+            Types = types;
+            Arity = Types.Length;
+        }
+
+        public ResultType(Type[] sysTypes)
+        {
+            Types = new ValType[sysTypes.Length];
+            Arity = sysTypes.Length;
+
+            for (int i = 0; i < sysTypes.Length; ++i)
+            {
+                Types[i] = sysTypes[i].ToValType();
+            }
+        }
+
+        private ResultType(BinaryReader reader)
+        {
             Types = reader.ParseVector(ValTypeParser.Parse);
-
-        public ValType[] Types { get; }
-
-        // ReSharper disable once ConditionalAccessQualifierIsNonNullableAccordingToAPIContract
-        public uint Length => (uint)(Types?.Length ?? 0);
-        public int Arity => (int)Length;
-
-        public bool IsEmpty => Arity == 0;
+            Arity = Types.Length;
+        }
 
         public string ToNotation() => $"[{string.Join(" ",Types)}]";
         public string ToTypes() => string.Join("", Types.Select(t => $" {t.ToWat()}"));
