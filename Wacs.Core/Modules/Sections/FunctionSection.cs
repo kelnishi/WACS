@@ -60,10 +60,10 @@ namespace Wacs.Core
                 var id = string.IsNullOrWhiteSpace(Id) ? $" (;{Index.Value};)" : $" (;{Id};)";
                 var type = $" (type {TypeIndex.Value})";
                 var functionType = module.Types[(int)TypeIndex.Value];
-                var param = functionType.ParameterTypes.Length > 0
+                var param = functionType.ParameterTypes.Arity > 0
                     ? functionType.ParameterTypes.ToParameters()
                     : "";
-                var result = functionType.ResultType.Length > 0
+                var result = functionType.ResultType.Arity > 0
                     ? functionType.ResultType.ToResults()
                     : "";
                 
@@ -103,10 +103,10 @@ namespace Wacs.Core
                             stackRenderer.FakeContext.LastEvent = "[";
                             var mnemonic = inst.Op.GetMnemonic();
                             var funcType = ComputeBlockType(blockInst.Type, module);
-                            var blockParams = funcType.ParameterTypes.Length > 0
+                            var blockParams = funcType.ParameterTypes.Arity > 0
                                 ? funcType.ParameterTypes.ToParameters()
                                 : "";
-                            var blockResults = funcType.ResultType.Length > 0
+                            var blockResults = funcType.ResultType.Arity > 0
                                 ? funcType.ResultType.ToResults()
                                 : "";
                             var label = $"  ;; label = @{depth}";

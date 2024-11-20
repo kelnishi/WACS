@@ -15,7 +15,6 @@
 //  */
 
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Wacs.Core.Runtime;
@@ -50,9 +49,21 @@ namespace Wacs.Core.Types
     public class TableAddrs : RuntimeIndexSpace<TableIdx, TableAddr>
     {}
 
-    public class MemAddrs : RuntimeIndexSpace<MemIdx, MemAddr>
-    {}
+    public class MemAddrs
+    {
+        private readonly List<MemAddr> _space = new();
 
+        public MemAddr this[MemIdx idx]
+        {
+            get => _space[(int)idx.Value];
+            set => _space[(int)idx.Value] = value;
+        }
+
+        public bool Contains(MemIdx idx) => idx.Value < _space.Count;
+
+        public void Add(MemAddr element) => _space.Add(element);
+    }
+    
     public class GlobalAddrs : RuntimeIndexSpace<GlobalIdx, GlobalAddr>
     {}
 
@@ -141,21 +152,22 @@ namespace Wacs.Core.Types
             idx.Value < Count;
     }
 
-    public class MemSpace : AbstractIndexSpace<MemIdx, MemoryType>
+    public class MemSpace
     {
+        private const string InvalidSetterMessage = "There's no crying in Baseball!";
         private readonly ReadOnlyCollection<MemoryType> _imports;
         private readonly ReadOnlyCollection<MemoryType> _memoryTypes;
 
         public MemSpace(Module module) =>
             (_imports, _memoryTypes) = (module.ImportedMems, module.Memories.AsReadOnly());
 
-        public override MemoryType this[MemIdx idx]
+        public MemoryType this[MemIdx idx]
         {
             get => idx.Value < _imports.Count ? _imports[(Index)idx] : _memoryTypes[(int)(idx.Value - _imports.Count)];
             set => throw new InvalidOperationException(InvalidSetterMessage);
         }
 
-        public override bool Contains(MemIdx idx) =>
+        public bool Contains(MemIdx idx) =>
             idx.Value < _imports.Count + _memoryTypes.Count;
     }
 
@@ -192,7 +204,7 @@ namespace Wacs.Core.Types
             if (Data == null)
                 throw new InvalidOperationException("LocalSpace was used uninitialized.");
                 
-            return Data[(Index)idx];
+            return Data[idx.Value];
         }
 
         public void Set(LocalIdx idx, Value value)
@@ -200,7 +212,7 @@ namespace Wacs.Core.Types
             if (Data == null)
                 throw new InvalidOperationException("LocalSpace was used uninitialized.");
                 
-            Data[(Index)idx] = value;
+            Data[idx.Value] = value;
         }
 
         public LocalsSpace(Value[] data, ValType[] parameters, ValType[] locals)

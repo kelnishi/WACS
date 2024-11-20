@@ -87,9 +87,9 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.2.3. ref.func x
         public override void Execute(ExecContext context)
         {
-            context.Assert( context.Frame.Module.FuncAddrs.Contains(FunctionIndex),
+            context.Assert( context.Frame?.Module.FuncAddrs.Contains(FunctionIndex),
                 $"Instruction ref.func failed. Could not find function address in the context");
-            var a = context.Frame.Module.FuncAddrs[FunctionIndex];
+            var a = context.Frame!.Module.FuncAddrs[FunctionIndex];
             context.OpStack.PushFuncref(new Value(ValType.Funcref, a.Value));
         }
 

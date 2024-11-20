@@ -37,7 +37,7 @@ namespace Wacs.Core.Types
             Instructions = seq;
 
         public Expression(IInstruction single) =>
-            Instructions = new InstructionSequence(single);
+            Instructions = new InstructionSequence(new List<IInstruction>{single});
 
         public InstructionSequence Instructions { get; }
 
@@ -74,8 +74,8 @@ namespace Wacs.Core.Types
         /// <returns></returns>
         public string ToWat()
         {
-            var inst = this.Instructions[0];
-            var instText = $" ({inst.RenderText(null)})";
+            var inst = Instructions[0];
+            var instText = $" ({inst?.RenderText(null)??"null"})";
             return instText;
         }
 
