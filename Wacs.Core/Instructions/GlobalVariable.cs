@@ -27,7 +27,7 @@ namespace Wacs.Core.Instructions
     public class InstGlobalGet : InstructionBase, IContextConstInstruction, IVarInstruction
     {
         public override ByteCode Op => OpCode.GlobalGet;
-        private GlobalIdx Index { get; set; }
+        private GlobalIdx Index;
 
         public bool IsConstant(IWasmValidationContext? context) => 
             context == null || context.Globals.Contains(Index) && context.Globals[Index].IsImport && context.Globals[Index].Type.Mutability == Mutability.Immutable;
@@ -87,7 +87,7 @@ namespace Wacs.Core.Instructions
     public class InstGlobalSet : InstructionBase, IContextConstInstruction, IVarInstruction
     {
         public override ByteCode Op => OpCode.GlobalSet;
-        private GlobalIdx Index { get; set; }
+        private GlobalIdx Index;
 
         public bool IsConstant(IWasmValidationContext? context) => 
             context == null || context.Globals.Contains(Index) && context.Globals[Index].IsImport && context.Globals[Index].Type.Mutability == Mutability.Immutable;
