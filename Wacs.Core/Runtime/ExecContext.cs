@@ -20,6 +20,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
@@ -38,13 +39,26 @@ namespace Wacs.Core.Runtime
 
     public class ExecContext
     {
+        private static readonly Frame NullFrame = new();
+
+        private static readonly ValType[] EmptyLocals = Array.Empty<ValType>();
+        private readonly Stack<Frame> _callStack;
+        private readonly ObjectPool<Frame> _framePool;
         private readonly InstructionSequence _hostReturnSequence;
+
+        private readonly ReusableStack<Label> _labelStack;
+        private readonly ArrayPool<Value> _localsDataPool;
         public readonly RuntimeAttributes Attributes;
+        public readonly OpStack OpStack;
+
+        public readonly Store Store;
 
         private Stack<Value> _asideVals = new();
 
         private InstructionSequence _currentSequence;
         private int _sequenceIndex;
+
+        public Frame Frame = NullFrame;
 
         public Dictionary<ushort, ExecStat> Stats = new();
 
@@ -53,17 +67,16 @@ namespace Wacs.Core.Runtime
             Store = store;
             Attributes = attributes ?? new RuntimeAttributes();
 
-            FramePool = new DefaultObjectPool<Frame>(new StackPoolPolicy<Frame>(), Attributes.MaxCallStack)
+            _framePool = new DefaultObjectPool<Frame>(new StackPoolPolicy<Frame>(), Attributes.MaxCallStack)
                 .Prime(Attributes.InitialCallStack);
             
-            LocalsDataPool = ArrayPool<Value>.Create(Attributes.MaxFunctionLocals, Attributes.LocalPoolSize);
+            _localsDataPool = ArrayPool<Value>.Create(Attributes.MaxFunctionLocals, Attributes.LocalPoolSize);
             
-            CallStack = new (Attributes.InitialCallStack);
-            LabelStack = new(Attributes.InitialLabelsStack, Attributes.GrowLabelsStack);
-
-            _hostReturnSequence = new InstructionSequence(
-                InstructionFactory.CreateInstruction<InstFuncReturn>(OpCode.Func)
-            );
+            _callStack = new (Attributes.InitialCallStack);
+            _labelStack = new(Attributes.InitialLabelsStack, Attributes.GrowLabelsStack);
+            
+            _hostReturnSequence = InstructionSequence.Empty;
+            
             _currentSequence = _hostReturnSequence;
             _sequenceIndex = -1;
 
@@ -74,16 +87,6 @@ namespace Wacs.Core.Runtime
         public Stopwatch InstructionTimer { get; set; } = new();
 
         public IInstructionFactory InstructionFactory => Attributes.InstructionFactory;
-
-        public Store Store { get; }
-        public OpStack OpStack { get; }
-
-        private ReusableStack<Label> LabelStack { get; }
-        private ObjectPool<Frame> FramePool { get; }
-        private ArrayPool<Value> LocalsDataPool { get; }
-        private Stack<Frame> CallStack { get; }
-
-        public Frame Frame => CallStack.Peek();
 
         public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[default]];
 
@@ -107,17 +110,17 @@ namespace Wacs.Core.Runtime
             FuncIdx index,
             ValType[]? locals = default)
         {
-            locals ??= Array.Empty<ValType>();
+            locals ??= EmptyLocals;
             
-            var frame = FramePool.Get();
+            var frame = _framePool.Get();
             frame.Module = module;
             frame.Type = type;
-            frame.Labels = LabelStack.GetSubStack();
+            frame.Labels = _labelStack.GetSubStack();
             frame.Index = index;
-            frame.ContinuationAddress = GetPointer();
+            frame.ContinuationAddress = new InstructionPointer(_currentSequence, _sequenceIndex);
             
             int capacity = type.ParameterTypes.Types.Length + locals.Length;
-            var localData = LocalsDataPool.Rent(capacity);
+            var localData = _localsDataPool.Rent(capacity);
             frame.Locals = new(localData, type.ParameterTypes.Types, locals);
             
             return frame;
@@ -125,27 +128,30 @@ namespace Wacs.Core.Runtime
 
         public void PushFrame(Frame frame)
         {
-            if (CallStack.Count >= Attributes.MaxCallStack)
-                throw new WasmRuntimeException($"Runtime call stack exhausted {CallStack.Count}");
-            
-            CallStack.Push(frame);
+            if (_callStack.Count >= Attributes.MaxCallStack)
+                throw new WasmRuntimeException($"Runtime call stack exhausted {_callStack.Count}");
+
+            Frame = frame;
+            _callStack.Push(frame);
         }
 
         public InstructionPointer PopFrame()
         {
-            var frame = CallStack.Pop();
+            var frame = _callStack.Pop();
+            Frame = _callStack.Count > 0 ? _callStack.Peek() : NullFrame;
+            
             frame.Labels.Drop();
             if (frame.Locals.Data != null)
-                frame.ReturnLocals(LocalsDataPool);
+                frame.ReturnLocals(_localsDataPool);
 
             var address = frame.ContinuationAddress;
-            FramePool.Return(frame);
+            _framePool.Return(frame);
             return address;
         }
 
         public void ResetStack(Label label)
         {
-            while (OpStack.Count > label.StackHeight)
+            for (int c = OpStack.Count, h = label.StackHeight; c > h; --c)
             {
                 OpStack.PopAny();
             }
@@ -153,41 +159,50 @@ namespace Wacs.Core.Runtime
 
         public void FlushCallStack()
         {
-            while (CallStack.Count > 0)
+            while (_callStack.Count > 0)
                 PopFrame();
             while (OpStack.Count > 0)
                 OpStack.PopAny();
 
+            Frame = NullFrame;
             _currentSequence = _hostReturnSequence;
             _sequenceIndex = -1;
         }
 
-        private void EnterSequence(InstructionSequence seq) =>
-            (_currentSequence, _sequenceIndex) = (seq, -1);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void EnterSequence(InstructionSequence seq)
+        {
+            _currentSequence = seq;
+            _sequenceIndex = -1;
+        }
 
-        public void ResumeSequence(InstructionPointer pointer) =>
-            (_currentSequence, _sequenceIndex) = (pointer.Sequence, pointer.Index);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void ResumeSequence(InstructionPointer pointer)
+        {
+            _currentSequence = pointer.Sequence;
+            _sequenceIndex = pointer.Index;
+        }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void FastForwardSequence()
         {
             //Go to penultimate instruction since we pre-increment on pointer advance.
-            _sequenceIndex = _currentSequence.Length - 2;
+            _sequenceIndex = _currentSequence.Count - 2;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void RewindSequence()
         {
             //Go back to the first instruction in the sequence
             _sequenceIndex = -1;
         }
 
-        public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
-
         // @Spec 4.4.9.1. Enter Block
         public void EnterBlock(Block block, ResultType resultType, ByteCode inst, Stack<Value> vals)
         {
-            OpStack.Push(vals);
+            OpStack.PushResults(vals);
             var label = Frame.ReserveLabel();
-            label.Set(resultType, this.GetPointer(), inst, OpStack.Count);
+            label.Set(resultType, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count);
             Frame.Labels.Push(label);
             //Sets the Pointer to the start of the block sequence
             EnterSequence(block.Instructions);
@@ -246,13 +261,15 @@ namespace Wacs.Core.Runtime
             //Load parameters
             while (_asideVals.Count > 0)
             {
-                frame.Locals.Set((LocalIdx)li, _asideVals.Pop());
+                // frame.Locals.Set((LocalIdx)li, _asideVals.Pop());
+                frame.Locals.Data[li] = _asideVals.Pop();
                 li += 1;
             }
             //Set the Locals to default
             for (int ti = 0; li < localCount; ++li, ++ti)
             {
-                frame.Locals.Set((LocalIdx)li, new Value(t[ti]));
+                // frame.Locals.Set((LocalIdx)li, new Value(t[ti]));
+                frame.Locals.Data[li] = new Value(t[ti]);
             }
 
             //9.
@@ -260,7 +277,7 @@ namespace Wacs.Core.Runtime
             
             //10.
             var label = frame.ReserveLabel();
-            label.Set(funcType.ResultType, GetPointer(), OpCode.Expr, OpStack.Count);
+            label.Set(funcType.ResultType, new InstructionPointer(_currentSequence, _sequenceIndex), OpCode.Expr, OpStack.Count);
             frame.Labels.Push(label);
             EnterSequence(wasmFunc.Definition.Body.Instructions);
         }
@@ -297,16 +314,12 @@ namespace Wacs.Core.Runtime
 
         public IInstruction? Next()
         {
-            if (_currentSequence == _hostReturnSequence)
-                return null;
-
             //Advance to the next instruction first.
-            ++_sequenceIndex;
-            
-            if (_sequenceIndex >= _currentSequence.Count)
+            if (++_sequenceIndex >= _currentSequence.Count)
                 return null;
-
-            return _currentSequence[_sequenceIndex];
+            
+            //Critical path, using direct array access
+            return _currentSequence._instructions[_sequenceIndex];
         }
 
         public List<(string, int)> ComputePointerPath()

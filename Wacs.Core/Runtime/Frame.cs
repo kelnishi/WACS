@@ -15,8 +15,6 @@
 //  */
 
 using System.Buffers;
-using System.Collections.Generic;
-using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -26,20 +24,21 @@ namespace Wacs.Core.Runtime
 {
     public class Frame : IPoolable
     {
+        public InstructionPointer ContinuationAddress = InstructionPointer.Nil;
+        public string FuncId = "";
+
+        public FuncIdx Index;
         // public ObjectPool<Label>? LabelPool = null;
-        
+
         public SubStack<Label> Labels;
+        public LocalsSpace Locals;
 
         // public readonly Stack<Label> Labels = new();
-        public ModuleInstance Module { get; set; } = null!;
-        public LocalsSpace Locals { get; set; }
-        public InstructionPointer ContinuationAddress { get; set; } = InstructionPointer.Nil;
-        public FunctionType Type { get; set; } = null!;
-        public FuncIdx Index { get; set; }
-        public string FuncId { get; set; } = "";
+        public ModuleInstance Module = null!;
+        public FunctionType Type = null!;
 
         public Label Label => Labels.Peek();
-        public int Arity => (int)Type.ResultType.Length;
+        public int Arity => Type.ResultType.Arity;
 
         public void Clear()
         {
