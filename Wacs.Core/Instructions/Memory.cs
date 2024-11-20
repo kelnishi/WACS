@@ -28,6 +28,11 @@ namespace Wacs.Core.Instructions
 {
     public class InstMemoryLoad : InstructionBase
     {
+        private readonly ValType Type;
+        private readonly BitWidth WidthT;
+
+        private MemArg M;
+
         public InstMemoryLoad(ValType type, BitWidth width) =>
             (Type, WidthT) = (type, width);
 
@@ -68,11 +73,6 @@ namespace Wacs.Core.Instructions
             ValType.F64 => OpCode.F64Load, //0x2B
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {Type}"),
         };
-
-        private ValType Type { get; }
-        private BitWidth WidthT { get; }
-
-        private MemArg M { get; set; }
 
         /// <summary>
         /// @Spec 3.3.7.1. t.load
@@ -201,6 +201,11 @@ namespace Wacs.Core.Instructions
 
     public class InstMemoryStore : InstructionBase
     {
+        private readonly BitWidth TWidth;
+
+        private readonly ValType Type;
+        private MemArg M;
+
         public InstMemoryStore(ValType type, BitWidth width) =>
             (Type, TWidth) = (type, width);
 
@@ -226,10 +231,6 @@ namespace Wacs.Core.Instructions
             ValType.V128 => SimdCode.V128Store,
             _ => throw new InvalidDataException($"InstMemoryStore instruction is malformed: {Type}"),
         };
-
-        private ValType Type { get; }
-        private BitWidth TWidth { get; }
-        private MemArg M { get; set; }
 
         public IInstruction Immediate(MemArg m)
         {

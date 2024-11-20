@@ -69,8 +69,9 @@ namespace Wacs.Core.Instructions
     public class InstBlock : InstructionBase, IBlockInstruction
     {
         private static Stack<Value> _asideVals = new();
-        public override ByteCode Op => OpCode.Block;
-        private Block Block { get; set; } = null!;
+        private static readonly ByteCode BlockOp = OpCode.Block;
+        public override ByteCode Op => BlockOp;
+        private Block Block;
 
         public BlockType Type => Block.Type;
 
@@ -91,7 +92,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PopValues(funcType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
-                context.PushControlFrame(Op, funcType);
+                context.PushControlFrame(BlockOp, funcType);
                 
                 //Continue on to instructions in sequence
                 context.ValidateBlock(Block);
@@ -106,7 +107,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.3. block
-        public override void Execute(ExecContext context) => ExecuteInstruction(context, Block, Op);
+        public override void Execute(ExecContext context) => ExecuteInstruction(context, Block, BlockOp);
 
         public static void ExecuteInstruction(ExecContext context, Block block, ByteCode inst)
         {
@@ -122,7 +123,7 @@ namespace Wacs.Core.Instructions
                 //4.
                 // var label = new Label(funcType.ResultType, context.GetPointer(), inst);
                 //5.
-                context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Length,
+                context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Arity,
                     $"Instruction block failed. Operand Stack underflow.");
                 //6. 
                 context.Assert(_asideVals.Count == 0,
@@ -144,11 +145,10 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader)
         {
-            Block = new Block(type: Block.ParseBlockType(reader))
-            {
-                Instructions = new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
-                    IInstruction.IsEnd))
-            };
+            Block = new Block(
+                type: Block.ParseBlockType(reader),
+                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd))
+            );
             return this;
         }
 
@@ -162,8 +162,9 @@ namespace Wacs.Core.Instructions
     //0x03
     public class InstLoop : InstructionBase, IBlockInstruction
     {
+        private static readonly ByteCode LoopOp = OpCode.Loop;
         private Stack<Value> _asideVals = new();
-        public override ByteCode Op => OpCode.Loop;
+        public override ByteCode Op => LoopOp;
         private Block Block { get; set; } = null!;
 
         public BlockType Type => Block.Type;
@@ -185,7 +186,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PopValues(funcType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
-                context.PushControlFrame(Op, funcType);
+                context.PushControlFrame(LoopOp, funcType);
                 
                 //Continue on to instructions in sequence
                 context.ValidateBlock(Block);
@@ -211,7 +212,7 @@ namespace Wacs.Core.Instructions
                 //4.
                 // var label = new Label(funcType.ParameterTypes, context.GetPointer(), OpCode.Loop);
                 //5.
-                context.Assert( context.OpStack.Count >= funcType.ParameterTypes.Length,
+                context.Assert( context.OpStack.Count >= funcType.ParameterTypes.Arity,
                     $"Instruction loop failed. Operand Stack underflow.");
                 //6. 
                 context.Assert(_asideVals.Count == 0,
@@ -233,11 +234,10 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader)
         {
-            Block = new Block(type: Block.ParseBlockType(reader))
-            {
-                Instructions = new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
-                    IInstruction.IsEnd))
-            };
+            Block = new Block(
+                type: Block.ParseBlockType(reader),
+                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd))
+            );
             return this;
         }
 
@@ -251,7 +251,9 @@ namespace Wacs.Core.Instructions
     //0x04
     public class InstIf : InstructionBase, IBlockInstruction
     {
-        public override ByteCode Op => OpCode.If;
+        private static readonly ByteCode IfOp = OpCode.If;
+        private static readonly ByteCode ElseOp = OpCode.Else;
+        public override ByteCode Op => IfOp;
         private Block IfBlock { get; set; } = Block.Empty;
         private Block ElseBlock { get; set; } = Block.Empty;
 
@@ -277,7 +279,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PopValues(ifType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
-                context.PushControlFrame(Op, ifType);
+                context.PushControlFrame(IfOp, ifType);
 
                 //Continue on to instructions in sequence
                 // *any (end) contained within will pop the control frame and check values
@@ -310,11 +312,11 @@ namespace Wacs.Core.Instructions
             int c = context.OpStack.PopI32();
             if (c != 0)
             {
-                InstBlock.ExecuteInstruction(context, IfBlock, OpCode.If);
+                InstBlock.ExecuteInstruction(context, IfBlock, IfOp);
             }
             else
             {
-                InstBlock.ExecuteInstruction(context, ElseBlock, OpCode.Else);
+                InstBlock.ExecuteInstruction(context, ElseBlock, ElseOp);
             }
         }
 
@@ -323,19 +325,19 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader)
         {
-            IfBlock = new Block(type: Block.ParseBlockType(reader))
-            {
-                Instructions = new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
+            IfBlock = new Block(
+                type: Block.ParseBlockType(reader),
+                new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
                     IInstruction.IsElseOrEnd))
-            };
+            );
 
             if (IfBlock.Instructions.EndsWithElse)
             {
-                ElseBlock = new Block(type: IfBlock.Type)
-                {
-                    Instructions = new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
+                ElseBlock = new Block(
+                    type: IfBlock.Type,
+                    seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
                         IInstruction.IsEnd))
-                };
+                );
             }
             else if (!IfBlock.Instructions.HasExplicitEnd)
             {
@@ -350,14 +352,15 @@ namespace Wacs.Core.Instructions
     public class InstElse : InstEnd
     {
         public new static readonly InstElse Inst = new();
-        public override ByteCode Op => OpCode.Else;
+        private static readonly ByteCode ElseOp = OpCode.Else;
+        public override ByteCode Op => ElseOp;
 
         public override void Validate(IWasmValidationContext context)
         {
             var frame = context.PopControlFrame();
             context.Assert(frame.Opcode == OpCode.If,
                 "Else terminated a non-If block");
-            context.PushControlFrame(OpCode.Else, frame.Types);
+            context.PushControlFrame(ElseOp, frame.Types);
         }
     }
 
@@ -443,7 +446,7 @@ namespace Wacs.Core.Instructions
         private static Stack<Value> _asideVals = new();
         public override ByteCode Op => OpCode.Br;
 
-        public LabelIdx L { get; internal set; }
+        private LabelIdx L { get; set; }
 
         // @Spec 3.3.8.6. br l
         public override void Validate(IWasmValidationContext context)
@@ -496,7 +499,7 @@ namespace Wacs.Core.Instructions
             //     labels.Pop();
             context.ResetStack(label);
             //7.
-            context.OpStack.Push(_asideVals);
+            context.OpStack.PushResults(_asideVals);
             //8. 
             if (label.Instruction.x00 == OpCode.Loop)
             {

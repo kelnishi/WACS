@@ -25,6 +25,19 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class ModuleInstance
     {
+        public readonly DataAddrs DataAddrs = new();
+        public readonly ElemAddrs ElemAddrs = new();
+        public readonly List<ExportInstance> Exports = new();
+        public readonly FuncAddrs FuncAddrs = new();
+        public readonly GlobalAddrs GlobalAddrs = new();
+        public readonly MemAddrs MemAddrs = new();
+
+        public readonly Module Repr;
+
+        public readonly TableAddrs TableAddrs = new();
+
+        public readonly TypesSpace Types;
+
         public ModuleInstance(Module module)
         {
             Types = new TypesSpace(module);
@@ -33,18 +46,6 @@ namespace Wacs.Core.Runtime.Types
 
         public string Name { get; set; } = "_";
 
-        public Module Repr { get; }
-
-        public TypesSpace Types { get; }
-        public FuncAddrs FuncAddrs { get; } = new();
-
         public FuncAddr StartFunc { get; set; } = FuncAddr.Null;
-
-        public TableAddrs TableAddrs { get; } = new();
-        public MemAddrs MemAddrs { get; } = new();
-        public GlobalAddrs GlobalAddrs { get; } = new();
-        public ElemAddrs ElemAddrs { get; } = new();
-        public DataAddrs DataAddrs { get; } = new();
-        public List<ExportInstance> Exports { get; } = new();
     }
 }

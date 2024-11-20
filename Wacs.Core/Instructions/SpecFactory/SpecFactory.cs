@@ -70,11 +70,11 @@ namespace Wacs.Core.Instructions
             OpCode.SelectT           => new InstSelect(true),
                 
             //Variable Instructions
-            OpCode.LocalGet         => LocalVariableInst.CreateInstLocalGet(),
-            OpCode.LocalSet         => LocalVariableInst.CreateInstLocalSet(),
-            OpCode.LocalTee         => LocalVariableInst.CreateInstLocalTee(),
-            OpCode.GlobalGet        => GlobalVariableInst.CreateInstGlobalGet(),
-            OpCode.GlobalSet        => GlobalVariableInst.CreateInstGlobalSet(),
+            OpCode.LocalGet         => new InstLocalGet(),
+            OpCode.LocalSet         => new InstLocalSet(),
+            OpCode.LocalTee         => new InstLocalTee(),
+            OpCode.GlobalGet        => new InstGlobalGet(),
+            OpCode.GlobalSet        => new InstGlobalSet(),
                 
             //Table Instructions
             OpCode.TableGet          => new InstTableGet(),

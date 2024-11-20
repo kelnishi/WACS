@@ -73,9 +73,9 @@ namespace Wacs.Core.Types
         public static explicit operator TableIdx(uint value) => new(value);
     }
 
-    public readonly struct MemIdx : IEquatable<Index>, IIndex
+    public readonly struct MemIdx : IEquatable<Index>
     {
-        public uint Value { get; }
+        public readonly uint Value;
         private MemIdx(uint value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;
         public static explicit operator Index(MemIdx memIdx) => new((int)memIdx.Value);
@@ -125,14 +125,19 @@ namespace Wacs.Core.Types
         public static explicit operator DataIdx(uint value) => new(value);
     }
 
-    public readonly struct LocalIdx : IEquatable<Index>, IIndex
+    public readonly struct LocalIdx : IEquatable<Index>
     {
-        public uint Value { get; }
-        private LocalIdx(uint value) => Value = value;
+        public readonly int Value;
+        
+        private LocalIdx(int value)
+        {
+            Value = value;
+        }
+
         public bool Equals(Index other) => Value == other.Value;
-        public static explicit operator Index(LocalIdx localIdx) => new((int)localIdx.Value);
-        public static explicit operator LocalIdx(int value) => new((uint)value);
-        public static explicit operator LocalIdx(uint value) => new(value);
+        public static explicit operator Index(LocalIdx localIdx) => new(localIdx.Value);
+        public static explicit operator LocalIdx(int value) => new(value);
+        public static explicit operator LocalIdx(uint value) => new((int)value);
     }
 
     public readonly struct LabelIdx : IEquatable<Index>, IIndex

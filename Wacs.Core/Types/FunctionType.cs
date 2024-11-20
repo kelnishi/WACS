@@ -37,6 +37,16 @@ namespace Wacs.Core.Types
         public static readonly FunctionType SingleFuncref = new(ResultType.Empty, new ResultType(ValType.Funcref));
         public static readonly FunctionType SingleExternref = new(ResultType.Empty, new ResultType(ValType.Externref));
 
+        /// <summary>
+        /// The vec of parameter types for the function.
+        /// </summary>
+        public readonly ResultType ParameterTypes;
+
+        /// <summary>
+        /// The vec of return types for the function.
+        /// </summary>
+        public readonly ResultType ResultType;
+
         public FunctionType(ResultType parameterTypes, ResultType resultType) =>
             (ParameterTypes, ResultType) = (parameterTypes, resultType);
 
@@ -44,16 +54,6 @@ namespace Wacs.Core.Types
         /// For rendering/debugging
         /// </summary>
         public string Id { get; set; } = "";
-
-        /// <summary>
-        /// The vec of parameter types for the function.
-        /// </summary>
-        public ResultType ParameterTypes { get; }
-
-        /// <summary>
-        /// The vec of return types for the function.
-        /// </summary>
-        public ResultType ResultType { get; }
 
         public void RenderText(StreamWriter writer, Module module, string indent)
         {
