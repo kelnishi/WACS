@@ -313,7 +313,11 @@ namespace Wacs.Core.Runtime
         public IInstruction? Next()
         {
             //Advance to the next instruction first.
-            return _currentSequence[++_sequenceIndex];
+            if (++_sequenceIndex >= _currentSequence.Count)
+                return null;
+            
+            //Critical path, using direct array access
+            return _currentSequence._instructions[_sequenceIndex];
         }
 
         public List<(string, int)> ComputePointerPath()

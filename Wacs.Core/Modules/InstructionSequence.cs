@@ -31,7 +31,9 @@ namespace Wacs.Core
     public class InstructionSequence : IEnumerable<IInstruction>
     {
         public static readonly InstructionSequence Empty = new(new List<IInstruction>());
-        private readonly IInstruction[] _instructions;
+
+        //public for direct array access on critical path
+        public readonly IInstruction[] _instructions;
 
         public readonly int Count;
 
