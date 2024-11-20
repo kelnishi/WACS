@@ -27,7 +27,7 @@ namespace Wacs.Core.Instructions
     public class InstLocalGet : InstructionBase, IVarInstruction
     {
         public override ByteCode Op => OpCode.LocalGet;
-        private LocalIdx Index { get; set; }
+        private LocalIdx Index;
 
         public override IInstruction Parse(BinaryReader reader)
         {
@@ -66,7 +66,8 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Frame.Locals.Contains(Index),
                 $"Instruction local.get could not get Local {Index}");
             //3.
-            var value = context.Frame.Locals.Get(Index);
+            // var value = context.Frame.Locals.Get(Index);
+            var value = context.Frame.Locals.Data[Index.Value];
             //4.
             context.OpStack.PushValue(value);
         }
@@ -75,7 +76,7 @@ namespace Wacs.Core.Instructions
     public class InstLocalSet : InstructionBase, IVarInstruction
     {
         public override ByteCode Op => OpCode.LocalSet;
-        private LocalIdx Index { get; set; }
+        private LocalIdx Index;
 
         public override IInstruction Parse(BinaryReader reader)
         {
@@ -115,19 +116,21 @@ namespace Wacs.Core.Instructions
             //3.
             context.Assert( context.OpStack.HasValue,
                 $"Operand Stack underflow in instruction local.set");
-            var localValue = context.Frame.Locals.Get(Index);
+            // var localValue = context.Frame.Locals.Get(Index);
+            var localValue = context.Frame.Locals.Data[Index.Value];
             var type = localValue.Type;
             //4.
             var value = context.OpStack.PopType(type);
             //5.
-            context.Frame.Locals.Set(Index, value);
+            // context.Frame.Locals.Set(Index, value);
+            context.Frame.Locals.Data[Index.Value] = value;
         }
     }
     
     public class InstLocalTee : InstructionBase, IVarInstruction
     {
         public override ByteCode Op => OpCode.LocalTee;
-        private LocalIdx Index { get; set; }
+        private LocalIdx Index;
 
         public override IInstruction Parse(BinaryReader reader)
         {
@@ -168,7 +171,8 @@ namespace Wacs.Core.Instructions
             //1.
             context.Assert( context.OpStack.HasValue,
                 $"Operand Stack underflow in instruction local.tee");
-            var localValue = context.Frame.Locals.Get(Index);
+            // var localValue = context.Frame.Locals.Get(Index);
+            var localValue = context.Frame.Locals.Data[Index.Value];
             //2.
             var value = context.OpStack.PopType(localValue.Type);
             //3.
@@ -188,7 +192,9 @@ namespace Wacs.Core.Instructions
             //4.
             // var value = context.OpStack.PopType(type);
             //5.
-            context.Frame.Locals.Set(Index, value);
+            // context.Frame.Locals.Set(Index, value);
+            context.Frame.Locals.Data[Index.Value] = value;
         }
+        
     }
 }

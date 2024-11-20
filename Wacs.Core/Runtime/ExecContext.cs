@@ -261,13 +261,15 @@ namespace Wacs.Core.Runtime
             //Load parameters
             while (_asideVals.Count > 0)
             {
-                frame.Locals.Set((LocalIdx)li, _asideVals.Pop());
+                // frame.Locals.Set((LocalIdx)li, _asideVals.Pop());
+                frame.Locals.Data[li] = _asideVals.Pop();
                 li += 1;
             }
             //Set the Locals to default
             for (int ti = 0; li < localCount; ++li, ++ti)
             {
-                frame.Locals.Set((LocalIdx)li, new Value(t[ti]));
+                // frame.Locals.Set((LocalIdx)li, new Value(t[ti]));
+                frame.Locals.Data[li] = new Value(t[ti]);
             }
 
             //9.
