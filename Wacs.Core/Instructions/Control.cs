@@ -71,7 +71,7 @@ namespace Wacs.Core.Instructions
         private static Stack<Value> _asideVals = new();
         private static readonly ByteCode BlockOp = OpCode.Block;
         public override ByteCode Op => BlockOp;
-        private Block Block { get; set; } = null!;
+        private Block Block;
 
         public BlockType Type => Block.Type;
 

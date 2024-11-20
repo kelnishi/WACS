@@ -27,7 +27,7 @@ namespace Wacs.Core.Runtime.Types
 {
     public class MemoryInstance
     {
-        private byte[] _data;
+        public byte[] Data;
 
         [SuppressMessage("ReSharper.DPA", "DPA0003: Excessive memory allocations in LOH", MessageId = "type: System.Byte[]; size: 134MB")]
         public MemoryInstance(MemoryType type)
@@ -38,16 +38,15 @@ namespace Wacs.Core.Runtime.Types
                 throw new InstantiationException($"Cannot allocate memory of size {type.Limits.Minimum}");
             
             uint initialSize = (type.Limits.Minimum)* Constants.PageSize;
-            _data = new byte[initialSize];
+            Data = new byte[initialSize];
         }
 
         public MemoryType Type { get; private set; }
-        public byte[] Data => _data;
 
-        public long Size => _data.Length / Constants.PageSize;
+        public long Size => Data.Length / Constants.PageSize;
 
         //TODO bounds checking?
-        public Span<byte> this[Range range] => _data.AsSpan(range);
+        public Span<byte> this[Range range] => Data.AsSpan(range);
 
         /// <summary>
         /// @Spec 4.5.3.9. Growing memories
@@ -80,7 +79,7 @@ namespace Wacs.Core.Runtime.Types
 
             int len = (int)(newNumPages * Constants.PageSize);
 
-            Array.Resize(ref _data, len);
+            Array.Resize(ref Data, len);
 
             Type = new MemoryType(newLimits);
 
@@ -88,7 +87,7 @@ namespace Wacs.Core.Runtime.Types
         }
 
         public bool Contains(int offset, int width) => 
-            offset >= 0 && (offset + width) <= _data.Length;
+            offset >= 0 && (offset + width) <= Data.Length;
 
         public string ReadString(uint ptr, uint len)
         {
@@ -99,9 +98,9 @@ namespace Wacs.Core.Runtime.Types
         public int WriteUtf8String(uint ptr, string str, bool nullTerminate = false)
         {
             var data = Encoding.UTF8.GetBytes(str);
-            Buffer.BlockCopy(data, 0, _data, (int)ptr, data.Length);
+            Buffer.BlockCopy(data, 0, Data, (int)ptr, data.Length);
             if (nullTerminate)
-                _data[ptr + data.Length] = 0;
+                Data[ptr + data.Length] = 0;
             return data.Length + (nullTerminate?1:0);
         }
 
@@ -122,7 +121,7 @@ namespace Wacs.Core.Runtime.Types
                 throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
             
             var scratchBuffer = BitConverter.GetBytes(x);
-            Buffer.BlockCopy(scratchBuffer, 0, _data, ptr, sizeof(int));
+            Buffer.BlockCopy(scratchBuffer, 0, Data, ptr, sizeof(int));
         }
 
         public void WriteInt32(uint ptr, int x)
@@ -131,7 +130,7 @@ namespace Wacs.Core.Runtime.Types
                 throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
             
             var scratchBuffer = BitConverter.GetBytes(x);
-            Buffer.BlockCopy(scratchBuffer, 0, _data, (int)ptr, sizeof(int));
+            Buffer.BlockCopy(scratchBuffer, 0, Data, (int)ptr, sizeof(int));
         }
 
         public void WriteInt32(int ptr, uint x)
@@ -140,7 +139,7 @@ namespace Wacs.Core.Runtime.Types
                 throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
             
             var scratchBuffer = BitConverter.GetBytes(x);
-            Buffer.BlockCopy(scratchBuffer, 0, _data, ptr, sizeof(uint));
+            Buffer.BlockCopy(scratchBuffer, 0, Data, ptr, sizeof(uint));
         }
 
         public void WriteInt32(uint ptr, uint x)
@@ -149,7 +148,7 @@ namespace Wacs.Core.Runtime.Types
                 throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
             
             var scratchBuffer = BitConverter.GetBytes(x);
-            Buffer.BlockCopy(scratchBuffer, 0, _data, (int)ptr, sizeof(uint));
+            Buffer.BlockCopy(scratchBuffer, 0, Data, (int)ptr, sizeof(uint));
         }
 
         public void WriteInt64(int ptr, long x)
@@ -158,7 +157,7 @@ namespace Wacs.Core.Runtime.Types
                 throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
             
             var scratchBuffer = BitConverter.GetBytes(x);
-            Buffer.BlockCopy(scratchBuffer, 0, _data, ptr, sizeof(long));
+            Buffer.BlockCopy(scratchBuffer, 0, Data, ptr, sizeof(long));
         }
 
         public void WriteInt64(uint ptr, long x)
@@ -167,7 +166,7 @@ namespace Wacs.Core.Runtime.Types
                 throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
             
             var scratchBuffer = BitConverter.GetBytes(x);
-            Buffer.BlockCopy(scratchBuffer, 0, _data, (int)ptr, sizeof(long));
+            Buffer.BlockCopy(scratchBuffer, 0, Data, (int)ptr, sizeof(long));
         }
 
         public void WriteInt64(int ptr, ulong x)
@@ -176,7 +175,7 @@ namespace Wacs.Core.Runtime.Types
                 throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
             
             var scratchBuffer = BitConverter.GetBytes(x);
-            Buffer.BlockCopy(scratchBuffer, 0, _data, ptr, sizeof(ulong));
+            Buffer.BlockCopy(scratchBuffer, 0, Data, ptr, sizeof(ulong));
         }
 
         public void WriteInt64(uint ptr, ulong x)
@@ -185,7 +184,7 @@ namespace Wacs.Core.Runtime.Types
                 throw new ArgumentOutOfRangeException(nameof(ptr), "Pointer is out of bounds.");
             
             var scratchBuffer = BitConverter.GetBytes(x);
-            Buffer.BlockCopy(scratchBuffer, 0, _data, (int)ptr, sizeof(ulong));
+            Buffer.BlockCopy(scratchBuffer, 0, Data, (int)ptr, sizeof(ulong));
         }
 
         public T[] ReadStructs<T>(uint iovsPtr, uint iovsLen)
