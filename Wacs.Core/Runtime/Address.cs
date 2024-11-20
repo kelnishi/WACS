@@ -22,16 +22,14 @@ namespace Wacs.Core.Runtime
     /// <summary>
     /// @Spec 4.2.4. Addresses
     /// </summary>
-    public interface IAddress
-    {
-        uint Value { get; }
-    }
+    public interface IAddress {}
+    
     public readonly struct FuncAddr : IAddress, IEquatable<FuncAddr>
     {
         public static readonly FuncAddr Null = new(-1);
-        public FuncAddr(int value) => Value = (uint)value;
-        public uint Value { get; }
-        public static implicit operator Index(FuncAddr addr) => new((int)addr.Value);
+        public FuncAddr(int value) => Value = value;
+        public readonly int Value;
+        public static implicit operator Index(FuncAddr addr) => new(addr.Value);
 
         public static explicit operator FuncAddr(Value value)
         {
@@ -60,72 +58,72 @@ namespace Wacs.Core.Runtime
     public readonly struct TableAddr : IAddress, IEquatable<TableAddr>
     {
         public static readonly TableAddr Null = new(-1);
-        public TableAddr(int value) => Value = (uint)value;
-        public uint Value { get; }
-        public static implicit operator Index(TableAddr addr) => new((int)addr.Value);
+        public TableAddr(int value) => Value = value;
+        public readonly int Value;
+        public static implicit operator Index(TableAddr addr) => new(addr.Value);
 
         public bool Equals(TableAddr other) => Value == other.Value;
 
         public override bool Equals(object? obj) => obj is TableAddr other && Equals(other);
 
-        public override int GetHashCode() => (int)Value;
+        public override int GetHashCode() => Value;
     }
 
     public readonly struct MemAddr : IAddress, IEquatable<MemAddr>
     {
         public static readonly MemAddr Null = new(-1);
-        public MemAddr(int value) => Value = (uint)value;
-        public uint Value { get; }
-        public static implicit operator Index(MemAddr addr) => new((int)addr.Value);
-        public static explicit operator MemAddr(int addr) => new MemAddr(addr);
+        public MemAddr(int value) => Value = value;
+        public readonly int Value;
+        public static implicit operator Index(MemAddr addr) => new(addr.Value);
+        public static explicit operator MemAddr(int addr) => new(addr);
 
         public bool Equals(MemAddr other) => Value == other.Value;
 
         public override bool Equals(object? obj) => obj is MemAddr other && Equals(other);
 
-        public override int GetHashCode() => (int)Value;
+        public override int GetHashCode() => Value;
     }
 
     public readonly struct GlobalAddr : IAddress, IEquatable<GlobalAddr>
     {
         public static readonly GlobalAddr Null = new(-1);
-        public GlobalAddr(int value) => Value = (uint)value;
-        public uint Value { get; }
-        public static implicit operator Index(GlobalAddr addr) => new((int)addr.Value);
+        public GlobalAddr(int value) => Value = value;
+        public readonly int Value;
+        public static implicit operator Index(GlobalAddr addr) => new(addr.Value);
 
         public bool Equals(GlobalAddr other) => Value == other.Value;
 
         public override bool Equals(object? obj) => obj is GlobalAddr other && Equals(other);
 
-        public override int GetHashCode() => (int)Value;
+        public override int GetHashCode() => Value;
     }
 
     public readonly struct ElemAddr : IAddress, IEquatable<ElemAddr>
     {
         public static readonly ElemAddr Null = new(-1);
-        public ElemAddr(int value) => Value = (uint)value;
-        public uint Value { get; }
-        public static implicit operator Index(ElemAddr addr) => new((int)addr.Value);
+        public ElemAddr(int value) => Value = value;
+        public readonly int Value;
+        public static implicit operator Index(ElemAddr addr) => new(addr.Value);
 
         public bool Equals(ElemAddr other) => Value == other.Value;
 
         public override bool Equals(object? obj) => obj is ElemAddr other && Equals(other);
 
-        public override int GetHashCode() => (int)Value;
+        public override int GetHashCode() => Value;
     }
 
     public readonly struct DataAddr : IAddress, IEquatable<DataAddr>
     {
         public static readonly DataAddr Null = new(-1);
-        public DataAddr(int value) => Value = (uint)value;
-        public uint Value { get; }
-        public static implicit operator Index(DataAddr addr) => new((int)addr.Value);
+        public DataAddr(int value) => Value = value;
+        public readonly int Value;
+        public static implicit operator Index(DataAddr addr) => new(addr.Value);
 
         public bool Equals(DataAddr other) => Value == other.Value;
 
         public override bool Equals(object? obj) => obj is DataAddr other && Equals(other);
 
-        public override int GetHashCode() => (int)Value;
+        public override int GetHashCode() => Value;
     }
     
 }

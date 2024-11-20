@@ -26,32 +26,32 @@ namespace Wacs.Core.Runtime
     /// </summary>
     public class Store
     {
+        private readonly List<DataInstance> Datas = new();
+        private readonly List<ElementInstance> Elems = new();
+
+        private readonly List<IFunctionInstance> Funcs = new();
+        private readonly List<GlobalInstance> Globals = new();
+        private readonly List<MemoryInstance> Mems = new();
+        private readonly List<TableInstance> Tables = new();
         private StoreTransaction? CurrentTransaction = null;
 
-        private List<IFunctionInstance> Funcs { get; } = new();
-        private List<TableInstance> Tables { get; } = new();
-        private List<MemoryInstance> Mems { get; } = new();
-        private List<GlobalInstance> Globals { get; } = new();
-        private List<ElementInstance> Elems { get; } = new();
-        private List<DataInstance> Datas { get; } = new();
-
         public IFunctionInstance this[FuncAddr addr] => 
-            CurrentTransaction?.Funcs.GetValueOrDefault(addr)??Funcs[(Index)addr];
+            CurrentTransaction?.Funcs.GetValueOrDefault(addr)??Funcs[addr.Value];
 
         public TableInstance this[TableAddr addr] => 
-            CurrentTransaction?.Tables.GetValueOrDefault(addr)??Tables[(Index)addr];
+            CurrentTransaction?.Tables.GetValueOrDefault(addr)??Tables[addr.Value];
 
         public MemoryInstance this[MemAddr addr] => 
-            CurrentTransaction?.Mems.GetValueOrDefault(addr)??Mems[(Index)addr];
+            CurrentTransaction?.Mems.GetValueOrDefault(addr)??Mems[addr.Value];
 
         public GlobalInstance this[GlobalAddr addr] =>
-            CurrentTransaction?.Globals.GetValueOrDefault(addr)??Globals[(Index)addr];
+            CurrentTransaction?.Globals.GetValueOrDefault(addr)??Globals[addr.Value];
 
         public ElementInstance this[ElemAddr addr] =>
-            CurrentTransaction?.Elems.GetValueOrDefault(addr)??Elems[(Index)addr];
+            CurrentTransaction?.Elems.GetValueOrDefault(addr)??Elems[addr.Value];
 
         public DataInstance this[DataAddr addr] =>
-            CurrentTransaction?.Datas.GetValueOrDefault(addr)??Datas[(Index)addr];
+            CurrentTransaction?.Datas.GetValueOrDefault(addr)??Datas[addr.Value];
 
         public bool Contains(FuncAddr addr) => addr.Value < Funcs.Count || (CurrentTransaction?.Funcs.ContainsKey(addr) ?? false);
         public bool Contains(TableAddr addr) => addr.Value < Tables.Count || (CurrentTransaction?.Tables.ContainsKey(addr) ?? false);
@@ -73,12 +73,12 @@ namespace Wacs.Core.Runtime
             if (CurrentTransaction == null)
                 throw new InvalidOperationException("No open transaction to commit");
 
-            foreach (var (addr, inst) in CurrentTransaction.Funcs) Funcs[(Index)addr] = inst;
-            foreach (var (addr, inst) in CurrentTransaction.Tables) Tables[(Index)addr] = inst;
-            foreach (var (addr, inst) in CurrentTransaction.Mems) Mems[(Index)addr] = inst;
-            foreach (var (addr, inst) in CurrentTransaction.Globals) Globals[(Index)addr] = inst;
-            foreach (var (addr, inst) in CurrentTransaction.Elems) Elems[(Index)addr] = inst;
-            foreach (var (addr, inst) in CurrentTransaction.Datas) Datas[(Index)addr] = inst;
+            foreach (var (addr, inst) in CurrentTransaction.Funcs) Funcs[addr.Value] = inst;
+            foreach (var (addr, inst) in CurrentTransaction.Tables) Tables[addr.Value] = inst;
+            foreach (var (addr, inst) in CurrentTransaction.Mems) Mems[addr.Value] = inst;
+            foreach (var (addr, inst) in CurrentTransaction.Globals) Globals[addr.Value] = inst;
+            foreach (var (addr, inst) in CurrentTransaction.Elems) Elems[addr.Value] = inst;
+            foreach (var (addr, inst) in CurrentTransaction.Datas) Datas[addr.Value] = inst;
             CurrentTransaction = null;
         }
 
@@ -140,7 +140,7 @@ namespace Wacs.Core.Runtime
                 throw new InvalidOperationException("Table does not exist in Store.");
             
             if (CurrentTransaction == null)
-                return Tables[(Index)addr];
+                return Tables[addr.Value];
             
             if (!CurrentTransaction.Tables.ContainsKey(addr))
             {
@@ -203,7 +203,7 @@ namespace Wacs.Core.Runtime
             }
             else
             {
-                Datas[(Index)addr] = DataInstance.Empty;
+                Datas[addr.Value] = DataInstance.Empty;
             }
         }
 
@@ -215,7 +215,7 @@ namespace Wacs.Core.Runtime
             }
             else
             {
-                Elems[(Index)addr] = ElementInstance.Empty;
+                Elems[addr.Value] = ElementInstance.Empty;
             }
         }
     }
