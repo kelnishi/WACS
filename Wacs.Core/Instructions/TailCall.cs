@@ -60,7 +60,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.10. call
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //Fetch the Module first because we might exhaust the call stack
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
@@ -80,6 +80,7 @@ namespace Wacs.Core.Instructions
             
             //Reuse the pointer from the outgoing function
             context.Frame.ContinuationAddress = address;
+            return 1;
         }
 
         /// <summary>
@@ -186,7 +187,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.11. call_indirect
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //Call Indirect
             //2.
@@ -246,6 +247,7 @@ namespace Wacs.Core.Instructions
             
             //Reuse the pointer from the outgoing function
             context.Frame.ContinuationAddress = address;
+            return 1;
         }
 
         /// <summary>

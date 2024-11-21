@@ -43,9 +43,9 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.1. table.get 
-        public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
+        public override int Execute(ExecContext context) => ExecuteInstruction(context, X);
 
-        public static void ExecuteInstruction(ExecContext context, TableIdx tableIndex)
+        public static int ExecuteInstruction(ExecContext context, TableIdx tableIndex)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(tableIndex),
@@ -73,6 +73,7 @@ namespace Wacs.Core.Instructions
             var val = tab.Elements[(int)i];
             //10.
             context.OpStack.PushValue(val);
+            return 1;
         }
 
         // @Spec 5.4.5. Table Instructions
@@ -102,9 +103,9 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.2. table.set
-        public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
+        public override int Execute(ExecContext context) => ExecuteInstruction(context, X);
 
-        public static void ExecuteInstruction(ExecContext context, TableIdx tableIndex)
+        public static int ExecuteInstruction(ExecContext context, TableIdx tableIndex)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(tableIndex),
@@ -135,6 +136,7 @@ namespace Wacs.Core.Instructions
 
             //11.
             tab.Elements[(int)i] = val;
+            return 1;
         }
 
         // @Spec 5.4.5. Table Instructions
@@ -171,7 +173,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.7. table.init x y
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(X),
@@ -217,7 +219,7 @@ namespace Wacs.Core.Instructions
                 }
                 else if (n == 0)
                 {
-                    return;
+                    return 1;
                 }
 
                 //18.
@@ -277,7 +279,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.8. elem.drop x
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.ElemAddrs.Contains(X),
@@ -289,6 +291,7 @@ namespace Wacs.Core.Instructions
                  $"Instruction elem.drop failed. Element {a} was not in the Store.");
             //5.
             context.Store.DropElement(a);
+            return 1;
         }
 
         // @Spec 5.4.5. Table Instructions
@@ -331,7 +334,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.6. table.copy
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(DstX),
@@ -380,7 +383,7 @@ namespace Wacs.Core.Instructions
                 //17.
                 else if (n == 0)
                 {
-                    return;
+                    return 1;
                 }
 
                 //18.
@@ -451,7 +454,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.4. table.grow x
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(X),
@@ -487,6 +490,7 @@ namespace Wacs.Core.Instructions
                 const int err = -1;
                 context.OpStack.PushI32(err);
             }
+            return 1;
         }
 
         // @Spec 5.4.5. Table Instructions
@@ -514,7 +518,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.3. table.size x
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(X),
@@ -531,6 +535,7 @@ namespace Wacs.Core.Instructions
             int sz = tab.Elements.Count;
             //7.
             context.OpStack.PushI32(sz);
+            return 1;
         }
 
         // @Spec 5.4.5. Table Instructions
@@ -561,7 +566,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.5. table.fill
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(X),
@@ -600,7 +605,7 @@ namespace Wacs.Core.Instructions
                 }
                 else if (n == 0)
                 {
-                    return;
+                    return 1;
                 }
 
                 //13.

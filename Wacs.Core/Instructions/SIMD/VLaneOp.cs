@@ -156,7 +156,11 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         public override void Validate(IWasmValidationContext context) => _validate(context, Op, X);
-        public override void Execute(ExecContext context) => _execute(context, X);
+        public override int Execute(ExecContext context)
+        {
+            _execute(context, X);
+            return 1;
+        }
 
         public override IInstruction Parse(BinaryReader reader)
         {
