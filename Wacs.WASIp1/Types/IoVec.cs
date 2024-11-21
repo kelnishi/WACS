@@ -38,8 +38,7 @@ namespace Wacs.WASIp1.Types
         public void FromWasmValue(object value)
         {
             ulong bits = (ulong)value;
-            byte[] bytes = BitConverter.GetBytes(bits);
-            this = MemoryMarshal.Cast<byte, IoVec>(bytes.AsSpan())[0];
+            this = MemoryMarshal.Cast<ulong, IoVec>(MemoryMarshal.CreateSpan(ref bits, 1))[0];
         }
 
         public Value ToWasmType()
