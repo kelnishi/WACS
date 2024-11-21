@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions.Numeric
             };
 
         // [pop1 pop2] -> [push]
-        private static ValidationDelegate ValidateOperands(ValType pop1, ValType pop2, ValType push) =>
+        public static ValidationDelegate ValidateOperands(ValType pop1, ValType pop2, ValType push) =>
             context => {
                 context.OpStack.PopType(pop2);
                 context.OpStack.PopType(pop1);
@@ -79,6 +79,6 @@ namespace Wacs.Core.Instructions.Numeric
 
         private delegate void ExecuteDelegate(ExecContext context);
 
-        private delegate void ValidationDelegate(IWasmValidationContext context);
+        public delegate void ValidationDelegate(IWasmValidationContext context);
     }
 }
