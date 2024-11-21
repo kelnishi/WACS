@@ -126,7 +126,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.OpStack.Peek().IsI32,
                  $"Instruction table.set found incorrect type on top of the Stack");
             //9.
-            uint i = context.OpStack.PopI32();
+            uint i = context.OpStack.PopU32();
             //10.
             if (i >= tab.Elements.Count)
             {
@@ -223,7 +223,7 @@ namespace Wacs.Core.Instructions
                 //18.
                 var val = elem.Elements[(int)s];
                 //19.
-                context.OpStack.PushI32((uint)d);
+                context.OpStack.PushU32((uint)d);
                 //20.
                 context.OpStack.PushRef(val);
                 //21.
@@ -232,14 +232,14 @@ namespace Wacs.Core.Instructions
                 long check = d + 1L;
                 context.Assert( check < Constants.TwoTo32,  $"Instruction table.init failed. Invalid table size");
                 //23.
-                context.OpStack.PushI32((uint)(d + 1L));
+                context.OpStack.PushU32((uint)(d + 1L));
                 //24.
                 check = s + 1L;
                 context.Assert( check < Constants.TwoTo32,  $"Instruction table.init failed. Invalid table size");
                 //25.
-                context.OpStack.PushI32((uint)(s + 1L));
+                context.OpStack.PushU32((uint)(s + 1L));
                 //26.
-                context.OpStack.PushI32((uint)(n - 1L));
+                context.OpStack.PushU32((uint)(n - 1L));
                 //27.
             }
         }
@@ -386,18 +386,18 @@ namespace Wacs.Core.Instructions
                 //18.
                 if (d <= s)
                 {
-                    context.OpStack.PushI32((uint)d);
-                    context.OpStack.PushI32((uint)s);
+                    context.OpStack.PushU32((uint)d);
+                    context.OpStack.PushU32((uint)s);
                     InstTableGet.ExecuteInstruction(context, SrcY);
                     InstTableSet.ExecuteInstruction(context, DstX);
                     long check = d + 1L;
                     context.Assert( check < Constants.TwoTo32,
                          "Instruction table.copy failed. Table size overflow");
-                    context.OpStack.PushI32((uint)(d + 1L));
+                    context.OpStack.PushU32((uint)(d + 1L));
                     check = s + 1L;
                     context.Assert( check < Constants.TwoTo32,
                          "Instruction table.copy failed. Table size overflow");
-                    context.OpStack.PushI32((uint)(s + 1L));
+                    context.OpStack.PushU32((uint)(s + 1L));
                 }
                 //19.
                 else
@@ -405,19 +405,19 @@ namespace Wacs.Core.Instructions
                     long check = d + n - 1L;
                     context.Assert( check < Constants.TwoTo32,
                          "Intruction table.copy failed. Table size overflow");
-                    context.OpStack.PushI32((uint)(d + n - 1L));
+                    context.OpStack.PushU32((uint)(d + n - 1L));
                     check = (long)s + n - 1;
                     context.Assert( check < Constants.TwoTo32,
                          "Intruction table.copy failed. Table size overflow");
-                    context.OpStack.PushI32((uint)(s + n - 1L));
+                    context.OpStack.PushU32((uint)(s + n - 1L));
                     InstTableGet.ExecuteInstruction(context, SrcY);
                     InstTableSet.ExecuteInstruction(context, DstX);
-                    context.OpStack.PushI32((uint)d);
-                    context.OpStack.PushI32((uint)s);
+                    context.OpStack.PushU32((uint)d);
+                    context.OpStack.PushU32((uint)s);
                 }
 
                 //20.
-                context.OpStack.PushI32((uint)(n - 1L));
+                context.OpStack.PushU32((uint)(n - 1L));
                 //21.
             }
         }
@@ -479,7 +479,7 @@ namespace Wacs.Core.Instructions
             //12, 13. TODO: implement optional constraints on table.grow
             if (tab.Grow(n, val))
             {
-                context.OpStack.PushI32((uint)sz);
+                context.OpStack.PushU32((uint)sz);
             }
             else
             {

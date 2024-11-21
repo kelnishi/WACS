@@ -31,14 +31,14 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI32Eqz(ExecContext context)
         {
-            int i = context.OpStack.PopI32().Int32;
+            int i = context.OpStack.PopI32();
             int result = i == 0 ? 1 : 0;
             context.OpStack.PushI32(result);
         }
 
         private static void ExecuteI64Eqz(ExecContext context)
         {
-            long i = context.OpStack.PopI64().Int64;
+            long i = context.OpStack.PopI64();
             int result = i == 0 ? 1 : 0;
             context.OpStack.PushI32(result);
         }
