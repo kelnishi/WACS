@@ -24,109 +24,115 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstI32BinOp : InstructionBase, IConstOpInstruction
+    public abstract class InstI32BinOp : InstructionBase, IConstOpInstruction
     {
         // @Spec 3.3.1.3. i.binop
-        public static readonly InstI32BinOp I32Add = new(OpCode.I32Add, (Func<int,int,int>)ExecuteI32Add,
+        public static readonly InstI32BinOp I32Add = new Signed(OpCode.I32Add, ExecuteI32Add,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32), isConst: true);
 
-        public static readonly InstI32BinOp I32Sub = new(OpCode.I32Sub, (Func<int,int,int>)ExecuteI32Sub,
+        public static readonly InstI32BinOp I32Sub = new Signed(OpCode.I32Sub, ExecuteI32Sub,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32), isConst: true);
 
-        public static readonly InstI32BinOp I32Mul = new(OpCode.I32Mul, (Func<int,int,int>)ExecuteI32Mul,
+        public static readonly InstI32BinOp I32Mul = new Signed(OpCode.I32Mul, ExecuteI32Mul,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32), isConst: true);
 
-        public static readonly InstI32BinOp I32DivS = new(OpCode.I32DivS, (Func<int,int,int>)ExecuteI32DivS,
+        public static readonly InstI32BinOp I32DivS = new Signed(OpCode.I32DivS, ExecuteI32DivS,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly InstI32BinOp I32DivU = new(OpCode.I32DivU, (Func<uint,uint,uint>)ExecuteI32DivU,
+        public static readonly InstI32BinOp I32DivU = new Unsigned(OpCode.I32DivU, ExecuteI32DivU,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly InstI32BinOp I32RemS = new(OpCode.I32RemS, (Func<int,int,int>)ExecuteI32RemS,
+        public static readonly InstI32BinOp I32RemS = new Signed(OpCode.I32RemS, ExecuteI32RemS,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly InstI32BinOp I32RemU = new(OpCode.I32RemU, (Func<uint,uint,uint>)ExecuteI32RemU,
+        public static readonly InstI32BinOp I32RemU = new Unsigned(OpCode.I32RemU, ExecuteI32RemU,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly InstI32BinOp I32And = new(OpCode.I32And, (Func<uint,uint,uint>)ExecuteI32And,
+        public static readonly InstI32BinOp I32And = new Unsigned(OpCode.I32And, ExecuteI32And,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly InstI32BinOp I32Or = new(OpCode.I32Or, (Func<uint,uint,uint>)ExecuteI32Or,
+        public static readonly InstI32BinOp I32Or = new Unsigned(OpCode.I32Or, ExecuteI32Or,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly InstI32BinOp I32Xor = new(OpCode.I32Xor, (Func<uint,uint,uint>)ExecuteI32Xor,
+        public static readonly InstI32BinOp I32Xor = new Unsigned(OpCode.I32Xor, ExecuteI32Xor,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly InstI32BinOp I32Shl = new(OpCode.I32Shl, (Func<uint,int,uint>)ExecuteI32Shl,
+        public static readonly InstI32BinOp I32Shl = new Mixed(OpCode.I32Shl, ExecuteI32Shl,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly InstI32BinOp I32ShrS = new(OpCode.I32ShrS, (Func<int,int,int>)ExecuteI32ShrS,
+        public static readonly InstI32BinOp I32ShrS = new Signed(OpCode.I32ShrS, ExecuteI32ShrS,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly InstI32BinOp I32ShrU = new(OpCode.I32ShrU, (Func<uint,int,uint>)ExecuteI32ShrU,
+        public static readonly InstI32BinOp I32ShrU = new Mixed(OpCode.I32ShrU, ExecuteI32ShrU,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly InstI32BinOp I32Rotl = new(OpCode.I32Rotl, (Func<uint,int,uint>)ExecuteI32Rotl,
+        public static readonly InstI32BinOp I32Rotl = new Mixed(OpCode.I32Rotl, ExecuteI32Rotl,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly InstI32BinOp I32Rotr = new(OpCode.I32Rotr, (Func<uint,int,uint>)ExecuteI32Rotr,
+        public static readonly InstI32BinOp I32Rotr = new Mixed(OpCode.I32Rotr, ExecuteI32Rotr,
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
         public override ByteCode Op { get; }
-        
         private readonly NumericInst.ValidationDelegate _validate;
+        public bool IsConstant { get; }
 
-        private readonly bool _isConst;
-        public bool IsConstant => _isConst;
-        delegate int Executor(ExecContext context);
-        private Executor _executor;
-        
-        private InstI32BinOp(ByteCode op, Delegate execute, NumericInst.ValidationDelegate validate, bool isConst = false)
+
+        private InstI32BinOp(ByteCode op, NumericInst.ValidationDelegate validate, bool isConst = false)
         {
             Op = op;
-            _executor = CreateExecutor(execute);
             _validate = validate;
-            _isConst = isConst;
+            IsConstant = isConst;
         }
 
-        private Executor CreateExecutor(Delegate execute)
+        private class Signed : InstI32BinOp
         {
-            switch (execute)
+            private Func<int,int,int> _execute;
+            public Signed(ByteCode op, Func<int,int,int> execute, NumericInst.ValidationDelegate validate,
+                bool isConst = false) : base(op, validate, isConst) => _execute = execute;
+
+            public override int Execute(ExecContext context)
             {
-                case Func<int,int,int> signed:
-                    return context =>
-                    {
-                        int i2 = context.OpStack.PopI32();
-                        int i1 = context.OpStack.PopI32();
-                        int result = signed(i1, i2);
-                        context.OpStack.PushI32(result);
-                        return 1;
-                    };
-                case Func<uint,uint,uint> unsigned:
-                    return context =>
-                    {
-                        uint i2 = context.OpStack.PopU32();
-                        uint i1 = context.OpStack.PopU32();
-                        uint result = unsigned(i1, i2);
-                        context.OpStack.PushU32(result);
-                        return 1;
-                    };
-                case Func<uint,int,uint> mixed:
-                    return context =>
-                    {
-                        int i2 = context.OpStack.PopI32();
-                        uint i1 = context.OpStack.PopU32();
-                        uint result = mixed(i1, i2);
-                        context.OpStack.PushU32(result);
-                        return 1;
-                    };
-                default:
-                    throw new InvalidDataException($"Invalid delegate type {execute.GetType()}");
+                int i2 = context.OpStack.PopI32();
+                int i1 = context.OpStack.PopI32();
+                int result = _execute(i1, i2);
+                context.OpStack.PushI32(result);
+                return 1;
+            }
+        }
+
+        private class Unsigned : InstI32BinOp
+        {
+            private Func<uint,uint,uint> _execute;
+            public Unsigned(ByteCode op, Func<uint,uint,uint> execute, NumericInst.ValidationDelegate validate,
+                bool isConst = false) : base(op, validate, isConst) => _execute = execute;
+
+            public override int Execute(ExecContext context)
+            {
+                uint i2 = context.OpStack.PopU32();
+                uint i1 = context.OpStack.PopU32();
+                uint result = _execute(i1, i2);
+                context.OpStack.PushU32(result);
+                return 1;
+            }
+        }
+
+        private class Mixed : InstI32BinOp
+        {
+            private Func<uint,int,uint> _execute;
+            public Mixed(ByteCode op, Func<uint,int,uint> execute, NumericInst.ValidationDelegate validate,
+                bool isConst = false) : base(op, validate, isConst) => _execute = execute;
+
+            public override int Execute(ExecContext context)
+            {
+                int i2 = context.OpStack.PopI32();
+                uint i1 = context.OpStack.PopU32();
+                uint result = _execute(i1, i2);
+                context.OpStack.PushU32(result);
+                return 1;
             }
         }
         
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context) => _executor(context);
 
         // @Spec 4.3.2.3. iadd
         private static int ExecuteI32Add(int i1, int i2) => i1 + i2;
@@ -215,7 +221,7 @@ namespace Wacs.Core.Instructions.Numeric
         // @Spec 4.3.2.19 irotr
         private static uint ExecuteI32Rotr(uint i1, int i2)
         {
-            int k = i2 & 31;
+            int k = i2 & 0x1F;
             return (i1 >> k) | (i1 << (32 - k));
         }
     }
