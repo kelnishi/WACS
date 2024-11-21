@@ -14,123 +14,101 @@
 //  * limitations under the License.
 //  */
 
+using System;
+using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public partial class NumericInst
+    public abstract class InstI32RelOp : InstructionBase
     {
         // @Spec 3.3.1.5. i.relop
-        public static readonly NumericInst I32Eq = new(OpCode.I32Eq, ExecuteI32Eq,
-            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly InstI32RelOp I32Eq = new Signed(OpCode.I32Eq, ExecuteI32Eq,
+            NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly NumericInst I32Ne = new(OpCode.I32Ne, ExecuteI32Ne,
-            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly InstI32RelOp I32Ne = new Signed(OpCode.I32Ne, ExecuteI32Ne,
+            NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly NumericInst I32LtS = new(OpCode.I32LtS, ExecuteI32LtS,
-            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly InstI32RelOp I32LtS = new Signed(OpCode.I32LtS, ExecuteI32LtS,
+            NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly NumericInst I32LtU = new(OpCode.I32LtU, ExecuteI32LtU,
-            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly InstI32RelOp I32LtU = new Unsigned(OpCode.I32LtU, ExecuteI32LtU,
+            NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly NumericInst I32GtS = new(OpCode.I32GtS, ExecuteI32GtS,
-            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly InstI32RelOp I32GtS = new Signed(OpCode.I32GtS, ExecuteI32GtS,
+            NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly NumericInst I32GtU = new(OpCode.I32GtU, ExecuteI32GtU,
-            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly InstI32RelOp I32GtU = new Unsigned(OpCode.I32GtU, ExecuteI32GtU,
+            NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly NumericInst I32LeS = new(OpCode.I32LeS, ExecuteI32LeS,
-            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly InstI32RelOp I32LeS = new Signed(OpCode.I32LeS, ExecuteI32LeS,
+            NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly NumericInst I32LeU = new(OpCode.I32LeU, ExecuteI32LeU,
-            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly InstI32RelOp I32LeU = new Unsigned(OpCode.I32LeU, ExecuteI32LeU,
+            NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly NumericInst I32GeS = new(OpCode.I32GeS, ExecuteI32GeS,
-            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly InstI32RelOp I32GeS = new Signed(OpCode.I32GeS, ExecuteI32GeS,
+            NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        public static readonly NumericInst I32GeU = new(OpCode.I32GeU, ExecuteI32GeU,
-            ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
+        public static readonly InstI32RelOp I32GeU = new Unsigned(OpCode.I32GeU, ExecuteI32GeU,
+            NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
-        private static void ExecuteI32Eq(ExecContext context)
+        public override ByteCode Op { get; }
+        
+        private readonly NumericInst.ValidationDelegate _validate;
+        
+        private InstI32RelOp(ByteCode op, NumericInst.ValidationDelegate validate)
         {
-            int i2 = context.OpStack.PopI32();
-            int i1 = context.OpStack.PopI32();
-            int result = i1 == i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
+            Op = op;
+            _validate = validate;
         }
-
-        private static void ExecuteI32Ne(ExecContext context)
+        
+        private class Signed : InstI32RelOp
         {
-            int i2 = context.OpStack.PopI32();
-            int i1 = context.OpStack.PopI32();
-            int result = i1 != i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
+            private Func<int,int,int> _execute;
+            public Signed(ByteCode op, Func<int,int,int> execute, NumericInst.ValidationDelegate validate) 
+                : base(op, validate) => _execute = execute;
 
-        private static void ExecuteI32LtS(ExecContext context)
-        {
-            int i2 = context.OpStack.PopI32();
-            int i1 = context.OpStack.PopI32();
-            int result = i1 < i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
+            public override int Execute(ExecContext context)
+            {
+                int i2 = context.OpStack.PopI32();
+                int i1 = context.OpStack.PopI32();
+                int result = _execute(i1, i2);
+                context.OpStack.PushI32(result);
+                return 1;
+            }
         }
+        
+        private class Unsigned : InstI32RelOp
+        {
+            private Func<uint,uint,int> _execute;
+            public Unsigned(ByteCode op, Func<uint,uint,int> execute, NumericInst.ValidationDelegate validate)
+                : base(op, validate) => _execute = execute;
 
-        private static void ExecuteI32LtU(ExecContext context)
-        {
-            uint i2 = context.OpStack.PopU32();
-            uint i1 = context.OpStack.PopU32();
-            int result = i1 < i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
+            public override int Execute(ExecContext context)
+            {
+                uint i2 = context.OpStack.PopU32();
+                uint i1 = context.OpStack.PopU32();
+                int result = _execute(i1, i2);
+                context.OpStack.PushI32(result);
+                return 1;
+            }
         }
-
-        private static void ExecuteI32GtS(ExecContext context)
-        {
-            int b = context.OpStack.PopI32();
-            int a = context.OpStack.PopI32();
-            int result = a > b ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
-
-        private static void ExecuteI32GtU(ExecContext context)
-        {
-            uint i2 = context.OpStack.PopU32();
-            uint i1 = context.OpStack.PopU32();
-            int result = i1 > i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
-
-        private static void ExecuteI32LeS(ExecContext context)
-        {
-            int i2 = context.OpStack.PopI32();
-            int i1 = context.OpStack.PopI32();
-            int result = i1 <= i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
-
-        private static void ExecuteI32LeU(ExecContext context)
-        {
-            uint i2 = context.OpStack.PopU32();
-            uint i1 = context.OpStack.PopU32();
-            int result = i1 <= i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
-
-        private static void ExecuteI32GeS(ExecContext context)
-        {
-            int i2 = context.OpStack.PopI32();
-            int i1 = context.OpStack.PopI32();
-            int result = i1 >= i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
-
-        private static void ExecuteI32GeU(ExecContext context)
-        {
-            uint i2 = context.OpStack.PopU32();
-            uint i1 = context.OpStack.PopU32();
-            int result = i1 >= i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
+        
+        public override void Validate(IWasmValidationContext context) => _validate(context);
+        
+        private static int ExecuteI32Eq(int i1, int i2) => i1 == i2 ? 1 : 0;
+        private static int ExecuteI32Ne(int i1, int i2) => i1 != i2 ? 1 : 0;
+        private static int ExecuteI32LtS(int i1, int i2) => i1 < i2 ? 1 : 0;
+        private static int ExecuteI32LtU(uint i1, uint i2) => i1 < i2 ? 1 : 0;
+        private static int ExecuteI32GtS(int i1, int i2) => i1 > i2 ? 1 : 0;
+        private static int ExecuteI32GtU(uint i1, uint i2) => i1 > i2 ? 1 : 0;
+        private static int ExecuteI32LeS(int i1, int i2) => i1 <= i2 ? 1 : 0;
+        private static int ExecuteI32LeU(uint i1, uint i2) => i1 <= i2 ? 1 : 0;
+        private static int ExecuteI32GeS(int i1, int i2) => i1 >= i2 ? 1 : 0;
+        private static int ExecuteI32GeU(uint i1, uint i2) => i1 >= i2 ? 1 : 0;
     }
 }
