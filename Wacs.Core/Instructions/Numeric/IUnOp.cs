@@ -33,7 +33,7 @@ namespace Wacs.Core.Instructions.Numeric
         // @Spec 4.3.2.20 iclz
         private static void ExecuteI32Clz(ExecContext context)
         {
-            uint x = context.OpStack.PopI32().UInt32;
+            uint x = context.OpStack.PopU32();
             if (x != 0)
             {
                 int count = 0;
@@ -55,7 +55,7 @@ namespace Wacs.Core.Instructions.Numeric
         // @Spec 4.3.2.21 ictz
         private static void ExecuteI32Ctz(ExecContext context)
         {
-            uint x = context.OpStack.PopI32().UInt32;
+            uint x = context.OpStack.PopU32();
             if (x != 0)
             {
                 int count = 0;
@@ -79,19 +79,19 @@ namespace Wacs.Core.Instructions.Numeric
         // @Spec 4.3.2.22 ipopcnt
         private static void ExecuteI32Popcnt(ExecContext context)
         {
-            uint x = context.OpStack.PopI32().UInt32;
+            uint x = context.OpStack.PopU32();
             uint count = 0;
             while (x != 0)
             {
                 count += x & 1;  // Add 1 to count if the least significant bit is 1
                 x >>= 1;         // Right shift x by 1 to process the next bit
             }
-            context.OpStack.PushI32(count);
+            context.OpStack.PushU32(count);
         }
 
         private static void ExecuteI64Clz(ExecContext context)
         {
-            ulong x = context.OpStack.PopI64().UInt64;
+            ulong x = context.OpStack.PopU64();
             if (x != 0)
             {
                 int count = 0;
@@ -110,7 +110,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64Ctz(ExecContext context)
         {
-            ulong x = context.OpStack.PopI64().UInt64;
+            ulong x = context.OpStack.PopU64();
             if (x != 0)
             {
                 int count = 0;
@@ -129,14 +129,14 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64Popcnt(ExecContext context)
         {
-            ulong x = context.OpStack.PopI64().UInt64;
+            ulong x = context.OpStack.PopU64();
             ulong count = 0;
             while (x != 0)
             {
                 count += x & 1;  // Add 1 to count if the least significant bit is 1
                 x >>= 1;         // Right shift x by 1 to process the next bit
             }
-            context.OpStack.PushI64(count);
+            context.OpStack.PushU64(count);
             
         }
     }

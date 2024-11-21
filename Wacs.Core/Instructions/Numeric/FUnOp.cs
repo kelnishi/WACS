@@ -43,21 +43,21 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF32Abs(ExecContext context)
         {
-            float a = context.OpStack.PopF32().Float32;
+            float a = context.OpStack.PopF32();
             var result = Math.Abs(a);
             context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Neg(ExecContext context)
         {
-            float a = context.OpStack.PopF32().Float32;
+            float a = context.OpStack.PopF32();
             var result = -a;
             context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Ceil(ExecContext context)
         {
-            float a = context.OpStack.PopF32().Float32;
+            float a = context.OpStack.PopF32();
             var result = a switch {
                 _ when float.IsNaN(a) => float.NaN,
                 _ when float.IsInfinity(a) => a,
@@ -72,7 +72,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF32Floor(ExecContext context)
         {
-            float a = context.OpStack.PopF32().Float32;
+            float a = context.OpStack.PopF32();
             var result = a switch {
                 _ when float.IsNaN(a) => float.NaN,
                 _ when float.IsInfinity(a) => a,
@@ -87,14 +87,14 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF32Trunc(ExecContext context)
         {
-            float a = context.OpStack.PopF32().Float32;
+            float a = context.OpStack.PopF32();
             float result = (float)Math.Truncate(a);
             context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF32Nearest(ExecContext context)
         {
-            float a = context.OpStack.PopF32().Float32;
+            float a = context.OpStack.PopF32();
             var result = a switch {
                 _ when float.IsNaN(a) => float.NaN,
                 _ when float.IsInfinity(a) => a,
@@ -109,28 +109,28 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF32Sqrt(ExecContext context)
         {
-            float a = context.OpStack.PopF32().Float32;
+            float a = context.OpStack.PopF32();
             float result = (float)Math.Sqrt(a);
             context.OpStack.PushF32(result);
         }
 
         private static void ExecuteF64Abs(ExecContext context)
         {
-            double a = context.OpStack.PopF64().Float64;
+            double a = context.OpStack.PopF64();
             var result = Math.Abs(a);
             context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64Neg(ExecContext context)
         {
-            double a = context.OpStack.PopF64().Float64;
+            double a = context.OpStack.PopF64();
             var result = -a;
             context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64Ceil(ExecContext context)
         {
-            double a = context.OpStack.PopF64().Float64;
+            double a = context.OpStack.PopF64();
             var result = a switch {
                 _ when double.IsNaN(a) => double.NaN,
                 _ when double.IsInfinity(a) => a,
@@ -145,7 +145,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF64Floor(ExecContext context)
         {
-            double a = context.OpStack.PopF64().Float64;
+            double a = context.OpStack.PopF64();
             var result = a switch {
                 _ when double.IsNaN(a) => double.NaN,
                 _ when double.IsInfinity(a) => a,
@@ -160,14 +160,14 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF64Trunc(ExecContext context)
         {
-            double a = context.OpStack.PopF64().Float64;
+            double a = context.OpStack.PopF64();
             var result = Math.Truncate(a);
             context.OpStack.PushF64(result);
         }
 
         private static void ExecuteF64Nearest(ExecContext context)
         {
-            double a = context.OpStack.PopF64().Float64;
+            double a = context.OpStack.PopF64();
             var result = a switch {
                 _ when double.IsNaN(a) => double.NaN,
                 _ when double.IsInfinity(a) => a,
@@ -182,7 +182,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteF64Sqrt(ExecContext context)
         {
-            double a = context.OpStack.PopF64().Float64;
+            double a = context.OpStack.PopF64();
             var result = Math.Sqrt(a);
             context.OpStack.PushF64(result);
         }

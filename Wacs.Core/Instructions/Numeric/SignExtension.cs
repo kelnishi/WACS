@@ -54,7 +54,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI32Extend8S(ExecContext context)
         {
-            uint value = context.OpStack.PopI32().UInt32;
+            uint value = context.OpStack.PopU32();
             uint result = ((value & ByteSign) != 0)
                 ? (I32ByteExtend | value)
                 : (ByteMask & value);
@@ -63,7 +63,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI32Extend16S(ExecContext context)
         {
-            uint value = context.OpStack.PopI32().UInt32;
+            uint value = context.OpStack.PopU32();
             uint result = (value & ShortSign) != 0
                 ? I32ShortExtend | value
                 : ShortMask & value;
@@ -72,7 +72,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64Extend8S(ExecContext context)
         {
-            ulong value = context.OpStack.PopI64().UInt64;
+            ulong value = context.OpStack.PopU64();
             ulong result = (value & ByteSign) != 0
                 ? I64ByteExtend | value
                 : ByteMask & value;
@@ -81,7 +81,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64Extend16S(ExecContext context)
         {
-            ulong value = context.OpStack.PopI64().UInt64;
+            ulong value = context.OpStack.PopU64();
             ulong result = (value & ShortSign) != 0
                 ? I64ShortExtend | value
                 : ShortMask & value;
@@ -90,7 +90,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64Extend32S(ExecContext context)
         {
-            ulong value = context.OpStack.PopI64().UInt64;
+            ulong value = context.OpStack.PopU64();
             ulong result = (value & WordSign) != 0
                 ? WordExtend | value
                 : WordMask & value;

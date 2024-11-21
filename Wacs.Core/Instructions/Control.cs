@@ -888,7 +888,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            uint i = context.OpStack.PopI32();
+            uint i = context.OpStack.PopU32();
             //10.
             if (i >= tab.Elements.Count)
                 throw new TrapException($"Instruction call_indirect could not find element {i}");
