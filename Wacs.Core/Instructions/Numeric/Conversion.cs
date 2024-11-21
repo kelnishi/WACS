@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -58,52 +59,58 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly InstConvert F64ReinterpretI64 = new(OpCode.F64ReinterpretI64 , (Func<long,double> )ExecuteF64ReinterpretI64, NumericInst.ValidateOperands(pop: ValType.I64, push: ValType.F64));
 
         public override ByteCode Op { get; }
-        private readonly Delegate _execute;
-
+        
         private readonly NumericInst.ValidationDelegate _validate;
+        delegate void Executor(ExecContext context);
+        private Executor _executor;
         
         private InstConvert(ByteCode op, Delegate execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
-            _execute = execute;
+            _executor = CreateExecutor(execute);
             _validate = validate;
         }
         
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        
         public override int Execute(ExecContext context)
         {
-            switch (_execute)
-            {
-                case Func<long,int>     I64_I32: context.OpStack.PushI32(I64_I32(context.OpStack.PopI64())); break;
-                case Func<float,int>    F32_I32: context.OpStack.PushI32(F32_I32(context.OpStack.PopF32())); break;
-                case Func<double,int>   F64_I32: context.OpStack.PushI32(F64_I32(context.OpStack.PopF64())); break;
-                
-                case Func<float,uint>    F32_U32: context.OpStack.PushU32(F32_U32(context.OpStack.PopF32())); break;
-                case Func<double,uint>   F64_U32: context.OpStack.PushU32(F64_U32(context.OpStack.PopF64())); break;
-                
-                case Func<int,long>     I32_I64: context.OpStack.PushI64(I32_I64(context.OpStack.PopI32())); break;
-                case Func<uint,long>    U32_I64: context.OpStack.PushI64(U32_I64(context.OpStack.PopU32())); break;
-                case Func<float,long>   F32_I64: context.OpStack.PushI64(F32_I64(context.OpStack.PopF32())); break;
-                case Func<double,long>  F64_I64: context.OpStack.PushI64(F64_I64(context.OpStack.PopF64())); break;
-                
-                case Func<uint,ulong>    U32_U64: context.OpStack.PushU64(U32_U64(context.OpStack.PopU32())); break;
-                case Func<float,ulong>   F32_U64: context.OpStack.PushU64(F32_U64(context.OpStack.PopF32())); break;
-                case Func<double,ulong>  F64_U64: context.OpStack.PushU64(F64_U64(context.OpStack.PopF64())); break;
-                
-                case Func<int,float>    I32_F32: context.OpStack.PushF32(I32_F32(context.OpStack.PopI32())); break;
-                case Func<uint,float>   U32_F32: context.OpStack.PushF32(U32_F32(context.OpStack.PopU32())); break;
-                case Func<long,float>   I64_F32: context.OpStack.PushF32(I64_F32(context.OpStack.PopI64())); break;
-                case Func<ulong,float>  U64_F32: context.OpStack.PushF32(U64_F32(context.OpStack.PopU64())); break;
-                case Func<double,float> F64_F32: context.OpStack.PushF32(F64_F32(context.OpStack.PopF64())); break;
-                
-                case Func<int,double>     I32_D64: context.OpStack.PushF64(I32_D64(context.OpStack.PopI32())); break;
-                case Func<uint,double>    U32_D64: context.OpStack.PushF64(U32_D64(context.OpStack.PopU32())); break;
-                case Func<long,double>    I64_D64: context.OpStack.PushF64(I64_D64(context.OpStack.PopI64())); break;
-                case Func<ulong,double>   U64_D64: context.OpStack.PushF64(U64_D64(context.OpStack.PopU64())); break;
-                case Func<float,double>   F32_D64: context.OpStack.PushF64(F32_D64(context.OpStack.PopF32())); break;
-            }
+            _executor(context);
             return 1;
+        }
+
+        private Executor CreateExecutor(Delegate execute)
+        {
+            return execute switch
+            {
+                Func<long, int> I64_I32 => context => context.OpStack.PushI32(I64_I32(context.OpStack.PopI64())),
+                Func<float, int> F32_I32 => context => context.OpStack.PushI32(F32_I32(context.OpStack.PopF32())),
+                Func<double, int> F64_I32 => context => context.OpStack.PushI32(F64_I32(context.OpStack.PopF64())),
+
+                Func<float, uint> F32_U32 => context => context.OpStack.PushU32(F32_U32(context.OpStack.PopF32())),
+                Func<double, uint> F64_U32 => context => context.OpStack.PushU32(F64_U32(context.OpStack.PopF64())),
+
+                Func<int, long> I32_I64 => context => context.OpStack.PushI64(I32_I64(context.OpStack.PopI32())),
+                Func<uint, long> U32_I64 => context => context.OpStack.PushI64(U32_I64(context.OpStack.PopU32())),
+                Func<float, long> F32_I64 => context => context.OpStack.PushI64(F32_I64(context.OpStack.PopF32())),
+                Func<double, long> F64_I64 => context => context.OpStack.PushI64(F64_I64(context.OpStack.PopF64())),
+
+                Func<uint, ulong> U32_U64 => context => context.OpStack.PushU64(U32_U64(context.OpStack.PopU32())),
+                Func<float, ulong> F32_U64 => context => context.OpStack.PushU64(F32_U64(context.OpStack.PopF32())),
+                Func<double, ulong> F64_U64 => context => context.OpStack.PushU64(F64_U64(context.OpStack.PopF64())),
+
+                Func<int, float> I32_F32 => context => context.OpStack.PushF32(I32_F32(context.OpStack.PopI32())),
+                Func<uint, float> U32_F32 => context => context.OpStack.PushF32(U32_F32(context.OpStack.PopU32())),
+                Func<long, float> I64_F32 => context => context.OpStack.PushF32(I64_F32(context.OpStack.PopI64())),
+                Func<ulong, float> U64_F32 => context => context.OpStack.PushF32(U64_F32(context.OpStack.PopU64())),
+                Func<double, float> F64_F32 => context => context.OpStack.PushF32(F64_F32(context.OpStack.PopF64())),
+
+                Func<int, double> I32_D64 => context => context.OpStack.PushF64(I32_D64(context.OpStack.PopI32())),
+                Func<uint, double> U32_D64 => context => context.OpStack.PushF64(U32_D64(context.OpStack.PopU32())),
+                Func<long, double> I64_D64 => context => context.OpStack.PushF64(I64_D64(context.OpStack.PopI64())),
+                Func<ulong, double> U64_D64 => context => context.OpStack.PushF64(U64_D64(context.OpStack.PopU64())),
+                Func<float, double> F32_D64 => context => context.OpStack.PushF64(F32_D64(context.OpStack.PopF32())),
+                _ => throw new InvalidDataException($"Cannot create delegate from type {execute.GetType()}")
+            };
         }
         
         private static int ExecuteI32WrapI64(long value) => unchecked((int)value);

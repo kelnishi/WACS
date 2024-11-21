@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -72,53 +73,60 @@ namespace Wacs.Core.Instructions.Numeric
             NumericInst.ValidateOperands(pop1: ValType.I32, pop2: ValType.I32, push: ValType.I32));
 
         public override ByteCode Op { get; }
-        private readonly Delegate _execute;
-
+        
         private readonly NumericInst.ValidationDelegate _validate;
 
         private readonly bool _isConst;
         public bool IsConstant => _isConst;
+        delegate int Executor(ExecContext context);
+        private Executor _executor;
         
         private InstI32BinOp(ByteCode op, Delegate execute, NumericInst.ValidationDelegate validate, bool isConst = false)
         {
             Op = op;
-            _execute = execute;
+            _executor = CreateExecutor(execute);
             _validate = validate;
             _isConst = isConst;
         }
-        
-        public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        private Executor CreateExecutor(Delegate execute)
         {
-            switch (_execute)
+            switch (execute)
             {
                 case Func<int,int,int> signed:
-                {
-                    int i2 = context.OpStack.PopI32();
-                    int i1 = context.OpStack.PopI32();
-                    int result = signed(i1, i2);
-                    context.OpStack.PushI32(result);
-                    break;
-                }
+                    return context =>
+                    {
+                        int i2 = context.OpStack.PopI32();
+                        int i1 = context.OpStack.PopI32();
+                        int result = signed(i1, i2);
+                        context.OpStack.PushI32(result);
+                        return 1;
+                    };
                 case Func<uint,uint,uint> unsigned:
-                {
-                    uint i2 = context.OpStack.PopU32();
-                    uint i1 = context.OpStack.PopU32();
-                    uint result = unsigned(i1, i2);
-                    context.OpStack.PushU32(result);
-                    break;
-                }
+                    return context =>
+                    {
+                        uint i2 = context.OpStack.PopU32();
+                        uint i1 = context.OpStack.PopU32();
+                        uint result = unsigned(i1, i2);
+                        context.OpStack.PushU32(result);
+                        return 1;
+                    };
                 case Func<uint,int,uint> mixed:
-                {
-                    int i2 = context.OpStack.PopI32();
-                    uint i1 = context.OpStack.PopU32();
-                    uint result = mixed(i1, i2);
-                    context.OpStack.PushU32(result);
-                    break;
-                }
+                    return context =>
+                    {
+                        int i2 = context.OpStack.PopI32();
+                        uint i1 = context.OpStack.PopU32();
+                        uint result = mixed(i1, i2);
+                        context.OpStack.PushU32(result);
+                        return 1;
+                    };
+                default:
+                    throw new InvalidDataException($"Invalid delegate type {execute.GetType()}");
             }
-            return 1;
         }
+        
+        public override void Validate(IWasmValidationContext context) => _validate(context);
+        public override int Execute(ExecContext context) => _executor(context);
 
         // @Spec 4.3.2.3. iadd
         private static int ExecuteI32Add(int i1, int i2) => i1 + i2;
