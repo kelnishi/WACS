@@ -14,123 +14,107 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public partial class NumericInst
+    public abstract class InstI64RelOp : InstructionBase
     {
         // @Spec 3.3.1.5. i.relop
-        public static readonly NumericInst I64Eq = new(OpCode.I64Eq, ExecuteI64Eq,
-            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
+        public static readonly InstI64RelOp I64Eq = new Signed(OpCode.I64Eq, ExecuteI64Eq,
+            NumericInst.ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
 
-        public static readonly NumericInst I64Ne = new(OpCode.I64Ne, ExecuteI64Ne,
-            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
+        public static readonly InstI64RelOp I64Ne = new Signed(OpCode.I64Ne, ExecuteI64Ne,
+            NumericInst.ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
 
-        public static readonly NumericInst I64LtS = new(OpCode.I64LtS, ExecuteI64LtS,
-            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
+        public static readonly InstI64RelOp I64LtS = new Signed(OpCode.I64LtS, ExecuteI64LtS,
+            NumericInst.ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
 
-        public static readonly NumericInst I64LtU = new(OpCode.I64LtU, ExecuteI64LtU,
-            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
+        public static readonly InstI64RelOp I64LtU = new Unsigned(OpCode.I64LtU, ExecuteI64LtU,
+            NumericInst.ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
 
-        public static readonly NumericInst I64GtS = new(OpCode.I64GtS, ExecuteI64GtS,
-            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
+        public static readonly InstI64RelOp I64GtS = new Signed(OpCode.I64GtS, ExecuteI64GtS,
+            NumericInst.ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
 
-        public static readonly NumericInst I64GtU = new(OpCode.I64GtU, ExecuteI64GtU,
-            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
+        public static readonly InstI64RelOp I64GtU = new Unsigned(OpCode.I64GtU, ExecuteI64GtU,
+            NumericInst.ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
 
-        public static readonly NumericInst I64LeS = new(OpCode.I64LeS, ExecuteI64LeS,
-            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
+        public static readonly InstI64RelOp I64LeS = new Signed(OpCode.I64LeS, ExecuteI64LeS,
+            NumericInst.ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
 
-        public static readonly NumericInst I64LeU = new(OpCode.I64LeU, ExecuteI64LeU,
-            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
+        public static readonly InstI64RelOp I64LeU = new Unsigned(OpCode.I64LeU, ExecuteI64LeU,
+            NumericInst.ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
 
-        public static readonly NumericInst I64GeS = new(OpCode.I64GeS, ExecuteI64GeS,
-            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
+        public static readonly InstI64RelOp I64GeS = new Signed(OpCode.I64GeS, ExecuteI64GeS,
+            NumericInst.ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
 
-        public static readonly NumericInst I64GeU = new(OpCode.I64GeU, ExecuteI64GeU,
-            ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
+        public static readonly InstI64RelOp I64GeU = new Unsigned(OpCode.I64GeU, ExecuteI64GeU,
+            NumericInst.ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
 
-        private static void ExecuteI64Eq(ExecContext context)
+        public override ByteCode Op { get; }
+        private readonly NumericInst.ValidationDelegate _validate;
+        private InstI64RelOp(ByteCode op, NumericInst.ValidationDelegate validate)
         {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
-            int result = i1 == i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
+            Op = op;
+            _validate = validate;
         }
 
-        private static void ExecuteI64Ne(ExecContext context)
+        private class Signed : InstI64RelOp
         {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
-            int result = i1 != i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
+            private Func<long,long,int> _execute;
+            public Signed(ByteCode op, Func<long, long ,int> execute, NumericInst.ValidationDelegate validate)
+                : base(op, validate) => _execute = execute;
 
-        private static void ExecuteI64LtS(ExecContext context)
-        {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
-            int result = i1 < i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
+            public override int Execute(ExecContext context)
+            {
+                long i2 = context.OpStack.PopI64();
+                long i1 = context.OpStack.PopI64();
+                int result = _execute(i1, i2);
+                context.OpStack.PushI32(result);
+                return 1;
+            }
         }
+        
+        private class Unsigned : InstI64RelOp
+        {
+            private Func<ulong,ulong,int> _execute;
+            public Unsigned(ByteCode op, Func<ulong, ulong, int> execute, NumericInst.ValidationDelegate validate)
+                : base(op, validate) => _execute = execute;
 
-        private static void ExecuteI64LtU(ExecContext context)
-        {
-            ulong i2 = context.OpStack.PopU64();
-            ulong i1 = context.OpStack.PopU64();
-            int result = i1 < i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
+            public override int Execute(ExecContext context)
+            {
+                ulong i2 = context.OpStack.PopU64();
+                ulong i1 = context.OpStack.PopU64();
+                int result = _execute(i1, i2);
+                context.OpStack.PushI32(result);
+                return 1;
+            }
         }
+        
+        public override void Validate(IWasmValidationContext context) => _validate(context);
+        
+        private static int ExecuteI64Eq(long i1, long i2) => i1 == i2 ? 1 : 0;
 
-        private static void ExecuteI64GtS(ExecContext context)
-        {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
-            int result = i1 > i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
+        private static int ExecuteI64Ne(long i1, long i2) => i1 != i2 ? 1 : 0;
 
-        private static void ExecuteI64GtU(ExecContext context)
-        {
-            ulong i2 = context.OpStack.PopU64();
-            ulong i1 = context.OpStack.PopU64();
-            int result = i1 > i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
+        private static int ExecuteI64LtS(long i1, long i2) => i1 < i2 ? 1 : 0;
 
-        private static void ExecuteI64LeS(ExecContext context)
-        {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
-            int result = i1 <= i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
+        private static int ExecuteI64LtU(ulong i1, ulong i2) => i1 < i2 ? 1 : 0;
 
-        private static void ExecuteI64LeU(ExecContext context)
-        {
-            ulong i2 = context.OpStack.PopU64();
-            ulong i1 = context.OpStack.PopU64();
-            int result = i1 <= i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
+        private static int ExecuteI64GtS(long i1, long i2) => i1 > i2 ? 1 : 0;
 
-        private static void ExecuteI64GeS(ExecContext context)
-        {
-            long i2 = context.OpStack.PopI64();
-            long i1 = context.OpStack.PopI64();
-            int result = i1 >= i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
+        private static int ExecuteI64GtU(ulong i1, ulong i2) => i1 > i2 ? 1 : 0;
 
-        private static void ExecuteI64GeU(ExecContext context)
-        {
-            ulong i2 = context.OpStack.PopU64();
-            ulong i1 = context.OpStack.PopU64();
-            int result = i1 >= i2 ? 1 : 0;
-            context.OpStack.PushI32(result);
-        }
+        private static int ExecuteI64LeS(long i1, long i2) => i1 <= i2 ? 1 : 0;
+
+        private static int ExecuteI64LeU(ulong i1, ulong i2) => i1 <= i2 ? 1 : 0;
+
+        private static int ExecuteI64GeS(long i1, long i2) => i1 >= i2 ? 1 : 0;
+
+        private static int ExecuteI64GeU(ulong i1, ulong i2) => i1 >= i2 ? 1 : 0;
     }
 }
