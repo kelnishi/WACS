@@ -44,7 +44,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.2. unreachable
-        public override void Execute(ExecContext context) =>
+        public override int Execute(ExecContext context) =>
             throw new TrapException("unreachable");
     }
 
@@ -60,8 +60,9 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.1. nop
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
+            return 1;
         }
     }
 
@@ -107,7 +108,11 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.3. block
-        public override void Execute(ExecContext context) => ExecuteInstruction(context, Block, BlockOp);
+        public override int Execute(ExecContext context)
+        {
+            ExecuteInstruction(context, Block, BlockOp);
+            return 1;
+        }
 
         public static void ExecuteInstruction(ExecContext context, Block block, ByteCode inst)
         {
@@ -201,7 +206,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.4. loop
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             try
             {
@@ -227,6 +232,7 @@ namespace Wacs.Core.Instructions
                 context.Assert( false,
                     $"Instruction loop failed. BlockType {Block.Type} did not exist in the Context.");
             }
+            return 1;
         }
 
         /// <summary>
@@ -307,7 +313,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.5. if
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             int c = context.OpStack.PopI32();
             if (c != 0)
@@ -318,6 +324,7 @@ namespace Wacs.Core.Instructions
             {
                 InstBlock.ExecuteInstruction(context, ElseBlock, ElseOp);
             }
+            return 1;
         }
 
         /// <summary>
@@ -376,7 +383,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.ReturnResults(frame.EndTypes);
         }
 
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             var label = context.Frame.Label;
             switch (label.Instruction.x00)
@@ -395,6 +402,7 @@ namespace Wacs.Core.Instructions
                     //Do nothing
                     break;
             }
+            return 1;
         }
 
         public override string RenderText(ExecContext? context)
@@ -466,7 +474,11 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.6. br l
-        public override void Execute(ExecContext context) => ExecuteInstruction(context, L);
+        public override int Execute(ExecContext context)
+        {
+            ExecuteInstruction(context, L);
+            return 1;
+        }
 
         public static void ExecuteInstruction(ExecContext context, LabelIdx labelIndex)
         {
@@ -557,13 +569,14 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.7. br_if
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             int c = context.OpStack.PopI32();
             if (c != 0)
             {
                 InstBranch.ExecuteInstruction(context, L);
             }
+            return 1;
         }
 
         /// <summary>
@@ -635,7 +648,7 @@ namespace Wacs.Core.Instructions
         /// @Spec 4.4.8.8. br_table
         /// </summary>
         /// <param name="context"></param>
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             int i = context.OpStack.PopI32();
@@ -650,6 +663,7 @@ namespace Wacs.Core.Instructions
             {
                 InstBranch.ExecuteInstruction(context, Ln);
             }
+            return 1;
         }
 
         private static LabelIdx ParseLabelIndex(BinaryReader reader) =>
@@ -720,7 +734,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.9. return
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             context.Assert( context.OpStack.Count >= context.Frame.Arity,
                 $"Instruction return failed. Operand stack underflow");
@@ -729,6 +743,7 @@ namespace Wacs.Core.Instructions
             // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
             var address = context.PopFrame();
             context.ResumeSequence(address);
+            return 1;
         }
     }
 
@@ -761,12 +776,13 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.10. call
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
                 $"Instruction call failed. Function address for {X} was not in the Context.");
             var a = context.Frame.Module.FuncAddrs[X];
             context.Invoke(a);
+            return 1;
         }
 
         /// <summary>
@@ -867,7 +883,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.11. call_indirect
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(X),
@@ -914,6 +930,7 @@ namespace Wacs.Core.Instructions
                 throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
             //19.
             context.Invoke(a);
+            return 1;
         }
 
         /// <summary>

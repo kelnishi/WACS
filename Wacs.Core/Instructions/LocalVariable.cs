@@ -60,7 +60,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.5.1. local.get 
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Locals.Contains(Index),
@@ -70,6 +70,7 @@ namespace Wacs.Core.Instructions
             var value = context.Frame.Locals.Data[Index.Value];
             //4.
             context.OpStack.PushValue(value);
+            return 1;
         }
     }
     
@@ -108,7 +109,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.5.2. local.set
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Locals.Contains(Index),
@@ -124,6 +125,7 @@ namespace Wacs.Core.Instructions
             //5.
             // context.Frame.Locals.Set(Index, value);
             context.Frame.Locals.Data[Index.Value] = value;
+            return 1;
         }
     }
     
@@ -166,7 +168,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.5.3. local.tee
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //1.
             context.Assert( context.OpStack.HasValue,
@@ -194,6 +196,7 @@ namespace Wacs.Core.Instructions
             //5.
             // context.Frame.Locals.Set(Index, value);
             context.Frame.Locals.Data[Index.Value] = value;
+            return 1;
         }
         
     }
