@@ -88,7 +88,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
         
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             switch (_execute)
             {
@@ -117,6 +117,7 @@ namespace Wacs.Core.Instructions.Numeric
                     break;
                 }
             }
+            return 1;
         }
 
         // @Spec 4.3.2.3. iadd

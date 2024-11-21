@@ -37,7 +37,11 @@ namespace Wacs.Core.Instructions.Numeric
         public override ByteCode Op { get; }
 
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override void Execute(ExecContext context) => _execute(context);
+        public override int Execute(ExecContext context)
+        {
+            _execute(context);
+            return 1;
+        }
 
         public override string RenderText(ExecContext? context)
         {

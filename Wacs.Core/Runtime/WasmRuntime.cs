@@ -235,24 +235,28 @@ namespace Wacs.Core.Runtime
                 {
                     if (fastPath)
                     {
-                        while (ProcessThread())
+                        int comp = 0;
+                        do
                         {
-                            steps += 1;
+                            comp = ProcessThread();
+                            steps += comp;
                             if (options.GasLimit > 0)
                             {
                                 if (steps >= options.GasLimit)
                                 {
                                     throw new InsufficientGasException(
                                         $"Invocation ran out of gas (limit:{options.GasLimit}).");
-                                }    
+                                }
                             }
-                        }
+                        } while (comp > 0);
                     }
                     else
                     {
-                        while (ProcessThreadWithOptions(options))
+                        int comp = 0;
+                        do
                         {
-                            steps += 1;
+                            comp = ProcessThreadWithOptions(options);
+                            steps += comp;
 
                             if (options.GasLimit > 0)
                             {
@@ -260,7 +264,7 @@ namespace Wacs.Core.Runtime
                                 {
                                     throw new InsufficientGasException(
                                         $"Invocation ran out of gas (limit:{options.GasLimit}).");
-                                }    
+                                }
                             }
 
                             if (options.LogGas && options.LogProgressEvery > 0)
@@ -270,7 +274,7 @@ namespace Wacs.Core.Runtime
                                     Console.Error.Write('.');
                                 }
                             }
-                        }
+                        } while (comp > 0);
                     }
                 }
                 catch (TrapException exc)
@@ -392,21 +396,20 @@ namespace Wacs.Core.Runtime
             };
         }
 
-        public bool ProcessThread()
+        public int ProcessThread()
         {
             var inst = Context.Next();
             if (inst == null)
-                return false;
+                return 0;
             
-            inst.Execute(Context);
-            return true;
+            return inst.Execute(Context);
         }
 
-        public bool ProcessThreadWithOptions(InvokerOptions options)
+        public int ProcessThreadWithOptions(InvokerOptions options)
         {
             var inst = Context.Next();
             if (inst == null)
-                return false;
+                return 0;
             
             //Trace execution
             if (options.LogInstructionExecution != InstructionLogging.None)
@@ -414,10 +417,11 @@ namespace Wacs.Core.Runtime
                 LogPreInstruction(options, inst);
             }
 
+            int steps = 0;
             if (options.CollectStats)
             {
                 Context.InstructionTimer.Restart();
-                inst.Execute(Context);
+                steps += inst.Execute(Context);
                 Context.InstructionTimer.Stop();
 
                 var st = Context.Stats[(ushort)inst.Op];
@@ -427,7 +431,7 @@ namespace Wacs.Core.Runtime
             }
             else
             {
-                inst.Execute(Context);
+                steps += inst.Execute(Context);
             }
 
             if (options.LogInstructionExecution.Has(InstructionLogging.Computes))
@@ -436,7 +440,7 @@ namespace Wacs.Core.Runtime
             }
             
             lastInstruction = inst;
-            return true;
+            return steps;
         }
 
         private void LogPreInstruction(InvokerOptions options, IInstruction inst)

@@ -44,7 +44,7 @@ namespace Wacs.Core.Instructions
         /// @Spec 4.4.3.7. i8x16.shuffle x
         /// </summary>
         /// <param name="context"></param>
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             V128 b = context.OpStack.PopV128();
             V128 a = context.OpStack.PopV128();
@@ -55,6 +55,7 @@ namespace Wacs.Core.Instructions
                 result[i] = laneIndex < 16 ? a[laneIndex] : b[(byte)(laneIndex - 16)];
             }
             context.OpStack.PushV128(result);
+            return 1;
         }
 
         public static V128 ParseLanes(BinaryReader reader) => 

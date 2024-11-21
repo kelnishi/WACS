@@ -90,7 +90,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.7.1. t.load and t.loadN_sx
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -171,6 +171,7 @@ namespace Wacs.Core.Instructions
                     }
                     break;
             }
+            return 1;
         }
 
         public IInstruction Immediate(MemArg m)
@@ -257,7 +258,7 @@ namespace Wacs.Core.Instructions
 
         // @Spec 4.4.7.6. t.store
         // @Spec 4.4.7.6. t.storeN
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -316,6 +317,7 @@ namespace Wacs.Core.Instructions
                     cData.CopyTo(bs);
                     break;
             }
+            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader)

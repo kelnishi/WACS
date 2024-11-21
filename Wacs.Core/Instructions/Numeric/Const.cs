@@ -39,8 +39,11 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(ExecContext context) =>
+        public override int Execute(ExecContext context)
+        {
             context.OpStack.PushI32(Value);
+            return 1;
+        }
 
         public override IInstruction Parse(BinaryReader reader) {
             Value = reader.ReadLeb128_s32();
@@ -72,8 +75,11 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(ExecContext context) =>
+        public override int Execute(ExecContext context)
+        {
             context.OpStack.PushI64(Value);
+            return 1;
+        }
 
         public override IInstruction Parse(BinaryReader reader) {
             Value = reader.ReadLeb128_s64();
@@ -99,8 +105,11 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(ExecContext context) =>
+        public override int Execute(ExecContext context)
+        {
             context.OpStack.PushF32(Value);
+            return 1;
+        }
 
         public override IInstruction Parse(BinaryReader reader) {
             Value = reader.Read_f32();
@@ -134,8 +143,11 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(ExecContext context) =>
+        public override int Execute(ExecContext context)
+        {
             context.OpStack.PushF64(Value);
+            return 1;
+        }
 
         public override IInstruction Parse(BinaryReader reader) {
             Value = reader.Read_f64();
