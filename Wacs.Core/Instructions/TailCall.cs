@@ -30,7 +30,7 @@ namespace Wacs.Core.Instructions
     {
         public override ByteCode Op => OpCode.ReturnCall;
 
-        public FuncIdx X { get; set; }
+        public FuncIdx X;
 
         public bool IsBound(ExecContext context)
         {
@@ -135,8 +135,8 @@ namespace Wacs.Core.Instructions
     {
         public override ByteCode Op => OpCode.ReturnCallIndirect;
 
-        private TypeIdx Y { get; set; }
-        private TableIdx X { get; set; }
+        private TypeIdx Y;
+        private TableIdx X;
 
         public bool IsBound(ExecContext context)
         {
