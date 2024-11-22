@@ -298,23 +298,28 @@ namespace Wacs.Core.Instructions
                     bs[0] = cU8;
                     break;
                 case BitWidth.S16:
+                    short cI16 = (short)c.Int32;
+                    MemoryMarshal.Write(bs, ref cI16);
+                    break;
                 case BitWidth.U16:
-                    byte[] cU16 = BitConverter.GetBytes((ushort)(0xFFFF & c.Int32));
-                    cU16.CopyTo(bs);
+                    ushort cU16 = (ushort)c.UInt32;
+                    MemoryMarshal.Write(bs, ref cU16);
                     break;
                 case BitWidth.S32:
+                    int cI32 = c.Int32;
+                    MemoryMarshal.Write(bs, ref cI32);
+                    break;
                 case BitWidth.U32:
-                    byte[] cU32 = BitConverter.GetBytes((uint)c.Int32);
-                    cU32.CopyTo(bs);
+                    uint cU32 = c.UInt32;
+                    MemoryMarshal.Write(bs, ref cU32);
                     break;
                 case BitWidth.U64:
-                    byte[] cU64 = BitConverter.GetBytes((ulong)c.Int64);
-                    cU64.CopyTo(bs);
+                    ulong cU64 = c.UInt64;
+                    MemoryMarshal.Write(bs, ref cU64);
                     break;
                 case BitWidth.V128:
                     V128 cV128 = c.V128;
-                    var cData = MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref cV128, 1));
-                    cData.CopyTo(bs);
+                    MemoryMarshal.Write(bs, ref cV128);
                     break;
             }
             return 1;
