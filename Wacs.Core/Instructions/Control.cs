@@ -69,7 +69,6 @@ namespace Wacs.Core.Instructions
     //0x02
     public class InstBlock : InstructionBase, IBlockInstruction
     {
-        private static Stack<Value> _asideVals = new();
         private static readonly ByteCode BlockOp = OpCode.Block;
         public override ByteCode Op => BlockOp;
         private Block Block;
@@ -131,11 +130,10 @@ namespace Wacs.Core.Instructions
                 context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Arity,
                     $"Instruction block failed. Operand Stack underflow.");
                 //6. 
-                context.Assert(_asideVals.Count == 0,
-                    "Shared temporary stack had values left in it.");
-                context.OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
+                //Split stack, leave values in place.
+                // context.OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
                 //7.
-                context.EnterBlock(block, funcType.ResultType, inst, _asideVals);
+                context.EnterBlock(block, funcType.ResultType, inst);
             }
             catch (IndexOutOfRangeException exc)
             {
@@ -168,7 +166,6 @@ namespace Wacs.Core.Instructions
     public class InstLoop : InstructionBase, IBlockInstruction
     {
         private static readonly ByteCode LoopOp = OpCode.Loop;
-        private Stack<Value> _asideVals = new();
         public override ByteCode Op => LoopOp;
         private Block Block { get; set; } = null!;
 
@@ -220,11 +217,10 @@ namespace Wacs.Core.Instructions
                 context.Assert( context.OpStack.Count >= funcType.ParameterTypes.Arity,
                     $"Instruction loop failed. Operand Stack underflow.");
                 //6. 
-                context.Assert(_asideVals.Count == 0,
-                    "Shared temporary stack had values left in it.");
-                context.OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
+                //Split stack, leave values in place.
+                // context.OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
                 //7.
-                context.EnterBlock(Block, funcType.ParameterTypes, OpCode.Loop, _asideVals);
+                context.EnterBlock(Block, funcType.ParameterTypes, OpCode.Loop);
             }
             catch (IndexOutOfRangeException exc)
             {

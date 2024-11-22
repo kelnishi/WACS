@@ -198,10 +198,11 @@ namespace Wacs.Core.Runtime
         }
 
         // @Spec 4.4.9.1. Enter Block
-        public void EnterBlock(Block block, ResultType resultType, ByteCode inst, Stack<Value> vals)
+        public void EnterBlock(Block block, ResultType resultType, ByteCode inst)
         {
-            OpStack.PushResults(vals);
-            var label = Frame.ReserveLabel();
+            //Split stack
+            // OpStack.PushResults(vals);
+            var label = Frame.Labels.Reserve();
             label.Set(resultType, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count);
             Frame.Labels.Push(label);
             //Sets the Pointer to the start of the block sequence
@@ -276,7 +277,7 @@ namespace Wacs.Core.Runtime
             PushFrame(frame);
             
             //10.
-            var label = frame.ReserveLabel();
+            var label = frame.Labels.Reserve();
             label.Set(funcType.ResultType, new InstructionPointer(_currentSequence, _sequenceIndex), OpCode.Expr, OpStack.Count);
             frame.Labels.Push(label);
             EnterSequence(wasmFunc.Definition.Body.Instructions);

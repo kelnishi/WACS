@@ -65,13 +65,11 @@ namespace Wacs.Core.Runtime
         public bool Contains(LabelIdx index) =>
             index.Value < Labels.Count;
 
-        public Label ReserveLabel() => Labels.Reserve();
-
         public void ForceLabels(int depth)
         {
             while (Labels.Count < depth)
             {
-                var fakeLabel = ReserveLabel();
+                var fakeLabel = Labels.Reserve();
                 fakeLabel.Set(ResultType.Empty, InstructionPointer.Nil, OpCode.Nop, 0);
                 Labels.Push(fakeLabel);
             }

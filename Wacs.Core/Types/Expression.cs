@@ -50,7 +50,7 @@ namespace Wacs.Core.Types
         public void Execute(ExecContext context)
         {
             var frame = context.ReserveFrame(context.Frame.Module, FunctionType.Empty, FuncIdx.ExpressionEvaluation);
-            var label = frame.ReserveLabel();
+            var label = frame.Labels.Reserve();
             label.Set(ResultType.Empty, new InstructionPointer(Instructions, 1), OpCode.Nop, context.OpStack.Count);
             frame.Labels.Push(label);
             context.PushFrame(frame);
