@@ -248,11 +248,11 @@ namespace Wacs.Core.Instructions
             OpCode.F64ReinterpretI64 => InstConvert.F64ReinterpretI64,
             
             //Sign-Extension
-            OpCode.I32Extend8S       => NumericInst.I32Extend8S,
-            OpCode.I32Extend16S      => NumericInst.I32Extend16S,
-            OpCode.I64Extend8S       => NumericInst.I64Extend8S,
-            OpCode.I64Extend16S      => NumericInst.I64Extend16S,
-            OpCode.I64Extend32S      => NumericInst.I64Extend32S,
+            OpCode.I32Extend8S       => InstI32SignExtend.I32Extend8S,
+            OpCode.I32Extend16S      => InstI32SignExtend.I32Extend16S,
+            OpCode.I64Extend8S       => InstI64SignExtend.I64Extend8S,
+            OpCode.I64Extend16S      => InstI64SignExtend.I64Extend16S,
+            OpCode.I64Extend32S      => InstI64SignExtend.I64Extend32S,
             
             _ => throw new NotSupportedException($"Opcode {opcode} is not supported.")
         } ?? throw new InvalidOperationException($"Could not create instruction for opcode {opcode}");
