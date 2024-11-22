@@ -32,7 +32,7 @@ namespace Wacs.Core.Runtime.Types
             _value = initialValue;
         }
 
-        public GlobalType Type { get; }
+        public readonly GlobalType Type;
 
         public Value Value
         {

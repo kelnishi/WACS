@@ -30,7 +30,7 @@ namespace Wacs.Core.Instructions
     {
         public override ByteCode Op => OpCode.MemorySize;
 
-        private MemIdx M { get; set; }
+        private MemIdx M;
 
         /// <summary>
         /// @Spec 3.3.7.10. memory.size
@@ -73,7 +73,7 @@ namespace Wacs.Core.Instructions
     public class InstMemoryGrow : InstructionBase
     {
         public override ByteCode Op => OpCode.MemoryGrow;
-        private MemIdx M { get; set; }
+        private MemIdx M;
 
         /// <summary>
         /// @Spec 3.3.7.11. memory.grow
@@ -131,8 +131,8 @@ namespace Wacs.Core.Instructions
     public class InstMemoryInit : InstructionBase
     {
         public override ByteCode Op => ExtCode.MemoryInit;
-        private DataIdx X { get; set; }
-        private MemIdx Y { get; set; }
+        private DataIdx X;
+        private MemIdx Y;
 
         /// <summary>
         /// @Spec 3.3.7.14. memory.init
@@ -248,7 +248,7 @@ namespace Wacs.Core.Instructions
     public class InstDataDrop : InstructionBase
     {
         public override ByteCode Op => ExtCode.DataDrop;
-        private DataIdx X { get; set; }
+        private DataIdx X;
 
         /// <summary>
         /// @Spec 3.3.7.15. data.drop
@@ -294,8 +294,8 @@ namespace Wacs.Core.Instructions
     public class InstMemoryCopy : InstructionBase
     {
         public override ByteCode Op => ExtCode.MemoryCopy;
-        private MemIdx SrcX { get; set; }
-        private MemIdx DstY { get; set; }
+        private MemIdx SrcX;
+        private MemIdx DstY;
 
         /// <summary>
         /// @Spec 3.3.7.13. memory.copy
@@ -418,7 +418,7 @@ namespace Wacs.Core.Instructions
     public class InstMemoryFill : InstructionBase
     {
         public override ByteCode Op => ExtCode.MemoryFill;
-        private MemIdx X { get; set; }
+        private MemIdx X;
 
         /// <summary>
         /// @Spec 3.3.7.12. memory.fill

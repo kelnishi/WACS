@@ -39,7 +39,7 @@ namespace Wacs.Core.Types
         public Expression(IInstruction single) =>
             Instructions = new InstructionSequence(new List<IInstruction>{single});
 
-        public InstructionSequence Instructions { get; }
+        public readonly InstructionSequence Instructions;
 
         public int Size => Instructions.Size;
 
@@ -89,8 +89,6 @@ namespace Wacs.Core.Types
         {
             public Validator(ResultType resultType, bool isConstant = false)
             {
-                ResultType = resultType;
-
                 RuleFor(e => e).Custom((e, ctx) =>
                 {
                     var validationContext = ctx.GetValidationContext();
@@ -145,8 +143,6 @@ namespace Wacs.Core.Types
                     }
                 });
             }
-
-            private ResultType ResultType { get; }
         }
     }
 }

@@ -25,7 +25,7 @@ namespace Wacs.Core.Instructions.Simd
     public class InstV128Const : InstructionBase, IConstInstruction
     {
         public override ByteCode Op => SimdCode.V128Const;
-        private V128 V128 { get; set; }
+        private V128 V128;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
