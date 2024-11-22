@@ -30,7 +30,7 @@ namespace Wacs.Core.Instructions
     public class InstTableGet : InstructionBase
     {
         public override ByteCode Op => OpCode.TableGet;
-        private TableIdx X { get; set; }
+        private TableIdx X;
 
         // @Spec 3.3.6.1. table.get
         public override void Validate(IWasmValidationContext context)
@@ -90,7 +90,7 @@ namespace Wacs.Core.Instructions
     public class InstTableSet : InstructionBase
     {
         public override ByteCode Op => OpCode.TableSet;
-        private TableIdx X { get; set; }
+        private TableIdx X;
 
         // @Spec 3.3.6.2. table.set
         public override void Validate(IWasmValidationContext context)
@@ -153,8 +153,8 @@ namespace Wacs.Core.Instructions
     public class InstTableInit : InstructionBase
     {
         public override ByteCode Op => ExtCode.TableInit;
-        private TableIdx X { get; set; }
-        private ElemIdx Y { get; set; }
+        private TableIdx X;
+        private ElemIdx Y;
 
         // @Spec 3.3.6.7. table.init x y
         public override void Validate(IWasmValidationContext context)
@@ -269,7 +269,7 @@ namespace Wacs.Core.Instructions
     public class InstElemDrop : InstructionBase
     {
         public override ByteCode Op => ExtCode.ElemDrop;
-        private ElemIdx X { get; set; }
+        private ElemIdx X;
 
         // @Spec 3.3.6.8. elem.drop x
         public override void Validate(IWasmValidationContext context)
@@ -314,8 +314,8 @@ namespace Wacs.Core.Instructions
     public class InstTableCopy : InstructionBase
     {
         public override ByteCode Op => ExtCode.TableCopy;
-        private TableIdx SrcY { get; set; }
-        private TableIdx DstX { get; set; }
+        private TableIdx SrcY;
+        private TableIdx DstX;
 
         // @Spec 3.3.6.6. table.copy
         public override void Validate(IWasmValidationContext context)
@@ -440,7 +440,7 @@ namespace Wacs.Core.Instructions
     public class InstTableGrow : InstructionBase
     {
         public override ByteCode Op => ExtCode.TableGrow;
-        private TableIdx X { get; set; }
+        private TableIdx X;
 
         // @Spec 3.3.6.4. table.grow x
         public override void Validate(IWasmValidationContext context)
@@ -507,7 +507,7 @@ namespace Wacs.Core.Instructions
     public class InstTableSize : InstructionBase
     {
         public override ByteCode Op => ExtCode.TableSize;
-        private TableIdx X { get; set; }
+        private TableIdx X;
 
         // @Spec 3.3.6.3. table.size x
         public override void Validate(IWasmValidationContext context)
@@ -552,7 +552,7 @@ namespace Wacs.Core.Instructions
     public class InstTableFill : InstructionBase
     {
         public override ByteCode Op => ExtCode.TableFill;
-        private TableIdx X { get; set; }
+        private TableIdx X;
 
         // @Spec 3.3.6.5. table.fill
         public override void Validate(IWasmValidationContext context)

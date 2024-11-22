@@ -38,14 +38,14 @@ namespace Wacs.Core.Runtime.Types
                 Name = Definition.Id;
         }
 
-        public ModuleInstance Module { get; }
+        public readonly ModuleInstance Module;
 
         /// <summary>
         /// Gets the function definition containing the code and locals.
         /// </summary>
-        public Module.Function Definition { get; }
+        public readonly Module.Function Definition;
 
-        public FuncIdx Index { get; }
+        public readonly FuncIdx Index;
 
         public string ModuleName => Module.Name;
         public string Name { get; set; } = "";

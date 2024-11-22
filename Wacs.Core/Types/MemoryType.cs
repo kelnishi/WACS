@@ -46,7 +46,7 @@ namespace Wacs.Core.Types
         /// <summary>
         /// The limits specifying the minimum and optional maximum number of memory pages.
         /// </summary>
-        public Limits Limits { get; }
+        public readonly Limits Limits;
 
         public string Id { get; set; } = "";
 

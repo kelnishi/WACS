@@ -167,7 +167,7 @@ namespace Wacs.Core.Instructions
     {
         private static readonly ByteCode LoopOp = OpCode.Loop;
         public override ByteCode Op => LoopOp;
-        private Block Block { get; set; } = null!;
+        private Block Block = null!;
 
         public BlockType Type => Block.Type;
 
@@ -256,8 +256,8 @@ namespace Wacs.Core.Instructions
         private static readonly ByteCode IfOp = OpCode.If;
         private static readonly ByteCode ElseOp = OpCode.Else;
         public override ByteCode Op => IfOp;
-        private Block IfBlock { get; set; } = Block.Empty;
-        private Block ElseBlock { get; set; } = Block.Empty;
+        private Block IfBlock = Block.Empty;
+        private Block ElseBlock = Block.Empty;
 
         public BlockType Type => IfBlock.Type;
 
@@ -450,7 +450,7 @@ namespace Wacs.Core.Instructions
         private static Stack<Value> _asideVals = new();
         public override ByteCode Op => OpCode.Br;
 
-        private LabelIdx L { get; set; }
+        private LabelIdx L;
 
         // @Spec 3.3.8.6. br l
         public override void Validate(IWasmValidationContext context)
@@ -603,8 +603,8 @@ namespace Wacs.Core.Instructions
     {
         public override ByteCode Op => OpCode.BrTable;
 
-        private LabelIdx[] Ls { get; set; } = null!;
-        private LabelIdx Ln { get; set; } //Default m
+        private LabelIdx[] Ls = null!;
+        private LabelIdx Ln; //Default m
 
         // @Spec 3.3.8.8. br_table
         public override void Validate(IWasmValidationContext context)
@@ -748,7 +748,7 @@ namespace Wacs.Core.Instructions
     {
         public override ByteCode Op => OpCode.Call;
 
-        public FuncIdx X { get; set; }
+        public FuncIdx X;
 
         public bool IsBound(ExecContext context)
         {
@@ -833,8 +833,8 @@ namespace Wacs.Core.Instructions
     {
         public override ByteCode Op => OpCode.CallIndirect;
 
-        private TypeIdx Y { get; set; }
-        private TableIdx X { get; set; }
+        private TypeIdx Y;
+        private TableIdx X;
 
         public bool IsBound(ExecContext context)
         {

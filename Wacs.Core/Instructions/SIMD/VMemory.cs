@@ -53,9 +53,9 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoadMxN instruction is malformed: {WidthT}x{CountN}"),
         };
 
-        private BitWidth WidthT { get; }
-        private int CountN { get; }
-        private MemArg M { get; set; }
+        private readonly BitWidth WidthT;
+        private readonly int CountN;
+        private MemArg M;
 
         /// <summary>
         /// @Spec 3.3.7.5. v128.loadNxM_sx memarg
@@ -159,9 +159,9 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
-        private BitWidth WidthN { get; }
+        private readonly BitWidth WidthN;
 
-        private MemArg M { get; set; }
+        private MemArg M;
 
         /// <summary>
         /// @Spec 3.3.7.6. v128.loadN_splat
@@ -265,9 +265,9 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
-        private BitWidth WidthN { get; }
+        private readonly BitWidth WidthN;
 
-        private MemArg M { get; set; }
+        private MemArg M;
 
         /// <summary>
         /// @Spec 3.3.7.7. v128.loadN_zero memarg
@@ -363,11 +363,11 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
-        private BitWidth WidthN { get; }
+        private BitWidth WidthN;
 
-        private MemArg M { get; set; }
+        private MemArg M;
 
-        private LaneIdx X { get; set; }
+        private LaneIdx X;
 
         /// <summary>
         /// @Spec 3.3.7.8. v128.loadN_lane memarge laneidx
@@ -472,10 +472,10 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
-        private BitWidth WidthN { get; }
-        private MemArg M { get; set; }
+        private readonly BitWidth WidthN;
+        private MemArg M;
 
-        private LaneIdx X { get; set; }
+        private LaneIdx X;
 
         public IInstruction Immediate(MemArg m)
         {

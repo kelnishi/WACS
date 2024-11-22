@@ -42,7 +42,7 @@ namespace Wacs.Core
 
             public bool IsImport = false;
             public string Id { get; set; } = "";
-            public FuncIdx Index { get; set; }
+            public FuncIdx Index;
 
             //Function Section only parses the type indices
             public TypeIdx TypeIndex { get; internal set; }

@@ -23,7 +23,7 @@ namespace Wacs.Core.Instructions
 {
     public class InstShuffleOp : InstructionBase
     {
-        private V128 X { get; set; }
+        private V128 X;
 
         public override ByteCode Op => SimdCode.I8x16Shuffle;
 

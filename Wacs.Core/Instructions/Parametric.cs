@@ -59,8 +59,8 @@ namespace Wacs.Core.Instructions
         public InstSelect(bool withTypes = false) => WithTypes = withTypes;
         public override ByteCode Op => OpCode.Select;
 
-        private bool WithTypes { get; }
-        private ValType[] Types { get; set; } = Array.Empty<ValType>();
+        private readonly bool WithTypes;
+        private ValType[] Types = Array.Empty<ValType>();
 
         /// <summary>
         /// @Spec 3.3.4.2. select

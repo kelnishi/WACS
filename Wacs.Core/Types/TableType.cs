@@ -41,7 +41,7 @@ namespace Wacs.Core.Types
         /// <summary>
         /// The limits specifying the minimum and optional maximum number of elements.
         /// </summary>
-        public Limits Limits { get; set; } = null!;
+        public Limits Limits = null!;
 
         /// <summary>
         /// The element type of the table (e.g., funcref or externref).

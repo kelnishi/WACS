@@ -693,6 +693,8 @@ namespace Wacs.Core.Runtime
             {
                 moduleInstance.MemAddrs.Add(AllocateMemory(Store, mem));
             }
+            //Make the address space permanent
+            moduleInstance.MemAddrs.Finalize();
 
             //@Spec 4.5.4 Step 7
             Frame initFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.GlobalInitializers);
