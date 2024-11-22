@@ -123,7 +123,8 @@ namespace Wacs.Core.Utilities
         public T Reserve()
         {
             var element = _stack.Reserve();
-            element.Clear();
+            //YOLO for perf
+            // element.Clear();
             return element;
         }
 

@@ -159,10 +159,10 @@ namespace Wacs.Core.Runtime
 
         public void FlushCallStack()
         {
-            while (_callStack.Count > 0)
+            for (int i = _callStack.Count; i > 0; --i)
                 PopFrame();
-            while (OpStack.Count > 0)
-                OpStack.PopAny();
+            
+            OpStack.Clear();
 
             Frame = NullFrame;
             _currentSequence = _hostReturnSequence;

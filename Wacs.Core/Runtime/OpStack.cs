@@ -25,75 +25,78 @@ namespace Wacs.Core.Runtime
     public class OpStack
     {
         private readonly Stack<Value> _stack;
+        public int Count;
         private readonly int _stackLimit;
 
         public OpStack(int limit)
         {
             _stackLimit = limit;
             _stack = new(limit);
+            Count = 0;
         }
 
-        public bool HasValue => _stack.Count > 0;
-
-        public int Count => _stack.Count;
+        public bool HasValue => Count > 0;
 
         public void PushResults(Stack<Value> vals)
         {
-            while (vals.Count > 0) PushValue(vals.Pop());
+            for (int i = 0, l = vals.Count; i < l; ++i)
+            {
+                PushValue(vals.Pop());
+            }
         }
 
         public void PushI32(int value)
         {
-            if (_stack.Count > _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            if (++Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
             
             _stack.Push(new Value(value));
         }
 
         public void PushU32(uint value)
         {
-            if (_stack.Count > _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            if (++Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
             
             _stack.Push(new Value(value));
         }
 
         public void PushI64(long value)
         {
-            if (_stack.Count > _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            if (++Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
             
             _stack.Push(new Value(value));
         }
 
         public void PushU64(ulong value)
         {
-            if (_stack.Count > _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            if (++Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
             
             _stack.Push(new Value(value));
         }
 
         public void PushF32(float value)
         {
-            if (_stack.Count > _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            if (++Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
             
             _stack.Push(new Value(value));
         }
 
         public void PushF64(double value)
         {
-            if (_stack.Count > _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            if (++Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
             
             _stack.Push(new Value(value));
         }
 
         public void PushV128(V128 value)
         {
-            if (_stack.Count > _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            if (++Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
             
             _stack.Push(new Value(value));
         }
@@ -121,30 +124,79 @@ namespace Wacs.Core.Runtime
 
         public void PushValue(Value value)
         {
-            if (_stack.Count > _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {_stack.Count}");
+            if (++Count > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
             
             _stack.Push(value);
         }
 
-        public int PopI32() => _stack.Pop().Int32;
-        public uint PopU32() => _stack.Pop().UInt32;
-        public long PopI64() => _stack.Pop().Int64;
-        public ulong PopU64() => _stack.Pop().UInt64;
+        public int PopI32()
+        {
+            --Count;
+            return _stack.Pop().Int32;
+        }
 
-        public float PopF32() => _stack.Pop().Float32;
-        public double PopF64() => _stack.Pop().Float64;
-        public V128 PopV128() => _stack.Pop().V128;
-        public Value PopRefType() => _stack.Pop();
+        public uint PopU32()
+        {
+            --Count;
+            return _stack.Pop().UInt32;
+        }
 
-        public Value PopAny() => _stack.Pop();
+        public long PopI64()
+        {
+            --Count;
+            return _stack.Pop().Int64;
+        }
+
+        public ulong PopU64()
+        {
+            --Count;
+            return _stack.Pop().UInt64;
+        }
+
+        public float PopF32()
+        {
+            --Count;
+            return _stack.Pop().Float32;
+        }
+
+        public double PopF64()
+        {
+            --Count;
+            return _stack.Pop().Float64;
+        }
+
+        public V128 PopV128()
+        {
+            --Count;
+            return _stack.Pop().V128;
+        }
+
+        public Value PopRefType()
+        {
+            --Count;
+            return _stack.Pop();
+        }
+
+        public Value  PopAny()
+        {
+            --Count;
+            return _stack.Pop();
+        }
 
         public Value PopType(ValType type)
         {
+            --Count;
             var val = _stack.Pop();
             if (val.Type != type)
                 throw new InvalidDataException($"OperandStack contained wrong type {val.Type} expected {type}");
             return val;
+        }
+
+        public void Clear()
+        {
+            _stack.Clear();
+            Count = 0;
         }
 
         public Value Peek() => _stack.Peek();

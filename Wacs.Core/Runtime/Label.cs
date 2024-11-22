@@ -20,7 +20,7 @@ using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime
 {
-    public class Label : IPoolable
+    public struct Label : IPoolable
     {
         public int Arity;
 
