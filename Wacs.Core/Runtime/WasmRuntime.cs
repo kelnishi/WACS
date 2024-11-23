@@ -229,6 +229,7 @@ namespace Wacs.Core.Runtime
                 Context.Invoke(funcAddr);
 
                 long steps = 0;
+                long highwatermark = 0;
                 bool fastPath = options.UseFastPath();
 
                 try
@@ -267,10 +268,12 @@ namespace Wacs.Core.Runtime
                                 }
                             }
 
-                            if (options.LogGas && options.LogProgressEvery > 0)
+                            if (options.LogProgressEvery > 0)
                             {
-                                if (steps % options.LogProgressEvery == 0)
+                                highwatermark += comp;
+                                if (highwatermark >= options.LogProgressEvery)
                                 {
+                                    highwatermark -= options.LogProgressEvery;
                                     Console.Error.Write('.');
                                 }
                             }
