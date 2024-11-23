@@ -533,25 +533,26 @@ namespace Wacs.Core.Runtime
 
         private void PrintStats()
         {
-            long procTicks = Context.ProcessTimer.ElapsedTicks;
+            long procTicks = Context.ProcessTimer.ElapsedTicks; //ns
             long totalExecs = Context.Stats.Values.Sum(dc => dc.count);
-            long execTicks = Context.Stats.Values.Sum(dc => dc.duration);
+            long execTicks = Context.Stats.Values.Sum(dc => dc.duration); //ns
             long overheadTicks = procTicks - execTicks;
 
-            TimeSpan totalTime = new TimeSpan(procTicks);
-            TimeSpan execTime = new TimeSpan(execTicks);
-            TimeSpan overheadTime = new TimeSpan(overheadTicks);
+            TimeSpan totalTime = new TimeSpan(procTicks/100); //100ns
+            TimeSpan execTime = new TimeSpan(execTicks/100);
+            TimeSpan overheadTime = new TimeSpan(overheadTicks/100);
             double overheadPercent =  100.0 * overheadTicks / procTicks;
             double execPercent = 100.0 * execTicks / procTicks;
-            string overheadLabel = $"({overheadPercent:#0.###}%) {overheadTime}";
+            string overheadLabel = $"({overheadPercent:#0.###}%) {overheadTime:g}";
             
             string totalLabel = "    total duration";
             string totalInst = $"{totalExecs}";
             string totalPercent = $"{execPercent:#0.###}%t".PadLeft(8,' ');
-            string avgTime = $"{new TimeSpan(execTicks / totalExecs)}/instruction";
-            string velocity = $"{totalExecs*1.0/totalTime.TotalMilliseconds:#0.#} inst/ms";
+            string avgTime = $"{execTime.TotalMilliseconds * 1000000.0/totalExecs:#0.###}ns/i";
+            double instPerSec = totalExecs * 1000.0 / totalTime.TotalMilliseconds;
+            string velocity = $"{instPerSec.SiSuffix("0.###")}i/s";
             Console.Error.WriteLine($"Execution Stats:");
-            Console.Error.WriteLine($"{totalLabel}: {totalInst}| ({totalPercent}) {execTime} {avgTime} {velocity} overhead:{overheadLabel} total proctime:{totalTime}");
+            Console.Error.WriteLine($"{totalLabel}: {totalInst}| ({totalPercent}) {execTime.TotalSeconds:#0.###}s {avgTime} {velocity} overhead:{overheadLabel} total proctime:{totalTime.TotalSeconds:#0.###}s");
             var orderedStats = Context.Stats
                 .Where(bdc => bdc.Value.count != 0)
                 .OrderBy(bdc => -bdc.Value.count);
@@ -559,11 +560,11 @@ namespace Wacs.Core.Runtime
             foreach (var (opcode, st) in orderedStats)
             {
                 string label = $"{((ByteCode)opcode).GetMnemonic()}".PadLeft(totalLabel.Length, ' ');
-                TimeSpan instTime = new TimeSpan(st.duration);
+                TimeSpan instTime = new TimeSpan(st.duration/100); //100ns
                 double percent = 100.0 * st.duration / execTicks;
                 string execsLabel = $"{st.count}".PadLeft(totalInst.Length, ' ');
                 string percentLabel = $"{percent:#0.###}%e".PadLeft(8,' ');
-                Console.Error.WriteLine($"{label}: {execsLabel}| ({percentLabel}) {instTime}");
+                Console.Error.WriteLine($"{label}: {execsLabel}| ({percentLabel}) {instTime.TotalMilliseconds:#0.000}ms");
             }
         }
 
