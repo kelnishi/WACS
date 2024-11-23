@@ -37,6 +37,12 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public IInstruction Immediate(LocalIdx index)
+        {
+            Index = index;
+            return this;
+        }
+
         public override string RenderText(ExecContext? context)
         {
             if (context == null)
@@ -96,6 +102,12 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public IInstruction Immediate(LocalIdx idx)
+        {
+            Index = idx;
+            return this;
+        }
+
         public override string RenderText(ExecContext? context)
         {
             if (context == null)
@@ -151,6 +163,8 @@ namespace Wacs.Core.Instructions
     {
         public override ByteCode Op => OpCode.LocalTee;
         private LocalIdx Index;
+
+        public LocalIdx GetIndex() => Index;
 
         public override IInstruction Parse(BinaryReader reader)
         {

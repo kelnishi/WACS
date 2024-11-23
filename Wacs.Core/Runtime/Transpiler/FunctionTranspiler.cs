@@ -61,6 +61,19 @@ namespace Wacs.Core.Runtime.Transpiler
                         var newIf = new InstIf().Immediate(instIf.Type, newIfSeq, newElseSeq);
                         stack.Push(newIf);
                         break;
+                    case InstLocalTee instTee:
+                        //Split into local.set/local.get
+                        var newSet = new InstLocalSet().Immediate(instTee.GetIndex()) as IOptimizationTarget;
+                        var newGet = new InstLocalGet().Immediate(instTee.GetIndex());
+                        if (newSet != null)
+                        {
+                            var setInst = OptimizeInstruction(newSet, stack);
+                            stack.Push(setInst);
+                            stack.Push(newGet);
+                            break;
+                        }
+                        stack.Push(inst);
+                        break;
                     case IOptimizationTarget target:
                         var newInst = OptimizeInstruction(target, stack);
                         stack.Push(newInst);
