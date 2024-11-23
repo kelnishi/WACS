@@ -30,13 +30,37 @@ namespace Wacs.Core.Runtime.Transpiler
         public static void TranspileFunction(FunctionInstance function)
         {
             var expression = function.Definition.Body;
-            var instructions = expression.Instructions;
-            Stack<IInstruction> stack = new(instructions.Count);
+            var newSeq = OptimizeSequence(expression.Instructions);
+            function.Body = new Expression(newSeq, false);
+        }
 
-            foreach (var inst in instructions)
+        private static InstructionSequence OptimizeSequence(InstructionSequence seq)
+        {
+            if (seq.Count == 0)
+                return InstructionSequence.Empty;
+            
+            Stack<IInstruction> stack = new(seq.Count);
+
+            foreach (var inst in seq)
             {
                 switch (inst)
                 {
+                    case InstBlock instBlock:
+                        var newBlockSeq = OptimizeSequence(instBlock.GetBlock(0));
+                        var newBlock = new InstBlock().Immediate(instBlock.Type, newBlockSeq);
+                        stack.Push(newBlock);
+                        break;
+                    case InstLoop instLoop:
+                        var newLoopSeq = OptimizeSequence(instLoop.GetBlock(0));
+                        var newLoop = new InstLoop().Immediate(instLoop.Type, newLoopSeq);
+                        stack.Push(newLoop);
+                        break;
+                    case InstIf instIf:
+                        var newIfSeq = OptimizeSequence(instIf.GetBlock(0));
+                        var newElseSeq = OptimizeSequence(instIf.GetBlock(1));
+                        var newIf = new InstIf().Immediate(instIf.Type, newIfSeq, newElseSeq);
+                        stack.Push(newIf);
+                        break;
                     case IOptimizationTarget target:
                         var newInst = OptimizeInstruction(target, stack);
                         stack.Push(newInst);
@@ -49,7 +73,7 @@ namespace Wacs.Core.Runtime.Transpiler
             
             //Attach the new optimized expression
             var newSeq = new InstructionSequence(stack.Reverse().ToList());
-            function.Body = new Expression(newSeq, false);
+            return newSeq;
         }
 
         private static IInstruction OptimizeInstruction(IOptimizationTarget inst, Stack<IInstruction> stack)
