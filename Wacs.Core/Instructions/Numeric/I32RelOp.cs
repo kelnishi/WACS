@@ -16,6 +16,7 @@
 
 using System;
 using System.IO;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -66,7 +67,7 @@ namespace Wacs.Core.Instructions.Numeric
             _validate = validate;
         }
         
-        private class Signed : InstI32RelOp
+        private class Signed : InstI32RelOp, INodeComputer<int,int,int>
         {
             private Func<int,int,int> _execute;
             public Signed(ByteCode op, Func<int,int,int> execute, NumericInst.ValidationDelegate validate) 
@@ -80,9 +81,11 @@ namespace Wacs.Core.Instructions.Numeric
                 context.OpStack.PushI32(result);
                 return 1;
             }
+            
+            public Func<ExecContext, int, int, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
         
-        private class Unsigned : InstI32RelOp
+        private class Unsigned : InstI32RelOp, INodeComputer<uint,uint,int>
         {
             private Func<uint,uint,int> _execute;
             public Unsigned(ByteCode op, Func<uint,uint,int> execute, NumericInst.ValidationDelegate validate)
@@ -96,6 +99,8 @@ namespace Wacs.Core.Instructions.Numeric
                 context.OpStack.PushI32(result);
                 return 1;
             }
+            
+            public Func<ExecContext, uint, uint, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
         
         public override void Validate(IWasmValidationContext context) => _validate(context);

@@ -54,7 +54,7 @@ namespace Wacs.Core.Instructions.Transpiler
         public override int Execute(ExecContext context)
         {
             TOut value = Run(context);
-            context.OpStack.PushValue(new Value(_type, value));
+            context.OpStack.PushValue(new Value(value));
             return Size;
         }
     }

@@ -40,7 +40,8 @@ namespace Wacs.Core.Instructions.Transpiler
                 }
                 else
                 {
-                    _func = context => new Value(type, _inA.GetFunc(context));
+                    var func = _inA.GetFunc;
+                    _func = context => new Value(func(context));
                 }
             }
             public int CalculateSize() => _inA.CalculateSize();
@@ -57,7 +58,8 @@ namespace Wacs.Core.Instructions.Transpiler
         public UnwrapValue(ITypedValueProducer<Value> inA)
         {
             _inA = inA;
-            _func = context => (T)_inA.GetFunc(context).Scalar;
+            var func = _inA.GetFunc;
+            _func = context => (T)func(context).CastScalar<T>();
         }
 
         public int CalculateSize() => _inA.CalculateSize();
@@ -79,7 +81,8 @@ namespace Wacs.Core.Instructions.Transpiler
             }
             else if (typeof(T) == typeof(uint))
             {
-                _func = context => (int)(((_inA.GetFunc as Func<ExecContext, uint>)!)(context));
+                var func = _inA.GetFunc as Func<ExecContext, uint>;
+                _func = context => (int)func!(context);
             }
             else
             {
@@ -106,7 +109,8 @@ namespace Wacs.Core.Instructions.Transpiler
             }
             else if (typeof(T) == typeof(int))
             {
-                _func = context => (uint)(((_inA.GetFunc as Func<ExecContext, int>)!)(context));
+                var func = _inA.GetFunc as Func<ExecContext, int>;
+                _func = context => (uint)func!(context);
             }
             else
             {

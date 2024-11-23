@@ -417,6 +417,19 @@ namespace Wacs.Core.Runtime
             _ => throw new InvalidCastException($"Cannot cast ValType {Type} to Scalar")
         };
 
+        public object CastScalar<T>()
+        {
+            if (typeof(T) == typeof(int)) return Int32;
+            if (typeof(T) == typeof(uint)) return UInt32;
+            if (typeof(T) == typeof(long)) return Int64;
+            if (typeof(T) == typeof(ulong)) return (ulong)Int64;
+            if (typeof(T) == typeof(float)) return Float32;
+            if (typeof(T) == typeof(double)) return Float64;
+            if (typeof(T) == typeof(V128)) return V128;
+
+            throw new InvalidCastException($"Cannot cast ValType {Type} to Scalar");
+        }
+
         public static readonly Value NullFuncRef = new(ValType.Funcref);
         public static readonly Value NullExternRef = new(ValType.Externref);
         public static readonly Value Void = new (ValType.Nil);
