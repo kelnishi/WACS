@@ -61,6 +61,9 @@ namespace Wacs.Console
 
         [Option('i', "invoke", HelpText = "Call a specific function.")]
         public string InvokeFunction { get; set; } = "";
+        
+        [Option('t', "transpiler", HelpText = "Invoke the transpiler on instantiated module")]
+        public bool Transpile { get; set; }
 
         // This will capture all values that aren't tied to an option
         [Value(0, Required = true, MetaName = "WasmModule", HelpText = "Path to the executable")]

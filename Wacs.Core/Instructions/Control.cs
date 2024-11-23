@@ -79,7 +79,7 @@ namespace Wacs.Core.Instructions
 
         public int Size => 1 + Block.Size;
         public InstructionSequence GetBlock(int idx) => Block.Instructions;
-
+        
         // @Spec 3.3.8.3 block
         public override void Validate(IWasmValidationContext context)
         {
@@ -154,6 +154,15 @@ namespace Wacs.Core.Instructions
             );
             return this;
         }
+        
+        public IInstruction Immediate(BlockType type, InstructionSequence sequence)
+        {
+            Block = new Block(
+                type: type,
+                seq: sequence
+            );
+            return this;
+        }
 
         public override string RenderText(ExecContext? context)
         {
@@ -175,7 +184,7 @@ namespace Wacs.Core.Instructions
 
         public int Size => 1 + Block.Size;
         public InstructionSequence GetBlock(int idx) => Block.Instructions;
-
+        
         // @Spec 3.3.8.4. loop
         public override void Validate(IWasmValidationContext context)
         {
@@ -242,6 +251,15 @@ namespace Wacs.Core.Instructions
             );
             return this;
         }
+        
+        public IInstruction Immediate(BlockType type, InstructionSequence sequence)
+        {
+            Block = new Block(
+                type: type,
+                seq: sequence
+            );
+            return this;
+        }
 
         public override string RenderText(ExecContext? context)
         {
@@ -265,7 +283,7 @@ namespace Wacs.Core.Instructions
 
         public int Size => 1 + IfBlock.Size + ElseBlock.Size;
         public InstructionSequence GetBlock(int idx) => idx == 0 ? IfBlock.Instructions : ElseBlock.Instructions;
-
+        
         // @Spec 3.3.8.5 if
         public override void Validate(IWasmValidationContext context)
         {
@@ -347,6 +365,19 @@ namespace Wacs.Core.Instructions
                 throw new FormatException($"If block did not terminate correctly.");
             }
 
+            return this;
+        }
+        
+        public IInstruction Immediate(BlockType type, InstructionSequence ifSeq, InstructionSequence elseSeq)
+        {
+            IfBlock = new Block(
+                type: type,
+                seq: ifSeq
+            );
+            ElseBlock = new Block(
+                type: type,
+                seq: elseSeq
+            );
             return this;
         }
     }

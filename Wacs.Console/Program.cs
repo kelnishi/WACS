@@ -207,7 +207,9 @@ namespace Wacs.Console
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing, or you're like super confident.
             var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true});
             runtime.RegisterModule(moduleName, modInst);
-
+            
+            if (opts.Transpile)
+                runtime.TranspileModule(modInst);
 
             var callOptions = new InvokerOptions {
                 LogGas = opts.LogGas,
