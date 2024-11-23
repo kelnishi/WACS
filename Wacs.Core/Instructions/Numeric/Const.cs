@@ -14,8 +14,10 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.Globalization;
 using System.IO;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Utilities;
@@ -24,7 +26,7 @@ using Wacs.Core.Validation;
 namespace Wacs.Core.Instructions.Numeric
 {
     //0x41
-    public class InstI32Const : InstructionBase, IConstInstruction
+    public class InstI32Const : InstructionBase, IConstInstruction, ITypedValueProducer<int>
     {
         public override ByteCode Op => OpCode.I32Const;
         private int Value;
@@ -56,6 +58,10 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
+        public int FetchImmediate(ExecContext context) => Value;
+        public Func<ExecContext, int> GetFunc => FetchImmediate;
+        public int CalculateSize() => 1;
+        
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
     }
     

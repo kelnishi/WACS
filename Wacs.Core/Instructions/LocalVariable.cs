@@ -14,7 +14,9 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.IO;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -24,7 +26,7 @@ using Wacs.Core.Validation;
 // 5.4.4 Variable Instructions
 namespace Wacs.Core.Instructions
 {
-    public class InstLocalGet : InstructionBase, IVarInstruction
+    public class InstLocalGet : InstructionBase, IVarInstruction, ITypedValueProducer<Value>
     {
         public override ByteCode Op => OpCode.LocalGet;
         private LocalIdx Index;
@@ -58,9 +60,16 @@ namespace Wacs.Core.Instructions
             var value = context.Locals.Get(Index);
             context.OpStack.PushType(value.Type);
         }
-
-        // @Spec 4.4.5.1. local.get 
+        
         public override int Execute(ExecContext context)
+        {
+            var value = FetchFromLocals(context);
+            context.OpStack.PushValue(value);
+            return 1;
+        }
+        
+        // @Spec 4.4.5.1. local.get 
+        public Value FetchFromLocals(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Locals.Contains(Index),
@@ -68,13 +77,15 @@ namespace Wacs.Core.Instructions
             //3.
             // var value = context.Frame.Locals.Get(Index);
             var value = context.Frame.Locals.Data[Index.Value];
-            //4.
-            context.OpStack.PushValue(value);
-            return 1;
+            return value;
         }
+
+        public Func<ExecContext, Value> GetFunc => FetchFromLocals;
+
+        public int CalculateSize() => 1;
     }
     
-    public class InstLocalSet : InstructionBase, IVarInstruction
+    public class InstLocalSet : InstructionBase, IVarInstruction, INodeComputer<Value>
     {
         public override ByteCode Op => OpCode.LocalSet;
         private LocalIdx Index;
@@ -122,11 +133,18 @@ namespace Wacs.Core.Instructions
             var type = localValue.Type;
             //4.
             var value = context.OpStack.PopType(type);
+            SetLocal(context, value);
+            return 1;
+        }
+
+        public void SetLocal(ExecContext context, Value value)
+        {
             //5.
             // context.Frame.Locals.Set(Index, value);
             context.Frame.Locals.Data[Index.Value] = value;
-            return 1;
         }
+
+        public Action<ExecContext, Value> GetFunc => SetLocal;
     }
     
     public class InstLocalTee : InstructionBase, IVarInstruction

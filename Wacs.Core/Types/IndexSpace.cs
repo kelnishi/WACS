@@ -22,7 +22,7 @@ using Wacs.Core.Runtime.Exceptions;
 
 namespace Wacs.Core.Types
 {
-    public class FuncAddrs
+    public class FuncAddrs : IEnumerable<FuncAddr>
     {
         private readonly List<FuncAddr> _space = new();
 
@@ -35,6 +35,10 @@ namespace Wacs.Core.Types
         public bool Contains(FuncIdx idx) => idx.Value < _space.Count;
 
         public void Add(FuncAddr element) => _space.Add(element);
+        
+        public IEnumerator<FuncAddr> GetEnumerator() => _space.GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+        
     }
 
     public class TableAddrs

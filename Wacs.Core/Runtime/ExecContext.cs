@@ -242,7 +242,7 @@ namespace Wacs.Core.Runtime
             //3.
             var funcType = wasmFunc.Type;
             //4.
-            var t = wasmFunc.Definition.Locals;
+            var t = wasmFunc.Locals;
             //5. *Instructions will be handled in EnterSequence below
             //var seq = wasmFunc.Definition.Body;
             //6.
@@ -280,7 +280,7 @@ namespace Wacs.Core.Runtime
             var label = frame.Labels.Reserve();
             label.Set(funcType.ResultType, new InstructionPointer(_currentSequence, _sequenceIndex), OpCode.Expr, OpStack.Count);
             frame.Labels.Push(label);
-            EnterSequence(wasmFunc.Definition.Body.Instructions);
+            EnterSequence(wasmFunc.Body.Instructions);
         }
 
         private void Invoke(HostFunction hostFunc)

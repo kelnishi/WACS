@@ -313,5 +313,8 @@ namespace Wacs.Core.OpCodes
         //Custom
         [OpCode("func")] Func = 0xF0,
         [OpCode("expr")] Expr = 0xF1,
+        
+        [OpCode("aggregate")] Aggr = 0xF2,
+        [OpCode("stackval")] StackVal = 0xF3,
     }
 }

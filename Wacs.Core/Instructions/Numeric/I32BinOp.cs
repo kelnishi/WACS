@@ -16,6 +16,7 @@
 
 using System;
 using System.IO;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -84,7 +85,7 @@ namespace Wacs.Core.Instructions.Numeric
             IsConstant = isConst;
         }
 
-        private class Signed : InstI32BinOp
+        private class Signed : InstI32BinOp, INodeComputer<int,int,int>
         {
             private Func<int,int,int> _execute;
             public Signed(ByteCode op, Func<int,int,int> execute, NumericInst.ValidationDelegate validate,
@@ -98,6 +99,8 @@ namespace Wacs.Core.Instructions.Numeric
                 context.OpStack.PushI32(result);
                 return 1;
             }
+
+            public Func<ExecContext, int, int, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
 
         private class Unsigned : InstI32BinOp

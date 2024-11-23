@@ -33,7 +33,7 @@ using Wacs.Core.WASIp1;
 
 namespace Wacs.Core.Runtime
 {
-    public class WasmRuntime
+    public partial class WasmRuntime
     {
         private static readonly MethodInfo GenericFuncsInvoke = typeof(Delegates.GenericFuncs).GetMethod("Invoke")!;
         private readonly Dictionary<(string module, string entity), IAddress?> _entityBindings = new();
