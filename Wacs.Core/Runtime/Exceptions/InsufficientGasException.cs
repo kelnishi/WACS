@@ -15,10 +15,11 @@
 //  */
 
 using System;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Runtime.Exceptions
 {
-    public class InsufficientGasException : Exception
+    public class InsufficientGasException : TrapException
     {
         public InsufficientGasException(string s) : base(s) {}
     }
