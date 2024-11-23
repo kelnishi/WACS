@@ -84,11 +84,15 @@ namespace Wacs.Core.Runtime.Transpiler
                 case IValueConsumer<uint> uintConsumer: return BindU32(inst, stack, uintConsumer);
                 case IValueConsumer<int> intConsumer: return BindI32(inst, stack, intConsumer);
                 case IValueConsumer<int,int> intConsumer: return BindI32I32(inst, stack, intConsumer);
+                case IValueConsumer<uint,uint> uintConsumer: return BindU32U32(inst, stack, uintConsumer);
+                case IValueConsumer<uint,int> intConsumer: return BindU32I32(inst, stack, intConsumer);
                 
                 case IValueConsumer<float> floatConsumer: return BindF32(inst, stack, floatConsumer);
                 case IValueConsumer<double> doubleConsumer: return BindF64(inst, stack, doubleConsumer);
                 
-                default: return inst;
+                default:
+                    Console.WriteLine($"Could not optimize {inst}");
+                    return inst;
             }
         }
 
@@ -221,6 +225,38 @@ namespace Wacs.Core.Runtime.Transpiler
                 switch (intConsumer) {
                     case INodeComputer<uint, uint, uint> uintComputer:
                         return new InstAggregate2_1<uint, uint, uint>(i1Producer, i2Producer, uintComputer);
+                }
+            }
+            
+            stack.Push(i1);
+            stack.Push(i2);
+            return inst;
+        }
+        
+        private static IInstruction BindU32I32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,int> intConsumer)
+        {
+            var i2 = stack.Pop();
+            var i1 = stack.Pop();
+
+            var i2Producer = i2 switch {
+                ITypedValueProducer<Value> p => new UnwrapValue<int>(p),
+                ITypedValueProducer<uint> p => new CastToI32<uint>(p),
+                ITypedValueProducer<int> p => p,
+                _ => null
+            };
+            var i1Producer = i1 switch
+            {
+                ITypedValueProducer<Value> p => new UnwrapValue<uint>(p),
+                ITypedValueProducer<int> p => new CastToU32<int>(p),
+                ITypedValueProducer<uint> p => p,
+                _ => null
+            };
+
+            if (i1Producer != null && i2Producer != null)
+            {
+                switch (intConsumer) {
+                    case INodeComputer<uint, int, uint> uintComputer:
+                        return new InstAggregate2_1<uint, int, uint>(i1Producer, i2Producer, uintComputer);
                 }
             }
             
