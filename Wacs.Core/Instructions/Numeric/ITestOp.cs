@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -22,7 +23,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstI32TestOp : InstructionBase
+    public class InstI32TestOp : InstructionBase, INodeComputer<int, int>
     {
         // @Spec 3.3.1.4 i.testop
         public static readonly InstI32TestOp I32Eqz = new(OpCode.I32Eqz, ExecuteI32Eqz, NumericInst.ValidateOperands(pop: ValType.I32, push: ValType.I32));
@@ -49,6 +50,8 @@ namespace Wacs.Core.Instructions.Numeric
         
         // @Spec 4.6.1.4. t.testop
         private static int ExecuteI32Eqz(int i) => i == 0 ? 1 : 0;
+        
+        public Func<ExecContext, int, int> GetFunc => (_, i1) => _execute(i1);
     }
 
     public class InstI64TestOp : InstructionBase

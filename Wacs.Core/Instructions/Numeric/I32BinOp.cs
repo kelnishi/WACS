@@ -103,7 +103,7 @@ namespace Wacs.Core.Instructions.Numeric
             public Func<ExecContext, int, int, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
 
-        private class Unsigned : InstI32BinOp
+        private class Unsigned : InstI32BinOp, INodeComputer<uint,uint,uint>
         {
             private Func<uint,uint,uint> _execute;
             public Unsigned(ByteCode op, Func<uint,uint,uint> execute, NumericInst.ValidationDelegate validate,
@@ -117,9 +117,11 @@ namespace Wacs.Core.Instructions.Numeric
                 context.OpStack.PushU32(result);
                 return 1;
             }
+            
+            public Func<ExecContext, uint, uint, uint> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
 
-        private class Mixed : InstI32BinOp
+        private class Mixed : InstI32BinOp, INodeComputer<uint,int,uint>
         {
             private Func<uint,int,uint> _execute;
             public Mixed(ByteCode op, Func<uint,int,uint> execute, NumericInst.ValidationDelegate validate,
@@ -133,6 +135,8 @@ namespace Wacs.Core.Instructions.Numeric
                 context.OpStack.PushU32(result);
                 return 1;
             }
+            
+            public Func<ExecContext, uint, int, uint> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
         
         public override void Validate(IWasmValidationContext context) => _validate(context);

@@ -61,12 +61,11 @@ namespace Wacs.Core.Instructions.Numeric
         public int FetchImmediate(ExecContext context) => Value;
         public Func<ExecContext, int> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
-        
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
     }
     
     //0x42
-    public class InstI64Const : InstructionBase, IConstInstruction
+    public class InstI64Const : InstructionBase, IConstInstruction, ITypedValueProducer<long>
     {
         public override ByteCode Op => OpCode.I64Const;
         private long Value;
@@ -91,12 +90,15 @@ namespace Wacs.Core.Instructions.Numeric
             Value = reader.ReadLeb128_s64();
             return this;
         }
+        public long FetchImmediate(ExecContext context) => Value;
+        public Func<ExecContext, long> GetFunc => FetchImmediate;
+        public int CalculateSize() => 1;
 
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
     }
     
     //0x43
-    public class InstF32Const : InstructionBase, IConstInstruction
+    public class InstF32Const : InstructionBase, IConstInstruction, ITypedValueProducer<float>
     {
         public override ByteCode Op => OpCode.F32Const;
         private float Value;
@@ -122,6 +124,10 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
+        public float FetchImmediate(ExecContext context) => Value;
+        public Func<ExecContext, float> GetFunc => FetchImmediate;
+        public int CalculateSize() => 1;
+        
         public override string RenderText(ExecContext? context)
         {
             var sourceText = Value.ToString(CultureInfo.InvariantCulture).ToLower();
@@ -134,7 +140,7 @@ namespace Wacs.Core.Instructions.Numeric
     }
     
     //0x44
-    public class InstF64Const : InstructionBase, IConstInstruction
+    public class InstF64Const : InstructionBase, IConstInstruction, ITypedValueProducer<double>
     {
         public override ByteCode Op => OpCode.F64Const;
         private double Value;
@@ -159,6 +165,10 @@ namespace Wacs.Core.Instructions.Numeric
             Value = reader.Read_f64();
             return this;
         }
+        
+        public double FetchImmediate(ExecContext context) => Value;
+        public Func<ExecContext, double> GetFunc => FetchImmediate;
+        public int CalculateSize() => 1;
 
         public override string RenderText(ExecContext? context)
         {
