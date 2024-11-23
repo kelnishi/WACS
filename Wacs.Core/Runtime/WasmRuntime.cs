@@ -425,7 +425,7 @@ namespace Wacs.Core.Runtime
                 Context.InstructionTimer.Stop();
 
                 var st = Context.Stats[(ushort)inst.Op];
-                st.count += 1;
+                st.count += steps;
                 st.duration += Context.InstructionTimer.ElapsedTicks;
                 Context.Stats[(ushort)inst.Op] = st;
             }
