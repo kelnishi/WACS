@@ -32,8 +32,12 @@ namespace Wacs.Core.Runtime.Types
         {
             Type = type;
             Module = module;
+            
             Definition = definition;
+            Body = definition.Body;
+            Locals = definition.Locals;
             Index = definition.Index;
+            
             if (!string.IsNullOrEmpty(Definition.Id))
                 Name = Definition.Id;
         }
@@ -41,9 +45,16 @@ namespace Wacs.Core.Runtime.Types
         public readonly ModuleInstance Module;
 
         /// <summary>
-        /// Gets the function definition containing the code and locals.
+        /// The function definition containing the raw code and locals.
         /// </summary>
         public readonly Module.Function Definition;
+
+        //Copied from the static Definition
+        //Can be processed with optimization passes
+        public Expression Body;
+
+        //Copied from the static Definition
+        public ValType[] Locals;
 
         public readonly FuncIdx Index;
 

@@ -141,13 +141,10 @@ namespace Wacs.Core.Types
                 { } t when t == typeof(ulong) => ValType.I64,
                 { } t when t == typeof(float) => ValType.F32,
                 { } t when t == typeof(double) => ValType.F64,
+                { } t when t == typeof(V128) => ValType.V128,
                 { } t when t == typeof(void) => ValType.Nil,
                 { } t when t == typeof(ExecContext) => ValType.ExecContext,
                 { } t when t.GetWasmType() is { } wasmType => wasmType,
-                // { } t when t == typeof(System.Numerics.Vector128<byte>) ||
-                //            t == typeof(System.Numerics.Vector128<float>) ||
-                //            t == typeof(System.Numerics.Vector128<int>) ||
-                //            t == typeof(System.Numerics.Vector128<long>) => ValType.V128,
                 _ => throw new InvalidCastException($"Unsupported type: {type.FullName}")
             };
 
