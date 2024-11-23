@@ -564,7 +564,8 @@ namespace Wacs.Core.Runtime
                 double percent = 100.0 * st.duration / execTicks;
                 string execsLabel = $"{st.count}".PadLeft(totalInst.Length, ' ');
                 string percentLabel = $"{percent:#0.###}%e".PadLeft(8,' ');
-                Console.Error.WriteLine($"{label}: {execsLabel}| ({percentLabel}) {instTime.TotalMilliseconds:#0.000}ms");
+                string instAve = $"{instTime.TotalMilliseconds * 1000000.0/st.count:#0.#}ns/i";
+                Console.Error.WriteLine($"{label}: {execsLabel}| ({percentLabel}) {instTime.TotalMilliseconds:#0.000}ms {instAve}");
             }
         }
 
