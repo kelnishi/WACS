@@ -31,14 +31,21 @@ namespace Wacs.Core.Types
     /// </summary>
     public class Expression
     {
-        public static readonly Expression Empty = new(InstructionSequence.Empty);
+        public static readonly Expression Empty = new(InstructionSequence.Empty, true);
 
-        private Expression(InstructionSequence seq) =>
+        public Expression(InstructionSequence seq, bool isStatic)
+        {
             Instructions = seq;
+            IsStatic = isStatic;
+        }
 
-        public Expression(IInstruction single) =>
-            Instructions = new InstructionSequence(new List<IInstruction>{single});
+        public Expression(IInstruction single)
+        {
+            IsStatic = true;
+            Instructions = new InstructionSequence(new List<IInstruction> { single });
+        }
 
+        public readonly bool IsStatic;
         public readonly InstructionSequence Instructions;
 
         public int Size => Instructions.Size;
@@ -66,7 +73,7 @@ namespace Wacs.Core.Types
         /// @Spec 5.4.9 Expressions
         /// </summary>
         public static Expression Parse(BinaryReader reader) =>
-            new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd)));
+            new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd)), true);
 
         /// <summary>
         /// For Single instruction renders (globals, elements)

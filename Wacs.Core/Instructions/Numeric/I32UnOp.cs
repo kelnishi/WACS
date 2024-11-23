@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -22,7 +23,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstI32UnOp : InstructionBase
+    public class InstI32UnOp : InstructionBase, INodeComputer<uint, uint>
     {
         // @Spec 3.3.1.2. i.unop
         public static readonly InstI32UnOp I32Clz    = new(OpCode.I32Clz    , ExecuteI32Clz    , NumericInst.ValidateOperands(pop: ValType.I32, push: ValType.I32));
@@ -50,6 +51,7 @@ namespace Wacs.Core.Instructions.Numeric
             return 1;
         }
         
+        public Func<ExecContext, uint, uint> GetFunc => (_, i1) => _execute(i1);
         
         // @Spec 4.3.2.20 iclz
         private static uint ExecuteI32Clz(uint x)
