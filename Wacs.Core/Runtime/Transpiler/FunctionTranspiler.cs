@@ -27,6 +27,25 @@ namespace Wacs.Core.Runtime.Transpiler
 {
     public static class FunctionTranspiler
     {
+        /// <summary>
+        /// Transpiling a function will walk the instruction sequences and link their execution functions
+        /// into an (expression) tree. This is similar to Linq Expression Trees, except in our case, we're
+        /// passing values around raw without boxing/unboxing when possible.
+        /// Instructions are tagged with generic interfaces to indicate that they consume/produce values.
+        /// Links are only made between adjacent instructions, so call/block/br like instructions will interrupt
+        /// linking. The linked instructions are rolled up into super-instructions (InstAggregates) and are dispatched
+        /// as single operations by the runtime. For cases I did not explicitly handle, the instructions will be
+        /// copied over, as-is. 
+        ///
+        /// The goal for super-instructions is to bypass the OpStack. Since our VM is (usually) running in the CLR,
+        /// we'd be incurring function calls for stack operations anyway. By directly linking execution functions
+        /// we are in-effect lowering these callstack invocations into the CLR where they are highly optimized and
+        /// (relatively) closer to the metal. Bypassing the OpStack also allows the CLR to make use of hardware
+        /// registers instead of an in-memory value stack for loading parameters. It also means that we are not
+        /// using Wacs.Core.Runtime.Value (our runtime's value box; 20bytes!), improving cache coherency
+        /// and reducing processing overhead.
+        /// </summary>
+        /// <param name="function"></param>
         public static void TranspileFunction(FunctionInstance function)
         {
             var expression = function.Definition.Body;
