@@ -22,26 +22,27 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Transpiler
 {
-    public class InstAggregate1_1<TIn,TOut> : InstructionBase, ITypedValueProducer<TOut>
-        where TOut : struct
+    public class InstAggregate2_0<TIn1,TIn2> : InstructionBase
     {
-        private readonly Func<ExecContext, TIn> _in1;
-        private readonly Func<ExecContext, TIn, TOut> _compute;
+        private readonly Func<ExecContext, TIn1> _in1;
+        private readonly Func<ExecContext, TIn2> _in2;
+        private readonly Action<ExecContext, TIn1, TIn2> _compute;
 
         public int CalculateSize() => Size;
         public readonly int Size;
         
-        public InstAggregate1_1(ITypedValueProducer<TIn> in1, INodeComputer<TIn, TOut> compute)
+        public InstAggregate2_0(ITypedValueProducer<TIn1> in1, ITypedValueProducer<TIn2> in2, INodeConsumer<TIn1,TIn2> compute)
         {
             _in1 = in1.GetFunc;
+            _in2 = in2.GetFunc;
             _compute = compute.GetFunc;
 
-            Size = in1.CalculateSize() + 1;
+            Size = in1.CalculateSize() + in2.CalculateSize() + 1;
         }
 
-        public TOut Run(ExecContext context) => _compute(context, _in1(context));
+        public void Run(ExecContext context) => _compute(context, _in1(context), _in2(context));
         
-        public Func<ExecContext, TOut> GetFunc => Run;
+        public Action<ExecContext> GetFunc => Run;
         public override ByteCode Op => OpCode.Aggr;
         public override void Validate(IWasmValidationContext context)
         {
@@ -50,9 +51,9 @@ namespace Wacs.Core.Instructions.Transpiler
 
         public override int Execute(ExecContext context)
         {
-            TOut value = Run(context);
-            context.OpStack.PushValue(new Value(value));
+            Run(context);
             return Size;
         }
     }
+    
 }

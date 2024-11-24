@@ -24,8 +24,8 @@ namespace Wacs.Core.Instructions.Transpiler
     public class InstAggregateValue<T> : InstAggregate1_0<Value>
         where T : struct
     {
-        public InstAggregateValue(ITypedValueProducer<T> inA, ValType type, INodeComputer<Value> compute)
-            : base(new Wrapper(inA, type), compute) {}
+        public InstAggregateValue(ITypedValueProducer<T> inA, ValType type, INodeConsumer<Value> consumer)
+            : base(new Wrapper(inA, type), consumer) {}
 
         class Wrapper : ITypedValueProducer<Value>
         {
@@ -49,6 +49,30 @@ namespace Wacs.Core.Instructions.Transpiler
             private Func<ExecContext, Value> _func;
             public Func<ExecContext, Value> GetFunc => _func;
         }
+    }
+    
+    public class WrapValue<T> : ITypedValueProducer<Value>
+        where T : struct
+    {
+        private readonly ITypedValueProducer<T> _inA;
+        public WrapValue(ITypedValueProducer<T> inA)
+        {
+            _inA = inA;
+            if (typeof(T) == typeof(Value))
+            {
+                _func = ((ITypedValueProducer<Value>)_inA).GetFunc;
+            }
+            else
+            {
+                var func = _inA.GetFunc;
+                _func = context => new Value(func(context));
+            }
+        }
+        public int CalculateSize() => _inA.CalculateSize();
+
+        private Func<ExecContext, Value> _func;
+        public Func<ExecContext, Value> GetFunc => _func;
+        
     }
     
     public class UnwrapValue<T> : ITypedValueProducer<T>
