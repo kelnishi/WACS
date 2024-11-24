@@ -28,7 +28,6 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly Func<ExecContext, TIn1> _in1;
         private readonly Func<ExecContext, TIn2> _in2;
         private readonly Func<ExecContext, TIn1, TIn2, TOut> _compute;
-        private readonly ValType _type;
 
         public int CalculateSize() => Size;
         public readonly int Size;
@@ -40,8 +39,6 @@ namespace Wacs.Core.Instructions.Transpiler
             _compute = compute.GetFunc;
 
             Size = in1.CalculateSize() + in2.CalculateSize() + 1;
-
-            _type = typeof(TOut).ToValType();
         }
 
         public TOut Run(ExecContext context) => _compute(context, _in1(context), _in2(context));
