@@ -912,7 +912,10 @@ namespace Wacs.Core.Runtime
                 Context.PopFrame();
 
                 _moduleInstances.Add(moduleInstance);
-
+                
+                if (TranspileModules)
+                    TranspileModule(moduleInstance);
+                
                 return moduleInstance;
             }
             catch (WasmRuntimeException)
