@@ -100,12 +100,13 @@ namespace Wacs.Core.Runtime.Transpiler
                 case IValueConsumer<uint,uint> uintConsumer: return BindU32U32(inst, stack, uintConsumer);
                 case IValueConsumer<uint,int> intConsumer: return BindU32I32(inst, stack, intConsumer);
                 
+                //Memory Store
+                case IValueConsumer<uint,Value> valueConsumer: return BindU32Value(inst, stack, valueConsumer);
+
                 case IValueConsumer<float> floatConsumer: return BindF32(inst, stack, floatConsumer);
                 case IValueConsumer<double> doubleConsumer: return BindF64(inst, stack, doubleConsumer);
                 
-                default:
-                    Console.WriteLine($"Could not optimize {inst}");
-                    return inst;
+                default: return inst;
             }
         }
 
@@ -113,23 +114,23 @@ namespace Wacs.Core.Runtime.Transpiler
         {
             if (stack.Count < 1) return inst;
             var top = stack.Pop();
-            if (valueConsumer is INodeComputer<Value> valueComputer) {
+            if (valueConsumer is INodeConsumer<Value> nodeConsumer) {
                 switch (top)
                 {
                     case ITypedValueProducer<Value> valProducer:
-                        return new InstAggregateValue<Value>(valProducer, ValType.Nil, valueComputer);
+                        return new InstAggregateValue<Value>(valProducer, ValType.Nil, nodeConsumer);
                     case ITypedValueProducer<int> intProducer:
-                        return new InstAggregateValue<int>(intProducer, ValType.I32, valueComputer);
+                        return new InstAggregateValue<int>(intProducer, ValType.I32, nodeConsumer);
                     case ITypedValueProducer<uint> uintProducer:
-                        return new InstAggregateValue<uint>(uintProducer, ValType.I32, valueComputer);
+                        return new InstAggregateValue<uint>(uintProducer, ValType.I32, nodeConsumer);
                     case ITypedValueProducer<long> longProducer:
-                        return new InstAggregateValue<long>(longProducer, ValType.I64, valueComputer);
+                        return new InstAggregateValue<long>(longProducer, ValType.I64, nodeConsumer);
                     case ITypedValueProducer<ulong> ulongProducer:
-                        return new InstAggregateValue<ulong>(ulongProducer, ValType.I64, valueComputer);
+                        return new InstAggregateValue<ulong>(ulongProducer, ValType.I64, nodeConsumer);
                     case ITypedValueProducer<float> floatProducer:
-                        return new InstAggregateValue<float>(floatProducer, ValType.F32, valueComputer);
+                        return new InstAggregateValue<float>(floatProducer, ValType.F32, nodeConsumer);
                     case ITypedValueProducer<double> doubleProducer:
-                        return new InstAggregateValue<double>(doubleProducer, ValType.F64, valueComputer);
+                        return new InstAggregateValue<double>(doubleProducer, ValType.F64, nodeConsumer);
                 }
             }
             stack.Push(top);
@@ -148,10 +149,13 @@ namespace Wacs.Core.Runtime.Transpiler
             };
             if (uintProducer != null) {
                 switch (uintConsumer) {
-                    case INodeComputer<uint> uintComputer:
-                        return new InstAggregate1_0<uint>(uintProducer, uintComputer);
+                    case INodeConsumer<uint> nodeConsumer:
+                        return new InstAggregate1_0<uint>(uintProducer, nodeConsumer);
                     case INodeComputer<uint, uint> uintComputer:
                         return new InstAggregate1_1<uint, uint>(uintProducer, uintComputer);
+                    //MemoryLoad
+                    case INodeComputer<uint, Value> uintComputer:
+                        return new InstAggregate1_1<uint, Value>(uintProducer, uintComputer);
                 }
             }
             stack.Push(top);
@@ -170,8 +174,8 @@ namespace Wacs.Core.Runtime.Transpiler
             };
             if (intProducer != null) {
                 switch (intConsumer) {
-                    case INodeComputer<int> intComputer:
-                        return new InstAggregate1_0<int>(intProducer, intComputer);
+                    case INodeConsumer<int> nodeConsumer:
+                        return new InstAggregate1_0<int>(intProducer, nodeConsumer);
                     case INodeComputer<int, int> intComputer: 
                         return new InstAggregate1_1<int, int>(intProducer, intComputer);
                 }
@@ -216,6 +220,7 @@ namespace Wacs.Core.Runtime.Transpiler
         
         private static IInstruction BindU32U32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,uint> intConsumer)
         {
+            if (stack.Count < 2) return inst;
             var i2 = stack.Pop();
             var i1 = stack.Pop();
 
@@ -248,6 +253,7 @@ namespace Wacs.Core.Runtime.Transpiler
         
         private static IInstruction BindU32I32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,int> intConsumer)
         {
+            if (stack.Count < 2) return inst;
             var i2 = stack.Pop();
             var i1 = stack.Pop();
 
@@ -278,8 +284,55 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
         
+        private static IInstruction BindU32Value(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,Value> intConsumer)
+        {
+            if (stack.Count < 1) return inst;
+            var i2 = stack.Pop();
+            var i1 = stack.Count > 0 ? stack.Pop() : null;
+
+            var i2Producer = i2 switch {
+                ITypedValueProducer<Value> p => p,
+                ITypedValueProducer<int> p => new WrapValue<int>(p),
+                ITypedValueProducer<uint> p => new WrapValue<uint>(p),
+                ITypedValueProducer<long> p => new WrapValue<long>(p),
+                ITypedValueProducer<ulong> p => new WrapValue<ulong>(p),
+                ITypedValueProducer<float> p => new WrapValue<float>(p),
+                ITypedValueProducer<double> p => new WrapValue<double>(p),
+                ITypedValueProducer<V128> p => new WrapValue<V128>(p),
+                _ => null,
+            };
+            var i1Producer = i1 switch
+            {
+                ITypedValueProducer<Value> p => new UnwrapValue<uint>(p),
+                ITypedValueProducer<int> p => new CastToU32<int>(p),
+                ITypedValueProducer<uint> p => p,
+                _ => null
+            };
+            
+            if (i2Producer != null)
+            {
+                if (i1Producer == null)
+                {
+                    i1Producer = new CastToU32<int>(new InstStackProducer<int>());
+                    if (i1 != null) stack.Push(i1);
+                    i1 = null;
+                }
+                
+                switch (intConsumer) {
+                    case INodeConsumer<uint, Value> nodeConsumer:
+                        return new InstAggregate2_0<uint, Value>(i1Producer, i2Producer, nodeConsumer);
+                }
+
+            }
+            
+            if (i1 != null) stack.Push(i1);
+            stack.Push(i2);
+            return inst;
+        }
+        
         private static IInstruction BindF32(IOptimizationTarget inst, Stack<IInstruction> stack, IValueConsumer<float> floatConsumer)
         {
+            if (stack.Count < 1) return inst;
             var top = stack.Pop();
             var floatProducer = top switch {
                 ITypedValueProducer<Value> p => new UnwrapValue<float>(p),
@@ -288,8 +341,8 @@ namespace Wacs.Core.Runtime.Transpiler
             };
             if (floatProducer != null) {
                 switch (floatConsumer) {
-                    case INodeComputer<float> floatComputer:
-                        return new InstAggregate1_0<float>(floatProducer, floatComputer);
+                    case INodeConsumer<float> nodeConsumer:
+                        return new InstAggregate1_0<float>(floatProducer, nodeConsumer);
                     case INodeComputer<float, float> floatComputer: 
                         return new InstAggregate1_1<float, float>(floatProducer, floatComputer);
                 }
@@ -300,6 +353,7 @@ namespace Wacs.Core.Runtime.Transpiler
         
         private static IInstruction BindF64(IOptimizationTarget inst, Stack<IInstruction> stack, IValueConsumer<double> doubleConsumer)
         {
+            if (stack.Count < 1) return inst;
             var top = stack.Pop();
             var doubleProducer = top switch {
                 ITypedValueProducer<Value> p => new UnwrapValue<double>(p),
@@ -308,8 +362,8 @@ namespace Wacs.Core.Runtime.Transpiler
             };
             if (doubleProducer != null) {
                 switch (doubleConsumer) {
-                    case INodeComputer<double> doubleComputer:
-                        return new InstAggregate1_0<double>(doubleProducer, doubleComputer);
+                    case INodeConsumer<double> nodeConsumer:
+                        return new InstAggregate1_0<double>(doubleProducer, nodeConsumer);
                     case INodeComputer<double, double> doubleComputer: 
                         return new InstAggregate1_1<double, double>(doubleProducer, doubleComputer);
                 }

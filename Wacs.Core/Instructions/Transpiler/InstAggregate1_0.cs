@@ -26,15 +26,14 @@ namespace Wacs.Core.Instructions.Transpiler
     {
         private readonly Func<ExecContext, TIn> _inA;
         private readonly Action<ExecContext, TIn> _compute;
-        private readonly ValType _type;
         
         public int CalculateSize => Size;
         public readonly int Size;
         
-        public InstAggregate1_0(ITypedValueProducer<TIn> inA, INodeComputer<TIn> compute)
+        public InstAggregate1_0(ITypedValueProducer<TIn> inA, INodeConsumer<TIn> consumer)
         {
             _inA = inA.GetFunc;
-            _compute = compute.GetFunc;
+            _compute = consumer.GetFunc;
 
             Size = inA.CalculateSize() + 1;
         }

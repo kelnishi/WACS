@@ -91,7 +91,7 @@ namespace Wacs.Core.Instructions
         public int CalculateSize() => 1;
     }
     
-    public class InstLocalSet : InstructionBase, IVarInstruction, INodeComputer<Value>
+    public class InstLocalSet : InstructionBase, IVarInstruction, INodeConsumer<Value>
     {
         public override ByteCode Op => OpCode.LocalSet;
         private LocalIdx Index;
