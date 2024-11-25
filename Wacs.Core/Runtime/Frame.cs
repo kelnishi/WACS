@@ -15,6 +15,8 @@
 //  */
 
 using System.Buffers;
+using System.Collections.Generic;
+using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -30,19 +32,41 @@ namespace Wacs.Core.Runtime
         public FuncIdx Index;
         // public ObjectPool<Label>? LabelPool = null;
 
-        public SubStack<Label> Labels;
+        // public SubStack<Label> Labels;
+        // private Stack<Label> Labels = new();
         public LocalsSpace Locals;
 
         // public readonly Stack<Label> Labels = new();
         public ModuleInstance Module = null!;
         public FunctionType Type = null!;
 
-        public Label Label => Labels.Peek();
+        public Label Label
+        {
+            get
+            {
+                var label = TopLabel switch
+                {
+                    InstBlock b => b.Label, 
+                    InstLoop b => b.Label,
+                    InstIf b => b.Label,
+                    Expression e => e.Label,
+                };
+                return label;
+                // return Labels.Peek();
+            }
+        }
+
+        public ILabelTarget TopLabel;
+        public int LabelCount = 0;
+        public int StackHeight;
+        
         public int Arity => Type.ResultType.Arity;
 
         public void Clear()
         {
-            Labels = default;
+            // Labels = default;
+            // Labels.Clear();
+            TopLabel = default!;
             Module = default!;
             Locals = default;
             ContinuationAddress = default;
@@ -63,28 +87,65 @@ namespace Wacs.Core.Runtime
         }
 
         public bool Contains(LabelIdx index) =>
-            index.Value < Labels.Count;
+            index.Value < LabelCount;
 
         public void ForceLabels(int depth)
         {
-            while (Labels.Count < depth)
+            while (LabelCount < depth)
             {
-                var fakeLabel = Labels.Reserve();
-                fakeLabel.Set(ResultType.Empty, InstructionPointer.Nil, OpCode.Nop, 0);
-                Labels.Push(fakeLabel);
+                var fakeExpr = new Expression(FunctionType.Empty, InstructionSequence.Empty, true);
+                // var fakeLabel = new Label();
+                // fakeLabel.Set(ResultType.Empty, InstructionPointer.Nil, OpCode.Nop, 0);
+                fakeExpr.Label.Set(ResultType.Empty, InstructionPointer.Nil, OpCode.Nop, 0);
+                PushLabel(fakeExpr);
+                // Labels.Push(fakeLabel);
             }
 
-            while (Labels.Count > depth)
+            while (LabelCount > depth)
             {
                 PopLabel();
             }
         }
 
+        public void ClearLabels()
+        {
+            TopLabel = default!;
+            LabelCount = 0;
+            // Labels.Clear();
+        }
+        
+        public void PushLabel(ILabelTarget target)
+        {
+            // var label = target switch
+            // {
+            //     InstBlock b => b.Label, 
+            //     InstLoop b => b.Label,
+            //     InstIf b => b.Label,
+            //     Expression e => e.Label,
+            // };
+            // Labels.Push(label);
+
+            TopLabel = target;
+            LabelCount += 1;
+        }
+
         public InstructionPointer PopLabel()
         {
-            var label = Labels.Pop();
+            // var label = Labels.Pop();
+            var label = TopLabel switch
+            {
+                InstBlock b => b.Label, 
+                InstLoop b => b.Label,
+                InstIf b => b.Label,
+                Expression e => e.Label,
+            };
+            
             var addr = label.ContinuationAddress;
-            // LabelPool?.Return(label);
+
+            TopLabel = TopLabel.EnclosingBlock;
+            
+            LabelCount -= 1;
+            
             return addr;
         }
     }
