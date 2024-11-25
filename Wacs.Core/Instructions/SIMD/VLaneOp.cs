@@ -34,7 +34,7 @@ namespace Wacs.Core.Instructions.Numeric
             (Op, _execute, _validate) = (op, execute, validate);
 
         public override ByteCode Op { get; }
-        private LaneIdx X { get; set; }
+        private LaneIdx X;
         public static InstLaneOp I8x16ExtractLaneS() => new(SimdCode.I8x16ExtractLaneS, ExecuteI8x16ExtractLaneS, ValidateFromLane(V128Shape.I8x16));
         public static InstLaneOp I8x16ExtractLaneU() => new(SimdCode.I8x16ExtractLaneU, ExecuteI8x16ExtractLaneU, ValidateFromLane(V128Shape.I8x16));
         public static InstLaneOp I16x8ExtractLaneS() => new(SimdCode.I16x8ExtractLaneS, ExecuteI16x8ExtractLaneS, ValidateFromLane(V128Shape.I16x8));
@@ -156,7 +156,11 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         public override void Validate(IWasmValidationContext context) => _validate(context, Op, X);
-        public override void Execute(ExecContext context) => _execute(context, X);
+        public override int Execute(ExecContext context)
+        {
+            _execute(context, X);
+            return 1;
+        }
 
         public override IInstruction Parse(BinaryReader reader)
         {

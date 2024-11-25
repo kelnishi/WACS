@@ -33,7 +33,7 @@ using Wacs.Core.WASIp1;
 
 namespace Wacs.Core.Runtime
 {
-    public class WasmRuntime
+    public partial class WasmRuntime
     {
         private static readonly MethodInfo GenericFuncsInvoke = typeof(Delegates.GenericFuncs).GetMethod("Invoke")!;
         private readonly Dictionary<(string module, string entity), IAddress?> _entityBindings = new();
@@ -229,30 +229,35 @@ namespace Wacs.Core.Runtime
                 Context.Invoke(funcAddr);
 
                 long steps = 0;
+                long highwatermark = 0;
                 bool fastPath = options.UseFastPath();
 
                 try
                 {
                     if (fastPath)
                     {
-                        while (ProcessThread())
+                        int comp = 0;
+                        do
                         {
-                            steps += 1;
+                            comp = ProcessThread();
+                            steps += comp;
                             if (options.GasLimit > 0)
                             {
                                 if (steps >= options.GasLimit)
                                 {
                                     throw new InsufficientGasException(
                                         $"Invocation ran out of gas (limit:{options.GasLimit}).");
-                                }    
+                                }
                             }
-                        }
+                        } while (comp > 0);
                     }
                     else
                     {
-                        while (ProcessThreadWithOptions(options))
+                        int comp = 0;
+                        do
                         {
-                            steps += 1;
+                            comp = ProcessThreadWithOptions(options);
+                            steps += comp;
 
                             if (options.GasLimit > 0)
                             {
@@ -260,17 +265,19 @@ namespace Wacs.Core.Runtime
                                 {
                                     throw new InsufficientGasException(
                                         $"Invocation ran out of gas (limit:{options.GasLimit}).");
-                                }    
+                                }
                             }
 
-                            if (options.LogGas && options.LogProgressEvery > 0)
+                            if (options.LogProgressEvery > 0)
                             {
-                                if (steps % options.LogProgressEvery == 0)
+                                highwatermark += comp;
+                                if (highwatermark >= options.LogProgressEvery)
                                 {
+                                    highwatermark -= options.LogProgressEvery;
                                     Console.Error.Write('.');
                                 }
                             }
-                        }
+                        } while (comp > 0);
                     }
                 }
                 catch (TrapException exc)
@@ -392,21 +399,20 @@ namespace Wacs.Core.Runtime
             };
         }
 
-        public bool ProcessThread()
+        public int ProcessThread()
         {
             var inst = Context.Next();
             if (inst == null)
-                return false;
+                return 0;
             
-            inst.Execute(Context);
-            return true;
+            return inst.Execute(Context);
         }
 
-        public bool ProcessThreadWithOptions(InvokerOptions options)
+        public int ProcessThreadWithOptions(InvokerOptions options)
         {
             var inst = Context.Next();
             if (inst == null)
-                return false;
+                return 0;
             
             //Trace execution
             if (options.LogInstructionExecution != InstructionLogging.None)
@@ -414,20 +420,21 @@ namespace Wacs.Core.Runtime
                 LogPreInstruction(options, inst);
             }
 
+            int steps = 0;
             if (options.CollectStats)
             {
                 Context.InstructionTimer.Restart();
-                inst.Execute(Context);
+                steps += inst.Execute(Context);
                 Context.InstructionTimer.Stop();
 
                 var st = Context.Stats[(ushort)inst.Op];
-                st.count += 1;
+                st.count += steps;
                 st.duration += Context.InstructionTimer.ElapsedTicks;
                 Context.Stats[(ushort)inst.Op] = st;
             }
             else
             {
-                inst.Execute(Context);
+                steps += inst.Execute(Context);
             }
 
             if (options.LogInstructionExecution.Has(InstructionLogging.Computes))
@@ -436,7 +443,7 @@ namespace Wacs.Core.Runtime
             }
             
             lastInstruction = inst;
-            return true;
+            return steps;
         }
 
         private void LogPreInstruction(InvokerOptions options, IInstruction inst)
@@ -529,25 +536,26 @@ namespace Wacs.Core.Runtime
 
         private void PrintStats()
         {
-            long procTicks = Context.ProcessTimer.ElapsedTicks;
+            long procTicks = Context.ProcessTimer.ElapsedTicks; //ns
             long totalExecs = Context.Stats.Values.Sum(dc => dc.count);
-            long execTicks = Context.Stats.Values.Sum(dc => dc.duration);
+            long execTicks = Context.Stats.Values.Sum(dc => dc.duration); //ns
             long overheadTicks = procTicks - execTicks;
 
-            TimeSpan totalTime = new TimeSpan(procTicks);
-            TimeSpan execTime = new TimeSpan(execTicks);
-            TimeSpan overheadTime = new TimeSpan(overheadTicks);
+            TimeSpan totalTime = new TimeSpan(procTicks/100); //100ns
+            TimeSpan execTime = new TimeSpan(execTicks/100);
+            TimeSpan overheadTime = new TimeSpan(overheadTicks/100);
             double overheadPercent =  100.0 * overheadTicks / procTicks;
             double execPercent = 100.0 * execTicks / procTicks;
-            string overheadLabel = $"({overheadPercent:#0.###}%) {overheadTime}";
+            string overheadLabel = $"({overheadPercent:#0.###}%) {overheadTime:g}";
             
             string totalLabel = "    total duration";
             string totalInst = $"{totalExecs}";
             string totalPercent = $"{execPercent:#0.###}%t".PadLeft(8,' ');
-            string avgTime = $"{new TimeSpan(execTicks / totalExecs)}/instruction";
-            string velocity = $"{totalExecs*1.0/totalTime.TotalMilliseconds:#0.#} inst/ms";
+            string avgTime = $"{execTime.TotalMilliseconds * 1000000.0/totalExecs:#0.###}ns/i";
+            double instPerSec = totalExecs * 1000.0 / totalTime.TotalMilliseconds;
+            string velocity = $"{instPerSec.SiSuffix("0.###")}i/s";
             Console.Error.WriteLine($"Execution Stats:");
-            Console.Error.WriteLine($"{totalLabel}: {totalInst}| ({totalPercent}) {execTime} {avgTime} {velocity} overhead:{overheadLabel} total proctime:{totalTime}");
+            Console.Error.WriteLine($"{totalLabel}: {totalInst}| ({totalPercent}) {execTime.TotalSeconds:#0.###}s {avgTime} {velocity} overhead:{overheadLabel} total proctime:{totalTime.TotalSeconds:#0.###}s");
             var orderedStats = Context.Stats
                 .Where(bdc => bdc.Value.count != 0)
                 .OrderBy(bdc => -bdc.Value.count);
@@ -555,11 +563,12 @@ namespace Wacs.Core.Runtime
             foreach (var (opcode, st) in orderedStats)
             {
                 string label = $"{((ByteCode)opcode).GetMnemonic()}".PadLeft(totalLabel.Length, ' ');
-                TimeSpan instTime = new TimeSpan(st.duration);
+                TimeSpan instTime = new TimeSpan(st.duration/100); //100ns
                 double percent = 100.0 * st.duration / execTicks;
                 string execsLabel = $"{st.count}".PadLeft(totalInst.Length, ' ');
                 string percentLabel = $"{percent:#0.###}%e".PadLeft(8,' ');
-                Console.Error.WriteLine($"{label}: {execsLabel}| ({percentLabel}) {instTime}");
+                string instAve = $"{instTime.TotalMilliseconds * 1000000.0/st.count:#0.#}ns/i";
+                Console.Error.WriteLine($"{label}: {execsLabel}| ({percentLabel}) {instTime.TotalMilliseconds:#0.000}ms {instAve}");
             }
         }
 
@@ -689,6 +698,8 @@ namespace Wacs.Core.Runtime
             {
                 moduleInstance.MemAddrs.Add(AllocateMemory(Store, mem));
             }
+            //Make the address space permanent
+            moduleInstance.MemAddrs.Finalize();
 
             //@Spec 4.5.4 Step 7
             Frame initFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.GlobalInitializers);
@@ -901,7 +912,10 @@ namespace Wacs.Core.Runtime
                 Context.PopFrame();
 
                 _moduleInstances.Add(moduleInstance);
-
+                
+                if (TranspileModules)
+                    TranspileModule(moduleInstance);
+                
                 return moduleInstance;
             }
             catch (WasmRuntimeException)

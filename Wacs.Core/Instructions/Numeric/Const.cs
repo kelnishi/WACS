@@ -14,8 +14,10 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.Globalization;
 using System.IO;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Utilities;
@@ -24,10 +26,10 @@ using Wacs.Core.Validation;
 namespace Wacs.Core.Instructions.Numeric
 {
     //0x41
-    public class InstI32Const : InstructionBase, IConstInstruction
+    public class InstI32Const : InstructionBase, IConstInstruction, ITypedValueProducer<int>
     {
         public override ByteCode Op => OpCode.I32Const;
-        private int Value { get; set; }
+        private int Value;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -39,8 +41,11 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(ExecContext context) =>
+        public override int Execute(ExecContext context)
+        {
             context.OpStack.PushI32(Value);
+            return 1;
+        }
 
         public override IInstruction Parse(BinaryReader reader) {
             Value = reader.ReadLeb128_s32();
@@ -53,14 +58,17 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
+        public int FetchImmediate(ExecContext context) => Value;
+        public Func<ExecContext, int> GetFunc => FetchImmediate;
+        public int CalculateSize() => 1;
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
     }
     
     //0x42
-    public class InstI64Const : InstructionBase, IConstInstruction
+    public class InstI64Const : InstructionBase, IConstInstruction, ITypedValueProducer<long>
     {
         public override ByteCode Op => OpCode.I64Const;
-        private long Value { get; set; }
+        private long Value;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -72,22 +80,28 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(ExecContext context) =>
+        public override int Execute(ExecContext context)
+        {
             context.OpStack.PushI64(Value);
+            return 1;
+        }
 
         public override IInstruction Parse(BinaryReader reader) {
             Value = reader.ReadLeb128_s64();
             return this;
         }
+        public long FetchImmediate(ExecContext context) => Value;
+        public Func<ExecContext, long> GetFunc => FetchImmediate;
+        public int CalculateSize() => 1;
 
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
     }
     
     //0x43
-    public class InstF32Const : InstructionBase, IConstInstruction
+    public class InstF32Const : InstructionBase, IConstInstruction, ITypedValueProducer<float>
     {
         public override ByteCode Op => OpCode.F32Const;
-        private float Value { get; set; }
+        private float Value;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -99,14 +113,21 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(ExecContext context) =>
+        public override int Execute(ExecContext context)
+        {
             context.OpStack.PushF32(Value);
+            return 1;
+        }
 
         public override IInstruction Parse(BinaryReader reader) {
             Value = reader.Read_f32();
             return this;
         }
 
+        public float FetchImmediate(ExecContext context) => Value;
+        public Func<ExecContext, float> GetFunc => FetchImmediate;
+        public int CalculateSize() => 1;
+        
         public override string RenderText(ExecContext? context)
         {
             var sourceText = Value.ToString(CultureInfo.InvariantCulture).ToLower();
@@ -119,10 +140,10 @@ namespace Wacs.Core.Instructions.Numeric
     }
     
     //0x44
-    public class InstF64Const : InstructionBase, IConstInstruction
+    public class InstF64Const : InstructionBase, IConstInstruction, ITypedValueProducer<double>
     {
         public override ByteCode Op => OpCode.F64Const;
-        private double Value { get; set; }
+        private double Value;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -134,13 +155,20 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override void Execute(ExecContext context) =>
+        public override int Execute(ExecContext context)
+        {
             context.OpStack.PushF64(Value);
+            return 1;
+        }
 
         public override IInstruction Parse(BinaryReader reader) {
             Value = reader.Read_f64();
             return this;
         }
+        
+        public double FetchImmediate(ExecContext context) => Value;
+        public Func<ExecContext, double> GetFunc => FetchImmediate;
+        public int CalculateSize() => 1;
 
         public override string RenderText(ExecContext? context)
         {

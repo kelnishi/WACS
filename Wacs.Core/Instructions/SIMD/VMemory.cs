@@ -53,9 +53,9 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoadMxN instruction is malformed: {WidthT}x{CountN}"),
         };
 
-        private BitWidth WidthT { get; }
-        private int CountN { get; }
-        private MemArg M { get; set; }
+        private readonly BitWidth WidthT;
+        private readonly int CountN;
+        private MemArg M;
 
         /// <summary>
         /// @Spec 3.3.7.5. v128.loadNxM_sx memarg
@@ -72,7 +72,7 @@ namespace Wacs.Core.Instructions.SIMD
         }
 
         // @Spec 4.4.7.2. v128.loadMxN_sx memarg
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -88,7 +88,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopI32();
+            long i = context.OpStack.PopU32();
             //8.
             long ea = (long)i + (long)M.Offset;
             //9.
@@ -117,6 +117,7 @@ namespace Wacs.Core.Instructions.SIMD
             }
             //15.
             context.OpStack.PushV128((V128)c);
+            return 1;
         }
 
         public IInstruction Immediate(MemArg m)
@@ -158,9 +159,9 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
-        private BitWidth WidthN { get; }
+        private readonly BitWidth WidthN;
 
-        private MemArg M { get; set; }
+        private MemArg M;
 
         /// <summary>
         /// @Spec 3.3.7.6. v128.loadN_splat
@@ -177,7 +178,7 @@ namespace Wacs.Core.Instructions.SIMD
         }
 
         // @Spec 4.4.7.3. v128.loadN_splat
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -193,7 +194,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopI32();
+            long i = context.OpStack.PopU32();
             //8.
             long ea = (long)i + (long)M.Offset;
             //9.
@@ -222,6 +223,7 @@ namespace Wacs.Core.Instructions.SIMD
                     break;
                 default: throw new ArgumentOutOfRangeException();
             }
+            return 1;
         }
 
         public IInstruction Immediate(MemArg m)
@@ -263,9 +265,9 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
-        private BitWidth WidthN { get; }
+        private readonly BitWidth WidthN;
 
-        private MemArg M { get; set; }
+        private MemArg M;
 
         /// <summary>
         /// @Spec 3.3.7.7. v128.loadN_zero memarg
@@ -282,7 +284,7 @@ namespace Wacs.Core.Instructions.SIMD
         }
 
         // @Spec 4.4.7.7. v128.loadN_zero memarg
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -298,7 +300,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopI32();
+            long i = context.OpStack.PopU32();
             //8.
             long ea = (long)i + (long)M.Offset;
             //9.
@@ -319,6 +321,7 @@ namespace Wacs.Core.Instructions.SIMD
                     break;
                 default: throw new ArgumentOutOfRangeException();
             }
+            return 1;
         }
 
         public IInstruction Immediate(MemArg m, LaneIdx l)
@@ -360,11 +363,11 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
-        private BitWidth WidthN { get; }
+        private BitWidth WidthN;
 
-        private MemArg M { get; set; }
+        private MemArg M;
 
-        private LaneIdx X { get; set; }
+        private LaneIdx X;
 
         /// <summary>
         /// @Spec 3.3.7.8. v128.loadN_lane memarge laneidx
@@ -384,7 +387,7 @@ namespace Wacs.Core.Instructions.SIMD
         }
 
         // @Spec 4.4.7.5. v128.loadN_lane memarg x
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             
             //2.
@@ -406,7 +409,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            long i = context.OpStack.PopI32();
+            long i = context.OpStack.PopU32();
             //10.
             long ea = (long)i + (long)M.Offset;
             //11.
@@ -425,6 +428,7 @@ namespace Wacs.Core.Instructions.SIMD
             }
             //17.
             context.OpStack.PushV128(value);
+            return 1;
         }
 
         public IInstruction Immediate(MemArg m, LaneIdx l)
@@ -468,10 +472,10 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
-        private BitWidth WidthN { get; }
-        private MemArg M { get; set; }
+        private readonly BitWidth WidthN;
+        private MemArg M;
 
-        private LaneIdx X { get; set; }
+        private LaneIdx X;
 
         public IInstruction Immediate(MemArg m)
         {
@@ -496,7 +500,7 @@ namespace Wacs.Core.Instructions.SIMD
         }
 
         // @Spec 4.4.7.7. v128.storeN_lane memarg x
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -517,7 +521,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            long i = context.OpStack.PopI32();
+            long i = context.OpStack.PopU32();
             //10.
             long ea = i + M.Offset;
             //11.
@@ -547,6 +551,7 @@ namespace Wacs.Core.Instructions.SIMD
                     cU64.CopyTo(bs);
                     break;
             }
+            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader)

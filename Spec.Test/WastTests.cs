@@ -42,6 +42,7 @@ namespace Spec.Test
 
             //Make multiple memories fail validation
             ModuleValidator.ValidateMultipleMemories = false;
+            runtime.TranspileModules = true;
             
             Module? module = null;
             foreach (var command in file.Commands)

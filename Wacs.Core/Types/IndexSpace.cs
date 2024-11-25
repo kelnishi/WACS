@@ -18,63 +18,119 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 
 namespace Wacs.Core.Types
 {
-    public interface IIndex
+    public class FuncAddrs : IEnumerable<FuncAddr>
     {
-        uint Value { get; }
-    }
+        private readonly List<FuncAddr> _space = new();
 
-    public class RuntimeIndexSpace<TIndex, TType>
-        where TIndex : IIndex
-        where TType : IAddress
-    {
-        private readonly List<TType> _space = new();
-
-        public TType this[TIndex idx]
+        public FuncAddr this[FuncIdx idx]
         {
             get => _space[(int)idx.Value];
             set => _space[(int)idx.Value] = value;
         }
 
-        public bool Contains(TIndex idx) => idx.Value < _space.Count;
+        public bool Contains(FuncIdx idx) => idx.Value < _space.Count;
 
-        public void Add(TType element) => _space.Add(element);
+        public void Add(FuncAddr element) => _space.Add(element);
+        
+        public IEnumerator<FuncAddr> GetEnumerator() => _space.GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+        
     }
 
-    public class FuncAddrs : RuntimeIndexSpace<FuncIdx, FuncAddr>
-    {}
+    public class TableAddrs
+    {
+        private readonly List<TableAddr> _space = new();
 
-    public class TableAddrs : RuntimeIndexSpace<TableIdx, TableAddr>
-    {}
+        public TableAddr this[TableIdx idx]
+        {
+            get => _space[(int)idx.Value];
+            set => _space[(int)idx.Value] = value;
+        }
+
+        public bool Contains(TableIdx idx) => idx.Value < _space.Count;
+
+        public void Add(TableAddr element) => _space.Add(element);
+    }
 
     public class MemAddrs
     {
-        private readonly List<MemAddr> _space = new();
+        private bool _final;
+        private List<MemAddr>? _build = new();
+        private MemAddr[]? _space;
 
-        public MemAddr this[MemIdx idx]
+        public MemAddr this[MemIdx idx] => _space![(int)idx.Value];
+
+        public bool Contains(MemIdx idx) => idx.Value < _space!.Length;
+
+        public void Add(MemAddr element)
+        {
+            if (_final)
+                throw new WasmRuntimeException("Cannot add addresses after module instance has been finalized.");
+                    
+            _build!.Add(element);
+        }
+
+        public void Finalize()
+        {
+            if (_final)
+                throw new WasmRuntimeException("MemAddrs space already finalized.");
+            
+            _final = true;
+            _space = _build!.ToArray();
+            _build = null;
+        }
+    }
+    
+    public class GlobalAddrs
+    {
+        private readonly List<GlobalAddr> _space = new();
+
+        public GlobalAddr this[GlobalIdx idx]
         {
             get => _space[(int)idx.Value];
             set => _space[(int)idx.Value] = value;
         }
 
-        public bool Contains(MemIdx idx) => idx.Value < _space.Count;
+        public bool Contains(GlobalIdx idx) => idx.Value < _space.Count;
 
-        public void Add(MemAddr element) => _space.Add(element);
+        public void Add(GlobalAddr element) => _space.Add(element);
+    }
+
+    public class ElemAddrs
+    {
+        private readonly List<ElemAddr> _space = new();
+
+        public ElemAddr this[ElemIdx idx]
+        {
+            get => _space[(int)idx.Value];
+            set => _space[(int)idx.Value] = value;
+        }
+
+        public bool Contains(ElemIdx idx) => idx.Value < _space.Count;
+
+        public void Add(ElemAddr element) => _space.Add(element);
+    }
+
+    public class DataAddrs
+    {
+        private readonly List<DataAddr> _space = new();
+
+        public DataAddr this[DataIdx idx]
+        {
+            get => _space[(int)idx.Value];
+            set => _space[(int)idx.Value] = value;
+        }
+
+        public bool Contains(DataIdx idx) => idx.Value < _space.Count;
+
+        public void Add(DataAddr element) => _space.Add(element);
     }
     
-    public class GlobalAddrs : RuntimeIndexSpace<GlobalIdx, GlobalAddr>
-    {}
-
-    public class ElemAddrs : RuntimeIndexSpace<ElemIdx, ElemAddr>
-    {}
-
-    public class DataAddrs : RuntimeIndexSpace<DataIdx, DataAddr>
-    {}
-
-
-    public abstract class AbstractIndexSpace<TIndex, TType> where TIndex : IIndex
+    public abstract class AbstractIndexSpace<TIndex, TType>
     {
         protected const string InvalidSetterMessage = "There's no crying in Baseball!";
 

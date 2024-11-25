@@ -65,7 +65,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.5.4. global.get
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.GlobalAddrs.Contains(Index),
@@ -81,6 +81,7 @@ namespace Wacs.Core.Instructions
             var val = glob.Value;
             //7.
             context.OpStack.PushValue(val);
+            return 1;
         }
     }
     
@@ -129,7 +130,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.5.5. global.set
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.GlobalAddrs.Contains(Index),
@@ -148,7 +149,7 @@ namespace Wacs.Core.Instructions
             var val = context.OpStack.PopType(glob.Type.ContentType);
             //8.
             glob.Value = val;
-
+            return 1;
         }
     }
     

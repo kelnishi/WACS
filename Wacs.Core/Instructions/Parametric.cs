@@ -44,9 +44,10 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 4.4.4.1. drop
         /// </summary>
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             Value _ = context.OpStack.PopAny();
+            return 1;
         }
     }
     
@@ -58,8 +59,8 @@ namespace Wacs.Core.Instructions
         public InstSelect(bool withTypes = false) => WithTypes = withTypes;
         public override ByteCode Op => OpCode.Select;
 
-        private bool WithTypes { get; }
-        private ValType[] Types { get; set; } = Array.Empty<ValType>();
+        private readonly bool WithTypes;
+        private ValType[] Types = Array.Empty<ValType>();
 
         /// <summary>
         /// @Spec 3.3.4.2. select
@@ -107,12 +108,13 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 4.4.4.2. select
         /// </summary>
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             int c = context.OpStack.PopI32();
             Value val2 = context.OpStack.PopAny();
             Value val1 = context.OpStack.PopAny();
             context.OpStack.PushValue(c != 0 ? val1 : val2);
+            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader)

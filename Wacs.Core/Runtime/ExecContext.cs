@@ -159,10 +159,10 @@ namespace Wacs.Core.Runtime
 
         public void FlushCallStack()
         {
-            while (_callStack.Count > 0)
+            for (int i = _callStack.Count; i > 0; --i)
                 PopFrame();
-            while (OpStack.Count > 0)
-                OpStack.PopAny();
+            
+            OpStack.Clear();
 
             Frame = NullFrame;
             _currentSequence = _hostReturnSequence;
@@ -198,10 +198,11 @@ namespace Wacs.Core.Runtime
         }
 
         // @Spec 4.4.9.1. Enter Block
-        public void EnterBlock(Block block, ResultType resultType, ByteCode inst, Stack<Value> vals)
+        public void EnterBlock(Block block, ResultType resultType, ByteCode inst)
         {
-            OpStack.PushResults(vals);
-            var label = Frame.ReserveLabel();
+            //Split stack
+            // OpStack.PushResults(vals);
+            var label = Frame.Labels.Reserve();
             label.Set(resultType, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count);
             Frame.Labels.Push(label);
             //Sets the Pointer to the start of the block sequence
@@ -241,7 +242,7 @@ namespace Wacs.Core.Runtime
             //3.
             var funcType = wasmFunc.Type;
             //4.
-            var t = wasmFunc.Definition.Locals;
+            var t = wasmFunc.Locals;
             //5. *Instructions will be handled in EnterSequence below
             //var seq = wasmFunc.Definition.Body;
             //6.
@@ -276,10 +277,10 @@ namespace Wacs.Core.Runtime
             PushFrame(frame);
             
             //10.
-            var label = frame.ReserveLabel();
+            var label = frame.Labels.Reserve();
             label.Set(funcType.ResultType, new InstructionPointer(_currentSequence, _sequenceIndex), OpCode.Expr, OpStack.Count);
             frame.Labels.Push(label);
-            EnterSequence(wasmFunc.Definition.Body.Instructions);
+            EnterSequence(wasmFunc.Body.Instructions);
         }
 
         private void Invoke(HostFunction hostFunc)

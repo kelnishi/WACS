@@ -40,7 +40,7 @@ namespace Wacs.Core.Runtime
         public long GasLimit = 0;
         public bool LogGas = false;
         public InstructionLogging LogInstructionExecution = InstructionLogging.None;
-        public int LogProgressEvery = -1;
+        public long LogProgressEvery = -1;
         public bool ShowPath = false;
 
         public bool UseFastPath()
