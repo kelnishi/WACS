@@ -50,7 +50,7 @@ namespace Wacs.Core.Instructions.Numeric
         // https://github.com/WebAssembly/spec/blob/master/proposals/nontrapping-float-to-int-conversion/Overview.md
         private static void ExecuteI32TruncSatF32S(ExecContext context)
         {
-            float value = context.OpStack.PopF32().Float32;
+            float value = context.OpStack.PopF32();
             int result = TruncSatF32S(value);
             context.OpStack.PushI32(result);
         }
@@ -73,9 +73,9 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI32TruncSatF32U(ExecContext context)
         {
-            float value = context.OpStack.PopF32().Float32;
+            float value = context.OpStack.PopF32();
             uint result = TruncSatF32U(value);
-            context.OpStack.PushI32(result);
+            context.OpStack.PushU32(result);
         }
 
         public static uint TruncSatF32U(float value)
@@ -98,7 +98,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI32TruncSatF64S(ExecContext context)
         {
-            double value = context.OpStack.PopF64().Float64;
+            double value = context.OpStack.PopF64();
             int result = TruncSatF64S(value);
             context.OpStack.PushI32(result);
         }
@@ -118,9 +118,9 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI32TruncSatF64U(ExecContext context)
         {
-            double value = context.OpStack.PopF64().Float64;
+            double value = context.OpStack.PopF64();
             uint result = TruncSatF64U(value);
-            context.OpStack.PushI32(result);
+            context.OpStack.PushU32(result);
         }
 
         public static uint TruncSatF64U(double value)
@@ -140,7 +140,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64TruncSatF32S(ExecContext context)
         {
-            float value = context.OpStack.PopF32().Float32;
+            float value = context.OpStack.PopF32();
 
             // Handle special cases first
             if (float.IsNaN(value))
@@ -180,7 +180,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64TruncSatF32U(ExecContext context)
         {
-            float value = context.OpStack.PopF32().Float32;
+            float value = context.OpStack.PopF32();
 
             // Handle special cases first
             if (float.IsNaN(value))
@@ -223,7 +223,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64TruncSatF64S(ExecContext context)
         {
-            double value = context.OpStack.PopF64().Float64;
+            double value = context.OpStack.PopF64();
 
             // Handle special cases first
             if (double.IsNaN(value))
@@ -259,7 +259,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI64TruncSatF64U(ExecContext context)
         {
-            double value = context.OpStack.PopF64().Float64;
+            double value = context.OpStack.PopF64();
 
             // Handle special cases first
             if (double.IsNaN(value))

@@ -50,14 +50,14 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI32x4Splat(ExecContext context)
         {
-            uint v = context.OpStack.PopI32();
+            uint v = context.OpStack.PopU32();
             V128 result = new V128(v, v, v, v);
             context.OpStack.PushV128(result);
         }
 
         private static void ExecuteI64x2Splat(ExecContext context)
         {
-            ulong v = context.OpStack.PopI64();
+            ulong v = context.OpStack.PopU64();
             V128 result = new V128(v, v);
             context.OpStack.PushV128(result);
         }

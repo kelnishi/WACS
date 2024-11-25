@@ -45,12 +45,12 @@ namespace Wacs.Core.Types
         /// <summary>
         /// The minimum number of units (e.g., pages for memory).
         /// </summary>
-        public uint Minimum { get; set; }
+        public uint Minimum;
 
         /// <summary>
         /// The optional maximum number of units. If MaxValue, there is no specified maximum.
         /// </summary>
-        public uint? Maximum { get; set; }
+        public uint? Maximum;
 
         public object Clone() => new Limits(this);
 

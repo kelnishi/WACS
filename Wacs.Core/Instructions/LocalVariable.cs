@@ -14,7 +14,9 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.IO;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -24,7 +26,7 @@ using Wacs.Core.Validation;
 // 5.4.4 Variable Instructions
 namespace Wacs.Core.Instructions
 {
-    public class InstLocalGet : InstructionBase, IVarInstruction
+    public class InstLocalGet : InstructionBase, IVarInstruction, ITypedValueProducer<Value>
     {
         public override ByteCode Op => OpCode.LocalGet;
         private LocalIdx Index;
@@ -32,6 +34,12 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             Index = (LocalIdx)reader.ReadLeb128_u32();
+            return this;
+        }
+
+        public IInstruction Immediate(LocalIdx index)
+        {
+            Index = index;
             return this;
         }
 
@@ -58,9 +66,16 @@ namespace Wacs.Core.Instructions
             var value = context.Locals.Get(Index);
             context.OpStack.PushType(value.Type);
         }
-
+        
+        public override int Execute(ExecContext context)
+        {
+            var value = FetchFromLocals(context);
+            context.OpStack.PushValue(value);
+            return 1;
+        }
+        
         // @Spec 4.4.5.1. local.get 
-        public override void Execute(ExecContext context)
+        public Value FetchFromLocals(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Locals.Contains(Index),
@@ -68,12 +83,15 @@ namespace Wacs.Core.Instructions
             //3.
             // var value = context.Frame.Locals.Get(Index);
             var value = context.Frame.Locals.Data[Index.Value];
-            //4.
-            context.OpStack.PushValue(value);
+            return value;
         }
+
+        public Func<ExecContext, Value> GetFunc => FetchFromLocals;
+
+        public int CalculateSize() => 1;
     }
     
-    public class InstLocalSet : InstructionBase, IVarInstruction
+    public class InstLocalSet : InstructionBase, IVarInstruction, INodeConsumer<Value>
     {
         public override ByteCode Op => OpCode.LocalSet;
         private LocalIdx Index;
@@ -81,6 +99,12 @@ namespace Wacs.Core.Instructions
         public override IInstruction Parse(BinaryReader reader)
         {
             Index = (LocalIdx)reader.ReadLeb128_u32();
+            return this;
+        }
+
+        public IInstruction Immediate(LocalIdx idx)
+        {
+            Index = idx;
             return this;
         }
 
@@ -108,7 +132,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.5.2. local.set
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Locals.Contains(Index),
@@ -121,16 +145,26 @@ namespace Wacs.Core.Instructions
             var type = localValue.Type;
             //4.
             var value = context.OpStack.PopType(type);
+            SetLocal(context, value);
+            return 1;
+        }
+
+        public void SetLocal(ExecContext context, Value value)
+        {
             //5.
             // context.Frame.Locals.Set(Index, value);
             context.Frame.Locals.Data[Index.Value] = value;
         }
+
+        public Action<ExecContext, Value> GetFunc => SetLocal;
     }
     
     public class InstLocalTee : InstructionBase, IVarInstruction
     {
         public override ByteCode Op => OpCode.LocalTee;
         private LocalIdx Index;
+
+        public LocalIdx GetIndex() => Index;
 
         public override IInstruction Parse(BinaryReader reader)
         {
@@ -166,7 +200,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.5.3. local.tee
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //1.
             context.Assert( context.OpStack.HasValue,
@@ -194,6 +228,7 @@ namespace Wacs.Core.Instructions
             //5.
             // context.Frame.Locals.Set(Index, value);
             context.Frame.Locals.Data[Index.Value] = value;
+            return 1;
         }
         
     }

@@ -30,7 +30,7 @@ namespace Wacs.Core.Instructions
     {
         public override ByteCode Op => OpCode.ReturnCall;
 
-        public FuncIdx X { get; set; }
+        public FuncIdx X;
 
         public bool IsBound(ExecContext context)
         {
@@ -60,7 +60,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.10. call
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //Fetch the Module first because we might exhaust the call stack
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
@@ -80,6 +80,7 @@ namespace Wacs.Core.Instructions
             
             //Reuse the pointer from the outgoing function
             context.Frame.ContinuationAddress = address;
+            return 1;
         }
 
         /// <summary>
@@ -134,8 +135,8 @@ namespace Wacs.Core.Instructions
     {
         public override ByteCode Op => OpCode.ReturnCallIndirect;
 
-        private TypeIdx Y { get; set; }
-        private TableIdx X { get; set; }
+        private TypeIdx Y;
+        private TableIdx X;
 
         public bool IsBound(ExecContext context)
         {
@@ -186,7 +187,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.11. call_indirect
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //Call Indirect
             //2.
@@ -208,7 +209,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            uint i = context.OpStack.PopI32();
+            uint i = context.OpStack.PopU32();
             //10.
             if (i >= tab.Elements.Count)
                 throw new TrapException($"Instruction call_indirect could not find element {i}");
@@ -246,6 +247,7 @@ namespace Wacs.Core.Instructions
             
             //Reuse the pointer from the outgoing function
             context.Frame.ContinuationAddress = address;
+            return 1;
         }
 
         /// <summary>

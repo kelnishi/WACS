@@ -32,12 +32,12 @@ namespace Wacs.Core.Types
         /// <summary>
         /// The mutability of the global variable (immutable or mutable).
         /// </summary>
-        public Mutability Mutability { get; }
+        public readonly Mutability Mutability;
 
         /// <summary>
         /// The value type of the global variable.
         /// </summary>
-        public ValType ContentType { get; }
+        public readonly ValType ContentType;
 
         public ResultType ResultType => ContentType.SingleResult();
 

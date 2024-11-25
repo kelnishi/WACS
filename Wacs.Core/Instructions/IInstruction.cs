@@ -35,7 +35,7 @@ namespace Wacs.Core.Instructions
         /// Executes the instruction within the given execution context.
         /// </summary>
         /// <param name="context">The execution context in which to execute the instruction.</param>
-        void Execute(ExecContext context);
+        int Execute(ExecContext context);
 
         /// <summary>
         /// Parses an instruction from a binary reader.
