@@ -31,12 +31,19 @@ namespace Wacs.Core.Runtime
         Control = Calls | Blocks | Branches | Binds,
         All = Calls | Blocks | Branches | Computes | Binds,
     }
+
+    public enum StatsDetail: int
+    {
+        None = 0,
+        Total = 1,
+        Instruction = 2,
+    }
     
     public class InvokerOptions
     {
         public bool CalculateLineNumbers = false;
 
-        public bool CollectStats = false;
+        public StatsDetail CollectStats = StatsDetail.None;
         public long GasLimit = 0;
         public bool LogGas = false;
         public InstructionLogging LogInstructionExecution = InstructionLogging.None;
@@ -53,7 +60,7 @@ namespace Wacs.Core.Runtime
                 return false;
             if (ShowPath)
                 return false;
-            if (CollectStats)
+            if (CollectStats != StatsDetail.None)
                 return false;
             return true;
         }
