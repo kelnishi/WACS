@@ -16,6 +16,7 @@
 
 using System;
 using System.IO;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -23,7 +24,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstF32RelOp : InstructionBase
+    public class InstF32RelOp : InstructionBase, INodeComputer<float, float, int>
     {
         public static readonly InstF32RelOp F32Eq = new(OpCode.F32Eq, ExecuteF32Eq,
             NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
@@ -64,6 +65,8 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
             return 1;
         }
+        
+        public Func<ExecContext, float, float, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
         
         private static int ExecuteF32Eq(float i1, float i2) =>
             i1 == i2 ? 1 : 0;

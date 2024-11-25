@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -22,7 +23,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstF64RelOp : InstructionBase
+    public class InstF64RelOp : InstructionBase, INodeComputer<double,double,int>
     {
         public static readonly InstF64RelOp F64Eq = new(OpCode.F64Eq, ExecuteF64Eq,
             NumericInst.ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.I32));
@@ -64,6 +65,8 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
             return 1;
         }
+        
+        public Func<ExecContext, double,double,int> GetFunc => (_, i1, i2) => _execute(i1, i2);
 
         private static int ExecuteF64Eq(double i1, double i2) => i1 == i2 ? 1 : 0;
 

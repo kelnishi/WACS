@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -22,7 +23,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstF32UnOp : InstructionBase
+    public class InstF32UnOp : InstructionBase, INodeComputer<float, float>
     {
         // @Spec 3.3.1.2. f.unop
         public static readonly InstF32UnOp F32Abs      = new(OpCode.F32Abs       , ExecuteF32Abs     , NumericInst.ValidateOperands(pop: ValType.F32, push: ValType.F32));
@@ -53,6 +54,8 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF32(result);
             return 1;
         }
+        
+        public Func<ExecContext, float,float> GetFunc => (_, i1) => _execute(i1);
 
         private static float ExecuteF32Abs(float a) => Math.Abs(a);
         private static float ExecuteF32Neg(float a) => -a;

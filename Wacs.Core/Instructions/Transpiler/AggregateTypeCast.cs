@@ -147,4 +147,60 @@ namespace Wacs.Core.Instructions.Transpiler
         private Func<ExecContext, uint> _func;
         public Func<ExecContext, uint> GetFunc => _func;
     }
+    
+    public class CastToI64<T> : ITypedValueProducer<long>
+        where T : struct
+    {
+        private readonly ITypedValueProducer<T> _inA;
+        public CastToI64(ITypedValueProducer<T> inA)
+        {
+            _inA = inA;
+            if (typeof(T) == typeof(long))
+            {
+                _func = ((ITypedValueProducer<long>)_inA).GetFunc;
+            }
+            else if (typeof(T) == typeof(ulong))
+            {
+                var func = _inA.GetFunc as Func<ExecContext, ulong>;
+                _func = context => (long)func!(context);
+            }
+            else
+            {
+                throw new ArgumentException($"Cannot convert type {typeof(T)} to int");
+            }
+        }
+
+        public int CalculateSize() => _inA.CalculateSize();
+
+        private Func<ExecContext, long> _func;
+        public Func<ExecContext, long> GetFunc => _func;
+    }
+    
+    public class CastToU64<T> : ITypedValueProducer<ulong>
+        where T : struct
+    {
+        private readonly ITypedValueProducer<T> _inA;
+        public CastToU64(ITypedValueProducer<T> inA)
+        {
+            _inA = inA;
+            if (typeof(T) == typeof(ulong))
+            {
+                _func = ((ITypedValueProducer<ulong>)_inA).GetFunc;
+            }
+            else if (typeof(T) == typeof(long))
+            {
+                var func = _inA.GetFunc as Func<ExecContext, long>;
+                _func = context => (ulong)func!(context);
+            }
+            else
+            {
+                throw new ArgumentException($"Cannot convert type {typeof(T)} to int");
+            }
+        }
+
+        public int CalculateSize() => _inA.CalculateSize();
+
+        private Func<ExecContext, ulong> _func;
+        public Func<ExecContext, ulong> GetFunc => _func;
+    }
 }

@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -22,7 +23,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstI32SignExtend : InstructionBase
+    public class InstI32SignExtend : InstructionBase, INodeComputer<uint,uint>
     {
         private const uint ByteSign = 0x80;
         private const uint I32ByteExtend = 0xFFFF_FF80;
@@ -58,6 +59,8 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32((int)result);
             return 1;
         }
+        
+        public Func<ExecContext, uint, uint> GetFunc => (_, i1) => _execute(i1);
 
         private static uint ExecuteI32Extend8S(uint value) =>
             ((value & ByteSign) != 0)

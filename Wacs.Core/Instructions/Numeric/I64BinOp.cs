@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -82,7 +83,7 @@ namespace Wacs.Core.Instructions.Numeric
             IsConstant = isConst;
         }
 
-        private class Signed : InstI64BinOp
+        private class Signed : InstI64BinOp, INodeComputer<long,long,long>
         {
             private Func<long,long,long> _execute;
             public Signed(ByteCode op, Func<long,long,long> execute, NumericInst.ValidationDelegate validate,
@@ -96,9 +97,10 @@ namespace Wacs.Core.Instructions.Numeric
                 context.OpStack.PushI64(result);
                 return 1;
             }
+            public Func<ExecContext, long,long,long> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
 
-        private class Unsigned : InstI64BinOp
+        private class Unsigned : InstI64BinOp, INodeComputer<ulong,ulong,ulong>
         {
             private Func<ulong,ulong,ulong> _execute;
             public Unsigned(ByteCode op, Func<ulong,ulong,ulong> execute, NumericInst.ValidationDelegate validate,
@@ -112,9 +114,11 @@ namespace Wacs.Core.Instructions.Numeric
                 context.OpStack.PushU64(result);
                 return 1;
             }
+            
+            public Func<ExecContext, ulong,ulong,ulong> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
         
-        private class Mixed : InstI64BinOp
+        private class Mixed : InstI64BinOp, INodeComputer<ulong,long,ulong>
         {
             private Func<ulong,long,ulong> _execute;
             public Mixed(ByteCode op, Func<ulong,long,ulong> execute, NumericInst.ValidationDelegate validate,
@@ -128,6 +132,8 @@ namespace Wacs.Core.Instructions.Numeric
                 context.OpStack.PushU64(result);
                 return 1;
             }
+            
+            public Func<ExecContext, ulong,long,ulong> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
         
         public override void Validate(IWasmValidationContext context) => _validate(context);

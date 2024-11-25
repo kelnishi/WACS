@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -22,7 +23,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstI64SignExtend : InstructionBase
+    public class InstI64SignExtend : InstructionBase, INodeComputer<uint,ulong>
     {
         private const uint ByteSign = 0x80;
         private const uint ByteMask = 0xFF;
@@ -49,9 +50,9 @@ namespace Wacs.Core.Instructions.Numeric
         public override ByteCode Op { get; }
         
         private readonly NumericInst.ValidationDelegate _validate;
-        private Func<ulong, ulong> _execute;
+        private Func<uint, ulong> _execute;
         
-        private InstI64SignExtend(ByteCode op, Func<ulong, ulong> execute, NumericInst.ValidationDelegate validate)
+        private InstI64SignExtend(ByteCode op, Func<uint, ulong> execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _execute = execute;
@@ -61,23 +62,25 @@ namespace Wacs.Core.Instructions.Numeric
         public override void Validate(IWasmValidationContext context) => _validate(context);
         public override int Execute(ExecContext context)
         {
-            ulong value = context.OpStack.PopU32();
+            uint value = context.OpStack.PopU32();
             ulong result = _execute(value);
             context.OpStack.PushI64((long)result);
             return 1;
         }
         
-        private static ulong ExecuteI64Extend8S(ulong value) =>
+        public Func<ExecContext, uint,ulong> GetFunc => (_, i1) => _execute(i1);
+        
+        private static ulong ExecuteI64Extend8S(uint value) =>
             (value & ByteSign) != 0
                 ? I64ByteExtend | value
                 : ByteMask & value;
 
-        private static ulong ExecuteI64Extend16S(ulong value) =>
+        private static ulong ExecuteI64Extend16S(uint value) =>
             (value & ShortSign) != 0
                 ? I64ShortExtend | value
                 : ShortMask & value;
 
-        private static ulong ExecuteI64Extend32S(ulong value) =>
+        private static ulong ExecuteI64Extend32S(uint value) =>
             (value & WordSign) != 0
                 ? WordExtend | value
                 : WordMask & value;
