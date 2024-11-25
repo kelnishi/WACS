@@ -218,7 +218,7 @@ namespace Wacs.Core.Runtime
                 
                 Context.OpStack.PushScalars(funcType.ParameterTypes, args);
 
-                if (options.CollectStats)
+                if (options.CollectStats != StatsDetail.None)
                 {
                     Context.ResetStats();
                     Context.InstructionTimer.Reset();
@@ -228,7 +228,7 @@ namespace Wacs.Core.Runtime
 
                 Context.Invoke(funcAddr);
 
-                long steps = 0;
+                Context.steps = 0;
                 long highwatermark = 0;
                 bool fastPath = options.UseFastPath();
 
@@ -240,10 +240,10 @@ namespace Wacs.Core.Runtime
                         do
                         {
                             comp = ProcessThread();
-                            steps += comp;
+                            Context.steps += comp;
                             if (options.GasLimit > 0)
                             {
-                                if (steps >= options.GasLimit)
+                                if (Context.steps >= options.GasLimit)
                                 {
                                     throw new InsufficientGasException(
                                         $"Invocation ran out of gas (limit:{options.GasLimit}).");
@@ -253,15 +253,15 @@ namespace Wacs.Core.Runtime
                     }
                     else
                     {
-                        int comp = 0;
+                        long comp = 0;
                         do
                         {
                             comp = ProcessThreadWithOptions(options);
-                            steps += comp;
+                            Context.steps += comp;
 
                             if (options.GasLimit > 0)
                             {
-                                if (steps >= options.GasLimit)
+                                if (Context.steps >= options.GasLimit)
                                 {
                                     throw new InsufficientGasException(
                                         $"Invocation ran out of gas (limit:{options.GasLimit}).");
@@ -283,12 +283,13 @@ namespace Wacs.Core.Runtime
                 catch (TrapException exc)
                 {
                     Context.ProcessTimer.Stop();
+                    Context.InstructionTimer.Stop();
                     if (options.LogProgressEvery > 0)
                         Console.Error.WriteLine();
-                    if (options.CollectStats)
-                        PrintStats();
+                    if (options.CollectStats != StatsDetail.None)
+                        PrintStats(options);
                     if (options.LogGas)
-                        Console.Error.WriteLine($"Process used {steps} gas. {Context.ProcessTimer.Elapsed}");
+                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
 
                     if (options.CalculateLineNumbers)
                     {
@@ -296,7 +297,7 @@ namespace Wacs.Core.Runtime
                         var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
                         (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
 
-                        throw new TrapException(exc.Message + $":line {line} instruction #{steps}\n{path}");
+                        throw new TrapException(exc.Message + $":line {line} instruction #{Context.steps}\n{path}");
                     }
 
                     //Flush the stack before throwing...
@@ -306,12 +307,13 @@ namespace Wacs.Core.Runtime
                 catch (SignalException exc)
                 {
                     Context.ProcessTimer.Stop();
+                    Context.InstructionTimer.Stop();
                     if (options.LogProgressEvery > 0)
                         Console.Error.WriteLine();
-                    if (options.CollectStats)
-                        PrintStats();
+                    if (options.CollectStats != StatsDetail.None)
+                        PrintStats(options);
                     if (options.LogGas)
-                        Console.Error.WriteLine($"Process used {steps} gas. {Context.ProcessTimer.Elapsed}");
+                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
 
                     string message = exc.Message;
                     if (options.CalculateLineNumbers)
@@ -319,7 +321,7 @@ namespace Wacs.Core.Runtime
                         var ptr = Context.ComputePointerPath();
                         var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
                         (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
-                        message = exc.Message + $":line {line} instruction #{steps}\n{path}";
+                        message = exc.Message + $":line {line} instruction #{Context.steps}\n{path}";
                     }
 
                     //Flush the stack before throwing...
@@ -337,9 +339,10 @@ namespace Wacs.Core.Runtime
                 }
                 
                 Context.ProcessTimer.Stop();
+                Context.InstructionTimer.Stop();
                 if (options.LogProgressEvery > 0) Console.Error.WriteLine("done.");
-                if (options.CollectStats) PrintStats();
-                if (options.LogGas) Console.Error.WriteLine($"Process used {steps} gas. {Context.ProcessTimer.Elapsed}");
+                if (options.CollectStats != StatsDetail.None) PrintStats(options);
+                if (options.LogGas) Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
 
                 Value[] results = new Value[funcType.ResultType.Arity];
                 var span = results.AsSpan();
@@ -408,7 +411,7 @@ namespace Wacs.Core.Runtime
             return inst.Execute(Context);
         }
 
-        public int ProcessThreadWithOptions(InvokerOptions options)
+        public long ProcessThreadWithOptions(InvokerOptions options)
         {
             var inst = Context.Next();
             if (inst == null)
@@ -420,8 +423,8 @@ namespace Wacs.Core.Runtime
                 LogPreInstruction(options, inst);
             }
 
-            int steps = 0;
-            if (options.CollectStats)
+            long steps = 0;
+            if (options.CollectStats == StatsDetail.Instruction)
             {
                 Context.InstructionTimer.Restart();
                 steps += inst.Execute(Context);
@@ -434,7 +437,9 @@ namespace Wacs.Core.Runtime
             }
             else
             {
+                Context.InstructionTimer.Start();
                 steps += inst.Execute(Context);
+                Context.InstructionTimer.Stop();
             }
 
             if (options.LogInstructionExecution.Has(InstructionLogging.Computes))
@@ -534,11 +539,15 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        private void PrintStats()
+        private void PrintStats(InvokerOptions options)
         {
             long procTicks = Context.ProcessTimer.ElapsedTicks; //ns
-            long totalExecs = Context.Stats.Values.Sum(dc => dc.count);
-            long execTicks = Context.Stats.Values.Sum(dc => dc.duration); //ns
+            long totalExecs = options.CollectStats == StatsDetail.Instruction
+                ? Context.Stats.Values.Sum(dc => dc.count)
+                : Context.steps;
+            long execTicks = options.CollectStats == StatsDetail.Instruction
+                ? Context.Stats.Values.Sum(dc => dc.duration)
+                : Context.InstructionTimer.ElapsedTicks;
             long overheadTicks = procTicks - execTicks;
 
             TimeSpan totalTime = new TimeSpan(procTicks/100); //100ns
