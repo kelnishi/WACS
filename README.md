@@ -7,6 +7,7 @@
 ## Overview
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including AOT environments like Unity's IL2CPP.
+
 The architecture is my literal interpretation of the WebAssembly spec, so it should be conceptually similar to the OCaml reference interpreter.
 The chapters and sections from the spec are commented throughout the source code and should serve as a good reference for others. 
 
@@ -21,6 +22,7 @@ The chapters and sections from the spec are commented throughout the source code
 - [Integration with Unity](#integration-with-unity)
 - [Interop Bindings](#interop-bindings)
 - [Customization](#customization)
+- [Performance](#performance)
 - [Roadmap](#roadmap)
 - [WebAssembly Feature Extensions](#webassembly-feature-extensions)
 - [License](#license)
@@ -180,22 +182,79 @@ objects like Tables, Memories, and Variables.
 
 Custom Instruction implementations can be patched in by replacing or inheriting from `SpecFactory`.
 
+## Performance
+
+WACS is a bytecode (wasm) interpreter running on a bytecode interpreted (or JIT'd) language (CIL/CLR). This is, as you can imagine,
+*not a recipe for raw performance*. However, recognizing this dynamic allows us to make certain optimizations to achieve
+performance closer to other languages in other VMs.
+
+### The Spec-Defined Implementation
+The Wasm Virtual Machine is a stack machine. This means that instructions produce operands, place them on the stack, and then other
+instructions consume them by popping them from the stack. WACS's implementation does exactly this with the data structure you might expect 
+in C#: `Stack<Value>`. So for every _instruction_, WACS performs some number of Pops and Pushes to this stack. Each Pop or Push 
+is a function call to a class and may or may not require a constructor to initialize a Value or memory to be resized for the 
+Stack<> operation. This is **extremely** heavy. The CLR is manipulating its function call stack, managing memory, checking bounds,
+boxing/unboxing, etc. All for a single WASM instruction! And, while most C# runtimes have these kinds of things heavily optimized,
+It's still a lot compared to what our instruction represents. I've taken great care to minimize memory allocation or any extra code
+within these critical paths, but the core paradigm of objects and function calls is difficult to avoid.
+
+### In-Memory Transpiling
+If it can't be avoided, then what? Acceptance. Here's where we break WASM semantics and go off-road to claw back some performance.
+A linear list of WASM instructions can be inverted into an expression tree. Take for example, this sequence:
+> i32.const 5   <- Pushes 5 onto the stack
+> 
+> i32.const 7   <- Pushes 7 onto the stack
+> 
+> i32.add       <- Pops 7, Pops 5, Pushes 12 onto the stack
+
+For a sequence representing `5+7`, this is performing potentially 8+ function calls, multiple Value.ctors, memory bounds checks, etc.
+All this, not even including the actual computation (+). Knowing this, we have an alternative. 
+
+**Expression Tree Compilation**
+
+```
+       i32.add
+     /         \
+i32.const 5  i32.const 7
+```
+If enabled, WACS will do a linear pass through the instruction sequences and roll up interdependent instructions into directed acyclic graphs.
+Instructions are replaced with functionally equivalent expression trees `InstAggregate`. The new aggregate instructions are *in-memory*
+and are implemented with pre-built relational functions. Ultimately, these instructions are compiled by the dotnet build process into bytecode
+to be run by the runtime. Thus, at runtime aggregate wasm instruction sequences map to pre-compiled implementations (*semi-transpiled*).
+
+How does this differ from executing the wasm instructions linearly with the WACS VM? 
+- No OpStack manipulation
+- Values are passed directly without casting or boxing
+- The CLR's implementation can use hardware more effectively (use registers instead of heap memory)
+- Avoids instruction fetching and dispatch
+
+In my testing, this leads to roughly 60% higher instruction processing throughput (10Mips -> 16Mips). These gains are situational however.
+Linking of the instructions into a tree cannot 100% be determined across block boundaries. So in these cases, the transpiler just passes
+the sequence through unaltered. So WASM code with lots of function calls or branches will see less benefit.
+
+There's still some headroom for optimization. Optimization is an ongoing process and I have a few other strategies yet to implement.
+
+My plan for 1.0 includes:
+- Prebaked super-instructions for memory operations
+- Replace some object pools with pre-computed statics
+- Implement the above transpiling for SIMD instructions (currently only i32/i64/f32/f64 instructions are optimized)
+- Provide an API for 3rd party super-instruction optimization
+
 ## Roadmap
 
 The current TODO list includes:
 
-- **ExecAsync**: Thread scheduling and advanced gas metering.
+- **ExecAsync**: Thread scheduling and advanced gas metering (basically JSPI, but C# Tasks)
 - **Wasm Garbage Collection**: Support  wasm-gc and heaptypes.
 - **Text Format Parsing**: Add support for WebAssembly text format.
 - **WASI p1 Test Suite**: Validate WASIp1 with the test suite for improved standard compliance.
 - **WASI p2 and Component Model**: Implement the component model proposal.
 - **SIMD Intrinsics**: Add hardware-accelerated SIMD (software implementation included in Wacs.Core).
 - **Unity Bindings for SDL**: Implement SDL2 with Unity bindings.
-- **Instantiation-time Optimization**: Improvements like superinstruction threading and selective inlining for better performance.
 - **JavaScript Proxy Bindings**: Maybe support common JS env functions.
 
 ## WebAssembly Feature Extensions
-WACS is based on the WebAssembly Core 2 spec.
+WACS is based on the [WebAssembly Core 2 spec](https://www.w3.org/TR/wasm-core-2/).
 I am implementing and adding support for as many phase 5 extensions as I can.
 Progress depends mostly on complexity and non-javascriptiness.
 
