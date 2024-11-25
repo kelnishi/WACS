@@ -16,6 +16,7 @@
 
 using System;
 using System.Runtime.InteropServices;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -23,7 +24,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstF32BinOp : InstructionBase
+    public class InstF32BinOp : InstructionBase, INodeComputer<float,float,float>
     {
         // Mask for the sign bit (most significant bit)
         private const uint F32SignMask = 0x8000_0000;
@@ -72,6 +73,8 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF32(result);
             return 1;
         }
+        
+        public Func<ExecContext, float, float, float> GetFunc => (_, i1, i2) => _execute(i1, i2);
 
         private static float ExecuteF32Add(float z1, float z2) => z1 + z2;
 
