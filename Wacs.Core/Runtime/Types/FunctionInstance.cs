@@ -32,20 +32,31 @@ namespace Wacs.Core.Runtime.Types
         {
             Type = type;
             Module = module;
+            
             Definition = definition;
+            Body = definition.Body;
+            Locals = definition.Locals;
             Index = definition.Index;
+            
             if (!string.IsNullOrEmpty(Definition.Id))
                 Name = Definition.Id;
         }
 
-        public ModuleInstance Module { get; }
+        public readonly ModuleInstance Module;
 
         /// <summary>
-        /// Gets the function definition containing the code and locals.
+        /// The function definition containing the raw code and locals.
         /// </summary>
-        public Module.Function Definition { get; }
+        public readonly Module.Function Definition;
 
-        public FuncIdx Index { get; }
+        //Copied from the static Definition
+        //Can be processed with optimization passes
+        public Expression Body;
+
+        //Copied from the static Definition
+        public ValType[] Locals;
+
+        public readonly FuncIdx Index;
 
         public string ModuleName => Module.Name;
         public string Name { get; set; } = "";

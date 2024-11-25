@@ -62,15 +62,14 @@ namespace Wacs.WASIp1
                     return ErrNo.Success;
                 case ClockId.Monotonic:
                     // Calculate the duration of a single tick.
-                    ulong resolution = (ulong)(1_000_000_000.0 / Stopwatch.Frequency);
+                    ulong resolution = (ulong)(1_000_000_000L / Stopwatch.Frequency);
                     mem.WriteInt64(resolutionPtr,resolution);
                     return ErrNo.Success;
                 case ClockId.ProcessCputimeId:
-                    //1us in ns
-                    mem.WriteInt64(resolutionPtr,1_000_000ul);
+                    //100ns
+                    mem.WriteInt64(resolutionPtr,100ul);
                     return ErrNo.Success;
                 case ClockId.ThreadCputimeId:
-                    //1us in ns
                     return ErrNo.NoSys;
                 default:
                     return ErrNo.Inval;
@@ -105,14 +104,16 @@ namespace Wacs.WASIp1
                     timestamp = ToTimestamp(DateTimeOffset.UtcNow);
                     break;
                 case ClockId.Monotonic:
+                {
                     long ticks = Stopwatch.GetTimestamp();
-                    double nanosecondsPerTick = 1_000_000_000.0 / Stopwatch.Frequency;
-                    timestamp = (long)(ticks * nanosecondsPerTick);
-                    break;
+                    long nanosecondsPerTick = 1_000_000_000L / Stopwatch.Frequency;
+                    timestamp = (ticks * nanosecondsPerTick);
+                } break;
                 case ClockId.ProcessCputimeId:
+                {
                     TimeSpan cpuTime = Process.GetCurrentProcess().TotalProcessorTime;
-                    timestamp = (long)cpuTime.TotalMilliseconds * 1_000_000; // Convert milliseconds to nanoseconds.
-                    break;
+                    timestamp = cpuTime.Ticks * 1_000_000L / TimeSpan.TicksPerMillisecond; //ns
+                } break;
                 case ClockId.ThreadCputimeId:
                     return ErrNo.NoSys;
                 default:

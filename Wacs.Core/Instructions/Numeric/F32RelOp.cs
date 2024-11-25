@@ -14,98 +14,76 @@
 //  * limitations under the License.
 //  */
 
+using System;
+using System.IO;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public partial class NumericInst
+    public class InstF32RelOp : InstructionBase, INodeComputer<float, float, int>
     {
-        public static readonly NumericInst F32Eq = new(OpCode.F32Eq, ExecuteF32Eq,
-            ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
+        public static readonly InstF32RelOp F32Eq = new(OpCode.F32Eq, ExecuteF32Eq,
+            NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
 
-        public static readonly NumericInst F32Ne = new(OpCode.F32Ne, ExecuteF32Ne,
-            ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
+        public static readonly InstF32RelOp F32Ne = new(OpCode.F32Ne, ExecuteF32Ne,
+            NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
 
-        public static readonly NumericInst F32Lt = new(OpCode.F32Lt, ExecuteF32Lt,
-            ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
+        public static readonly InstF32RelOp F32Lt = new(OpCode.F32Lt, ExecuteF32Lt,
+            NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
 
-        public static readonly NumericInst F32Gt = new(OpCode.F32Gt, ExecuteF32Gt,
-            ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
+        public static readonly InstF32RelOp F32Gt = new(OpCode.F32Gt, ExecuteF32Gt,
+            NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
 
-        public static readonly NumericInst F32Le = new(OpCode.F32Le, ExecuteF32Le,
-            ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
+        public static readonly InstF32RelOp F32Le = new(OpCode.F32Le, ExecuteF32Le,
+            NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
 
-        public static readonly NumericInst F32Ge = new(OpCode.F32Ge, ExecuteF32Ge,
-            ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
+        public static readonly InstF32RelOp F32Ge = new(OpCode.F32Ge, ExecuteF32Ge,
+            NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
 
-        private static void ExecuteF32Eq(ExecContext context)
+        public override ByteCode Op { get; }
+        
+        private readonly NumericInst.ValidationDelegate _validate;
+        private Func<float,float,int> _execute;
+        
+        private InstF32RelOp(ByteCode op, Func<float,float,int> execute, NumericInst.ValidationDelegate validate)
         {
-            float i2 = context.OpStack.PopF32().Float32;
-            float i1 = context.OpStack.PopF32().Float32;
-
-            int result = i1 == i2 ? 1 : 0;
-
-            context.OpStack.PushI32(result);
+            Op = op;
+            _execute = execute;
+            _validate = validate;
         }
-
-        private static void ExecuteF32Ne(ExecContext context)
+        
+        public override void Validate(IWasmValidationContext context) => _validate(context);
+        public override int Execute(ExecContext context)
         {
-            float i2 = context.OpStack.PopF32().Float32;
-            float i1 = context.OpStack.PopF32().Float32;
-
-            int result = i1 != i2 ? 1 : 0;
-
+            float i2 = context.OpStack.PopF32();
+            float i1 = context.OpStack.PopF32();
+            int result = _execute(i1, i2);
             context.OpStack.PushI32(result);
+            return 1;
         }
+        
+        public Func<ExecContext, float, float, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
+        
+        private static int ExecuteF32Eq(float i1, float i2) =>
+            i1 == i2 ? 1 : 0;
 
-        private static void ExecuteF32Lt(ExecContext context)
-        {
-            float i2 = context.OpStack.PopF32().Float32;
-            float i1 = context.OpStack.PopF32().Float32;
+        private static int ExecuteF32Ne(float i1, float i2) => 
+            i1 != i2 ? 1 : 0;
 
-            int result = i1 < i2 ? 1 : 0;
-            if (float.IsNaN(i1) || float.IsNaN(i2))
-                result = 0;
+        private static int ExecuteF32Lt(float i1, float i2) => 
+            float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 < i2 ? 1 : 0;
 
-            context.OpStack.PushI32(result);
-        }
+        private static int ExecuteF32Gt(float i1, float i2) => 
+            float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 > i2 ? 1 : 0;
 
-        private static void ExecuteF32Gt(ExecContext context)
-        {
-            float i2 = context.OpStack.PopF32().Float32;
-            float i1 = context.OpStack.PopF32().Float32;
+        private static int ExecuteF32Le(float i1, float i2) => 
+            float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 <= i2 ? 1 : 0;
 
-            int result = i1 > i2 ? 1 : 0;
-            if (float.IsNaN(i1) || float.IsNaN(i2))
-                result = 0;
-
-            context.OpStack.PushI32(result);
-        }
-
-        private static void ExecuteF32Le(ExecContext context)
-        {
-            float i2 = context.OpStack.PopF32().Float32;
-            float i1 = context.OpStack.PopF32().Float32;
-
-            int result = i1 <= i2 ? 1 : 0;
-            if (float.IsNaN(i1) || float.IsNaN(i2))
-                result = 0;
-
-            context.OpStack.PushI32(result);
-        }
-
-        private static void ExecuteF32Ge(ExecContext context)
-        {
-            float i2 = context.OpStack.PopF32().Float32;
-            float i1 = context.OpStack.PopF32().Float32;
-
-            int result = i1 >= i2 ? 1 : 0;
-            if (float.IsNaN(i1) || float.IsNaN(i2))
-                result = 0;
-
-            context.OpStack.PushI32(result);
-        }
+        private static int ExecuteF32Ge(float i1, float i2) => 
+            float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 >= i2 ? 1 : 0;
     }
 }

@@ -30,7 +30,7 @@ namespace Wacs.Core.Instructions
     {
         public override ByteCode Op => OpCode.MemorySize;
 
-        private MemIdx M { get; set; }
+        private MemIdx M;
 
         /// <summary>
         /// @Spec 3.3.7.10. memory.size
@@ -43,7 +43,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.7.8. memory.size
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M),
@@ -58,7 +58,8 @@ namespace Wacs.Core.Instructions
             //6.
             uint sz = (uint)mem.Size;
             //7.
-            context.OpStack.PushI32(sz);
+            context.OpStack.PushU32(sz);
+            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader)
@@ -72,7 +73,7 @@ namespace Wacs.Core.Instructions
     public class InstMemoryGrow : InstructionBase
     {
         public override ByteCode Op => OpCode.MemoryGrow;
-        private MemIdx M { get; set; }
+        private MemIdx M;
 
         /// <summary>
         /// @Spec 3.3.7.11. memory.grow
@@ -86,7 +87,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.7.9. memory.grow
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M),
@@ -104,18 +105,19 @@ namespace Wacs.Core.Instructions
             context.Assert( context.OpStack.Peek().IsI32,
                  $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //8.
-            uint n = context.OpStack.PopI32();
+            uint n = context.OpStack.PopU32();
             //9.
             const int err = -1;
             //10,11 TODO: implement optional constraints on memory.grow
             if (mem.Grow(n))
             {
-                context.OpStack.PushI32(sz);
+                context.OpStack.PushU32(sz);
             }
             else
             {
                 context.OpStack.PushI32(err);
             }
+            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader)
@@ -129,8 +131,8 @@ namespace Wacs.Core.Instructions
     public class InstMemoryInit : InstructionBase
     {
         public override ByteCode Op => ExtCode.MemoryInit;
-        private DataIdx X { get; set; }
-        private MemIdx Y { get; set; }
+        private DataIdx X;
+        private MemIdx Y;
 
         /// <summary>
         /// @Spec 3.3.7.14. memory.init
@@ -149,7 +151,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.7.12. memory.init x
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(Y),
@@ -199,11 +201,11 @@ namespace Wacs.Core.Instructions
                     throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory overflow.");
                 //17.
                 if (n == 0)
-                    return;
+                    return 1;
                 //18.
                 byte b = data.Data[s];
                 //19.
-                context.OpStack.PushI32((uint)d);
+                context.OpStack.PushU32((uint)d);
                 //20.
                 context.OpStack.PushI32(b);
                 //21.
@@ -214,14 +216,14 @@ namespace Wacs.Core.Instructions
                 context.Assert( check < Constants.TwoTo32,
                      $"Instruction {Op.GetMnemonic()} failed. Memory overflow.");
                 //23.
-                context.OpStack.PushI32((uint)(d + 1L));
+                context.OpStack.PushU32((uint)(d + 1L));
                 //24.
                 check = s + 1L;
                 context.Assert( check < Constants.TwoTo32,
                      $"Instruction {Op.GetMnemonic()} failed. Data overflow.");
                 //25.
-                context.OpStack.PushI32((uint)(s + 1L));
-                context.OpStack.PushI32((uint)(n - 1L));
+                context.OpStack.PushU32((uint)(s + 1L));
+                context.OpStack.PushU32((uint)(n - 1L));
             }
         }
 
@@ -246,7 +248,7 @@ namespace Wacs.Core.Instructions
     public class InstDataDrop : InstructionBase
     {
         public override ByteCode Op => ExtCode.DataDrop;
-        private DataIdx X { get; set; }
+        private DataIdx X;
 
         /// <summary>
         /// @Spec 3.3.7.15. data.drop
@@ -258,7 +260,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.7.13
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.DataAddrs.Contains(X),
@@ -270,6 +272,7 @@ namespace Wacs.Core.Instructions
                  $"Instruction {Op.GetMnemonic()} failed. Address for Data {X} was not in the Store.");
             //5.
             context.Store.DropData(a);
+            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader)
@@ -291,8 +294,8 @@ namespace Wacs.Core.Instructions
     public class InstMemoryCopy : InstructionBase
     {
         public override ByteCode Op => ExtCode.MemoryCopy;
-        private MemIdx SrcX { get; set; }
-        private MemIdx DstY { get; set; }
+        private MemIdx SrcX;
+        private MemIdx DstY;
 
         /// <summary>
         /// @Spec 3.3.7.13. memory.copy
@@ -310,7 +313,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.7.11. memory.copy
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(SrcX),
@@ -359,12 +362,12 @@ namespace Wacs.Core.Instructions
                         $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
                 //13.
                 if (n == 0)
-                    return;
+                    return 1;
                 //14.
                 if (d <= s)
                 {
-                    context.OpStack.PushI32((uint)d);
-                    context.OpStack.PushI32((uint)s);
+                    context.OpStack.PushU32((uint)d);
+                    context.OpStack.PushU32((uint)s);
                     context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, SrcX))
                         .Execute(context);
                     context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, DstY))
@@ -372,11 +375,11 @@ namespace Wacs.Core.Instructions
                     check = d + 1L;
                     context.Assert( check < Constants.TwoTo32,
                          $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
-                    context.OpStack.PushI32((uint)(d + 1L));
+                    context.OpStack.PushU32((uint)(d + 1L));
                     check = s + 1L;
                     context.Assert( check < Constants.TwoTo32,
                          $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
-                    context.OpStack.PushI32((uint)(s + 1L));
+                    context.OpStack.PushU32((uint)(s + 1L));
                 }
                 //15.
                 else
@@ -384,21 +387,21 @@ namespace Wacs.Core.Instructions
                     check = d + n - 1L;
                     context.Assert( check < Constants.TwoTo32,
                          $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
-                    context.OpStack.PushI32((uint)(d + n - 1));
+                    context.OpStack.PushU32((uint)(d + n - 1));
                     check = s + n - 1L;
                     context.Assert( check < Constants.TwoTo32,
                          $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
-                    context.OpStack.PushI32((uint)(s + n - 1));
+                    context.OpStack.PushU32((uint)(s + n - 1));
                     context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, SrcX))
                         .Execute(context);
                     context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, DstY))
                         .Execute(context);
-                    context.OpStack.PushI32((uint)d);
-                    context.OpStack.PushI32((uint)s);
+                    context.OpStack.PushU32((uint)d);
+                    context.OpStack.PushU32((uint)s);
                 }
 
                 //16.
-                context.OpStack.PushI32((uint)n - 1);
+                context.OpStack.PushU32((uint)n - 1);
                 //17.
             }
         }
@@ -415,7 +418,7 @@ namespace Wacs.Core.Instructions
     public class InstMemoryFill : InstructionBase
     {
         public override ByteCode Op => ExtCode.MemoryFill;
-        private MemIdx X { get; set; }
+        private MemIdx X;
 
         /// <summary>
         /// @Spec 3.3.7.12. memory.fill
@@ -431,7 +434,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.7.10. memory.fill
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(X),
@@ -465,9 +468,9 @@ namespace Wacs.Core.Instructions
                     throw new TrapException("Instruction memory.fill failed. Buffer overflow");
                 //13.
                 if (n == 0)
-                    return;
+                    return 1;
                 //14.
-                context.OpStack.PushI32((uint)d);
+                context.OpStack.PushU32((uint)d);
                 //15.
                 context.OpStack.PushValue(val);
                 //16.
@@ -479,11 +482,11 @@ namespace Wacs.Core.Instructions
                 context.Assert( check < Constants.TwoTo32,
                      $"Instruction memory.fill failed. Buffer overflow");
                 //18.
-                context.OpStack.PushI32((uint)(d + 1));
+                context.OpStack.PushU32((uint)(d + 1));
                 //19.
                 context.OpStack.PushValue(val);
                 //20.
-                context.OpStack.PushI32((uint)(n - 1));
+                context.OpStack.PushU32((uint)(n - 1));
                 //21.
             }
         }

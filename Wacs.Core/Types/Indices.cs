@@ -20,9 +20,9 @@ namespace Wacs.Core.Types
 {
     // @Spec 2.5.1. Indices
     
-    public readonly struct TypeIdx : IEquatable<Index>, IIndex 
+    public readonly struct TypeIdx : IEquatable<Index>
     {
-        public uint Value { get; }
+        public readonly uint Value;
         private TypeIdx(uint value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;
         public static explicit operator Index(TypeIdx functionIndex) => new((int)functionIndex.Value);
@@ -31,10 +31,10 @@ namespace Wacs.Core.Types
         
     }
 
-    public readonly struct FuncIdx : IEquatable<Index>, IIndex
+    public readonly struct FuncIdx : IEquatable<Index>
     {
-        
-        public uint Value { get; }
+
+        public readonly uint Value;
         private FuncIdx(uint value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;
         public static explicit operator Index(FuncIdx functionIndex) => new((int)functionIndex.Value);
@@ -63,9 +63,9 @@ namespace Wacs.Core.Types
         };
     }
 
-    public readonly struct TableIdx : IEquatable<Index>, IIndex
+    public readonly struct TableIdx : IEquatable<Index>
     {
-        public uint Value { get; }
+        public readonly uint Value;
         private TableIdx(uint value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;
         public static explicit operator Index(TableIdx tableIdx) => new((int)tableIdx.Value);
@@ -95,9 +95,9 @@ namespace Wacs.Core.Types
 
     }
 
-    public readonly struct GlobalIdx : IEquatable<Index>, IIndex
+    public readonly struct GlobalIdx : IEquatable<Index>
     {
-        public uint Value { get; }
+        public readonly uint Value;
         private GlobalIdx(uint value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;
         public static explicit operator Index(GlobalIdx globalIdx) => new((int)globalIdx.Value);
@@ -105,9 +105,9 @@ namespace Wacs.Core.Types
         public static explicit operator GlobalIdx(uint value) => new(value);
     }
 
-    public readonly struct ElemIdx : IEquatable<Index>, IIndex
+    public readonly struct ElemIdx : IEquatable<Index>
     {
-        public uint Value { get; }
+        public readonly uint Value;
         private ElemIdx(uint value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;
         public static explicit operator Index(ElemIdx elemIdx) => new((int)elemIdx.Value);
@@ -115,9 +115,9 @@ namespace Wacs.Core.Types
         public static explicit operator ElemIdx(uint value) => new(value);
     }
 
-    public readonly struct DataIdx : IEquatable<Index>, IIndex
+    public readonly struct DataIdx : IEquatable<Index>
     {
-        public uint Value { get; }
+        public readonly uint Value;
         private DataIdx(uint value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;
         public static explicit operator Index(DataIdx dataIdx) => new((int)dataIdx.Value);
@@ -140,9 +140,9 @@ namespace Wacs.Core.Types
         public static explicit operator LocalIdx(uint value) => new((int)value);
     }
 
-    public readonly struct LabelIdx : IEquatable<Index>, IIndex
+    public readonly struct LabelIdx : IEquatable<Index>
     {
-        public uint Value { get; }
+        public readonly uint Value;
         private LabelIdx(uint value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;
         public static explicit operator Index(LabelIdx labelIdx) => new((int)labelIdx.Value);

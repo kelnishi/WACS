@@ -17,6 +17,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -26,7 +27,7 @@ using Wacs.Core.Validation;
 // 5.4.6 Memory Instructions
 namespace Wacs.Core.Instructions
 {
-    public class InstMemoryLoad : InstructionBase
+    public class InstMemoryLoad : InstructionBase, INodeComputer<uint, Value>
     {
         private readonly ValType Type;
         private readonly BitWidth WidthT;
@@ -89,24 +90,33 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushType(Type);
         }
 
+        
+        public override int Execute(ExecContext context)
+        {
+            //6.
+            context.Assert( context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            uint offset = context.OpStack.PopU32();
+            var value = FetchFromMemory(context, offset);
+            context.OpStack.PushValue(value);
+            return 1;
+        }
+
         // @Spec 4.4.7.1. t.load and t.loadN_sx
-        public override void Execute(ExecContext context)
+        public Value FetchFromMemory(ExecContext context, uint offset)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
-                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
             //3.
             var a = context.Frame.Module.MemAddrs[M.M];
             //4.
             context.Assert( context.Store.Contains(a),
-                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             //5.
             var mem = context.Store[a];
-            //6.
-            context.Assert( context.OpStack.Peek().IsI32,
-                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopI32();
+            long i = offset;
             //8.
             long ea = (long)i + (long)M.Offset;
             //9.
@@ -122,57 +132,51 @@ namespace Wacs.Core.Instructions
                 case ValType.F32:
                 {
                     float cF32 = BitConverter.ToSingle(bs);
-                    context.OpStack.PushF32(cF32);
-                    break;
+                    return new Value(cF32);
                 }
                 case ValType.F64:
                 {
                     double cF64 = BitConverter.ToDouble(bs);
-                    context.OpStack.PushF64(cF64);
-                    break;
+                    return new Value(cF64);
                 }
                 case ValType.V128:
                 {
-                    context.OpStack.PushV128(new V128(bs));
-                    break;
+                    V128 v128 = new V128(bs);
+                    return new Value(v128);
                 }
                 default:
                     switch (WidthT)
                     {
                         case BitWidth.S8:
                             int cS8 = (sbyte)bs[0];
-                            context.OpStack.PushValue(new Value(Type, cS8));
-                            break;
+                            return new Value(Type, cS8);
                         case BitWidth.S16:
                             int cS16 = BitConverter.ToInt16(bs);
-                            context.OpStack.PushValue(new Value(Type, cS16));
-                            break;
+                            return new Value(Type, cS16);
                         case BitWidth.S32:
                             int cS32 = BitConverter.ToInt32(bs);
-                            context.OpStack.PushValue(new Value(Type, cS32));
-                            break;
+                            return new Value(Type, cS32);
                         case BitWidth.U8:
                             uint cU8 = bs[0];
-                            context.OpStack.PushValue(new Value(Type, cU8));
-                            break;
+                            return new Value(Type, cU8);
                         case BitWidth.U16:
                             uint cU16 = BitConverter.ToUInt16(bs);
-                            context.OpStack.PushValue(new Value(Type, cU16));
-                            break;
+                            return new Value(Type, cU16);
                         case BitWidth.U32:
                             uint cU32 = BitConverter.ToUInt32(bs);
-                            context.OpStack.PushValue(new Value(Type, cU32));
-                            break;
+                            return new Value(Type, cU32);
                         case BitWidth.U64:
                             ulong cU64 = BitConverter.ToUInt64(bs);
-                            context.OpStack.PushValue(new Value(Type, cU64));
-                            break;
+                            return new Value(Type, cU64);
                         default: throw new ArgumentOutOfRangeException();
                     }
-                    break;
             }
         }
 
+        public Func<ExecContext, uint, Value> GetFunc => FetchFromMemory;
+
+        public int CalculateSize() => 1;
+        
         public IInstruction Immediate(MemArg m)
         {
             M = m;
@@ -199,7 +203,7 @@ namespace Wacs.Core.Instructions
         }
     }
 
-    public class InstMemoryStore : InstructionBase
+    public class InstMemoryStore : InstructionBase, INodeConsumer<uint, Value>
     {
         private readonly BitWidth TWidth;
 
@@ -257,7 +261,24 @@ namespace Wacs.Core.Instructions
 
         // @Spec 4.4.7.6. t.store
         // @Spec 4.4.7.6. t.storeN
-        public override void Execute(ExecContext context)
+        public override int Execute(ExecContext context)
+        {
+            //6.
+            context.Assert( context.OpStack.Peek().Type == Type,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //7.
+            var c = context.OpStack.PopAny();
+            //8.
+            context.Assert( context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            uint offset = context.OpStack.PopU32();
+            
+            SetMemoryValue(context, offset, c);
+            
+            return 1;
+        }
+
+        public void SetMemoryValue(ExecContext context, uint offset, Value c)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -269,16 +290,9 @@ namespace Wacs.Core.Instructions
                  $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             //5.
             var mem = context.Store[a];
-            //6.
-            context.Assert( context.OpStack.Peek().Type == Type,
-                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            //7.
-            var c = context.OpStack.PopType(Type);
-            //8.
-            context.Assert( context.OpStack.Peek().IsI32,
-                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            
             //9.
-            long i = context.OpStack.PopI32();
+            long i = offset;
             //10.
             long ea = i + M.Offset;
             //11.
@@ -297,27 +311,37 @@ namespace Wacs.Core.Instructions
                     bs[0] = cU8;
                     break;
                 case BitWidth.S16:
+                    short cI16 = (short)c.Int32;
+                    MemoryMarshal.Write(bs, ref cI16);
+                    break;
                 case BitWidth.U16:
-                    byte[] cU16 = BitConverter.GetBytes((ushort)(0xFFFF & c.Int32));
-                    cU16.CopyTo(bs);
+                    ushort cU16 = (ushort)c.UInt32;
+                    MemoryMarshal.Write(bs, ref cU16);
                     break;
                 case BitWidth.S32:
+                    int cI32 = c.Int32;
+                    MemoryMarshal.Write(bs, ref cI32);
+                    break;
                 case BitWidth.U32:
-                    byte[] cU32 = BitConverter.GetBytes((uint)c.Int32);
-                    cU32.CopyTo(bs);
+                    uint cU32 = c.UInt32;
+                    MemoryMarshal.Write(bs, ref cU32);
                     break;
                 case BitWidth.U64:
-                    byte[] cU64 = BitConverter.GetBytes((ulong)c.Int64);
-                    cU64.CopyTo(bs);
+                    ulong cU64 = c.UInt64;
+                    MemoryMarshal.Write(bs, ref cU64);
                     break;
                 case BitWidth.V128:
                     V128 cV128 = c.V128;
-                    var cData = MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref cV128, 1));
-                    cData.CopyTo(bs);
+                    MemoryMarshal.Write(bs, ref cV128);
                     break;
             }
         }
+        
+        
+        public Action<ExecContext, uint, Value> GetFunc => SetMemoryValue;
 
+        public int CalculateSize() => 1;
+        
         public override IInstruction Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
@@ -338,7 +362,4 @@ namespace Wacs.Core.Instructions
         }
     }
 
-    
-
-    
 }
