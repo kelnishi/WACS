@@ -16,6 +16,7 @@
 
 using System;
 using System.Runtime.InteropServices;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -23,7 +24,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstF64BinOp : InstructionBase
+    public class InstF64BinOp : InstructionBase, INodeComputer<double,double,double>
     {
 
         // Mask for the sign bit (most significant bit)
@@ -75,6 +76,8 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF64(result);
             return 1;
         }
+        
+        public Func<ExecContext, double,double,double> GetFunc => (_, i1, i2) => _execute(i1, i2);
 
         private static double ExecuteF64Add(double z1, double z2) => z1 + z2;
 

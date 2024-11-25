@@ -54,7 +54,7 @@ namespace Wacs.Core.Instructions.Numeric
         public Func<ExecContext, int, int> GetFunc => (_, i1) => _execute(i1);
     }
 
-    public class InstI64TestOp : InstructionBase
+    public class InstI64TestOp : InstructionBase, INodeComputer<long,int>
     {
         
         public static readonly InstI64TestOp I64Eqz = new(OpCode.I64Eqz, ExecuteI64Eqz, NumericInst.ValidateOperands(pop: ValType.I64, push: ValType.I32));
@@ -80,5 +80,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
         
         private static int ExecuteI64Eqz(long i) => i == 0 ? 1 : 0;
+        
+        public Func<ExecContext, long, int> GetFunc => (_, i1) => _execute(i1);
     }
 }

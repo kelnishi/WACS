@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -22,7 +23,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstF64UnOp : InstructionBase
+    public class InstF64UnOp : InstructionBase, INodeComputer<double, double>
     {
         // @Spec 3.3.1.2. f.unop
         public static readonly InstF64UnOp F64Abs      = new(OpCode.F64Abs       , ExecuteF64Abs     , NumericInst.ValidateOperands(pop: ValType.F64, push: ValType.F64));
@@ -53,6 +54,8 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF64(result);
             return 1;
         }
+        
+        public Func<ExecContext, double,double> GetFunc => (_, i1) => _execute(i1);
 
         private static double ExecuteF64Abs(double a) => Math.Abs(a);
 
