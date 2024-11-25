@@ -14,13 +14,14 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime
 {
-    public struct Label : IPoolable
+    public class Label : IPoolable
     {
         public int Arity;
 
@@ -47,6 +48,14 @@ namespace Wacs.Core.Runtime
 
         public void Set(ResultType type, InstructionPointer address, ByteCode inst, int stackHeight)
         {
+            if (StackHeight != -1)
+            {
+                if (inst.x00 != OpCode.Expr && !ContinuationAddress.Equals(address))
+                    throw new ArgumentException("Block was entered from unknown location");
+                if (Arity != type.Arity || StackHeight != stackHeight)
+                    throw new ArgumentException("Label had different characteristics");
+            }
+            
             StackHeight = stackHeight;
             Arity = type.Arity;
             Instruction = inst;

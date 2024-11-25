@@ -21,6 +21,7 @@ using FluentValidation;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -29,21 +30,90 @@ namespace Wacs.Core.Types
     /// <summary>
     /// @Spec 2.4.9. Expressions
     /// </summary>
-    public class Expression
+    public class Expression : ILabelTarget
     {
-        public static readonly Expression Empty = new(InstructionSequence.Empty, true);
+        public static readonly Expression Empty = new(FunctionType.Empty, InstructionSequence.Empty, true);
 
-        public Expression(InstructionSequence seq, bool isStatic)
+        private Expression(InstructionSequence seq, bool isStatic)
         {
             Instructions = seq;
             IsStatic = isStatic;
+            Label = new Label
+            {
+                ContinuationAddress = InstructionPointer.Nil,
+                Instruction = OpCode.Nop,
+                StackHeight = -1,
+            };
+            EnclosingBlock = this;
+            LinkLabelTarget(Instructions, this);
+        }
+        
+        public Expression(FunctionType type, InstructionSequence seq, bool isStatic)
+        {
+            Instructions = seq;
+            IsStatic = isStatic;
+            Label = new Label
+            {
+                ContinuationAddress = InstructionPointer.Nil,
+                Instruction = OpCode.Nop,
+                Arity = type.ResultType.Arity,
+                StackHeight = -1,
+            };
+            EnclosingBlock = this;
+            LinkLabelTarget(Instructions, this);
         }
 
         public Expression(IInstruction single)
         {
             IsStatic = true;
             Instructions = new InstructionSequence(new List<IInstruction> { single });
+            Label = new Label
+            {
+                ContinuationAddress = InstructionPointer.Nil,
+                Instruction = OpCode.Nop,
+                StackHeight = -1,
+            };
+            EnclosingBlock = this;
+            LinkLabelTarget(Instructions, this);
         }
+
+        //TODO: compute stack heights
+        private void LinkLabelTarget(InstructionSequence seq, ILabelTarget enclosingTarget)
+        {
+            for (int i = 0; i < seq.Count; ++i)
+            {
+                var inst = seq._instructions[i];
+                if (inst is IBlockInstruction target)
+                {
+                    target.EnclosingBlock = enclosingTarget;
+                    var label = new Label
+                    {
+                        ContinuationAddress = new InstructionPointer(seq, i),
+                        Instruction = inst.Op,
+                        StackHeight = -1,
+                    };
+                    switch (inst)
+                    {
+                        case InstBlock b: 
+                            b.Label = label;
+                            LinkLabelTarget(b.GetBlock(0), b);
+                            break;
+                        case InstLoop b: 
+                            b.Label = label;
+                            LinkLabelTarget(b.GetBlock(0), b);
+                            break;
+                        case InstIf b: 
+                            b.Label = label;
+                            LinkLabelTarget(b.GetBlock(0), b);
+                            LinkLabelTarget(b.GetBlock(1), b);
+                            break;
+                    }
+                }
+            }
+        }
+
+        public ILabelTarget EnclosingBlock { get; set; }
+        public Label Label;
 
         public readonly bool IsStatic;
         public readonly InstructionSequence Instructions;
@@ -57,9 +127,15 @@ namespace Wacs.Core.Types
         public void Execute(ExecContext context)
         {
             var frame = context.ReserveFrame(context.Frame.Module, FunctionType.Empty, FuncIdx.ExpressionEvaluation);
-            var label = frame.Labels.Reserve();
-            label.Set(ResultType.Empty, new InstructionPointer(Instructions, 1), OpCode.Nop, context.OpStack.Count);
-            frame.Labels.Push(label);
+            
+            // var label = new Label{StackHeight = -1}; //frame.Labels.Reserve();
+            // label.Set(ResultType.Empty, new InstructionPointer(Instructions, 1), OpCode.Nop, context.OpStack.Count);
+            // frame.Labels.Push(label);
+            
+            Label.Set(ResultType.Empty, new InstructionPointer(Instructions, 1), OpCode.Nop, context.OpStack.Count - frame.StackHeight);
+            frame.PushLabel(this);
+            
+            
             context.PushFrame(frame);
             foreach (var inst in Instructions)
             {
