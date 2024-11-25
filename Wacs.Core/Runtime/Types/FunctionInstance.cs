@@ -35,6 +35,8 @@ namespace Wacs.Core.Runtime.Types
             
             Definition = definition;
             Body = definition.Body;
+            Body.Label.Arity = type.ResultType.Arity;
+            
             Locals = definition.Locals;
             Index = definition.Index;
             

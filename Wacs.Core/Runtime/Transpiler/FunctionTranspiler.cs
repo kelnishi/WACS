@@ -50,7 +50,7 @@ namespace Wacs.Core.Runtime.Transpiler
         {
             var expression = function.Definition.Body;
             var newSeq = OptimizeSequence(expression.Instructions);
-            function.Body = new Expression(newSeq, false);
+            function.Body = new Expression(function.Type, newSeq, false);
         }
 
         private static InstructionSequence OptimizeSequence(InstructionSequence seq)
