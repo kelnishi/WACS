@@ -44,7 +44,11 @@ namespace Wacs.WASIp1.Types
         public Value ToWasmType()
         {
             byte[] bytes = new byte[8];
+#if NETSTANDARD2_1
             MemoryMarshal.Write(bytes, ref this);
+#else
+            MemoryMarshal.Write(bytes, in this);
+#endif
             return MemoryMarshal.Read<ulong>(bytes);
         }
     }

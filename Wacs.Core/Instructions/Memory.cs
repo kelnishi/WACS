@@ -312,27 +312,51 @@ namespace Wacs.Core.Instructions
                     break;
                 case BitWidth.S16:
                     short cI16 = (short)c.Int32;
+#if NETSTANDARD2_1
                     MemoryMarshal.Write(bs, ref cI16);
+#else
+                    MemoryMarshal.Write(bs, in cI16); // Assume you can change to 'in'
+#endif
                     break;
                 case BitWidth.U16:
                     ushort cU16 = (ushort)c.UInt32;
+#if NETSTANDARD2_1
                     MemoryMarshal.Write(bs, ref cU16);
+#else
+                    MemoryMarshal.Write(bs, in cU16);
+#endif
                     break;
                 case BitWidth.S32:
                     int cI32 = c.Int32;
+#if NETSTANDARD2_1
                     MemoryMarshal.Write(bs, ref cI32);
+#else
+                    MemoryMarshal.Write(bs, in cI32);
+#endif
                     break;
                 case BitWidth.U32:
                     uint cU32 = c.UInt32;
+#if NETSTANDARD2_1
                     MemoryMarshal.Write(bs, ref cU32);
+#else
+                    MemoryMarshal.Write(bs, in cU32);
+#endif
                     break;
                 case BitWidth.U64:
                     ulong cU64 = c.UInt64;
+#if NETSTANDARD2_1
                     MemoryMarshal.Write(bs, ref cU64);
+#else
+                    MemoryMarshal.Write(bs, in cU64);
+#endif
                     break;
                 case BitWidth.V128:
                     V128 cV128 = c.V128;
+#if NETSTANDARD2_1
                     MemoryMarshal.Write(bs, ref cV128);
+#else
+                    MemoryMarshal.Write(bs, in cV128);
+#endif
                     break;
             }
         }
