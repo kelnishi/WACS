@@ -387,7 +387,11 @@ namespace Wacs.WASIp1
                 var entryTarget = window[start..delim];
                 var nameTarget = window[delim..end];
                 var dirEnt = struc;
+#if NETSTANDARD2_1
                 MemoryMarshal.Write(entryTarget, ref dirEnt);
+#else
+                MemoryMarshal.Write(entryTarget, in dirEnt);
+#endif
                 name.CopyTo(nameTarget);
             }
 
