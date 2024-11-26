@@ -31,7 +31,10 @@ namespace Wacs.Core.Runtime
 
         private readonly List<IFunctionInstance> Funcs = new();
         private readonly List<GlobalInstance> Globals = new();
-        private readonly List<MemoryInstance> Mems = new();
+        
+        private MemoryInstance?[] Mems = new MemoryInstance[32];
+        private int MemsCount = 0;
+        
         private readonly List<TableInstance> Tables = new();
         private StoreTransaction? CurrentTransaction = null;
 
@@ -55,7 +58,7 @@ namespace Wacs.Core.Runtime
 
         public bool Contains(FuncAddr addr) => addr.Value < Funcs.Count || (CurrentTransaction?.Funcs.ContainsKey(addr) ?? false);
         public bool Contains(TableAddr addr) => addr.Value < Tables.Count || (CurrentTransaction?.Tables.ContainsKey(addr) ?? false);
-        public bool Contains(MemAddr addr) => addr.Value < Mems.Count || (CurrentTransaction?.Mems.ContainsKey(addr) ?? false);
+        public bool Contains(MemAddr addr) => addr.Value < MemsCount || (CurrentTransaction?.Mems.ContainsKey(addr) ?? false);
         public bool Contains(GlobalAddr addr) => addr.Value < Globals.Count || (CurrentTransaction?.Globals.ContainsKey(addr) ?? false);
         public bool Contains(ElemAddr addr) => addr.Value < Elems.Count || (CurrentTransaction?.Elems.ContainsKey(addr) ?? false);
         public bool Contains(DataAddr addr) => addr.Value < Datas.Count || (CurrentTransaction?.Datas.ContainsKey(addr) ?? false);
@@ -89,10 +92,11 @@ namespace Wacs.Core.Runtime
             
             while (Funcs.Count > 0 && Funcs[^1] == null) Funcs.RemoveAt(Funcs.Count - 1);
             while (Tables.Count > 0 && Tables[^1] == null) Tables.RemoveAt(Tables.Count - 1);
-            while (Mems.Count > 0 && Mems[^1] == null) Mems.RemoveAt(Mems.Count - 1);
             while (Globals.Count > 0 && Globals[^1] == null) Globals.RemoveAt(Globals.Count - 1);
             while (Elems.Count > 0 && Elems[^1] == null) Elems.RemoveAt(Elems.Count - 1);
             while (Datas.Count > 0 && Datas[^1] == null) Datas.RemoveAt(Datas.Count - 1);
+            
+            while (MemsCount > 0 && Mems[MemsCount-1] == null) MemsCount -= 1;
             
             CurrentTransaction = null;
         }
@@ -152,10 +156,14 @@ namespace Wacs.Core.Runtime
 
         public MemAddr AddMemory(MemoryInstance mem)
         {
-            var addr = new MemAddr(Mems.Count);
+            var addr = new MemAddr(MemsCount);
             if (CurrentTransaction == null)
                 throw new InvalidOperationException("Cannot add to Store without a transaction.");
-            Mems.Add(null!);
+            MemsCount += 1;
+            if (Mems.Length < MemsCount)
+            {
+                Array.Resize(ref Mems, Mems.Length + 32);
+            }
             CurrentTransaction.Mems.Add(addr, mem);
             return addr;
         }
