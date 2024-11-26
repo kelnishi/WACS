@@ -14,7 +14,9 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.IO;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -24,7 +26,7 @@ using Wacs.Core.Validation;
 // 5.4.4 Variable Instructions
 namespace Wacs.Core.Instructions
 {
-    public class InstGlobalGet : InstructionBase, IContextConstInstruction, IVarInstruction
+    public class InstGlobalGet : InstructionBase, IContextConstInstruction, IVarInstruction, ITypedValueProducer<Value>
     {
         public override ByteCode Op => OpCode.GlobalGet;
         private GlobalIdx Index;
@@ -67,6 +69,13 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.5.4. global.get
         public override int Execute(ExecContext context)
         {
+            var val = FetchFromGlobals(context);
+            context.OpStack.PushValue(val);
+            return 1;
+        }
+
+        public Value FetchFromGlobals(ExecContext context)
+        {
             //2.
             context.Assert( context.Frame.Module.GlobalAddrs.Contains(Index),
                 "Runtime Globals did not contain address for {Index} in global.get");
@@ -80,12 +89,15 @@ namespace Wacs.Core.Instructions
             //6.
             var val = glob.Value;
             //7.
-            context.OpStack.PushValue(val);
-            return 1;
+            return val;
         }
+        
+        public Func<ExecContext, Value> GetFunc => FetchFromGlobals;
+
+        public int CalculateSize() => 1;
     }
     
-    public class InstGlobalSet : InstructionBase, IContextConstInstruction, IVarInstruction
+    public class InstGlobalSet : InstructionBase, IContextConstInstruction, IVarInstruction, INodeConsumer<Value>
     {
         public override ByteCode Op => OpCode.GlobalSet;
         private GlobalIdx Index;
@@ -147,10 +159,28 @@ namespace Wacs.Core.Instructions
                 $"Operand Stack underflow in global.set");
             //7.
             var val = context.OpStack.PopType(glob.Type.ContentType);
-            //8.
-            glob.Value = val;
+            SetGlobal(context, val);
             return 1;
         }
+
+        public void SetGlobal(ExecContext context, Value value)
+        {
+            //2.
+            context.Assert( context.Frame.Module.GlobalAddrs.Contains(Index),
+                "Runtime Globals did not contain address for {Index} in global.set");
+            //3.
+            var a = context.Frame.Module.GlobalAddrs[Index];
+            //4.
+            context.Assert( context.Store.Contains(a),
+                $"Runtime Store did not contain Global at address {a} in global.set");
+            //5.
+            var glob = context.Store[a];
+            
+            //8.
+            glob.Value = value;
+        }
+        
+        public Action<ExecContext, Value> GetFunc => SetGlobal;
     }
     
 }
