@@ -14,7 +14,11 @@
 //  * limitations under the License.
 //  */
 
+using FluentValidation;
+using FluentValidation.Internal;
+using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Runtime.Types
 {
@@ -62,7 +66,9 @@ namespace Wacs.Core.Runtime.Types
         {
             Body = body;
             Body.Label.Arity = Type.ResultType.Arity;
-            Body.PrecomputeLabels(Module.Types);
+
+            var vContext = new StackCalculator(Module, Definition);
+            Body.PrecomputeLabels(vContext);
         }
         
 

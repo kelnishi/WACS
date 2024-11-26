@@ -19,6 +19,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.ObjectPool;
@@ -200,21 +201,13 @@ namespace Wacs.Core.Runtime
         }
 
         // @Spec 4.4.9.1. Enter Block
-        public void EnterBlock(BlockTarget target, Block block, ResultType resultType, ByteCode inst)
+        public void EnterBlock(BlockTarget target, int blockIndex)
         {
-            //Split stack
-            // OpStack.PushResults(vals);
-            // var label = new Label{StackHeight = -1}; //Frame.Labels.Reserve();
-            // label.Set(resultType, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count);
-            // target.Label.Set(resultType.Arity, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count - Frame.StackHeight);
-            target.Label.StackHeight = OpStack.Count - Frame.StackHeight;
-            
-            // Frame.Labels.Push(label);
+            //HACK: Labels are a linked list with each node residing on its respective block instruction.
             Frame.PushLabel(target);
             
-            
             //Sets the Pointer to the start of the block sequence
-            EnterSequence(block.Instructions);
+            EnterSequence((target as IBlockInstruction)!.GetBlock(blockIndex).Instructions);
         }
 
         // @Spec 4.4.9.2. Exit Block
