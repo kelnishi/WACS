@@ -65,7 +65,7 @@ namespace Wacs.Core.Runtime.Types
         public void SetBody(Expression body)
         {
             Body = body;
-            Body.Label.Arity = Type.ResultType.Arity;
+            Body.LabelTarget.Label.Arity = Type.ResultType.Arity;
 
             var vContext = new StackCalculator(Module, Definition);
             Body.PrecomputeLabels(vContext);

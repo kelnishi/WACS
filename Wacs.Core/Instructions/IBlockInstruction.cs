@@ -35,9 +35,9 @@ namespace Wacs.Core.Instructions
     }
 
 
-    public abstract class BlockTarget : InstructionBase, ILabelTarget
+    public abstract class BlockTarget : InstructionBase
     {
-        public ILabelTarget EnclosingBlock { get; set; }
+        public BlockTarget EnclosingBlock;
         public Label Label;
     }
 }
