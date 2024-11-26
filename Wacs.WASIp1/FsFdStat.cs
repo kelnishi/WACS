@@ -128,23 +128,40 @@ namespace Wacs.WASIp1
             if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.NoEnt;
 
-            var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
-            var fileInfo = new FileInfo(hostPath);
-            
-            var fileStat = new FileStat
+            if (fd < 3)
             {
-                Device = 0, // Device ID - can be set later if available
-                Ino = FileUtil.GenerateInode(fileInfo),
-                Mode = fileDescriptor.Type,
-                NLink = 1, // Number of hard links - can be adjusted as needed
-                Size = (filesize)fileInfo.Length,
-                ATim = Clock.ToTimestamp(fileInfo.LastAccessTimeUtc),
-                MTim = Clock.ToTimestamp(fileInfo.LastWriteTimeUtc),
-                CTim = Clock.ToTimestamp(fileInfo.CreationTimeUtc)
-            };
-
-            mem.WriteStruct(bufPtr, ref fileStat);
-            
+                var fileStat = new FileStat
+                {
+                    Device = 0, // Device ID - can be set later if available
+                    Ino = fd,
+                    Mode = fileDescriptor.Type,
+                    NLink = 1, // Number of hard links - can be adjusted as needed
+                    Size = 0,
+                    ATim = 0,
+                    MTim = 0,
+                    CTim = 0,
+                };
+                
+                mem.WriteStruct(bufPtr, ref fileStat);
+            }
+            else
+            {
+                var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
+                var fileInfo = new FileInfo(hostPath);
+                var fileStat = new FileStat
+                {
+                    Device = 0, // Device ID - can be set later if available
+                    Ino = FileUtil.GenerateInode(fileInfo),
+                    Mode = fileDescriptor.Type,
+                    NLink = 1, // Number of hard links - can be adjusted as needed
+                    Size = (filesize)fileInfo.Length,
+                    ATim = Clock.ToTimestamp(fileInfo.LastAccessTimeUtc),
+                    MTim = Clock.ToTimestamp(fileInfo.LastWriteTimeUtc),
+                    CTim = Clock.ToTimestamp(fileInfo.CreationTimeUtc)
+                };
+                
+                mem.WriteStruct(bufPtr, ref fileStat);
+            } 
             return ErrNo.Success;
         }
 

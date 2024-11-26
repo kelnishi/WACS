@@ -28,26 +28,30 @@ namespace Wacs.WASIp1
         private readonly Proc _proc;
         private readonly Random _random;
         private readonly State _state;
+        private readonly Poll _poll;
+        private readonly Sock _sock;
 
         public Wasi(WasiConfiguration config)
         {
             _config = config;
             _state = new State();
-
             _proc = new Proc(_state);
+            _poll = new Poll(_state);
             _env = new Env(config);
             _clock = new Clock(config);
             _random = new Random();
-
+            _sock = new Sock(_state);
             _fs = new Filesystem(config, _state);
         }
 
         public void BindToRuntime(WasmRuntime runtime)
         {
             _proc.BindToRuntime(runtime);
+            _poll.BindToRuntime(runtime);
             _env.BindToRuntime(runtime);
             _clock.BindToRuntime(runtime);
             _random.BindToRuntime(runtime);
+            _sock.BindToRuntime(runtime);
             _fs.BindToRuntime(runtime);
         }
     }
