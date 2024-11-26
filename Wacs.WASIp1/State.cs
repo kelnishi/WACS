@@ -15,6 +15,8 @@
 //  */
 
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Net.Sockets;
 using System.Threading;
 using Wacs.WASIp1.Types;
 
@@ -41,5 +43,9 @@ namespace Wacs.WASIp1
 
 
         public VirtualPathMapper PathMapper { get; set; } = new();
+        
+        
+        public Dictionary<int, Socket> socketTable = new Dictionary<int, Socket>();
+        public int nextSocketDescriptor = 1;
     }
 }
