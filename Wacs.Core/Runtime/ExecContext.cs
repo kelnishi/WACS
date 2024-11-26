@@ -206,7 +206,9 @@ namespace Wacs.Core.Runtime
             // OpStack.PushResults(vals);
             // var label = new Label{StackHeight = -1}; //Frame.Labels.Reserve();
             // label.Set(resultType, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count);
-            target.Label.Set(resultType.Arity, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count - Frame.StackHeight);
+            // target.Label.Set(resultType.Arity, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count - Frame.StackHeight);
+            target.Label.StackHeight = OpStack.Count - Frame.StackHeight;
+            
             // Frame.Labels.Push(label);
             Frame.PushLabel(target);
             
@@ -287,8 +289,13 @@ namespace Wacs.Core.Runtime
             // label.Set(funcType.ResultType, new InstructionPointer(_currentSequence, _sequenceIndex), OpCode.Expr, OpStack.Count);
             // frame.Labels.Push(label);
             
-            wasmFunc.Body.Label.Set(funcType.ResultType.Arity, new InstructionPointer(_currentSequence, _sequenceIndex), OpCode.Func, OpStack.Count - frame.StackHeight);
-            frame.PushLabel(wasmFunc.Body);
+            // wasmFunc.Body.Label.Set(funcType.ResultType.Arity, new InstructionPointer(_currentSequence, _sequenceIndex), OpCode.Func, OpStack.Count - frame.StackHeight);
+            frame.PushLabel(wasmFunc.Body); 
+            
+            frame.ReturnLabel.Arity = funcType.ResultType.Arity;
+            frame.ReturnLabel.Instruction = OpCode.Func;
+            frame.ReturnLabel.ContinuationAddress = new InstructionPointer(_currentSequence, _sequenceIndex);
+            frame.ReturnLabel.StackHeight = 0;
             
             
             EnterSequence(wasmFunc.Body.Instructions);
