@@ -1039,7 +1039,7 @@ namespace Wacs.Core.Runtime
         /// </summary>
         private Value EvaluateInitializer(Expression ini)
         {
-            if (ini.Label.Arity != 1)
+            if (ini.LabelTarget.Label.Arity != 1)
                 throw new InvalidDataException("Initializers must have arity of 1");
             
             ini.ExecuteInitializer(Context);

@@ -109,8 +109,8 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.3. block
         public override int Execute(ExecContext context)
         {
-            if (Block.Length != 0)
-                context.EnterBlock(this, 0);
+            if (Block.Instructions.Count != 0)
+                context.EnterBlock(this, Block);
             return 1;
         }
 
@@ -185,8 +185,8 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.4. loop
         public override int Execute(ExecContext context)
         {
-            if (Block.Length != 0)
-                context.EnterBlock(this, 0);
+            if (Block.Instructions.Count != 0)
+                context.EnterBlock(this, Block);
             return 1;
         }
 
@@ -281,11 +281,16 @@ namespace Wacs.Core.Instructions
         public override int Execute(ExecContext context)
         {
             int c = context.OpStack.PopI32();
-            int idx = c != 0 ? 0 : 1;
-            Block targetBlock = GetBlock(idx);
-            if (targetBlock.Length != 0)
-                context.EnterBlock(this, idx);
-                
+            if (c != 0)
+            {
+                if (IfBlock.Instructions.Count != 0)
+                    context.EnterBlock(this, IfBlock);
+            }
+            else
+            {
+                if (ElseBlock.Instructions.Count != 0)
+                    context.EnterBlock(this, ElseBlock);
+            }
             return 1;
         }
 
@@ -463,11 +468,7 @@ namespace Wacs.Core.Instructions
             //2.
             if (labelIndex.Value > 0)
             {
-                InstructionPointer topAddr = default;
-                for (uint i = 0, l = labelIndex.Value; i < l; ++i)
-                {
-                    topAddr = context.Frame.PopLabel();
-                }
+                var topAddr = context.Frame.PopLabels((int)(labelIndex.Value - 1));
                 context.ResumeSequence(topAddr);
             }
 
@@ -478,14 +479,21 @@ namespace Wacs.Core.Instructions
             //5.
             context.Assert(_asideVals.Count == 0,
                 "Shared temporary stack had values left in it.");
-            context.OpStack.PopResults(label.Arity, ref _asideVals);
-            //6.
-            context.ResetStack(label);
-            //We did this in part 2 to avoid stack drilling.
-            // for (uint i = 0, l = labelIndex.Value; i < l; ++i)
-            //     labels.Pop();
-            //7.
-            context.OpStack.PushResults(_asideVals);
+
+            //Only reset the stack if there blocks containing extra values.
+            // An ideal solution would be to slice the OpStack array, but we don't have access.
+            if (context.OpStack.Count > context.Frame.StackHeight + label.StackHeight + label.Arity)
+            {
+                context.OpStack.PopResults(label.Arity, ref _asideVals);
+                //6.
+                context.ResetStack(label);
+                //We did this in part 2 to avoid stack drilling.
+                // for (uint i = 0, l = labelIndex.Value; i < l; ++i)
+                //     labels.Pop();
+                //7.
+                context.OpStack.PushResults(_asideVals);
+            }
+            
             //8. 
             if (label.Instruction.x00 == OpCode.Loop)
             {
@@ -521,7 +529,7 @@ namespace Wacs.Core.Instructions
     {
         public override ByteCode Op => OpCode.BrIf;
 
-        public LabelIdx L { get; internal set; }
+        public LabelIdx L;
 
         // @Spec 3.3.8.7. br_if
         public override void Validate(IWasmValidationContext context)

@@ -14,9 +14,7 @@
 //  * limitations under the License.
 //  */
 
-using System;
 using System.Buffers;
-using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
@@ -37,22 +35,10 @@ namespace Wacs.Core.Runtime
         public ModuleInstance Module = null!;
         public FunctionType Type = null!;
 
-        public Label Label
-        {
-            get
-            {
-                Label label = TopLabel switch
-                {
-                    BlockTarget b => b.Label,
-                    Expression => ReturnLabel,
-                    _ => throw new ArgumentOutOfRangeException(nameof(TopLabel))
-                };
-                return label;
-            }
-        }
+        public Label Label;
 
         public Label ReturnLabel = new();
-        public ILabelTarget TopLabel;
+        public BlockTarget TopLabel;
         public int LabelCount = 0;
         public int StackHeight;
         
@@ -87,15 +73,19 @@ namespace Wacs.Core.Runtime
         {
             while (LabelCount < depth)
             {
-                var fakeExpr = new Expression(0, InstructionSequence.Empty, true);
-                fakeExpr.Label.Instruction = OpCode.Nop;
-                // fakeExpr.Label.Set(0, InstructionPointer.Nil, OpCode.Nop, 0);
-                PushLabel(fakeExpr);
+                var fakeLabel = new InstExpressionProxy(new Label
+                {
+                    Arity = 0,
+                    ContinuationAddress = InstructionPointer.Nil,
+                    Instruction = OpCode.Nop,
+                    StackHeight = 0
+                });
+                PushLabel(fakeLabel);
             }
 
             while (LabelCount > depth)
             {
-                PopLabel();
+                PopLabels(0);
             }
         }
 
@@ -105,28 +95,35 @@ namespace Wacs.Core.Runtime
             LabelCount = 0;
         }
         
-        public void PushLabel(ILabelTarget target)
+        public void PushLabel(BlockTarget target)
         {
             TopLabel = target;
             LabelCount += 1;
+
+            Label = LabelCount > 1
+                ? TopLabel.Label 
+                : ReturnLabel;
         }
 
-        public InstructionPointer PopLabel()
+        public InstructionPointer PopLabels(int idx)
         {
-            if (LabelCount == 1)
+            if (LabelCount <= idx + 1)
                 throw new InvalidDataException("Label Stack underflow");
-
-            InstructionPointer addr = TopLabel switch
-            {
-                BlockTarget b => b.Label.ContinuationAddress,
-                Expression => ReturnLabel.ContinuationAddress,
-                _ => throw new InvalidDataException("Label Stack underflow")
-            };
-
-            TopLabel = TopLabel.EnclosingBlock;
-            LabelCount -= 1;
             
-            return addr;
+            BlockTarget oldLabel;
+            do
+            {
+                oldLabel = TopLabel;
+                TopLabel = TopLabel.EnclosingBlock;
+                idx -= 1;
+                LabelCount -= 1;
+            } while (idx >= 0);
+
+            Label = LabelCount > 1
+                ? TopLabel.Label 
+                : ReturnLabel;
+
+            return oldLabel.Label.ContinuationAddress;
         }
     }
 }

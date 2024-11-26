@@ -201,19 +201,19 @@ namespace Wacs.Core.Runtime
         }
 
         // @Spec 4.4.9.1. Enter Block
-        public void EnterBlock(BlockTarget target, int blockIndex)
+        public void EnterBlock(BlockTarget target, Block block)
         {
             //HACK: Labels are a linked list with each node residing on its respective block instruction.
             Frame.PushLabel(target);
             
             //Sets the Pointer to the start of the block sequence
-            EnterSequence((target as IBlockInstruction)!.GetBlock(blockIndex).Instructions);
+            EnterSequence(block.Instructions);
         }
 
         // @Spec 4.4.9.2. Exit Block
         public void ExitBlock()
         {
-            var addr = Frame.PopLabel();
+            var addr = Frame.PopLabels(0);
             // We manage separate stacks, so we don't need to relocate the operands
             // var vals = OpStack.PopResults(label.Type);
             ResumeSequence(addr);
@@ -278,12 +278,7 @@ namespace Wacs.Core.Runtime
             PushFrame(frame);
             
             //10.
-            // var label = new Label{StackHeight = -1}; //frame.Labels.Reserve();
-            // label.Set(funcType.ResultType, new InstructionPointer(_currentSequence, _sequenceIndex), OpCode.Expr, OpStack.Count);
-            // frame.Labels.Push(label);
-            
-            // wasmFunc.Body.Label.Set(funcType.ResultType.Arity, new InstructionPointer(_currentSequence, _sequenceIndex), OpCode.Func, OpStack.Count - frame.StackHeight);
-            frame.PushLabel(wasmFunc.Body); 
+            frame.PushLabel(wasmFunc.Body.LabelTarget); 
             
             frame.ReturnLabel.Arity = funcType.ResultType.Arity;
             frame.ReturnLabel.Instruction = OpCode.Func;
