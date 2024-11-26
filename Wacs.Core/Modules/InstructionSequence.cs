@@ -99,7 +99,7 @@ namespace Wacs.Core
                 
                 for (int i = 0, l = blockInstruction.Count; i < l; ++i)
                 {
-                    if (blockInstruction.GetBlock(i).ContainsInstruction(opcodes))
+                    if (blockInstruction.GetBlock(i).Instructions.ContainsInstruction(opcodes))
                         return true;
                 }
             }

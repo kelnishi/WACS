@@ -50,7 +50,7 @@ namespace Wacs.Core.Runtime.Transpiler
         {
             var expression = function.Definition.Body;
             var newSeq = OptimizeSequence(expression.Instructions);
-            function.Body = new Expression(function.Type, newSeq, false);
+            function.SetBody(new Expression(function.Type.ResultType.Arity, newSeq, false));
         }
 
         private static InstructionSequence OptimizeSequence(InstructionSequence seq)
@@ -65,18 +65,18 @@ namespace Wacs.Core.Runtime.Transpiler
                 switch (inst)
                 {
                     case InstBlock instBlock:
-                        var newBlockSeq = OptimizeSequence(instBlock.GetBlock(0));
+                        var newBlockSeq = OptimizeSequence(instBlock.GetBlock(0).Instructions);
                         var newBlock = new InstBlock().Immediate(instBlock.Type, newBlockSeq);
                         stack.Push(newBlock);
                         break;
                     case InstLoop instLoop:
-                        var newLoopSeq = OptimizeSequence(instLoop.GetBlock(0));
+                        var newLoopSeq = OptimizeSequence(instLoop.GetBlock(0).Instructions);
                         var newLoop = new InstLoop().Immediate(instLoop.Type, newLoopSeq);
                         stack.Push(newLoop);
                         break;
                     case InstIf instIf:
-                        var newIfSeq = OptimizeSequence(instIf.GetBlock(0));
-                        var newElseSeq = OptimizeSequence(instIf.GetBlock(1));
+                        var newIfSeq = OptimizeSequence(instIf.GetBlock(0).Instructions);
+                        var newElseSeq = OptimizeSequence(instIf.GetBlock(1).Instructions);
                         var newIf = new InstIf().Immediate(instIf.Type, newIfSeq, newElseSeq);
                         stack.Push(newIf);
                         break;

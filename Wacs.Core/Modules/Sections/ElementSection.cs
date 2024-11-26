@@ -42,7 +42,7 @@ namespace Wacs.Core
             private ElementSegment(ReferenceType type, IInstruction[] funcIndices, ElementMode mode)
             {
                 Type = type;
-                Initializers = funcIndices.Select(inst => new Expression(inst)).ToArray();
+                Initializers = funcIndices.Select(inst => new Expression(inst, 1)).ToArray();
                 Mode = mode;
                 Mode.SegmentType = Type;
             }
@@ -58,7 +58,7 @@ namespace Wacs.Core
             private ElementSegment(TableIdx tableIndex, Expression e, ReferenceType type, IInstruction[] funcIndices)
             {
                 Type = type;
-                Initializers = funcIndices.Select(inst => new Expression(inst)).ToArray();
+                Initializers = funcIndices.Select(inst => new Expression(inst, 1)).ToArray();
                 Mode = new ElementMode.ActiveMode(tableIndex, e);
                 Mode.SegmentType = Type;
             }
@@ -138,7 +138,7 @@ namespace Wacs.Core
                     ElementType.ActiveNoIndexWithElemKind => 
                         new ElementSegment(
                             (TableIdx)0,
-                            Expression.Parse(reader),
+                            Expression.ParseInitializer(reader),
                             ReferenceType.Funcref,
                             reader.ParseVector(ParseFuncIdxInstructions)),
                     ElementType.PassiveWithElemKind =>
@@ -149,7 +149,7 @@ namespace Wacs.Core
                     ElementType.ActiveWithIndexAndElemKind =>
                         new ElementSegment(
                             ParseTableIndex(reader),
-                            Expression.Parse(reader),
+                            Expression.ParseInitializer(reader),
                             ParseElementKind(reader),
                             reader.ParseVector(ParseFuncIdxInstructions)),
                     ElementType.DeclarativeWithElemKind =>
@@ -160,24 +160,24 @@ namespace Wacs.Core
                     ElementType.ActiveNoIndexWithElemType =>
                         new ElementSegment(
                             (TableIdx)0,
-                            Expression.Parse(reader),
+                            Expression.ParseInitializer(reader),
                             ReferenceType.Funcref,
-                            reader.ParseVector(Expression.Parse)),
+                            reader.ParseVector(Expression.ParseInitializer)),
                     ElementType.PassiveWithElemType =>
                         new ElementSegment(
                             ReferenceTypeParser.Parse(reader),
-                            reader.ParseVector(Expression.Parse),
+                            reader.ParseVector(Expression.ParseInitializer),
                             new ElementMode.PassiveMode()),
                     ElementType.ActiveWithIndexAndElemType =>
                         new ElementSegment(
                             ParseTableIndex(reader),
-                            Expression.Parse(reader),
+                            Expression.ParseInitializer(reader),
                             ReferenceTypeParser.Parse(reader),
-                            reader.ParseVector(Expression.Parse)),
+                            reader.ParseVector(Expression.ParseInitializer)),
                     ElementType.DeclarativeWithElemType =>
                         new ElementSegment(
                             ReferenceTypeParser.Parse(reader),
-                            reader.ParseVector(Expression.Parse),
+                            reader.ParseVector(Expression.ParseInitializer),
                             new ElementMode.DeclarativeMode()),
                     _ => throw new FormatException($"Invalid Element at {reader.BaseStream.Position}")
                 };

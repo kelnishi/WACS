@@ -45,8 +45,7 @@ namespace Wacs.Core.Runtime
         private readonly Stack<Frame> _callStack;
         private readonly ObjectPool<Frame> _framePool;
         private readonly InstructionSequence _hostReturnSequence;
-
-        private readonly ReusableStack<Label> _labelStack;
+        
         private readonly ArrayPool<Value> _localsDataPool;
         public readonly RuntimeAttributes Attributes;
         public readonly OpStack OpStack;
@@ -57,6 +56,7 @@ namespace Wacs.Core.Runtime
 
         private InstructionSequence _currentSequence;
         private int _sequenceIndex;
+        public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
 
         public Frame Frame = NullFrame;
 
@@ -74,7 +74,6 @@ namespace Wacs.Core.Runtime
             _localsDataPool = ArrayPool<Value>.Create(Attributes.MaxFunctionLocals, Attributes.LocalPoolSize);
             
             _callStack = new (Attributes.InitialCallStack);
-            _labelStack = new(Attributes.InitialLabelsStack, Attributes.GrowLabelsStack);
             
             _hostReturnSequence = InstructionSequence.Empty;
             
@@ -201,25 +200,13 @@ namespace Wacs.Core.Runtime
         }
 
         // @Spec 4.4.9.1. Enter Block
-        public void EnterBlock(ILabelTarget target, Block block, ResultType resultType, ByteCode inst)
+        public void EnterBlock(BlockTarget target, Block block, ResultType resultType, ByteCode inst)
         {
             //Split stack
             // OpStack.PushResults(vals);
             // var label = new Label{StackHeight = -1}; //Frame.Labels.Reserve();
             // label.Set(resultType, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count);
-            
-            switch (target)
-            {
-                case InstBlock b:
-                    b.Label.Set(resultType, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count - Frame.StackHeight);
-                    break;
-                case InstLoop b:
-                    b.Label.Set(resultType, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count - Frame.StackHeight);
-                    break;
-                case InstIf b:
-                    b.Label.Set(resultType, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count - Frame.StackHeight);
-                    break;
-            }
+            target.Label.Set(resultType.Arity, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count - Frame.StackHeight);
             // Frame.Labels.Push(label);
             Frame.PushLabel(target);
             
@@ -300,7 +287,7 @@ namespace Wacs.Core.Runtime
             // label.Set(funcType.ResultType, new InstructionPointer(_currentSequence, _sequenceIndex), OpCode.Expr, OpStack.Count);
             // frame.Labels.Push(label);
             
-            wasmFunc.Body.Label.Set(funcType.ResultType, new InstructionPointer(_currentSequence, _sequenceIndex), OpCode.Expr, OpStack.Count - frame.StackHeight);
+            wasmFunc.Body.Label.Set(funcType.ResultType.Arity, new InstructionPointer(_currentSequence, _sequenceIndex), OpCode.Func, OpStack.Count - frame.StackHeight);
             frame.PushLabel(wasmFunc.Body);
             
             
@@ -405,7 +392,7 @@ namespace Wacs.Core.Runtime
 
         public OpCode GetEndFor()
         {
-            if (Frame.LabelCount == 1 && Frame.Label.Instruction.x00 == OpCode.Expr)
+            if (Frame.LabelCount == 1 && Frame.Label.Instruction.x00 == OpCode.Func)
                 return OpCode.Func;    
             return OpCode.Block;
         }

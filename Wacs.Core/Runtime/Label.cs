@@ -46,18 +46,20 @@ namespace Wacs.Core.Runtime
                    ContinuationAddress.Equals(other.ContinuationAddress);
         }
 
-        public void Set(ResultType type, InstructionPointer address, ByteCode inst, int stackHeight)
+        public void Set(int arity, InstructionPointer address, ByteCode inst, int stackHeight)
         {
+            if (inst.x00 != OpCode.Func && !ContinuationAddress.Equals(address))
+                throw new ArgumentException("Block was entered from unknown location");
             if (StackHeight != -1)
             {
-                if (inst.x00 != OpCode.Expr && !ContinuationAddress.Equals(address))
-                    throw new ArgumentException("Block was entered from unknown location");
-                if (Arity != type.Arity || StackHeight != stackHeight)
+                if (StackHeight != stackHeight)
                     throw new ArgumentException("Label had different characteristics");
             }
+            if (Arity != arity)
+                throw new ArgumentException($"Label had different Arity: {Arity} vs {arity}");
             
             StackHeight = stackHeight;
-            Arity = type.Arity;
+            Arity = arity;
             Instruction = inst;
             ContinuationAddress = address;
         }

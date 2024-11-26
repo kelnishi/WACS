@@ -99,8 +99,7 @@ namespace Wacs.Core.Runtime
 
         public FuncAddr AllocateWasmFunction(Module.Function func, ModuleInstance moduleInst)
         {
-            var funcType = moduleInst.Types[func.TypeIndex];
-            var funcInst = new FunctionInstance(funcType, moduleInst, func);
+            var funcInst = new FunctionInstance(moduleInst, func);
             var funcAddr = AddFunction(funcInst);
             return funcAddr;
         }

@@ -14,6 +14,7 @@
 //  * limitations under the License.
 //  */
 
+using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
@@ -22,15 +23,21 @@ namespace Wacs.Core.Instructions
     /// <summary>
     /// Helper to calculate sizes
     /// </summary>
-    public interface IBlockInstruction : ILabelTarget
-
+    public interface IBlockInstruction
     {
-    public int Size { get; }
+        public int Size { get; }
 
-    public BlockType Type { get; }
+        public BlockType Type { get; }
 
-    public int Count { get; }
+        public int Count { get; }
 
-    public InstructionSequence GetBlock(int idx);
+        public Block GetBlock(int idx);
+    }
+
+
+    public abstract class BlockTarget : InstructionBase, ILabelTarget
+    {
+        public ILabelTarget EnclosingBlock { get; set; }
+        public Label Label;
     }
 }
