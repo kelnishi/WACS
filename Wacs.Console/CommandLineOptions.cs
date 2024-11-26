@@ -53,8 +53,8 @@ namespace Wacs.Console
         [Option('l',"calculate_lines", HelpText = "Calculate line numbers for logged instructions.", Default = false)]
         public bool CalculateLineNumbers { get; set; }
 
-        [Option('s', "stats", HelpText = "Collect instruction statistics.", Default = false)]
-        public bool CollectStats { get; set; }
+        [Option('s', "stats", HelpText = "Collect instruction statistics.", Default = StatsDetail.None)]
+        public StatsDetail CollectStats { get; set; }
 
         [Option('p', "profile", HelpText = "Bracket execution with a JetBrains profiling session.", Default = false)]
         public bool Profile { get; set; }

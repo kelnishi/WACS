@@ -42,6 +42,38 @@ namespace Spec.Test
 
             //Make multiple memories fail validation
             ModuleValidator.ValidateMultipleMemories = false;
+            runtime.TranspileModules = false;
+            
+            Module? module = null;
+            foreach (var command in file.Commands)
+            {
+                try
+                {
+                    _output.WriteLine($"    {command}");
+                    var warnings = command.RunTest(file, ref runtime, ref module);
+                    foreach (var error in warnings)
+                    {
+                        _output.WriteLine($"Warning: {error}");
+                    }
+                }
+                catch (TestException exc)
+                {
+                    Assert.Fail(exc.Message);
+                }
+            }
+        }
+        
+        [Theory]
+        [ClassData(typeof(WastJsonTestData))]
+        public void RunWastTranspiled(WastJson.WastJson file)
+        {
+            _output.WriteLine($"Running test:{file.TestName}");
+            SpecTestEnv env = new SpecTestEnv();
+            WasmRuntime runtime = new();
+            env.BindToRuntime(runtime);
+
+            //Make multiple memories fail validation
+            ModuleValidator.ValidateMultipleMemories = false;
             runtime.TranspileModules = true;
             
             Module? module = null;

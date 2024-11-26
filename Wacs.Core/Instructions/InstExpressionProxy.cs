@@ -14,30 +14,24 @@
 //  * limitations under the License.
 //  */
 
+using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions
 {
-    /// <summary>
-    /// Helper to calculate sizes
-    /// </summary>
-    public interface IBlockInstruction
+    public class InstExpressionProxy : BlockTarget
     {
-        public int Size { get; }
+        private ByteCode _op = OpCode.Expr;
+        public override ByteCode Op => _op;
+        public override void Validate(IWasmValidationContext context) { }
+        public override int Execute(ExecContext context) => 0;
 
-        public BlockType Type { get; }
-
-        public int Count { get; }
-
-        public Block GetBlock(int idx);
-    }
-
-
-    public abstract class BlockTarget : InstructionBase
-    {
-        public BlockTarget EnclosingBlock;
-        public Label Label;
+        public InstExpressionProxy(Label label)
+        {
+            EnclosingBlock = this;
+            Label = label;
+        }
     }
 }

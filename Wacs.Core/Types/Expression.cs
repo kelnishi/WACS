@@ -14,6 +14,7 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -21,6 +22,7 @@ using FluentValidation;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -31,19 +33,110 @@ namespace Wacs.Core.Types
     /// </summary>
     public class Expression
     {
-        public static readonly Expression Empty = new(InstructionSequence.Empty, true);
+        public static readonly Expression Empty = new(0, InstructionSequence.Empty, true);
 
-        public Expression(InstructionSequence seq, bool isStatic)
+        /// <summary>
+        /// For parsing normal Code sections
+        /// </summary>
+        /// <param name="seq"></param>
+        /// <param name="isStatic"></param>
+        private Expression(InstructionSequence seq, bool isStatic)
         {
             Instructions = seq;
             IsStatic = isStatic;
+            LabelTarget = new(new Label
+            {
+                //Compute Arity in PrecomputeLabels
+                ContinuationAddress = new InstructionPointer(Instructions, 1),
+                Instruction = OpCode.Expr,
+                StackHeight = -1,
+            });
+        }
+        
+        /// <summary>
+        /// Manual construction (from optimizers or statics)
+        /// </summary>
+        /// <param name="arity"></param>
+        /// <param name="seq"></param>
+        /// <param name="isStatic"></param>
+        public Expression(int arity, InstructionSequence seq, bool isStatic)
+        {
+            Instructions = seq;
+            IsStatic = isStatic;
+            LabelTarget = new(new Label
+            {
+                Arity = arity,
+                ContinuationAddress = new InstructionPointer(Instructions, 1),
+                Instruction = OpCode.Expr,
+                StackHeight = 0,
+            });
         }
 
-        public Expression(IInstruction single)
+        //Single Initializer
+        public Expression(IInstruction single, int arity)
         {
             IsStatic = true;
             Instructions = new InstructionSequence(new List<IInstruction> { single });
+            LabelTarget = new (new Label
+            {
+                Arity = arity,
+                ContinuationAddress = new InstructionPointer(Instructions, 1),
+                Instruction = OpCode.Expr,
+                StackHeight = 0,
+            });
         }
+
+        public void PrecomputeLabels(IWasmValidationContext vContext)
+        {
+            LinkLabelTarget(vContext, Instructions, LabelTarget);
+        }
+        
+        //TODO: compute stack heights
+        private void LinkLabelTarget(IWasmValidationContext vContext, InstructionSequence seq, BlockTarget enclosingTarget)
+        {
+            for (int i = 0; i < seq.Count; ++i)
+            {
+                var inst = seq._instructions[i];
+                inst.Validate(vContext);
+                
+                if (inst is BlockTarget target)
+                {
+                    target.EnclosingBlock = enclosingTarget;
+                    var blockInst = target as IBlockInstruction;
+
+                    var block = blockInst!.GetBlock(0);
+                    int arity = 0;
+                    try
+                    {
+                        var funcType = vContext.Types.ResolveBlockType(block.Type);
+                        if (funcType == null)
+                            throw new IndexOutOfRangeException();
+
+                        arity = inst is InstLoop ? funcType.ParameterTypes.Arity : funcType.ResultType.Arity;
+                    }
+                    catch (IndexOutOfRangeException)
+                    {
+                        throw new InvalidDataException($"Failure computing Labels. BlockType:{block.Type} did not exist in the Module");
+                    }
+                    
+                    var label = new Label
+                    {
+                        Arity = arity,
+                        ContinuationAddress = new InstructionPointer(seq, i),
+                        Instruction = inst.Op,
+                        //HACK: Use any existing precomputed StackHeight (assume optimization has not changed this value)
+                        StackHeight = (target.Label?.StackHeight ?? -1) >= 0 ? target.Label!.StackHeight : vContext.OpStack.Height,
+                    };
+                    
+                    for (int b = 0; b < blockInst!.Count; ++b)
+                        LinkLabelTarget(vContext,blockInst.GetBlock(b).Instructions, target);
+                    
+                    target.Label = label;
+                }
+            }
+        }
+
+        public InstExpressionProxy LabelTarget;
 
         public readonly bool IsStatic;
         public readonly InstructionSequence Instructions;
@@ -54,18 +147,18 @@ namespace Wacs.Core.Types
         /// Leaves the result on the OpStack
         /// </summary>
         /// <param name="context"></param>
-        public void Execute(ExecContext context)
+        public void ExecuteInitializer(ExecContext context)
         {
             var frame = context.ReserveFrame(context.Frame.Module, FunctionType.Empty, FuncIdx.ExpressionEvaluation);
-            var label = frame.Labels.Reserve();
-            label.Set(ResultType.Empty, new InstructionPointer(Instructions, 1), OpCode.Nop, context.OpStack.Count);
-            frame.Labels.Push(label);
+            if (context.OpStack.Count != 0)
+                throw new InvalidDataException("OpStack should be empty");
+            frame.ReturnLabel = LabelTarget.Label;
+            frame.PushLabel(LabelTarget);
             context.PushFrame(frame);
             foreach (var inst in Instructions)
             {
                 inst.Execute(context);
             }
-
             context.PopFrame();
         }
 
@@ -74,6 +167,9 @@ namespace Wacs.Core.Types
         /// </summary>
         public static Expression Parse(BinaryReader reader) =>
             new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd)), true);
+        
+        public static Expression ParseInitializer(BinaryReader reader) =>
+            new(1, new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd)), true);
 
         /// <summary>
         /// For Single instruction renders (globals, elements)

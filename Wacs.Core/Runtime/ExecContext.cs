@@ -19,6 +19,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.ObjectPool;
@@ -45,8 +46,7 @@ namespace Wacs.Core.Runtime
         private readonly Stack<Frame> _callStack;
         private readonly ObjectPool<Frame> _framePool;
         private readonly InstructionSequence _hostReturnSequence;
-
-        private readonly ReusableStack<Label> _labelStack;
+        
         private readonly ArrayPool<Value> _localsDataPool;
         public readonly RuntimeAttributes Attributes;
         public readonly OpStack OpStack;
@@ -57,10 +57,12 @@ namespace Wacs.Core.Runtime
 
         private InstructionSequence _currentSequence;
         private int _sequenceIndex;
+        public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
 
         public Frame Frame = NullFrame;
 
         public Dictionary<ushort, ExecStat> Stats = new();
+        public long steps;
 
         public ExecContext(Store store, RuntimeAttributes? attributes = default)
         {
@@ -73,7 +75,6 @@ namespace Wacs.Core.Runtime
             _localsDataPool = ArrayPool<Value>.Create(Attributes.MaxFunctionLocals, Attributes.LocalPoolSize);
             
             _callStack = new (Attributes.InitialCallStack);
-            _labelStack = new(Attributes.InitialLabelsStack, Attributes.GrowLabelsStack);
             
             _hostReturnSequence = InstructionSequence.Empty;
             
@@ -115,13 +116,15 @@ namespace Wacs.Core.Runtime
             var frame = _framePool.Get();
             frame.Module = module;
             frame.Type = type;
-            frame.Labels = _labelStack.GetSubStack();
+            // frame.Labels = _labelStack.GetSubStack();
             frame.Index = index;
             frame.ContinuationAddress = new InstructionPointer(_currentSequence, _sequenceIndex);
             
+            frame.ClearLabels();
             int capacity = type.ParameterTypes.Types.Length + locals.Length;
             var localData = _localsDataPool.Rent(capacity);
             frame.Locals = new(localData, type.ParameterTypes.Types, locals);
+            frame.StackHeight = OpStack.Count;
             
             return frame;
         }
@@ -140,7 +143,7 @@ namespace Wacs.Core.Runtime
             var frame = _callStack.Pop();
             Frame = _callStack.Count > 0 ? _callStack.Peek() : NullFrame;
             
-            frame.Labels.Drop();
+            // frame.Labels.Drop();
             if (frame.Locals.Data != null)
                 frame.ReturnLocals(_localsDataPool);
 
@@ -151,7 +154,7 @@ namespace Wacs.Core.Runtime
 
         public void ResetStack(Label label)
         {
-            for (int c = OpStack.Count, h = label.StackHeight; c > h; --c)
+            for (int c = OpStack.Count, h = label.StackHeight + Frame.StackHeight; c > h; --c)
             {
                 OpStack.PopAny();
             }
@@ -198,13 +201,11 @@ namespace Wacs.Core.Runtime
         }
 
         // @Spec 4.4.9.1. Enter Block
-        public void EnterBlock(Block block, ResultType resultType, ByteCode inst)
+        public void EnterBlock(BlockTarget target, Block block)
         {
-            //Split stack
-            // OpStack.PushResults(vals);
-            var label = Frame.Labels.Reserve();
-            label.Set(resultType, new InstructionPointer(_currentSequence, _sequenceIndex), inst, OpStack.Count);
-            Frame.Labels.Push(label);
+            //HACK: Labels are a linked list with each node residing on its respective block instruction.
+            Frame.PushLabel(target);
+            
             //Sets the Pointer to the start of the block sequence
             EnterSequence(block.Instructions);
         }
@@ -212,7 +213,7 @@ namespace Wacs.Core.Runtime
         // @Spec 4.4.9.2. Exit Block
         public void ExitBlock()
         {
-            var addr = Frame.PopLabel();
+            var addr = Frame.PopLabels(0);
             // We manage separate stacks, so we don't need to relocate the operands
             // var vals = OpStack.PopResults(label.Type);
             ResumeSequence(addr);
@@ -277,9 +278,14 @@ namespace Wacs.Core.Runtime
             PushFrame(frame);
             
             //10.
-            var label = frame.Labels.Reserve();
-            label.Set(funcType.ResultType, new InstructionPointer(_currentSequence, _sequenceIndex), OpCode.Expr, OpStack.Count);
-            frame.Labels.Push(label);
+            frame.PushLabel(wasmFunc.Body.LabelTarget); 
+            
+            frame.ReturnLabel.Arity = funcType.ResultType.Arity;
+            frame.ReturnLabel.Instruction = OpCode.Func;
+            frame.ReturnLabel.ContinuationAddress = new InstructionPointer(_currentSequence, _sequenceIndex);
+            frame.ReturnLabel.StackHeight = 0;
+            
+            
             EnterSequence(wasmFunc.Body.Instructions);
         }
 
@@ -328,26 +334,26 @@ namespace Wacs.Core.Runtime
             Stack<(string, int)> ascent = new();
             int idx = _sequenceIndex;
             
-            foreach (var label in Frame.Labels)
-            {
-                var pointer = (label.Instruction.GetMnemonic(), idx);
-                ascent.Push(pointer);
-
-                idx = label.ContinuationAddress.Index;
-                
-                switch ((OpCode)label.Instruction)
-                {
-                    case OpCode.If: ascent.Push(("InstIf", 0));
-                        break;
-                    case OpCode.Else: ascent.Push(("InstElse", 1));
-                        break;
-                    case OpCode.Block: ascent.Push(("InstBlock", 0));
-                        break;
-                    case OpCode.Loop: ascent.Push(("InstLoop", 0));
-                        break;
-                }
-                
-            }
+            // foreach (var label in Frame.Labels)
+            // {
+            //     var pointer = (label.Instruction.GetMnemonic(), idx);
+            //     ascent.Push(pointer);
+            //
+            //     idx = label.ContinuationAddress.Index;
+            //     
+            //     switch ((OpCode)label.Instruction)
+            //     {
+            //         case OpCode.If: ascent.Push(("InstIf", 0));
+            //             break;
+            //         case OpCode.Else: ascent.Push(("InstElse", 1));
+            //             break;
+            //         case OpCode.Block: ascent.Push(("InstBlock", 0));
+            //             break;
+            //         case OpCode.Loop: ascent.Push(("InstLoop", 0));
+            //             break;
+            //     }
+            //     
+            // }
             
             ascent.Push(("Function", (int)Frame.Index.Value));
 
@@ -381,7 +387,7 @@ namespace Wacs.Core.Runtime
 
         public OpCode GetEndFor()
         {
-            if (Frame.Labels.Count == 1 && Frame.Label.Instruction.x00 == OpCode.Expr)
+            if (Frame.LabelCount == 1 && Frame.Label.Instruction.x00 == OpCode.Func)
                 return OpCode.Func;    
             return OpCode.Block;
         }
