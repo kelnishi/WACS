@@ -45,7 +45,7 @@ namespace Wacs.Core
                 (Type, Initializer) = (type, Expression.Empty);
 
             private Global(BinaryReader reader) =>
-                (Type, Initializer) = (GlobalType.Parse(reader), Expression.Parse(reader));
+                (Type, Initializer) = (GlobalType.Parse(reader), Expression.ParseInitializer(reader));
 
             public bool IsImport;
 

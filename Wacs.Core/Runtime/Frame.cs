@@ -15,6 +15,8 @@
 //  */
 
 using System.Buffers;
+using System.IO;
+using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -28,21 +30,23 @@ namespace Wacs.Core.Runtime
         public string FuncId = "";
 
         public FuncIdx Index;
-        // public ObjectPool<Label>? LabelPool = null;
-
-        public SubStack<Label> Labels;
         public LocalsSpace Locals;
 
-        // public readonly Stack<Label> Labels = new();
         public ModuleInstance Module = null!;
         public FunctionType Type = null!;
 
-        public Label Label => Labels.Peek();
+        public Label Label;
+
+        public Label ReturnLabel = new();
+        public BlockTarget TopLabel;
+        public int LabelCount = 0;
+        public int StackHeight;
+        
         public int Arity => Type.ResultType.Arity;
 
         public void Clear()
         {
-            Labels = default;
+            TopLabel = default!;
             Module = default!;
             Locals = default;
             ContinuationAddress = default;
@@ -63,29 +67,63 @@ namespace Wacs.Core.Runtime
         }
 
         public bool Contains(LabelIdx index) =>
-            index.Value < Labels.Count;
+            index.Value < LabelCount;
 
         public void ForceLabels(int depth)
         {
-            while (Labels.Count < depth)
+            while (LabelCount < depth)
             {
-                var fakeLabel = Labels.Reserve();
-                fakeLabel.Set(ResultType.Empty, InstructionPointer.Nil, OpCode.Nop, 0);
-                Labels.Push(fakeLabel);
+                var fakeLabel = new InstExpressionProxy(new Label
+                {
+                    Arity = 0,
+                    ContinuationAddress = InstructionPointer.Nil,
+                    Instruction = OpCode.Nop,
+                    StackHeight = 0
+                });
+                PushLabel(fakeLabel);
             }
 
-            while (Labels.Count > depth)
+            while (LabelCount > depth)
             {
-                PopLabel();
+                PopLabels(0);
             }
         }
 
-        public InstructionPointer PopLabel()
+        public void ClearLabels()
         {
-            var label = Labels.Pop();
-            var addr = label.ContinuationAddress;
-            // LabelPool?.Return(label);
-            return addr;
+            TopLabel = default!;
+            LabelCount = 0;
+        }
+        
+        public void PushLabel(BlockTarget target)
+        {
+            TopLabel = target;
+            LabelCount += 1;
+
+            Label = LabelCount > 1
+                ? TopLabel.Label 
+                : ReturnLabel;
+        }
+
+        public InstructionPointer PopLabels(int idx)
+        {
+            if (LabelCount <= idx + 1)
+                throw new InvalidDataException("Label Stack underflow");
+            
+            BlockTarget oldLabel;
+            do
+            {
+                oldLabel = TopLabel;
+                TopLabel = TopLabel.EnclosingBlock;
+                idx -= 1;
+                LabelCount -= 1;
+            } while (idx >= 0);
+
+            Label = LabelCount > 1
+                ? TopLabel.Label 
+                : ReturnLabel;
+
+            return oldLabel.Label.ContinuationAddress;
         }
     }
 }
