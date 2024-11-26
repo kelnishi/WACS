@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>netstandard2.1</TargetFramework>
         <LangVersion>9</LangVersion>
         <Nullable>enable</Nullable>
         <Title>Wacs WASIp1</Title>
@@ -17,6 +16,7 @@
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
         <Version>0.9.2</Version>
         <RepositoryType>git</RepositoryType>
+        <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>
     </PropertyGroup>
 
     <PropertyGroup>
@@ -24,13 +24,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <None Update="README.md">
+        <None Include="README.md">
             <Pack>true</Pack>
             <PackagePath/>
-        </None>
-        <None Update="README.md">
-          <Pack>true</Pack>
-          <PackagePath></PackagePath>
         </None>
     </ItemGroup>
     
