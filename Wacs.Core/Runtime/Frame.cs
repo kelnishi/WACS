@@ -88,7 +88,8 @@ namespace Wacs.Core.Runtime
             while (LabelCount < depth)
             {
                 var fakeExpr = new Expression(0, InstructionSequence.Empty, true);
-                fakeExpr.Label.Set(0, InstructionPointer.Nil, OpCode.Nop, 0);
+                fakeExpr.Label.Instruction = OpCode.Nop;
+                // fakeExpr.Label.Set(0, InstructionPointer.Nil, OpCode.Nop, 0);
                 PushLabel(fakeExpr);
             }
 

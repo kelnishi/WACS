@@ -14,28 +14,27 @@
 //  * limitations under the License.
 //  */
 
-using System;
+using System.Collections;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Types;
-using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime
 {
-    public class Label : IPoolable
+    public class Label
     {
         public int Arity;
-
         public InstructionPointer ContinuationAddress;
-
         public ByteCode Instruction;
         public int StackHeight;
 
-        public void Clear()
+        public Label()
         {
-            Arity = default;
-            Instruction = default;
-            ContinuationAddress = default;
-            StackHeight = default;
+        }
+
+        public Label(Label copy)
+        {
+            Arity = copy.Arity;
+            Instruction = copy.Instruction;
+            StackHeight = copy.StackHeight;
         }
 
         public bool Equals(Label other)
@@ -45,23 +44,11 @@ namespace Wacs.Core.Runtime
                    Instruction.Equals(other.Instruction) &&
                    ContinuationAddress.Equals(other.ContinuationAddress);
         }
-
-        public void Set(int arity, InstructionPointer address, ByteCode inst, int stackHeight)
+        
+        public override string ToString()
         {
-            if (inst.x00 != OpCode.Func && !ContinuationAddress.Equals(address))
-                throw new ArgumentException("Block was entered from unknown location");
-            if (StackHeight != -1)
-            {
-                if (StackHeight != stackHeight)
-                    throw new ArgumentException("Label had different characteristics");
-            }
-            if (Arity != arity)
-                throw new ArgumentException($"Label had different Arity: {Arity} vs expected {arity}");
-            
-            StackHeight = stackHeight;
-            Arity = arity;
-            Instruction = inst;
-            ContinuationAddress = address;
+            return $"Label(Instruction: {Instruction}, Arity: {Arity}, StackHeight: {StackHeight}, ContinuationAddress: {ContinuationAddress})";
         }
+        
     }
 }

@@ -109,33 +109,8 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.3. block
         public override int Execute(ExecContext context)
         {
-            if (Block.Length == 0)
-                return 1;
-            
-            try
-            {
-                //2.
-                var funcType = context.Frame.Module.Types.ResolveBlockType(Block.Type);
-                //3.
-                context.Assert(funcType, $"Invalid BlockType: {Block.Type}");
-                //4.
-                // var label = new Label(funcType.ResultType, context.GetPointer(), inst);
-                //5.
-                context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Arity,
-                    $"Instruction block failed. Operand Stack underflow.");
-                //6. 
-                //Split stack, leave values in place.
-                // context.OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
-                //7.
-                context.EnterBlock(this, Block, funcType.ResultType, BlockOp);
-            }
-            catch (IndexOutOfRangeException exc)
-            {
-                _ = exc;
-                context.Assert(false,
-                    $"Instruction block failed. BlockType {Block.Type} did not exist in the Context.");
-            }
-
+            if (Block.Length != 0)
+                context.EnterBlock(this, 0);
             return 1;
         }
 
@@ -151,7 +126,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
         
-        public IInstruction Immediate(BlockType type, InstructionSequence sequence)
+        public BlockTarget Immediate(BlockType type, InstructionSequence sequence)
         {
             Block = new Block(
                 type: type,
@@ -210,29 +185,8 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.4. loop
         public override int Execute(ExecContext context)
         {
-            try
-            {
-                //2.
-                var funcType = context.Frame.Module.Types.ResolveBlockType(Block.Type);
-                //3.
-                context.Assert(funcType, $"Invalid BlockType: {Block.Type}");
-                //4.
-                // var label = new Label(funcType.ParameterTypes, context.GetPointer(), OpCode.Loop);
-                //5.
-                context.Assert( context.OpStack.Count >= funcType.ParameterTypes.Arity,
-                    $"Instruction loop failed. Operand Stack underflow.");
-                //6. 
-                //Split stack, leave values in place.
-                // context.OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
-                //7.
-                context.EnterBlock(this, Block, funcType.ParameterTypes, OpCode.Loop);
-            }
-            catch (IndexOutOfRangeException exc)
-            {
-                _ = exc;
-                context.Assert( false,
-                    $"Instruction loop failed. BlockType {Block.Type} did not exist in the Context.");
-            }
+            if (Block.Length != 0)
+                context.EnterBlock(this, 0);
             return 1;
         }
 
@@ -248,7 +202,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
         
-        public IInstruction Immediate(BlockType type, InstructionSequence sequence)
+        public BlockTarget Immediate(BlockType type, InstructionSequence sequence)
         {
             Block = new Block(
                 type: type,
@@ -327,34 +281,11 @@ namespace Wacs.Core.Instructions
         public override int Execute(ExecContext context)
         {
             int c = context.OpStack.PopI32();
-            Block targetBlock = c != 0 ? IfBlock : ElseBlock;
-            ByteCode inst = c != 0 ? IfOp : ElseOp;
-            if (targetBlock.Length == 0)
-                return 1;
-            
-            try
-            {
-                //2.
-                var funcType = context.Frame.Module.Types.ResolveBlockType(targetBlock.Type);
-                //3.
-                context.Assert(funcType, $"Invalid BlockType: {targetBlock.Type}");
-                //4.
-                // var label = new Label(funcType.ResultType, context.GetPointer(), ElseOp);
-                //5.
-                context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Arity,
-                    $"Instruction block failed. Operand Stack underflow.");
-                //6. 
-                //Split stack, leave values in place.
-                // context.OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
-                //7.
-                context.EnterBlock(this, targetBlock, funcType.ResultType, inst);
-            }
-            catch (IndexOutOfRangeException exc)
-            {
-                _ = exc;
-                context.Assert(false,
-                    $"Instruction if failed. BlockType {targetBlock.Type} did not exist in the Context.");
-            }
+            int idx = c != 0 ? 0 : 1;
+            Block targetBlock = GetBlock(idx);
+            if (targetBlock.Length != 0)
+                context.EnterBlock(this, idx);
+                
             return 1;
         }
 
@@ -385,7 +316,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
         
-        public IInstruction Immediate(BlockType type, InstructionSequence ifSeq, InstructionSequence elseSeq)
+        public BlockTarget Immediate(BlockType type, InstructionSequence ifSeq, InstructionSequence elseSeq)
         {
             IfBlock = new Block(
                 type: type,

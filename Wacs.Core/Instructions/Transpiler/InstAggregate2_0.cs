@@ -46,7 +46,7 @@ namespace Wacs.Core.Instructions.Transpiler
         public override ByteCode Op => OpCode.Aggr;
         public override void Validate(IWasmValidationContext context)
         {
-            throw new NotImplementedException("Validation of transpiled instructions not supported.");
+            context.Assert(false, "Validation of transpiled instructions not supported.");
         }
 
         public override int Execute(ExecContext context)
