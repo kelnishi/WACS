@@ -14,6 +14,7 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -32,7 +33,7 @@ namespace Wacs.Core.Types
     /// </summary>
     public class Expression : ILabelTarget
     {
-        public static readonly Expression Empty = new(FunctionType.Empty, InstructionSequence.Empty, true);
+        public static readonly Expression Empty = new(0, InstructionSequence.Empty, true);
 
         private Expression(InstructionSequence seq, bool isStatic)
         {
@@ -40,74 +41,86 @@ namespace Wacs.Core.Types
             IsStatic = isStatic;
             Label = new Label
             {
-                ContinuationAddress = InstructionPointer.Nil,
-                Instruction = OpCode.Nop,
+                //Compute Arity in PrecomputeLabels
+                ContinuationAddress = new InstructionPointer(Instructions, 1),
+                Instruction = OpCode.Expr,
                 StackHeight = -1,
             };
             EnclosingBlock = this;
-            LinkLabelTarget(Instructions, this);
         }
         
-        public Expression(FunctionType type, InstructionSequence seq, bool isStatic)
+        public Expression(int arity, InstructionSequence seq, bool isStatic)
         {
             Instructions = seq;
             IsStatic = isStatic;
             Label = new Label
             {
-                ContinuationAddress = InstructionPointer.Nil,
-                Instruction = OpCode.Nop,
-                Arity = type.ResultType.Arity,
-                StackHeight = -1,
+                Arity = arity,
+                ContinuationAddress = new InstructionPointer(Instructions, 1),
+                Instruction = OpCode.Expr,
+                StackHeight = 0,
             };
             EnclosingBlock = this;
-            LinkLabelTarget(Instructions, this);
         }
 
-        public Expression(IInstruction single)
+        public Expression(IInstruction single, int arity)
         {
             IsStatic = true;
             Instructions = new InstructionSequence(new List<IInstruction> { single });
             Label = new Label
             {
-                ContinuationAddress = InstructionPointer.Nil,
-                Instruction = OpCode.Nop,
+                Arity = arity,
+                ContinuationAddress = new InstructionPointer(Instructions, 1),
+                Instruction = OpCode.Expr,
                 StackHeight = -1,
             };
             EnclosingBlock = this;
-            LinkLabelTarget(Instructions, this);
         }
 
+        public void PrecomputeLabels(TypesSpace types)
+        {
+            LinkLabelTarget(types, Instructions, this);
+        }
+        
         //TODO: compute stack heights
-        private void LinkLabelTarget(InstructionSequence seq, ILabelTarget enclosingTarget)
+        private void LinkLabelTarget(TypesSpace types, InstructionSequence seq, ILabelTarget enclosingTarget)
         {
             for (int i = 0; i < seq.Count; ++i)
             {
                 var inst = seq._instructions[i];
-                if (inst is IBlockInstruction target)
+                if (inst is BlockTarget target)
                 {
                     target.EnclosingBlock = enclosingTarget;
+                    var blockInst = target as IBlockInstruction;
+                    for (int b = 0; b < blockInst!.Count; ++b)
+                        LinkLabelTarget(types,blockInst.GetBlock(b).Instructions, target);
+
+                    var block = blockInst.GetBlock(0);
+                    int arity = 0;
+                    try
+                    {
+                        var funcType = types.ResolveBlockType(block.Type);
+                        if (funcType == null)
+                            throw new IndexOutOfRangeException();
+                        
+                        // context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Arity,
+                        //     $"Instruction block failed. Operand Stack underflow.");
+
+                        arity = inst is InstLoop ? funcType.ParameterTypes.Arity : funcType.ResultType.Arity;
+                    }
+                    catch (IndexOutOfRangeException)
+                    {
+                        throw new InvalidDataException($"Failure computing Labels. BlockType:{block.Type} did not exist in the Module");
+                    }
+                    
                     var label = new Label
                     {
+                        Arity = arity,
                         ContinuationAddress = new InstructionPointer(seq, i),
                         Instruction = inst.Op,
                         StackHeight = -1,
                     };
-                    switch (inst)
-                    {
-                        case InstBlock b: 
-                            b.Label = label;
-                            LinkLabelTarget(b.GetBlock(0), b);
-                            break;
-                        case InstLoop b: 
-                            b.Label = label;
-                            LinkLabelTarget(b.GetBlock(0), b);
-                            break;
-                        case InstIf b: 
-                            b.Label = label;
-                            LinkLabelTarget(b.GetBlock(0), b);
-                            LinkLabelTarget(b.GetBlock(1), b);
-                            break;
-                    }
+                    target.Label = label;
                 }
             }
         }
@@ -124,24 +137,18 @@ namespace Wacs.Core.Types
         /// Leaves the result on the OpStack
         /// </summary>
         /// <param name="context"></param>
-        public void Execute(ExecContext context)
+        public void ExecuteInitializer(ExecContext context)
         {
             var frame = context.ReserveFrame(context.Frame.Module, FunctionType.Empty, FuncIdx.ExpressionEvaluation);
+            if (context.OpStack.Count != 0)
+                throw new InvalidDataException("OpStack should be empty");
             
-            // var label = new Label{StackHeight = -1}; //frame.Labels.Reserve();
-            // label.Set(ResultType.Empty, new InstructionPointer(Instructions, 1), OpCode.Nop, context.OpStack.Count);
-            // frame.Labels.Push(label);
-            
-            Label.Set(ResultType.Empty, new InstructionPointer(Instructions, 1), OpCode.Nop, context.OpStack.Count - frame.StackHeight);
             frame.PushLabel(this);
-            
-            
             context.PushFrame(frame);
             foreach (var inst in Instructions)
             {
                 inst.Execute(context);
             }
-
             context.PopFrame();
         }
 
@@ -150,6 +157,9 @@ namespace Wacs.Core.Types
         /// </summary>
         public static Expression Parse(BinaryReader reader) =>
             new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd)), true);
+        
+        public static Expression ParseInitializer(BinaryReader reader) =>
+            new(1, new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd)), true);
 
         /// <summary>
         /// For Single instruction renders (globals, elements)

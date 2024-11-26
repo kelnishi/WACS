@@ -16,6 +16,7 @@
 
 using System.Buffers;
 using System.Collections.Generic;
+using System.IO;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
@@ -30,13 +31,8 @@ namespace Wacs.Core.Runtime
         public string FuncId = "";
 
         public FuncIdx Index;
-        // public ObjectPool<Label>? LabelPool = null;
-
-        // public SubStack<Label> Labels;
-        // private Stack<Label> Labels = new();
         public LocalsSpace Locals;
 
-        // public readonly Stack<Label> Labels = new();
         public ModuleInstance Module = null!;
         public FunctionType Type = null!;
 
@@ -46,13 +42,10 @@ namespace Wacs.Core.Runtime
             {
                 var label = TopLabel switch
                 {
-                    InstBlock b => b.Label, 
-                    InstLoop b => b.Label,
-                    InstIf b => b.Label,
+                    BlockTarget b => b.Label, 
                     Expression e => e.Label,
                 };
                 return label;
-                // return Labels.Peek();
             }
         }
 
@@ -64,8 +57,6 @@ namespace Wacs.Core.Runtime
 
         public void Clear()
         {
-            // Labels = default;
-            // Labels.Clear();
             TopLabel = default!;
             Module = default!;
             Locals = default;
@@ -93,12 +84,9 @@ namespace Wacs.Core.Runtime
         {
             while (LabelCount < depth)
             {
-                var fakeExpr = new Expression(FunctionType.Empty, InstructionSequence.Empty, true);
-                // var fakeLabel = new Label();
-                // fakeLabel.Set(ResultType.Empty, InstructionPointer.Nil, OpCode.Nop, 0);
-                fakeExpr.Label.Set(ResultType.Empty, InstructionPointer.Nil, OpCode.Nop, 0);
+                var fakeExpr = new Expression(0, InstructionSequence.Empty, true);
+                fakeExpr.Label.Set(0, InstructionPointer.Nil, OpCode.Nop, 0);
                 PushLabel(fakeExpr);
-                // Labels.Push(fakeLabel);
             }
 
             while (LabelCount > depth)
@@ -111,39 +99,27 @@ namespace Wacs.Core.Runtime
         {
             TopLabel = default!;
             LabelCount = 0;
-            // Labels.Clear();
         }
         
         public void PushLabel(ILabelTarget target)
         {
-            // var label = target switch
-            // {
-            //     InstBlock b => b.Label, 
-            //     InstLoop b => b.Label,
-            //     InstIf b => b.Label,
-            //     Expression e => e.Label,
-            // };
-            // Labels.Push(label);
-
             TopLabel = target;
             LabelCount += 1;
         }
 
         public InstructionPointer PopLabel()
         {
-            // var label = Labels.Pop();
-            var label = TopLabel switch
+            if (LabelCount == 0)
+                throw new InvalidDataException("Label Stack underflow");
+            
+            var addr = TopLabel switch
             {
-                InstBlock b => b.Label, 
-                InstLoop b => b.Label,
-                InstIf b => b.Label,
-                Expression e => e.Label,
+                BlockTarget b => b.Label.ContinuationAddress, 
+                Expression e => e.Label.ContinuationAddress,
+                _ => throw new InvalidDataException("Label Stack underflow")
             };
             
-            var addr = label.ContinuationAddress;
-
             TopLabel = TopLabel.EnclosingBlock;
-            
             LabelCount -= 1;
             
             return addr;

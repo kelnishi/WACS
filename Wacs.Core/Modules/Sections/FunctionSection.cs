@@ -81,7 +81,7 @@ namespace Wacs.Core
 
                 var fakeContext = new FakeContext(module, this);
                 StackRenderer stackRenderer = new(null, RenderStack, context:fakeContext);
-                fakeContext.PushControlFrame(OpCode.Expr, functionType);
+                fakeContext.PushControlFrame(OpCode.Func, functionType);
                 RenderInstructions(writer, indent, 0, module, Body.Instructions, stackRenderer);
                 fakeContext.PopControlFrame();
                 writer.WriteLine(")");
@@ -121,7 +121,7 @@ namespace Wacs.Core
                                 stackRenderer.FakeContext.LastEvent = "[";
                                 stackRenderer.ProcessInstruction(inst);
                                 
-                                var blockSeq = blockInst.GetBlock(b);
+                                var blockSeq = blockInst.GetBlock(b).Instructions;
                                 stackRenderer.FakeContext.DummyContext.Frame.ForceLabels(depth+1);
                                 RenderInstructions(writer, blockIndent, depth, module, blockSeq, stackRenderer.SubRenderer());
 

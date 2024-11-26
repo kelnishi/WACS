@@ -67,21 +67,18 @@ namespace Wacs.Core.Instructions
     }
 
     //0x02
-    public class InstBlock : InstructionBase, IBlockInstruction
+    public class InstBlock : BlockTarget, IBlockInstruction
     {
         private static readonly ByteCode BlockOp = OpCode.Block;
         public override ByteCode Op => BlockOp;
         private Block Block;
         
-        public ILabelTarget EnclosingBlock { get; set; }
-        public Label Label;
-
         public BlockType Type => Block.Type;
 
         public int Count => 1;
 
         public int Size => 1 + Block.Size;
-        public InstructionSequence GetBlock(int idx) => Block.Instructions;
+        public Block GetBlock(int idx) => Block;
         
         // @Spec 3.3.8.3 block
         public override void Validate(IWasmValidationContext context)
@@ -171,21 +168,18 @@ namespace Wacs.Core.Instructions
     }
 
     //0x03
-    public class InstLoop : InstructionBase, IBlockInstruction
+    public class InstLoop : BlockTarget, IBlockInstruction
     {
         private static readonly ByteCode LoopOp = OpCode.Loop;
         public override ByteCode Op => LoopOp;
         private Block Block = null!;
 
-        public ILabelTarget EnclosingBlock { get; set; }
-        public Label Label;
-        
         public BlockType Type => Block.Type;
 
         public int Count => 1;
 
         public int Size => 1 + Block.Size;
-        public InstructionSequence GetBlock(int idx) => Block.Instructions;
+        public Block GetBlock(int idx) => Block;
         
         // @Spec 3.3.8.4. loop
         public override void Validate(IWasmValidationContext context)
@@ -271,7 +265,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x04
-    public class InstIf : InstructionBase, IBlockInstruction
+    public class InstIf : BlockTarget, IBlockInstruction
     {
         private static readonly ByteCode IfOp = OpCode.If;
         private static readonly ByteCode ElseOp = OpCode.Else;
@@ -279,15 +273,13 @@ namespace Wacs.Core.Instructions
         private Block IfBlock = Block.Empty;
         private Block ElseBlock = Block.Empty;
 
-        public ILabelTarget EnclosingBlock { get; set; }
-        public Label Label;
         
         public BlockType Type => IfBlock.Type;
 
         public int Count => ElseBlock.Length == 0 ? 1 : 2;
 
         public int Size => 1 + IfBlock.Size + ElseBlock.Size;
-        public InstructionSequence GetBlock(int idx) => idx == 0 ? IfBlock.Instructions : ElseBlock.Instructions;
+        public Block GetBlock(int idx) => idx == 0 ? IfBlock : ElseBlock;
         
         // @Spec 3.3.8.5 if
         public override void Validate(IWasmValidationContext context)
@@ -335,66 +327,33 @@ namespace Wacs.Core.Instructions
         public override int Execute(ExecContext context)
         {
             int c = context.OpStack.PopI32();
-            if (c != 0)
-            {
-                // InstBlock.ExecuteInstruction(context, IfBlock, IfOp);
-                if (IfBlock.Length == 0)
-                    return 1;
+            Block targetBlock = c != 0 ? IfBlock : ElseBlock;
+            ByteCode inst = c != 0 ? IfOp : ElseOp;
+            if (targetBlock.Length == 0)
+                return 1;
             
-                try
-                {
-                    //2.
-                    var funcType = context.Frame.Module.Types.ResolveBlockType(IfBlock.Type);
-                    //3.
-                    context.Assert(funcType, $"Invalid BlockType: {IfBlock.Type}");
-                    //4.
-                    // var label = new Label(funcType.ResultType, context.GetPointer(), IfOp);
-                    //5.
-                    context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Arity,
-                        $"Instruction block failed. Operand Stack underflow.");
-                    //6. 
-                    //Split stack, leave values in place.
-                    // context.OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
-                    //7.
-                    context.EnterBlock(this, IfBlock, funcType.ResultType, IfOp);
-                }
-                catch (IndexOutOfRangeException exc)
-                {
-                    _ = exc;
-                    context.Assert(false,
-                        $"Instruction block failed. BlockType {IfBlock.Type} did not exist in the Context.");
-                }
+            try
+            {
+                //2.
+                var funcType = context.Frame.Module.Types.ResolveBlockType(targetBlock.Type);
+                //3.
+                context.Assert(funcType, $"Invalid BlockType: {targetBlock.Type}");
+                //4.
+                // var label = new Label(funcType.ResultType, context.GetPointer(), ElseOp);
+                //5.
+                context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Arity,
+                    $"Instruction block failed. Operand Stack underflow.");
+                //6. 
+                //Split stack, leave values in place.
+                // context.OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
+                //7.
+                context.EnterBlock(this, targetBlock, funcType.ResultType, inst);
             }
-            else
+            catch (IndexOutOfRangeException exc)
             {
-                // InstBlock.ExecuteInstruction(context, ElseBlock, ElseOp);
-                if (ElseBlock.Length == 0)
-                    return 1;
-            
-                try
-                {
-                    //2.
-                    var funcType = context.Frame.Module.Types.ResolveBlockType(ElseBlock.Type);
-                    //3.
-                    context.Assert(funcType, $"Invalid BlockType: {ElseBlock.Type}");
-                    //4.
-                    // var label = new Label(funcType.ResultType, context.GetPointer(), ElseOp);
-                    //5.
-                    context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Arity,
-                        $"Instruction block failed. Operand Stack underflow.");
-                    //6. 
-                    //Split stack, leave values in place.
-                    // context.OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
-                    //7.
-                    context.EnterBlock(this, ElseBlock, funcType.ResultType, ElseOp);
-                }
-                catch (IndexOutOfRangeException exc)
-                {
-                    _ = exc;
-                    context.Assert(false,
-                        $"Instruction block failed. BlockType {IfBlock.Type} did not exist in the Context.");
-                }
-                
+                _ = exc;
+                context.Assert(false,
+                    $"Instruction if failed. BlockType {targetBlock.Type} did not exist in the Context.");
             }
             return 1;
         }
@@ -479,7 +438,7 @@ namespace Wacs.Core.Instructions
                 case OpCode.Loop:
                     context.ExitBlock();
                     break;
-                case OpCode.Expr:
+                case OpCode.Func:
                 case OpCode.Call:
                     context.FunctionReturn();
                     break;
@@ -505,7 +464,7 @@ namespace Wacs.Core.Instructions
                     return $"{base.RenderText(context)} (;B/@{context.Frame.LabelCount-1};)";
                 case OpCode.Loop:
                     return $"{base.RenderText(context)} (;L/@{context.Frame.LabelCount-1};)";
-                case OpCode.Expr:
+                case OpCode.Func:
                 case OpCode.Call:
                     var funcAddr = context.Frame.Module.FuncAddrs[context.Frame.Index];
                     var func = context.Store[funcAddr];
@@ -571,10 +530,13 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Frame.LabelCount > (int)labelIndex.Value,
                 $"Instruction br failed. Context did not contain Label {labelIndex}");
             //2.
-            // var labels = context.Frame.Labels;
-            for (uint i = 0, l = labelIndex.Value; i < l; ++i)
+            if (labelIndex.Value > 0)
             {
-                var topAddr = context.Frame.PopLabel();
+                InstructionPointer topAddr = default;
+                for (uint i = 0, l = labelIndex.Value; i < l; ++i)
+                {
+                    topAddr = context.Frame.PopLabel();
+                }
                 context.ResumeSequence(topAddr);
             }
 
@@ -587,14 +549,10 @@ namespace Wacs.Core.Instructions
                 "Shared temporary stack had values left in it.");
             context.OpStack.PopResults(label.Arity, ref _asideVals);
             //6.
-            // while (context.OpStack.Count > label.StackHeight)
-            // {
-            //     context.OpStack.PopAny();
-            // }
+            context.ResetStack(label);
             //We did this in part 2 to avoid stack drilling.
             // for (uint i = 0, l = labelIndex.Value; i < l; ++i)
             //     labels.Pop();
-            context.ResetStack(label);
             //7.
             context.OpStack.PushResults(_asideVals);
             //8. 

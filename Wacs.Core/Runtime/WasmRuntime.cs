@@ -718,7 +718,7 @@ namespace Wacs.Core.Runtime
             //11. index ordered global addresses
             foreach (var global in module.Globals)
             {
-                var val = EvaluateExpression(global.Initializer);
+                var val = EvaluateInitializer(global.Initializer);
                 if (Context.Frame != initFrame)
                     throw new TrapException($"Call stack was manipulated while initializing globals");
                 moduleInstance.GlobalAddrs.Add(AllocateGlobal(Store, global.Type, val));
@@ -832,7 +832,7 @@ namespace Wacs.Core.Runtime
                         case Module.ElementMode.ActiveMode activeMode:
                             var n = elem.Initializers.Length;
                             activeMode.Offset
-                                .Execute(Context);
+                                .ExecuteInitializer(Context);
                             Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(0)
                                 .Execute(Context);
                             Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(n)
@@ -865,7 +865,7 @@ namespace Wacs.Core.Runtime
                                     "Module could not be instantiated: Multiple Memories are not supported.");
                             var n = data.Init.Length;
                             activeMode.Offset
-                                .Execute(Context);
+                                .ExecuteInitializer(Context);
                             Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(0)
                                 .Execute(Context);
                             Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(n)
@@ -1037,9 +1037,12 @@ namespace Wacs.Core.Runtime
         /// Step 8.1
         /// Execute instructions without gas
         /// </summary>
-        private Value EvaluateExpression(Expression ini)
+        private Value EvaluateInitializer(Expression ini)
         {
-            ini.Execute(Context);
+            if (ini.Label.Arity != 1)
+                throw new InvalidDataException("Initializers must have arity of 1");
+            
+            ini.ExecuteInitializer(Context);
             
             var value = Context.OpStack.PopAny();
             return value;
@@ -1047,7 +1050,7 @@ namespace Wacs.Core.Runtime
 
         private List<Value> EvaluateInitializers(Expression[] inis)
         {
-            return inis.Select(EvaluateExpression).ToList();
+            return inis.Select(EvaluateInitializer).ToList();
         }
     }
 
