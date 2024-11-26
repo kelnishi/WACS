@@ -93,6 +93,9 @@ namespace Wacs.WASIp1
 
         public string MapToHostPath(string guestPath)
         {
+            if (guestPath.Split(Path.DirectorySeparatorChar)[0] == "dev")
+                return guestPath;
+            
             if (string.IsNullOrWhiteSpace(guestPath))
                 throw new ArgumentException("Guest path cannot be empty", nameof(guestPath));
 
