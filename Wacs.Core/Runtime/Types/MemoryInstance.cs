@@ -111,7 +111,11 @@ namespace Wacs.Core.Runtime.Types
         {
             int size = Marshal.SizeOf<T>();
             var buf = this[(int)ptr..(int)(ptr + size)];
+#if NETSTANDARD2_1
             MemoryMarshal.Write(buf, ref str);
+#else
+            MemoryMarshal.Write(buf, in str);
+#endif
             return size;
         }
 
