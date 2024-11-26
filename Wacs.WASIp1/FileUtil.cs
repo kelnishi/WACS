@@ -29,7 +29,7 @@ namespace Wacs.WASIp1
             using (var sha256 = SHA256.Create())
             {
                 // Combine file attributes
-                string data = $"{fileInfo.FullName}|{fileInfo.CreationTimeUtc.Ticks}|{fileInfo.Length}";
+                string data = $"{fileInfo.FullName}|{fileInfo.CreationTimeUtc.Ticks}|{(fileInfo.Exists ? fileInfo.Length : 0L)}";
                 byte[] hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(data));
                 // Use the first 8 bytes of the hash as the inode
                 ulong inode = BitConverter.ToUInt64(hashBytes, 0);
