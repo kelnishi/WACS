@@ -56,7 +56,7 @@ namespace Wacs.Core.Runtime
                     throw new ArgumentException("Label had different characteristics");
             }
             if (Arity != arity)
-                throw new ArgumentException($"Label had different Arity: {Arity} vs {arity}");
+                throw new ArgumentException($"Label had different Arity: {Arity} vs expected {arity}");
             
             StackHeight = stackHeight;
             Arity = arity;

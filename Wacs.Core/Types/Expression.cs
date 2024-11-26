@@ -35,6 +35,11 @@ namespace Wacs.Core.Types
     {
         public static readonly Expression Empty = new(0, InstructionSequence.Empty, true);
 
+        /// <summary>
+        /// For parsing normal Code sections
+        /// </summary>
+        /// <param name="seq"></param>
+        /// <param name="isStatic"></param>
         private Expression(InstructionSequence seq, bool isStatic)
         {
             Instructions = seq;
@@ -49,6 +54,12 @@ namespace Wacs.Core.Types
             EnclosingBlock = this;
         }
         
+        /// <summary>
+        /// Manual construction (from optimizers or statics)
+        /// </summary>
+        /// <param name="arity"></param>
+        /// <param name="seq"></param>
+        /// <param name="isStatic"></param>
         public Expression(int arity, InstructionSequence seq, bool isStatic)
         {
             Instructions = seq;
@@ -63,6 +74,7 @@ namespace Wacs.Core.Types
             EnclosingBlock = this;
         }
 
+        //Single Initializer
         public Expression(IInstruction single, int arity)
         {
             IsStatic = true;
@@ -72,7 +84,7 @@ namespace Wacs.Core.Types
                 Arity = arity,
                 ContinuationAddress = new InstructionPointer(Instructions, 1),
                 Instruction = OpCode.Expr,
-                StackHeight = -1,
+                StackHeight = 0,
             };
             EnclosingBlock = this;
         }
@@ -142,7 +154,7 @@ namespace Wacs.Core.Types
             var frame = context.ReserveFrame(context.Frame.Module, FunctionType.Empty, FuncIdx.ExpressionEvaluation);
             if (context.OpStack.Count != 0)
                 throw new InvalidDataException("OpStack should be empty");
-            
+            frame.ReturnLabel = Label;
             frame.PushLabel(this);
             context.PushFrame(frame);
             foreach (var inst in Instructions)

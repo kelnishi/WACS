@@ -14,6 +14,7 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
@@ -40,15 +41,17 @@ namespace Wacs.Core.Runtime
         {
             get
             {
-                var label = TopLabel switch
+                Label label = TopLabel switch
                 {
-                    BlockTarget b => b.Label, 
-                    Expression e => e.Label,
+                    BlockTarget b => b.Label,
+                    Expression => ReturnLabel,
+                    _ => throw new ArgumentOutOfRangeException(nameof(TopLabel))
                 };
                 return label;
             }
         }
 
+        public Label ReturnLabel = new();
         public ILabelTarget TopLabel;
         public int LabelCount = 0;
         public int StackHeight;
@@ -109,16 +112,16 @@ namespace Wacs.Core.Runtime
 
         public InstructionPointer PopLabel()
         {
-            if (LabelCount == 0)
+            if (LabelCount == 1)
                 throw new InvalidDataException("Label Stack underflow");
-            
-            var addr = TopLabel switch
+
+            InstructionPointer addr = TopLabel switch
             {
-                BlockTarget b => b.Label.ContinuationAddress, 
-                Expression e => e.Label.ContinuationAddress,
+                BlockTarget b => b.Label.ContinuationAddress,
+                Expression => ReturnLabel.ContinuationAddress,
                 _ => throw new InvalidDataException("Label Stack underflow")
             };
-            
+
             TopLabel = TopLabel.EnclosingBlock;
             LabelCount -= 1;
             
