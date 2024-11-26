@@ -15,6 +15,8 @@
 //  */
 
 using System.Buffers;
+using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
@@ -124,6 +126,18 @@ namespace Wacs.Core.Runtime
                 : ReturnLabel;
 
             return oldLabel.Label.ContinuationAddress;
+        }
+
+        public IEnumerable<Label> EnumerateLabels()
+        {
+            int height = LabelCount;
+            var current = TopLabel;
+            while (height > 0)
+            {
+                yield return current.Label;
+                height -= 1;
+                current = current.EnclosingBlock;
+            }
         }
     }
 }
