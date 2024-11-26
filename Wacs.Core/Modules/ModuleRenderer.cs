@@ -156,7 +156,7 @@ namespace Wacs.Core
                                 if (print)
                                     Console.WriteLine($"{indent}{strata}[{index}]:{line}");
 
-                                seq = pointerInst.GetBlock(index);
+                                seq = pointerInst.GetBlock(index).Instructions;
                                 break;
                             }
                         }

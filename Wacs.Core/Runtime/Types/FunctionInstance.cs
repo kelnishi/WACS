@@ -28,14 +28,13 @@ namespace Wacs.Core.Runtime.Types
         /// @Spec 4.5.3.1. Functions
         /// Initializes a new instance of the <see cref="FunctionInstance"/> class.
         /// </summary>
-        public FunctionInstance(FunctionType type, ModuleInstance module, Module.Function definition)
+        public FunctionInstance(ModuleInstance module, Module.Function definition)
         {
-            Type = type;
+            Type = module.Types[definition.TypeIndex];
             Module = module;
             
             Definition = definition;
-            Body = definition.Body;
-            Body.Label.Arity = type.ResultType.Arity;
+            SetBody(definition.Body);
             
             Locals = definition.Locals;
             Index = definition.Index;
@@ -54,6 +53,18 @@ namespace Wacs.Core.Runtime.Types
         //Copied from the static Definition
         //Can be processed with optimization passes
         public Expression Body;
+
+        /// <summary>
+        /// Sets Body and precomputes labels
+        /// </summary>
+        /// <param name="body"></param>
+        public void SetBody(Expression body)
+        {
+            Body = body;
+            Body.Label.Arity = Type.ResultType.Arity;
+            Body.PrecomputeLabels(Module.Types);
+        }
+        
 
         //Copied from the static Definition
         public ValType[] Locals;
