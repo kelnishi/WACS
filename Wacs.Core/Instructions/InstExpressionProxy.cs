@@ -14,10 +14,24 @@
 //  * limitations under the License.
 //  */
 
-namespace Wacs.Core.Runtime.Types
+using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime;
+using Wacs.Core.Types;
+using Wacs.Core.Validation;
+
+namespace Wacs.Core.Instructions
 {
-    public interface ILabelTarget
+    public class InstExpressionProxy : BlockTarget
     {
-        public ILabelTarget EnclosingBlock { get; set; }
+        private ByteCode _op = OpCode.Expr;
+        public override ByteCode Op => _op;
+        public override void Validate(IWasmValidationContext context) { }
+        public override int Execute(ExecContext context) => 0;
+
+        public InstExpressionProxy(Label label)
+        {
+            EnclosingBlock = this;
+            Label = label;
+        }
     }
 }

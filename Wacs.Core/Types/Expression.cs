@@ -31,7 +31,7 @@ namespace Wacs.Core.Types
     /// <summary>
     /// @Spec 2.4.9. Expressions
     /// </summary>
-    public class Expression : ILabelTarget
+    public class Expression
     {
         public static readonly Expression Empty = new(0, InstructionSequence.Empty, true);
 
@@ -44,14 +44,13 @@ namespace Wacs.Core.Types
         {
             Instructions = seq;
             IsStatic = isStatic;
-            Label = new Label
+            LabelTarget = new(new Label
             {
                 //Compute Arity in PrecomputeLabels
                 ContinuationAddress = new InstructionPointer(Instructions, 1),
                 Instruction = OpCode.Expr,
                 StackHeight = -1,
-            };
-            EnclosingBlock = this;
+            });
         }
         
         /// <summary>
@@ -64,14 +63,13 @@ namespace Wacs.Core.Types
         {
             Instructions = seq;
             IsStatic = isStatic;
-            Label = new Label
+            LabelTarget = new(new Label
             {
                 Arity = arity,
                 ContinuationAddress = new InstructionPointer(Instructions, 1),
                 Instruction = OpCode.Expr,
                 StackHeight = 0,
-            };
-            EnclosingBlock = this;
+            });
         }
 
         //Single Initializer
@@ -79,23 +77,22 @@ namespace Wacs.Core.Types
         {
             IsStatic = true;
             Instructions = new InstructionSequence(new List<IInstruction> { single });
-            Label = new Label
+            LabelTarget = new (new Label
             {
                 Arity = arity,
                 ContinuationAddress = new InstructionPointer(Instructions, 1),
                 Instruction = OpCode.Expr,
                 StackHeight = 0,
-            };
-            EnclosingBlock = this;
+            });
         }
 
         public void PrecomputeLabels(IWasmValidationContext vContext)
         {
-            LinkLabelTarget(vContext, Instructions, this);
+            LinkLabelTarget(vContext, Instructions, LabelTarget);
         }
         
         //TODO: compute stack heights
-        private void LinkLabelTarget(IWasmValidationContext vContext, InstructionSequence seq, ILabelTarget enclosingTarget)
+        private void LinkLabelTarget(IWasmValidationContext vContext, InstructionSequence seq, BlockTarget enclosingTarget)
         {
             for (int i = 0; i < seq.Count; ++i)
             {
@@ -139,8 +136,7 @@ namespace Wacs.Core.Types
             }
         }
 
-        public ILabelTarget EnclosingBlock { get; set; }
-        public Label Label;
+        public InstExpressionProxy LabelTarget;
 
         public readonly bool IsStatic;
         public readonly InstructionSequence Instructions;
@@ -156,8 +152,8 @@ namespace Wacs.Core.Types
             var frame = context.ReserveFrame(context.Frame.Module, FunctionType.Empty, FuncIdx.ExpressionEvaluation);
             if (context.OpStack.Count != 0)
                 throw new InvalidDataException("OpStack should be empty");
-            frame.ReturnLabel = Label;
-            frame.PushLabel(this);
+            frame.ReturnLabel = LabelTarget.Label;
+            frame.PushLabel(LabelTarget);
             context.PushFrame(frame);
             foreach (var inst in Instructions)
             {
