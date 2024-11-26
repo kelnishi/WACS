@@ -89,34 +89,31 @@ namespace Wacs.Core.Types
             EnclosingBlock = this;
         }
 
-        public void PrecomputeLabels(TypesSpace types)
+        public void PrecomputeLabels(IWasmValidationContext vContext)
         {
-            LinkLabelTarget(types, Instructions, this);
+            LinkLabelTarget(vContext, Instructions, this);
         }
         
         //TODO: compute stack heights
-        private void LinkLabelTarget(TypesSpace types, InstructionSequence seq, ILabelTarget enclosingTarget)
+        private void LinkLabelTarget(IWasmValidationContext vContext, InstructionSequence seq, ILabelTarget enclosingTarget)
         {
             for (int i = 0; i < seq.Count; ++i)
             {
                 var inst = seq._instructions[i];
+                inst.Validate(vContext);
+                
                 if (inst is BlockTarget target)
                 {
                     target.EnclosingBlock = enclosingTarget;
                     var blockInst = target as IBlockInstruction;
-                    for (int b = 0; b < blockInst!.Count; ++b)
-                        LinkLabelTarget(types,blockInst.GetBlock(b).Instructions, target);
 
-                    var block = blockInst.GetBlock(0);
+                    var block = blockInst!.GetBlock(0);
                     int arity = 0;
                     try
                     {
-                        var funcType = types.ResolveBlockType(block.Type);
+                        var funcType = vContext.Types.ResolveBlockType(block.Type);
                         if (funcType == null)
                             throw new IndexOutOfRangeException();
-                        
-                        // context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Arity,
-                        //     $"Instruction block failed. Operand Stack underflow.");
 
                         arity = inst is InstLoop ? funcType.ParameterTypes.Arity : funcType.ResultType.Arity;
                     }
@@ -130,8 +127,13 @@ namespace Wacs.Core.Types
                         Arity = arity,
                         ContinuationAddress = new InstructionPointer(seq, i),
                         Instruction = inst.Op,
-                        StackHeight = -1,
+                        //HACK: Use any existing precomputed StackHeight (assume optimization has not changed this value)
+                        StackHeight = (target.Label?.StackHeight ?? -1) >= 0 ? target.Label!.StackHeight : vContext.OpStack.Height,
                     };
+                    
+                    for (int b = 0; b < blockInst!.Count; ++b)
+                        LinkLabelTarget(vContext,blockInst.GetBlock(b).Instructions, target);
+                    
                     target.Label = label;
                 }
             }
