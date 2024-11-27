@@ -16,6 +16,7 @@
 
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
@@ -35,10 +36,22 @@ namespace Wacs.Core.Instructions
         public abstract void Validate(IWasmValidationContext context);
 
         /// <summary>
-        /// Executes the instruction within the given execution context.
+        /// Synchronously executes the instruction within the given execution context.
         /// </summary>
         /// <param name="context">The execution context in which to execute the instruction.</param>
+        /// <returns>The effective number of wasm instructions executed</returns>
         public abstract int Execute(ExecContext context);
+        
+        /// <summary>
+        /// Asynchronously wraps the Execute function.
+        /// Individual instructions may override to perform async functions.
+        /// </summary>
+        /// <param name="context"></param>
+        /// <returns>ValueTask containing the effective number of wasm instructions executed</returns>
+        public virtual ValueTask<int> ExecuteAsync(ExecContext context)
+        {
+            return new ValueTask<int>(Execute(context));
+        }
 
         /// <summary>
         /// Instructions are responsible for parsing their binary representation.
@@ -53,5 +66,6 @@ namespace Wacs.Core.Instructions
         public virtual string RenderText(ExecContext? context) => Op.GetMnemonic();
         
         protected static Stack<Value> _aside = new();
+        
     }
 }
