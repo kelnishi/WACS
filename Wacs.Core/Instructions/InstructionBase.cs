@@ -19,6 +19,7 @@ using System.IO;
 using System.Threading.Tasks;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions
@@ -35,6 +36,8 @@ namespace Wacs.Core.Instructions
 
         public abstract void Validate(IWasmValidationContext context);
 
+        public bool IsAsync = false;
+        
         /// <summary>
         /// Synchronously executes the instruction within the given execution context.
         /// </summary>
@@ -48,9 +51,9 @@ namespace Wacs.Core.Instructions
         /// </summary>
         /// <param name="context"></param>
         /// <returns>ValueTask containing the effective number of wasm instructions executed</returns>
-        public virtual ValueTask<int> ExecuteAsync(ExecContext context)
+        public virtual async ValueTask<int> ExecuteAsync(ExecContext context)
         {
-            return new ValueTask<int>(Execute(context));
+            throw new WasmRuntimeException("Async Execution must be explicitly implemented");
         }
 
         /// <summary>

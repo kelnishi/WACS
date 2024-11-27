@@ -108,9 +108,9 @@ namespace Wacs.Core.Runtime
             return funcAddr;
         }
 
-        public FuncAddr AllocateHostFunction((string module, string entity) id, FunctionType funcType, Type delType, Delegate hostFunc)
+        public FuncAddr AllocateHostFunction((string module, string entity) id, FunctionType funcType, Type delType, Delegate hostFunc, bool isAsync)
         {
-            var funcInst = new HostFunction(id, funcType, delType, hostFunc);
+            var funcInst = new HostFunction(id, funcType, delType, hostFunc, isAsync);
             var funcAddr = AddFunction(funcInst);
             return funcAddr;
         }

@@ -212,9 +212,9 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public void PopScalars(ResultType type, Span<object> targetBuf)
+        public void PopScalars(ResultType type, object[] targetBuf, int firstParameter)
         {
-            for (int i = type.Arity - 1; i >= 0; --i)
+            for (int i = type.Arity - 1 + firstParameter; i >= firstParameter; --i)
             {
                 targetBuf[i] = PopAny().Scalar;
             }

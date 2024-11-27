@@ -19,6 +19,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -114,7 +115,6 @@ namespace Wacs.Core.Runtime
         private IAddress? GetBoundEntity((string module, string entity) id) =>
             _entityBindings.GetValueOrDefault(id);
 
-        // [RequiresUnreferencedCode("Uses reflection to match parameters for binding")]
         public void BindHostFunction<TDelegate>((string module, string entity) id, TDelegate func)
             where TDelegate : Delegate
         {
@@ -131,11 +131,28 @@ namespace Wacs.Core.Runtime
                                .ToArray()
                            ?? Array.Empty<Type>();
             
-            var returnTypeInfo = funcType.GetMethod("Invoke")?.ReturnType;
-            
             var paramValTypes = new ResultType(paramTypes);
+            
+            var returnTypeInfo = funcType.GetMethod("Invoke")?.ReturnType;
+            ValType returnType = ValType.Nil;
+            bool isAsync = false;
+            if (returnTypeInfo is not null)
+            {
+                if (returnTypeInfo.BaseType == typeof(Task))
+                {
+                    isAsync = true;
+                    if (returnTypeInfo.IsGenericType)
+                    {
+                        returnType = returnTypeInfo.GenericTypeArguments[0].ToValType();
+                    }
+                }
+                else
+                {
+                    returnType = returnTypeInfo.ToValType();
+                }
+            }
+            
             var outValTypes = outTypes.Select(t => ValTypeUtilities.UnpackRef(t)).ToArray();
-            var returnType = returnTypeInfo?.ToValType() ?? ValType.Nil;
 
             if (returnType != ValType.Nil)
             {
@@ -159,7 +176,7 @@ namespace Wacs.Core.Runtime
 
             Store.OpenTransaction();
             var type = new FunctionType(paramValTypes, returnValType);
-            var funcAddr = AllocateHostFunc(Store, id, type, funcType, func);
+            var funcAddr = AllocateHostFunc(Store, id, type, funcType, func, isAsync);
             Store.CommitTransaction();
             _entityBindings[id] = funcAddr;
         }

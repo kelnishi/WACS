@@ -17,8 +17,10 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
@@ -28,6 +30,10 @@ namespace Wacs.Core.Instructions
 {
     public class InstReturnCall : InstructionBase, ICallInstruction
     {
+        public InstReturnCall()
+        {
+            IsAsync = true;
+        }
         public override ByteCode Op => OpCode.ReturnCall;
 
         public FuncIdx X;
@@ -81,6 +87,31 @@ namespace Wacs.Core.Instructions
             
             //Reuse the pointer from the outgoing function
             context.Frame.ContinuationAddress = address;
+
+            throw new WasmRuntimeException("Synchronous execution path not allowed");
+            return 1;
+        }
+        
+        public override async ValueTask<int> ExecuteAsync(ExecContext context)
+        {
+            //Fetch the Module first because we might exhaust the call stack
+            context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
+                $"Instruction call failed. Function address for {X} was not in the Context.");
+            var a = context.Frame.Module.FuncAddrs[X];
+            
+            //Return
+            // Split stack will preserve the operands, don't bother moving them.
+            // Stack<Value> values = new Stack<Value>();
+            // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
+            var address = context.PopFrame();
+            //Push back operands
+            // context.OpStack.Push(values);
+            
+            //Call
+            await context.Invoke(a);
+            
+            //Reuse the pointer from the outgoing function
+            context.Frame.ContinuationAddress = address;
             return 1;
         }
 
@@ -89,6 +120,7 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override IInstruction Parse(BinaryReader reader)
         {
+            IsAsync = true;
             X = (FuncIdx)reader.ReadLeb128_u32();
             return this;
         }
@@ -134,6 +166,11 @@ namespace Wacs.Core.Instructions
     //0x11
     public class InstReturnCallIndirect : InstructionBase, ICallInstruction
     {
+        public InstReturnCallIndirect()
+        {
+            IsAsync = true;
+        }
+        
         public override ByteCode Op => OpCode.ReturnCallIndirect;
 
         private TypeIdx Y;
@@ -246,6 +283,71 @@ namespace Wacs.Core.Instructions
             
             //19.
             context.Invoke(a);
+            
+            //Reuse the pointer from the outgoing function
+            context.Frame.ContinuationAddress = address;
+            
+            throw new WasmRuntimeException("Synchronous execution path not allowed");
+            return 1;
+        }
+        
+        public override async ValueTask<int> ExecuteAsync(ExecContext context)
+        {
+            //Call Indirect
+            //2.
+            context.Assert( context.Frame.Module.TableAddrs.Contains(X),
+                $"Instruction call_indirect failed. Table {X} was not in the Context.");
+            //3.
+            var ta = context.Frame.Module.TableAddrs[X];
+            //4.
+            context.Assert( context.Store.Contains(ta),
+                $"Instruction call_indirect failed. TableInstance {ta} was not in the Store.");
+            //5.
+            var tab = context.Store[ta];
+            //6.
+            context.Assert( context.Frame.Module.Types.Contains(Y),
+                $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
+            //7.
+            var ftExpect = context.Frame.Module.Types[Y];
+            //8.
+            context.Assert( context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //9.
+            uint i = context.OpStack.PopU32();
+            //10.
+            if (i >= tab.Elements.Count)
+                throw new TrapException($"Instruction call_indirect could not find element {i}");
+            //11.
+            var r = tab.Elements[(int)i];
+            //12.
+            if (r.IsNullRef)
+                throw new TrapException($"Instruction call_indirect NullReference.");
+            //13.
+            context.Assert( r.Type == ValType.Funcref,
+                $"Instruction call_indirect failed. Element was not a FuncRef");
+            //14.
+            var a = (FuncAddr)r;
+            //15.
+            context.Assert( context.Store.Contains(a),
+                $"Instruction call_indirect failed. Validation of table mutation failed.");
+            //16.
+            var funcInst = context.Store[a];
+            //17.
+            var ftActual = funcInst.Type;
+            //18.
+            if (!ftExpect.Matches(ftActual))
+                throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
+            
+            //Return
+            // Split stack will preserve the operands, don't bother moving them.
+            // Stack<Value> values = new Stack<Value>();
+            // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
+            var address = context.PopFrame();
+            //Push back operands
+            // context.OpStack.Push(values);
+            
+            //19.
+            await context.Invoke(a);
             
             //Reuse the pointer from the outgoing function
             context.Frame.ContinuationAddress = address;
