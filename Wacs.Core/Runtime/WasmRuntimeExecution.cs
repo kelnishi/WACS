@@ -46,9 +46,10 @@ namespace Wacs.Core.Runtime
             var inner = CreateInvoker(funcAddr, options);
             var genericDelegate = Delegates.AnonymousFunctionFromType(funcType, args =>
             {
+                Value[] results = null!;
                 try
                 {
-                    Value[] results = funcType.ParameterTypes.Arity == 0
+                    results = funcType.ParameterTypes.Arity == 0
                         ? inner()
                         : (Value[])GenericFuncsInvoke.Invoke(inner, args);
                     if (funcType.ResultType.Types.Length == 1)
@@ -57,7 +58,9 @@ namespace Wacs.Core.Runtime
                 }
                 catch (TargetInvocationException exc)
                 { //Propagate out any exceptions
-                    throw exc.InnerException;
+                    ExceptionDispatchInfo.Throw(exc.InnerException);
+                    //This won't happen
+                    return results;
                 }
             });
             
@@ -99,7 +102,10 @@ namespace Wacs.Core.Runtime
                 }
 
                 Context.ProcessTimer.Restart();
-                Context.Invoke(funcAddr);
+                
+                var task = Context.Invoke(funcAddr);
+                task.Wait();
+                
                 Context.steps = 0;
                 bool fastPath = options.UseFastPath();
                 try
@@ -218,7 +224,12 @@ namespace Wacs.Core.Runtime
             if (gasLimit <= 0) gasLimit = long.MaxValue;
             while (Context.Next() is { } inst)
             {
-                int work = await inst.ExecuteAsync(Context);
+                int work;
+                if (inst.IsAsync)
+                    work = await inst.ExecuteAsync(Context);
+                else
+                    work = inst.Execute(Context);
+                
                 Context.steps += work;
                 if (Context.steps >= gasLimit)
                     throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
@@ -241,7 +252,12 @@ namespace Wacs.Core.Runtime
                 if (options.CollectStats == StatsDetail.Instruction)
                 {
                     Context.InstructionTimer.Restart();
-                    work = await inst.ExecuteAsync(Context);
+                    
+                    if (inst.IsAsync)
+                        work = await inst.ExecuteAsync(Context);
+                    else
+                        work = inst.Execute(Context);
+
                     Context.InstructionTimer.Stop();
                     Context.steps += work;
 
@@ -253,7 +269,10 @@ namespace Wacs.Core.Runtime
                 else
                 {
                     Context.InstructionTimer.Start();
-                    work = await inst.ExecuteAsync(Context);
+                    if (inst.IsAsync)
+                        work = await inst.ExecuteAsync(Context);
+                    else
+                        work = inst.Execute(Context);
                     Context.InstructionTimer.Stop();
                     Context.steps += work;
                 }
