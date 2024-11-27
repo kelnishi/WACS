@@ -46,16 +46,17 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             //Return
-            var vals = context.OpStack.PopValues(context.ReturnType);
-            context.OpStack.PushValues(vals);
+            context.OpStack.PopValues(context.ReturnType, ref _aside);
+            context.OpStack.PushValues(_aside);
             context.SetUnreachable();
             
             //Call
             context.Assert(context.Funcs.Contains(X),
-                $"Instruction call was invalid. Function {X} was not in the Context.");
+                "Instruction call was invalid. Function {0} was not in the Context.",X);
             var func = context.Funcs[X];
             var type = context.Types[func.TypeIndex];
-            context.OpStack.PopValues(type.ParameterTypes);
+            context.OpStack.PopValues(type.ParameterTypes, ref _aside);
+            _aside.Clear();
             context.OpStack.PushResult(type.ResultType);
         }
 
@@ -167,22 +168,23 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             //Return
-            var vals = context.OpStack.PopValues(context.ReturnType);
-            context.OpStack.PushValues(vals);
+            context.OpStack.PopValues(context.ReturnType, ref _aside);
+            context.OpStack.PushValues(_aside);
             context.SetUnreachable();
             
             //Call Indirect
             context.Assert(context.Tables.Contains(X),
-                $"Instruction call_indirect was invalid. Table {X} was not in the Context.");
+                "Instruction call_indirect was invalid. Table {0} was not in the Context.",X);
             var tableType = context.Tables[X];
             context.Assert(tableType.ElementType == ReferenceType.Funcref,
-                $"Instruction call_indirect was invalid. Table type was not funcref");
+                "Instruction call_indirect was invalid. Table type was not funcref");
             context.Assert(context.Types.Contains(Y),
-                $"Instruction call_indirect was invalid. Function type {Y} was not in the Context.");
+                "Instruction call_indirect was invalid. Function type {0} was not in the Context.",Y);
             var funcType = context.Types[Y];
 
             context.OpStack.PopI32();
-            context.OpStack.PopValues(funcType.ParameterTypes);
+            context.OpStack.PopValues(funcType.ParameterTypes, ref _aside);
+            _aside.Clear();
             context.OpStack.PushResult(funcType.ResultType);
         }
 

@@ -86,10 +86,11 @@ namespace Wacs.Core.Instructions
             try
             {
                 var funcType = context.Types.ResolveBlockType(Block.Type);
-                context.Assert(funcType,  $"Invalid BlockType: {Block.Type}");
+                context.Assert(funcType,  "Invalid BlockType: {0}",Block.Type);
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(funcType.ParameterTypes);
+                context.OpStack.PopValues(funcType.ParameterTypes, ref _aside);
+                _aside.Clear();
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
                 context.PushControlFrame(BlockOp, funcType);
@@ -102,7 +103,7 @@ namespace Wacs.Core.Instructions
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    $"Instruction block was invalid. BlockType {Block.Type} did not exist in the Context.");
+                    "Instruction block was invalid. BlockType {0} did not exist in the Context.",Block.Type);
             }
         }
 
@@ -162,10 +163,11 @@ namespace Wacs.Core.Instructions
             try
             {
                 var funcType = context.Types.ResolveBlockType(Block.Type);
-                context.Assert(funcType, $"Invalid BlockType: {Block.Type}");
+                context.Assert(funcType, "Invalid BlockType: {0}",Block.Type);
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(funcType.ParameterTypes);
+                context.OpStack.PopValues(funcType.ParameterTypes, ref _aside);
+                _aside.Clear();
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
                 context.PushControlFrame(LoopOp, funcType);
@@ -178,7 +180,7 @@ namespace Wacs.Core.Instructions
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    $"Instruciton loop invalid. BlockType {Block.Type} did not exist in the Context.");
+                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",Block.Type);
             }
         }
 
@@ -241,13 +243,14 @@ namespace Wacs.Core.Instructions
             try
             {
                 var ifType = context.Types.ResolveBlockType(IfBlock.Type);
-                context.Assert(ifType,  $"Invalid BlockType: {IfBlock.Type}");
+                context.Assert(ifType,  "Invalid BlockType: {0}",IfBlock.Type);
 
                 //Pop the predicate
                 context.OpStack.PopI32();
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(ifType.ParameterTypes);
+                context.OpStack.PopValues(ifType.ParameterTypes, ref _aside);
+                _aside.Clear();
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
                 context.PushControlFrame(IfOp, ifType);
@@ -273,7 +276,7 @@ namespace Wacs.Core.Instructions
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    $"Instruciton loop invalid. BlockType {IfBlock.Type} did not exist in the Context.");
+                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.Type);
             }
         }
 
@@ -345,8 +348,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             var frame = context.PopControlFrame();
-            context.Assert(frame.Opcode == OpCode.If,
-                "Else terminated a non-If block");
+            context.Assert(frame.Opcode == OpCode.If, "Else terminated a non-If block");
             context.PushControlFrame(ElseOp, frame.Types);
         }
     }
@@ -435,17 +437,18 @@ namespace Wacs.Core.Instructions
         public override ByteCode Op => OpCode.Br;
 
         private LabelIdx L;
-
+        
         // @Spec 3.3.8.6. br l
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.ContainsLabel(L.Value),
-                $"Instruction br invalid. Could not branch to label {L}");
+                "Instruction br invalid. Could not branch to label {0}",L);
 
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
             
             //Validate results, but leave them on the stack
-            context.OpStack.PopValues(nthFrame.LabelTypes);
+            context.OpStack.PopValues(nthFrame.LabelTypes, ref _aside);
+            _aside.Clear();
 
             // if (!context.Unreachable)
             //     nthFrame.ConditionallyReachable = true;
@@ -530,12 +533,12 @@ namespace Wacs.Core.Instructions
         public override ByteCode Op => OpCode.BrIf;
 
         public LabelIdx L;
-
+        
         // @Spec 3.3.8.7. br_if
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.ContainsLabel(L.Value),
-                $"Instruction br_if invalid. Could not branch to label {L}");
+                "Instruction br_if invalid. Could not branch to label {0}",L);
             
             //Pop the predicate
             context.OpStack.PopI32();
@@ -545,7 +548,7 @@ namespace Wacs.Core.Instructions
             //     nthFrame.ConditionallyReachable = true;
             
             //Pop values like we branch
-            context.OpStack.PopValues(nthFrame.LabelTypes);
+            context.OpStack.PopValues(nthFrame.LabelTypes, ref _aside);
             //But actually, we don't, so push them back on.
             context.OpStack.PushResult(nthFrame.LabelTypes);
         }
@@ -598,7 +601,7 @@ namespace Wacs.Core.Instructions
             //Pop the switch
             context.OpStack.PopI32();
             context.Assert(context.ContainsLabel(Ln.Value),
-                $"Instruction br_table invalid. Context did not contain Label {Ln}");
+                "Instruction br_table invalid. Context did not contain Label {0}", Ln);
             
             var mthFrame = context.ControlStack.PeekAt((int)Ln.Value);
             var arity = mthFrame.LabelTypes.Arity;
@@ -609,20 +612,21 @@ namespace Wacs.Core.Instructions
             foreach (var lidx in Ls)
             {
                 context.Assert(context.ContainsLabel(lidx.Value),
-                    $"Instruction br_table invalid. Context did not contain Label {lidx}");
+                    "Instruction br_table invalid. Context did not contain Label {0}", lidx);
                 
                 var nthFrame = context.ControlStack.PeekAt((int)lidx.Value);
                 context.Assert(nthFrame.LabelTypes.Arity == arity,
-                    $"Instruction br_table invalid. Label {lidx} had different arity {nthFrame.LabelTypes.Arity} =/= {arity}");
+                    "Instruction br_table invalid. Label {0} had different arity {1} =/= {2}", lidx, nthFrame.LabelTypes.Arity,arity);
 
                 // if (!context.Unreachable)
                 //     nthFrame.ConditionallyReachable = true;
                 
-                var vals = context.OpStack.PopValues(nthFrame.LabelTypes);
-                context.OpStack.PushValues(vals);
+                context.OpStack.PopValues(nthFrame.LabelTypes, ref _aside);
+                context.OpStack.PushValues(_aside);
             }
 
-            context.OpStack.PopValues(mthFrame.LabelTypes);
+            context.OpStack.PopValues(mthFrame.LabelTypes, ref _aside);
+            _aside.Clear();
             context.SetUnreachable();
         }
 
@@ -705,13 +709,13 @@ namespace Wacs.Core.Instructions
     {
         public static readonly InstReturn Inst = new();
         public override ByteCode Op => OpCode.Return;
-
+        
         // @Spec 3.3.8.9. return
         public override void Validate(IWasmValidationContext context)
         {
             //keep the results for the block or function to validate
-            var vals = context.OpStack.PopValues(context.ReturnType);
-            context.OpStack.PushValues(vals);
+            context.OpStack.PopValues(context.ReturnType, ref _aside);
+            context.OpStack.PushValues(_aside);
             context.SetUnreachable();
         }
 
@@ -750,10 +754,11 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Funcs.Contains(X),
-                $"Instruction call was invalid. Function {X} was not in the Context.");
+                "Instruction call was invalid. Function {0} was not in the Context.",X);
             var func = context.Funcs[X];
             var type = context.Types[func.TypeIndex];
-            context.OpStack.PopValues(type.ParameterTypes);
+            context.OpStack.PopValues(type.ParameterTypes, ref _aside);
+            _aside.Clear();
             context.OpStack.PushResult(type.ResultType);
         }
 
@@ -851,16 +856,17 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                $"Instruction call_indirect was invalid. Table {X} was not in the Context.");
+                "Instruction call_indirect was invalid. Table {0} was not in the Context.",X);
             var tableType = context.Tables[X];
             context.Assert(tableType.ElementType == ReferenceType.Funcref,
-                $"Instruction call_indirect was invalid. Table type was not funcref");
+                "Instruction call_indirect was invalid. Table type was not funcref");
             context.Assert(context.Types.Contains(Y),
-                $"Instruction call_indirect was invalid. Function type {Y} was not in the Context.");
+                "Instruction call_indirect was invalid. Function type {0} was not in the Context.",Y);
             var funcType = context.Types[Y];
 
             context.OpStack.PopI32();
-            context.OpStack.PopValues(funcType.ParameterTypes);
+            context.OpStack.PopValues(funcType.ParameterTypes, ref _aside);
+            _aside.Clear();
             context.OpStack.PushResult(funcType.ResultType);
         }
 

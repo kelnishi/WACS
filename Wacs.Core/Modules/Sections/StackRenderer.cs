@@ -70,16 +70,14 @@ namespace Wacs.Core
 
         public Value PopType(ValType type) => _context.Pop(type);
         public Value PopAny() => _context.Pop(ValType.Nil);
-
-        public Stack<Value> PopValues(ResultType types)
+        
+        public void PopValues(ResultType types, ref Stack<Value> aside)
         {
-            var aside = new Stack<Value>();
             foreach (var type in types.Types.Reverse())
             {
                 var stackType = PopAny();
                 aside.Push(stackType);
             }
-            return aside;
         }
 
         public void ReturnResults(ResultType types)
@@ -158,8 +156,9 @@ namespace Wacs.Core
 
         public IValidationOpStack OpStack => _opStack;
 
-        public void Assert(bool factIsTrue, string message) {}
-        public void Assert([NotNull] object? objIsNotNull, string message) { objIsNotNull = NonNull; }
+        
+        public void Assert(bool factIsTrue, string formatString, params object[] args) { }
+        public void Assert([NotNull] object? objIsNotNull, string formatString, params object[] args) { objIsNotNull = NonNull; }
 
         public FuncIdx FunctionIndex => FuncIdx.Default;
 
@@ -180,13 +179,15 @@ namespace Wacs.Core
             OpStack.PushResult(types.ParameterTypes);
         }
 
+        private static Stack<Value> _aside = new();
         public ValidationControlFrame PopControlFrame()
         {
             if (ControlStack.Count == 0)
                 throw new InvalidDataException("Control Stack underflow");
             
             //Check to make sure we have the correct results
-            OpStack.PopValues(ControlFrame.EndTypes);
+            OpStack.PopValues(ControlFrame.EndTypes, ref _aside);
+            _aside.Clear();
             
             //Reset the stack
             if (OpStack.Height != ControlFrame.Height)

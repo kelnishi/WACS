@@ -91,7 +91,6 @@ namespace Wacs.Core.Types
             LinkLabelTarget(vContext, Instructions, LabelTarget);
         }
         
-        //TODO: compute stack heights
         private void LinkLabelTarget(IWasmValidationContext vContext, InstructionSequence seq, BlockTarget enclosingTarget)
         {
             for (int i = 0; i < seq.Count; ++i)
@@ -118,15 +117,15 @@ namespace Wacs.Core.Types
                     {
                         throw new InvalidDataException($"Failure computing Labels. BlockType:{block.Type} did not exist in the Module");
                     }
-                    
-                    var label = new Label
-                    {
-                        Arity = arity,
-                        ContinuationAddress = new InstructionPointer(seq, i),
-                        Instruction = inst.Op,
-                        //HACK: Use any existing precomputed StackHeight (assume optimization has not changed this value)
-                        StackHeight = (target.Label?.StackHeight ?? -1) >= 0 ? target.Label!.StackHeight : vContext.OpStack.Height,
-                    };
+
+                    var label = target.Label ?? new Label();
+                    label.Arity = arity;
+                    label.ContinuationAddress = new InstructionPointer(seq, i);
+                    label.Instruction = inst.Op;
+                    //HACK: Use any existing precomputed StackHeight (assume optimization has not changed this value)
+                    label.StackHeight = (target.Label?.StackHeight ?? -1) >= 0
+                        ? target.Label!.StackHeight
+                        : vContext.OpStack.Height;
                     
                     for (int b = 0; b < blockInst!.Count; ++b)
                         LinkLabelTarget(vContext,blockInst.GetBlock(b).Instructions, target);
