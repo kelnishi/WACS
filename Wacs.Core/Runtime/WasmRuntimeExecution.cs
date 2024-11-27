@@ -17,6 +17,8 @@
 using System;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
+using System.Threading.Tasks;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Exceptions;
@@ -28,153 +30,8 @@ namespace Wacs.Core.Runtime
 {
     public partial class WasmRuntime
     {
-        
         private IInstruction? lastInstruction = null;
         
-        private Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
-        {
-            return GenericDelegate;
-            Value[] GenericDelegate(params object[] args)
-            {
-                var funcInst = Context.Store[funcAddr];
-                var funcType = funcInst.Type;
-                
-                Context.OpStack.PushScalars(funcType.ParameterTypes, args);
-
-                if (options.CollectStats != StatsDetail.None)
-                {
-                    Context.ResetStats();
-                    Context.InstructionTimer.Reset();
-                }
-
-                Context.ProcessTimer.Restart();
-
-                Context.Invoke(funcAddr);
-
-                Context.steps = 0;
-                long highwatermark = 0;
-                bool fastPath = options.UseFastPath();
-
-                try
-                {
-                    if (fastPath)
-                    {
-                        int comp = 0;
-                        do
-                        {
-                            comp = ProcessThread();
-                            Context.steps += comp;
-                            if (options.GasLimit > 0)
-                            {
-                                if (Context.steps >= options.GasLimit)
-                                {
-                                    throw new InsufficientGasException(
-                                        $"Invocation ran out of gas (limit:{options.GasLimit}).");
-                                }
-                            }
-                        } while (comp > 0);
-                    }
-                    else
-                    {
-                        long comp = 0;
-                        do
-                        {
-                            comp = ProcessThreadWithOptions(options);
-                            Context.steps += comp;
-
-                            if (options.GasLimit > 0)
-                            {
-                                if (Context.steps >= options.GasLimit)
-                                {
-                                    throw new InsufficientGasException(
-                                        $"Invocation ran out of gas (limit:{options.GasLimit}).");
-                                }
-                            }
-
-                            if (options.LogProgressEvery > 0)
-                            {
-                                highwatermark += comp;
-                                if (highwatermark >= options.LogProgressEvery)
-                                {
-                                    highwatermark -= options.LogProgressEvery;
-                                    Console.Error.Write('.');
-                                }
-                            }
-                        } while (comp > 0);
-                    }
-                }
-                catch (TrapException exc)
-                {
-                    Context.ProcessTimer.Stop();
-                    Context.InstructionTimer.Stop();
-                    if (options.LogProgressEvery > 0)
-                        Console.Error.WriteLine();
-                    if (options.CollectStats != StatsDetail.None)
-                        PrintStats(options);
-                    if (options.LogGas)
-                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
-
-                    if (options.CalculateLineNumbers)
-                    {
-                        var ptr = Context.ComputePointerPath();
-                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
-
-                        throw new TrapException(exc.Message + $":line {line} instruction #{Context.steps}\n{path}");
-                    }
-
-                    //Flush the stack before throwing...
-                    Context.FlushCallStack();
-                    throw;
-                }
-                catch (SignalException exc)
-                {
-                    Context.ProcessTimer.Stop();
-                    Context.InstructionTimer.Stop();
-                    if (options.LogProgressEvery > 0)
-                        Console.Error.WriteLine();
-                    if (options.CollectStats != StatsDetail.None)
-                        PrintStats(options);
-                    if (options.LogGas)
-                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
-
-                    string message = exc.Message;
-                    if (options.CalculateLineNumbers)
-                    {
-                        var ptr = Context.ComputePointerPath();
-                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
-                        message = exc.Message + $":line {line} instruction #{Context.steps}\n{path}";
-                    }
-
-                    //Flush the stack before throwing...
-                    Context.FlushCallStack();
-
-                    var exType = exc.GetType();
-                    var ctr = exType.GetConstructor(new Type[] { typeof(int), typeof(string) });
-                    throw ctr?.Invoke(new object[] { exc.Signal, message }) as Exception ?? exc;
-                }
-                catch (WasmRuntimeException)
-                {
-                    //Maybe Log?
-                    Context.FlushCallStack();
-                    throw;
-                }
-                
-                Context.ProcessTimer.Stop();
-                Context.InstructionTimer.Stop();
-                if (options.LogProgressEvery > 0) Console.Error.WriteLine("done.");
-                if (options.CollectStats != StatsDetail.None) PrintStats(options);
-                if (options.LogGas) Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
-
-                Value[] results = new Value[funcType.ResultType.Arity];
-                var span = results.AsSpan();
-                Context.OpStack.PopScalars(funcType.ResultType, span);
-
-                return results;
-            }
-        }
-
         public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr, InvokerOptions? options = default)
             where TDelegate : Delegate
         {
@@ -225,53 +82,202 @@ namespace Wacs.Core.Runtime
             };
         }
 
-        public int ProcessThread()
+        private Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
         {
-            var inst = Context.Next();
-            if (inst == null)
-                return 0;
-            
-            return inst.Execute(Context);
+            return GenericDelegate;
+            Value[] GenericDelegate(params object[] args)
+            {
+                var funcInst = Context.Store[funcAddr];
+                var funcType = funcInst.Type;
+                
+                Context.OpStack.PushScalars(funcType.ParameterTypes, args);
+
+                if (options.CollectStats != StatsDetail.None)
+                {
+                    Context.ResetStats();
+                    Context.InstructionTimer.Reset();
+                }
+
+                Context.ProcessTimer.Restart();
+                Context.Invoke(funcAddr);
+                Context.steps = 0;
+                bool fastPath = options.UseFastPath();
+                try
+                {
+                    if (fastPath)
+                    {
+                        Task thread = ProcessThreadAsync(options.GasLimit);
+                        thread.Wait();
+                    }
+                    else
+                    {
+                        Task thread = ProcessThreadWithOptions(options);
+                        thread.Wait();
+                    }
+                }
+                catch (AggregateException agg)
+                {
+                    var exc = agg.InnerException;
+                    
+                    Context.ProcessTimer.Stop();
+                    Context.InstructionTimer.Stop();
+                    if (options.LogProgressEvery > 0)
+                        Console.Error.WriteLine();
+                    if (options.CollectStats != StatsDetail.None)
+                        PrintStats(options);
+                    if (options.LogGas)
+                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
+
+                    if (options.CalculateLineNumbers)
+                    {
+                        var ptr = Context.ComputePointerPath();
+                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+
+                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{Context.steps}\n{path}"));
+                    }
+
+                    //Flush the stack before throwing...
+                    Context.FlushCallStack();
+                    ExceptionDispatchInfo.Throw(exc);
+                }
+                catch (TrapException exc)
+                {
+                    Context.ProcessTimer.Stop();
+                    Context.InstructionTimer.Stop();
+                    if (options.LogProgressEvery > 0)
+                        Console.Error.WriteLine();
+                    if (options.CollectStats != StatsDetail.None)
+                        PrintStats(options);
+                    if (options.LogGas)
+                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
+
+                    if (options.CalculateLineNumbers)
+                    {
+                        var ptr = Context.ComputePointerPath();
+                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+
+                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{Context.steps}\n{path}"));
+                    }
+
+                    //Flush the stack before throwing...
+                    Context.FlushCallStack();
+                    ExceptionDispatchInfo.Throw(exc);
+                }
+                catch (SignalException exc)
+                {
+                    Context.ProcessTimer.Stop();
+                    Context.InstructionTimer.Stop();
+                    if (options.LogProgressEvery > 0)
+                        Console.Error.WriteLine();
+                    if (options.CollectStats != StatsDetail.None)
+                        PrintStats(options);
+                    if (options.LogGas)
+                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
+
+                    string message = exc.Message;
+                    if (options.CalculateLineNumbers)
+                    {
+                        var ptr = Context.ComputePointerPath();
+                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+                        message = exc.Message + $":line {line} instruction #{Context.steps}\n{path}";
+                    }
+
+                    //Flush the stack before throwing...
+                    Context.FlushCallStack();
+
+                    var exType = exc.GetType();
+                    var ctr = exType.GetConstructor(new Type[] { typeof(int), typeof(string) });
+                    ExceptionDispatchInfo.Throw(ctr?.Invoke(new object[] { exc.Signal, message }) as Exception ?? exc);
+                }
+                catch (WasmRuntimeException)
+                {
+                    //Maybe Log?
+                    Context.FlushCallStack();
+                    throw;
+                }
+                
+                Context.ProcessTimer.Stop();
+                Context.InstructionTimer.Stop();
+                if (options.LogProgressEvery > 0) Console.Error.WriteLine("done.");
+                if (options.CollectStats != StatsDetail.None) PrintStats(options);
+                if (options.LogGas) Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
+
+                Value[] results = new Value[funcType.ResultType.Arity];
+                var span = results.AsSpan();
+                Context.OpStack.PopScalars(funcType.ResultType, span);
+
+                return results;
+            }
+        }
+        
+        public async Task ProcessThreadAsync(long gasLimit)
+        {
+            if (gasLimit <= 0) gasLimit = long.MaxValue;
+            while (Context.Next() is { } inst)
+            {
+                int work = await inst.ExecuteAsync(Context);
+                Context.steps += work;
+                if (Context.steps >= gasLimit)
+                    throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
+            }
         }
 
-        public long ProcessThreadWithOptions(InvokerOptions options)
+        public async Task ProcessThreadWithOptions(InvokerOptions options)
         {
-            var inst = Context.Next();
-            if (inst == null)
-                return 0;
+            long highwatermark = 0;
+            long gasLimit = options.GasLimit > 0 ? options.GasLimit : long.MaxValue;
+            while (Context.Next() is { } inst)
+            {
+                //Trace execution
+                if (options.LogInstructionExecution != InstructionLogging.None)
+                {
+                    LogPreInstruction(options, inst);
+                }
+
+                int work = 0;
+                if (options.CollectStats == StatsDetail.Instruction)
+                {
+                    Context.InstructionTimer.Restart();
+                    work = await inst.ExecuteAsync(Context);
+                    Context.InstructionTimer.Stop();
+                    Context.steps += work;
+
+                    var st = Context.Stats[(ushort)inst.Op];
+                    st.count += work;
+                    st.duration += Context.InstructionTimer.ElapsedTicks;
+                    Context.Stats[(ushort)inst.Op] = st;
+                }
+                else
+                {
+                    Context.InstructionTimer.Start();
+                    work = await inst.ExecuteAsync(Context);
+                    Context.InstructionTimer.Stop();
+                    Context.steps += work;
+                }
+
+                if (options.LogInstructionExecution.Has(InstructionLogging.Computes))
+                {
+                    LogPostInstruction(options, inst);
+                }
             
-            //Trace execution
-            if (options.LogInstructionExecution != InstructionLogging.None)
-            {
-                LogPreInstruction(options, inst);
+                lastInstruction = inst;
+                
+                if (Context.steps >= gasLimit)
+                    throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
+                
+                if (options.LogProgressEvery > 0)
+                {
+                    highwatermark += work;
+                    if (highwatermark >= options.LogProgressEvery)
+                    {
+                        highwatermark -= options.LogProgressEvery;
+                        Console.Error.Write('.');
+                    }
+                }
             }
-
-            long steps = 0;
-            if (options.CollectStats == StatsDetail.Instruction)
-            {
-                Context.InstructionTimer.Restart();
-                steps += inst.Execute(Context);
-                Context.InstructionTimer.Stop();
-
-                var st = Context.Stats[(ushort)inst.Op];
-                st.count += steps;
-                st.duration += Context.InstructionTimer.ElapsedTicks;
-                Context.Stats[(ushort)inst.Op] = st;
-            }
-            else
-            {
-                Context.InstructionTimer.Start();
-                steps += inst.Execute(Context);
-                Context.InstructionTimer.Stop();
-            }
-
-            if (options.LogInstructionExecution.Has(InstructionLogging.Computes))
-            {
-                LogPostInstruction(options, inst);
-            }
-            
-            lastInstruction = inst;
-            return steps;
         }
 
         private void LogPreInstruction(InvokerOptions options, IInstruction inst)
