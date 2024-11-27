@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Text;
 
@@ -269,6 +270,7 @@ namespace Wacs.Core.Utilities
             return vector;
         }
 
+        [SuppressMessage("ReSharper.DPA", "DPA0000: DPA issues")]
         public static List<T> ParseUntil<T>(this BinaryReader reader, Func<BinaryReader, T?> elementParser,
             Func<T, bool> predicate)
             where T : class

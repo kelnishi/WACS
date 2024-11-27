@@ -14,6 +14,7 @@
 //  * limitations under the License.
 //  */
 
+using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -50,5 +51,7 @@ namespace Wacs.Core.Instructions
         public virtual IInstruction Parse(BinaryReader reader) => this;
 
         public virtual string RenderText(ExecContext? context) => Op.GetMnemonic();
+        
+        protected static Stack<Value> _aside = new();
     }
 }
