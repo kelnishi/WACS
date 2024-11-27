@@ -176,22 +176,22 @@ namespace Wacs.Core.Instructions.Numeric
                 switch (shape)
                 {
                     case V128Shape.I8x16: 
-                        context.Assert(l < 16, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        context.Assert(l < 16, "Instruction {0} was invalid. Target Lane out of bounds.", op.GetMnemonic());
                         break;
                     case V128Shape.I16x8:
-                        context.Assert(l < 8, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        context.Assert(l < 8, "Instruction {0} was invalid. Target Lane out of bounds.", op.GetMnemonic());
                         break;
                     case V128Shape.I32x4:
-                        context.Assert(l < 4, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        context.Assert(l < 4, "Instruction {0} was invalid. Target Lane out of bounds.", op.GetMnemonic());
                         break;
                     case V128Shape.I64x2: 
-                        context.Assert(l < 2, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        context.Assert(l < 2, "Instruction {0} was invalid. Target Lane out of bounds.", op.GetMnemonic());
                         break;
                     case V128Shape.F32x4:
-                        context.Assert(l < 4, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        context.Assert(l < 4, "Instruction {0} was invalid. Target Lane out of bounds.", op.GetMnemonic());
                         break;
                     case V128Shape.F64x2:
-                        context.Assert(l < 2, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        context.Assert(l < 2, "Instruction {0} was invalid. Target Lane out of bounds.", op.GetMnemonic());
                         break;
                     default: throw new InvalidOperationException("Unsupported lane shape");
                 }
@@ -216,27 +216,27 @@ namespace Wacs.Core.Instructions.Numeric
                 switch (shape)
                 {
                     case V128Shape.I8x16: 
-                        context.Assert(l < 16, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        context.Assert(l < 16, "Instruction {0} was invalid. Target Lane out of bounds.", op.GetMnemonic());
                         context.OpStack.PopI32();
                         break;
                     case V128Shape.I16x8:
-                        context.Assert(l < 8, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        context.Assert(l < 8, "Instruction {0} was invalid. Target Lane out of bounds.", op.GetMnemonic());
                         context.OpStack.PopI32(); 
                         break;
                     case V128Shape.I32x4:
-                        context.Assert(l < 4, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        context.Assert(l < 4, "Instruction {0} was invalid. Target Lane out of bounds.", op.GetMnemonic());
                         context.OpStack.PopI32(); 
                         break;
                     case V128Shape.I64x2: 
-                        context.Assert(l < 2, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        context.Assert(l < 2, "Instruction {0} was invalid. Target Lane out of bounds.", op.GetMnemonic());
                         context.OpStack.PopI64(); 
                         break;
                     case V128Shape.F32x4:
-                        context.Assert(l < 4, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        context.Assert(l < 4, "Instruction {0} was invalid. Target Lane out of bounds.", op.GetMnemonic());
                         context.OpStack.PopF32(); 
                         break;
                     case V128Shape.F64x2:
-                        context.Assert(l < 2, $"Instruction {op.GetMnemonic()} was invalid. Target Lane out of bounds.");
+                        context.Assert(l < 2, "Instruction {0} was invalid. Target Lane out of bounds.", op.GetMnemonic());
                         context.OpStack.PopF64();
                         break;
                     default: throw new InvalidOperationException("Unsupported lane shape");

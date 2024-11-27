@@ -38,7 +38,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory {M}.");
+                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),M);
             context.OpStack.PushI32();
         }
 
@@ -81,7 +81,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory {M}.");
+                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),M);
             context.OpStack.PopI32();
             context.OpStack.PushI32();
         }
@@ -140,10 +140,10 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(Y),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory {Y}.");
+                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),Y);
 
             context.Assert(context.Datas.Contains(X),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context data {X}.");
+                 "Instruction {0} failed with invalid context data {1}.",Op.GetMnemonic(), X);
 
             context.OpStack.PopI32();
             context.OpStack.PopI32();
@@ -256,7 +256,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Datas.Contains(X),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context data {X}.");
+                 "Instruction {0} failed with invalid context data {1}.",Op.GetMnemonic(),X);
         }
 
         // @Spec 4.4.7.13
@@ -303,9 +303,9 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(SrcX),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory {SrcX}.");
+                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),SrcX);
             context.Assert(context.Mems.Contains(DstY),
-                $"Instruction {Op.GetMnemonic()} failed with invalid context memory {DstY}.");
+                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(), DstY);
 
             context.OpStack.PopI32();
             context.OpStack.PopI32();
@@ -426,7 +426,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(X),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory {X}.");
+                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),X);
 
             context.OpStack.PopI32();
             context.OpStack.PopI32();

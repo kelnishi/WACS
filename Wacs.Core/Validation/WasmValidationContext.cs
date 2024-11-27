@@ -96,16 +96,16 @@ namespace Wacs.Core.Validation
             ControlFrame.Unreachable = true;
         }
 
-        public void Assert(bool factIsTrue, string message)
+        public void Assert(bool factIsTrue, string formatString, params object[] args)
         {
-            if (!factIsTrue)
-                throw new ValidationException(message);
+            if (factIsTrue) return;
+            throw new ValidationException(string.Format(formatString, args));
         }
-
-        public void Assert([NotNull] object? objIsNotNull, string message)
+        
+        public void Assert([NotNull] object? objIsNotNull, string formatString, params object[] args)
         {
-            if (objIsNotNull == null)
-                throw new ValidationException(message);
+            if (objIsNotNull != null) return;
+            throw new ValidationException(string.Format(formatString, args));
         }
 
         public void ValidateBlock(Block instructionBlock, int index = 0)

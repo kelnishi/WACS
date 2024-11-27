@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using Wacs.Core.OpCodes;
@@ -113,6 +114,8 @@ namespace Wacs.Core
     
     public class StackCalculator: IWasmValidationContext
     {
+        private static readonly object NonNull = new();
+        
         public StackCalculator(ModuleInstance moduleInst, Module.Function func)
         {
             Types = new TypesSpace(moduleInst.Repr);
@@ -213,10 +216,9 @@ namespace Wacs.Core
             ControlFrame.Unreachable = true;
         }
 
+        public void Assert(bool factIsTrue, string formatString, params object[] args) { }
+        public void Assert([NotNull] object? objIsNotNull, string formatString, params object[] args) { objIsNotNull = NonNull; }
 
-        public void Assert(bool factIsTrue, string message) {}
-
-        public void Assert(object objIsNotNull, string message) { }
 
         public void ValidateBlock(Block instructionBlock, int index = 0) {}
     }

@@ -158,8 +158,9 @@ namespace Wacs.Core
 
         public IValidationOpStack OpStack => _opStack;
 
-        public void Assert(bool factIsTrue, string message) {}
-        public void Assert([NotNull] object? objIsNotNull, string message) { objIsNotNull = NonNull; }
+        
+        public void Assert(bool factIsTrue, string formatString, params object[] args) { }
+        public void Assert([NotNull] object? objIsNotNull, string formatString, params object[] args) { objIsNotNull = NonNull; }
 
         public FuncIdx FunctionIndex => FuncIdx.Default;
 
