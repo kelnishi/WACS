@@ -22,6 +22,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
@@ -220,11 +221,12 @@ namespace Wacs.Core.Runtime
         }
 
         // @Spec 4.4.10.1 Function Invocation
-        public void Invoke(FuncAddr addr)
+        public async Task Invoke(FuncAddr addr)
         {
             //1.
             Assert( Store.Contains(addr),
                 $"Failure in Function Invocation. Address does not exist {addr}");
+            
             //2.
             var funcInst = Store[addr];
             switch (funcInst)
@@ -233,8 +235,11 @@ namespace Wacs.Core.Runtime
                     Invoke(wasmFunc, wasmFunc.Index);
                     return;
                 case HostFunction hostFunc:
-                    Invoke(hostFunc);
-                    break;
+                    if (hostFunc.IsAsync)
+                        await InvokeAsync(hostFunc);
+                    else
+                        Invoke(hostFunc);
+                    return;
             }
         }
 
@@ -292,17 +297,19 @@ namespace Wacs.Core.Runtime
         private void Invoke(HostFunction hostFunc)
         {
             var funcType = hostFunc.Type;
-
-            //Write the ExecContext to the first parameter if needed
-            var paramBuf = hostFunc.GetParameterBuf(this);
             
             //Fetch the parameters
-            OpStack.PopScalars(funcType.ParameterTypes, paramBuf);
+            OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
 
+            if (hostFunc.PassExecContext)
+            {
+                hostFunc.ParameterBuffer[0] = this;
+            }
+            
             //Pass them
             hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
         }
-
+        
         // @Spec 4.4.10.2. Returning from a function
         public void FunctionReturn()
         {
@@ -318,15 +325,31 @@ namespace Wacs.Core.Runtime
             //8.
             ResumeSequence(address);
         }
+        
+        private async ValueTask InvokeAsync(HostFunction hostFunc)
+        {
+            var funcType = hostFunc.Type;
+            
+            //Fetch the parameters
+            OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
 
-        public IInstruction? Next()
+            if (hostFunc.PassExecContext)
+            {
+                hostFunc.ParameterBuffer[0] = this;
+            }
+            
+            //Pass them
+            await hostFunc.InvokeAsync(hostFunc.ParameterBuffer, OpStack);
+        }
+        
+        public InstructionBase? Next()
         {
             //Advance to the next instruction first.
             if (++_sequenceIndex >= _currentSequence.Count)
                 return null;
             
             //Critical path, using direct array access
-            return _currentSequence._instructions[_sequenceIndex];
+            return _currentSequence._instructions[_sequenceIndex] as InstructionBase;
         }
 
         public List<(string, int)> ComputePointerPath()

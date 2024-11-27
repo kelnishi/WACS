@@ -233,7 +233,7 @@ namespace Wacs.Core
                 {
                     case Module.ImportDesc.FuncDesc funcDesc:
                         var funcSig = moduleInst.Types[funcDesc.TypeIndex];
-                        var funcAddr = store.AllocateHostFunction(entityId, funcSig, typeof(FakeHostDelegate), fakeHostFunc);
+                        var funcAddr = store.AllocateHostFunction(entityId, funcSig, typeof(FakeHostDelegate), fakeHostFunc, false);
                         moduleInst.FuncAddrs.Add(funcAddr);
                         break;
                     default: break;

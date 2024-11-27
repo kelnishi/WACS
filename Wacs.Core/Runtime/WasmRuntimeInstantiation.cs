@@ -412,9 +412,9 @@ namespace Wacs.Core.Runtime
         /// <summary>
         /// @Spec 4.5.3.2. Host Functions
         /// </summary>
-        private static FuncAddr AllocateHostFunc(Store store, (string module, string entity) id, FunctionType funcType, Type delType, Delegate hostFunc)
+        private static FuncAddr AllocateHostFunc(Store store, (string module, string entity) id, FunctionType funcType, Type delType, Delegate hostFunc, bool isAsync)
         {
-            return store.AllocateHostFunction(id, funcType, delType, hostFunc);
+            return store.AllocateHostFunction(id, funcType, delType, hostFunc, isAsync);
         }
 
         /// <summary>
