@@ -62,7 +62,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Locals.Contains(Index),
-                $"Instruction local.get was invalid. Context Locals did not contain {Index}");
+                "Instruction local.get was invalid. Context Locals did not contain {0}",Index);
             var value = context.Locals.Get(Index);
             context.OpStack.PushType(value.Type);
         }
@@ -126,7 +126,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Locals.Contains(Index),
-                $"Instruction local.set was invalid. Context Locals did not contain {Index}");
+                "Instruction local.set was invalid. Context Locals did not contain {0}",Index);
             var value = context.Locals.Get(Index);
             context.OpStack.PopType(value.Type);
         }
@@ -191,7 +191,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Locals.Contains(Index),
-                $"Instruction local.tee was invalid. Context Locals did not contain {Index}");
+                "Instruction local.tee was invalid. Context Locals did not contain {0}",Index);
             var value = context.Locals.Get(Index);
             context.OpStack.PopType(value.Type);
             context.OpStack.PushType(value.Type);

@@ -63,9 +63,9 @@ namespace Wacs.Core.Instructions.SIMD
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+                "Instruction {0} failed with invalid context memory 0.",Op.GetMnemonic());
             context.Assert(M.Align.LinearSize() <= WidthT.ByteSize() * CountN,
-                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align.LinearSize()} <= {WidthT}/8");
+                "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),WidthT);
 
             context.OpStack.PopI32();
             context.OpStack.PushV128();
@@ -169,9 +169,9 @@ namespace Wacs.Core.Instructions.SIMD
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+                "Instruction {0} failed with invalid context memory 0.",Op.GetMnemonic());
             context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
-                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align} <= {BitWidth.V128}/8");
+                "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align,BitWidth.V128);
 
             context.OpStack.PopI32();
             context.OpStack.PushV128();
@@ -275,9 +275,9 @@ namespace Wacs.Core.Instructions.SIMD
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+                "Instruction {0} failed with invalid context memory 0.",Op.GetMnemonic());
             context.Assert(M.Align.LinearSize() <= BitWidth.V128.ByteSize(),
-                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align.LinearSize()} <= {BitWidth.V128}/8");
+                "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),BitWidth.V128);
 
             context.OpStack.PopI32();
             context.OpStack.PushV128();
@@ -374,12 +374,12 @@ namespace Wacs.Core.Instructions.SIMD
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(X < 128/WidthN.BitSize(),
-                $"Instruction {Op.GetMnemonic()} failed with invalid laneidx {X} <= {128/WidthN.BitSize()}");
+            context.Assert(X < 128 / WidthN.BitSize(),
+                "Instruction {0} failed with invalid laneidx {1} <= {2}", Op.GetMnemonic(), X, 128 / WidthN.BitSize());
             context.Assert(context.Mems.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+                "Instruction {0} failed with invalid context memory 0.", Op.GetMnemonic());
             context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
-                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align.LinearSize()} <= {WidthN}/8");
+                "Instruction {0} failed with invalid alignment {1} <= {2}/8", Op.GetMnemonic(), M.Align.LinearSize(), WidthN);
             
             context.OpStack.PopV128();
             context.OpStack.PopI32();
@@ -488,13 +488,12 @@ namespace Wacs.Core.Instructions.SIMD
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(X < 128/WidthN.BitSize(),
-                $"Instruction {Op.GetMnemonic()} failed with invalid laneidx {X} <= {128/WidthN.BitSize()}");
+            context.Assert(X < 128 / WidthN.BitSize(),
+                "Instruction {0} failed with invalid laneidx {1} <= {2}", Op.GetMnemonic(), X, 128 / WidthN.BitSize());
             context.Assert(context.Mems.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+                "Instruction {0} failed with invalid context memory 0.", Op.GetMnemonic());
             context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
-                $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align.LinearSize()} <= {WidthN}/8");
-            
+                "Instruction {0} failed with invalid alignment {1} <= {2}/8", Op.GetMnemonic(), M.Align.LinearSize(), WidthN);
             context.OpStack.PopV128();
             context.OpStack.PopI32();
         }
