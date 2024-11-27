@@ -16,6 +16,7 @@
 
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using Xunit;
@@ -24,11 +25,27 @@ namespace Spec.Test
 {
     public class BindingTests
     {
+        delegate int HostInOut(int a, out int b);
+        static int BoundHost(int a, out int b)
+        {
+            b = a;
+            int c = a * 2;
+            return c;
+        }
+        delegate Task<int> HostAsyncInRet(int a);
+        static async Task<int> BoundAsyncHost(int a)
+        {
+            await Task.Delay(1000); // Simulate work
+            return a*2;
+        }
+        
+        
         [Fact]
         public void BindStackBinder()
         {
             var runtime = new WasmRuntime();
-            runtime.BindHostFunction<hostInOut>(("env","bound_host"), BoundHost);
+            runtime.BindHostFunction<HostInOut>(("env","bound_host"), BoundHost);
+            runtime.BindHostFunction<HostAsyncInRet>(("env","bound_async_host"), BoundAsyncHost);
             using var fileStream = new FileStream("../../../engine/binding.wasm", FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
             var moduleInst = runtime.InstantiateModule(module);
@@ -49,7 +66,8 @@ namespace Spec.Test
         public void BindParamAndResultI32()
         {
             var runtime = new WasmRuntime();
-            runtime.BindHostFunction<hostInOut>(("env","bound_host"), BoundHost);
+            runtime.BindHostFunction<HostInOut>(("env","bound_host"), BoundHost);
+            runtime.BindHostFunction<HostAsyncInRet>(("env","bound_async_host"), BoundAsyncHost);
             using var fileStream = new FileStream("../../../engine/binding.wasm", FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
             var moduleInst = runtime.InstantiateModule(module);
@@ -67,7 +85,8 @@ namespace Spec.Test
         public void BindParamAndResultF32()
         {
             var runtime = new WasmRuntime();
-            runtime.BindHostFunction<hostInOut>(("env","bound_host"), BoundHost);
+            runtime.BindHostFunction<HostInOut>(("env","bound_host"), BoundHost);
+            runtime.BindHostFunction<HostAsyncInRet>(("env","bound_async_host"), BoundAsyncHost);
             using var fileStream = new FileStream("../../../engine/binding.wasm", FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
             var moduleInst = runtime.InstantiateModule(module);
@@ -80,19 +99,13 @@ namespace Spec.Test
             Assert.Equal(2f * 2f, invoker(2f));
             Assert.Equal(3f * 2f, invoker(3f));
         }
-
-        static int BoundHost(int a, out int b)
-        {
-            b = a;
-            int c = a * 2;
-            return c;
-        }
-
+        
         [Fact]
         public void BindHostFunction()
         {
             var runtime = new WasmRuntime();
-            runtime.BindHostFunction<hostInOut>(("env","bound_host"), BoundHost);
+            runtime.BindHostFunction<HostInOut>(("env","bound_host"), BoundHost);
+            runtime.BindHostFunction<HostAsyncInRet>(("env","bound_async_host"), BoundAsyncHost);
             
             using var fileStream = new FileStream("../../../engine/binding.wasm", FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
@@ -105,6 +118,24 @@ namespace Spec.Test
             Assert.Equal(10 + 20, invoker(10));
         }
 
-        delegate int hostInOut(int a, out int b);
+        
+        [Fact]
+        public void BindHostAsyncFunction()
+        {
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<HostInOut>(("env","bound_host"), BoundHost);
+            runtime.BindHostFunction<HostAsyncInRet>(("env","bound_async_host"), BoundAsyncHost);
+            
+            using var fileStream = new FileStream("../../../engine/binding.wasm", FileMode.Open);
+            var module = BinaryModuleParser.ParseWasm(fileStream);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("binding", moduleInst);
+
+            var fa = runtime.GetExportedFunction(("binding", "call_async_host"));
+            var invoker = runtime.CreateInvoker<Func<int, int>>(fa);
+            
+            Assert.Equal(10*2, invoker(10));
+        }
+
     }
 }
