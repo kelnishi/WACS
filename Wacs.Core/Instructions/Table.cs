@@ -36,7 +36,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                 $"Instruction table.get failed to get table {X} from context");
+                 "Instruction table.get failed to get table {0} from context",X);
             var type = context.Tables[X];
             context.OpStack.PopI32();
             context.OpStack.PushType(type.ElementType.StackType());
@@ -96,7 +96,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                 $"Instruction table.set failed to get table {X} from context");
+                 "Instruction table.set failed to get table {0} from context", X);
             var type = context.Tables[X];
             context.OpStack.PopType(type.ElementType.StackType());
             context.OpStack.PopI32();
@@ -160,13 +160,13 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                 $"Instruction table.init is invalid. Table {X} not in the Context.");
+                 "Instruction table.init is invalid. Table {0} not in the Context.", X);
             var t1 = context.Tables[X];
             context.Assert(context.Elements.Contains(Y),
-                 $"Instruction table.init is invalid. Element {Y} not in the Context.");
+                 "Instruction table.init is invalid. Element {0} not in the Context.",Y);
             var t2 = context.Elements[Y];
             context.Assert(t1.ElementType == t2.Type,
-                 $"Instruction table.init is invalid. Type mismatch {t1.ElementType} != {t2.Type}");
+                 "Instruction table.init is invalid. Type mismatch {0} != {1}",t1.ElementType,t2.Type);
             context.OpStack.PopI32();
             context.OpStack.PopI32();
             context.OpStack.PopI32();
@@ -275,7 +275,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Elements.Contains(X),
-                 $"Instruction elem.drop is invalid. Element {X} was not in the Context");
+                 "Instruction elem.drop is invalid. Element {0} was not in the Context",X);
         }
 
         // @Spec 4.4.6.8. elem.drop x
@@ -321,13 +321,13 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(DstX),
-                 $"Instruction table.copy failed. Table index {DstX} does not exist in Context");
+                 "Instruction table.copy failed. Table index {0} does not exist in Context",DstX);
             var t1 = context.Tables[DstX];
             context.Assert(context.Tables.Contains(SrcY),
-                 $"Instruction table.copy failed. Table index {SrcY} does not exist in Context");
+                 "Instruction table.copy failed. Table index {0} does not exist in Context",SrcY);
             var t2 = context.Tables[SrcY];
             context.Assert(t1.ElementType == t2.ElementType,
-                 $"Instruction table.copy failed. Table type mismatch {t1.ElementType} != {t2.ElementType}");
+                 "Instruction table.copy failed. Table type mismatch {0} != {1}",t1.ElementType,t2.ElementType);
             context.OpStack.PopI32();
             context.OpStack.PopI32();
             context.OpStack.PopI32();
@@ -446,7 +446,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                 $"Instruction table.grow failed to get table {X} from context");
+                 "Instruction table.grow failed to get table {0} from context",X);
             var type = context.Tables[X];
             context.OpStack.PopI32();
             context.OpStack.PopType(type.ElementType.StackType());
@@ -513,7 +513,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                 $"Instruction table.set failed to get table {X} from context");
+                 "Instruction table.set failed to get table {0} from context",X);
             context.OpStack.PushI32();
         }
 
@@ -558,7 +558,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tables.Contains(X),
-                 $"Instruction table.set failed to get table {X} from context");
+                 "Instruction table.set failed to get table {0} from context",X);
             var type = context.Tables[X];
             context.OpStack.PopI32();
             context.OpStack.PopType(type.ElementType.StackType());

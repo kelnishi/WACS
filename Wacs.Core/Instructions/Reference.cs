@@ -76,12 +76,12 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Funcs.Contains(FunctionIndex),
-                $"Instruction ref.func is invalid. Function {FunctionIndex} was not in the context.");
+                "Instruction ref.func is invalid. Function {0} was not in the context.",FunctionIndex);
             //Seems like C.Refs isn't strictly necessary since FunctionSpace collects all the references
             var func = context.Funcs[FunctionIndex];
             
             context.Assert(func.IsFullyDeclared,
-                $"Instruction ref.func is invalid. Function {FunctionIndex} is not fully declared in the module.");
+                "Instruction ref.func is invalid. Function {0} is not fully declared in the module.",FunctionIndex);
             
             context.OpStack.PushFuncref(Value.NullFuncRef);
         }

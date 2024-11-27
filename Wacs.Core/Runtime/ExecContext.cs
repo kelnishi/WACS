@@ -334,26 +334,26 @@ namespace Wacs.Core.Runtime
             Stack<(string, int)> ascent = new();
             int idx = _sequenceIndex;
             
-            // foreach (var label in Frame.Labels)
-            // {
-            //     var pointer = (label.Instruction.GetMnemonic(), idx);
-            //     ascent.Push(pointer);
-            //
-            //     idx = label.ContinuationAddress.Index;
-            //     
-            //     switch ((OpCode)label.Instruction)
-            //     {
-            //         case OpCode.If: ascent.Push(("InstIf", 0));
-            //             break;
-            //         case OpCode.Else: ascent.Push(("InstElse", 1));
-            //             break;
-            //         case OpCode.Block: ascent.Push(("InstBlock", 0));
-            //             break;
-            //         case OpCode.Loop: ascent.Push(("InstLoop", 0));
-            //             break;
-            //     }
-            //     
-            // }
+            foreach (var label in Frame.EnumerateLabels())
+            {
+                var pointer = (label.Instruction.GetMnemonic(), idx);
+                ascent.Push(pointer);
+            
+                idx = label.ContinuationAddress.Index;
+                
+                switch ((OpCode)label.Instruction)
+                {
+                    case OpCode.If: ascent.Push(("InstIf", 0));
+                        break;
+                    case OpCode.Else: ascent.Push(("InstElse", 1));
+                        break;
+                    case OpCode.Block: ascent.Push(("InstBlock", 0));
+                        break;
+                    case OpCode.Loop: ascent.Push(("InstLoop", 0));
+                        break;
+                }
+                
+            }
             
             ascent.Push(("Function", (int)Frame.Index.Value));
 

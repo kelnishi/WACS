@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Globals.Contains(Index),
-                $"Instruction global.get was invalid. Context Globals did not contain {Index}");
+                "Instruction global.get was invalid. Context Globals did not contain {0}",Index);
             var globalType = context.Globals[Index].Type;
             context.OpStack.PushType(globalType.ContentType);
         }
@@ -132,11 +132,11 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Globals.Contains(Index),
-                $"Instruction global.set was invalid. Context Globals did not contain {Index}");
+                "Instruction global.set was invalid. Context Globals did not contain {0}",Index);
             var global = context.Globals[Index];
             var mut = global.Type.Mutability;
             context.Assert(mut == Mutability.Mutable,
-                $"Instruction global.set was invalid. Trying to set immutable global {Index}");
+                "Instruction global.set was invalid. Trying to set immutable global {0}",Index);
             context.OpStack.PopType(global.Type.ContentType);
 
         }

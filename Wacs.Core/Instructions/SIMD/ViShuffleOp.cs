@@ -32,7 +32,7 @@ namespace Wacs.Core.Instructions
             for (int i = 0; i < 16; ++i)
             {
                 context.Assert(X[(byte)i] < 32,
-                    $"Instruction {Op.GetMnemonic()} was invalid. Lane {i} ({X[(byte)i]}) was >= 32.");
+                    "Instruction {0} was invalid. Lane {1} ({2}) was >= 32.",Op.GetMnemonic(),i,X[(byte)i]);
             }
 
             context.OpStack.PopV128();

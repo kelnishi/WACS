@@ -82,9 +82,9 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M.M),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+                 "Instruction {0} failed with invalid context memory 0.",Op.GetMnemonic());
             context.Assert(M.Align.LinearSize() <= WidthT.ByteSize(),
-                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align.LinearSize()} <= {WidthT}/8");
+                    "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),WidthT);
 
             context.OpStack.PopI32();
             context.OpStack.PushType(Type);
@@ -249,10 +249,9 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M.M),
-                 $"Instruction {Op.GetMnemonic()} failed with invalid context memory 0.");
+                 "Instruction {0} failed with invalid context memory 0.",Op.GetMnemonic());
             context.Assert(M.Align.LinearSize() <= TWidth.ByteSize(),
-                
-                    $"Instruction {Op.GetMnemonic()} failed with invalid alignment {M.Align.LinearSize()} <= {TWidth}/8");
+                    "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),TWidth);
 
             //Pop parameters from right to left
             context.OpStack.PopType(Type);

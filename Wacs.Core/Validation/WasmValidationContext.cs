@@ -96,16 +96,16 @@ namespace Wacs.Core.Validation
             ControlFrame.Unreachable = true;
         }
 
-        public void Assert(bool factIsTrue, string message)
+        public void Assert(bool factIsTrue, string formatString, params object[] args)
         {
-            if (!factIsTrue)
-                throw new ValidationException(message);
+            if (factIsTrue) return;
+            throw new ValidationException(string.Format(formatString, args));
         }
-
-        public void Assert([NotNull] object? objIsNotNull, string message)
+        
+        public void Assert([NotNull] object? objIsNotNull, string formatString, params object[] args)
         {
-            if (objIsNotNull == null)
-                throw new ValidationException(message);
+            if (objIsNotNull != null) return;
+            throw new ValidationException(string.Format(formatString, args));
         }
 
         public void ValidateBlock(Block instructionBlock, int index = 0)
@@ -151,13 +151,15 @@ namespace Wacs.Core.Validation
             OpStack.PushResult(types.ParameterTypes);
         }
 
+        private static Stack<Value> _aside = new();
         public ValidationControlFrame PopControlFrame()
         {
             if (ControlStack.Count == 0)
                 throw new ValidationException("Validation Control Stack underflow");
             
             //Check to make sure we have the correct results, but only if we didn't jump
-            OpStack.PopValues(ControlFrame.EndTypes);
+            OpStack.PopValues(ControlFrame.EndTypes, ref _aside);
+            _aside.Clear();
             
             //Check the stack
             if (OpStack.Height != ControlFrame.Height)
