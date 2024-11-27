@@ -45,7 +45,7 @@ namespace Wacs.Core.Validation
         Value PopType(ValType expectedType);
         Value PopAny();
 
-        Stack<Value> PopValues(ResultType types);
+        void PopValues(ResultType types, ref Stack<Value> aside);
         public void ReturnResults(ResultType type);
     }
 
@@ -251,14 +251,12 @@ namespace Wacs.Core.Validation
             return actual;
         }
 
-        public Stack<Value> PopValues(ResultType types)
+        public void PopValues(ResultType types, ref Stack<Value> aside)
         {
-            var aside = new Stack<Value>();
             foreach (var type in types.Types.Reverse())
             {
                 aside.Push(PopType(type));
             }
-            return aside;
         }
 
         public void ReturnResults(ResultType types)

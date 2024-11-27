@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using Wacs.Core.Instructions;
@@ -53,6 +54,7 @@ namespace Wacs.Core.Runtime.Transpiler
             function.SetBody(new Expression(function.Type.ResultType.Arity, newSeq, false));
         }
 
+        [SuppressMessage("ReSharper.DPA", "DPA0000: DPA issues")]
         private static InstructionSequence OptimizeSequence(InstructionSequence seq)
         {
             if (seq.Count == 0)

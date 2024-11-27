@@ -151,13 +151,15 @@ namespace Wacs.Core.Validation
             OpStack.PushResult(types.ParameterTypes);
         }
 
+        private static Stack<Value> _aside = new();
         public ValidationControlFrame PopControlFrame()
         {
             if (ControlStack.Count == 0)
                 throw new ValidationException("Validation Control Stack underflow");
             
             //Check to make sure we have the correct results, but only if we didn't jump
-            OpStack.PopValues(ControlFrame.EndTypes);
+            OpStack.PopValues(ControlFrame.EndTypes, ref _aside);
+            _aside.Clear();
             
             //Check the stack
             if (OpStack.Height != ControlFrame.Height)
