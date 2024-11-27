@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Spec.Test;
 using Wacs.Core;
 using Wacs.Core.Runtime;
@@ -40,7 +42,13 @@ namespace Feature.Detect
             }
             else
             {
-                Assert.Fail($"{file.Name} not supported.");
+                var supportedJsParadigms = new List<string>
+                {
+                    "jspi"
+                };
+
+                var supported = file.Features?.All(feature => supportedJsParadigms.Contains(feature)) ?? false;
+                Assert.True(supported, $"{file.Name} not supported.");
             }
         }
     }
