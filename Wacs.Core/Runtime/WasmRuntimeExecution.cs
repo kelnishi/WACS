@@ -102,6 +102,7 @@ namespace Wacs.Core.Runtime
                 }
 
                 Context.ProcessTimer.Restart();
+                Context.InstructionTimer.Restart();
                 
                 var task = Context.Invoke(funcAddr);
                 task.Wait();
@@ -124,7 +125,6 @@ namespace Wacs.Core.Runtime
                 catch (AggregateException agg)
                 {
                     var exc = agg.InnerException;
-                    
                     Context.ProcessTimer.Stop();
                     Context.InstructionTimer.Stop();
                     if (options.LogProgressEvery > 0)
@@ -403,16 +403,23 @@ namespace Wacs.Core.Runtime
             TimeSpan overheadTime = new TimeSpan(overheadTicks/100);
             double overheadPercent =  100.0 * overheadTicks / procTicks;
             double execPercent = 100.0 * execTicks / procTicks;
-            string overheadLabel = $"({overheadPercent:#0.###}%) {overheadTime:g}";
+            string overheadLabel = $" overhead:({overheadPercent:#0.###}%) {overheadTime.TotalSeconds:#0.###}s";
             
             string totalLabel = "    total duration";
             string totalInst = $"{totalExecs}";
-            string totalPercent = $"{execPercent:#0.###}%t".PadLeft(8,' ');
+            string totalPercent = $" ({execPercent:#0.###}%t)".PadLeft(8,' ');
             string avgTime = $"{execTime.TotalMilliseconds * 1000000.0/totalExecs:#0.###}ns/i";
             double instPerSec = totalExecs * 1000.0 / totalTime.TotalMilliseconds;
-            string velocity = $"{instPerSec.SiSuffix("0.###")}i/s";
+            string velocity = $"{instPerSec.SiSuffix("0.###")}ips";
+
+            if (options.CollectStats == StatsDetail.Total)
+            {
+                overheadLabel = "";
+                totalPercent = "";
+            }
+            
             Console.Error.WriteLine($"Execution Stats:");
-            Console.Error.WriteLine($"{totalLabel}: {totalInst}| ({totalPercent}) {execTime.TotalSeconds:#0.###}s {avgTime} {velocity} overhead:{overheadLabel} total proctime:{totalTime.TotalSeconds:#0.###}s");
+            Console.Error.WriteLine($"{totalLabel}: {totalInst}|{totalPercent} {execTime.TotalSeconds:#0.###}s {avgTime} {velocity}{overheadLabel} proctime:{totalTime.TotalSeconds:#0.###}s");
             var orderedStats = Context.Stats
                 .Where(bdc => bdc.Value.count != 0)
                 .OrderBy(bdc => -bdc.Value.count);
