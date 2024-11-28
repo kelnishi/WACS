@@ -25,56 +25,101 @@ namespace Wacs.Core.Instructions.Transpiler
         where T : struct
     {
         public InstAggregateValue(ITypedValueProducer<T> inA, ValType type, INodeConsumer<Value> consumer)
-            : base(new Wrapper(inA, type), consumer) {}
+            : base(GetWrapper(inA, type), consumer) {}
 
-        class Wrapper : ITypedValueProducer<Value>
-        {
-            private readonly ITypedValueProducer<T> _inA;
-            
-            public Wrapper(ITypedValueProducer<T> inA, ValType type)
+        private static ITypedValueProducer<Value> GetWrapper(ITypedValueProducer<T> inA, ValType type) =>
+            type switch
             {
-                _inA = inA;
-                if (typeof(T) == typeof(Value))
-                {
-                    _func = ((ITypedValueProducer<Value>)_inA).GetFunc;
-                }
-                else
-                {
-                    var func = _inA.GetFunc;
-                    _func = context => new Value(func(context));
-                }
-            }
-            public int CalculateSize() => _inA.CalculateSize();
-
-            private Func<ExecContext, Value> _func;
-            public Func<ExecContext, Value> GetFunc => _func;
-        }
+                ValType.Nil => (ITypedValueProducer<Value>)inA,
+                ValType.I32 => new WrapValueI32((ITypedValueProducer<int>)inA),
+                ValType.I64 => new WrapValueI64((ITypedValueProducer<long>)inA),
+                ValType.F32 => new WrapValueF32((ITypedValueProducer<float>)inA),
+                ValType.F64 => new WrapValueF64((ITypedValueProducer<double>)inA),
+                ValType.U32 => new WrapValueU32((ITypedValueProducer<uint>)inA),
+                ValType.U64 => new WrapValueU64((ITypedValueProducer<ulong>)inA),
+                ValType.V128 => new WrapValueV128((ITypedValueProducer<V128>)inA),
+                _ => throw new ArgumentException($"Unsupported ValType: {type}")
+            };
     }
     
-    public class WrapValue<T> : ITypedValueProducer<Value>
+    public abstract class WrapValue<T> : ITypedValueProducer<Value>
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
-        public WrapValue(ITypedValueProducer<T> inA)
+        protected WrapValue(ITypedValueProducer<T> inA)
         {
             _inA = inA;
-            if (typeof(T) == typeof(Value))
-            {
-                _func = ((ITypedValueProducer<Value>)_inA).GetFunc;
-            }
-            else
-            {
-                var func = _inA.GetFunc;
-                _func = context => new Value(func(context));
-            }
         }
         public int CalculateSize() => _inA.CalculateSize();
 
-        private Func<ExecContext, Value> _func;
+        protected Func<ExecContext, Value> _func = null!;
         public Func<ExecContext, Value> GetFunc => _func;
         
     }
 
+    public class WrapValueI32 : WrapValue<int>
+    {
+        public WrapValueI32(ITypedValueProducer<int> inA) : base(inA)
+        {
+            var func = inA.GetFunc;
+            _func = context => new Value(func(context));
+        }
+    }
+    
+    public class WrapValueU32 : WrapValue<uint>
+    {
+        public WrapValueU32(ITypedValueProducer<uint> inA) : base(inA)
+        {
+            var func = inA.GetFunc;
+            _func = context => new Value(func(context));
+        }
+    }
+    
+    public class WrapValueI64 : WrapValue<long>
+    {
+        public WrapValueI64(ITypedValueProducer<long> inA) : base(inA)
+        {
+            var func = inA.GetFunc;
+            _func = context => new Value(func(context));
+        }
+    }
+
+    public class WrapValueU64 : WrapValue<ulong>
+    {
+        public WrapValueU64(ITypedValueProducer<ulong> inA) : base(inA)
+        {
+            var func = inA.GetFunc;
+            _func = context => new Value(func(context));
+        }
+    }
+
+    public class WrapValueF32 : WrapValue<float>
+    {
+        public WrapValueF32(ITypedValueProducer<float> inA) : base(inA)
+        {
+            var func = inA.GetFunc;
+            _func = context => new Value(func(context));
+        }
+    }
+
+    public class WrapValueF64 : WrapValue<double>
+    {
+        public WrapValueF64(ITypedValueProducer<double> inA) : base(inA)
+        {
+            var func = inA.GetFunc;
+            _func = context => new Value(func(context));
+        }
+    }
+    
+    public class WrapValueV128 : WrapValue<V128>
+    {
+        public WrapValueV128(ITypedValueProducer<V128> inA) : base(inA)
+        {
+            var func = inA.GetFunc;
+            _func = context => new Value(func(context));
+        }
+    }
+    
     public abstract class UnwrapValue<T> : ITypedValueProducer<T>
     {
         protected ITypedValueProducer<Value> InA;
