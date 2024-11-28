@@ -25,17 +25,17 @@ namespace Wacs.Core.Instructions.Transpiler
     }
     
 
-    public interface IConvertableValueProducer { }
+    public interface IConvertableValueProducer {}
 
     public interface ITypedValueProducer<out T> : IInstructionAnalog, IConvertableValueProducer
     {
         public Func<ExecContext, T> GetFunc { get; }
     }
     
-    public interface IOptimizationTarget : IInstruction { }
+    public interface IOptimizationTarget : IInstruction {}
 
-    public interface IValueConsumer<TIn1> { }
-    public interface IValueConsumer<TIn1, TIn2> { }
+    public interface IValueConsumer<TIn1> {}
+    public interface IValueConsumer<TIn1, TIn2> {}
 
     public interface INodeConsumer<TIn1> : IValueConsumer<TIn1>, IOptimizationTarget
     {

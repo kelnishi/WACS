@@ -22,7 +22,6 @@ using FluentValidation;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Runtime.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -34,6 +33,11 @@ namespace Wacs.Core.Types
     public class Expression
     {
         public static readonly Expression Empty = new(0, InstructionSequence.Empty, true);
+        public readonly InstructionSequence Instructions;
+
+        public readonly bool IsStatic;
+
+        public InstExpressionProxy LabelTarget;
 
         /// <summary>
         /// For parsing normal Code sections
@@ -52,7 +56,7 @@ namespace Wacs.Core.Types
                 StackHeight = -1,
             });
         }
-        
+
         /// <summary>
         /// Manual construction (from optimizers or statics)
         /// </summary>
@@ -86,11 +90,13 @@ namespace Wacs.Core.Types
             });
         }
 
+        public int Size => Instructions.Size;
+
         public void PrecomputeLabels(IWasmValidationContext vContext)
         {
             LinkLabelTarget(vContext, Instructions, LabelTarget);
         }
-        
+
         private void LinkLabelTarget(IWasmValidationContext vContext, InstructionSequence seq, BlockTarget enclosingTarget)
         {
             for (int i = 0; i < seq.Count; ++i)
@@ -135,13 +141,6 @@ namespace Wacs.Core.Types
             }
         }
 
-        public InstExpressionProxy LabelTarget;
-
-        public readonly bool IsStatic;
-        public readonly InstructionSequence Instructions;
-
-        public int Size => Instructions.Size;
-
         /// <summary>
         /// Leaves the result on the OpStack
         /// </summary>
@@ -166,7 +165,7 @@ namespace Wacs.Core.Types
         /// </summary>
         public static Expression Parse(BinaryReader reader) =>
             new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd)), true);
-        
+
         public static Expression ParseInitializer(BinaryReader reader) =>
             new(1, new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd)), true);
 

@@ -57,25 +57,24 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly InstConvert I64ReinterpretF64 = new(OpCode.I64ReinterpretF64 , (Func<double,long> )ExecuteI64ReinterpretF64, NumericInst.ValidateOperands(pop: ValType.F64, push: ValType.I64));
         public static readonly InstConvert F32ReinterpretI32 = new(OpCode.F32ReinterpretI32 , (Func<int,float>   )ExecuteF32ReinterpretI32, NumericInst.ValidateOperands(pop: ValType.I32, push: ValType.F32));
         public static readonly InstConvert F64ReinterpretI64 = new(OpCode.F64ReinterpretI64 , (Func<long,double> )ExecuteF64ReinterpretI64, NumericInst.ValidateOperands(pop: ValType.I64, push: ValType.F64));
+        private readonly Executor _executor;
 
-        public override ByteCode Op { get; }
-        
         private readonly NumericInst.ValidationDelegate _validate;
-        delegate void Executor(ExecContext context);
-        private Executor _executor;
-        
+
         private InstConvert(ByteCode op, Delegate execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _executor = CreateExecutor(execute);
             _validate = validate;
         }
-        
+
+        public override ByteCode Op { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             _executor(context);
-            return 1;
         }
 
         private Executor CreateExecutor(Delegate execute)
@@ -112,9 +111,9 @@ namespace Wacs.Core.Instructions.Numeric
                 _ => throw new InvalidDataException($"Cannot create delegate from type {execute.GetType()}")
             };
         }
-        
+
         private static int ExecuteI32WrapI64(long value) => unchecked((int)value);
-        
+
         private static int ExecuteI32TruncF32S(float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) 
@@ -127,7 +126,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             return (int)truncated;
         }
-        
+
         private static uint ExecuteI32TruncF32U(float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value))
@@ -140,7 +139,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             return (uint)truncated;
         }
-        
+
         private static int ExecuteI32TruncF64S(double value)
         {
             if (double.IsNaN(value) || double.IsInfinity(value))
@@ -153,7 +152,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             return (int)truncated;
         }
-        
+
         private static uint ExecuteI32TruncF64U(double value)
         {
             if (double.IsNaN(value) || double.IsInfinity(value))
@@ -166,7 +165,7 @@ namespace Wacs.Core.Instructions.Numeric
         
             return (uint)truncated;
         }
-        
+
         private static long ExecuteI64ExtendI32S(int value) => value;
 
         private static ulong ExecuteI64ExtendI32U(uint value) => value;
@@ -187,7 +186,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             return (long)truncated;
         }
-        
+
         private static ulong ExecuteI64TruncF32U(float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) 
@@ -202,7 +201,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             return (ulong)truncated;
         }
-        
+
         private static long ExecuteI64TruncF64S(double value)
         {
             if (double.IsNaN(value) || double.IsInfinity(value)) 
@@ -219,7 +218,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             return (long)truncated;
         }
-        
+
         private static ulong ExecuteI64TruncF64U(double value)
         {
             if (double.IsNaN(value) || double.IsInfinity(value)) 
@@ -234,7 +233,7 @@ namespace Wacs.Core.Instructions.Numeric
             
             return (ulong)truncated;
         }
-        
+
         private static float ExecuteF32ConvertI32S(int value) => value;
 
         private static float ExecuteF32ConvertI32U(uint value) => value;
@@ -266,5 +265,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static double ExecuteF64ReinterpretI64(long value) => 
             MemoryMarshal.Cast<long, double>(MemoryMarshal.CreateSpan(ref value, 1))[0];
+
+        delegate void Executor(ExecContext context);
     }
 }

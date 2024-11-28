@@ -30,13 +30,14 @@ namespace Wacs.Core.Instructions
 {
     public class InstReturnCall : InstructionBase, ICallInstruction
     {
+        public FuncIdx X;
+
         public InstReturnCall()
         {
             IsAsync = true;
         }
-        public override ByteCode Op => OpCode.ReturnCall;
 
-        public FuncIdx X;
+        public override ByteCode Op => OpCode.ReturnCall;
 
         public bool IsBound(ExecContext context)
         {
@@ -67,7 +68,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.10. call
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //Fetch the Module first because we might exhaust the call stack
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
@@ -89,10 +90,9 @@ namespace Wacs.Core.Instructions
             context.Frame.ContinuationAddress = address;
 
             throw new WasmRuntimeException("Synchronous execution path not allowed");
-            return 1;
         }
-        
-        public override async ValueTask<int> ExecuteAsync(ExecContext context)
+
+        public override async ValueTask ExecuteAsync(ExecContext context)
         {
             //Fetch the Module first because we might exhaust the call stack
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
@@ -112,7 +112,6 @@ namespace Wacs.Core.Instructions
             
             //Reuse the pointer from the outgoing function
             context.Frame.ContinuationAddress = address;
-            return 1;
         }
 
         /// <summary>
@@ -166,15 +165,16 @@ namespace Wacs.Core.Instructions
     //0x11
     public class InstReturnCallIndirect : InstructionBase, ICallInstruction
     {
+        private TableIdx X;
+
+        private TypeIdx Y;
+
         public InstReturnCallIndirect()
         {
             IsAsync = true;
         }
-        
-        public override ByteCode Op => OpCode.ReturnCallIndirect;
 
-        private TypeIdx Y;
-        private TableIdx X;
+        public override ByteCode Op => OpCode.ReturnCallIndirect;
 
         public bool IsBound(ExecContext context)
         {
@@ -226,7 +226,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.11. call_indirect
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //Call Indirect
             //2.
@@ -288,10 +288,9 @@ namespace Wacs.Core.Instructions
             context.Frame.ContinuationAddress = address;
             
             throw new WasmRuntimeException("Synchronous execution path not allowed");
-            return 1;
         }
-        
-        public override async ValueTask<int> ExecuteAsync(ExecContext context)
+
+        public override async ValueTask ExecuteAsync(ExecContext context)
         {
             //Call Indirect
             //2.
@@ -351,7 +350,6 @@ namespace Wacs.Core.Instructions
             
             //Reuse the pointer from the outgoing function
             context.Frame.ContinuationAddress = address;
-            return 1;
         }
 
         /// <summary>

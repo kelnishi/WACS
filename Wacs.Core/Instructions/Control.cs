@@ -46,7 +46,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.2. unreachable
-        public override int Execute(ExecContext context) =>
+        public override void Execute(ExecContext context) =>
             throw new TrapException("unreachable");
     }
 
@@ -62,26 +62,23 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.1. nop
-        public override int Execute(ExecContext context)
-        {
-            return 1;
-        }
+        public override void Execute(ExecContext context) {}
     }
 
     //0x02
     public class InstBlock : BlockTarget, IBlockInstruction
     {
         private static readonly ByteCode BlockOp = OpCode.Block;
-        public override ByteCode Op => BlockOp;
         private Block Block;
-        
+        public override ByteCode Op => BlockOp;
+
         public BlockType Type => Block.Type;
 
         public int Count => 1;
 
         public int Size => 1 + Block.Size;
         public Block GetBlock(int idx) => Block;
-        
+
         // @Spec 3.3.8.3 block
         public override void Validate(IWasmValidationContext context)
         {
@@ -110,11 +107,10 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.3. block
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             if (Block.Instructions.Count != 0)
                 context.EnterBlock(this, Block);
-            return 1;
         }
 
         /// <summary>
@@ -128,7 +124,7 @@ namespace Wacs.Core.Instructions
             );
             return this;
         }
-        
+
         public BlockTarget Immediate(BlockType type, InstructionSequence sequence)
         {
             Block = new Block(
@@ -149,8 +145,8 @@ namespace Wacs.Core.Instructions
     public class InstLoop : BlockTarget, IBlockInstruction
     {
         private static readonly ByteCode LoopOp = OpCode.Loop;
-        public override ByteCode Op => LoopOp;
         private Block Block = null!;
+        public override ByteCode Op => LoopOp;
 
         public BlockType Type => Block.Type;
 
@@ -158,7 +154,7 @@ namespace Wacs.Core.Instructions
 
         public int Size => 1 + Block.Size;
         public Block GetBlock(int idx) => Block;
-        
+
         // @Spec 3.3.8.4. loop
         public override void Validate(IWasmValidationContext context)
         {
@@ -187,11 +183,10 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.4. loop
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             if (Block.Instructions.Count != 0)
                 context.EnterBlock(this, Block);
-            return 1;
         }
 
         /// <summary>
@@ -205,7 +200,7 @@ namespace Wacs.Core.Instructions
             );
             return this;
         }
-        
+
         public BlockTarget Immediate(BlockType type, InstructionSequence sequence)
         {
             Block = new Block(
@@ -227,18 +222,18 @@ namespace Wacs.Core.Instructions
     {
         private static readonly ByteCode IfOp = OpCode.If;
         private static readonly ByteCode ElseOp = OpCode.Else;
-        public override ByteCode Op => IfOp;
-        private Block IfBlock = Block.Empty;
         private Block ElseBlock = Block.Empty;
+        private Block IfBlock = Block.Empty;
+        public override ByteCode Op => IfOp;
 
-        
+
         public BlockType Type => IfBlock.Type;
 
         public int Count => ElseBlock.Length == 0 ? 1 : 2;
 
         public int Size => 1 + IfBlock.Size + ElseBlock.Size;
         public Block GetBlock(int idx) => idx == 0 ? IfBlock : ElseBlock;
-        
+
         // @Spec 3.3.8.5 if
         public override void Validate(IWasmValidationContext context)
         {
@@ -283,7 +278,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.5. if
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             int c = context.OpStack.PopI32();
             if (c != 0)
@@ -296,7 +291,6 @@ namespace Wacs.Core.Instructions
                 if (ElseBlock.Instructions.Count != 0)
                     context.EnterBlock(this, ElseBlock);
             }
-            return 1;
         }
 
         /// <summary>
@@ -325,7 +319,7 @@ namespace Wacs.Core.Instructions
 
             return this;
         }
-        
+
         public BlockTarget Immediate(BlockType type, InstructionSequence ifSeq, InstructionSequence elseSeq)
         {
             IfBlock = new Block(
@@ -367,7 +361,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.ReturnResults(frame.EndTypes);
         }
 
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             var label = context.Frame.Label;
             switch (label.Instruction.x00)
@@ -386,7 +380,6 @@ namespace Wacs.Core.Instructions
                     //Do nothing
                     break;
             }
-            return 1;
         }
 
         public override string RenderText(ExecContext? context)
@@ -436,10 +429,10 @@ namespace Wacs.Core.Instructions
     public class InstBranch : InstructionBase, IBranchInstruction
     {
         private static Stack<Value> _asideVals = new();
-        public override ByteCode Op => OpCode.Br;
 
         private LabelIdx L;
-        
+        public override ByteCode Op => OpCode.Br;
+
         // @Spec 3.3.8.6. br l
         public override void Validate(IWasmValidationContext context)
         {
@@ -459,10 +452,9 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.6. br l
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             ExecuteInstruction(context, L);
-            return 1;
         }
 
         public static void ExecuteInstruction(ExecContext context, LabelIdx labelIndex)
@@ -532,10 +524,9 @@ namespace Wacs.Core.Instructions
     //0x0D
     public class InstBranchIf : InstructionBase, IBranchInstruction
     {
+        public LabelIdx L;
         public override ByteCode Op => OpCode.BrIf;
 
-        public LabelIdx L;
-        
         // @Spec 3.3.8.7. br_if
         public override void Validate(IWasmValidationContext context)
         {
@@ -556,14 +547,13 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.7. br_if
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             int c = context.OpStack.PopI32();
             if (c != 0)
             {
                 InstBranch.ExecuteInstruction(context, L);
             }
-            return 1;
         }
 
         /// <summary>
@@ -592,10 +582,10 @@ namespace Wacs.Core.Instructions
     //0x0E
     public class InstBranchTable : InstructionBase, IBranchInstruction
     {
-        public override ByteCode Op => OpCode.BrTable;
+        private LabelIdx Ln; //Default m
 
         private LabelIdx[] Ls = null!;
-        private LabelIdx Ln; //Default m
+        public override ByteCode Op => OpCode.BrTable;
 
         // @Spec 3.3.8.8. br_table
         public override void Validate(IWasmValidationContext context)
@@ -636,7 +626,7 @@ namespace Wacs.Core.Instructions
         /// @Spec 4.4.8.8. br_table
         /// </summary>
         /// <param name="context"></param>
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             int i = context.OpStack.PopI32();
@@ -651,7 +641,6 @@ namespace Wacs.Core.Instructions
             {
                 InstBranch.ExecuteInstruction(context, Ln);
             }
-            return 1;
         }
 
         private static LabelIdx ParseLabelIndex(BinaryReader reader) =>
@@ -711,7 +700,7 @@ namespace Wacs.Core.Instructions
     {
         public static readonly InstReturn Inst = new();
         public override ByteCode Op => OpCode.Return;
-        
+
         // @Spec 3.3.8.9. return
         public override void Validate(IWasmValidationContext context)
         {
@@ -722,7 +711,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.9. return
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             context.Assert( context.OpStack.Count >= context.Frame.Arity,
                 $"Instruction return failed. Operand stack underflow");
@@ -731,21 +720,20 @@ namespace Wacs.Core.Instructions
             // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
             var address = context.PopFrame();
             context.ResumeSequence(address);
-            return 1;
         }
     }
 
     //0x10
     public class InstCall : InstructionBase, ICallInstruction
     {
+        public FuncIdx X;
+
         public InstCall()
         {
             IsAsync = true;
         }
-        
-        public override ByteCode Op => OpCode.Call;
 
-        public FuncIdx X;
+        public override ByteCode Op => OpCode.Call;
 
         public bool IsBound(ExecContext context)
         {
@@ -770,7 +758,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.10. call
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
                 $"Instruction call failed. Function address for {X} was not in the Context.");
@@ -778,16 +766,14 @@ namespace Wacs.Core.Instructions
             context.Invoke(a);
 
             throw new WasmRuntimeException("Synchronous execution path not allowed.");
-            return 1;
         }
-        
-        public override async ValueTask<int> ExecuteAsync(ExecContext context)
+
+        public override async ValueTask ExecuteAsync(ExecContext context)
         {
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
                 $"Instruction call failed. Function address for {X} was not in the Context.");
             var a = context.Frame.Module.FuncAddrs[X];
             await context.Invoke(a);
-            return 1;
         }
 
         /// <summary>
@@ -840,15 +826,16 @@ namespace Wacs.Core.Instructions
     //0x11
     public class InstCallIndirect : InstructionBase, ICallInstruction
     {
+        private TableIdx X;
+
+        private TypeIdx Y;
+
         public InstCallIndirect()
         {
             IsAsync = true;
         }
-        
-        public override ByteCode Op => OpCode.CallIndirect;
 
-        private TypeIdx Y;
-        private TableIdx X;
+        public override ByteCode Op => OpCode.CallIndirect;
 
         public bool IsBound(ExecContext context)
         {
@@ -894,7 +881,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.8.11. call_indirect
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(X),
@@ -942,10 +929,9 @@ namespace Wacs.Core.Instructions
             //19.
             context.Invoke(a);
             throw new WasmRuntimeException("Synchronous execution path not allowed");
-            return 1;
         }
-        
-        public override async ValueTask<int> ExecuteAsync(ExecContext context)
+
+        public override async ValueTask ExecuteAsync(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(X),
@@ -992,7 +978,6 @@ namespace Wacs.Core.Instructions
                 throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
             //19.
             await context.Invoke(a);
-            return 1;
         }
 
         /// <summary>

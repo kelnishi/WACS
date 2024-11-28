@@ -27,6 +27,11 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class TableInstance
     {
+        //The actual data array, filled in by InstantiateModule with table.init instructions
+        public readonly List<Value> Elements;
+
+        public readonly TableType Type;
+
         /// <summary>
         /// @Spec 4.5.3.3. Tables
         /// @Spec 4.5.3.10. Modules
@@ -49,11 +54,6 @@ namespace Wacs.Core.Runtime.Types
         /// <param name="elems">Makes a copy of the element list</param>
         private TableInstance(TableType type, IEnumerable<Value> elems) =>
             (Type, Elements) = ((TableType)type.Clone(), elems.ToList());
-
-        public readonly TableType Type;
-
-        //The actual data array, filled in by InstantiateModule with table.init instructions
-        public readonly List<Value> Elements;
 
         public TableInstance Clone() => new(Type, Elements);
 

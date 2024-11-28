@@ -28,9 +28,8 @@ namespace Wacs.Core.Instructions
     //0x3F
     public class InstMemorySize : InstructionBase
     {
-        public override ByteCode Op => OpCode.MemorySize;
-
         private MemIdx M;
+        public override ByteCode Op => OpCode.MemorySize;
 
         /// <summary>
         /// @Spec 3.3.7.10. memory.size
@@ -43,7 +42,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.7.8. memory.size
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M),
@@ -59,7 +58,6 @@ namespace Wacs.Core.Instructions
             uint sz = (uint)mem.Size;
             //7.
             context.OpStack.PushU32(sz);
-            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader)
@@ -72,8 +70,8 @@ namespace Wacs.Core.Instructions
     //0x40
     public class InstMemoryGrow : InstructionBase
     {
-        public override ByteCode Op => OpCode.MemoryGrow;
         private MemIdx M;
+        public override ByteCode Op => OpCode.MemoryGrow;
 
         /// <summary>
         /// @Spec 3.3.7.11. memory.grow
@@ -87,7 +85,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.7.9. memory.grow
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M),
@@ -117,7 +115,6 @@ namespace Wacs.Core.Instructions
             {
                 context.OpStack.PushI32(err);
             }
-            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader)
@@ -130,9 +127,9 @@ namespace Wacs.Core.Instructions
     //0xFC_08
     public class InstMemoryInit : InstructionBase
     {
-        public override ByteCode Op => ExtCode.MemoryInit;
         private DataIdx X;
         private MemIdx Y;
+        public override ByteCode Op => ExtCode.MemoryInit;
 
         /// <summary>
         /// @Spec 3.3.7.14. memory.init
@@ -151,7 +148,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.7.12. memory.init x
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(Y),
@@ -201,7 +198,7 @@ namespace Wacs.Core.Instructions
                     throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory overflow.");
                 //17.
                 if (n == 0)
-                    return 1;
+                    return;
                 //18.
                 byte b = data.Data[s];
                 //19.
@@ -247,8 +244,8 @@ namespace Wacs.Core.Instructions
     //0xFC_09
     public class InstDataDrop : InstructionBase
     {
-        public override ByteCode Op => ExtCode.DataDrop;
         private DataIdx X;
+        public override ByteCode Op => ExtCode.DataDrop;
 
         /// <summary>
         /// @Spec 3.3.7.15. data.drop
@@ -260,7 +257,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.7.13
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.DataAddrs.Contains(X),
@@ -272,7 +269,6 @@ namespace Wacs.Core.Instructions
                  $"Instruction {Op.GetMnemonic()} failed. Address for Data {X} was not in the Store.");
             //5.
             context.Store.DropData(a);
-            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader)
@@ -293,9 +289,9 @@ namespace Wacs.Core.Instructions
     //0xFC_0A
     public class InstMemoryCopy : InstructionBase
     {
-        public override ByteCode Op => ExtCode.MemoryCopy;
-        private MemIdx SrcX;
         private MemIdx DstY;
+        private MemIdx SrcX;
+        public override ByteCode Op => ExtCode.MemoryCopy;
 
         /// <summary>
         /// @Spec 3.3.7.13. memory.copy
@@ -313,7 +309,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.7.11. memory.copy
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(SrcX),
@@ -362,7 +358,7 @@ namespace Wacs.Core.Instructions
                         $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
                 //13.
                 if (n == 0)
-                    return 1;
+                    return;
                 //14.
                 if (d <= s)
                 {
@@ -417,8 +413,8 @@ namespace Wacs.Core.Instructions
     //0xFC_0B
     public class InstMemoryFill : InstructionBase
     {
-        public override ByteCode Op => ExtCode.MemoryFill;
         private MemIdx X;
+        public override ByteCode Op => ExtCode.MemoryFill;
 
         /// <summary>
         /// @Spec 3.3.7.12. memory.fill
@@ -434,7 +430,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.7.10. memory.fill
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(X),
@@ -468,7 +464,7 @@ namespace Wacs.Core.Instructions
                     throw new TrapException("Instruction memory.fill failed. Buffer overflow");
                 //13.
                 if (n == 0)
-                    return 1;
+                    return;
                 //14.
                 context.OpStack.PushU32((uint)d);
                 //15.

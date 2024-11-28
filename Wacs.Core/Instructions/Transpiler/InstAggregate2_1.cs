@@ -16,9 +16,8 @@
 
 using System;
 using System.IO;
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Types;
+using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Transpiler
@@ -26,14 +25,10 @@ namespace Wacs.Core.Instructions.Transpiler
     public class InstAggregate2_1<TIn1,TIn2,TOut> : InstructionBase, ITypedValueProducer<TOut>
         where TOut : struct
     {
+        private readonly Func<ExecContext, TIn1, TIn2, TOut> _compute;
         private readonly Func<ExecContext, TIn1> _in1;
         private readonly Func<ExecContext, TIn2> _in2;
-        private readonly Func<ExecContext, TIn1, TIn2, TOut> _compute;
         private readonly Func<ExecContext, Value> _wrap;
-
-        public int CalculateSize() => Size;
-        public readonly int Size;
-
         
         public InstAggregate2_1(ITypedValueProducer<TIn1> in1, ITypedValueProducer<TIn2> in2, INodeComputer<TIn1,TIn2,TOut> compute)
         {
@@ -53,19 +48,22 @@ namespace Wacs.Core.Instructions.Transpiler
             else throw new InvalidDataException($"Could not bind aggregate type {typeof(TOut)}");
         }
 
-        public TOut Run(ExecContext context) => _compute(context, _in1(context), _in2(context));
-        
-        public Func<ExecContext, TOut> GetFunc => Run;
         public override ByteCode Op => OpCode.Aggr;
+
+        public int CalculateSize() => Size;
+
+        public Func<ExecContext, TOut> GetFunc => Run;
+
+        public TOut Run(ExecContext context) => _compute(context, _in1(context), _in2(context));
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(false, "Validation of transpiled instructions not supported.");
         }
 
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             context.OpStack.PushValue(_wrap(context));
-            return Size;
         }
     }
     

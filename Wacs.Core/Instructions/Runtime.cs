@@ -30,11 +30,10 @@ namespace Wacs.Core.Instructions
             throw new ValidationException($"This instruction should never be present in modules.");
         }
 
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //Notify the runtime?
             context.RewindSequence();
-            return 1;
         }
     }
 }
