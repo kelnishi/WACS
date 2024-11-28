@@ -163,11 +163,11 @@ namespace Wacs.Core.Runtime.Transpiler
                     case ITypedValueProducer<int> intProducer:
                         return new InstAggregateValue<int>(intProducer, ValType.I32, nodeConsumer);
                     case ITypedValueProducer<uint> uintProducer:
-                        return new InstAggregateValue<uint>(uintProducer, ValType.I32, nodeConsumer);
+                        return new InstAggregateValue<uint>(uintProducer, ValType.U32, nodeConsumer);
                     case ITypedValueProducer<long> longProducer:
                         return new InstAggregateValue<long>(longProducer, ValType.I64, nodeConsumer);
                     case ITypedValueProducer<ulong> ulongProducer:
-                        return new InstAggregateValue<ulong>(ulongProducer, ValType.I64, nodeConsumer);
+                        return new InstAggregateValue<ulong>(ulongProducer, ValType.U64, nodeConsumer);
                     case ITypedValueProducer<float> floatProducer:
                         return new InstAggregateValue<float>(floatProducer, ValType.F32, nodeConsumer);
                     case ITypedValueProducer<double> doubleProducer:
@@ -488,13 +488,13 @@ namespace Wacs.Core.Runtime.Transpiler
 
             var i2Producer = i2 switch {
                 ITypedValueProducer<Value> p => p,
-                ITypedValueProducer<int> p => new WrapValue<int>(p),
-                ITypedValueProducer<uint> p => new WrapValue<uint>(p),
-                ITypedValueProducer<long> p => new WrapValue<long>(p),
-                ITypedValueProducer<ulong> p => new WrapValue<ulong>(p),
-                ITypedValueProducer<float> p => new WrapValue<float>(p),
-                ITypedValueProducer<double> p => new WrapValue<double>(p),
-                ITypedValueProducer<V128> p => new WrapValue<V128>(p),
+                ITypedValueProducer<int> p => new WrapValueI32(p),
+                ITypedValueProducer<uint> p => new WrapValueU32(p),
+                ITypedValueProducer<long> p => new WrapValueI64(p),
+                ITypedValueProducer<ulong> p => new WrapValueU64(p),
+                ITypedValueProducer<float> p => new WrapValueF32(p),
+                ITypedValueProducer<double> p => new WrapValueF64(p),
+                ITypedValueProducer<V128> p => new WrapValueV128(p),
                 _ => null,
             };
             var i1Producer = i1 switch
