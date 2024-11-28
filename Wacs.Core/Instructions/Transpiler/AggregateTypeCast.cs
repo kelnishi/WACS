@@ -57,6 +57,15 @@ namespace Wacs.Core.Instructions.Transpiler
         
     }
 
+    public class NakedValue : WrapValue<Value>
+    {
+        public NakedValue(ITypedValueProducer<Value> inA) : base(inA)
+        {
+            var func = inA.GetFunc;
+            _func = context => func(context);
+        }
+    }
+
     public class WrapValueI32 : WrapValue<int>
     {
         public WrapValueI32(ITypedValueProducer<int> inA) : base(inA)
