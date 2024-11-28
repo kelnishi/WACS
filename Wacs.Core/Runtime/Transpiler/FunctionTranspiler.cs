@@ -14,11 +14,9 @@
 //  * limitations under the License.
 //  */
 
-using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
-using System.Reflection;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.Runtime.Types;
@@ -226,7 +224,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(top);
             return inst;
         }
-        
+
         private static IInstruction BindI32I32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<int,int> intConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -260,7 +258,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        
+
         private static IInstruction BindU32U32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,uint> intConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -293,7 +291,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        
+
         private static IInstruction BindU32I32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,int> intConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -326,6 +324,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
+
         private static IInstruction BindU64(IOptimizationTarget inst, Stack<IInstruction> stack, IValueConsumer<ulong> ulongConsumer)
         {
             if (stack.Count < 1) return inst;
@@ -374,7 +373,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(top);
             return inst;
         }
-        
+
         private static IInstruction BindI64I64(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<long,long> longConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -410,7 +409,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        
+
         private static IInstruction BindU64U64(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<ulong,ulong> longConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -445,7 +444,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        
+
         private static IInstruction BindU64I64(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<ulong,long> longConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -478,8 +477,8 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        
-        
+
+
         private static IInstruction BindU32Value(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,Value> intConsumer)
         {
             if (stack.Count < 1) return inst;
@@ -525,7 +524,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        
+
         private static IInstruction BindF32(IOptimizationTarget inst, Stack<IInstruction> stack, IValueConsumer<float> floatConsumer)
         {
             if (stack.Count < 1) return inst;
@@ -546,7 +545,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(top);
             return inst;
         }
-        
+
         private static IInstruction BindF32F32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<float,float> intConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -579,7 +578,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        
+
         private static IInstruction BindF64(IOptimizationTarget inst, Stack<IInstruction> stack, IValueConsumer<double> doubleConsumer)
         {
             if (stack.Count < 1) return inst;
@@ -600,7 +599,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(top);
             return inst;
         }
-        
+
         private static IInstruction BindF64F64(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<double,double> intConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -633,6 +632,5 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        
     }
 }

@@ -38,11 +38,11 @@ namespace Wacs.Core
         /// </summary>
         public class Function : IRenderable
         {
+            public FuncIdx Index;
             public bool IsFullyDeclared = false;
 
             public bool IsImport = false;
             public string Id { get; set; } = "";
-            public FuncIdx Index;
 
             //Function Section only parses the type indices
             public TypeIdx TypeIndex { get; internal set; }

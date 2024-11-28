@@ -46,15 +46,16 @@ namespace Wacs.Core.Instructions.Transpiler
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
+
+        protected Func<ExecContext, Value> _func = null!;
+
         protected WrapValue(ITypedValueProducer<T> inA)
         {
             _inA = inA;
         }
-        public int CalculateSize() => _inA.CalculateSize();
 
-        protected Func<ExecContext, Value> _func = null!;
+        public int CalculateSize() => _inA.CalculateSize();
         public Func<ExecContext, Value> GetFunc => _func;
-        
     }
 
     public class NakedValue : WrapValue<Value>
@@ -132,6 +133,7 @@ namespace Wacs.Core.Instructions.Transpiler
     public abstract class UnwrapValue<T> : ITypedValueProducer<T>
     {
         protected ITypedValueProducer<Value> InA;
+
         protected UnwrapValue(ITypedValueProducer<Value> inA)
         {
             InA = inA;
@@ -148,6 +150,7 @@ namespace Wacs.Core.Instructions.Transpiler
             var func = InA.GetFunc;
             GetFunc = context => func(context).Int32;
         }
+
         public override Func<ExecContext, int> GetFunc { get; }
     }
     
@@ -158,6 +161,7 @@ namespace Wacs.Core.Instructions.Transpiler
             var func = InA.GetFunc;
             GetFunc = context => func(context).UInt32;
         }
+
         public override Func<ExecContext, uint> GetFunc { get; }
     }
     
@@ -168,6 +172,7 @@ namespace Wacs.Core.Instructions.Transpiler
             var func = InA.GetFunc;
             GetFunc = context => func(context).Float32;
         }
+
         public override Func<ExecContext, float> GetFunc { get; }
     }
     
@@ -178,6 +183,7 @@ namespace Wacs.Core.Instructions.Transpiler
             var func = InA.GetFunc;
             GetFunc = context => func(context).Int64;
         }
+
         public override Func<ExecContext, long> GetFunc { get; }
     }
     
@@ -188,6 +194,7 @@ namespace Wacs.Core.Instructions.Transpiler
             var func = InA.GetFunc;
             GetFunc = context => func(context).UInt64;
         }
+
         public override Func<ExecContext, ulong> GetFunc { get; }
     }
     
@@ -198,6 +205,7 @@ namespace Wacs.Core.Instructions.Transpiler
             var func = InA.GetFunc;
             GetFunc = context => func(context).Float64;
         }
+
         public override Func<ExecContext, double> GetFunc { get; }
     }
     
@@ -205,17 +213,18 @@ namespace Wacs.Core.Instructions.Transpiler
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
+
         public CastToI32(ITypedValueProducer<T> inA)
         {
             _inA = inA;
             if (typeof(T) == typeof(int))
             {
-                _func = ((ITypedValueProducer<int>)_inA).GetFunc;
+                GetFunc = ((ITypedValueProducer<int>)_inA).GetFunc;
             }
             else if (typeof(T) == typeof(uint))
             {
                 var func = _inA.GetFunc as Func<ExecContext, uint>;
-                _func = context => (int)func!(context);
+                GetFunc = context => (int)func!(context);
             }
             else
             {
@@ -224,26 +233,25 @@ namespace Wacs.Core.Instructions.Transpiler
         }
 
         public int CalculateSize() => _inA.CalculateSize();
-
-        private Func<ExecContext, int> _func;
-        public Func<ExecContext, int> GetFunc => _func;
+        public Func<ExecContext, int> GetFunc { get; }
     }
     
     public class CastToU32<T> : ITypedValueProducer<uint>
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
+
         public CastToU32(ITypedValueProducer<T> inA)
         {
             _inA = inA;
             if (typeof(T) == typeof(uint))
             {
-                _func = ((ITypedValueProducer<uint>)_inA).GetFunc;
+                GetFunc = ((ITypedValueProducer<uint>)_inA).GetFunc;
             }
             else if (typeof(T) == typeof(int))
             {
                 var func = _inA.GetFunc as Func<ExecContext, int>;
-                _func = context => (uint)func!(context);
+                GetFunc = context => (uint)func!(context);
             }
             else
             {
@@ -252,26 +260,25 @@ namespace Wacs.Core.Instructions.Transpiler
         }
 
         public int CalculateSize() => _inA.CalculateSize();
-
-        private Func<ExecContext, uint> _func;
-        public Func<ExecContext, uint> GetFunc => _func;
+        public Func<ExecContext, uint> GetFunc { get; }
     }
     
     public class CastToI64<T> : ITypedValueProducer<long>
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
+
         public CastToI64(ITypedValueProducer<T> inA)
         {
             _inA = inA;
             if (typeof(T) == typeof(long))
             {
-                _func = ((ITypedValueProducer<long>)_inA).GetFunc;
+                GetFunc = ((ITypedValueProducer<long>)_inA).GetFunc;
             }
             else if (typeof(T) == typeof(ulong))
             {
                 var func = _inA.GetFunc as Func<ExecContext, ulong>;
-                _func = context => (long)func!(context);
+                GetFunc = context => (long)func!(context);
             }
             else
             {
@@ -280,26 +287,25 @@ namespace Wacs.Core.Instructions.Transpiler
         }
 
         public int CalculateSize() => _inA.CalculateSize();
-
-        private Func<ExecContext, long> _func;
-        public Func<ExecContext, long> GetFunc => _func;
+        public Func<ExecContext, long> GetFunc { get; }
     }
     
     public class CastToU64<T> : ITypedValueProducer<ulong>
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
+
         public CastToU64(ITypedValueProducer<T> inA)
         {
             _inA = inA;
             if (typeof(T) == typeof(ulong))
             {
-                _func = ((ITypedValueProducer<ulong>)_inA).GetFunc;
+                GetFunc = ((ITypedValueProducer<ulong>)_inA).GetFunc;
             }
             else if (typeof(T) == typeof(long))
             {
                 var func = _inA.GetFunc as Func<ExecContext, long>;
-                _func = context => (ulong)func!(context);
+                GetFunc = context => (ulong)func!(context);
             }
             else
             {
@@ -308,8 +314,6 @@ namespace Wacs.Core.Instructions.Transpiler
         }
 
         public int CalculateSize() => _inA.CalculateSize();
-
-        private Func<ExecContext, ulong> _func;
-        public Func<ExecContext, ulong> GetFunc => _func;
+        public Func<ExecContext, ulong> GetFunc { get; }
     }
 }

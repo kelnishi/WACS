@@ -28,8 +28,10 @@ namespace Wacs.Core.Instructions.Numeric
     //0x41
     public class InstI32Const : InstructionBase, IConstInstruction, ITypedValueProducer<int>
     {
-        public override ByteCode Op => OpCode.I32Const;
         private int Value;
+        public override ByteCode Op => OpCode.I32Const;
+        public Func<ExecContext, int> GetFunc => FetchImmediate;
+        public int CalculateSize() => 1;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -41,10 +43,9 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             context.OpStack.PushI32(Value);
-            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader) {
@@ -59,16 +60,16 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         public int FetchImmediate(ExecContext context) => Value;
-        public Func<ExecContext, int> GetFunc => FetchImmediate;
-        public int CalculateSize() => 1;
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
     }
     
     //0x42
     public class InstI64Const : InstructionBase, IConstInstruction, ITypedValueProducer<long>
     {
-        public override ByteCode Op => OpCode.I64Const;
         private long Value;
+        public override ByteCode Op => OpCode.I64Const;
+        public Func<ExecContext, long> GetFunc => FetchImmediate;
+        public int CalculateSize() => 1;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -80,19 +81,17 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             context.OpStack.PushI64(Value);
-            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader) {
             Value = reader.ReadLeb128_s64();
             return this;
         }
+
         public long FetchImmediate(ExecContext context) => Value;
-        public Func<ExecContext, long> GetFunc => FetchImmediate;
-        public int CalculateSize() => 1;
 
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
     }
@@ -100,8 +99,10 @@ namespace Wacs.Core.Instructions.Numeric
     //0x43
     public class InstF32Const : InstructionBase, IConstInstruction, ITypedValueProducer<float>
     {
-        public override ByteCode Op => OpCode.F32Const;
         private float Value;
+        public override ByteCode Op => OpCode.F32Const;
+        public Func<ExecContext, float> GetFunc => FetchImmediate;
+        public int CalculateSize() => 1;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -113,10 +114,9 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             context.OpStack.PushF32(Value);
-            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader) {
@@ -125,9 +125,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         public float FetchImmediate(ExecContext context) => Value;
-        public Func<ExecContext, float> GetFunc => FetchImmediate;
-        public int CalculateSize() => 1;
-        
+
         public override string RenderText(ExecContext? context)
         {
             var sourceText = Value.ToString(CultureInfo.InvariantCulture).ToLower();
@@ -142,8 +140,10 @@ namespace Wacs.Core.Instructions.Numeric
     //0x44
     public class InstF64Const : InstructionBase, IConstInstruction, ITypedValueProducer<double>
     {
-        public override ByteCode Op => OpCode.F64Const;
         private double Value;
+        public override ByteCode Op => OpCode.F64Const;
+        public Func<ExecContext, double> GetFunc => FetchImmediate;
+        public int CalculateSize() => 1;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -155,20 +155,17 @@ namespace Wacs.Core.Instructions.Numeric
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             context.OpStack.PushF64(Value);
-            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader) {
             Value = reader.Read_f64();
             return this;
         }
-        
+
         public double FetchImmediate(ExecContext context) => Value;
-        public Func<ExecContext, double> GetFunc => FetchImmediate;
-        public int CalculateSize() => 1;
 
         public override string RenderText(ExecContext? context)
         {

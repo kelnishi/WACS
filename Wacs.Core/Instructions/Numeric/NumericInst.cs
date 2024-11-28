@@ -23,24 +23,26 @@ namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst : InstructionBase, IConstOpInstruction
     {
+        public delegate void ExecuteDelegate(ExecContext context);
+
+        public delegate void ValidationDelegate(IWasmValidationContext context);
+
         private readonly ExecuteDelegate _execute;
 
         private readonly ValidationDelegate _validate;
 
-        private readonly bool _isConst;
-
         private NumericInst(ByteCode op, ExecuteDelegate execute, ValidationDelegate validate, bool isConst = false) =>
-            (Op, _execute, _validate, _isConst) = (op, execute, validate, isConst);
-
-        public bool IsConstant => _isConst;
+            (Op, _execute, _validate, IsConstant) = (op, execute, validate, isConst);
 
         public override ByteCode Op { get; }
 
+        public bool IsConstant { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             _execute(context);
-            return 1;
         }
 
         public override string RenderText(ExecContext? context)
@@ -80,9 +82,5 @@ namespace Wacs.Core.Instructions.Numeric
                 context.OpStack.PopType(pop1);
                 context.OpStack.PushType(push);
             };
-
-        public delegate void ExecuteDelegate(ExecContext context);
-
-        public delegate void ValidationDelegate(IWasmValidationContext context);
     }
 }

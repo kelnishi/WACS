@@ -56,51 +56,18 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly InstI64RelOp I64GeU = new Unsigned(OpCode.I64GeU, ExecuteI64GeU,
             NumericInst.ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I32));
 
-        public override ByteCode Op { get; }
         private readonly NumericInst.ValidationDelegate _validate;
+
         private InstI64RelOp(ByteCode op, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _validate = validate;
         }
 
-        private class Signed : InstI64RelOp, INodeComputer<long,long,int>
-        {
-            private Func<long,long,int> _execute;
-            public Signed(ByteCode op, Func<long, long ,int> execute, NumericInst.ValidationDelegate validate)
-                : base(op, validate) => _execute = execute;
+        public override ByteCode Op { get; }
 
-            public override int Execute(ExecContext context)
-            {
-                long i2 = context.OpStack.PopI64();
-                long i1 = context.OpStack.PopI64();
-                int result = _execute(i1, i2);
-                context.OpStack.PushI32(result);
-                return 1;
-            }
-            
-            public Func<ExecContext, long, long, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
-        }
-        
-        private class Unsigned : InstI64RelOp, INodeComputer<ulong,ulong,int>
-        {
-            private Func<ulong,ulong,int> _execute;
-            public Unsigned(ByteCode op, Func<ulong, ulong, int> execute, NumericInst.ValidationDelegate validate)
-                : base(op, validate) => _execute = execute;
-
-            public override int Execute(ExecContext context)
-            {
-                ulong i2 = context.OpStack.PopU64();
-                ulong i1 = context.OpStack.PopU64();
-                int result = _execute(i1, i2);
-                context.OpStack.PushI32(result);
-                return 1;
-            }
-            public Func<ExecContext, ulong, ulong, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
-        }
-        
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        
+
         private static int ExecuteI64Eq(long i1, long i2) => i1 == i2 ? 1 : 0;
 
         private static int ExecuteI64Ne(long i1, long i2) => i1 != i2 ? 1 : 0;
@@ -120,5 +87,41 @@ namespace Wacs.Core.Instructions.Numeric
         private static int ExecuteI64GeS(long i1, long i2) => i1 >= i2 ? 1 : 0;
 
         private static int ExecuteI64GeU(ulong i1, ulong i2) => i1 >= i2 ? 1 : 0;
+
+        private class Signed : InstI64RelOp, INodeComputer<long,long,int>
+        {
+            private readonly Func<long,long,int> _execute;
+
+            public Signed(ByteCode op, Func<long, long ,int> execute, NumericInst.ValidationDelegate validate)
+                : base(op, validate) => _execute = execute;
+
+            public override void Execute(ExecContext context)
+            {
+                long i2 = context.OpStack.PopI64();
+                long i1 = context.OpStack.PopI64();
+                int result = _execute(i1, i2);
+                context.OpStack.PushI32(result);
+            }
+
+            public Func<ExecContext, long, long, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
+        }
+
+        private class Unsigned : InstI64RelOp, INodeComputer<ulong,ulong,int>
+        {
+            private readonly Func<ulong,ulong,int> _execute;
+
+            public Unsigned(ByteCode op, Func<ulong, ulong, int> execute, NumericInst.ValidationDelegate validate)
+                : base(op, validate) => _execute = execute;
+
+            public override void Execute(ExecContext context)
+            {
+                ulong i2 = context.OpStack.PopU64();
+                ulong i1 = context.OpStack.PopU64();
+                int result = _execute(i1, i2);
+                context.OpStack.PushI32(result);
+            }
+
+            public Func<ExecContext, ulong, ulong, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
+        }
     }
 }

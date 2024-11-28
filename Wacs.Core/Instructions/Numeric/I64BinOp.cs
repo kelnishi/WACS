@@ -72,9 +72,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly InstI64BinOp I64Rotr = new Mixed(OpCode.I64Rotr, ExecuteI64Rotr,
             NumericInst.ValidateOperands(pop1: ValType.I64, pop2: ValType.I64, push: ValType.I64));
 
-        public override ByteCode Op { get; }
         private readonly NumericInst.ValidationDelegate _validate;
-        public bool IsConstant { get; }
 
         private InstI64BinOp(ByteCode op, NumericInst.ValidationDelegate validate, bool isConst = false)
         {
@@ -83,61 +81,11 @@ namespace Wacs.Core.Instructions.Numeric
             IsConstant = isConst;
         }
 
-        private class Signed : InstI64BinOp, INodeComputer<long,long,long>
-        {
-            private Func<long,long,long> _execute;
-            public Signed(ByteCode op, Func<long,long,long> execute, NumericInst.ValidationDelegate validate,
-                bool isConst = false) : base(op, validate, isConst) => _execute = execute;
+        public override ByteCode Op { get; }
+        public bool IsConstant { get; }
 
-            public override int Execute(ExecContext context)
-            {
-                long i2 = context.OpStack.PopI64();
-                long i1 = context.OpStack.PopI64();
-                long result = _execute(i1, i2);
-                context.OpStack.PushI64(result);
-                return 1;
-            }
-            public Func<ExecContext, long,long,long> GetFunc => (_, i1, i2) => _execute(i1, i2);
-        }
-
-        private class Unsigned : InstI64BinOp, INodeComputer<ulong,ulong,ulong>
-        {
-            private Func<ulong,ulong,ulong> _execute;
-            public Unsigned(ByteCode op, Func<ulong,ulong,ulong> execute, NumericInst.ValidationDelegate validate,
-                bool isConst = false) : base(op, validate, isConst) => _execute = execute;
-
-            public override int Execute(ExecContext context)
-            {
-                ulong i2 = context.OpStack.PopU64();
-                ulong i1 = context.OpStack.PopU64();
-                ulong result = _execute(i1, i2);
-                context.OpStack.PushU64(result);
-                return 1;
-            }
-            
-            public Func<ExecContext, ulong,ulong,ulong> GetFunc => (_, i1, i2) => _execute(i1, i2);
-        }
-        
-        private class Mixed : InstI64BinOp, INodeComputer<ulong,long,ulong>
-        {
-            private Func<ulong,long,ulong> _execute;
-            public Mixed(ByteCode op, Func<ulong,long,ulong> execute, NumericInst.ValidationDelegate validate,
-                bool isConst = false) : base(op, validate, isConst) => _execute = execute;
-
-            public override int Execute(ExecContext context)
-            {
-                long i2 = context.OpStack.PopI64();
-                ulong i1 = context.OpStack.PopU64();
-                ulong result = _execute(i1, i2);
-                context.OpStack.PushU64(result);
-                return 1;
-            }
-            
-            public Func<ExecContext, ulong,long,ulong> GetFunc => (_, i1, i2) => _execute(i1, i2);
-        }
-        
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        
+
         private static long ExecuteI64Add(long i1, long i2) => i1 + i2;
 
         private static long ExecuteI64Sub(long i1, long i2) => i1 - i2;
@@ -201,6 +149,60 @@ namespace Wacs.Core.Instructions.Numeric
         {
             int k = (int)i2 & 0x3F;
             return (i1 >> k) | (i1 << (64 - k));
+        }
+
+        private class Signed : InstI64BinOp, INodeComputer<long,long,long>
+        {
+            private readonly Func<long,long,long> _execute;
+
+            public Signed(ByteCode op, Func<long,long,long> execute, NumericInst.ValidationDelegate validate,
+                bool isConst = false) : base(op, validate, isConst) => _execute = execute;
+
+            public override void Execute(ExecContext context)
+            {
+                long i2 = context.OpStack.PopI64();
+                long i1 = context.OpStack.PopI64();
+                long result = _execute(i1, i2);
+                context.OpStack.PushI64(result);
+            }
+
+            public Func<ExecContext, long,long,long> GetFunc => (_, i1, i2) => _execute(i1, i2);
+        }
+
+        private class Unsigned : InstI64BinOp, INodeComputer<ulong,ulong,ulong>
+        {
+            private readonly Func<ulong,ulong,ulong> _execute;
+
+            public Unsigned(ByteCode op, Func<ulong,ulong,ulong> execute, NumericInst.ValidationDelegate validate,
+                bool isConst = false) : base(op, validate, isConst) => _execute = execute;
+
+            public override void Execute(ExecContext context)
+            {
+                ulong i2 = context.OpStack.PopU64();
+                ulong i1 = context.OpStack.PopU64();
+                ulong result = _execute(i1, i2);
+                context.OpStack.PushU64(result);
+            }
+
+            public Func<ExecContext, ulong,ulong,ulong> GetFunc => (_, i1, i2) => _execute(i1, i2);
+        }
+
+        private class Mixed : InstI64BinOp, INodeComputer<ulong,long,ulong>
+        {
+            private readonly Func<ulong,long,ulong> _execute;
+
+            public Mixed(ByteCode op, Func<ulong,long,ulong> execute, NumericInst.ValidationDelegate validate,
+                bool isConst = false) : base(op, validate, isConst) => _execute = execute;
+
+            public override void Execute(ExecContext context)
+            {
+                long i2 = context.OpStack.PopI64();
+                ulong i1 = context.OpStack.PopU64();
+                ulong result = _execute(i1, i2);
+                context.OpStack.PushU64(result);
+            }
+
+            public Func<ExecContext, ulong,long,ulong> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
     }
 }

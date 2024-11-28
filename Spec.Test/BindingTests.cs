@@ -25,21 +25,20 @@ namespace Spec.Test
 {
     public class BindingTests
     {
-        delegate int HostInOut(int a, out int b);
         static int BoundHost(int a, out int b)
         {
             b = a;
             int c = a * 2;
             return c;
         }
-        delegate Task<int> HostAsyncInRet(int a);
+
         static async Task<int> BoundAsyncHost(int a)
         {
             await Task.Delay(1000); // Simulate work
             return a*2;
         }
-        
-        
+
+
         [Fact]
         public void BindStackBinder()
         {
@@ -99,7 +98,7 @@ namespace Spec.Test
             Assert.Equal(2f * 2f, invoker(2f));
             Assert.Equal(3f * 2f, invoker(3f));
         }
-        
+
         [Fact]
         public void BindHostFunction()
         {
@@ -118,7 +117,7 @@ namespace Spec.Test
             Assert.Equal(10 + 20, invoker(10));
         }
 
-        
+
         [Fact]
         public void BindHostAsyncFunction()
         {
@@ -137,5 +136,8 @@ namespace Spec.Test
             Assert.Equal(10*2, invoker(10));
         }
 
+        delegate int HostInOut(int a, out int b);
+
+        delegate Task<int> HostAsyncInRet(int a);
     }
 }

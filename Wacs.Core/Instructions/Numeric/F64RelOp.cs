@@ -43,29 +43,30 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly InstF64RelOp F64Ge = new(OpCode.F64Ge, ExecuteF64Ge,
             NumericInst.ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.I32));
 
-        
-        public override ByteCode Op { get; }
-        
+        private readonly Func<double,double,int> _execute;
+
         private readonly NumericInst.ValidationDelegate _validate;
-        private Func<double,double,int> _execute;
-        
+
         private InstF64RelOp(ByteCode op, Func<double,double,int> execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
         }
-        
+
+
+        public override ByteCode Op { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             double i2 = context.OpStack.PopF64();
             double i1 = context.OpStack.PopF64();
             int result = _execute(i1, i2);
             context.OpStack.PushI32(result);
-            return 1;
         }
-        
+
         public Func<ExecContext, double,double,int> GetFunc => (_, i1, i2) => _execute(i1, i2);
 
         private static int ExecuteF64Eq(double i1, double i2) => i1 == i2 ? 1 : 0;

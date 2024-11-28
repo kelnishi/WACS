@@ -29,30 +29,30 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly InstI32UnOp I32Clz    = new(OpCode.I32Clz    , ExecuteI32Clz    , NumericInst.ValidateOperands(pop: ValType.I32, push: ValType.I32));
         public static readonly InstI32UnOp I32Ctz    = new(OpCode.I32Ctz    , ExecuteI32Ctz    , NumericInst.ValidateOperands(pop: ValType.I32, push: ValType.I32));
         public static readonly InstI32UnOp I32Popcnt = new(OpCode.I32Popcnt , ExecuteI32Popcnt , NumericInst.ValidateOperands(pop: ValType.I32, push: ValType.I32));
-        
-        public override ByteCode Op { get; }
-        
+        private readonly Func<uint, uint> _execute;
+
         private readonly NumericInst.ValidationDelegate _validate;
-        private Func<uint, uint> _execute;
-        
+
         private InstI32UnOp(ByteCode op, Func<uint, uint> execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
         }
-        
+
+        public override ByteCode Op { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             uint x = context.OpStack.PopU32();
             uint result = _execute(x);
             context.OpStack.PushU32(result);
-            return 1;
         }
-        
+
         public Func<ExecContext, uint, uint> GetFunc => (_, i1) => _execute(i1);
-        
+
         // @Spec 4.3.2.20 iclz
         private static uint ExecuteI32Clz(uint x)
         {
@@ -102,7 +102,5 @@ namespace Wacs.Core.Instructions.Numeric
             }
             return count;
         }
-        
-
     }
 }

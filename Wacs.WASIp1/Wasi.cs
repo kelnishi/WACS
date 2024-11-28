@@ -25,11 +25,11 @@ namespace Wacs.WASIp1
 
         private readonly Env _env;
         private readonly Filesystem _fs;
+        private readonly Poll _poll;
         private readonly Proc _proc;
         private readonly Random _random;
-        private readonly State _state;
-        private readonly Poll _poll;
         private readonly Sock _sock;
+        private readonly State _state;
 
         public Wasi(WasiConfiguration config)
         {

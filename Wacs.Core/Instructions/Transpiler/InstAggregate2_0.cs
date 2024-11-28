@@ -15,22 +15,18 @@
 //  */
 
 using System;
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Types;
+using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Transpiler
 {
     public class InstAggregate2_0<TIn1,TIn2> : InstructionBase
     {
+        private readonly Action<ExecContext, TIn1, TIn2> _compute;
         private readonly Func<ExecContext, TIn1> _in1;
         private readonly Func<ExecContext, TIn2> _in2;
-        private readonly Action<ExecContext, TIn1, TIn2> _compute;
 
-        public int CalculateSize() => Size;
-        public readonly int Size;
-        
         public InstAggregate2_0(ITypedValueProducer<TIn1> in1, ITypedValueProducer<TIn2> in2, INodeConsumer<TIn1,TIn2> compute)
         {
             _in1 = in1.GetFunc;
@@ -40,19 +36,16 @@ namespace Wacs.Core.Instructions.Transpiler
             Size = in1.CalculateSize() + in2.CalculateSize() + 1;
         }
 
-        public void Run(ExecContext context) => _compute(context, _in1(context), _in2(context));
-        
-        public Action<ExecContext> GetFunc => Run;
         public override ByteCode Op => OpCode.Aggr;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(false, "Validation of transpiled instructions not supported.");
         }
 
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
-            Run(context);
-            return Size;
+            _compute(context, _in1(context), _in2(context));
         }
     }
     

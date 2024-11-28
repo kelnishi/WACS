@@ -52,28 +52,29 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly InstF32BinOp F32Copysign = new(OpCode.F32Copysign, ExecuteF32Copysign,
             NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
 
-        public override ByteCode Op { get; }
-        
+        private readonly Func<float,float,float> _execute;
+
         private readonly NumericInst.ValidationDelegate _validate;
-        private Func<float,float,float> _execute;
-        
+
         private InstF32BinOp(ByteCode op, Func<float,float,float> execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
         }
-        
+
+        public override ByteCode Op { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             float z2 = context.OpStack.PopF32();
             float z1 = context.OpStack.PopF32();
             float result = _execute(z1, z2);
             context.OpStack.PushF32(result);
-            return 1;
         }
-        
+
         public Func<ExecContext, float, float, float> GetFunc => (_, i1, i2) => _execute(i1, i2);
 
         private static float ExecuteF32Add(float z1, float z2) => z1 + z2;
@@ -106,6 +107,5 @@ namespace Wacs.Core.Instructions.Numeric
             // Convert the result bits back to float
             return MemoryMarshal.Cast<uint, float>(MemoryMarshal.CreateSpan(ref resultBits, 1))[0];
         }
-        
     }
 }

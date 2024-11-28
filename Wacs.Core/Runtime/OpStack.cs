@@ -25,8 +25,8 @@ namespace Wacs.Core.Runtime
     public class OpStack
     {
         private readonly Stack<Value> _stack;
-        public int Count;
         private readonly int _stackLimit;
+        public int Count;
 
         public OpStack(int limit)
         {

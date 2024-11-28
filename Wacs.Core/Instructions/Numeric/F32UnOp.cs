@@ -33,28 +33,28 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly InstF32UnOp F32Trunc    = new(OpCode.F32Trunc     , ExecuteF32Trunc   , NumericInst.ValidateOperands(pop: ValType.F32, push: ValType.F32));
         public static readonly InstF32UnOp F32Nearest  = new(OpCode.F32Nearest   , ExecuteF32Nearest , NumericInst.ValidateOperands(pop: ValType.F32, push: ValType.F32));
         public static readonly InstF32UnOp F32Sqrt     = new(OpCode.F32Sqrt      , ExecuteF32Sqrt    , NumericInst.ValidateOperands(pop: ValType.F32, push: ValType.F32));
-        
-        public override ByteCode Op { get; }
-        
+        private readonly Func<float,float> _execute;
+
         private readonly NumericInst.ValidationDelegate _validate;
-        private Func<float,float> _execute;
-        
+
         private InstF32UnOp(ByteCode op, Func<float,float> execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
         }
-        
+
+        public override ByteCode Op { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             float a = context.OpStack.PopF32();
             float result = _execute(a);
             context.OpStack.PushF32(result);
-            return 1;
         }
-        
+
         public Func<ExecContext, float,float> GetFunc => (_, i1) => _execute(i1);
 
         private static float ExecuteF32Abs(float a) => Math.Abs(a);

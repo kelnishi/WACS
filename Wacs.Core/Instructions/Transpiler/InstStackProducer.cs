@@ -25,12 +25,19 @@ namespace Wacs.Core.Instructions.Transpiler
     public class InstStackProducer<T> : InstructionBase, ITypedValueProducer<T>
     where T : struct
     {
+        private readonly ValType _type;
+
         public InstStackProducer()
         {
             _type = typeof(T).ToValType();
+            Size = 0;
         }
-        
-        private readonly ValType _type;
+
+        public override ByteCode Op => OpCode.StackVal;
+
+        public Func<ExecContext, T> GetFunc => FetchFromStack;
+
+        public int CalculateSize() => 0;
 
         public T FetchFromStack(ExecContext context)
         {
@@ -40,18 +47,11 @@ namespace Wacs.Core.Instructions.Transpiler
             return (T)Convert.ChangeType(boxedValue, typeof(T));
         }
 
-        public Func<ExecContext, T> GetFunc => FetchFromStack;
-
-        public int CalculateSize() => 1;
-        public override ByteCode Op => OpCode.StackVal;
         public override void Validate(IWasmValidationContext context)
         {
             context.OpStack.PopType(_type);
         }
 
-        public override int Execute(ExecContext context)
-        {
-            return 0;
-        }
+        public override void Execute(ExecContext context) {}
     }
 }

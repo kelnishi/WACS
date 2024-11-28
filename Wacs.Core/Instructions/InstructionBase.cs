@@ -29,6 +29,11 @@ namespace Wacs.Core.Instructions
     /// </summary>
     public abstract class InstructionBase : IInstruction
     {
+        protected static Stack<Value> _aside = new();
+
+        public bool IsAsync = false;
+        public int Size = 1;
+
         /// <summary>
         /// Gets the opcode associated with the instruction.
         /// </summary>
@@ -36,22 +41,20 @@ namespace Wacs.Core.Instructions
 
         public abstract void Validate(IWasmValidationContext context);
 
-        public bool IsAsync = false;
-        
         /// <summary>
         /// Synchronously executes the instruction within the given execution context.
         /// </summary>
         /// <param name="context">The execution context in which to execute the instruction.</param>
         /// <returns>The effective number of wasm instructions executed</returns>
-        public abstract int Execute(ExecContext context);
-        
+        public abstract void Execute(ExecContext context);
+
         /// <summary>
         /// Asynchronously wraps the Execute function.
         /// Individual instructions may override to perform async functions.
         /// </summary>
         /// <param name="context"></param>
         /// <returns>ValueTask containing the effective number of wasm instructions executed</returns>
-        public virtual async ValueTask<int> ExecuteAsync(ExecContext context)
+        public virtual async ValueTask ExecuteAsync(ExecContext context)
         {
             throw new WasmRuntimeException("Async Execution must be explicitly implemented");
         }
@@ -67,8 +70,5 @@ namespace Wacs.Core.Instructions
         public virtual IInstruction Parse(BinaryReader reader) => this;
 
         public virtual string RenderText(ExecContext? context) => Op.GetMnemonic();
-        
-        protected static Stack<Value> _aside = new();
-        
     }
 }

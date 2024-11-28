@@ -27,6 +27,10 @@ namespace Wacs.WASIp1
         public readonly CancellationTokenSource Cts = new();
 
         private uint nextFd = 0;
+        public int nextSocketDescriptor = 1;
+
+
+        public Dictionary<int, Socket> socketTable = new Dictionary<int, Socket>();
         public int ExitCode { get; set; }
         public int LastSignal { get; set; }
 
@@ -43,9 +47,5 @@ namespace Wacs.WASIp1
 
 
         public VirtualPathMapper PathMapper { get; set; } = new();
-        
-        
-        public Dictionary<int, Socket> socketTable = new Dictionary<int, Socket>();
-        public int nextSocketDescriptor = 1;
     }
 }

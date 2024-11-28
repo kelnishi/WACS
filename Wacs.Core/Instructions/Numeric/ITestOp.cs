@@ -27,60 +27,60 @@ namespace Wacs.Core.Instructions.Numeric
     {
         // @Spec 3.3.1.4 i.testop
         public static readonly InstI32TestOp I32Eqz = new(OpCode.I32Eqz, ExecuteI32Eqz, NumericInst.ValidateOperands(pop: ValType.I32, push: ValType.I32));
-        
-        public override ByteCode Op { get; }
+        private readonly Func<int, int> _execute;
         private readonly NumericInst.ValidationDelegate _validate;
-        private Func<int, int> _execute;
-        
+
         private InstI32TestOp(ByteCode op, Func<int, int> execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
         }
-        
+
+        public override ByteCode Op { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             int i = context.OpStack.PopI32();
             int result = _execute(i);
             context.OpStack.PushI32(result);
-            return 1;
         }
-        
+
+        public Func<ExecContext, int, int> GetFunc => (_, i1) => _execute(i1);
+
         // @Spec 4.6.1.4. t.testop
         private static int ExecuteI32Eqz(int i) => i == 0 ? 1 : 0;
-        
-        public Func<ExecContext, int, int> GetFunc => (_, i1) => _execute(i1);
     }
 
     public class InstI64TestOp : InstructionBase, INodeComputer<long,int>
     {
-        
         public static readonly InstI64TestOp I64Eqz = new(OpCode.I64Eqz, ExecuteI64Eqz, NumericInst.ValidateOperands(pop: ValType.I64, push: ValType.I32));
-        public override ByteCode Op { get; }
-        
+        private readonly Func<long, int> _execute;
+
         private readonly NumericInst.ValidationDelegate _validate;
-        private Func<long, int> _execute;
-        
+
         private InstI64TestOp(ByteCode op, Func<long, int> execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
         }
-        
+
+        public override ByteCode Op { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             long i = context.OpStack.PopI64();
             int result = _execute(i);
             context.OpStack.PushI32(result);
-            return 1;
         }
-        
-        private static int ExecuteI64Eqz(long i) => i == 0 ? 1 : 0;
-        
+
         public Func<ExecContext, long, int> GetFunc => (_, i1) => _execute(i1);
+
+        private static int ExecuteI64Eqz(long i) => i == 0 ? 1 : 0;
     }
 }

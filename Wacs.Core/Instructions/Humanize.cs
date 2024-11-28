@@ -34,6 +34,5 @@ namespace Wacs.Core.Instructions
 
             return string.Format("{0}{1}", formattedValue, suffixes[magnitude]);
         }
-
     }
 }

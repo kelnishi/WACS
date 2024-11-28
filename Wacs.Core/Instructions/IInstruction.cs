@@ -31,13 +31,13 @@ namespace Wacs.Core.Instructions
         public ByteCode Op { get; }
 
         void Validate(IWasmValidationContext context);
-        
+
         /// <summary>
         /// Synchronously executes the instruction within the given execution context.
         /// </summary>
         /// <param name="context">The execution context in which to execute the instruction.</param>
         /// <returns>The effective number of wasm instructions executed</returns>
-        int Execute(ExecContext context);
+        void Execute(ExecContext context);
 
         /// <summary>
         /// Asynchronously wraps the Execute function.
@@ -45,7 +45,7 @@ namespace Wacs.Core.Instructions
         /// </summary>
         /// <param name="context"></param>
         /// <returns>ValueTask containing the effective number of wasm instructions executed</returns>
-        public ValueTask<int> ExecuteAsync(ExecContext context);
+        public ValueTask ExecuteAsync(ExecContext context);
 
         /// <summary>
         /// Parses an instruction from a binary reader.

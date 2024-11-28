@@ -41,13 +41,13 @@ namespace Wacs.Core
             public readonly Expression Initializer;
             public readonly GlobalType Type;
 
+            public bool IsImport;
+
             public Global(GlobalType type) =>
                 (Type, Initializer) = (type, Expression.Empty);
 
             private Global(BinaryReader reader) =>
                 (Type, Initializer) = (GlobalType.Parse(reader), Expression.ParseInitializer(reader));
-
-            public bool IsImport;
 
             public string Id { get; set; } = "";
 

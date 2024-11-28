@@ -24,8 +24,8 @@ namespace Wacs.Core.Instructions.Simd
     //0x41
     public class InstV128Const : InstructionBase, IConstInstruction
     {
-        public override ByteCode Op => SimdCode.V128Const;
         private V128 V128;
+        public override ByteCode Op => SimdCode.V128Const;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -37,10 +37,9 @@ namespace Wacs.Core.Instructions.Simd
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             context.OpStack.PushV128(V128);
-            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader)

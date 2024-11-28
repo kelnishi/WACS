@@ -33,28 +33,28 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly InstF64UnOp F64Trunc    = new(OpCode.F64Trunc     , ExecuteF64Trunc   , NumericInst.ValidateOperands(pop: ValType.F64, push: ValType.F64));
         public static readonly InstF64UnOp F64Nearest  = new(OpCode.F64Nearest   , ExecuteF64Nearest , NumericInst.ValidateOperands(pop: ValType.F64, push: ValType.F64));
         public static readonly InstF64UnOp F64Sqrt     = new(OpCode.F64Sqrt      , ExecuteF64Sqrt    , NumericInst.ValidateOperands(pop: ValType.F64, push: ValType.F64));
+        private readonly Func<double,double> _execute;
 
-        public override ByteCode Op { get; }
-        
         private readonly NumericInst.ValidationDelegate _validate;
-        private Func<double,double> _execute;
-        
+
         private InstF64UnOp(ByteCode op, Func<double,double> execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
         }
-        
+
+        public override ByteCode Op { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             double a = context.OpStack.PopF64();
             double result = _execute(a);
             context.OpStack.PushF64(result);
-            return 1;
         }
-        
+
         public Func<ExecContext, double,double> GetFunc => (_, i1) => _execute(i1);
 
         private static double ExecuteF64Abs(double a) => Math.Abs(a);
