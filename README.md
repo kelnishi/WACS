@@ -263,7 +263,7 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |Proposal |Features|    |
 |------|-------|----|
 |Phase 5|
-|[JavaScript BigInt to WebAssembly i64 integration](https://github.com/WebAssembly/JS-BigInt-integration)||✅|
+|[JavaScript BigInt to WebAssembly i64 integration](https://github.com/WebAssembly/JS-BigInt-integration)||<span title="Browser idiom, but conceptually supported">✳️</span>|
 |[Bulk memory operations](https://github.com/webassembly/bulk-memory-operations)||✅|
 |[Extended Constant Expressions](https://github.com/WebAssembly/extended-const)|extended_const|✅|
 |[Garbage collection](https://github.com/WebAssembly/gc)|gc|❌|
@@ -283,7 +283,7 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |[Memory64](https://github.com/WebAssembly/memory64)|memory64|❌|
 |[Threads](https://github.com/webassembly/threads)|threads|❌|
 |Phase 3|
-|[JS Promise Integration](https://github.com/WebAssembly/js-promise-integration)|jspi|<span title="Browser idioms, not directly supported">🌐</span>|
+|[JS Promise Integration](https://github.com/WebAssembly/js-promise-integration)|jspi|<span title="Browser idiom, but conceptually supported">✳️</span>|
 |[Type Reflection for WebAssembly JavaScript API](https://github.com/WebAssembly/js-types)|type-reflection|<span title="Browser idioms, not directly supported">🌐</span>|
 ||
 |[Legacy Exception Handling]( https://github.com/WebAssembly/exception-handling)|exceptions|❌|

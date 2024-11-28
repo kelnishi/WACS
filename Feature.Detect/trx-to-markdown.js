@@ -60,11 +60,11 @@ class TrxToMarkdown {
                 testDef['Phase'] = 0;
             }
             
+            testDef['outcome'] = test.outcome;
             if (testDef['Source'].includes('in WebAssembly'))
-                testDef['outcome'] = 'Javascript';
-            else
-                testDef['outcome'] = test.outcome;
-                
+                testDef['outcome'] = 'JS.' + testDef['outcome'];
+            else if (testDef.Id == 'big-int')
+                testDef['outcome'] = 'JS.' + testDef['outcome'];
             
             tests.push(testDef);
         });
@@ -96,9 +96,10 @@ class TrxToMarkdown {
             
             let status = '❔';
             switch (testDef['outcome']) {
-                case 'Passed': status = '✅'; break;
-                case 'Javascript': status = '<span title="Browser idioms, not directly supported">🌐</span>'; break;
                 case 'Failed': status = '❌'; break;
+                case 'Passed': status = '✅'; break;
+                case 'JS.Failed': status = '<span title="Browser idioms, not directly supported">🌐</span>'; break;
+                case 'JS.Passed': status = '<span title="Browser idiom, but conceptually supported">✳️</span>'; break;
             }
             markdown.push(`|[${testDef['Name']}](${testDef['Proposal']})|${testDef['Features']}|${status}|`);
         });
