@@ -54,8 +54,6 @@ namespace Wacs.Core.Runtime
 
         public readonly Store Store;
 
-        private Stack<Value> _asideVals = new();
-
         private InstructionSequence _currentSequence;
         private InstructionBase[] _sequenceInstructions;
         private int _sequenceCount;
@@ -178,17 +176,15 @@ namespace Wacs.Core.Runtime
             _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = -1;
         }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void EnterSequence(InstructionSequence seq)
+        
+        public void EnterSequence(InstructionSequence seq)
         {
             _currentSequence = seq;
             _sequenceCount = _currentSequence.Count;
             _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = -1;
         }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        
         public void ResumeSequence(InstructionPointer pointer)
         {
             _currentSequence = pointer.Sequence;
@@ -196,15 +192,13 @@ namespace Wacs.Core.Runtime
             _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = pointer.Index;
         }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        
         public void FastForwardSequence()
         {
             //Go to penultimate instruction since we pre-increment on pointer advance.
             _sequenceIndex = _sequenceCount - 2;
         }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        
         public void RewindSequence()
         {
             //Go back to the first instruction in the sequence
@@ -242,83 +236,39 @@ namespace Wacs.Core.Runtime
             switch (funcInst)
             {
                 case FunctionInstance wasmFunc:
-                    Invoke(wasmFunc, wasmFunc.Index);
+                    wasmFunc.Invoke(this);
                     return;
                 case HostFunction hostFunc:
+                {
+                    var funcType = hostFunc.Type;
+            
+                    //Fetch the parameters
+                    OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
+
+                    if (hostFunc.PassExecContext)
+                    {
+                        hostFunc.ParameterBuffer[0] = this;
+                    }
                     if (hostFunc.IsAsync)
-                        await InvokeAsync(hostFunc);
+                    {
+                        
+                        //Pass them
+                        await hostFunc.InvokeAsync(hostFunc.ParameterBuffer, OpStack);
+                    }
                     else
-                        Invoke(hostFunc);
-                    return;
+                    {
+                        //Pass them
+                        hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
+                    }
+                } return;
             }
         }
 
         private void Invoke(FunctionInstance wasmFunc, FuncIdx idx)
         {
-            //3.
-            var funcType = wasmFunc.Type;
-            //4.
-            var t = wasmFunc.Locals;
-            //5. *Instructions will be handled in EnterSequence below
-            //var seq = wasmFunc.Definition.Body;
-            //6.
-            Assert( OpStack.Count >= funcType.ParameterTypes.Arity,
-                $"Function invocation failed. Operand Stack underflow.");
-            //7.
-            Assert(_asideVals.Count == 0,
-                $"Shared temporary stack had values left in it.");
-            OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
-            //8.
-            //Push the frame and operate on the frame on the stack.
-            var frame = ReserveFrame(wasmFunc.Module, funcType, idx, t);
-            // frame.FuncId = wasmFunc.Id;
-                
-            int li = 0;
-            int localCount = funcType.ParameterTypes.Arity + t.Length;
-            //Load parameters
-            while (_asideVals.Count > 0)
-            {
-                // frame.Locals.Set((LocalIdx)li, _asideVals.Pop());
-                frame.Locals.Data[li] = _asideVals.Pop();
-                li += 1;
-            }
-            //Set the Locals to default
-            for (int ti = 0; li < localCount; ++li, ++ti)
-            {
-                // frame.Locals.Set((LocalIdx)li, new Value(t[ti]));
-                frame.Locals.Data[li] = new Value(t[ti]);
-            }
-
-            //9.
-            PushFrame(frame);
-            
-            //10.
-            frame.PushLabel(wasmFunc.Body.LabelTarget); 
-            
-            frame.ReturnLabel.Arity = funcType.ResultType.Arity;
-            frame.ReturnLabel.Instruction = OpCode.Func;
-            frame.ReturnLabel.ContinuationAddress = new InstructionPointer(_currentSequence, _sequenceIndex);
-            frame.ReturnLabel.StackHeight = 0;
-            
-            
-            EnterSequence(wasmFunc.Body.Instructions);
+           
         }
 
-        private void Invoke(HostFunction hostFunc)
-        {
-            var funcType = hostFunc.Type;
-            
-            //Fetch the parameters
-            OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
-
-            if (hostFunc.PassExecContext)
-            {
-                hostFunc.ParameterBuffer[0] = this;
-            }
-            
-            //Pass them
-            hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
-        }
         
         // @Spec 4.4.10.2. Returning from a function
         public void FunctionReturn()
@@ -336,21 +286,6 @@ namespace Wacs.Core.Runtime
             ResumeSequence(address);
         }
         
-        private async ValueTask InvokeAsync(HostFunction hostFunc)
-        {
-            var funcType = hostFunc.Type;
-            
-            //Fetch the parameters
-            OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
-
-            if (hostFunc.PassExecContext)
-            {
-                hostFunc.ParameterBuffer[0] = this;
-            }
-            
-            //Pass them
-            await hostFunc.InvokeAsync(hostFunc.ParameterBuffer, OpStack);
-        }
         
         public InstructionBase? Next()
         {

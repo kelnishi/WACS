@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using System.IO;
 using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
@@ -27,6 +28,7 @@ namespace Wacs.Core.Instructions.Transpiler
     {
         private readonly Func<ExecContext, TIn> _in1;
         private readonly Func<ExecContext, TIn, TOut> _compute;
+        private readonly Func<ExecContext, Value> _wrap;
 
         public int CalculateSize() => Size;
         public readonly int Size;
@@ -35,8 +37,17 @@ namespace Wacs.Core.Instructions.Transpiler
         {
             _in1 = in1.GetFunc;
             _compute = compute.GetFunc;
-
             Size = in1.CalculateSize() + 1;
+
+            if (typeof(TOut) == typeof(int)) _wrap = new WrapValueI32((ITypedValueProducer<int>)this).GetFunc;
+            else if (typeof(TOut) == typeof(uint)) _wrap = new WrapValueU32((ITypedValueProducer<uint>)this).GetFunc;
+            else if (typeof(TOut) == typeof(long)) _wrap = new WrapValueI64((ITypedValueProducer<long>)this).GetFunc;
+            else if (typeof(TOut) == typeof(ulong)) _wrap = new WrapValueU64((ITypedValueProducer<ulong>)this).GetFunc;
+            else if (typeof(TOut) == typeof(float)) _wrap = new WrapValueF32((ITypedValueProducer<float>)this).GetFunc;
+            else if (typeof(TOut) == typeof(double)) _wrap = new WrapValueF64((ITypedValueProducer<double>)this).GetFunc;
+            else if (typeof(TOut) == typeof(V128)) _wrap = new WrapValueV128((ITypedValueProducer<V128>)this).GetFunc;
+            else if (typeof(TOut) == typeof(Value)) _wrap = new NakedValue((ITypedValueProducer<Value>)this).GetFunc;
+            else throw new InvalidDataException($"Could not bind aggregate type {typeof(TOut)}");
         }
 
         public TOut Run(ExecContext context) => _compute(context, _in1(context));
@@ -50,8 +61,7 @@ namespace Wacs.Core.Instructions.Transpiler
 
         public override int Execute(ExecContext context)
         {
-            TOut value = Run(context);
-            context.OpStack.PushValue(new Value(value));
+            context.OpStack.PushValue(_wrap(context));
             return Size;
         }
     }
