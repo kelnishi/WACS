@@ -21,6 +21,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using FluentValidation;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
@@ -222,8 +223,9 @@ namespace Wacs.Core.Instructions
     {
         private static readonly ByteCode IfOp = OpCode.If;
         private static readonly ByteCode ElseOp = OpCode.Else;
-        private Block ElseBlock = Block.Empty;
         private Block IfBlock = Block.Empty;
+        private Block ElseBlock = Block.Empty;
+        private int ElseCount;
         public override ByteCode Op => IfOp;
 
 
@@ -276,19 +278,18 @@ namespace Wacs.Core.Instructions
                     "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.Type);
             }
         }
-
+        
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
             int c = context.OpStack.PopI32();
             if (c != 0)
             {
-                if (IfBlock.Instructions.Count != 0)
-                    context.EnterBlock(this, IfBlock);
+                context.EnterBlock(this, IfBlock);
             }
             else
             {
-                if (ElseBlock.Instructions.Count != 0)
+                if (ElseCount != 0)
                     context.EnterBlock(this, ElseBlock);
             }
         }
@@ -316,7 +317,8 @@ namespace Wacs.Core.Instructions
             {
                 throw new FormatException($"If block did not terminate correctly.");
             }
-
+            
+            ElseCount = ElseBlock.Instructions.Count;
             return this;
         }
 
@@ -330,6 +332,7 @@ namespace Wacs.Core.Instructions
                 type: type,
                 seq: elseSeq
             );
+            ElseCount = ElseBlock.Instructions.Count;
             return this;
         }
     }
@@ -522,7 +525,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x0D
-    public class InstBranchIf : InstructionBase, IBranchInstruction
+    public class InstBranchIf : InstructionBase, IBranchInstruction, INodeConsumer<int>
     {
         public LabelIdx L;
         public override ByteCode Op => OpCode.BrIf;
@@ -550,11 +553,18 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             int c = context.OpStack.PopI32();
+            BranchIf(context, c);
+        }
+
+        private void BranchIf(ExecContext context, int c)
+        {
             if (c != 0)
             {
                 InstBranch.ExecuteInstruction(context, L);
             }
         }
+
+        public Action<ExecContext, int> GetFunc => BranchIf;
 
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
@@ -580,7 +590,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x0E
-    public class InstBranchTable : InstructionBase, IBranchInstruction
+    public class InstBranchTable : InstructionBase, IBranchInstruction, INodeConsumer<int>
     {
         private LabelIdx Ln; //Default m
 
@@ -630,6 +640,12 @@ namespace Wacs.Core.Instructions
         {
             //2.
             int i = context.OpStack.PopI32();
+            BranchTable(context, i);
+        }
+        
+        
+        private void BranchTable(ExecContext context, int i)
+        {
             //3.
             if (i >= 0 && i < Ls.Length)
             {
@@ -642,6 +658,8 @@ namespace Wacs.Core.Instructions
                 InstBranch.ExecuteInstruction(context, Ln);
             }
         }
+
+        public Action<ExecContext, int> GetFunc => BranchTable;
 
         private static LabelIdx ParseLabelIndex(BinaryReader reader) =>
             (LabelIdx)reader.ReadLeb128_u32();

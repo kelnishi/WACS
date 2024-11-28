@@ -14,8 +14,10 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Linq;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Transpiler;
@@ -86,6 +88,7 @@ namespace Wacs.Core.Runtime.Transpiler
                         var newIf = new InstIf().Immediate(instIf.Type, newIfSeq, newElseSeq);
                         //copy stackheight
                         newIf.Label = new Label(instIf.Label);
+
                         stack.Push(newIf);
                         break;
                     case InstLocalTee instTee:
@@ -144,6 +147,9 @@ namespace Wacs.Core.Runtime.Transpiler
                 
                 //Memory Store
                 case IValueConsumer<uint,Value> valueConsumer: return BindU32Value(inst, stack, valueConsumer);
+                
+                //Select
+                case IValueConsumer<Value,Value,int> valueConsumer: return BindValueValueI32(inst, stack, valueConsumer);
                 
                 default: return inst;
             }
@@ -508,7 +514,7 @@ namespace Wacs.Core.Runtime.Transpiler
             {
                 if (i1Producer == null)
                 {
-                    i1Producer = new CastToU32<int>(new InstStackProducer<int>());
+                    i1Producer = new InstStackProducerU32();
                     if (i1 != null) stack.Push(i1);
                     i1 = null;
                 }
@@ -524,6 +530,86 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
+        
+        private static IInstruction BindValueValueI32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<Value,Value,int> valueConsumer)
+        {
+            Stack<IInstruction> operands = new();
+
+            bool tryStack = true;
+            ITypedValueProducer<Value>? i1Producer = null;
+            ITypedValueProducer<Value>? i2Producer = null;
+            ITypedValueProducer<int>? cProducer = null;
+
+            if (stack.Count > 0 && tryStack)
+            {
+                var c = stack.Pop();
+                operands.Push(c);
+                cProducer = c switch
+                {
+                    ITypedValueProducer<Value> p => new UnwrapValueI32(p),
+                    ITypedValueProducer<uint> p => new CastToI32<uint>(p),
+                    ITypedValueProducer<int> p => p,
+                    _ => null
+                };
+                if (cProducer == null)
+                    tryStack = false;
+            }
+            if (stack.Count > 0 && tryStack)
+            {
+                var i2 = stack.Pop();
+                operands.Push(i2);
+                i2Producer = i2 switch
+                {
+                    ITypedValueProducer<Value> p => p,
+                    ITypedValueProducer<int> p => new WrapValueI32(p),
+                    ITypedValueProducer<uint> p => new WrapValueU32(p),
+                    ITypedValueProducer<long> p => new WrapValueI64(p),
+                    ITypedValueProducer<ulong> p => new WrapValueU64(p),
+                    ITypedValueProducer<float> p => new WrapValueF32(p),
+                    ITypedValueProducer<double> p => new WrapValueF64(p),
+                    ITypedValueProducer<V128> p => new WrapValueV128(p),
+                    _ => null,
+                };
+                if (i2Producer == null)
+                    tryStack = false;
+            }
+            if (stack.Count > 0 && tryStack)
+            {
+                var i1 = stack.Pop();
+                operands.Push(i1);
+                i1Producer = i1 switch
+                {
+                    ITypedValueProducer<Value> p => p,
+                    ITypedValueProducer<int> p => new WrapValueI32(p),
+                    ITypedValueProducer<uint> p => new WrapValueU32(p),
+                    ITypedValueProducer<long> p => new WrapValueI64(p),
+                    ITypedValueProducer<ulong> p => new WrapValueU64(p),
+                    ITypedValueProducer<float> p => new WrapValueF32(p),
+                    ITypedValueProducer<double> p => new WrapValueF64(p),
+                    ITypedValueProducer<V128> p => new WrapValueV128(p),
+                    _ => null,
+                };
+                if (i1Producer == null)
+                    stack.Push(operands.Pop());
+            }
+
+            if (cProducer is not null && i2Producer is not null)
+            {
+                i1Producer ??= new InstStackProducerValue();
+                switch (valueConsumer) {
+                    case INodeComputer<Value, Value, int, Value> nodeComputer:
+                        return new InstAggregate3_1<Value, Value, int, Value>(i1Producer,i2Producer, cProducer, nodeComputer);
+                }
+            }
+            
+            while (operands.Count > 0)
+                stack.Push(operands.Pop());
+            
+            return inst;
+        }
+        
+        
+        
 
         private static IInstruction BindF32(IOptimizationTarget inst, Stack<IInstruction> stack, IValueConsumer<float> floatConsumer)
         {

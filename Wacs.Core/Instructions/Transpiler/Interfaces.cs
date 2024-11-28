@@ -36,6 +36,7 @@ namespace Wacs.Core.Instructions.Transpiler
 
     public interface IValueConsumer<TIn1> {}
     public interface IValueConsumer<TIn1, TIn2> {}
+    public interface IValueConsumer<TIn1, TIn2, TIn3> {}
 
     public interface INodeConsumer<TIn1> : IValueConsumer<TIn1>, IOptimizationTarget
     {
@@ -55,6 +56,10 @@ namespace Wacs.Core.Instructions.Transpiler
     {
         public Func<ExecContext, TIn1, TIn2, TOut> GetFunc { get; }
     }
-    
+
+    public interface INodeComputer<TIn1, TIn2, TIn3, out TOut> : IValueConsumer<TIn1, TIn2, TIn3>, IOptimizationTarget
+    {
+        public Func<ExecContext, TIn1, TIn2, TIn3, TOut> GetFunc { get; }
+    }
     
 }
