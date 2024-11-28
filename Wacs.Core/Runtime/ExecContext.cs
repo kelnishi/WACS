@@ -85,8 +85,8 @@ namespace Wacs.Core.Runtime
             OpStack = new(Attributes.MaxOpStack);
         }
 
-        public Stopwatch ProcessTimer { get; set; } = new();
-        public Stopwatch InstructionTimer { get; set; } = new();
+        public readonly Stopwatch ProcessTimer = new();
+        public readonly Stopwatch InstructionTimer = new();
 
         public IInstructionFactory InstructionFactory => Attributes.InstructionFactory;
 
