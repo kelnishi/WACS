@@ -57,6 +57,8 @@ namespace Wacs.Core.Runtime
         private Stack<Value> _asideVals = new();
 
         private InstructionSequence _currentSequence;
+        private InstructionBase[] _sequenceInstructions;
+        private int _sequenceCount;
         private int _sequenceIndex;
         public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
 
@@ -80,6 +82,8 @@ namespace Wacs.Core.Runtime
             _hostReturnSequence = InstructionSequence.Empty;
             
             _currentSequence = _hostReturnSequence;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = -1;
 
             OpStack = new(Attributes.MaxOpStack);
@@ -170,6 +174,8 @@ namespace Wacs.Core.Runtime
 
             Frame = NullFrame;
             _currentSequence = _hostReturnSequence;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = -1;
         }
 
@@ -177,6 +183,8 @@ namespace Wacs.Core.Runtime
         private void EnterSequence(InstructionSequence seq)
         {
             _currentSequence = seq;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = -1;
         }
 
@@ -184,6 +192,8 @@ namespace Wacs.Core.Runtime
         public void ResumeSequence(InstructionPointer pointer)
         {
             _currentSequence = pointer.Sequence;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = pointer.Index;
         }
 
@@ -191,7 +201,7 @@ namespace Wacs.Core.Runtime
         public void FastForwardSequence()
         {
             //Go to penultimate instruction since we pre-increment on pointer advance.
-            _sequenceIndex = _currentSequence.Count - 2;
+            _sequenceIndex = _sequenceCount - 2;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -345,11 +355,10 @@ namespace Wacs.Core.Runtime
         public InstructionBase? Next()
         {
             //Advance to the next instruction first.
-            if (++_sequenceIndex >= _currentSequence.Count)
-                return null;
-            
-            //Critical path, using direct array access
-            return _currentSequence._instructions[_sequenceIndex] as InstructionBase;
+            return (++_sequenceIndex < _sequenceCount)
+                //Critical path, using direct array access
+                ? _sequenceInstructions[_sequenceIndex]
+                : null;
         }
 
         public List<(string, int)> ComputePointerPath()
