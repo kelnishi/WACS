@@ -19,9 +19,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.IO;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.Instructions;
@@ -47,18 +45,20 @@ namespace Wacs.Core.Runtime
         private readonly Stack<Frame> _callStack;
         private readonly ObjectPool<Frame> _framePool;
         private readonly InstructionSequence _hostReturnSequence;
-        
+
         private readonly ArrayPool<Value> _localsDataPool;
         public readonly RuntimeAttributes Attributes;
+        public readonly Stopwatch InstructionTimer = new();
         public readonly OpStack OpStack;
+
+        public readonly Stopwatch ProcessTimer = new();
 
         public readonly Store Store;
 
         private InstructionSequence _currentSequence;
-        private InstructionBase[] _sequenceInstructions;
         private int _sequenceCount;
         private int _sequenceIndex;
-        public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
+        private InstructionBase[] _sequenceInstructions;
 
         public Frame Frame = NullFrame;
 
@@ -87,12 +87,10 @@ namespace Wacs.Core.Runtime
             OpStack = new(Attributes.MaxOpStack);
         }
 
-        public readonly Stopwatch ProcessTimer = new();
-        public readonly Stopwatch InstructionTimer = new();
-
         public IInstructionFactory InstructionFactory => Attributes.InstructionFactory;
 
         public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[default]];
+        public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
 
         [Conditional("STRICT_EXECUTION")]
         public void Assert([NotNull] object? objIsNotNull, string message)
@@ -176,7 +174,7 @@ namespace Wacs.Core.Runtime
             _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = -1;
         }
-        
+
         public void EnterSequence(InstructionSequence seq)
         {
             _currentSequence = seq;
@@ -184,7 +182,7 @@ namespace Wacs.Core.Runtime
             _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = -1;
         }
-        
+
         public void ResumeSequence(InstructionPointer pointer)
         {
             _currentSequence = pointer.Sequence;
@@ -192,13 +190,13 @@ namespace Wacs.Core.Runtime
             _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = pointer.Index;
         }
-        
+
         public void FastForwardSequence()
         {
             //Go to penultimate instruction since we pre-increment on pointer advance.
             _sequenceIndex = _sequenceCount - 2;
         }
-        
+
         public void RewindSequence()
         {
             //Go back to the first instruction in the sequence
@@ -269,7 +267,7 @@ namespace Wacs.Core.Runtime
            
         }
 
-        
+
         // @Spec 4.4.10.2. Returning from a function
         public void FunctionReturn()
         {
@@ -285,8 +283,8 @@ namespace Wacs.Core.Runtime
             //8.
             ResumeSequence(address);
         }
-        
-        
+
+
         public InstructionBase? Next()
         {
             //Advance to the next instruction first.

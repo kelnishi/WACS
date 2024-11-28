@@ -15,7 +15,6 @@
 //  */
 
 using System.Buffers;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Instructions;
@@ -32,18 +31,18 @@ namespace Wacs.Core.Runtime
         public string FuncId = "";
 
         public FuncIdx Index;
+
+        public Label Label;
+        public int LabelCount = 0;
         public LocalsSpace Locals;
 
         public ModuleInstance Module = null!;
-        public FunctionType Type = null!;
-
-        public Label Label;
 
         public Label ReturnLabel = new();
-        public BlockTarget TopLabel;
-        public int LabelCount = 0;
         public int StackHeight;
-        
+        public BlockTarget TopLabel;
+        public FunctionType Type = null!;
+
         public int Arity => Type.ResultType.Arity;
 
         public void Clear()
@@ -96,7 +95,7 @@ namespace Wacs.Core.Runtime
             TopLabel = default!;
             LabelCount = 0;
         }
-        
+
         public void PushLabel(BlockTarget target)
         {
             TopLabel = target;

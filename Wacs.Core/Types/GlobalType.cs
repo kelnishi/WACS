@@ -26,18 +26,18 @@ namespace Wacs.Core.Types
     /// </summary>
     public class GlobalType
     {
-        public GlobalType(ValType valtype, Mutability mut) =>
-            (ContentType, Mutability) = (valtype, mut);
+        /// <summary>
+        /// The value type of the global variable.
+        /// </summary>
+        public readonly ValType ContentType;
 
         /// <summary>
         /// The mutability of the global variable (immutable or mutable).
         /// </summary>
         public readonly Mutability Mutability;
 
-        /// <summary>
-        /// The value type of the global variable.
-        /// </summary>
-        public readonly ValType ContentType;
+        public GlobalType(ValType valtype, Mutability mut) =>
+            (ContentType, Mutability) = (valtype, mut);
 
         public ResultType ResultType => ContentType.SingleResult();
 

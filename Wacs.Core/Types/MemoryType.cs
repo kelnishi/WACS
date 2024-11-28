@@ -27,6 +27,11 @@ namespace Wacs.Core.Types
     public class MemoryType : IRenderable
     {
         /// <summary>
+        /// The limits specifying the minimum and optional maximum number of memory pages.
+        /// </summary>
+        public readonly Limits Limits;
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="MemoryType"/> class with the specified limits.
         /// </summary>
         /// <param name="limits">The limits of the memory.</param>
@@ -42,11 +47,6 @@ namespace Wacs.Core.Types
         {
             Limits = new Limits(minimum, maximum);
         }
-
-        /// <summary>
-        /// The limits specifying the minimum and optional maximum number of memory pages.
-        /// </summary>
-        public readonly Limits Limits;
 
         public string Id { get; set; } = "";
 

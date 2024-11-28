@@ -38,28 +38,29 @@ namespace Wacs.Core.Instructions.Numeric
 
         public static readonly InstI32SignExtend I32Extend16S = new(OpCode.I32Extend16S, ExecuteI32Extend16S,
             NumericInst.ValidateOperands(pop: ValType.I32, push: ValType.I32));
-        
-        public override ByteCode Op { get; }
-        
+
+        private readonly Func<uint, uint> _execute;
+
         private readonly NumericInst.ValidationDelegate _validate;
-        private Func<uint, uint> _execute;
-        
+
         private InstI32SignExtend(ByteCode op, Func<uint, uint> execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
         }
-        
+
+        public override ByteCode Op { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             uint value = context.OpStack.PopU32();
             uint result = _execute(value);
             context.OpStack.PushI32((int)result);
-            return 1;
         }
-        
+
         public Func<ExecContext, uint, uint> GetFunc => (_, i1) => _execute(i1);
 
         private static uint ExecuteI32Extend8S(uint value) =>

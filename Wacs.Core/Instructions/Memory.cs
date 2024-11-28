@@ -90,8 +90,8 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushType(Type);
         }
 
-        
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             //6.
             context.Assert( context.OpStack.Peek().IsI32,
@@ -99,7 +99,27 @@ namespace Wacs.Core.Instructions
             uint offset = context.OpStack.PopU32();
             var value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
-            return 1;
+        }
+
+        public Func<ExecContext, uint, Value> GetFunc => FetchFromMemory;
+
+        public override IInstruction Parse(BinaryReader reader)
+        {
+            M = MemArg.Parse(reader);
+            return this;
+        }
+
+        public override string RenderText(ExecContext? context)
+        {
+            if (context != null)
+            {
+                if (context.Attributes.Live && context.OpStack.Count > 0)
+                {
+                    var loadedValue = context.OpStack.Peek();
+                    return $"{base.RenderText(context)}{M.ToWat(WidthT)} (;>{loadedValue}<;)";
+                }
+            }
+            return $"{base.RenderText(context)}{M.ToWat(WidthT)}";
         }
 
         // @Spec 4.4.7.1. t.load and t.loadN_sx
@@ -173,33 +193,12 @@ namespace Wacs.Core.Instructions
             }
         }
 
-        public Func<ExecContext, uint, Value> GetFunc => FetchFromMemory;
-
         public int CalculateSize() => 1;
-        
+
         public IInstruction Immediate(MemArg m)
         {
             M = m;
             return this;
-        }
-
-        public override IInstruction Parse(BinaryReader reader)
-        {
-            M = MemArg.Parse(reader);
-            return this;
-        }
-
-        public override string RenderText(ExecContext? context)
-        {
-            if (context != null)
-            {
-                if (context.Attributes.Live && context.OpStack.Count > 0)
-                {
-                    var loadedValue = context.OpStack.Peek();
-                    return $"{base.RenderText(context)}{M.ToWat(WidthT)} (;>{loadedValue}<;)";
-                }
-            }
-            return $"{base.RenderText(context)}{M.ToWat(WidthT)}";
         }
     }
 
@@ -236,12 +235,6 @@ namespace Wacs.Core.Instructions
             _ => throw new InvalidDataException($"InstMemoryStore instruction is malformed: {Type}"),
         };
 
-        public IInstruction Immediate(MemArg m)
-        {
-            M = m;
-            return this;
-        }
-
         /// <summary>
         /// @Spec 3.3.7.3. t.store
         /// @Spec 3.3.7.4. t.storeN
@@ -260,7 +253,7 @@ namespace Wacs.Core.Instructions
 
         // @Spec 4.4.7.6. t.store
         // @Spec 4.4.7.6. t.storeN
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //6.
             context.Assert( context.OpStack.Peek().Type == Type,
@@ -273,8 +266,34 @@ namespace Wacs.Core.Instructions
             uint offset = context.OpStack.PopU32();
             
             SetMemoryValue(context, offset, c);
-            
-            return 1;
+        }
+
+
+        public Action<ExecContext, uint, Value> GetFunc => SetMemoryValue;
+
+        public override IInstruction Parse(BinaryReader reader)
+        {
+            M = MemArg.Parse(reader);
+            return this;
+        }
+
+        public override string RenderText(ExecContext? context)
+        {
+            if (context != null)
+            {
+                if (context.Attributes.Live && context.OpStack.Count > 0)
+                {
+                    var storeValue = context.OpStack.Peek();
+                    return $"{base.RenderText(context)}{M.ToWat(TWidth)} (;>{storeValue}<;)";
+                }
+            }
+            return $"{base.RenderText(context)}{M.ToWat(TWidth)}";
+        }
+
+        public IInstruction Immediate(MemArg m)
+        {
+            M = m;
+            return this;
         }
 
         public void SetMemoryValue(ExecContext context, uint offset, Value c)
@@ -359,30 +378,8 @@ namespace Wacs.Core.Instructions
                     break;
             }
         }
-        
-        
-        public Action<ExecContext, uint, Value> GetFunc => SetMemoryValue;
 
         public int CalculateSize() => 1;
-        
-        public override IInstruction Parse(BinaryReader reader)
-        {
-            M = MemArg.Parse(reader);
-            return this;
-        }
-
-        public override string RenderText(ExecContext? context)
-        {
-            if (context != null)
-            {
-                if (context.Attributes.Live && context.OpStack.Count > 0)
-                {
-                    var storeValue = context.OpStack.Peek();
-                    return $"{base.RenderText(context)}{M.ToWat(TWidth)} (;>{storeValue}<;)";
-                }
-            }
-            return $"{base.RenderText(context)}{M.ToWat(TWidth)}";
-        }
     }
 
 }

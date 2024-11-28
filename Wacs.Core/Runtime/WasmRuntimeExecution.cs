@@ -31,7 +31,7 @@ namespace Wacs.Core.Runtime
     public partial class WasmRuntime
     {
         private IInstruction? lastInstruction = null;
-        
+
         public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr, InvokerOptions? options = default)
             where TDelegate : Delegate
         {
@@ -218,19 +218,18 @@ namespace Wacs.Core.Runtime
                 return results;
             }
         }
-        
+
         public async Task ProcessThreadAsync(long gasLimit)
         {
             if (gasLimit <= 0) gasLimit = long.MaxValue;
             while (Context.Next() is { } inst)
             {
-                int work;
                 if (inst.IsAsync)
-                    work = await inst.ExecuteAsync(Context);
+                    await inst.ExecuteAsync(Context);
                 else
-                    work = inst.Execute(Context);
-                
-                Context.steps += work;
+                    inst.Execute(Context);
+   
+                Context.steps += inst.Size;
                 if (Context.steps >= gasLimit)
                     throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
             }
@@ -248,21 +247,20 @@ namespace Wacs.Core.Runtime
                     LogPreInstruction(options, inst);
                 }
 
-                int work = 0;
                 if (options.CollectStats == StatsDetail.Instruction)
                 {
                     Context.InstructionTimer.Restart();
                     
                     if (inst.IsAsync)
-                        work = await inst.ExecuteAsync(Context);
+                        await inst.ExecuteAsync(Context);
                     else
-                        work = inst.Execute(Context);
+                        inst.Execute(Context);
 
                     Context.InstructionTimer.Stop();
-                    Context.steps += work;
+                    Context.steps += inst.Size;
 
                     var st = Context.Stats[(ushort)inst.Op];
-                    st.count += work;
+                    st.count += inst.Size;
                     st.duration += Context.InstructionTimer.ElapsedTicks;
                     Context.Stats[(ushort)inst.Op] = st;
                 }
@@ -270,11 +268,11 @@ namespace Wacs.Core.Runtime
                 {
                     Context.InstructionTimer.Start();
                     if (inst.IsAsync)
-                        work = await inst.ExecuteAsync(Context);
+                        await inst.ExecuteAsync(Context);
                     else
-                        work = inst.Execute(Context);
+                        inst.Execute(Context);
                     Context.InstructionTimer.Stop();
-                    Context.steps += work;
+                    Context.steps += inst.Size;
                 }
 
                 if (((int)options.LogInstructionExecution & (int)InstructionLogging.Computes) != 0)
@@ -289,7 +287,7 @@ namespace Wacs.Core.Runtime
                 
                 if (options.LogProgressEvery > 0)
                 {
-                    highwatermark += work;
+                    highwatermark += inst.Size;
                     if (highwatermark >= options.LogProgressEvery)
                     {
                         highwatermark -= options.LogProgressEvery;
@@ -435,6 +433,5 @@ namespace Wacs.Core.Runtime
                 Console.Error.WriteLine($"{label}: {execsLabel}| ({percentLabel}) {instTime.TotalMilliseconds:#0.000}ms {instAve}");
             }
         }
-
     }
 }

@@ -15,11 +15,8 @@
 //  */
 
 using System.Collections.Generic;
-using FluentValidation;
-using FluentValidation.Internal;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
-using Wacs.Core.Validation;
 
 namespace Wacs.Core.Runtime.Types
 {
@@ -29,6 +26,26 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class FunctionInstance : IFunctionInstance
     {
+        private static Stack<Value> _asideVals = new();
+
+        private readonly static ByteCode LabelInst = OpCode.Func;
+
+        /// <summary>
+        /// The function definition containing the raw code and locals.
+        /// </summary>
+        public readonly Module.Function Definition;
+
+        public readonly FuncIdx Index;
+
+        public readonly ModuleInstance Module;
+
+        //Copied from the static Definition
+        //Can be processed with optimization passes
+        public Expression Body;
+
+        //Copied from the static Definition
+        public ValType[] Locals;
+
         /// <summary>
         /// @Spec 4.5.3.1. Functions
         /// Initializes a new instance of the <see cref="FunctionInstance"/> class.
@@ -48,16 +65,12 @@ namespace Wacs.Core.Runtime.Types
                 Name = Definition.Id;
         }
 
-        public readonly ModuleInstance Module;
-
-        /// <summary>
-        /// The function definition containing the raw code and locals.
-        /// </summary>
-        public readonly Module.Function Definition;
-
-        //Copied from the static Definition
-        //Can be processed with optimization passes
-        public Expression Body;
+        public string ModuleName => Module.Name;
+        public string Name { get; set; } = "";
+        public FunctionType Type { get; }
+        public void SetName(string value) => Name = value;
+        public string Id => string.IsNullOrEmpty(Name)?"":$"{ModuleName}.{Name}";
+        public bool IsExport { get; set; }
 
         /// <summary>
         /// Sets Body and precomputes labels
@@ -72,22 +85,6 @@ namespace Wacs.Core.Runtime.Types
             Body.PrecomputeLabels(vContext);
         }
 
-        //Copied from the static Definition
-        public ValType[] Locals;
-
-        public readonly FuncIdx Index;
-
-        public string ModuleName => Module.Name;
-        public string Name { get; set; } = "";
-        public FunctionType Type { get; }
-        public void SetName(string value) => Name = value;
-        public string Id => string.IsNullOrEmpty(Name)?"":$"{ModuleName}.{Name}";
-        public bool IsExport { get; set; }
-
-        private static Stack<Value> _asideVals = new();
-
-        private readonly static ByteCode LabelInst = OpCode.Func; 
-        
         public void Invoke(ExecContext context)
         {
             //3.
@@ -137,7 +134,7 @@ namespace Wacs.Core.Runtime.Types
             
             context.EnterSequence(Body.Instructions);
         }
-        
+
         public override string ToString() => $"FunctionInstance[{Id}] (Type: {Type}, IsExport: {IsExport})";
     }
 }

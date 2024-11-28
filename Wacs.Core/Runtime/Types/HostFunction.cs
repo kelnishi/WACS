@@ -38,8 +38,6 @@ namespace Wacs.Core.Runtime.Types
 
         private readonly MethodInfo _invoker;
 
-        private readonly bool _isAsync; 
-
         private ConversionHelper?[] _parameterConversions = null!;
         private ConversionHelper?[] _resultConversions = null!;
 
@@ -59,7 +57,7 @@ namespace Wacs.Core.Runtime.Types
             Type = type;
             _hostFunction = hostFunction;
             _invoker = delType.GetMethod("Invoke")!;
-            _isAsync = isAsync;
+            IsAsync = isAsync;
             (ModuleName, Name) = id;
 
             var invokerParams = _invoker.GetParameters();
@@ -91,12 +89,13 @@ namespace Wacs.Core.Runtime.Types
         public bool PassExecContext { get; set; }
 
         public string ModuleName { get; }
+
+        public bool IsAsync { get; }
+
         public string Name { get; }
         public void SetName(string value) {}
         public string Id => $"{ModuleName}.{Name}";
 
-        public bool IsAsync => _isAsync;
-        
         public bool IsExport
         {
             get => true;
@@ -281,7 +280,7 @@ namespace Wacs.Core.Runtime.Types
                 throw ex.InnerException!;
             }   
         }
-        
+
         public async ValueTask InvokeAsync(object[] args, OpStack opStack)
         {
             for (int i = 0; i < _parameterConversions.Length; ++i)

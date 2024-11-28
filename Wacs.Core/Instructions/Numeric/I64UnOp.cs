@@ -29,28 +29,28 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly InstI64UnOp I64Clz    = new(OpCode.I64Clz    , ExecuteI64Clz    , NumericInst.ValidateOperands(pop: ValType.I64, push: ValType.I64));
         public static readonly InstI64UnOp I64Ctz    = new(OpCode.I64Ctz    , ExecuteI64Ctz    , NumericInst.ValidateOperands(pop: ValType.I64, push: ValType.I64));
         public static readonly InstI64UnOp I64Popcnt = new(OpCode.I64Popcnt , ExecuteI64Popcnt , NumericInst.ValidateOperands(pop: ValType.I64, push: ValType.I64));
-        
-        public override ByteCode Op { get; }
-        
+        private readonly Func<ulong, ulong> _execute;
+
         private readonly NumericInst.ValidationDelegate _validate;
-        private Func<ulong, ulong> _execute;
-        
+
         private InstI64UnOp(ByteCode op, Func<ulong, ulong> execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
         }
-        
+
+        public override ByteCode Op { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             ulong x = context.OpStack.PopU64();
             ulong result = _execute(x);
             context.OpStack.PushU64(result);
-            return 1;
         }
-        
+
         public Func<ExecContext, ulong, ulong> GetFunc => (_, i1) => _execute(i1);
 
         // @Spec 4.3.2.20 iclz

@@ -27,8 +27,6 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
-using Wacs.Core.Utilities;
-using Wacs.Core.WASIp1;
 
 // using System.Diagnostics.CodeAnalysis;
 

@@ -24,6 +24,7 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class GlobalInstance
     {
+        public readonly GlobalType Type;
         private Value _value;
 
         public GlobalInstance(GlobalType type, Value initialValue)
@@ -31,8 +32,6 @@ namespace Wacs.Core.Runtime.Types
             Type = type;
             _value = initialValue;
         }
-
-        public readonly GlobalType Type;
 
         public Value Value
         {

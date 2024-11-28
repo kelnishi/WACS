@@ -26,7 +26,6 @@ namespace Wacs.Core.Instructions.Numeric
 {
     public class InstF64BinOp : InstructionBase, INodeComputer<double,double,double>
     {
-
         // Mask for the sign bit (most significant bit)
         private const ulong F64SignMask = 0x8000_0000_0000_0000;
         private const ulong F64NotSignMask = ~F64SignMask;
@@ -54,29 +53,30 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly InstF64BinOp F64Copysign = new(OpCode.F64Copysign, ExecuteF64Copysign,
             NumericInst.ValidateOperands(pop1: ValType.F64, pop2: ValType.F64, push: ValType.F64));
 
-        
-        public override ByteCode Op { get; }
-        
+        private readonly Func<double,double,double> _execute;
+
         private readonly NumericInst.ValidationDelegate _validate;
-        private Func<double,double,double> _execute;
-        
+
         private InstF64BinOp(ByteCode op, Func<double,double,double> execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
         }
-        
+
+
+        public override ByteCode Op { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             double z2 = context.OpStack.PopF64();
             double z1 = context.OpStack.PopF64();
             double result = _execute(z1, z2);
             context.OpStack.PushF64(result);
-            return 1;
         }
-        
+
         public Func<ExecContext, double,double,double> GetFunc => (_, i1, i2) => _execute(i1, i2);
 
         private static double ExecuteF64Add(double z1, double z2) => z1 + z2;
