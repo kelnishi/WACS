@@ -74,22 +74,77 @@ namespace Wacs.Core.Instructions.Transpiler
         public Func<ExecContext, Value> GetFunc => _func;
         
     }
-    
-    public class UnwrapValue<T> : ITypedValueProducer<T>
-        where T : struct
+
+    public abstract class UnwrapValue<T> : ITypedValueProducer<T>
     {
-        private readonly ITypedValueProducer<Value> _inA;
-        public UnwrapValue(ITypedValueProducer<Value> inA)
+        protected ITypedValueProducer<Value> InA;
+        protected UnwrapValue(ITypedValueProducer<Value> inA)
         {
-            _inA = inA;
-            var func = _inA.GetFunc;
-            _func = context => (T)func(context).CastScalar<T>();
+            InA = inA;
         }
 
-        public int CalculateSize() => _inA.CalculateSize();
-
-        private Func<ExecContext, T> _func;
-        public Func<ExecContext, T> GetFunc => _func;
+        public int CalculateSize() => InA.CalculateSize();
+        public abstract Func<ExecContext, T> GetFunc { get; }
+    }
+    
+    public class UnwrapValueI32 : UnwrapValue<int>
+    {
+        public UnwrapValueI32(ITypedValueProducer<Value> inA) : base(inA)
+        {
+            var func = InA.GetFunc;
+            GetFunc = context => func(context).Int32;
+        }
+        public override Func<ExecContext, int> GetFunc { get; }
+    }
+    
+    public class UnwrapValueU32 : UnwrapValue<uint>
+    {
+        public UnwrapValueU32(ITypedValueProducer<Value> inA) : base(inA)
+        {
+            var func = InA.GetFunc;
+            GetFunc = context => func(context).UInt32;
+        }
+        public override Func<ExecContext, uint> GetFunc { get; }
+    }
+    
+    public class UnwrapValueF32 : UnwrapValue<float>
+    {
+        public UnwrapValueF32(ITypedValueProducer<Value> inA) : base(inA)
+        {
+            var func = InA.GetFunc;
+            GetFunc = context => func(context).Float32;
+        }
+        public override Func<ExecContext, float> GetFunc { get; }
+    }
+    
+    public class UnwrapValueI64 : UnwrapValue<long>
+    {
+        public UnwrapValueI64(ITypedValueProducer<Value> inA) : base(inA)
+        {
+            var func = InA.GetFunc;
+            GetFunc = context => func(context).Int64;
+        }
+        public override Func<ExecContext, long> GetFunc { get; }
+    }
+    
+    public class UnwrapValueU64 : UnwrapValue<ulong>
+    {
+        public UnwrapValueU64(ITypedValueProducer<Value> inA) : base(inA)
+        {
+            var func = InA.GetFunc;
+            GetFunc = context => func(context).UInt64;
+        }
+        public override Func<ExecContext, ulong> GetFunc { get; }
+    }
+    
+    public class UnwrapValueF64 : UnwrapValue<double>
+    {
+        public UnwrapValueF64(ITypedValueProducer<Value> inA) : base(inA)
+        {
+            var func = InA.GetFunc;
+            GetFunc = context => func(context).Float64;
+        }
+        public override Func<ExecContext, double> GetFunc { get; }
     }
     
     public class CastToI32<T> : ITypedValueProducer<int>
