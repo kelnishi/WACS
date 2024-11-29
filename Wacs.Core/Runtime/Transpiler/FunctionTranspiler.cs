@@ -146,7 +146,10 @@ namespace Wacs.Core.Runtime.Transpiler
                 case IValueConsumer<double,double> doubleConsumer: return BindF64F64(inst, stack, doubleConsumer);
                 
                 //Memory Store
-                case IValueConsumer<uint,Value> valueConsumer: return BindU32Value(inst, stack, valueConsumer);
+                case IValueConsumer<uint,ulong> memConsumer: return BindU32U64(inst, stack, memConsumer);
+                case IValueConsumer<uint,float> memConsumer: return BindU32F32(inst, stack, memConsumer);
+                case IValueConsumer<uint,double> memConsumer: return BindU32F64(inst, stack, memConsumer);
+                case IValueConsumer<uint,V128> memConsumer: return BindU32V128(inst, stack, memConsumer);
                 
                 //Select
                 case IValueConsumer<Value,Value,int> valueConsumer: return BindValueValueI32(inst, stack, valueConsumer);
@@ -265,7 +268,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindU32U32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,uint> intConsumer)
+        private static IInstruction BindU32U32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,uint> uintConsumer)
         {
             if (stack.Count < 2) return inst;
             var i2 = stack.Pop();
@@ -287,7 +290,9 @@ namespace Wacs.Core.Runtime.Transpiler
 
             if (i1Producer != null && i2Producer != null)
             {
-                switch (intConsumer) {
+                switch (uintConsumer) {
+                    case INodeConsumer<uint, uint> memConsumer:
+                        return new InstAggregate2_0<uint, uint>(i1Producer, i2Producer, memConsumer);
                     case INodeComputer<uint, uint, uint> uintComputer:
                         return new InstAggregate2_1<uint, uint, uint>(i1Producer, i2Producer, uintComputer);
                 }
@@ -298,6 +303,131 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
+        private static IInstruction BindU32U64(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,ulong> ulongConsumer)
+        {
+            if (stack.Count < 2) return inst;
+            var i2 = stack.Pop();
+            var i1 = stack.Pop();
+
+            var i2Producer = i2 switch {
+                ITypedValueProducer<Value> p => new UnwrapValueU64(p),
+                ITypedValueProducer<long> p => new CastToU64<long>(p),
+                ITypedValueProducer<ulong> p => p,
+                _ => null
+            };
+            var i1Producer = i1 switch
+            {
+                ITypedValueProducer<Value> p => new UnwrapValueU32(p),
+                ITypedValueProducer<int> p => new CastToU32<int>(p),
+                ITypedValueProducer<uint> p => p,
+                _ => null
+            };
+
+            if (i1Producer != null && i2Producer != null)
+            {
+                switch (ulongConsumer) {
+                    case INodeConsumer<uint, ulong> memConsumer:
+                        return new InstAggregate2_0<uint, ulong>(i1Producer, i2Producer, memConsumer);
+                }
+            }
+            
+            stack.Push(i1);
+            stack.Push(i2);
+            return inst;
+        }
+        private static IInstruction BindU32F32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,float> floatConsumer)
+        {
+            if (stack.Count < 2) return inst;
+            var i2 = stack.Pop();
+            var i1 = stack.Pop();
+
+            var i2Producer = i2 switch {
+                ITypedValueProducer<Value> p => new UnwrapValueF32(p),
+                ITypedValueProducer<float> p => p,
+                _ => null
+            };
+            var i1Producer = i1 switch
+            {
+                ITypedValueProducer<Value> p => new UnwrapValueU32(p),
+                ITypedValueProducer<int> p => new CastToU32<int>(p),
+                ITypedValueProducer<uint> p => p,
+                _ => null
+            };
+
+            if (i1Producer != null && i2Producer != null)
+            {
+                switch (floatConsumer) {
+                    case INodeConsumer<uint, float> memConsumer:
+                        return new InstAggregate2_0<uint, float>(i1Producer, i2Producer, memConsumer);
+                }
+            }
+            
+            stack.Push(i1);
+            stack.Push(i2);
+            return inst;
+        }
+        private static IInstruction BindU32F64(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,double> doubleConsumer)
+        {
+            if (stack.Count < 2) return inst;
+            var i2 = stack.Pop();
+            var i1 = stack.Pop();
+
+            var i2Producer = i2 switch {
+                ITypedValueProducer<Value> p => new UnwrapValueF64(p),
+                ITypedValueProducer<double> p => p,
+                _ => null
+            };
+            var i1Producer = i1 switch
+            {
+                ITypedValueProducer<Value> p => new UnwrapValueU32(p),
+                ITypedValueProducer<int> p => new CastToU32<int>(p),
+                ITypedValueProducer<uint> p => p,
+                _ => null
+            };
+
+            if (i1Producer != null && i2Producer != null)
+            {
+                switch (doubleConsumer) {
+                    case INodeConsumer<uint, double> memConsumer:
+                        return new InstAggregate2_0<uint, double>(i1Producer, i2Producer, memConsumer);
+                }
+            }
+            
+            stack.Push(i1);
+            stack.Push(i2);
+            return inst;
+        }
+        private static IInstruction BindU32V128(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,V128> vecConsumer)
+        {
+            if (stack.Count < 2) return inst;
+            var i2 = stack.Pop();
+            var i1 = stack.Pop();
+
+            var i2Producer = i2 switch {
+                ITypedValueProducer<Value> p => new UnwrapValueV128(p),
+                ITypedValueProducer<V128> p => p,
+                _ => null
+            };
+            var i1Producer = i1 switch
+            {
+                ITypedValueProducer<Value> p => new UnwrapValueU32(p),
+                ITypedValueProducer<int> p => new CastToU32<int>(p),
+                ITypedValueProducer<uint> p => p,
+                _ => null
+            };
+
+            if (i1Producer != null && i2Producer != null)
+            {
+                switch (vecConsumer) {
+                    case INodeConsumer<uint, V128> memConsumer:
+                        return new InstAggregate2_0<uint, V128>(i1Producer, i2Producer, memConsumer);
+                }
+            }
+            
+            stack.Push(i1);
+            stack.Push(i2);
+            return inst;
+        }
         private static IInstruction BindU32I32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,int> intConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -483,14 +613,13 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-
-
+        
         private static IInstruction BindU32Value(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,Value> intConsumer)
         {
             if (stack.Count < 1) return inst;
             var i2 = stack.Pop();
             var i1 = stack.Count > 0 ? stack.Pop() : null;
-
+        
             var i2Producer = i2 switch {
                 ITypedValueProducer<Value> p => p,
                 ITypedValueProducer<int> p => new WrapValueI32(p),
@@ -523,7 +652,7 @@ namespace Wacs.Core.Runtime.Transpiler
                     case INodeConsumer<uint, Value> nodeConsumer:
                         return new InstAggregate2_0<uint, Value>(i1Producer, i2Producer, nodeConsumer);
                 }
-
+        
             }
             
             if (i1 != null) stack.Push(i1);
@@ -608,9 +737,6 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
         
-        
-        
-
         private static IInstruction BindF32(IOptimizationTarget inst, Stack<IInstruction> stack, IValueConsumer<float> floatConsumer)
         {
             if (stack.Count < 1) return inst;

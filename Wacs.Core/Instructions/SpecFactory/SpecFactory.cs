@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using Wacs.Core.Instructions.Memory;
 using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
@@ -81,30 +82,30 @@ namespace Wacs.Core.Instructions
             OpCode.TableSet          => new InstTableSet(),
 
             //Memory Instructions 
-            OpCode.I32Load           => new InstMemoryLoad(ValType.I32, BitWidth.U32),
-            OpCode.I64Load           => new InstMemoryLoad(ValType.I64, BitWidth.U64),
-            OpCode.F32Load           => new InstMemoryLoad(ValType.F32, BitWidth.U32),
-            OpCode.F64Load           => new InstMemoryLoad(ValType.F64, BitWidth.U64),
-            OpCode.I32Load8S         => new InstMemoryLoad(ValType.I32, BitWidth.S8),
-            OpCode.I32Load8U         => new InstMemoryLoad(ValType.I32, BitWidth.U8),
-            OpCode.I32Load16S        => new InstMemoryLoad(ValType.I32, BitWidth.S16),
-            OpCode.I32Load16U        => new InstMemoryLoad(ValType.I32, BitWidth.U16),
-            OpCode.I64Load8S         => new InstMemoryLoad(ValType.I64, BitWidth.S8),
-            OpCode.I64Load8U         => new InstMemoryLoad(ValType.I64, BitWidth.U8),
-            OpCode.I64Load16S        => new InstMemoryLoad(ValType.I64, BitWidth.S16),
-            OpCode.I64Load16U        => new InstMemoryLoad(ValType.I64, BitWidth.U16),
-            OpCode.I64Load32S        => new InstMemoryLoad(ValType.I64, BitWidth.S32),
-            OpCode.I64Load32U        => new InstMemoryLoad(ValType.I64, BitWidth.U32),
+            OpCode.I32Load           => new InstI32Load(),
+            OpCode.I64Load           => new InstI64Load(),
+            OpCode.F32Load           => new InstF32Load(),
+            OpCode.F64Load           => new InstF64Load(),
+            OpCode.I32Load8S         => new InstI32Load8S(),
+            OpCode.I32Load8U         => new InstI32Load8U(),
+            OpCode.I32Load16S        => new InstI32Load16S(),
+            OpCode.I32Load16U        => new InstI32Load16U(),
+            OpCode.I64Load8S         => new InstI64Load8S(),
+            OpCode.I64Load8U         => new InstI64Load8U(),
+            OpCode.I64Load16S        => new InstI64Load16S(),
+            OpCode.I64Load16U        => new InstI64Load16U(),
+            OpCode.I64Load32S        => new InstI64Load32S(),
+            OpCode.I64Load32U        => new InstI64Load32U(),
              
-            OpCode.I32Store          => new InstMemoryStore(ValType.I32, BitWidth.U32),
-            OpCode.I64Store          => new InstMemoryStore(ValType.I64, BitWidth.U64),
-            OpCode.F32Store          => new InstMemoryStore(ValType.F32, BitWidth.U32),
-            OpCode.F64Store          => new InstMemoryStore(ValType.F64, BitWidth.U64),
-            OpCode.I32Store8         => new InstMemoryStore(ValType.I32, BitWidth.U8),
-            OpCode.I32Store16        => new InstMemoryStore(ValType.I32, BitWidth.U16),
-            OpCode.I64Store8         => new InstMemoryStore(ValType.I64, BitWidth.U8),
-            OpCode.I64Store16        => new InstMemoryStore(ValType.I64, BitWidth.U16),
-            OpCode.I64Store32        => new InstMemoryStore(ValType.I64, BitWidth.U32),
+            OpCode.I32Store          => new InstI32Store(),
+            OpCode.I64Store          => new InstI64Store(),
+            OpCode.F32Store          => new InstF32Store(),
+            OpCode.F64Store          => new InstF64Store(),
+            OpCode.I32Store8         => new InstI32Store8(),
+            OpCode.I32Store16        => new InstI32Store16(),
+            OpCode.I64Store8         => new InstI64Store8(),
+            OpCode.I64Store16        => new InstI64Store16(),
+            OpCode.I64Store32        => new InstI64Store32(),
             
             OpCode.MemorySize        => new InstMemorySize(),
             OpCode.MemoryGrow        => new InstMemoryGrow(),
