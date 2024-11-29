@@ -15,6 +15,7 @@
 //  */
 
 using System.IO;
+using Wacs.Core.Instructions.Memory;
 using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.Instructions.Simd;
 using Wacs.Core.Instructions.SIMD;
@@ -30,8 +31,8 @@ namespace Wacs.Core.Instructions
             SimdCode.V128Const => new InstV128Const(),
             
             //Memory
-            SimdCode.V128Load        => new InstMemoryLoad(ValType.V128, BitWidth.V128),
-            SimdCode.V128Store       => new InstMemoryStore(ValType.V128, BitWidth.V128),
+            SimdCode.V128Load        => new InstV128Load(),
+            SimdCode.V128Store       => new InstV128Store(),
             SimdCode.V128Load8x8S    => new InstMemoryLoadMxN(BitWidth.S8, 8),
             SimdCode.V128Load8x8U    => new InstMemoryLoadMxN(BitWidth.U8, 8),
             SimdCode.V128Load16x4S   => new InstMemoryLoadMxN(BitWidth.S16, 4),
