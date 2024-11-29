@@ -782,8 +782,6 @@ namespace Wacs.Core.Instructions
                 $"Instruction call failed. Function address for {X} was not in the Context.");
             var a = context.Frame.Module.FuncAddrs[X];
             context.Invoke(a);
-
-            throw new WasmRuntimeException("Synchronous execution path not allowed.");
         }
 
         public override async ValueTask ExecuteAsync(ExecContext context)
@@ -791,7 +789,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
                 $"Instruction call failed. Function address for {X} was not in the Context.");
             var a = context.Frame.Module.FuncAddrs[X];
-            await context.Invoke(a);
+            await context.InvokeAsync(a);
         }
 
         /// <summary>
@@ -946,7 +944,6 @@ namespace Wacs.Core.Instructions
                 throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
             //19.
             context.Invoke(a);
-            throw new WasmRuntimeException("Synchronous execution path not allowed");
         }
 
         public override async ValueTask ExecuteAsync(ExecContext context)
@@ -995,7 +992,7 @@ namespace Wacs.Core.Instructions
             if (!ftExpect.Matches(ftActual))
                 throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
             //19.
-            await context.Invoke(a);
+            await context.InvokeAsync(a);
         }
 
         /// <summary>

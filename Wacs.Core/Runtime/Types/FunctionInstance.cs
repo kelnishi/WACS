@@ -72,6 +72,8 @@ namespace Wacs.Core.Runtime.Types
         public string Id => string.IsNullOrEmpty(Name)?"":$"{ModuleName}.{Name}";
         public bool IsExport { get; set; }
 
+        public bool IsAsync => false;
+
         /// <summary>
         /// Sets Body and precomputes labels
         /// </summary>
