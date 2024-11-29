@@ -88,8 +88,6 @@ namespace Wacs.Core.Instructions
             
             //Reuse the pointer from the outgoing function
             context.Frame.ContinuationAddress = address;
-
-            throw new WasmRuntimeException("Synchronous execution path not allowed");
         }
 
         public override async ValueTask ExecuteAsync(ExecContext context)
@@ -108,7 +106,7 @@ namespace Wacs.Core.Instructions
             // context.OpStack.Push(values);
             
             //Call
-            await context.Invoke(a);
+            await context.InvokeAsync(a);
             
             //Reuse the pointer from the outgoing function
             context.Frame.ContinuationAddress = address;
@@ -286,8 +284,6 @@ namespace Wacs.Core.Instructions
             
             //Reuse the pointer from the outgoing function
             context.Frame.ContinuationAddress = address;
-            
-            throw new WasmRuntimeException("Synchronous execution path not allowed");
         }
 
         public override async ValueTask ExecuteAsync(ExecContext context)
@@ -346,7 +342,7 @@ namespace Wacs.Core.Instructions
             // context.OpStack.Push(values);
             
             //19.
-            await context.Invoke(a);
+            await context.InvokeAsync(a);
             
             //Reuse the pointer from the outgoing function
             context.Frame.ContinuationAddress = address;

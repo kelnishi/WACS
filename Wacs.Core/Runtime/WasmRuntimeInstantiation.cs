@@ -315,7 +315,11 @@ namespace Wacs.Core.Runtime
                             break;
                     }
                 }
-
+                
+                if (TranspileModules)
+                    TranspileModule(moduleInstance);
+                
+                SynchronizeFunctionCalls(moduleInstance);
 
                 //17. 
                 if (module.StartIndex != FuncIdx.Default)
@@ -356,8 +360,6 @@ namespace Wacs.Core.Runtime
 
                 _moduleInstances.Add(moduleInstance);
                 
-                if (TranspileModules)
-                    TranspileModule(moduleInstance);
             }
             catch (WasmRuntimeException exc)
             {
@@ -397,7 +399,46 @@ namespace Wacs.Core.Runtime
             }
             return moduleInstance;
         }
+        
+        public void SynchronizeFunctionCalls(ModuleInstance moduleInstance)
+        {
+            foreach (var funcAddr in moduleInstance.FuncAddrs)
+            {
+                var instance = Store[funcAddr];
+                if (instance is FunctionInstance { Definition: { IsImport: false } } functionInstance)
+                    if (functionInstance.Module == moduleInstance)
+                    {
+                        var expr = functionInstance.Body;
+                        SynchronizeInstructions(moduleInstance, expr.Instructions);
+                    }
+            }
+        }
 
+        private void SynchronizeInstructions(ModuleInstance moduleInstance, InstructionSequence seq)
+        {
+            foreach (var inst in seq)
+            {
+                switch (inst)
+                {
+                    case InstCall instCall:
+                        var addr = moduleInstance.FuncAddrs[instCall.X];
+                        var funcInst = Store[addr];
+                        if (funcInst is FunctionInstance)
+                            instCall.IsAsync = false;
+                        break;
+                    case InstBlock instBlock:
+                        SynchronizeInstructions(moduleInstance, instBlock.GetBlock(0).Instructions);
+                        break;
+                    case InstLoop instLoop:
+                        SynchronizeInstructions(moduleInstance, instLoop.GetBlock(0).Instructions);
+                        break;
+                    case InstIf instIf:
+                        SynchronizeInstructions(moduleInstance, instIf.GetBlock(0).Instructions);
+                        SynchronizeInstructions(moduleInstance, instIf.GetBlock(1).Instructions);
+                        break;
+                }
+            }
+        }
 
         /// <summary>
         /// @Spec 4.5.3.1. Functions
