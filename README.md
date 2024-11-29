@@ -228,15 +228,21 @@ How does this differ from executing the wasm instructions linearly with the WACS
 - The CLR's implementation can use hardware more effectively (use registers instead of heap memory)
 - Avoids instruction fetching and dispatch
 
-In my testing, this leads to roughly 60% higher instruction processing throughput (10Mips -> 16Mips). These gains are situational however.
+In my testing, this leads to roughly 60% higher instruction processing throughput (128Mips -> 210Mips). These gains are situational however.
 Linking of the instructions into a tree cannot 100% be determined across block boundaries. So in these cases, the transpiler just passes
 the sequence through unaltered. So WASM code with lots of function calls or branches will see less benefit.
 
-There's still some headroom for optimization. Optimization is an ongoing process and I have a few other strategies yet to implement.
+### Prebaked Block Labels
+The design of the WASM VM includes block labelling for branch instructions and a heterogeneous operand/control stack.
+WACS uses a split stack that separates operands and control. This enables us to make some key optimizations:
+- Non-flushing branch jumps. We can leave operands on the stack if intermediate states don't interfere.
+- Precomputed block labels. We can ditch the control frame's label stack entirely!
+- Modern C# ObjectPools and ArrayPools minimize unavoidable allocation
+
+Optimization is an ongoing process and I have a few other strategies yet to implement.
 
 My plan for 1.0 includes:
 - Prebaked super-instructions for memory operations
-- Replace some object pools with pre-computed statics
 - Implement the above transpiling for SIMD instructions (currently only i32/i64/f32/f64 instructions are optimized)
 - Provide an API for 3rd party super-instruction optimization
 
