@@ -209,6 +209,17 @@ namespace Wacs.Core.Instructions.Transpiler
         public override Func<ExecContext, double> GetFunc { get; }
     }
     
+    public class UnwrapValueV128 : UnwrapValue<V128>
+    {
+        public UnwrapValueV128(ITypedValueProducer<Value> inA) : base(inA)
+        {
+            var func = InA.GetFunc;
+            GetFunc = context => func(context).V128;
+        }
+
+        public override Func<ExecContext, V128> GetFunc { get; }
+    }
+    
     public class CastToI32<T> : ITypedValueProducer<int>
         where T : struct
     {
