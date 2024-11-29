@@ -104,7 +104,7 @@ namespace Wacs.Core.Runtime
                 Context.ProcessTimer.Restart();
                 Context.InstructionTimer.Restart();
                 
-                var task = Context.Invoke(funcAddr);
+                var task = Context.InvokeAsync(funcAddr);
                 task.Wait();
                 
                 Context.steps = 0;

@@ -223,7 +223,7 @@ namespace Wacs.Core.Runtime
         }
 
         // @Spec 4.4.10.1 Function Invocation
-        public async Task Invoke(FuncAddr addr)
+        public async Task InvokeAsync(FuncAddr addr)
         {
             //1.
             Assert( Store.Contains(addr),
@@ -249,7 +249,6 @@ namespace Wacs.Core.Runtime
                     }
                     if (hostFunc.IsAsync)
                     {
-                        
                         //Pass them
                         await hostFunc.InvokeAsync(hostFunc.ParameterBuffer, OpStack);
                     }
@@ -262,11 +261,36 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        private void Invoke(FunctionInstance wasmFunc, FuncIdx idx)
+        public void Invoke(FuncAddr addr)
         {
-           
+            //1.
+            Assert( Store.Contains(addr),
+                $"Failure in Function Invocation. Address does not exist {addr}");
+            
+            //2.
+            var funcInst = Store[addr];
+            if (funcInst.IsAsync)
+                throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
+            
+            switch (funcInst)
+            {
+                case FunctionInstance wasmFunc:
+                    wasmFunc.Invoke(this);
+                    return;
+                case HostFunction hostFunc:
+                {
+                    var funcType = hostFunc.Type;
+                    //Fetch the parameters
+                    OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
+                    if (hostFunc.PassExecContext)
+                    {
+                        hostFunc.ParameterBuffer[0] = this;
+                    }
+                    //Pass them
+                    hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
+                } return;
+            }
         }
-
 
         // @Spec 4.4.10.2. Returning from a function
         public void FunctionReturn()
