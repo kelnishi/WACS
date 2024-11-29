@@ -210,7 +210,13 @@ namespace Wacs.Core.Runtime
             Frame.PushLabel(target);
             
             //Sets the Pointer to the start of the block sequence
-            EnterSequence(block.Instructions);
+            // EnterSequence(block.Instructions);
+            
+            //Manually inline EnterSequence
+            _currentSequence = block.Instructions;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
+            _sequenceIndex = -1;
         }
 
         // @Spec 4.4.9.2. Exit Block
@@ -219,7 +225,14 @@ namespace Wacs.Core.Runtime
             var addr = Frame.PopLabels(0);
             // We manage separate stacks, so we don't need to relocate the operands
             // var vals = OpStack.PopResults(label.Type);
-            ResumeSequence(addr);
+            
+            // ResumeSequence(addr);
+            
+            //Manually inline ResumeSequence
+            _currentSequence = addr.Sequence;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
+            _sequenceIndex = addr.Index;
         }
 
         // @Spec 4.4.10.1 Function Invocation
@@ -305,7 +318,14 @@ namespace Wacs.Core.Runtime
             var address = PopFrame();
             //7. split stack, values left in place 
             //8.
-            ResumeSequence(address);
+            
+            //ResumeSequence(address);
+            
+            //Manually inline ResumeSequence
+            _currentSequence = address.Sequence;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
+            _sequenceIndex = address.Index;
         }
 
 
