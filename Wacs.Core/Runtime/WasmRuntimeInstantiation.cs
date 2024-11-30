@@ -35,6 +35,7 @@ namespace Wacs.Core.Runtime
     public partial class WasmRuntime
     {
         private static readonly MethodInfo GenericFuncsInvoke = typeof(Delegates.GenericFuncs).GetMethod("Invoke")!;
+        private static readonly MethodInfo GenericFuncsAsyncInvoke = typeof(Delegates.GenericFuncsAsync).GetMethod("Invoke")!;
         private readonly Dictionary<(string module, string entity), IAddress?> _entityBindings = new();
 
         private readonly List<ModuleInstance> _moduleInstances = new();

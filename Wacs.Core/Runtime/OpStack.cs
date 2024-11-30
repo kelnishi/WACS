@@ -227,6 +227,14 @@ namespace Wacs.Core.Runtime
                 targetBuf[i] = PopAny();
             }
         }
+        
+        public void PushValues(Value[] scalars)
+        {
+            for (int i = 0, l = scalars.Length; i < l; ++i)
+            {
+                PushValue(scalars[i]);
+            }
+        }
 
         public void PushScalars(ResultType type, object[] scalars)
         {
