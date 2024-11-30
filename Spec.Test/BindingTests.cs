@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 using Wacs.Core;
@@ -119,7 +120,7 @@ namespace Spec.Test
 
 
         [Fact]
-        public void BindHostAsyncFunction()
+        public void BindAsyncHostFunction()
         {
             var runtime = new WasmRuntime();
             runtime.BindHostFunction<HostInOut>(("env","bound_host"), BoundHost);
@@ -131,9 +132,43 @@ namespace Spec.Test
             runtime.RegisterModule("binding", moduleInst);
 
             var fa = runtime.GetExportedFunction(("binding", "call_async_host"));
+            
+            //Host function is async, Wasm function is called synchronously
             var invoker = runtime.CreateInvoker<Func<int, int>>(fa);
             
             Assert.Equal(10*2, invoker(10));
+        }
+        
+        [Fact]
+        public async Task BindAsyncWasmFunction()
+        {
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<HostInOut>(("env","bound_host"), BoundHost);
+
+            runtime.BindHostFunction<HostAsyncInRet>(("env","bound_async_host"), static async a =>
+            {
+                await Task.Delay(3_000); // Simulate work
+                return a*2;
+            });
+            
+            using var fileStream = new FileStream("../../../engine/binding.wasm", FileMode.Open);
+            var module = BinaryModuleParser.ParseWasm(fileStream);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("binding", moduleInst);
+
+            var fa = runtime.GetExportedFunction(("binding", "call_async_host"));
+            
+            //Host function is async, Wasm function is called asynchronously
+            var invoker = runtime.CreateStackInvokerAsync(fa);
+
+            var stopwatch = new Stopwatch();
+            
+            stopwatch.Start();
+            var results = await invoker(10);
+            stopwatch.Stop();
+            
+            Assert.InRange(stopwatch.ElapsedMilliseconds, 3000, 3500);
+            Assert.Equal(10*2, results[0].Int32);
         }
 
         delegate int HostInOut(int a, out int b);
