@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Wacs.Core Publish Wacs.WASIp1.dll" type="ShConfigurationType" folderName="Unity Publish">
-    <option name="SCRIPT_TEXT" value="dotnet publish -c Release -o ../unity/Runtime/Plugins/" />
+    <option name="SCRIPT_TEXT" value="dotnet publish -f netstandard2.1 -c Release -o ../unity/Runtime/Plugins/" />
     <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
     <option name="SCRIPT_PATH" value="" />
     <option name="SCRIPT_OPTIONS" value="" />
