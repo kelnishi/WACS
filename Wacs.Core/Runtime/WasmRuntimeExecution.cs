@@ -84,7 +84,143 @@ namespace Wacs.Core.Runtime
                 return invoker(p);
             };
         }
+        
+        public Delegates.GenericFuncsAsync CreateStackInvokerAsync(FuncAddr funcAddr, InvokerOptions? options = default)
+        {
+            options ??= new InvokerOptions();
+            return CreateInvokerAsync(funcAddr, options);
+        }
 
+        private Delegates.GenericFuncsAsync CreateInvokerAsync(FuncAddr funcAddr, InvokerOptions options)
+        {
+            return GenericDelegateAsync;
+            async Task<Value[]> GenericDelegateAsync(params Value[] args)
+            {
+                var funcInst = Context.Store[funcAddr];
+                var funcType = funcInst.Type;
+                
+                Context.OpStack.PushValues(args);
+
+                if (options.CollectStats != StatsDetail.None)
+                {
+                    Context.ResetStats();
+                    Context.InstructionTimer.Reset();
+                }
+
+                Context.ProcessTimer.Restart();
+                Context.InstructionTimer.Restart();
+                
+                await Context.InvokeAsync(funcAddr);
+                
+                Context.steps = 0;
+                bool fastPath = options.UseFastPath();
+                try
+                {
+                    if (fastPath)
+                    {
+                        await ProcessThreadAsync(options.GasLimit);
+                    }
+                    else
+                    {
+                        await ProcessThreadWithOptions(options);
+                    }
+                }
+                catch (AggregateException agg)
+                {
+                    var exc = agg.InnerException;
+                    Context.ProcessTimer.Stop();
+                    Context.InstructionTimer.Stop();
+                    if (options.LogProgressEvery > 0)
+                        Console.Error.WriteLine();
+                    if (options.CollectStats != StatsDetail.None)
+                        PrintStats(options);
+                    if (options.LogGas)
+                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
+
+                    if (options.CalculateLineNumbers)
+                    {
+                        var ptr = Context.ComputePointerPath();
+                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+
+                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{Context.steps}\n{path}"));
+                    }
+
+                    //Flush the stack before throwing...
+                    Context.FlushCallStack();
+                    ExceptionDispatchInfo.Throw(exc);
+                }
+                catch (TrapException exc)
+                {
+                    Context.ProcessTimer.Stop();
+                    Context.InstructionTimer.Stop();
+                    if (options.LogProgressEvery > 0)
+                        Console.Error.WriteLine();
+                    if (options.CollectStats != StatsDetail.None)
+                        PrintStats(options);
+                    if (options.LogGas)
+                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
+
+                    if (options.CalculateLineNumbers)
+                    {
+                        var ptr = Context.ComputePointerPath();
+                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+
+                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{Context.steps}\n{path}"));
+                    }
+
+                    //Flush the stack before throwing...
+                    Context.FlushCallStack();
+                    ExceptionDispatchInfo.Throw(exc);
+                }
+                catch (SignalException exc)
+                {
+                    Context.ProcessTimer.Stop();
+                    Context.InstructionTimer.Stop();
+                    if (options.LogProgressEvery > 0)
+                        Console.Error.WriteLine();
+                    if (options.CollectStats != StatsDetail.None)
+                        PrintStats(options);
+                    if (options.LogGas)
+                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
+
+                    string message = exc.Message;
+                    if (options.CalculateLineNumbers)
+                    {
+                        var ptr = Context.ComputePointerPath();
+                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+                        message = exc.Message + $":line {line} instruction #{Context.steps}\n{path}";
+                    }
+
+                    //Flush the stack before throwing...
+                    Context.FlushCallStack();
+
+                    var exType = exc.GetType();
+                    var ctr = exType.GetConstructor(new Type[] { typeof(int), typeof(string) });
+                    ExceptionDispatchInfo.Throw(ctr?.Invoke(new object[] { exc.Signal, message }) as Exception ?? exc);
+                }
+                catch (WasmRuntimeException)
+                {
+                    //Maybe Log?
+                    Context.FlushCallStack();
+                    throw;
+                }
+                
+                Context.ProcessTimer.Stop();
+                Context.InstructionTimer.Stop();
+                if (options.LogProgressEvery > 0) Console.Error.WriteLine("done.");
+                if (options.CollectStats != StatsDetail.None) PrintStats(options);
+                if (options.LogGas) Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
+
+                Value[] results = new Value[funcType.ResultType.Arity];
+                Context.OpStack.PopScalars(funcType.ResultType, results);
+
+                return results;
+            }
+        }
+        
         private Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
         {
             return GenericDelegate;
@@ -225,13 +361,19 @@ namespace Wacs.Core.Runtime
             while (Context.Next() is { } inst)
             {
                 if (inst.IsAsync)
+                {
                     await inst.ExecuteAsync(Context);
+                    Context.steps += inst.Size;
+                    if (Context.steps >= gasLimit)
+                        throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
+                }
                 else
+                {
                     inst.Execute(Context);
-   
-                Context.steps += inst.Size;
-                if (Context.steps >= gasLimit)
-                    throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
+                    Context.steps += inst.Size;
+                    if (Context.steps >= gasLimit)
+                        throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
+                }
             }
         }
 
