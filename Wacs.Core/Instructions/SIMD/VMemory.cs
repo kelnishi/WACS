@@ -93,10 +93,10 @@ namespace Wacs.Core.Instructions.SIMD
             //13,14,15
             Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
-#if NETSTANDARD2_1
-            MemoryMarshal.Write(bs, ref cV128);
-#else
+#if NET8_0
             MemoryMarshal.Write(bs, in cV128);
+#else
+            MemoryMarshal.Write(bs, ref cV128);
 #endif
         }
 

@@ -58,10 +58,10 @@ namespace Wacs.Core.Instructions.Memory
             //13,14,15
             Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
-#if NETSTANDARD2_1
-            MemoryMarshal.Write(bs, ref cU64);
-#else
+#if NET8_0
             MemoryMarshal.Write(bs, in cU64);
+#else
+            MemoryMarshal.Write(bs, ref cU64);
 #endif
         }
 
@@ -144,10 +144,10 @@ namespace Wacs.Core.Instructions.Memory
             Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
             ushort cI16 = (ushort)cU64;
-#if NETSTANDARD2_1
-            MemoryMarshal.Write(bs, ref cI16);
-#else
+#if NET8_0
             MemoryMarshal.Write(bs, in cI16); // Assume you can change to 'in'
+#else
+            MemoryMarshal.Write(bs, ref cI16);
 #endif
         }
 
@@ -189,11 +189,12 @@ namespace Wacs.Core.Instructions.Memory
             Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
             uint cI32 = (uint)cU64;
-#if NETSTANDARD2_1
-            MemoryMarshal.Write(bs, ref cI32);
-#else
+#if NET8_0
             MemoryMarshal.Write(bs, in cI32); // Assume you can change to 'in'
+#else
+            MemoryMarshal.Write(bs, ref cI32);
 #endif
+            
         }
 
         public Action<ExecContext, uint, ulong> GetFunc => SetMemoryValue;
