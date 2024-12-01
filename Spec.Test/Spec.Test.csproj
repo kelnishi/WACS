@@ -1,8 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <OutputType>Exe</OutputType>
-        <TargetFramework>net6.0</TargetFramework>
+        <OutputType>Library</OutputType>
         <LangVersion>9</LangVersion>
         <Nullable>enable</Nullable>
         <Title>WebAssembly Spec Wast Test suite harness</Title>
@@ -10,6 +9,7 @@
         <Company>Kelvin Nishikawa</Company>
         <Product>Spec.Test</Product>
         <AssemblyVersion>1.0.1</AssemblyVersion>
+        <TargetFramework>net8.0</TargetFramework>
     </PropertyGroup>
 
     <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">

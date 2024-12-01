@@ -4,9 +4,8 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>9</LangVersion>
-    <AssemblyVersion>0.2.0</AssemblyVersion>
-    <FileVersion></FileVersion>
-    <Version>0.2.0</Version>
+    <AssemblyVersion>0.3.0</AssemblyVersion>
+    <Version>0.3.0</Version>
     <Authors>Kelvin Nishikawa</Authors>
     <Description>A Pure C# WebAssembly Interpreter</Description>
     <TrimUnusedDependencies>true</TrimUnusedDependencies>
@@ -21,7 +20,8 @@
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <RepositoryType>git</RepositoryType>
-    <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>
+    <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <PropertyGroup>

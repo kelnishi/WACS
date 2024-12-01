@@ -60,7 +60,7 @@ namespace Wacs.Core.Runtime
                 return false;
             if (ShowPath)
                 return false;
-            if (CollectStats != StatsDetail.None)
+            if (CollectStats == StatsDetail.Instruction)
                 return false;
             return true;
         }

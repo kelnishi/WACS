@@ -18,7 +18,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions
 {
-    public interface IConstInstruction { }
+    public interface IConstInstruction {}
 
     public interface IContextConstInstruction
     {

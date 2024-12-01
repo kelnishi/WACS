@@ -14,7 +14,6 @@
 //  * limitations under the License.
 //  */
 
-using System.Collections;
 using Wacs.Core.OpCodes;
 
 namespace Wacs.Core.Runtime
@@ -44,11 +43,10 @@ namespace Wacs.Core.Runtime
                    Instruction.Equals(other.Instruction) &&
                    ContinuationAddress.Equals(other.ContinuationAddress);
         }
-        
+
         public override string ToString()
         {
             return $"Label(Instruction: {Instruction}, Arity: {Arity}, StackHeight: {StackHeight}, ContinuationAddress: {ContinuationAddress})";
         }
-        
     }
 }

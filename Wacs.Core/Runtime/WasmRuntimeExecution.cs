@@ -17,6 +17,8 @@
 using System;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
+using System.Threading.Tasks;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Exceptions;
@@ -28,18 +30,76 @@ namespace Wacs.Core.Runtime
 {
     public partial class WasmRuntime
     {
-        
         private IInstruction? lastInstruction = null;
-        
-        private Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
+
+        public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr, InvokerOptions? options = default)
+            where TDelegate : Delegate
         {
-            return GenericDelegate;
-            Value[] GenericDelegate(params object[] args)
+            options ??= new InvokerOptions();
+            var funcInst = Context.Store[funcAddr];
+            var funcType = funcInst.Type;
+
+            if (funcType.ResultType.Types.Length > 1)
+                throw new WasmRuntimeException("Binding multiple return values from wasm are not yet supported.");
+            
+            Delegates.ValidateFunctionTypeCompatibility(funcType, typeof(TDelegate));
+            var inner = CreateInvoker(funcAddr, options);
+            var genericDelegate = Delegates.AnonymousFunctionFromType(funcType, args =>
+            {
+                Value[] results = null!;
+                try
+                {
+                    results = funcType.ParameterTypes.Arity == 0
+                        ? inner()
+                        : (Value[])GenericFuncsInvoke.Invoke(inner, args);
+                    if (funcType.ResultType.Types.Length == 1)
+                        return results[0];
+                    return results;
+                }
+                catch (TargetInvocationException exc)
+                { //Propagate out any exceptions
+                    ExceptionDispatchInfo.Throw(exc.InnerException);
+                    //This won't happen
+                    return results;
+                }
+            });
+            
+            return (TDelegate)Delegates.CreateTypedDelegate(genericDelegate, typeof(TDelegate));
+        }
+
+        //No type checking, but you can get multiple return values
+        public Delegates.StackFunc CreateStackInvoker(FuncAddr funcAddr, InvokerOptions? options = default)
+        {
+            options ??= new InvokerOptions();
+            var invoker = CreateInvoker(funcAddr, options);
+            var funcInst = Context.Store[funcAddr];
+            var funcType = funcInst.Type;
+            object[] p = new object[funcType.ParameterTypes.Arity];
+            
+            return valueParams =>
+            {
+                for (int i = 0; i < funcType.ParameterTypes.Arity; ++i)
+                    p[i] = valueParams[i];
+
+                return invoker(p);
+            };
+        }
+        
+        public Delegates.GenericFuncsAsync CreateStackInvokerAsync(FuncAddr funcAddr, InvokerOptions? options = default)
+        {
+            options ??= new InvokerOptions();
+            return CreateInvokerAsync(funcAddr, options);
+        }
+
+        private Delegates.GenericFuncsAsync CreateInvokerAsync(FuncAddr funcAddr, InvokerOptions options)
+        {
+            return GenericDelegateAsync;
+            async Task<Value[]> GenericDelegateAsync(params Value[] args)
             {
                 var funcInst = Context.Store[funcAddr];
                 var funcType = funcInst.Type;
                 
-                Context.OpStack.PushScalars(funcType.ParameterTypes, args);
+                Context.OpStack.PushValues(args);
 
                 if (options.CollectStats != StatsDetail.None)
                 {
@@ -48,60 +108,47 @@ namespace Wacs.Core.Runtime
                 }
 
                 Context.ProcessTimer.Restart();
-
-                Context.Invoke(funcAddr);
-
+                Context.InstructionTimer.Restart();
+                
+                await Context.InvokeAsync(funcAddr);
+                
                 Context.steps = 0;
-                long highwatermark = 0;
                 bool fastPath = options.UseFastPath();
-
                 try
                 {
                     if (fastPath)
                     {
-                        int comp = 0;
-                        do
-                        {
-                            comp = ProcessThread();
-                            Context.steps += comp;
-                            if (options.GasLimit > 0)
-                            {
-                                if (Context.steps >= options.GasLimit)
-                                {
-                                    throw new InsufficientGasException(
-                                        $"Invocation ran out of gas (limit:{options.GasLimit}).");
-                                }
-                            }
-                        } while (comp > 0);
+                        await ProcessThreadAsync(options.GasLimit);
                     }
                     else
                     {
-                        long comp = 0;
-                        do
-                        {
-                            comp = ProcessThreadWithOptions(options);
-                            Context.steps += comp;
-
-                            if (options.GasLimit > 0)
-                            {
-                                if (Context.steps >= options.GasLimit)
-                                {
-                                    throw new InsufficientGasException(
-                                        $"Invocation ran out of gas (limit:{options.GasLimit}).");
-                                }
-                            }
-
-                            if (options.LogProgressEvery > 0)
-                            {
-                                highwatermark += comp;
-                                if (highwatermark >= options.LogProgressEvery)
-                                {
-                                    highwatermark -= options.LogProgressEvery;
-                                    Console.Error.Write('.');
-                                }
-                            }
-                        } while (comp > 0);
+                        await ProcessThreadWithOptions(options);
                     }
+                }
+                catch (AggregateException agg)
+                {
+                    var exc = agg.InnerException;
+                    Context.ProcessTimer.Stop();
+                    Context.InstructionTimer.Stop();
+                    if (options.LogProgressEvery > 0)
+                        Console.Error.WriteLine();
+                    if (options.CollectStats != StatsDetail.None)
+                        PrintStats(options);
+                    if (options.LogGas)
+                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
+
+                    if (options.CalculateLineNumbers)
+                    {
+                        var ptr = Context.ComputePointerPath();
+                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+
+                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{Context.steps}\n{path}"));
+                    }
+
+                    //Flush the stack before throwing...
+                    Context.FlushCallStack();
+                    ExceptionDispatchInfo.Throw(exc);
                 }
                 catch (TrapException exc)
                 {
@@ -120,12 +167,12 @@ namespace Wacs.Core.Runtime
                         var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
                         (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
 
-                        throw new TrapException(exc.Message + $":line {line} instruction #{Context.steps}\n{path}");
+                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{Context.steps}\n{path}"));
                     }
 
                     //Flush the stack before throwing...
                     Context.FlushCallStack();
-                    throw;
+                    ExceptionDispatchInfo.Throw(exc);
                 }
                 catch (SignalException exc)
                 {
@@ -152,7 +199,140 @@ namespace Wacs.Core.Runtime
 
                     var exType = exc.GetType();
                     var ctr = exType.GetConstructor(new Type[] { typeof(int), typeof(string) });
-                    throw ctr?.Invoke(new object[] { exc.Signal, message }) as Exception ?? exc;
+                    ExceptionDispatchInfo.Throw(ctr?.Invoke(new object[] { exc.Signal, message }) as Exception ?? exc);
+                }
+                catch (WasmRuntimeException)
+                {
+                    //Maybe Log?
+                    Context.FlushCallStack();
+                    throw;
+                }
+                
+                Context.ProcessTimer.Stop();
+                Context.InstructionTimer.Stop();
+                if (options.LogProgressEvery > 0) Console.Error.WriteLine("done.");
+                if (options.CollectStats != StatsDetail.None) PrintStats(options);
+                if (options.LogGas) Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
+
+                Value[] results = new Value[funcType.ResultType.Arity];
+                Context.OpStack.PopScalars(funcType.ResultType, results);
+
+                return results;
+            }
+        }
+        
+        private Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
+        {
+            return GenericDelegate;
+            Value[] GenericDelegate(params object[] args)
+            {
+                var funcInst = Context.Store[funcAddr];
+                var funcType = funcInst.Type;
+                
+                Context.OpStack.PushScalars(funcType.ParameterTypes, args);
+
+                if (options.CollectStats != StatsDetail.None)
+                {
+                    Context.ResetStats();
+                    Context.InstructionTimer.Reset();
+                }
+
+                Context.ProcessTimer.Restart();
+                Context.InstructionTimer.Restart();
+                
+                var task = Context.InvokeAsync(funcAddr);
+                task.Wait();
+                
+                Context.steps = 0;
+                bool fastPath = options.UseFastPath();
+                try
+                {
+                    if (fastPath)
+                    {
+                        Task thread = ProcessThreadAsync(options.GasLimit);
+                        thread.Wait();
+                    }
+                    else
+                    {
+                        Task thread = ProcessThreadWithOptions(options);
+                        thread.Wait();
+                    }
+                }
+                catch (AggregateException agg)
+                {
+                    var exc = agg.InnerException;
+                    Context.ProcessTimer.Stop();
+                    Context.InstructionTimer.Stop();
+                    if (options.LogProgressEvery > 0)
+                        Console.Error.WriteLine();
+                    if (options.CollectStats != StatsDetail.None)
+                        PrintStats(options);
+                    if (options.LogGas)
+                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
+
+                    if (options.CalculateLineNumbers)
+                    {
+                        var ptr = Context.ComputePointerPath();
+                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+
+                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{Context.steps}\n{path}"));
+                    }
+
+                    //Flush the stack before throwing...
+                    Context.FlushCallStack();
+                    ExceptionDispatchInfo.Throw(exc);
+                }
+                catch (TrapException exc)
+                {
+                    Context.ProcessTimer.Stop();
+                    Context.InstructionTimer.Stop();
+                    if (options.LogProgressEvery > 0)
+                        Console.Error.WriteLine();
+                    if (options.CollectStats != StatsDetail.None)
+                        PrintStats(options);
+                    if (options.LogGas)
+                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
+
+                    if (options.CalculateLineNumbers)
+                    {
+                        var ptr = Context.ComputePointerPath();
+                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+
+                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{Context.steps}\n{path}"));
+                    }
+
+                    //Flush the stack before throwing...
+                    Context.FlushCallStack();
+                    ExceptionDispatchInfo.Throw(exc);
+                }
+                catch (SignalException exc)
+                {
+                    Context.ProcessTimer.Stop();
+                    Context.InstructionTimer.Stop();
+                    if (options.LogProgressEvery > 0)
+                        Console.Error.WriteLine();
+                    if (options.CollectStats != StatsDetail.None)
+                        PrintStats(options);
+                    if (options.LogGas)
+                        Console.Error.WriteLine($"Process used {Context.steps} gas. {Context.ProcessTimer.Elapsed}");
+
+                    string message = exc.Message;
+                    if (options.CalculateLineNumbers)
+                    {
+                        var ptr = Context.ComputePointerPath();
+                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
+                        message = exc.Message + $":line {line} instruction #{Context.steps}\n{path}";
+                    }
+
+                    //Flush the stack before throwing...
+                    Context.FlushCallStack();
+
+                    var exType = exc.GetType();
+                    var ctr = exType.GetConstructor(new Type[] { typeof(int), typeof(string) });
+                    ExceptionDispatchInfo.Throw(ctr?.Invoke(new object[] { exc.Signal, message }) as Exception ?? exc);
                 }
                 catch (WasmRuntimeException)
                 {
@@ -175,103 +355,88 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr, InvokerOptions? options = default)
-            where TDelegate : Delegate
+        public async Task ProcessThreadAsync(long gasLimit)
         {
-            options ??= new InvokerOptions();
-            var funcInst = Context.Store[funcAddr];
-            var funcType = funcInst.Type;
-
-            if (funcType.ResultType.Types.Length > 1)
-                throw new WasmRuntimeException("Binding multiple return values from wasm are not yet supported.");
-            
-            Delegates.ValidateFunctionTypeCompatibility(funcType, typeof(TDelegate));
-            var inner = CreateInvoker(funcAddr, options);
-            var genericDelegate = Delegates.AnonymousFunctionFromType(funcType, args =>
+            if (gasLimit <= 0) gasLimit = long.MaxValue;
+            while (Context.Next() is { } inst)
             {
-                try
+                if (inst.IsAsync)
                 {
-                    Value[] results = funcType.ParameterTypes.Arity == 0
-                        ? inner()
-                        : (Value[])GenericFuncsInvoke.Invoke(inner, args);
-                    if (funcType.ResultType.Types.Length == 1)
-                        return results[0];
-                    return results;
+                    await inst.ExecuteAsync(Context);
+                    Context.steps += inst.Size;
+                    if (Context.steps >= gasLimit)
+                        throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
                 }
-                catch (TargetInvocationException exc)
-                { //Propagate out any exceptions
-                    throw exc.InnerException;
+                else
+                {
+                    inst.Execute(Context);
+                    Context.steps += inst.Size;
+                    if (Context.steps >= gasLimit)
+                        throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
                 }
-            });
-            
-            return (TDelegate)Delegates.CreateTypedDelegate(genericDelegate, typeof(TDelegate));
+            }
         }
 
-        //No type checking, but you can get multiple return values
-        public Delegates.StackFunc CreateStackInvoker(FuncAddr funcAddr, InvokerOptions? options = default)
+        public async Task ProcessThreadWithOptions(InvokerOptions options)
         {
-            options ??= new InvokerOptions();
-            var invoker = CreateInvoker(funcAddr, options);
-            var funcInst = Context.Store[funcAddr];
-            var funcType = funcInst.Type;
-            object[] p = new object[funcType.ParameterTypes.Arity];
+            long highwatermark = 0;
+            long gasLimit = options.GasLimit > 0 ? options.GasLimit : long.MaxValue;
+            while (Context.Next() is { } inst)
+            {
+                //Trace execution
+                if (options.LogInstructionExecution != InstructionLogging.None)
+                {
+                    LogPreInstruction(options, inst);
+                }
+
+                if (options.CollectStats == StatsDetail.Instruction)
+                {
+                    Context.InstructionTimer.Restart();
+                    
+                    if (inst.IsAsync)
+                        await inst.ExecuteAsync(Context);
+                    else
+                        inst.Execute(Context);
+
+                    Context.InstructionTimer.Stop();
+                    Context.steps += inst.Size;
+
+                    var st = Context.Stats[(ushort)inst.Op];
+                    st.count += inst.Size;
+                    st.duration += Context.InstructionTimer.ElapsedTicks;
+                    Context.Stats[(ushort)inst.Op] = st;
+                }
+                else
+                {
+                    Context.InstructionTimer.Start();
+                    if (inst.IsAsync)
+                        await inst.ExecuteAsync(Context);
+                    else
+                        inst.Execute(Context);
+                    Context.InstructionTimer.Stop();
+                    Context.steps += inst.Size;
+                }
+
+                if (((int)options.LogInstructionExecution & (int)InstructionLogging.Computes) != 0)
+                {
+                    LogPostInstruction(options, inst);
+                }
             
-            return valueParams =>
-            {
-                for (int i = 0; i < funcType.ParameterTypes.Arity; ++i)
-                    p[i] = valueParams[i];
-
-                return invoker(p);
-            };
-        }
-
-        public int ProcessThread()
-        {
-            var inst = Context.Next();
-            if (inst == null)
-                return 0;
-            
-            return inst.Execute(Context);
-        }
-
-        public long ProcessThreadWithOptions(InvokerOptions options)
-        {
-            var inst = Context.Next();
-            if (inst == null)
-                return 0;
-            
-            //Trace execution
-            if (options.LogInstructionExecution != InstructionLogging.None)
-            {
-                LogPreInstruction(options, inst);
+                lastInstruction = inst;
+                
+                if (Context.steps >= gasLimit)
+                    throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
+                
+                if (options.LogProgressEvery > 0)
+                {
+                    highwatermark += inst.Size;
+                    if (highwatermark >= options.LogProgressEvery)
+                    {
+                        highwatermark -= options.LogProgressEvery;
+                        Console.Error.Write('.');
+                    }
+                }
             }
-
-            long steps = 0;
-            if (options.CollectStats == StatsDetail.Instruction)
-            {
-                Context.InstructionTimer.Restart();
-                steps += inst.Execute(Context);
-                Context.InstructionTimer.Stop();
-
-                var st = Context.Stats[(ushort)inst.Op];
-                st.count += steps;
-                st.duration += Context.InstructionTimer.ElapsedTicks;
-                Context.Stats[(ushort)inst.Op] = st;
-            }
-            else
-            {
-                Context.InstructionTimer.Start();
-                steps += inst.Execute(Context);
-                Context.InstructionTimer.Stop();
-            }
-
-            if (options.LogInstructionExecution.Has(InstructionLogging.Computes))
-            {
-                LogPostInstruction(options, inst);
-            }
-            
-            lastInstruction = inst;
-            return steps;
         }
 
         private void LogPreInstruction(InvokerOptions options, IInstruction inst)
@@ -283,30 +448,30 @@ namespace Wacs.Core.Runtime
                 case var _ when IInstruction.IsVar(inst): break;
                 case var _ when IInstruction.IsLoad(inst): break;
                 
-                case OpCode.Call when options.LogInstructionExecution.Has(InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
-                case OpCode.CallIndirect when options.LogInstructionExecution.Has(InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
-                // case OpCode.CallRef when options.LogInstructionExecution.Has(InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
+                case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && IInstruction.IsBound(Context, inst):
+                case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && IInstruction.IsBound(Context, inst):
+                // case OpCode.CallRef when options.LogInstructionExecution&(int)InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
                 
-                case OpCode.Call when options.LogInstructionExecution.Has(InstructionLogging.Calls):
-                case OpCode.CallIndirect when options.LogInstructionExecution.Has(InstructionLogging.Calls):
-                // case OpCode.CallRef when options.LogInstructionExecution.Has(InstructionLogging.Calls):
-                case OpCode.Return when options.LogInstructionExecution.Has(InstructionLogging.Calls):
-                case OpCode.ReturnCallIndirect when options.LogInstructionExecution.Has(InstructionLogging.Calls):
-                case OpCode.ReturnCall when options.LogInstructionExecution.Has(InstructionLogging.Calls):
-                case OpCode.End when options.LogInstructionExecution.Has(InstructionLogging.Calls) && Context.GetEndFor() == OpCode.Func:
+                case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
+                case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
+                // case OpCode.CallRef when options.LogInstructionExecution&(int)InstructionLogging.Calls):
+                case OpCode.Return when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
+                case OpCode.ReturnCallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
+                case OpCode.ReturnCall when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
+                case OpCode.End when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0 && Context.GetEndFor() == OpCode.Func:
                         
-                case OpCode.Block when options.LogInstructionExecution.Has(InstructionLogging.Blocks):
-                case OpCode.Loop when options.LogInstructionExecution.Has(InstructionLogging.Blocks):
-                case OpCode.If when options.LogInstructionExecution.Has(InstructionLogging.Blocks):
-                case OpCode.Else when options.LogInstructionExecution.Has(InstructionLogging.Blocks):
-                case OpCode.End when options.LogInstructionExecution.Has(InstructionLogging.Blocks) && Context.GetEndFor() == OpCode.Block:
+                case OpCode.Block when ((int)options.LogInstructionExecution&(int)InstructionLogging.Blocks)!=0:
+                case OpCode.Loop when ((int)options.LogInstructionExecution&(int)InstructionLogging.Blocks)!=0:
+                case OpCode.If when ((int)options.LogInstructionExecution&(int)InstructionLogging.Blocks)!=0:
+                case OpCode.Else when ((int)options.LogInstructionExecution&(int)InstructionLogging.Blocks)!=0:
+                case OpCode.End when ((int)options.LogInstructionExecution&(int)InstructionLogging.Blocks)!=0 && Context.GetEndFor() == OpCode.Block:
                             
-                case OpCode.Br when options.LogInstructionExecution.Has(InstructionLogging.Branches):
-                case OpCode.BrIf when options.LogInstructionExecution.Has(InstructionLogging.Branches):
-                case OpCode.BrTable when options.LogInstructionExecution.Has(InstructionLogging.Branches):
+                case OpCode.Br when ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
+                case OpCode.BrIf when ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
+                case OpCode.BrTable when ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
                 
-                case var _ when IInstruction.IsBranch(lastInstruction) && options.LogInstructionExecution.Has(InstructionLogging.Branches):
-                case var _ when options.LogInstructionExecution.Has(InstructionLogging.Computes):
+                case var _ when IInstruction.IsBranch(lastInstruction) && ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
+                case var _ when ((int)options.LogInstructionExecution&(int)InstructionLogging.Computes)!=0:
                     string location = "";
                     if (options.CalculateLineNumbers)
                     {
@@ -378,16 +543,23 @@ namespace Wacs.Core.Runtime
             TimeSpan overheadTime = new TimeSpan(overheadTicks/100);
             double overheadPercent =  100.0 * overheadTicks / procTicks;
             double execPercent = 100.0 * execTicks / procTicks;
-            string overheadLabel = $"({overheadPercent:#0.###}%) {overheadTime:g}";
+            string overheadLabel = $" overhead:({overheadPercent:#0.###}%) {overheadTime.TotalSeconds:#0.###}s";
             
             string totalLabel = "    total duration";
             string totalInst = $"{totalExecs}";
-            string totalPercent = $"{execPercent:#0.###}%t".PadLeft(8,' ');
+            string totalPercent = $" ({execPercent:#0.###}%t)".PadLeft(8,' ');
             string avgTime = $"{execTime.TotalMilliseconds * 1000000.0/totalExecs:#0.###}ns/i";
             double instPerSec = totalExecs * 1000.0 / totalTime.TotalMilliseconds;
-            string velocity = $"{instPerSec.SiSuffix("0.###")}i/s";
+            string velocity = $"{instPerSec.SiSuffix("0.###")}ips";
+
+            if (options.CollectStats == StatsDetail.Total)
+            {
+                overheadLabel = "";
+                totalPercent = "";
+            }
+            
             Console.Error.WriteLine($"Execution Stats:");
-            Console.Error.WriteLine($"{totalLabel}: {totalInst}| ({totalPercent}) {execTime.TotalSeconds:#0.###}s {avgTime} {velocity} overhead:{overheadLabel} total proctime:{totalTime.TotalSeconds:#0.###}s");
+            Console.Error.WriteLine($"{totalLabel}: {totalInst}|{totalPercent} {execTime.TotalSeconds:#0.###}s {avgTime} {velocity}{overheadLabel} proctime:{totalTime.TotalSeconds:#0.###}s");
             var orderedStats = Context.Stats
                 .Where(bdc => bdc.Value.count != 0)
                 .OrderBy(bdc => -bdc.Value.count);
@@ -403,6 +575,5 @@ namespace Wacs.Core.Runtime
                 Console.Error.WriteLine($"{label}: {execsLabel}| ({percentLabel}) {instTime.TotalMilliseconds:#0.000}ms {instAve}");
             }
         }
-
     }
 }

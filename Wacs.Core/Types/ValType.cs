@@ -83,6 +83,11 @@ namespace Wacs.Core.Types
         
         //Special types
         
+        
+        //Special case for transpiler
+        U32 = 0xFB,
+        U64 = 0xFA,
+        
         [WatToken("Unknown")] Unknown = 0xFC, //for validation
         
         ExecContext = 0xFD,
