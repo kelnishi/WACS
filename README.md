@@ -34,6 +34,7 @@ The chapters and sections from the spec are commented throughout the source code
 - **Unity Compatibility**: Compatible with **Unity 2021.3+** including AOT/IL2CPP modes for iOS.
 - **Full WebAssembly MVP Compliance**: Passes the  [WebAssembly spec test suite](https://github.com/WebAssembly/spec/tree/main/test/core).
 - **Magical Interop**: Host bindings are validated with reflection, no boilerplate code required.
+- **Async Tasks**: [JSPI](https://github.com/WebAssembly/js-promise-integration)-like non-blocking calls for async functions.
 - **WASI:** Wacs.WASIp1 provides a [wasi\_snapshot\_preview1](https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md) implementation.
 
 ## Getting Started
@@ -250,11 +251,11 @@ My plan for 1.0 includes:
 
 The current TODO list includes:
 
-- **ExecAsync**: Thread scheduling and advanced gas metering (basically JSPI, but C# Tasks)
+- **Source Generated Bindings**: Use Roslyn source generator for generating bindings.
 - **Wasm Garbage Collection**: Support  wasm-gc and heaptypes.
-- **Text Format Parsing**: Add support for WebAssembly text format.
 - **WASI p1 Test Suite**: Validate WASIp1 with the test suite for improved standard compliance.
 - **WASI p2 and Component Model**: Implement the component model proposal.
+- **Text Format Parsing**: Add support for WebAssembly text format.
 - **SIMD Intrinsics**: Add hardware-accelerated SIMD (software implementation included in Wacs.Core).
 - **Unity Bindings for SDL**: Implement SDL2 with Unity bindings.
 - **JavaScript Proxy Bindings**: Maybe support common JS env functions.
