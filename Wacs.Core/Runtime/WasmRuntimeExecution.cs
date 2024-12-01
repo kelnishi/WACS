@@ -378,7 +378,7 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public async Task ProcessThreadWithOptions(InvokerOptions options)
+        public async Task ProcessThreadWithOptions(InvokerOptions options) 
         {
             long highwatermark = 0;
             long gasLimit = options.GasLimit > 0 ? options.GasLimit : long.MaxValue;

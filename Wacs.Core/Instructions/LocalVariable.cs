@@ -85,8 +85,7 @@ namespace Wacs.Core.Instructions
                 $"Instruction local.get could not get Local {Index}");
             //3.
             // var value = context.Frame.Locals.Get(Index);
-            var value = context.Frame.Locals.Data[Index.Value];
-            return value;
+            return context.Frame.Locals.Data[Index.Value];
         }
     }
     
