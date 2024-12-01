@@ -58,10 +58,10 @@ namespace Wacs.Core.Instructions.Memory
             //13,14,15
             Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
-#if NETSTANDARD2_1
-            MemoryMarshal.Write(bs, ref cF32);
-#else
+#if NET8_0
             MemoryMarshal.Write(bs, in cF32);
+#else
+            MemoryMarshal.Write(bs, ref cF32);
 #endif
         }
 
@@ -102,10 +102,10 @@ namespace Wacs.Core.Instructions.Memory
             //13,14,15
             Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
-#if NETSTANDARD2_1
-            MemoryMarshal.Write(bs, ref cF64);
-#else
+#if NET8_0
             MemoryMarshal.Write(bs, in cF64);
+#else
+            MemoryMarshal.Write(bs, ref cF64);
 #endif
         }
 
