@@ -379,8 +379,16 @@ namespace Wacs.Core.Runtime
                 case ValType.I32:
                     Int32 = (int)externalValue;
                     break;
+                case ValType.U32: //Special case for transpiler
+                    Type = ValType.I32;
+                    UInt32 = (uint)externalValue;
+                    break;
                 case ValType.I64:
                     Int64 = (long)externalValue;
+                    break;
+                case ValType.U64: //Special case for transpiler
+                    Type = ValType.I64;
+                    UInt64 = (ulong)externalValue;
                     break;
                 case ValType.F32:
                     Float32 = (float)externalValue;
@@ -445,6 +453,9 @@ namespace Wacs.Core.Runtime
         public bool IsV128 => Type == ValType.V128;
         public bool IsRef => Type == ValType.Funcref || Type == ValType.Externref;
         public bool IsNullRef => IsRef && Ptr == -1;
+
+        public static object ToObject(Value value) => value.Scalar;
+
         public static implicit operator Value(int value) => new(value);
         public static implicit operator Value(uint value) => new(value);
 

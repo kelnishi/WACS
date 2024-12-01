@@ -28,11 +28,15 @@ namespace Wacs.Core.Instructions
 {
     public class InstGlobalGet : InstructionBase, IContextConstInstruction, IVarInstruction, ITypedValueProducer<Value>
     {
-        public override ByteCode Op => OpCode.GlobalGet;
         private GlobalIdx Index;
+        public override ByteCode Op => OpCode.GlobalGet;
 
         public bool IsConstant(IWasmValidationContext? context) => 
             context == null || context.Globals.Contains(Index) && context.Globals[Index].IsImport && context.Globals[Index].Type.Mutability == Mutability.Immutable;
+
+        public Func<ExecContext, Value> GetFunc => FetchFromGlobals;
+
+        public int CalculateSize() => 1;
 
         public override IInstruction Parse(BinaryReader reader)
         {
@@ -67,11 +71,10 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.5.4. global.get
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             var val = FetchFromGlobals(context);
             context.OpStack.PushValue(val);
-            return 1;
         }
 
         public Value FetchFromGlobals(ExecContext context)
@@ -91,19 +94,16 @@ namespace Wacs.Core.Instructions
             //7.
             return val;
         }
-        
-        public Func<ExecContext, Value> GetFunc => FetchFromGlobals;
-
-        public int CalculateSize() => 1;
     }
     
     public class InstGlobalSet : InstructionBase, IContextConstInstruction, IVarInstruction, INodeConsumer<Value>
     {
-        public override ByteCode Op => OpCode.GlobalSet;
         private GlobalIdx Index;
 
         public bool IsConstant(IWasmValidationContext? context) => 
             context == null || context.Globals.Contains(Index) && context.Globals[Index].IsImport && context.Globals[Index].Type.Mutability == Mutability.Immutable;
+
+        public override ByteCode Op => OpCode.GlobalSet;
 
         public override IInstruction Parse(BinaryReader reader)
         {
@@ -142,7 +142,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.5.5. global.set
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.GlobalAddrs.Contains(Index),
@@ -160,8 +160,9 @@ namespace Wacs.Core.Instructions
             //7.
             var val = context.OpStack.PopType(glob.Type.ContentType);
             SetGlobal(context, val);
-            return 1;
         }
+
+        public Action<ExecContext, Value> GetFunc => SetGlobal;
 
         public void SetGlobal(ExecContext context, Value value)
         {
@@ -179,8 +180,6 @@ namespace Wacs.Core.Instructions
             //8.
             glob.Value = value;
         }
-        
-        public Action<ExecContext, Value> GetFunc => SetGlobal;
     }
     
 }

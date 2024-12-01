@@ -62,7 +62,7 @@ namespace Spec.Test
                 }
             }
         }
-        
+
         [Theory]
         [ClassData(typeof(WastJsonTestData))]
         public void RunWastTranspiled(WastJson.WastJson file)

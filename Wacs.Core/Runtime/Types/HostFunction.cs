@@ -16,7 +16,9 @@
 
 using System;
 using System.Reflection;
+using System.Threading.Tasks;
 using Wacs.Core.Attributes;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime.Types
@@ -45,15 +47,17 @@ namespace Wacs.Core.Runtime.Types
         /// @Spec 4.5.3.2. Host Functions
         /// Initializes a new instance of the <see cref="HostFunction"/> class.
         /// </summary>
+        /// <param name="id">The bound export name</param>
         /// <param name="type">The function type.</param>
         /// <param name="delType">The System.Type of the delegate must match type.</param>
         /// <param name="hostFunction">The delegate representing the host function.</param>
-        /// <param name="passCtx">True if the specified function type had Store as the first type</param>
-        public HostFunction((string module, string entity) id, FunctionType type, Type delType, Delegate hostFunction)
+        /// <param name="isAsync">True if the function returns a System.Threading.Task</param>
+        public HostFunction((string module, string entity) id, FunctionType type, Type delType, Delegate hostFunction, bool isAsync)
         {
             Type = type;
             _hostFunction = hostFunction;
             _invoker = delType.GetMethod("Invoke")!;
+            IsAsync = isAsync;
             (ModuleName, Name) = id;
 
             var invokerParams = _invoker.GetParameters();
@@ -85,6 +89,9 @@ namespace Wacs.Core.Runtime.Types
         public bool PassExecContext { get; set; }
 
         public string ModuleName { get; }
+
+        public bool IsAsync { get; }
+
         public string Name { get; }
         public void SetName(string value) {}
         public string Id => $"{ModuleName}.{Name}";
@@ -243,15 +250,61 @@ namespace Wacs.Core.Runtime.Types
                 args[i] = _parameterConversions[i]?.Invoke(args[i]) ?? args[i];
             }
 
+            if (IsAsync)
+                throw new WasmRuntimeException("Cannot synchronously execute Async Function");
             try
             {
                 var returnValue = _invoker.Invoke(_hostFunction, args);
+                int outArgs = Type.ResultType.Types.Length;
+                int j = 0;
+                if (_captureReturn)
+                {
+                    outArgs -= 1;
+                    if (_resultConversions[j] != null)
+                        returnValue = _resultConversions[j]?.Invoke(returnValue) ?? returnValue;
+                    opStack.PushValue(new Value(returnValue));
+                    ++j;
+                }
+                
+                int idx = args.Length - outArgs;
+                for (; idx < args.Length; ++idx, ++j)
+                {
+                    var returnVal = args[idx];
+                    if (_resultConversions[j] != null)
+                        returnVal = _resultConversions[j]?.Invoke(returnVal) ?? returnVal;
+                    opStack.PushValue(new Value(returnVal));
+                }
+            }
+            catch (TargetInvocationException ex)
+            {
+                throw ex.InnerException!;
+            }   
+        }
+
+        public async ValueTask InvokeAsync(object[] args, OpStack opStack)
+        {
+            for (int i = 0; i < _parameterConversions.Length; ++i)
+            {
+                args[i] = _parameterConversions[i]?.Invoke(args[i]) ?? args[i];
+            }
+            
+            if (!IsAsync)
+                throw new WasmRuntimeException("Cannot asynchronously execute Synchronous Function");
+
+            try
+            {
+                var task = _invoker.Invoke(_hostFunction, args) as Task;
+                await task;
 
                 int outArgs = Type.ResultType.Types.Length;
                 int j = 0;
                 if (_captureReturn)
                 {
                     outArgs -= 1;
+                        
+                    var resultProperty = task.GetType().GetProperty("Result");
+                    var returnValue = resultProperty?.GetValue(task) ?? null;
+                        
                     if (_resultConversions[j] != null)
                         returnValue = _resultConversions[j]?.Invoke(returnValue) ?? returnValue;
                     opStack.PushValue(new Value(returnValue));

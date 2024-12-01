@@ -15,21 +15,17 @@
 //  */
 
 using System;
-using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Types;
+using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Transpiler
 {
     public class InstAggregate1_0<TIn> : InstructionBase
     {
-        private readonly Func<ExecContext, TIn> _inA;
         private readonly Action<ExecContext, TIn> _compute;
-        
-        public int CalculateSize => Size;
-        public readonly int Size;
-        
+        private readonly Func<ExecContext, TIn> _inA;
+
         public InstAggregate1_0(ITypedValueProducer<TIn> inA, INodeConsumer<TIn> consumer)
         {
             _inA = inA.GetFunc;
@@ -37,20 +33,16 @@ namespace Wacs.Core.Instructions.Transpiler
 
             Size = inA.CalculateSize() + 1;
         }
-
-        public void Run(ExecContext context) => _compute(context, _inA(context));
-        
-        public Action<ExecContext> GetFunc => Run;
         public override ByteCode Op => OpCode.Aggr;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(false, "Validation of transpiled instructions not supported.");
         }
 
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
-            Run(context);
-            return Size;
+            _compute(context, _inA(context));
         }
     }
     

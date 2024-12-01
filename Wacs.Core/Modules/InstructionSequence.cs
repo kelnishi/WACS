@@ -33,13 +33,13 @@ namespace Wacs.Core
         public static readonly InstructionSequence Empty = new(new List<IInstruction>());
 
         //public for direct array access on critical path
-        public readonly IInstruction[] _instructions;
+        public readonly InstructionBase[] _instructions;
 
         public readonly int Count;
 
         public InstructionSequence(IList<IInstruction> list)
         {
-            _instructions = list.ToArray();
+            _instructions = list.Cast<InstructionBase>().ToArray();
             Count = _instructions.Length;
         }
 

@@ -16,22 +16,23 @@
 
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions
 {
     public class InstExpressionProxy : BlockTarget
     {
-        private ByteCode _op = OpCode.Expr;
-        public override ByteCode Op => _op;
-        public override void Validate(IWasmValidationContext context) { }
-        public override int Execute(ExecContext context) => 0;
+        private readonly ByteCode _op = OpCode.Expr;
 
         public InstExpressionProxy(Label label)
         {
             EnclosingBlock = this;
             Label = label;
         }
+
+        public override ByteCode Op => _op;
+        public override void Validate(IWasmValidationContext context) { }
+
+        public override void Execute(ExecContext context) { }
     }
 }

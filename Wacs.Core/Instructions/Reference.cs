@@ -25,9 +25,8 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.2.1. ref.null t
-        public override int Execute(ExecContext context) {
+        public override void Execute(ExecContext context) {
             context.OpStack.PushRef(Value.RefNull(Type));
-            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader)
@@ -52,14 +51,13 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.2.2. ref.is_null
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             context.Assert( context.OpStack.Peek().IsRef,
                 $"Instruction ref.is_null failed. Expected reftype on top of the stack.");
             Value val = context.OpStack.PopRefType();
             int booleanResult = val.IsNullRef ? 1 : 0;
             context.OpStack.PushI32(booleanResult);
-            return 1;
         }
 
         public static readonly InstRefIsNull Inst = new InstRefIsNull();
@@ -87,13 +85,12 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.2.3. ref.func x
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             context.Assert( context.Frame?.Module.FuncAddrs.Contains(FunctionIndex),
                 $"Instruction ref.func failed. Could not find function address in the context");
             var a = context.Frame!.Module.FuncAddrs[FunctionIndex];
             context.OpStack.PushFuncref(new Value(ValType.Funcref, a.Value));
-            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader)

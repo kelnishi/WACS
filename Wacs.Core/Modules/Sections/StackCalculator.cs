@@ -14,7 +14,6 @@
 //  * limitations under the License.
 //  */
 
-using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
@@ -113,7 +112,11 @@ namespace Wacs.Core
     public class StackCalculator: IWasmValidationContext
     {
         private static readonly object NonNull = new();
-        
+
+        private static Stack<Value> _aside = new();
+
+        internal int stackHeight = 0;
+
         public StackCalculator(ModuleInstance moduleInst, Module.Function func)
         {
             Types = new TypesSpace(moduleInst.Repr);
@@ -144,22 +147,6 @@ namespace Wacs.Core
             };
         }
 
-        internal int stackHeight = 0;
-        public void Clear()
-        {
-            stackHeight = 0;
-        }
-        public void Push(ValType val)
-        {
-            stackHeight += 1;
-        }
-
-        public Value Pop(ValType type)
-        {
-            stackHeight -= 1;
-            return new Value(type);
-        }
-        
         public RuntimeAttributes Attributes { get; }
         public IValidationOpStack OpStack { get; }
         public FuncIdx FunctionIndex { get; }
@@ -173,6 +160,7 @@ namespace Wacs.Core
         public LocalsSpace Locals { get; }
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
+
         public bool ContainsLabel(uint label)
         {
             return true;
@@ -195,7 +183,6 @@ namespace Wacs.Core
             OpStack.PushResult(types.ParameterTypes);
         }
 
-        private static Stack<Value> _aside = new();
         public ValidationControlFrame PopControlFrame()
         {
             if (ControlStack.Count == 0)
@@ -220,5 +207,21 @@ namespace Wacs.Core
 
 
         public void ValidateBlock(Block instructionBlock, int index = 0) {}
+
+        public void Clear()
+        {
+            stackHeight = 0;
+        }
+
+        public void Push(ValType val)
+        {
+            stackHeight += 1;
+        }
+
+        public Value Pop(ValType type)
+        {
+            stackHeight -= 1;
+            return new Value(type);
+        }
     }
 }

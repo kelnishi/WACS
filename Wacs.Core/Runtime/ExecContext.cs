@@ -19,9 +19,8 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.IO;
 using System.Linq;
-using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
@@ -46,18 +45,20 @@ namespace Wacs.Core.Runtime
         private readonly Stack<Frame> _callStack;
         private readonly ObjectPool<Frame> _framePool;
         private readonly InstructionSequence _hostReturnSequence;
-        
+
         private readonly ArrayPool<Value> _localsDataPool;
         public readonly RuntimeAttributes Attributes;
+        public readonly Stopwatch InstructionTimer = new();
         public readonly OpStack OpStack;
+
+        public readonly Stopwatch ProcessTimer = new();
 
         public readonly Store Store;
 
-        private Stack<Value> _asideVals = new();
-
         private InstructionSequence _currentSequence;
+        private int _sequenceCount;
         private int _sequenceIndex;
-        public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
+        private InstructionBase[] _sequenceInstructions;
 
         public Frame Frame = NullFrame;
 
@@ -79,17 +80,17 @@ namespace Wacs.Core.Runtime
             _hostReturnSequence = InstructionSequence.Empty;
             
             _currentSequence = _hostReturnSequence;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = -1;
 
             OpStack = new(Attributes.MaxOpStack);
         }
 
-        public Stopwatch ProcessTimer { get; set; } = new();
-        public Stopwatch InstructionTimer { get; set; } = new();
-
         public IInstructionFactory InstructionFactory => Attributes.InstructionFactory;
 
         public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[default]];
+        public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
 
         [Conditional("STRICT_EXECUTION")]
         public void Assert([NotNull] object? objIsNotNull, string message)
@@ -169,31 +170,33 @@ namespace Wacs.Core.Runtime
 
             Frame = NullFrame;
             _currentSequence = _hostReturnSequence;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = -1;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void EnterSequence(InstructionSequence seq)
+        public void EnterSequence(InstructionSequence seq)
         {
             _currentSequence = seq;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = -1;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void ResumeSequence(InstructionPointer pointer)
         {
             _currentSequence = pointer.Sequence;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = pointer.Index;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void FastForwardSequence()
         {
             //Go to penultimate instruction since we pre-increment on pointer advance.
-            _sequenceIndex = _currentSequence.Count - 2;
+            _sequenceIndex = _sequenceCount - 2;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void RewindSequence()
         {
             //Go back to the first instruction in the sequence
@@ -207,7 +210,13 @@ namespace Wacs.Core.Runtime
             Frame.PushLabel(target);
             
             //Sets the Pointer to the start of the block sequence
-            EnterSequence(block.Instructions);
+            // EnterSequence(block.Instructions);
+            
+            //Manually inline EnterSequence
+            _currentSequence = block.Instructions;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
+            _sequenceIndex = -1;
         }
 
         // @Spec 4.4.9.2. Exit Block
@@ -216,91 +225,84 @@ namespace Wacs.Core.Runtime
             var addr = Frame.PopLabels(0);
             // We manage separate stacks, so we don't need to relocate the operands
             // var vals = OpStack.PopResults(label.Type);
-            ResumeSequence(addr);
+            
+            // ResumeSequence(addr);
+            
+            //Manually inline ResumeSequence
+            _currentSequence = addr.Sequence;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
+            _sequenceIndex = addr.Index;
         }
 
         // @Spec 4.4.10.1 Function Invocation
-        public void Invoke(FuncAddr addr)
+        public async Task InvokeAsync(FuncAddr addr)
         {
             //1.
             Assert( Store.Contains(addr),
                 $"Failure in Function Invocation. Address does not exist {addr}");
+            
             //2.
             var funcInst = Store[addr];
             switch (funcInst)
             {
                 case FunctionInstance wasmFunc:
-                    Invoke(wasmFunc, wasmFunc.Index);
+                    wasmFunc.Invoke(this);
                     return;
                 case HostFunction hostFunc:
-                    Invoke(hostFunc);
-                    break;
+                {
+                    var funcType = hostFunc.Type;
+            
+                    //Fetch the parameters
+                    OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
+
+                    if (hostFunc.PassExecContext)
+                    {
+                        hostFunc.ParameterBuffer[0] = this;
+                    }
+                    if (hostFunc.IsAsync)
+                    {
+                        //Pass them
+                        await hostFunc.InvokeAsync(hostFunc.ParameterBuffer, OpStack);
+                    }
+                    else
+                    {
+                        //Pass them
+                        hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
+                    }
+                } return;
             }
         }
 
-        private void Invoke(FunctionInstance wasmFunc, FuncIdx idx)
+        public void Invoke(FuncAddr addr)
         {
-            //3.
-            var funcType = wasmFunc.Type;
-            //4.
-            var t = wasmFunc.Locals;
-            //5. *Instructions will be handled in EnterSequence below
-            //var seq = wasmFunc.Definition.Body;
-            //6.
-            Assert( OpStack.Count >= funcType.ParameterTypes.Arity,
-                $"Function invocation failed. Operand Stack underflow.");
-            //7.
-            Assert(_asideVals.Count == 0,
-                $"Shared temporary stack had values left in it.");
-            OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
-            //8.
-            //Push the frame and operate on the frame on the stack.
-            var frame = ReserveFrame(wasmFunc.Module, funcType, idx, t);
-            // frame.FuncId = wasmFunc.Id;
-                
-            int li = 0;
-            int localCount = funcType.ParameterTypes.Arity + t.Length;
-            //Load parameters
-            while (_asideVals.Count > 0)
+            //1.
+            Assert( Store.Contains(addr),
+                $"Failure in Function Invocation. Address does not exist {addr}");
+            
+            //2.
+            var funcInst = Store[addr];
+            if (funcInst.IsAsync)
+                throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
+            
+            switch (funcInst)
             {
-                // frame.Locals.Set((LocalIdx)li, _asideVals.Pop());
-                frame.Locals.Data[li] = _asideVals.Pop();
-                li += 1;
+                case FunctionInstance wasmFunc:
+                    wasmFunc.Invoke(this);
+                    return;
+                case HostFunction hostFunc:
+                {
+                    var funcType = hostFunc.Type;
+                    //Fetch the parameters
+                    OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
+                    if (hostFunc.PassExecContext)
+                    {
+                        hostFunc.ParameterBuffer[0] = this;
+                    }
+                    //Pass them
+                    hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
+                } return;
             }
-            //Set the Locals to default
-            for (int ti = 0; li < localCount; ++li, ++ti)
-            {
-                // frame.Locals.Set((LocalIdx)li, new Value(t[ti]));
-                frame.Locals.Data[li] = new Value(t[ti]);
-            }
-
-            //9.
-            PushFrame(frame);
-            
-            //10.
-            frame.PushLabel(wasmFunc.Body.LabelTarget); 
-            
-            frame.ReturnLabel.Arity = funcType.ResultType.Arity;
-            frame.ReturnLabel.Instruction = OpCode.Func;
-            frame.ReturnLabel.ContinuationAddress = new InstructionPointer(_currentSequence, _sequenceIndex);
-            frame.ReturnLabel.StackHeight = 0;
-            
-            
-            EnterSequence(wasmFunc.Body.Instructions);
-        }
-
-        private void Invoke(HostFunction hostFunc)
-        {
-            var funcType = hostFunc.Type;
-
-            //Write the ExecContext to the first parameter if needed
-            var paramBuf = hostFunc.GetParameterBuf(this);
-            
-            //Fetch the parameters
-            OpStack.PopScalars(funcType.ParameterTypes, paramBuf);
-
-            //Pass them
-            hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
         }
 
         // @Spec 4.4.10.2. Returning from a function
@@ -316,17 +318,24 @@ namespace Wacs.Core.Runtime
             var address = PopFrame();
             //7. split stack, values left in place 
             //8.
-            ResumeSequence(address);
+            
+            //ResumeSequence(address);
+            
+            //Manually inline ResumeSequence
+            _currentSequence = address.Sequence;
+            _sequenceCount = _currentSequence.Count;
+            _sequenceInstructions = _currentSequence._instructions;
+            _sequenceIndex = address.Index;
         }
 
-        public IInstruction? Next()
+
+        public InstructionBase? Next()
         {
             //Advance to the next instruction first.
-            if (++_sequenceIndex >= _currentSequence.Count)
-                return null;
-            
-            //Critical path, using direct array access
-            return _currentSequence._instructions[_sequenceIndex];
+            return (++_sequenceIndex < _sequenceCount)
+                //Critical path, using direct array access
+                ? _sequenceInstructions[_sequenceIndex]
+                : null;
         }
 
         public List<(string, int)> ComputePointerPath()

@@ -25,8 +25,8 @@ namespace Wacs.Core.Runtime
     public class OpStack
     {
         private readonly Stack<Value> _stack;
-        public int Count;
         private readonly int _stackLimit;
+        public int Count;
 
         public OpStack(int limit)
         {
@@ -212,9 +212,9 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public void PopScalars(ResultType type, Span<object> targetBuf)
+        public void PopScalars(ResultType type, object[] targetBuf, int firstParameter)
         {
-            for (int i = type.Arity - 1; i >= 0; --i)
+            for (int i = type.Arity - 1 + firstParameter; i >= firstParameter; --i)
             {
                 targetBuf[i] = PopAny().Scalar;
             }
@@ -225,6 +225,14 @@ namespace Wacs.Core.Runtime
             for (int i = type.Arity - 1; i >= 0; --i)
             {
                 targetBuf[i] = PopAny();
+            }
+        }
+        
+        public void PushValues(Value[] scalars)
+        {
+            for (int i = 0, l = scalars.Length; i < l; ++i)
+            {
+                PushValue(scalars[i]);
             }
         }
 

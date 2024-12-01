@@ -22,18 +22,26 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Transpiler
 {
-    public class InstAggregate1_1<TIn,TOut> : InstructionBase, ITypedValueProducer<TOut>
+    public class InstAggregate3_1<TIn1,TIn2,TIn3,TOut> : InstructionBase, ITypedValueProducer<TOut>
         where TOut : struct
     {
-        private readonly Func<ExecContext, TIn, TOut> _compute;
-        private readonly Func<ExecContext, TIn> _in1;
+        private readonly Func<ExecContext, TIn1, TIn2, TIn3, TOut> _compute;
+        private readonly Func<ExecContext, TIn1> _in1;
+        private readonly Func<ExecContext, TIn2> _in2;
+        private readonly Func<ExecContext, TIn3> _in3;
         private readonly Func<ExecContext, Value> _wrap;
-
-        public InstAggregate1_1(ITypedValueProducer<TIn> in1, INodeComputer<TIn, TOut> compute)
+        
+        public InstAggregate3_1(
+            ITypedValueProducer<TIn1> in1,
+            ITypedValueProducer<TIn2> in2,
+            ITypedValueProducer<TIn3> in3,
+            INodeComputer<TIn1,TIn2,TIn3,TOut> compute)
         {
             _in1 = in1.GetFunc;
+            _in2 = in2.GetFunc;
+            _in3 = in3.GetFunc;
             _compute = compute.GetFunc;
-            Size = in1.CalculateSize() + 1;
+            Size = in1.CalculateSize() + in2.CalculateSize() + 1;
 
             if (typeof(TOut) == typeof(int)) _wrap = new WrapValueI32((ITypedValueProducer<int>)this).GetFunc;
             else if (typeof(TOut) == typeof(uint)) _wrap = new WrapValueU32((ITypedValueProducer<uint>)this).GetFunc;
@@ -52,7 +60,7 @@ namespace Wacs.Core.Instructions.Transpiler
 
         public Func<ExecContext, TOut> GetFunc => Run;
 
-        public TOut Run(ExecContext context) => _compute(context, _in1(context));
+        public TOut Run(ExecContext context) => _compute(context, _in1(context), _in2(context), _in3(context));
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -64,4 +72,5 @@ namespace Wacs.Core.Instructions.Transpiler
             context.OpStack.PushValue(_wrap(context));
         }
     }
+    
 }

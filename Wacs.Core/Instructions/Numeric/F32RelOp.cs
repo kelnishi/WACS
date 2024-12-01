@@ -15,7 +15,6 @@
 //  */
 
 using System;
-using System.IO;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -44,30 +43,31 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly InstF32RelOp F32Ge = new(OpCode.F32Ge, ExecuteF32Ge,
             NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
 
-        public override ByteCode Op { get; }
-        
+        private readonly Func<float,float,int> _execute;
+
         private readonly NumericInst.ValidationDelegate _validate;
-        private Func<float,float,int> _execute;
-        
+
         private InstF32RelOp(ByteCode op, Func<float,float,int> execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
         }
-        
+
+        public override ByteCode Op { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             float i2 = context.OpStack.PopF32();
             float i1 = context.OpStack.PopF32();
             int result = _execute(i1, i2);
             context.OpStack.PushI32(result);
-            return 1;
         }
-        
+
         public Func<ExecContext, float, float, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
-        
+
         private static int ExecuteF32Eq(float i1, float i2) =>
             i1 == i2 ? 1 : 0;
 

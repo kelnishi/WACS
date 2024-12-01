@@ -27,9 +27,9 @@ namespace Wacs.WASIp1
     public class Sock : IBindable
     {
         private readonly State _state;
-        
+
         public Sock(State state) => _state = state;
-        
+
         public void BindToRuntime(WasmRuntime runtime)
         {
             string module = "wasi_snapshot_preview1";
@@ -63,6 +63,5 @@ namespace Wacs.WASIp1
         {
             return ErrNo.NotSup;
         }
-        
     }
 }

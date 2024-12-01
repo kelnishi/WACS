@@ -70,7 +70,7 @@ namespace Wacs.Core
 
         public Value PopType(ValType type) => _context.Pop(type);
         public Value PopAny() => _context.Pop(ValType.Nil);
-        
+
         public void PopValues(ResultType types, ref Stack<Value> aside)
         {
             foreach (var type in types.Types.Reverse())
@@ -114,6 +114,8 @@ namespace Wacs.Core
     public class FakeContext : IWasmValidationContext
     {
         private static readonly object NonNull = new();
+
+        private static Stack<Value> _aside = new();
         private readonly FakeOpStack _opStack;
 
         private readonly Stack<string> fakeStack = new();
@@ -156,7 +158,7 @@ namespace Wacs.Core
 
         public IValidationOpStack OpStack => _opStack;
 
-        
+
         public void Assert(bool factIsTrue, string formatString, params object[] args) { }
         public void Assert([NotNull] object? objIsNotNull, string formatString, params object[] args) { objIsNotNull = NonNull; }
 
@@ -179,7 +181,6 @@ namespace Wacs.Core
             OpStack.PushResult(types.ParameterTypes);
         }
 
-        private static Stack<Value> _aside = new();
         public ValidationControlFrame PopControlFrame()
         {
             if (ControlStack.Count == 0)
@@ -233,7 +234,7 @@ namespace Wacs.Core
                 {
                     case Module.ImportDesc.FuncDesc funcDesc:
                         var funcSig = moduleInst.Types[funcDesc.TypeIndex];
-                        var funcAddr = store.AllocateHostFunction(entityId, funcSig, typeof(FakeHostDelegate), fakeHostFunc);
+                        var funcAddr = store.AllocateHostFunction(entityId, funcSig, typeof(FakeHostDelegate), fakeHostFunc, false);
                         moduleInst.FuncAddrs.Add(funcAddr);
                         break;
                     default: break;
