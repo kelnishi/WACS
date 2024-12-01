@@ -85,7 +85,29 @@ namespace Wacs.Core.Runtime.Transpiler
                     case InstIf instIf:
                         var newIfSeq = OptimizeSequence(instIf.GetBlock(0).Instructions);
                         var newElseSeq = OptimizeSequence(instIf.GetBlock(1).Instructions);
-                        var newIf = new InstIf().Immediate(instIf.Type, newIfSeq, newElseSeq);
+
+                        BlockTarget? newIf = null;
+                        if (stack.Count > 0)
+                        {
+                            var prevInst = stack.Pop();
+                            var intProducer = prevInst switch {
+                                ITypedValueProducer<Value> p => new UnwrapValueI32(p),
+                                ITypedValueProducer<uint> p => new CastToI32<uint>(p),
+                                ITypedValueProducer<int> p => p,
+                                _ => null
+                            };
+                            if (intProducer != null)
+                            {
+                                newIf = new InstCompoundIf(instIf.Type, newIfSeq, newElseSeq, intProducer);
+                            }
+                            else
+                            {
+                                stack.Push(prevInst);
+                            }
+                        }
+                        if (newIf == null)
+                            newIf = new InstIf().Immediate(instIf.Type, newIfSeq, newElseSeq);
+                        
                         //copy stackheight
                         newIf.Label = new Label(instIf.Label);
 
