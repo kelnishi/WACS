@@ -67,7 +67,7 @@ namespace Wacs.WASIp1
                     return ErrNo.Success;
                 case ClockId.ProcessCputimeId:
                     //100ns
-                    mem.WriteInt64(resolutionPtr,100ul);
+                    mem.WriteInt64(resolutionPtr,1ul);
                     return ErrNo.Success;
                 case ClockId.ThreadCputimeId:
                     return ErrNo.NoSys;
