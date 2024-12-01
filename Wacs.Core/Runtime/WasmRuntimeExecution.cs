@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
@@ -529,7 +530,7 @@ namespace Wacs.Core.Runtime
 
         private void PrintStats(InvokerOptions options)
         {
-            long procTicks = Context.ProcessTimer.ElapsedTicks; //ns
+            long procTicks = Context.ProcessTimer.ElapsedTicks;
             long totalExecs = options.CollectStats == StatsDetail.Instruction
                 ? Context.Stats.Values.Sum(dc => dc.count)
                 : Context.steps;
@@ -538,9 +539,11 @@ namespace Wacs.Core.Runtime
                 : Context.InstructionTimer.ElapsedTicks;
             long overheadTicks = procTicks - execTicks;
 
-            TimeSpan totalTime = new TimeSpan(procTicks/100); //100ns
-            TimeSpan execTime = new TimeSpan(execTicks/100);
-            TimeSpan overheadTime = new TimeSpan(overheadTicks/100);
+            long scale = Stopwatch.Frequency / 1000_000_0; //100ns ticks
+
+            TimeSpan totalTime = new TimeSpan(procTicks/scale);
+            TimeSpan execTime = new TimeSpan(execTicks/scale);
+            TimeSpan overheadTime = new TimeSpan(overheadTicks/scale);
             double overheadPercent =  100.0 * overheadTicks / procTicks;
             double execPercent = 100.0 * execTicks / procTicks;
             string overheadLabel = $" overhead:({overheadPercent:#0.###}%) {overheadTime.TotalSeconds:#0.###}s";
