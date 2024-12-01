@@ -20,7 +20,7 @@
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <RepositoryType>git</RepositoryType>
-    <TargetFrameworks>netstandard2.1;net8.0</TargetFrameworks>
+    <TargetFrameworks>net8.0;netstandard2.1;net6.0</TargetFrameworks>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 

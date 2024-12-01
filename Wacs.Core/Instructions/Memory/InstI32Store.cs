@@ -58,10 +58,10 @@ namespace Wacs.Core.Instructions.Memory
             //13,14,15
             Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
-#if NETSTANDARD2_1
-            MemoryMarshal.Write(bs, ref cU32);
-#else
+#if NET8_0
             MemoryMarshal.Write(bs, in cU32);
+#else
+            MemoryMarshal.Write(bs, ref cU32);
 #endif
         }
 
@@ -144,10 +144,10 @@ namespace Wacs.Core.Instructions.Memory
             Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
             ushort cI16 = (ushort)cU32;
-#if NETSTANDARD2_1
-            MemoryMarshal.Write(bs, ref cI16);
-#else
+#if NET8_0
             MemoryMarshal.Write(bs, in cI16); // Assume you can change to 'in'
+#else
+            MemoryMarshal.Write(bs, ref cI16);
 #endif
         }
 
