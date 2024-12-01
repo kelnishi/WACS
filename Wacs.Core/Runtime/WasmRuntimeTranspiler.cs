@@ -22,7 +22,7 @@ namespace Wacs.Core.Runtime
     public partial class WasmRuntime
     {
         public bool TranspileModules = false;
-        
+
         public void TranspileModule(ModuleInstance moduleInstance)
         {
             foreach (var funcAddr in moduleInstance.FuncAddrs)

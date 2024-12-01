@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Wacs.Core.Runtime;
@@ -32,13 +33,12 @@ namespace Wacs.Core.Types
             set => _space[(int)idx.Value] = value;
         }
 
+        public IEnumerator<FuncAddr> GetEnumerator() => _space.GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
         public bool Contains(FuncIdx idx) => idx.Value < _space.Count;
 
         public void Add(FuncAddr element) => _space.Add(element);
-        
-        public IEnumerator<FuncAddr> GetEnumerator() => _space.GetEnumerator();
-        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
-        
     }
 
     public class TableAddrs
@@ -58,8 +58,8 @@ namespace Wacs.Core.Types
 
     public class MemAddrs
     {
-        private bool _final;
         private List<MemAddr>? _build = new();
+        private bool _final;
         private MemAddr[]? _space;
 
         public MemAddr this[MemIdx idx] => _space![(int)idx.Value];
@@ -251,10 +251,9 @@ namespace Wacs.Core.Types
     public struct LocalsSpace
     {
         public Value[]? Data;
-        private int _capacity;
 
-        public int Capacity => _capacity;
-        
+        public int Capacity { get; }
+
         public Value Get(LocalIdx idx)
         {
             if (Data == null)
@@ -273,7 +272,7 @@ namespace Wacs.Core.Types
 
         public LocalsSpace(Value[] data, ValType[] parameters, ValType[] locals)
         {
-            _capacity = parameters.Length + locals.Length;
+            Capacity = parameters.Length + locals.Length;
             Data = data;
             int idx = 0;
             foreach (var t in parameters)
@@ -287,7 +286,7 @@ namespace Wacs.Core.Types
         }
 
         public bool Contains(LocalIdx idx) =>
-            idx.Value < _capacity;
+            idx.Value < Capacity;
     }
 
     public class ElementsSpace : AbstractIndexSpace<ElemIdx, Module.ElementSegment>

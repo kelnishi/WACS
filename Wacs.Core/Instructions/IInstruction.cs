@@ -15,6 +15,7 @@
 //  */
 
 using System.IO;
+using System.Threading.Tasks;
 using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -32,10 +33,19 @@ namespace Wacs.Core.Instructions
         void Validate(IWasmValidationContext context);
 
         /// <summary>
-        /// Executes the instruction within the given execution context.
+        /// Synchronously executes the instruction within the given execution context.
         /// </summary>
         /// <param name="context">The execution context in which to execute the instruction.</param>
-        int Execute(ExecContext context);
+        /// <returns>The effective number of wasm instructions executed</returns>
+        void Execute(ExecContext context);
+
+        /// <summary>
+        /// Asynchronously wraps the Execute function.
+        /// Individual instructions may override to perform async functions.
+        /// </summary>
+        /// <param name="context"></param>
+        /// <returns>ValueTask containing the effective number of wasm instructions executed</returns>
+        public ValueTask ExecuteAsync(ExecContext context);
 
         /// <summary>
         /// Parses an instruction from a binary reader.

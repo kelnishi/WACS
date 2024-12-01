@@ -28,6 +28,11 @@ namespace Wacs.Core.Types
     /// </summary>
     public class TableType : ICloneable, IRenderable
     {
+        /// <summary>
+        /// The limits specifying the minimum and optional maximum number of elements.
+        /// </summary>
+        public Limits Limits = null!;
+
         private TableType()
         {
         }
@@ -37,11 +42,6 @@ namespace Wacs.Core.Types
 
         private TableType(BinaryReader reader) =>
             (ElementType, Limits) = (ReferenceTypeParser.Parse(reader), Limits.Parse(reader));
-
-        /// <summary>
-        /// The limits specifying the minimum and optional maximum number of elements.
-        /// </summary>
-        public Limits Limits = null!;
 
         /// <summary>
         /// The element type of the table (e.g., funcref or externref).

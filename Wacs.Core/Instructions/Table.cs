@@ -29,8 +29,8 @@ namespace Wacs.Core.Instructions
     // 0x25
     public class InstTableGet : InstructionBase
     {
-        public override ByteCode Op => OpCode.TableGet;
         private TableIdx X;
+        public override ByteCode Op => OpCode.TableGet;
 
         // @Spec 3.3.6.1. table.get
         public override void Validate(IWasmValidationContext context)
@@ -43,9 +43,9 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.1. table.get 
-        public override int Execute(ExecContext context) => ExecuteInstruction(context, X);
+        public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
 
-        public static int ExecuteInstruction(ExecContext context, TableIdx tableIndex)
+        public static void ExecuteInstruction(ExecContext context, TableIdx tableIndex)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(tableIndex),
@@ -73,7 +73,6 @@ namespace Wacs.Core.Instructions
             var val = tab.Elements[(int)i];
             //10.
             context.OpStack.PushValue(val);
-            return 1;
         }
 
         // @Spec 5.4.5. Table Instructions
@@ -89,8 +88,8 @@ namespace Wacs.Core.Instructions
     // 0x26
     public class InstTableSet : InstructionBase
     {
-        public override ByteCode Op => OpCode.TableSet;
         private TableIdx X;
+        public override ByteCode Op => OpCode.TableSet;
 
         // @Spec 3.3.6.2. table.set
         public override void Validate(IWasmValidationContext context)
@@ -103,9 +102,9 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.2. table.set
-        public override int Execute(ExecContext context) => ExecuteInstruction(context, X);
+        public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
 
-        public static int ExecuteInstruction(ExecContext context, TableIdx tableIndex)
+        public static void ExecuteInstruction(ExecContext context, TableIdx tableIndex)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(tableIndex),
@@ -136,7 +135,6 @@ namespace Wacs.Core.Instructions
 
             //11.
             tab.Elements[(int)i] = val;
-            return 1;
         }
 
         // @Spec 5.4.5. Table Instructions
@@ -152,9 +150,9 @@ namespace Wacs.Core.Instructions
     // 0xFC0C
     public class InstTableInit : InstructionBase
     {
-        public override ByteCode Op => ExtCode.TableInit;
         private TableIdx X;
         private ElemIdx Y;
+        public override ByteCode Op => ExtCode.TableInit;
 
         // @Spec 3.3.6.7. table.init x y
         public override void Validate(IWasmValidationContext context)
@@ -173,7 +171,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.7. table.init x y
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(X),
@@ -219,7 +217,7 @@ namespace Wacs.Core.Instructions
                 }
                 else if (n == 0)
                 {
-                    return 1;
+                    return;
                 }
 
                 //18.
@@ -268,8 +266,8 @@ namespace Wacs.Core.Instructions
     // 0xFC0F
     public class InstElemDrop : InstructionBase
     {
-        public override ByteCode Op => ExtCode.ElemDrop;
         private ElemIdx X;
+        public override ByteCode Op => ExtCode.ElemDrop;
 
         // @Spec 3.3.6.8. elem.drop x
         public override void Validate(IWasmValidationContext context)
@@ -279,7 +277,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.8. elem.drop x
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.ElemAddrs.Contains(X),
@@ -291,7 +289,6 @@ namespace Wacs.Core.Instructions
                  $"Instruction elem.drop failed. Element {a} was not in the Store.");
             //5.
             context.Store.DropElement(a);
-            return 1;
         }
 
         // @Spec 5.4.5. Table Instructions
@@ -313,9 +310,9 @@ namespace Wacs.Core.Instructions
     // 0xFC0E
     public class InstTableCopy : InstructionBase
     {
-        public override ByteCode Op => ExtCode.TableCopy;
-        private TableIdx SrcY;
         private TableIdx DstX;
+        private TableIdx SrcY;
+        public override ByteCode Op => ExtCode.TableCopy;
 
         // @Spec 3.3.6.6. table.copy
         public override void Validate(IWasmValidationContext context)
@@ -334,7 +331,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.6. table.copy
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(DstX),
@@ -383,7 +380,7 @@ namespace Wacs.Core.Instructions
                 //17.
                 else if (n == 0)
                 {
-                    return 1;
+                    return;
                 }
 
                 //18.
@@ -439,8 +436,8 @@ namespace Wacs.Core.Instructions
     // 0xFC0F
     public class InstTableGrow : InstructionBase
     {
-        public override ByteCode Op => ExtCode.TableGrow;
         private TableIdx X;
+        public override ByteCode Op => ExtCode.TableGrow;
 
         // @Spec 3.3.6.4. table.grow x
         public override void Validate(IWasmValidationContext context)
@@ -454,7 +451,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.4. table.grow x
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(X),
@@ -490,7 +487,6 @@ namespace Wacs.Core.Instructions
                 const int err = -1;
                 context.OpStack.PushI32(err);
             }
-            return 1;
         }
 
         // @Spec 5.4.5. Table Instructions
@@ -506,8 +502,8 @@ namespace Wacs.Core.Instructions
     // 0xFC10
     public class InstTableSize : InstructionBase
     {
-        public override ByteCode Op => ExtCode.TableSize;
         private TableIdx X;
+        public override ByteCode Op => ExtCode.TableSize;
 
         // @Spec 3.3.6.3. table.size x
         public override void Validate(IWasmValidationContext context)
@@ -518,7 +514,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.3. table.size x
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(X),
@@ -535,7 +531,6 @@ namespace Wacs.Core.Instructions
             int sz = tab.Elements.Count;
             //7.
             context.OpStack.PushI32(sz);
-            return 1;
         }
 
         // @Spec 5.4.5. Table Instructions
@@ -551,8 +546,8 @@ namespace Wacs.Core.Instructions
     // 0xFC11
     public class InstTableFill : InstructionBase
     {
-        public override ByteCode Op => ExtCode.TableFill;
         private TableIdx X;
+        public override ByteCode Op => ExtCode.TableFill;
 
         // @Spec 3.3.6.5. table.fill
         public override void Validate(IWasmValidationContext context)
@@ -566,7 +561,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 4.4.6.5. table.fill
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.TableAddrs.Contains(X),
@@ -605,7 +600,7 @@ namespace Wacs.Core.Instructions
                 }
                 else if (n == 0)
                 {
-                    return 1;
+                    return;
                 }
 
                 //13.

@@ -14,7 +14,6 @@
 //  * limitations under the License.
 //  */
 
-using System;
 using System.Runtime.InteropServices;
 using Wacs.Core.Attributes;
 using Wacs.Core.Runtime;
@@ -44,10 +43,10 @@ namespace Wacs.WASIp1.Types
         public Value ToWasmType()
         {
             byte[] bytes = new byte[8];
-#if NETSTANDARD2_1
-            MemoryMarshal.Write(bytes, ref this);
-#else
+#if NET8_0
             MemoryMarshal.Write(bytes, in this);
+#else
+            MemoryMarshal.Write(bytes, ref this);
 #endif
             return MemoryMarshal.Read<ulong>(bytes);
         }

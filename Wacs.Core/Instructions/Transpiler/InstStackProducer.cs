@@ -22,36 +22,82 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Transpiler
 {
-    public class InstStackProducer<T> : InstructionBase, ITypedValueProducer<T>
-    where T : struct
+    public class InstStackProducerValue : InstructionBase, ITypedValueProducer<Value>
     {
-        public InstStackProducer()
+        public InstStackProducerValue()
         {
-            _type = typeof(T).ToValType();
+            Size = 0;
         }
-        
-        private readonly ValType _type;
 
-        public T FetchFromStack(ExecContext context)
+        public override ByteCode Op => OpCode.StackVal;
+
+        public Func<ExecContext, Value> GetFunc => FetchFromStack;
+
+        public int CalculateSize() => 0;
+
+        public Value FetchFromStack(ExecContext context)
         {
             //Get the type as a boxed scalar
-            var boxedValue = context.OpStack.PopType(_type).Scalar;
-            // Unbox with Convert.ChangeType
-            return (T)Convert.ChangeType(boxedValue, typeof(T));
+            return context.OpStack.PopAny();
         }
 
-        public Func<ExecContext, T> GetFunc => FetchFromStack;
-
-        public int CalculateSize() => 1;
-        public override ByteCode Op => OpCode.StackVal;
         public override void Validate(IWasmValidationContext context)
         {
-            context.OpStack.PopType(_type);
+            context.OpStack.PopAny();
         }
 
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context) {}
+    }
+    
+    public class InstStackProducerU32 : InstructionBase, ITypedValueProducer<uint>
+    {
+        public InstStackProducerU32()
         {
-            return 0;
+            Size = 0;
         }
+
+        public override ByteCode Op => OpCode.StackVal;
+
+        public Func<ExecContext, uint> GetFunc => FetchFromStack;
+
+        public int CalculateSize() => 0;
+
+        public uint FetchFromStack(ExecContext context)
+        {
+            return context.OpStack.PopU32();
+        }
+
+        public override void Validate(IWasmValidationContext context)
+        {
+            context.OpStack.PopI32();
+        }
+
+        public override void Execute(ExecContext context) {}
+    }
+    
+    public class InstStackProducerI32 : InstructionBase, ITypedValueProducer<int>
+    {
+        public InstStackProducerI32()
+        {
+            Size = 0;
+        }
+
+        public override ByteCode Op => OpCode.StackVal;
+
+        public Func<ExecContext, int> GetFunc => FetchFromStack;
+
+        public int CalculateSize() => 0;
+
+        public int FetchFromStack(ExecContext context)
+        {
+            return context.OpStack.PopI32();
+        }
+
+        public override void Validate(IWasmValidationContext context)
+        {
+            context.OpStack.PopI32();
+        }
+
+        public override void Execute(ExecContext context) {}
     }
 }

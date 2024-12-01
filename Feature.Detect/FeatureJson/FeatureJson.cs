@@ -52,7 +52,6 @@ namespace Feature.Detect.FeatureJson
                 .Append("}");
             return sb.ToString();
         }
-
     }
 
     public class Options

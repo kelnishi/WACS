@@ -33,6 +33,7 @@ namespace Wacs.Core.Validation
     /// </summary>
     public class WasmValidationContext : IWasmValidationContext
     {
+        private static Stack<Value> _aside = new();
         private readonly Stack<IValidationContext> _contextStack = new();
 
         /// <summary>
@@ -101,7 +102,7 @@ namespace Wacs.Core.Validation
             if (factIsTrue) return;
             throw new ValidationException(string.Format(formatString, args));
         }
-        
+
         public void Assert([NotNull] object? objIsNotNull, string formatString, params object[] args)
         {
             if (objIsNotNull != null) return;
@@ -151,7 +152,6 @@ namespace Wacs.Core.Validation
             OpStack.PushResult(types.ParameterTypes);
         }
 
-        private static Stack<Value> _aside = new();
         public ValidationControlFrame PopControlFrame()
         {
             if (ControlStack.Count == 0)

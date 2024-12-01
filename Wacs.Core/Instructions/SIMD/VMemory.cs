@@ -16,6 +16,8 @@
 
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
+using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -25,8 +27,89 @@ using LaneIdx = System.Byte;
 
 namespace Wacs.Core.Instructions.SIMD
 {
+    public class InstV128Load : InstMemoryLoad, INodeComputer<uint, V128>
+    {
+        public InstV128Load() : base(ValType.V128, BitWidth.V128, SimdCode.V128Load) {}
+        public override void Execute(ExecContext context)
+        {
+            context.Assert( context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            uint offset = context.OpStack.PopU32();
+            V128 value = FetchFromMemory(context, offset);
+            context.OpStack.PushValue(value);
+        }
+        
+        //@Spec 4.4.7.1. t.load and t.loadN_sx
+        public V128 FetchFromMemory(ExecContext context, uint offset)
+        {
+            context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+            var a = context.Frame.Module.MemAddrs[M.M];
+            context.Assert( context.Store.Contains(a),
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+            var mem = context.Store[a];
+            long i = offset;
+            long ea = (long)i + (long)M.Offset;
+            if (ea + WidthTByteSize > mem.Data.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
+            var bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
+            return new V128(bs);
+        }
+
+        public Func<ExecContext, uint, V128> GetFunc => FetchFromMemory;
+    }
+    
+    public class InstV128Store : InstMemoryStore, INodeConsumer<uint, V128>
+    {
+        public InstV128Store() : base(ValType.V128, BitWidth.V128, SimdCode.V128Store) { }
+
+        // @Spec 4.4.7.6. t.store
+        // @Spec 4.4.7.6. t.storeN
+        public override void Execute(ExecContext context)
+        {
+            context.Assert( context.OpStack.Peek().Type == Type,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            V128 c = context.OpStack.PopV128();
+            context.Assert( context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            uint offset = context.OpStack.PopU32();
+            
+            SetMemoryValue(context, offset, c);
+        }
+        
+        public void SetMemoryValue(ExecContext context, uint offset, V128 cV128)
+        {
+            context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+            var a = context.Frame.Module.MemAddrs[M.M];
+            context.Assert( context.Store.Contains(a),
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+            var mem = context.Store[a];
+            
+            long i = offset;
+            long ea = i + M.Offset;
+            if (ea + WidthTByteSize > mem.Data.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
+            //13,14,15
+            Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
+            
+#if NET8_0
+            MemoryMarshal.Write(bs, in cV128);
+#else
+            MemoryMarshal.Write(bs, ref cV128);
+#endif
+        }
+
+        public Action<ExecContext, uint, V128> GetFunc => SetMemoryValue;
+    }
+    
     public class InstMemoryLoadMxN : InstructionBase
     {
+        private readonly int CountN;
+
+        private readonly BitWidth WidthT;
+        private MemArg M;
+
         public InstMemoryLoadMxN(BitWidth width, int count) =>
             (WidthT, CountN) = (width, count);
 
@@ -53,10 +136,6 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoadMxN instruction is malformed: {WidthT}x{CountN}"),
         };
 
-        private readonly BitWidth WidthT;
-        private readonly int CountN;
-        private MemArg M;
-
         /// <summary>
         /// @Spec 3.3.7.5. v128.loadNxM_sx memarg
         /// </summary>
@@ -72,7 +151,7 @@ namespace Wacs.Core.Instructions.SIMD
         }
 
         // @Spec 4.4.7.2. v128.loadMxN_sx memarg
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -117,7 +196,6 @@ namespace Wacs.Core.Instructions.SIMD
             }
             //15.
             context.OpStack.PushV128((V128)c);
-            return 1;
         }
 
         public IInstruction Immediate(MemArg m)
@@ -148,6 +226,9 @@ namespace Wacs.Core.Instructions.SIMD
     
     public class InstMemoryLoadSplat : InstructionBase
     {
+        private readonly BitWidth WidthN;
+
+        private MemArg M;
         public InstMemoryLoadSplat(BitWidth width) => WidthN = width;
 
         public override ByteCode Op => WidthN switch
@@ -158,10 +239,6 @@ namespace Wacs.Core.Instructions.SIMD
             BitWidth.U64 => SimdCode.V128Load64Splat,
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
-
-        private readonly BitWidth WidthN;
-
-        private MemArg M;
 
         /// <summary>
         /// @Spec 3.3.7.6. v128.loadN_splat
@@ -178,7 +255,7 @@ namespace Wacs.Core.Instructions.SIMD
         }
 
         // @Spec 4.4.7.3. v128.loadN_splat
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -223,7 +300,6 @@ namespace Wacs.Core.Instructions.SIMD
                     break;
                 default: throw new ArgumentOutOfRangeException();
             }
-            return 1;
         }
 
         public IInstruction Immediate(MemArg m)
@@ -254,6 +330,9 @@ namespace Wacs.Core.Instructions.SIMD
     
     public class InstMemoryLoadZero : InstructionBase
     {
+        private readonly BitWidth WidthN;
+
+        private MemArg M;
         public InstMemoryLoadZero(BitWidth width) => WidthN = width;
 
         public override ByteCode Op => WidthN switch
@@ -264,10 +343,6 @@ namespace Wacs.Core.Instructions.SIMD
             BitWidth.U64 => SimdCode.V128Load64Lane,
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
-
-        private readonly BitWidth WidthN;
-
-        private MemArg M;
 
         /// <summary>
         /// @Spec 3.3.7.7. v128.loadN_zero memarg
@@ -284,7 +359,7 @@ namespace Wacs.Core.Instructions.SIMD
         }
 
         // @Spec 4.4.7.7. v128.loadN_zero memarg
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -321,7 +396,6 @@ namespace Wacs.Core.Instructions.SIMD
                     break;
                 default: throw new ArgumentOutOfRangeException();
             }
-            return 1;
         }
 
         public IInstruction Immediate(MemArg m, LaneIdx l)
@@ -352,6 +426,11 @@ namespace Wacs.Core.Instructions.SIMD
     
     public class InstMemoryLoadLane : InstructionBase
     {
+        private readonly BitWidth WidthN;
+
+        private MemArg M;
+
+        private LaneIdx X;
         public InstMemoryLoadLane(BitWidth width) => WidthN = width;
 
         public override ByteCode Op => WidthN switch
@@ -362,12 +441,6 @@ namespace Wacs.Core.Instructions.SIMD
             BitWidth.U64 => SimdCode.V128Load64Lane,
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
-
-        private BitWidth WidthN;
-
-        private MemArg M;
-
-        private LaneIdx X;
 
         /// <summary>
         /// @Spec 3.3.7.8. v128.loadN_lane memarge laneidx
@@ -387,7 +460,7 @@ namespace Wacs.Core.Instructions.SIMD
         }
 
         // @Spec 4.4.7.5. v128.loadN_lane memarg x
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             
             //2.
@@ -428,7 +501,6 @@ namespace Wacs.Core.Instructions.SIMD
             }
             //17.
             context.OpStack.PushV128(value);
-            return 1;
         }
 
         public IInstruction Immediate(MemArg m, LaneIdx l)
@@ -461,6 +533,10 @@ namespace Wacs.Core.Instructions.SIMD
         
     public class InstMemoryStoreLane : InstructionBase
     {
+        private readonly BitWidth WidthN;
+        private MemArg M;
+
+        private LaneIdx X;
         public InstMemoryStoreLane(BitWidth width) => WidthN = width;
 
         public override ByteCode Op => WidthN switch
@@ -471,11 +547,6 @@ namespace Wacs.Core.Instructions.SIMD
             BitWidth.U64 => SimdCode.V128Store64Lane,
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
-
-        private readonly BitWidth WidthN;
-        private MemArg M;
-
-        private LaneIdx X;
 
         public IInstruction Immediate(MemArg m)
         {
@@ -499,7 +570,7 @@ namespace Wacs.Core.Instructions.SIMD
         }
 
         // @Spec 4.4.7.7. v128.storeN_lane memarg x
-        public override int Execute(ExecContext context)
+        public override void Execute(ExecContext context)
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -550,7 +621,6 @@ namespace Wacs.Core.Instructions.SIMD
                     cU64.CopyTo(bs);
                     break;
             }
-            return 1;
         }
 
         public override IInstruction Parse(BinaryReader reader)

@@ -31,12 +31,12 @@ namespace Wacs.Core.Runtime
 
         private readonly List<IFunctionInstance> Funcs = new();
         private readonly List<GlobalInstance> Globals = new();
-        
-        private MemoryInstance?[] Mems = new MemoryInstance[32];
-        private int MemsCount = 0;
-        
+
         private readonly List<TableInstance> Tables = new();
         private StoreTransaction? CurrentTransaction = null;
+
+        private MemoryInstance?[] Mems = new MemoryInstance[32];
+        private int MemsCount = 0;
 
         public IFunctionInstance this[FuncAddr addr] => 
             CurrentTransaction?.Funcs.GetValueOrDefault(addr)??Funcs[addr.Value];
@@ -108,9 +108,9 @@ namespace Wacs.Core.Runtime
             return funcAddr;
         }
 
-        public FuncAddr AllocateHostFunction((string module, string entity) id, FunctionType funcType, Type delType, Delegate hostFunc)
+        public FuncAddr AllocateHostFunction((string module, string entity) id, FunctionType funcType, Type delType, Delegate hostFunc, bool isAsync)
         {
-            var funcInst = new HostFunction(id, funcType, delType, hostFunc);
+            var funcInst = new HostFunction(id, funcType, delType, hostFunc, isAsync);
             var funcAddr = AddFunction(funcInst);
             return funcAddr;
         }

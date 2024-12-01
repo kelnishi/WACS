@@ -18,6 +18,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Wacs.Core.Runtime;
@@ -137,7 +138,7 @@ namespace Spec.Test.WastJson
             if (value > int.MaxValue && value <= uint.MaxValue)
             {
                 uint v = (uint)value;
-                return BitConverter.UInt32BitsToSingle(v);
+                return MemoryMarshal.Cast<uint, float>(MemoryMarshal.CreateSpan(ref v, 1))[0];
             }
 
             return BitConverter.Int32BitsToSingle((int)value);
@@ -156,7 +157,7 @@ namespace Spec.Test.WastJson
             if (value > long.MaxValue && value <= ulong.MaxValue)
             {
                 ulong v = (ulong)value;
-                return BitConverter.UInt64BitsToDouble(v);
+                return MemoryMarshal.Cast<ulong, double>(MemoryMarshal.CreateSpan(ref v, 1))[0];
             }
 
             return BitConverter.Int64BitsToDouble((long)value);

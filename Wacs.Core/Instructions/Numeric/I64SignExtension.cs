@@ -46,30 +46,31 @@ namespace Wacs.Core.Instructions.Numeric
 
         public static readonly InstI64SignExtend I64Extend32S = new(OpCode.I64Extend32S, ExecuteI64Extend32S,
             NumericInst.ValidateOperands(pop: ValType.I64, push: ValType.I64));
-        
-        public override ByteCode Op { get; }
-        
+
+        private readonly Func<uint, ulong> _execute;
+
         private readonly NumericInst.ValidationDelegate _validate;
-        private Func<uint, ulong> _execute;
-        
+
         private InstI64SignExtend(ByteCode op, Func<uint, ulong> execute, NumericInst.ValidationDelegate validate)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
         }
-        
+
+        public override ByteCode Op { get; }
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public override int Execute(ExecContext context)
+
+        public override void Execute(ExecContext context)
         {
             uint value = context.OpStack.PopU32();
             ulong result = _execute(value);
             context.OpStack.PushI64((long)result);
-            return 1;
         }
-        
+
         public Func<ExecContext, uint,ulong> GetFunc => (_, i1) => _execute(i1);
-        
+
         private static ulong ExecuteI64Extend8S(uint value) =>
             (value & ByteSign) != 0
                 ? I64ByteExtend | value

@@ -17,6 +17,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using Wacs.Core.Types;
 using Expression = System.Linq.Expressions.Expression;
 
@@ -27,6 +28,8 @@ namespace Wacs.Core.Runtime
         public delegate object GenericFunc(params object[] args);
 
         public delegate Value[] GenericFuncs(params object[] args);
+
+        public delegate Task<Value[]> GenericFuncsAsync(params Value[] args);
 
         public delegate Value[] StackFunc(Value[] parameters);
 
@@ -45,6 +48,14 @@ namespace Wacs.Core.Runtime
 
             ParameterInfo[] parameters = invokeMethod.GetParameters();
             Type returnType = invokeMethod.ReturnType;
+            if (returnType.BaseType == typeof(Task))
+            {
+                if (returnType.IsGenericType)
+                {
+                    returnType = returnType.GenericTypeArguments[0];
+                }
+            }
+            
 
             // Check if the number of parameters matches
             if (parameters.Length != functionType.ParameterTypes.Types.Length)
@@ -87,7 +98,7 @@ namespace Wacs.Core.Runtime
                         .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.FlattenHierarchy)
                         .FirstOrDefault(m => m.Name == "op_Implicit" && m.ReturnType == expectedReturnType);
                     // Check if returnType has an implicit conversion operator to expectedReturnType
-                    if (implicitOp is null)
+                    if (implicitOp is null && returnType != typeof(object))
                     {
                         throw new ArgumentException(
                             $"Return type mismatch. Expected return type is {expectedReturnType.Name}, but delegate returns {returnType.Name}.");
@@ -137,7 +148,7 @@ namespace Wacs.Core.Runtime
                 _ => throw new NotSupportedException($"Cannot auto-bind function signature: ({string.Join(", ", paramTypes)}) -> ({string.Join(", ", resultTypes)})")
             };
         }
-
+        
         public static Delegate CreateTypedDelegate(Delegate genericDelegate, Type desiredDelegateType)
         {
             var genericMethod = typeof(Delegates).GetMethod(nameof(CreateTypedDelegateInternal), BindingFlags.NonPublic | BindingFlags.Static);
