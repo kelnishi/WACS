@@ -54,7 +54,6 @@ namespace Wacs.Core.Runtime.Transpiler
             function.SetBody(new Expression(function.Type.ResultType.Arity, newSeq, false));
         }
 
-        [SuppressMessage("ReSharper.DPA", "DPA0000: DPA issues")]
         private static InstructionSequence OptimizeSequence(InstructionSequence seq)
         {
             if (seq.Count == 0)
