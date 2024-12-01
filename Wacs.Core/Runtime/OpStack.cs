@@ -201,14 +201,35 @@ namespace Wacs.Core.Runtime
 
         public Value Peek() => _stack.Peek();
 
-        public void PopResults(ResultType type, ref Stack<Value> results) => PopResults(type.Arity, ref results);
+        public int PopResults(ResultType type, ref Value[] results)
+        {
+            int arity = type.Arity;
+            Count -= arity;
+            for (int i = arity - 1; i >= 0; --i)
+            {
+                //We could check the types here, but the spec just says to YOLO it.
+                results[i] = _stack.Pop();
+            }
+            return arity;
+        }
+        
+        public void PopResults(ResultType type, ref Stack<Value> results)
+        {
+            Count -= type.Arity;
+            for (int i = 0, l = type.Arity; i < l; ++i)
+            {
+                //We could check the types here, but the spec just says to YOLO it.
+                results.Push(_stack.Pop());
+            }
+        }
 
         public void PopResults(int arity, ref Stack<Value> results)
         {
+            Count -= arity;
             for (int i = 0, l = arity; i < l; ++i)
             {
                 //We could check the types here, but the spec just says to YOLO it.
-                results.Push(PopAny());
+                results.Push(_stack.Pop());
             }
         }
 

@@ -96,30 +96,25 @@ namespace Wacs.Core.Runtime.Types
             //5. *Instructions will be handled in EnterSequence below
             //var seq = Body.Instructions;
             //6.
+#if STRICT_EXECUTION
             context.Assert( context.OpStack.Count >= funcType.ParameterTypes.Arity,
                 $"Function invocation failed. Operand Stack underflow.");
             //7.
             context.Assert(_asideVals.Count == 0,
                 $"Shared temporary stack had values left in it.");
-            context.OpStack.PopResults(funcType.ParameterTypes, ref _asideVals);
+#endif
             //8.
             //Push the frame and operate on the frame on the stack.
             var frame = context.ReserveFrame(Module, funcType, Index, t);
-            // frame.FuncId = wasmFunc.Id;
                 
-            int li = 0;
-            int localCount = funcType.ParameterTypes.Arity + t.Length;
             //Load parameters
-            while (_asideVals.Count > 0)
-            {
-                // frame.Locals.Set((LocalIdx)li, _asideVals.Pop());
-                frame.Locals.Data[li] = _asideVals.Pop();
-                li += 1;
-            }
+            int li = context.OpStack.PopResults(funcType.ParameterTypes, ref frame.Locals.Data);
+            frame.StackHeight -= li;
+            
+            int localCount = funcType.ParameterTypes.Arity + t.Length;
             //Set the Locals to default
             for (int ti = 0; li < localCount; ++li, ++ti)
             {
-                // frame.Locals.Set((LocalIdx)li, new Value(t[ti]));
                 frame.Locals.Data[li] = new Value(t[ti]);
             }
 
@@ -132,7 +127,7 @@ namespace Wacs.Core.Runtime.Types
             frame.ReturnLabel.Arity = funcType.ResultType.Arity;
             frame.ReturnLabel.Instruction = LabelInst;
             frame.ReturnLabel.ContinuationAddress = context.GetPointer();
-            frame.ReturnLabel.StackHeight = 0;
+            // frame.ReturnLabel.StackHeight = 0;
             
             context.EnterSequence(Body.Instructions);
         }

@@ -270,10 +270,13 @@ namespace Wacs.Core.Types
             Data[idx.Value] = value;
         }
 
-        public LocalsSpace(Value[] data, ValType[] parameters, ValType[] locals)
+        public LocalsSpace(Value[] data, ValType[] parameters, ValType[] locals, bool skipInit = false)
         {
             Capacity = parameters.Length + locals.Length;
             Data = data;
+            if (skipInit)
+                return;
+            
             int idx = 0;
             foreach (var t in parameters)
             {

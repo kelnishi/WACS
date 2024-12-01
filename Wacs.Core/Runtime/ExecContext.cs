@@ -124,7 +124,7 @@ namespace Wacs.Core.Runtime
             frame.ClearLabels();
             int capacity = type.ParameterTypes.Types.Length + locals.Length;
             var localData = _localsDataPool.Rent(capacity);
-            frame.Locals = new(localData, type.ParameterTypes.Types, locals);
+            frame.Locals = new(localData, type.ParameterTypes.Types, locals, true);
             frame.StackHeight = OpStack.Count;
             
             return frame;
@@ -282,8 +282,6 @@ namespace Wacs.Core.Runtime
             
             //2.
             var funcInst = Store[addr];
-            if (funcInst.IsAsync)
-                throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
             
             switch (funcInst)
             {
@@ -292,6 +290,9 @@ namespace Wacs.Core.Runtime
                     return;
                 case HostFunction hostFunc:
                 {
+                    if (funcInst.IsAsync)
+                        throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
+                    
                     var funcType = hostFunc.Type;
                     //Fetch the parameters
                     OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
