@@ -22,11 +22,12 @@ namespace Wacs.Core.OpCodes
     [StructLayout(LayoutKind.Explicit)]
     public struct ByteCode : IComparable<ByteCode>
     {
-        [FieldOffset(0)] public readonly OpCode   x00;
+        [FieldOffset(0)] public readonly OpCode       x00;
         [FieldOffset(1)] public readonly GcCode       xFB;
         [FieldOffset(1)] public readonly ExtCode      xFC;
         [FieldOffset(1)] public readonly SimdCode     xFD;
         [FieldOffset(1)] public readonly AtomCode     xFE;
+        [FieldOffset(1)] public readonly WacsCode     xFF;
 
         public ByteCode(OpCode b)
         {
@@ -61,6 +62,13 @@ namespace Wacs.Core.OpCodes
             x00 = OpCode.FE;
             xFE = b;
         }
+        
+        public ByteCode(WacsCode b)
+        {
+            this = default;
+            x00 = OpCode.FF;
+            xFF = b;
+        }
 
         public static explicit operator ByteCode(ushort bytes) =>
             (byte)(bytes >> 8) switch
@@ -69,6 +77,7 @@ namespace Wacs.Core.OpCodes
                 0xFC => new ByteCode((ExtCode)(byte)(bytes & 0xFF)),
                 0xFD => new ByteCode((SimdCode)(byte)(bytes & 0xFF)),
                 0xFE => new ByteCode((AtomCode)(byte)(bytes & 0xFF)),
+                0xFF => new ByteCode((WacsCode)(byte)(bytes & 0xFF)),
                 _ => new ByteCode((OpCode)(byte)(bytes >> 8)),
             };
 
@@ -79,6 +88,7 @@ namespace Wacs.Core.OpCodes
                 OpCode.FC => (ushort)((byte)byteCode.x00 << 8 | (byte)byteCode.xFC),
                 OpCode.FD => (ushort)((byte)byteCode.x00 << 8 | (byte)byteCode.xFD),
                 OpCode.FE => (ushort)((byte)byteCode.x00 << 8 | (byte)byteCode.xFE),
+                OpCode.FF => (ushort)((byte)byteCode.x00 << 8 | (byte)byteCode.xFF),
                 _ => (ushort)((byte)byteCode.x00 << 8),
             };
 
@@ -88,6 +98,7 @@ namespace Wacs.Core.OpCodes
         public static implicit operator ByteCode(ExtCode b) => new ByteCode(b);
         public static implicit operator ByteCode(SimdCode b) => new ByteCode(b);
         public static implicit operator ByteCode(AtomCode b) => new ByteCode(b);
+        public static implicit operator ByteCode(WacsCode b) => new ByteCode(b);
         
         public override bool Equals(object obj) =>
             obj is ByteCode other && x00 == other.x00 && x00 switch {
@@ -95,6 +106,7 @@ namespace Wacs.Core.OpCodes
                 OpCode.FC => xFC.Equals(other.xFC),
                 OpCode.FD => xFD.Equals(other.xFD),
                 OpCode.FE => xFE.Equals(other.xFE),
+                OpCode.FF => xFE.Equals(other.xFF),
                 _ => true
             };
 
@@ -104,6 +116,7 @@ namespace Wacs.Core.OpCodes
                 OpCode.FC => HashCode.Combine(x00,xFC),
                 OpCode.FD => HashCode.Combine(x00,xFD),
                 OpCode.FE => HashCode.Combine(x00,xFE),
+                OpCode.FF => HashCode.Combine(x00,xFF),
                 _ => HashCode.Combine(x00)
             };
 
@@ -135,6 +148,7 @@ namespace Wacs.Core.OpCodes
                 case OpCode.FC: return xFC.CompareTo(other.xFC);
                 case OpCode.FD: return xFD.CompareTo(other.xFD);
                 case OpCode.FE: return xFE.CompareTo(other.xFE);
+                case OpCode.FF: return xFE.CompareTo(other.xFF);
                 default: return 0;
             }
         }
@@ -145,6 +159,7 @@ namespace Wacs.Core.OpCodes
             OpCode.FC => $"(Ext){xFC}",
             OpCode.FD => $"(SIMD){xFD}",
             OpCode.FE => $"(Threads){xFE}",
+            OpCode.FF => $"(Wacs){xFF}",
             _ => $"{x00}"
         };
         
