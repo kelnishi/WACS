@@ -394,6 +394,10 @@ namespace Wacs.Core.Runtime
             { 
                 Stats[(ushort)(ByteCode)opcode] = new ExecStat();
             }
+            foreach (WacsCode opcode in Enum.GetValues(typeof(WacsCode)))
+            { 
+                Stats[(ushort)(ByteCode)opcode] = new ExecStat();
+            }
         }
 
         public OpCode GetEndFor()
