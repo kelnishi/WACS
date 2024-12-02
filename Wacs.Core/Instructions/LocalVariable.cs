@@ -73,8 +73,7 @@ namespace Wacs.Core.Instructions
 
         public override void Execute(ExecContext context)
         {
-            var value = FetchFromLocals(context);
-            context.OpStack.PushValue(value);
+            context.OpStack.PushValue(FetchFromLocals(context));
         }
 
         // @Spec 4.4.5.1. local.get 

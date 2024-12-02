@@ -250,7 +250,7 @@ namespace Wacs.Core.Types
 
     public struct LocalsSpace
     {
-        public Value[]? Data;
+        public Value[] Data;
 
         public int Capacity { get; }
 
