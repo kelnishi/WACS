@@ -88,7 +88,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static int ExecuteI64GeU(ulong i1, ulong i2) => i1 >= i2 ? 1 : 0;
 
-        private class Signed : InstI64RelOp, INodeComputer<long,long,int>
+        private sealed class Signed : InstI64RelOp, INodeComputer<long,long,int>
         {
             private readonly Func<long,long,int> _execute;
 
@@ -106,7 +106,7 @@ namespace Wacs.Core.Instructions.Numeric
             public Func<ExecContext, long, long, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
 
-        private class Unsigned : InstI64RelOp, INodeComputer<ulong,ulong,int>
+        private sealed class Unsigned : InstI64RelOp, INodeComputer<ulong,ulong,int>
         {
             private readonly Func<ulong,ulong,int> _execute;
 

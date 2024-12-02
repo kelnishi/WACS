@@ -25,7 +25,7 @@ using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime
 {
-    public class Frame : IPoolable
+    public sealed class Frame : IPoolable
     {
         public InstructionPointer ContinuationAddress = InstructionPointer.Nil;
         public string FuncId = "";
