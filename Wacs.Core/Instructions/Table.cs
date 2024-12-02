@@ -76,7 +76,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 5.4.5. Table Instructions
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
@@ -138,7 +138,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 5.4.5. Table Instructions
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
@@ -245,7 +245,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 5.4.5. Table Instructions
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             //!!! `table.init x y` is parsed y then x
             Y = (ElemIdx)reader.ReadLeb128_u32();
@@ -253,7 +253,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public IInstruction Immediate(TableIdx x, ElemIdx y)
+        public InstructionBase Immediate(TableIdx x, ElemIdx y)
         {
             X = x;
             Y = y;
@@ -292,13 +292,13 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 5.4.5. Table Instructions
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             X = (ElemIdx)reader.ReadLeb128_u32();
             return this;
         }
 
-        public IInstruction Immediate(ElemIdx value)
+        public InstructionBase Immediate(ElemIdx value)
         {
             X = value;
             return this;
@@ -423,7 +423,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 5.4.5. Table Instructions
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             DstX = (TableIdx)reader.ReadLeb128_u32();
             SrcY = (TableIdx)reader.ReadLeb128_u32();
@@ -490,7 +490,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 5.4.5. Table Instructions
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
@@ -534,7 +534,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 5.4.5. Table Instructions
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
@@ -620,7 +620,7 @@ namespace Wacs.Core.Instructions
         }
 
         // @Spec 5.4.5. Table Instructions
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;

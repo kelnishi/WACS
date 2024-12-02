@@ -209,13 +209,13 @@ namespace Wacs.Core.Instructions.SIMD
             context.OpStack.PushV128((V128)c);
         }
 
-        public IInstruction Immediate(MemArg m)
+        public InstructionBase Immediate(MemArg m)
         {
             M = m;
             return this;
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
             return this;
@@ -313,13 +313,13 @@ namespace Wacs.Core.Instructions.SIMD
             }
         }
 
-        public IInstruction Immediate(MemArg m)
+        public InstructionBase Immediate(MemArg m)
         {
             M = m;
             return this;
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
             return this;
@@ -409,13 +409,13 @@ namespace Wacs.Core.Instructions.SIMD
             }
         }
 
-        public IInstruction Immediate(MemArg m, LaneIdx l)
+        public InstructionBase Immediate(MemArg m, LaneIdx l)
         {
             M = m;
             return this;
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
             return this;
@@ -514,14 +514,14 @@ namespace Wacs.Core.Instructions.SIMD
             context.OpStack.PushV128(value);
         }
 
-        public IInstruction Immediate(MemArg m, LaneIdx l)
+        public InstructionBase Immediate(MemArg m, LaneIdx l)
         {
             M = m;
             X = l;
             return this;
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
             X = reader.ReadByte();
@@ -559,7 +559,7 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
-        public IInstruction Immediate(MemArg m)
+        public InstructionBase Immediate(MemArg m)
         {
             M = m;
             return this;
@@ -634,7 +634,7 @@ namespace Wacs.Core.Instructions.SIMD
             }
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
             X = reader.ReadByte();

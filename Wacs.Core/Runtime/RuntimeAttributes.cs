@@ -34,7 +34,7 @@ namespace Wacs.Core.Runtime
         public int MaxFunctionLocals = 2048;
 
         public int MaxOpStack = 1024;
-        public IInstructionFactory InstructionFactory { get; set; } = SpecFactory.Factory;
+        public InstructionBaseFactory InstructionFactory { get; set; } = SpecFactory.Factory;
     }
 
 }

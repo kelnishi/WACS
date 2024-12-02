@@ -59,7 +59,7 @@ namespace Wacs.Core.Runtime.Transpiler
             if (seq.Count == 0)
                 return InstructionSequence.Empty;
             
-            Stack<IInstruction> stack = new(seq.Count);
+            Stack<InstructionBase> stack = new(seq.Count);
 
             foreach (var inst in seq)
             {
@@ -114,7 +114,7 @@ namespace Wacs.Core.Runtime.Transpiler
                         break;
                     case InstLocalTee instTee:
                         //Split into local.set/local.get
-                        var newSet = new InstLocalSet().Immediate(instTee.GetIndex()) as IOptimizationTarget;
+                        var newSet = new InstLocalSet().Immediate(instTee.GetIndex());
                         var newGet = new InstLocalGet().Immediate(instTee.GetIndex());
                         if (newSet != null)
                         {
@@ -126,7 +126,7 @@ namespace Wacs.Core.Runtime.Transpiler
                         stack.Push(inst);
                         break;
                     case IOptimizationTarget target:
-                        var newInst = OptimizeInstruction(target, stack);
+                        var newInst = OptimizeInstruction(target as InstructionBase, stack);
                         stack.Push(newInst);
                         break;
                     default:
@@ -140,7 +140,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return newSeq;
         }
 
-        private static IInstruction OptimizeInstruction(IOptimizationTarget inst, Stack<IInstruction> stack)
+        private static InstructionBase OptimizeInstruction(InstructionBase inst, Stack<InstructionBase> stack)
         {
             switch (inst)
             {
@@ -179,7 +179,7 @@ namespace Wacs.Core.Runtime.Transpiler
             }
         }
 
-        private static IInstruction BindAnyValue(IOptimizationTarget inst, Stack<IInstruction> stack, IValueConsumer<Value> valueConsumer)
+        private static InstructionBase BindAnyValue(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<Value> valueConsumer)
         {
             if (stack.Count < 1) return inst;
             var top = stack.Pop();
@@ -206,7 +206,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindU32(IOptimizationTarget inst, Stack<IInstruction> stack, IValueConsumer<uint> uintConsumer)
+        private static InstructionBase BindU32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint> uintConsumer)
         {
             if (stack.Count < 1) return inst;
             var top = stack.Pop();
@@ -233,7 +233,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindI32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<int> intConsumer)
+        private static InstructionBase BindI32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<int> intConsumer)
         {
             if (stack.Count < 1) return inst;
             var top = stack.Pop();
@@ -255,7 +255,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindI32I32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<int,int> intConsumer)
+        private static InstructionBase BindI32I32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<int,int> intConsumer)
         {
             if (stack.Count < 2) return inst;
             
@@ -289,7 +289,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindU32U32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,uint> uintConsumer)
+        private static InstructionBase BindU32U32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,uint> uintConsumer)
         {
             if (stack.Count < 2) return inst;
             var i2 = stack.Pop();
@@ -324,7 +324,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindU32U64(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,ulong> ulongConsumer)
+        private static InstructionBase BindU32U64(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,ulong> ulongConsumer)
         {
             if (stack.Count < 2) return inst;
             var i2 = stack.Pop();
@@ -356,7 +356,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        private static IInstruction BindU32F32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,float> floatConsumer)
+        private static InstructionBase BindU32F32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,float> floatConsumer)
         {
             if (stack.Count < 2) return inst;
             var i2 = stack.Pop();
@@ -387,7 +387,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        private static IInstruction BindU32F64(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,double> doubleConsumer)
+        private static InstructionBase BindU32F64(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,double> doubleConsumer)
         {
             if (stack.Count < 2) return inst;
             var i2 = stack.Pop();
@@ -418,7 +418,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        private static IInstruction BindU32V128(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,V128> vecConsumer)
+        private static InstructionBase BindU32V128(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,V128> vecConsumer)
         {
             if (stack.Count < 2) return inst;
             var i2 = stack.Pop();
@@ -449,7 +449,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        private static IInstruction BindU32I32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,int> intConsumer)
+        private static InstructionBase BindU32I32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,int> intConsumer)
         {
             if (stack.Count < 2) return inst;
             var i2 = stack.Pop();
@@ -482,7 +482,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindU64(IOptimizationTarget inst, Stack<IInstruction> stack, IValueConsumer<ulong> ulongConsumer)
+        private static InstructionBase BindU64(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<ulong> ulongConsumer)
         {
             if (stack.Count < 1) return inst;
             var top = stack.Pop();
@@ -507,7 +507,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindI64(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<long> longConsumer)
+        private static InstructionBase BindI64(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<long> longConsumer)
         {
             if (stack.Count < 1) return inst;
             var top = stack.Pop();
@@ -531,7 +531,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindI64I64(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<long,long> longConsumer)
+        private static InstructionBase BindI64I64(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<long,long> longConsumer)
         {
             if (stack.Count < 2) return inst;
             
@@ -567,7 +567,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindU64U64(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<ulong,ulong> longConsumer)
+        private static InstructionBase BindU64U64(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<ulong,ulong> longConsumer)
         {
             if (stack.Count < 2) return inst;
             var i2 = stack.Pop();
@@ -602,7 +602,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindU64I64(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<ulong,long> longConsumer)
+        private static InstructionBase BindU64I64(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<ulong,long> longConsumer)
         {
             if (stack.Count < 2) return inst;
             var i2 = stack.Pop();
@@ -635,7 +635,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
         
-        private static IInstruction BindU32Value(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<uint,Value> intConsumer)
+        private static InstructionBase BindU32Value(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,Value> intConsumer)
         {
             if (stack.Count < 1) return inst;
             var i2 = stack.Pop();
@@ -681,9 +681,9 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
         
-        private static IInstruction BindValueValueI32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<Value,Value,int> valueConsumer)
+        private static InstructionBase BindValueValueI32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<Value,Value,int> valueConsumer)
         {
-            Stack<IInstruction> operands = new();
+            Stack<InstructionBase> operands = new();
 
             bool tryStack = true;
             ITypedValueProducer<Value>? i1Producer = null;
@@ -758,7 +758,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
         
-        private static IInstruction BindF32(IOptimizationTarget inst, Stack<IInstruction> stack, IValueConsumer<float> floatConsumer)
+        private static InstructionBase BindF32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<float> floatConsumer)
         {
             if (stack.Count < 1) return inst;
             var top = stack.Pop();
@@ -779,7 +779,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindF32F32(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<float,float> intConsumer)
+        private static InstructionBase BindF32F32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<float,float> intConsumer)
         {
             if (stack.Count < 2) return inst;
             var i2 = stack.Pop();
@@ -812,7 +812,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindF64(IOptimizationTarget inst, Stack<IInstruction> stack, IValueConsumer<double> doubleConsumer)
+        private static InstructionBase BindF64(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<double> doubleConsumer)
         {
             if (stack.Count < 1) return inst;
             var top = stack.Pop();
@@ -833,7 +833,7 @@ namespace Wacs.Core.Runtime.Transpiler
             return inst;
         }
 
-        private static IInstruction BindF64F64(IInstruction inst, Stack<IInstruction> stack, IValueConsumer<double,double> intConsumer)
+        private static InstructionBase BindF64F64(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<double,double> intConsumer)
         {
             if (stack.Count < 2) return inst;
             var i2 = stack.Pop();

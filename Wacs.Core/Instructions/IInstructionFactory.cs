@@ -19,9 +19,9 @@ using Wacs.Core.OpCodes;
 namespace Wacs.Core.Instructions
 {
     //Inject this to change the instruction set
-    public interface IInstructionFactory
+    public interface InstructionBaseFactory
     {
         T CreateInstruction<T>(ByteCode code) where T : InstructionBase;
-        IInstruction CreateInstruction(ByteCode code);
+        InstructionBase CreateInstruction(ByteCode code);
     }
 }

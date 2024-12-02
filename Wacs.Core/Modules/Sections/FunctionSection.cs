@@ -126,9 +126,9 @@ namespace Wacs.Core
                                 RenderInstructions(writer, blockIndent, depth, module, blockSeq, stackRenderer.SubRenderer());
 
                                 var lastInst = blockSeq.LastInstruction;
-                                if (IInstruction.IsElseOrEnd(lastInst))
+                                if (InstructionBase.IsElseOrEnd(lastInst))
                                 {
-                                    stackRenderer.FakeContext.LastEvent = IInstruction.IsEnd(lastInst) ? "[" : "][";
+                                    stackRenderer.FakeContext.LastEvent = InstructionBase.IsEnd(lastInst) ? "[" : "][";
                                     stackRenderer.ProcessInstruction(inst);
                                     stackRenderer.FakeContext.DummyContext.Frame.ForceLabels(depth);
                                     var endLabel = $" (;< @{depth} ;)";

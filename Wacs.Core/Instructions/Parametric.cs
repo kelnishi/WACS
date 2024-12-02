@@ -121,7 +121,7 @@ namespace Wacs.Core.Instructions
             c != 0 ? val1 : val2;
 
         public Func<ExecContext, Value, Value, int, Value> GetFunc => Select;
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             if (WithTypes) {
                 Types = reader.ParseVector(ValTypeParser.Parse);

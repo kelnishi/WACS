@@ -48,12 +48,12 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(Value);
         }
 
-        public override IInstruction Parse(BinaryReader reader) {
+        public override InstructionBase Parse(BinaryReader reader) {
             Value = reader.ReadLeb128_s32();
             return this;
         }
 
-        public IInstruction Immediate(int value)
+        public InstructionBase Immediate(int value)
         {
             Value = value;
             return this;
@@ -86,7 +86,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI64(Value);
         }
 
-        public override IInstruction Parse(BinaryReader reader) {
+        public override InstructionBase Parse(BinaryReader reader) {
             Value = reader.ReadLeb128_s64();
             return this;
         }
@@ -119,7 +119,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF32(Value);
         }
 
-        public override IInstruction Parse(BinaryReader reader) {
+        public override InstructionBase Parse(BinaryReader reader) {
             Value = reader.Read_f32();
             return this;
         }
@@ -160,7 +160,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF64(Value);
         }
 
-        public override IInstruction Parse(BinaryReader reader) {
+        public override InstructionBase Parse(BinaryReader reader) {
             Value = reader.Read_f64();
             return this;
         }

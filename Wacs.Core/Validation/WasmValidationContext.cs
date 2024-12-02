@@ -208,7 +208,7 @@ namespace Wacs.Core.Validation
             };
         }
 
-        public class InstructionValidator : AbstractValidator<IInstruction>
+        public class InstructionValidator : AbstractValidator<InstructionBase>
         {
             public InstructionValidator()
             {
