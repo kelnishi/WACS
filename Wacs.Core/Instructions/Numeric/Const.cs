@@ -59,7 +59,7 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
-        public int FetchImmediate(ExecContext context) => Value;
+        public int FetchImmediate(ExecContext _) => Value;
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
     }
     
@@ -91,7 +91,7 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
-        public long FetchImmediate(ExecContext context) => Value;
+        public long FetchImmediate(ExecContext _) => Value;
 
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
     }
@@ -124,7 +124,7 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
-        public float FetchImmediate(ExecContext context) => Value;
+        public float FetchImmediate(ExecContext _) => Value;
 
         public override string RenderText(ExecContext? context)
         {
@@ -165,7 +165,7 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
-        public double FetchImmediate(ExecContext context) => Value;
+        public double FetchImmediate(ExecContext _) => Value;
 
         public override string RenderText(ExecContext? context)
         {
