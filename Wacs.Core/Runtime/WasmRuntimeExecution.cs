@@ -359,8 +359,13 @@ namespace Wacs.Core.Runtime
         public async Task ProcessThreadAsync(long gasLimit)
         {
             if (gasLimit <= 0) gasLimit = long.MaxValue;
-            while (Context.Next() is { } inst)
+
+            InstructionBase inst;
+            //Manually inline Next()
+            // while (Context.Next() is { } inst)
+            while (++Context._sequenceIndex < Context._sequenceCount)
             {
+                inst = Context._sequenceInstructions[Context._sequenceIndex];
                 if (inst.IsAsync)
                 {
                     await inst.ExecuteAsync(Context);
@@ -382,8 +387,13 @@ namespace Wacs.Core.Runtime
         {
             long highwatermark = 0;
             long gasLimit = options.GasLimit > 0 ? options.GasLimit : long.MaxValue;
-            while (Context.Next() is { } inst)
+            
+            InstructionBase inst;
+            //Manually inline Next()
+            // while (Context.Next() is { } inst)
+            while (++Context._sequenceIndex < Context._sequenceCount)
             {
+                inst = Context._sequenceInstructions[Context._sequenceIndex];
                 //Trace execution
                 if (options.LogInstructionExecution != InstructionLogging.None)
                 {
