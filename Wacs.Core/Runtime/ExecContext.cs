@@ -155,10 +155,11 @@ namespace Wacs.Core.Runtime
 
         public void ResetStack(Label label)
         {
-            for (int c = OpStack.Count, h = label.StackHeight + Frame.StackHeight; c > h; --c)
-            {
-                OpStack.PopAny();
-            }
+            // for (int c = OpStack.Count, h = label.StackHeight + Frame.StackHeight; c > h; --c)
+            // {
+            //     OpStack.PopAny();
+            // }
+            OpStack.PopTo(label.StackHeight + Frame.StackHeight);
         }
 
         public void FlushCallStack()
