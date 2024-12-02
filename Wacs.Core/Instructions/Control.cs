@@ -409,7 +409,7 @@ namespace Wacs.Core.Instructions
                     if (context.Attributes.Live)
                     {
                         sb.Append(" ");
-                        Stack<Value> values = new Stack<Value>();
+                        var values = new Stack<Value>();
                         context.OpStack.PopResults(func.Type.ResultType, ref values);
                         sb.Append("[");
                         while (values.Count > 0)
@@ -484,6 +484,7 @@ namespace Wacs.Core.Instructions
             // An ideal solution would be to slice the OpStack array, but we don't have access.
             if (context.OpStack.Count > context.Frame.StackHeight + label.StackHeight + label.Arity)
             {
+                //TODO Move the elements in OpStack's registers array.
                 context.OpStack.PopResults(label.Arity, ref _asideVals);
                 //6.
                 context.ResetStack(label);
@@ -583,7 +584,7 @@ namespace Wacs.Core.Instructions
             string taken = "";
             if (context.Attributes.Live)
             {
-                taken = (int)context.OpStack.Peek() != 0 ? "-> " : "X: ";
+                taken = context.OpStack.Peek().Int32 != 0 ? "-> " : "X: ";
             }
             return $"{base.RenderText(context)} {L.Value} (;{taken}@{depth - L.Value};)";
         }
@@ -683,7 +684,7 @@ namespace Wacs.Core.Instructions
             int index = -2;
             if (context.Attributes.Live)
             {
-                int c = context.OpStack.Peek();
+                int c = context.OpStack.Peek().Int32;
                 if (c < Ls.Length)
                 {
                     index = c;
@@ -819,7 +820,7 @@ namespace Wacs.Core.Instructions
                     if (context.Attributes.Live)
                     {
                         sb.Append(" ");
-                        Stack<Value> values = new Stack<Value>();
+                        var values = new Stack<Value>();
                         context.OpStack.PopResults(func.Type.ParameterTypes, ref values);
                         sb.Append("[");
                         while (values.Count > 0)
@@ -859,7 +860,7 @@ namespace Wacs.Core.Instructions
             {
                 var ta = context.Frame.Module.TableAddrs[X];
                 var tab = context.Store[ta];
-                int i = context.OpStack.Peek();
+                int i = context.OpStack.Peek().Int32;
                 if (i >= tab.Elements.Count)
                     throw new TrapException($"Instruction call_indirect could not find element {i}");
                 var r = tab.Elements[i];
