@@ -180,6 +180,35 @@ namespace Wacs.Core.Runtime.Transpiler
         {
             if (stack.Count < 1) return inst;
             var top = stack.Pop();
+
+            if (inst is InstLocalSet set)
+            {
+                switch (top)
+                {
+                    case InstLocalGet get:
+                        return new InstLocalGetSet(get, set);
+                    case IConstInstruction:
+                        switch (top)
+                        {
+                            case ITypedValueProducer<int> p:
+                                return new InstLocalConstSet<int>(p.GetFunc(null!), set);
+                            case ITypedValueProducer<uint> p:
+                                return new InstLocalConstSet<uint>(p.GetFunc(null!), set);
+                            case ITypedValueProducer<long> p:
+                                return new InstLocalConstSet<long>(p.GetFunc(null!), set);
+                            case ITypedValueProducer<ulong> p:
+                                return new InstLocalConstSet<ulong>(p.GetFunc(null!), set);
+                            case ITypedValueProducer<float> p:
+                                return new InstLocalConstSet<float>(p.GetFunc(null!), set);
+                            case ITypedValueProducer<double> p:
+                                return new InstLocalConstSet<double>(p.GetFunc(null!), set);
+                            case ITypedValueProducer<V128> p:
+                                return new InstLocalConstSet<V128>(p.GetFunc(null!), set);
+                        }
+                        break;   
+                }
+            }
+            
             if (valueConsumer is INodeConsumer<Value> nodeConsumer) {
                 switch (top)
                 {
@@ -273,9 +302,14 @@ namespace Wacs.Core.Runtime.Transpiler
                 _ => null
             };
 
-            if (i1Producer is not null && i2 is InstI32Const c && inst.Op == OpCode.I32Add)
+            if (i1Producer is not null && i2 is InstI32Const c)
             {
-                return new InstFusedI32AddS(i1Producer, c.Value);
+                switch (inst.Op.x00)
+                {
+                    case OpCode.I32Add: return new InstFusedI32Add(i1Producer, c.Value);
+                    case OpCode.I32Sub: return new InstFusedI32Sub(i1Producer, c.Value);
+                    case OpCode.I32Mul: return new InstFusedI32Mul(i1Producer, c.Value);
+                }
             }
             
             if (i1Producer != null && i2Producer != null)
@@ -311,6 +345,15 @@ namespace Wacs.Core.Runtime.Transpiler
                 _ => null
             };
 
+            if (i1Producer is not null && i2 is InstI32Const c)
+            {
+                switch (inst.Op.x00)
+                {
+                    case OpCode.I32And: return new InstFusedU32And(i1Producer, (uint)c.Value);
+                    case OpCode.I32Or: return new InstFusedU32Or(i1Producer, (uint)c.Value);
+                }
+            }
+            
             if (i1Producer != null && i2Producer != null)
             {
                 switch (uintConsumer) {
@@ -553,6 +596,16 @@ namespace Wacs.Core.Runtime.Transpiler
                 ITypedValueProducer<long> p => p,
                 _ => null
             };
+            
+            if (i1Producer is not null && i2 is InstI32Const c)
+            {
+                switch (inst.Op.x00)
+                {
+                    case OpCode.I64Add: return new InstFusedI64Add(i1Producer, c.Value);
+                    case OpCode.I64Sub: return new InstFusedI64Sub(i1Producer, c.Value);
+                    case OpCode.I64Mul: return new InstFusedI64Mul(i1Producer, c.Value);
+                }
+            }
 
             if (i1Producer != null && i2Producer != null)
             {
@@ -589,6 +642,15 @@ namespace Wacs.Core.Runtime.Transpiler
                 _ => null
             };
 
+            if (i1Producer is not null && i2 is InstI32Const c)
+            {
+                switch (inst.Op.x00)
+                {
+                    case OpCode.I64And: return new InstFusedU64And(i1Producer, (ulong)c.Value);
+                    case OpCode.I64Or: return new InstFusedU64Or(i1Producer, (ulong)c.Value);
+                }
+            }
+            
             if (i1Producer != null && i2Producer != null)
             {
                 switch (longConsumer) {
