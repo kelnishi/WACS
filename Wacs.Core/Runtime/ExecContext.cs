@@ -56,9 +56,9 @@ namespace Wacs.Core.Runtime
         public readonly Store Store;
 
         private InstructionSequence _currentSequence;
-        private int _sequenceCount;
-        private int _sequenceIndex;
-        private InstructionBase[] _sequenceInstructions;
+        public int _sequenceCount;
+        public int _sequenceIndex;
+        public InstructionBase[] _sequenceInstructions;
 
         public Frame Frame = NullFrame;
 
