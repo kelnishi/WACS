@@ -35,7 +35,7 @@ using Wacs.Core.Validation;
 namespace Wacs.Core.Instructions
 {
     //0x00
-    public class InstUnreachable : InstructionBase
+    public sealed class InstUnreachable : InstructionBase
     {
         public static readonly InstUnreachable Inst = new();
         public override ByteCode Op => OpCode.Unreachable;
@@ -52,7 +52,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x01
-    public class InstNop : InstructionBase
+    public sealed class InstNop : InstructionBase
     {
         public static readonly InstNop Inst = new();
         public override ByteCode Op => OpCode.Nop;
@@ -429,7 +429,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x0C
-    public class InstBranch : InstructionBase, IBranchInstruction
+    public sealed class InstBranch : InstructionBase, IBranchInstruction
     {
         private static Stack<Value> _asideVals = new();
 
@@ -525,7 +525,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x0D
-    public class InstBranchIf : InstructionBase, IBranchInstruction, INodeConsumer<int>
+    public sealed class InstBranchIf : InstructionBase, IBranchInstruction, INodeConsumer<int>
     {
         public LabelIdx L;
         public override ByteCode Op => OpCode.BrIf;
@@ -590,7 +590,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x0E
-    public class InstBranchTable : InstructionBase, IBranchInstruction, INodeConsumer<int>
+    public sealed class InstBranchTable : InstructionBase, IBranchInstruction, INodeConsumer<int>
     {
         private LabelIdx Ln; //Default m
 
@@ -714,7 +714,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x0F
-    public class InstReturn : InstructionBase
+    public sealed class InstReturn : InstructionBase
     {
         public static readonly InstReturn Inst = new();
         public override ByteCode Op => OpCode.Return;
@@ -742,7 +742,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x10
-    public class InstCall : InstructionBase, ICallInstruction
+    public sealed class InstCall : InstructionBase, ICallInstruction
     {
         public FuncIdx X;
 
@@ -840,7 +840,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x11
-    public class InstCallIndirect : InstructionBase, ICallInstruction
+    public sealed class InstCallIndirect : InstructionBase, ICallInstruction
     {
         private TableIdx X;
 

@@ -24,7 +24,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstF32BinOp : InstructionBase, INodeComputer<float,float,float>
+    public sealed class InstF32BinOp : InstructionBase, INodeComputer<float,float,float>
     {
         // Mask for the sign bit (most significant bit)
         private const uint F32SignMask = 0x8000_0000;

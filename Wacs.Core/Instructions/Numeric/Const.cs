@@ -26,7 +26,7 @@ using Wacs.Core.Validation;
 namespace Wacs.Core.Instructions.Numeric
 {
     //0x41
-    public class InstI32Const : InstructionBase, IConstInstruction, ITypedValueProducer<int>
+    public sealed class InstI32Const : InstructionBase, IConstInstruction, ITypedValueProducer<int>
     {
         private int Value;
         public override ByteCode Op => OpCode.I32Const;
@@ -64,7 +64,7 @@ namespace Wacs.Core.Instructions.Numeric
     }
     
     //0x42
-    public class InstI64Const : InstructionBase, IConstInstruction, ITypedValueProducer<long>
+    public sealed class InstI64Const : InstructionBase, IConstInstruction, ITypedValueProducer<long>
     {
         private long Value;
         public override ByteCode Op => OpCode.I64Const;
@@ -97,7 +97,7 @@ namespace Wacs.Core.Instructions.Numeric
     }
     
     //0x43
-    public class InstF32Const : InstructionBase, IConstInstruction, ITypedValueProducer<float>
+    public sealed class InstF32Const : InstructionBase, IConstInstruction, ITypedValueProducer<float>
     {
         private float Value;
         public override ByteCode Op => OpCode.F32Const;
@@ -138,7 +138,7 @@ namespace Wacs.Core.Instructions.Numeric
     }
     
     //0x44
-    public class InstF64Const : InstructionBase, IConstInstruction, ITypedValueProducer<double>
+    public sealed class InstF64Const : InstructionBase, IConstInstruction, ITypedValueProducer<double>
     {
         private double Value;
         public override ByteCode Op => OpCode.F64Const;

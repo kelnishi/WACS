@@ -79,7 +79,7 @@ namespace Wacs.Core.Instructions.Numeric
         private static int ExecuteI32GeS(int i1, int i2) => i1 >= i2 ? 1 : 0;
         private static int ExecuteI32GeU(uint i1, uint i2) => i1 >= i2 ? 1 : 0;
 
-        private class Signed : InstI32RelOp, INodeComputer<int,int,int>
+        private sealed class Signed : InstI32RelOp, INodeComputer<int,int,int>
         {
             private readonly Func<int,int,int> _execute;
 
@@ -97,7 +97,7 @@ namespace Wacs.Core.Instructions.Numeric
             public Func<ExecContext, int, int, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
 
-        private class Unsigned : InstI32RelOp, INodeComputer<uint,uint,int>
+        private sealed class Unsigned : InstI32RelOp, INodeComputer<uint,uint,int>
         {
             private readonly Func<uint,uint,int> _execute;
 

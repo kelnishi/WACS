@@ -23,7 +23,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstF32RelOp : InstructionBase, INodeComputer<float, float, int>
+    public sealed class InstF32RelOp : InstructionBase, INodeComputer<float, float, int>
     {
         public static readonly InstF32RelOp F32Eq = new(OpCode.F32Eq, ExecuteF32Eq,
             NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.I32));
