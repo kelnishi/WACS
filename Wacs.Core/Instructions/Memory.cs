@@ -60,13 +60,13 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushType(Type);
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
             return this;
         }
 
-        public IInstruction Immediate(MemArg m)
+        public InstructionBase Immediate(MemArg m)
         {
             M = m;
             return this;
@@ -121,12 +121,12 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopI32();
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
             return this;
         }
-        public IInstruction Immediate(MemArg m)
+        public InstructionBase Immediate(MemArg m)
         {
             M = m;
             return this;

@@ -162,7 +162,7 @@ namespace Wacs.Core.Instructions.Numeric
             _execute(context, X);
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             X = reader.ReadByte();
             return this;

@@ -87,7 +87,7 @@ namespace Wacs.Core.Runtime
             OpStack = new(Attributes.MaxOpStack);
         }
 
-        public IInstructionFactory InstructionFactory => Attributes.InstructionFactory;
+        public InstructionBaseFactory InstructionFactory => Attributes.InstructionFactory;
 
         public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[default]];
         public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);

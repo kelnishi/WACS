@@ -35,13 +35,13 @@ namespace Wacs.Core.Instructions
 
         public int CalculateSize() => 1;
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Index = (LocalIdx)reader.ReadLeb128_u32();
             return this;
         }
 
-        public IInstruction Immediate(LocalIdx index)
+        public InstructionBase Immediate(LocalIdx index)
         {
             Index = index;
             return this;
@@ -94,7 +94,7 @@ namespace Wacs.Core.Instructions
         private LocalIdx Index;
         public override ByteCode Op => OpCode.LocalSet;
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Index = (LocalIdx)reader.ReadLeb128_u32();
             return this;
@@ -142,7 +142,7 @@ namespace Wacs.Core.Instructions
 
         public Action<ExecContext, Value> GetFunc => SetLocal;
 
-        public IInstruction Immediate(LocalIdx idx)
+        public InstructionBase Immediate(LocalIdx idx)
         {
             Index = idx;
             return this;
@@ -163,7 +163,7 @@ namespace Wacs.Core.Instructions
 
         public LocalIdx GetIndex() => Index;
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Index = (LocalIdx)reader.ReadLeb128_u32();
             return this;

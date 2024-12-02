@@ -348,7 +348,7 @@ namespace Wacs.Core
 
         public StackRenderer SubRenderer() => new(this, DoesWrite, Width);
 
-        public void ProcessInstruction(IInstruction inst)
+        public void ProcessInstruction(InstructionBase inst)
         {
             FakeContext.LastEvent = "";
             inst.Validate(FakeContext);
