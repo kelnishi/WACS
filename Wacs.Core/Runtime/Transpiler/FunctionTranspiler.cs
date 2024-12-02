@@ -20,7 +20,9 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using Wacs.Core.Instructions;
+using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.Instructions.Transpiler;
+using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
@@ -116,17 +118,12 @@ namespace Wacs.Core.Runtime.Transpiler
                         //Split into local.set/local.get
                         var newSet = new InstLocalSet().Immediate(instTee.GetIndex());
                         var newGet = new InstLocalGet().Immediate(instTee.GetIndex());
-                        if (newSet != null)
-                        {
-                            var setInst = OptimizeInstruction(newSet, stack);
-                            stack.Push(setInst);
-                            stack.Push(newGet);
-                            break;
-                        }
-                        stack.Push(inst);
+                        var setInst = OptimizeInstruction(newSet, stack);
+                        stack.Push(setInst);
+                        stack.Push(newGet);
                         break;
-                    case IOptimizationTarget target:
-                        var newInst = OptimizeInstruction(target as InstructionBase, stack);
+                    case IOptimizationTarget:
+                        var newInst = OptimizeInstruction(inst, stack);
                         stack.Push(newInst);
                         break;
                     default:
@@ -276,6 +273,11 @@ namespace Wacs.Core.Runtime.Transpiler
                 _ => null
             };
 
+            if (i1Producer is not null && i2 is InstI32Const c && inst.Op == OpCode.I32Add)
+            {
+                return new InstFusedI32AddS(i1Producer, c.Value);
+            }
+            
             if (i1Producer != null && i2Producer != null)
             {
                 switch (intConsumer) {
