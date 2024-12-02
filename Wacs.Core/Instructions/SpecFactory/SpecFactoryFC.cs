@@ -22,7 +22,7 @@ namespace Wacs.Core.Instructions
 {
     public partial class SpecFactory
     {
-        public static IInstruction? CreateInstruction(ExtCode opcode) => opcode switch
+        public static InstructionBase? CreateInstruction(ExtCode opcode) => opcode switch
         {
             //Non-Trapping Saturating Float to Int Conversion 
             ExtCode.I32TruncSatF32S   => NumericInst.I32TruncSatF32S,

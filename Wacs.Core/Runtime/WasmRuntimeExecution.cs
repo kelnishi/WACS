@@ -31,7 +31,7 @@ namespace Wacs.Core.Runtime
 {
     public partial class WasmRuntime
     {
-        private IInstruction? lastInstruction = null;
+        private InstructionBase? lastInstruction = null;
 
         public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr, InvokerOptions? options = default)
             where TDelegate : Delegate
@@ -450,18 +450,18 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        private void LogPreInstruction(InvokerOptions options, IInstruction inst)
+        private void LogPreInstruction(InvokerOptions options, InstructionBase inst)
         {
             switch ((OpCode)inst.Op)
             {
                 //Handle these post
-                case var _ when IInstruction.IsNumeric(inst): break;
-                case var _ when IInstruction.IsVar(inst): break;
-                case var _ when IInstruction.IsLoad(inst): break;
+                case var _ when InstructionBase.IsNumeric(inst): break;
+                case var _ when InstructionBase.IsVar(inst): break;
+                case var _ when InstructionBase.IsLoad(inst): break;
                 
-                case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && IInstruction.IsBound(Context, inst):
-                case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && IInstruction.IsBound(Context, inst):
-                // case OpCode.CallRef when options.LogInstructionExecution&(int)InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
+                case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && InstructionBase.IsBound(Context, inst):
+                case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && InstructionBase.IsBound(Context, inst):
+                // case OpCode.CallRef when options.LogInstructionExecution&(int)InstructionLogging.Binds) && InstructionBase.IsBound(Context, inst):
                 
                 case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
                 case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
@@ -481,7 +481,7 @@ namespace Wacs.Core.Runtime
                 case OpCode.BrIf when ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
                 case OpCode.BrTable when ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
                 
-                case var _ when IInstruction.IsBranch(lastInstruction) && ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
+                case var _ when InstructionBase.IsBranch(lastInstruction) && ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
                 case var _ when ((int)options.LogInstructionExecution&(int)InstructionLogging.Computes)!=0:
                     string location = "";
                     if (options.CalculateLineNumbers)
@@ -505,16 +505,16 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        private void LogPostInstruction(InvokerOptions options, IInstruction inst)
+        private void LogPostInstruction(InvokerOptions options, InstructionBase inst)
         {
             if ((options.LogInstructionExecution & InstructionLogging.Computes) == 0)
                 return;
             
             switch ((OpCode)inst.Op)
             {
-                case var _ when IInstruction.IsLoad(inst):
-                case var _ when IInstruction.IsNumeric(inst): 
-                case var _ when IInstruction.IsVar(inst):
+                case var _ when InstructionBase.IsLoad(inst):
+                case var _ when InstructionBase.IsNumeric(inst): 
+                case var _ when InstructionBase.IsVar(inst):
                     string location = "";
                     if (options.CalculateLineNumbers)
                     {

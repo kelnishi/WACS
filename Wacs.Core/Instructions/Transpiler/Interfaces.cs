@@ -19,7 +19,7 @@ using Wacs.Core.Runtime;
 
 namespace Wacs.Core.Instructions.Transpiler
 {
-    public interface IInstructionAnalog
+    public interface InstructionBaseAnalog
     {
         public int CalculateSize();
     }
@@ -27,12 +27,12 @@ namespace Wacs.Core.Instructions.Transpiler
 
     public interface IConvertableValueProducer {}
 
-    public interface ITypedValueProducer<out T> : IInstructionAnalog, IConvertableValueProducer
+    public interface ITypedValueProducer<out T> : InstructionBaseAnalog, IConvertableValueProducer
     {
         public Func<ExecContext, T> GetFunc { get; }
     }
     
-    public interface IOptimizationTarget : IInstruction {}
+    public interface IOptimizationTarget {}
 
     public interface IValueConsumer<TIn1> {}
     public interface IValueConsumer<TIn1, TIn2> {}
