@@ -27,7 +27,7 @@ using Wacs.Core.Validation;
 // ReSharper disable InconsistentNaming
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstConvert : InstructionBase
+    public sealed class InstConvert : InstructionBase
     {
         // @Spec 3.3.1.6 cvtop
         // [t1] -> [t2]

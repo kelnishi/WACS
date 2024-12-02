@@ -151,7 +151,7 @@ namespace Wacs.Core.Instructions.Numeric
             return (i1 >> k) | (i1 << (64 - k));
         }
 
-        private class Signed : InstI64BinOp, INodeComputer<long,long,long>
+        private sealed class Signed : InstI64BinOp, INodeComputer<long,long,long>
         {
             private readonly Func<long,long,long> _execute;
 
@@ -169,7 +169,7 @@ namespace Wacs.Core.Instructions.Numeric
             public Func<ExecContext, long,long,long> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
 
-        private class Unsigned : InstI64BinOp, INodeComputer<ulong,ulong,ulong>
+        private sealed class Unsigned : InstI64BinOp, INodeComputer<ulong,ulong,ulong>
         {
             private readonly Func<ulong,ulong,ulong> _execute;
 
@@ -187,7 +187,7 @@ namespace Wacs.Core.Instructions.Numeric
             public Func<ExecContext, ulong,ulong,ulong> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
 
-        private class Mixed : InstI64BinOp, INodeComputer<ulong,long,ulong>
+        private sealed class Mixed : InstI64BinOp, INodeComputer<ulong,long,ulong>
         {
             private readonly Func<ulong,long,ulong> _execute;
 
