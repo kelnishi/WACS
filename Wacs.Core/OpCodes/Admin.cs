@@ -34,5 +34,18 @@ namespace Wacs.Core.OpCodes
         [OpCode("aggr.3x1")] Aggr3_1     = 0x24,
 
         [OpCode("i32.fused.add")] I32FusedAdd = 0x30,
+        [OpCode("i32.fused.sub")] I32FusedSub = 0x31,
+        [OpCode("i32.fused.mul")] I32FusedMul = 0x32,
+        [OpCode("i32.fused.and")] I32FusedAnd = 0x33,
+        [OpCode("i32.fused.or")]  I32FusedOr  = 0x34,
+        
+        [OpCode("i64.fused.add")] I64FusedAdd = 0x38,
+        [OpCode("i64.fused.sub")] I64FusedSub = 0x39,
+        [OpCode("i64.fused.mul")] I64FusedMul = 0x3A,
+        [OpCode("i64.fused.and")] I64FusedAnd = 0x3B,
+        [OpCode("i64.fused.or")]  I64FusedOr  = 0x3C,
+        
+        [OpCode("local.getset")] LocalGetSet = 0x40,
+        [OpCode("local.constset")] LocalConstSet = 0x41,
     }
 }

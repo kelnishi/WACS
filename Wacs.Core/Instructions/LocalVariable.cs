@@ -31,6 +31,8 @@ namespace Wacs.Core.Instructions
         private LocalIdx Index;
         public override ByteCode Op => OpCode.LocalGet;
 
+        public LocalIdx GetIndex() => Index;
+        
         public Func<ExecContext, Value> GetFunc => FetchFromLocals;
 
         public int CalculateSize() => 1;
@@ -91,6 +93,8 @@ namespace Wacs.Core.Instructions
     public class InstLocalSet : InstructionBase, IVarInstruction, INodeConsumer<Value>
     {
         private LocalIdx Index;
+        
+        public LocalIdx GetIndex() => Index;
         public override ByteCode Op => OpCode.LocalSet;
 
         public override InstructionBase Parse(BinaryReader reader)
@@ -127,7 +131,7 @@ namespace Wacs.Core.Instructions
         {
             //2.
             context.Assert( context.Frame.Locals.Contains(Index),
-                $"Instruction local.get could not get Local {Index}");
+                $"Instruction local.set could not set Local {Index}");
             //3.
             context.Assert( context.OpStack.HasValue,
                 $"Operand Stack underflow in instruction local.set");
