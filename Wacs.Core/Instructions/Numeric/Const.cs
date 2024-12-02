@@ -28,7 +28,7 @@ namespace Wacs.Core.Instructions.Numeric
     //0x41
     public sealed class InstI32Const : InstructionBase, IConstInstruction, ITypedValueProducer<int>
     {
-        private int Value;
+        public int Value;
         public override ByteCode Op => OpCode.I32Const;
         public Func<ExecContext, int> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
