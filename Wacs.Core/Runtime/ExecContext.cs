@@ -20,6 +20,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.Instructions;
@@ -176,6 +177,7 @@ namespace Wacs.Core.Runtime
             _sequenceIndex = -1;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void EnterSequence(InstructionSequence seq)
         {
             _currentSequence = seq;
@@ -205,19 +207,23 @@ namespace Wacs.Core.Runtime
         }
 
         // @Spec 4.4.9.1. Enter Block
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void EnterBlock(BlockTarget target, Block block)
         {
             //HACK: Labels are a linked list with each node residing on its respective block instruction.
             Frame.PushLabel(target);
+            //Manually inline PushLabel
+            // Frame.TopLabel = target;
+            // Frame.LabelCount++;
+            // Frame.Label = target.Label;
             
             //Sets the Pointer to the start of the block sequence
-            // EnterSequence(block.Instructions);
-            
+            EnterSequence(block.Instructions);
             //Manually inline EnterSequence
-            _currentSequence = block.Instructions;
-            _sequenceCount = _currentSequence.Count;
-            _sequenceInstructions = _currentSequence._instructions;
-            _sequenceIndex = -1;
+            // _currentSequence = block.Instructions;
+            // _sequenceCount = _currentSequence.Count;
+            // _sequenceInstructions = _currentSequence._instructions;
+            // _sequenceIndex = -1;
         }
 
         // @Spec 4.4.9.2. Exit Block

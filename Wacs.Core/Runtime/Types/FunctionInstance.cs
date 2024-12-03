@@ -122,12 +122,11 @@ namespace Wacs.Core.Runtime.Types
             context.PushFrame(frame);
             
             //10.
-            frame.PushLabel(Body.LabelTarget); 
-            
             frame.ReturnLabel.Arity = funcType.ResultType.Arity;
             frame.ReturnLabel.Instruction = LabelInst;
             frame.ReturnLabel.ContinuationAddress = context.GetPointer();
-            // frame.ReturnLabel.StackHeight = 0;
+            
+            frame.SetLabel(Body.LabelTarget); 
             
             context.EnterSequence(Body.Instructions);
         }
