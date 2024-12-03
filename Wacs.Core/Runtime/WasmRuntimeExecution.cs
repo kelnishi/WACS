@@ -358,27 +358,45 @@ namespace Wacs.Core.Runtime
 
         public async Task ProcessThreadAsync(long gasLimit)
         {
-            if (gasLimit <= 0) gasLimit = long.MaxValue;
-
             InstructionBase inst;
-            //Manually inline Next()
-            // while (Context.Next() is { } inst)
-            while (++Context._sequenceIndex < Context._sequenceCount)
+            if (gasLimit <= 0)
             {
-                inst = Context._sequenceInstructions[Context._sequenceIndex];
-                if (inst.IsAsync)
+                //Manually inline Next()
+                // while (Context.Next() is { } inst)
+                while (++Context._sequenceIndex < Context._sequenceCount)
                 {
-                    await inst.ExecuteAsync(Context);
-                    Context.steps += inst.Size;
-                    if (Context.steps >= gasLimit)
-                        throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
+                    inst = Context._sequenceInstructions[Context._sequenceIndex];
+                    if (inst.IsAsync)
+                    {
+                        await inst.ExecuteAsync(Context);
+                    }
+                    else
+                    {
+                        inst.Execute(Context);
+                    }
                 }
-                else
+            }
+            else
+            {
+                //Manually inline Next()
+                // while (Context.Next() is { } inst)
+                while (++Context._sequenceIndex < Context._sequenceCount)
                 {
-                    inst.Execute(Context);
+                    inst = Context._sequenceInstructions[Context._sequenceIndex];
+                    if (inst.IsAsync)
+                    {
+                        await inst.ExecuteAsync(Context);
+                    }
+                    else
+                    {
+                        inst.Execute(Context);
+                    }
+                    //Counting gas costs about 18% throughput!
                     Context.steps += inst.Size;
                     if (Context.steps >= gasLimit)
+                    {
                         throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
+                    }
                 }
             }
         }
