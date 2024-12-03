@@ -406,12 +406,8 @@ namespace Wacs.Core.Runtime
             long highwatermark = 0;
             long gasLimit = options.GasLimit > 0 ? options.GasLimit : long.MaxValue;
             
-            InstructionBase inst;
-            //Manually inline Next()
-            // while (Context.Next() is { } inst)
-            while (++Context._sequenceIndex < Context._sequenceCount)
+            while (Context.Next() is { } inst)
             {
-                inst = Context._sequenceInstructions[Context._sequenceIndex];
                 //Trace execution
                 if (options.LogInstructionExecution != InstructionLogging.None)
                 {
