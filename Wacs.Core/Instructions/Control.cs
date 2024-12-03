@@ -110,8 +110,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.3. block
         public override void Execute(ExecContext context)
         {
-            if (Block.Instructions.Count != 0)
-                context.EnterBlock(this, Block);
+            context.EnterBlock(this, Block);
         }
 
         /// <summary>
