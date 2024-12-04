@@ -23,7 +23,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstI64UnOp : InstructionBase, INodeComputer<ulong, ulong>
+    public sealed class InstI64UnOp : InstructionBase, INodeComputer<ulong, ulong>
     {
         // @Spec 3.3.1.2. i.unop
         public static readonly InstI64UnOp I64Clz    = new(OpCode.I64Clz    , ExecuteI64Clz    , NumericInst.ValidateOperands(pop: ValType.I64, push: ValType.I64));

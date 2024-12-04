@@ -60,6 +60,10 @@ namespace Wacs.Core
         public void PushValues(Stack<Value> vals) {
             while (vals.Count > 0) _context.Push(vals.Pop().Type);
         }
+        
+        public void DiscardValues(ResultType types) {
+            foreach (var type in types.Types.Reverse()) PopType(type);
+        }
 
         public Value PopI32() => _context.Pop(ValType.I32);
         public Value PopI64() => _context.Pop(ValType.I64);
@@ -348,7 +352,7 @@ namespace Wacs.Core
 
         public StackRenderer SubRenderer() => new(this, DoesWrite, Width);
 
-        public void ProcessInstruction(IInstruction inst)
+        public void ProcessInstruction(InstructionBase inst)
         {
             FakeContext.LastEvent = "";
             inst.Validate(FakeContext);

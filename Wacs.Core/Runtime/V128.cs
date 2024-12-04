@@ -267,7 +267,7 @@ namespace Wacs.Core.Runtime
         public static implicit operator V128((ulong, ulong) tuple) => 
             new(tuple.Item1, tuple.Item2);
 
-        public V128(Span<byte> data)
+        public V128(ReadOnlySpan<byte> data)
         {
             if (data.Length != 16)
                 throw new InvalidDataException($"Cannot create V128 from {data.Length} bytes");

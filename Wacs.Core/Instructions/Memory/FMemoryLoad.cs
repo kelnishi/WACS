@@ -49,7 +49,7 @@ namespace Wacs.Core.Instructions.Memory
             long ea = (long)i + (long)M.Offset;
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
-            var bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
+            var bs = new ReadOnlySpan<byte>(mem.Data, (int)ea, WidthTByteSize);
             
             return MemoryMarshal.Read<float>(bs);
         }
@@ -83,7 +83,7 @@ namespace Wacs.Core.Instructions.Memory
             long ea = (long)i + (long)M.Offset;
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
-            var bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
+            var bs = new ReadOnlySpan<byte>(mem.Data, (int)ea, WidthTByteSize);
             
             return MemoryMarshal.Read<double>(bs);
         }

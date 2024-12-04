@@ -26,9 +26,9 @@ using Wacs.Core.Validation;
 namespace Wacs.Core.Instructions.Numeric
 {
     //0x41
-    public class InstI32Const : InstructionBase, IConstInstruction, ITypedValueProducer<int>
+    public sealed class InstI32Const : InstructionBase, IConstInstruction, ITypedValueProducer<int>
     {
-        private int Value;
+        public int Value;
         public override ByteCode Op => OpCode.I32Const;
         public Func<ExecContext, int> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
@@ -48,23 +48,23 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(Value);
         }
 
-        public override IInstruction Parse(BinaryReader reader) {
+        public override InstructionBase Parse(BinaryReader reader) {
             Value = reader.ReadLeb128_s32();
             return this;
         }
 
-        public IInstruction Immediate(int value)
+        public InstructionBase Immediate(int value)
         {
             Value = value;
             return this;
         }
 
-        public int FetchImmediate(ExecContext context) => Value;
+        public int FetchImmediate(ExecContext _) => Value;
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
     }
     
     //0x42
-    public class InstI64Const : InstructionBase, IConstInstruction, ITypedValueProducer<long>
+    public sealed class InstI64Const : InstructionBase, IConstInstruction, ITypedValueProducer<long>
     {
         private long Value;
         public override ByteCode Op => OpCode.I64Const;
@@ -86,18 +86,18 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI64(Value);
         }
 
-        public override IInstruction Parse(BinaryReader reader) {
+        public override InstructionBase Parse(BinaryReader reader) {
             Value = reader.ReadLeb128_s64();
             return this;
         }
 
-        public long FetchImmediate(ExecContext context) => Value;
+        public long FetchImmediate(ExecContext _) => Value;
 
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
     }
     
     //0x43
-    public class InstF32Const : InstructionBase, IConstInstruction, ITypedValueProducer<float>
+    public sealed class InstF32Const : InstructionBase, IConstInstruction, ITypedValueProducer<float>
     {
         private float Value;
         public override ByteCode Op => OpCode.F32Const;
@@ -119,12 +119,12 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF32(Value);
         }
 
-        public override IInstruction Parse(BinaryReader reader) {
+        public override InstructionBase Parse(BinaryReader reader) {
             Value = reader.Read_f32();
             return this;
         }
 
-        public float FetchImmediate(ExecContext context) => Value;
+        public float FetchImmediate(ExecContext _) => Value;
 
         public override string RenderText(ExecContext? context)
         {
@@ -138,7 +138,7 @@ namespace Wacs.Core.Instructions.Numeric
     }
     
     //0x44
-    public class InstF64Const : InstructionBase, IConstInstruction, ITypedValueProducer<double>
+    public sealed class InstF64Const : InstructionBase, IConstInstruction, ITypedValueProducer<double>
     {
         private double Value;
         public override ByteCode Op => OpCode.F64Const;
@@ -160,12 +160,12 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF64(Value);
         }
 
-        public override IInstruction Parse(BinaryReader reader) {
+        public override InstructionBase Parse(BinaryReader reader) {
             Value = reader.Read_f64();
             return this;
         }
 
-        public double FetchImmediate(ExecContext context) => Value;
+        public double FetchImmediate(ExecContext _) => Value;
 
         public override string RenderText(ExecContext? context)
         {

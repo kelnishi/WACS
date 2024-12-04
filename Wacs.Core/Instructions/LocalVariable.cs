@@ -31,17 +31,19 @@ namespace Wacs.Core.Instructions
         private LocalIdx Index;
         public override ByteCode Op => OpCode.LocalGet;
 
+        public LocalIdx GetIndex() => Index;
+        
         public Func<ExecContext, Value> GetFunc => FetchFromLocals;
 
         public int CalculateSize() => 1;
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Index = (LocalIdx)reader.ReadLeb128_u32();
             return this;
         }
 
-        public IInstruction Immediate(LocalIdx index)
+        public InstructionBase Immediate(LocalIdx index)
         {
             Index = index;
             return this;
@@ -73,8 +75,7 @@ namespace Wacs.Core.Instructions
 
         public override void Execute(ExecContext context)
         {
-            var value = FetchFromLocals(context);
-            context.OpStack.PushValue(value);
+            context.OpStack.PushValue(FetchFromLocals(context));
         }
 
         // @Spec 4.4.5.1. local.get 
@@ -85,17 +86,18 @@ namespace Wacs.Core.Instructions
                 $"Instruction local.get could not get Local {Index}");
             //3.
             // var value = context.Frame.Locals.Get(Index);
-            var value = context.Frame.Locals.Data[Index.Value];
-            return value;
+            return context.Frame.Locals.Data[Index.Value];
         }
     }
     
     public class InstLocalSet : InstructionBase, IVarInstruction, INodeConsumer<Value>
     {
         private LocalIdx Index;
+        
+        public LocalIdx GetIndex() => Index;
         public override ByteCode Op => OpCode.LocalSet;
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Index = (LocalIdx)reader.ReadLeb128_u32();
             return this;
@@ -129,7 +131,7 @@ namespace Wacs.Core.Instructions
         {
             //2.
             context.Assert( context.Frame.Locals.Contains(Index),
-                $"Instruction local.get could not get Local {Index}");
+                $"Instruction local.set could not set Local {Index}");
             //3.
             context.Assert( context.OpStack.HasValue,
                 $"Operand Stack underflow in instruction local.set");
@@ -143,7 +145,7 @@ namespace Wacs.Core.Instructions
 
         public Action<ExecContext, Value> GetFunc => SetLocal;
 
-        public IInstruction Immediate(LocalIdx idx)
+        public InstructionBase Immediate(LocalIdx idx)
         {
             Index = idx;
             return this;
@@ -164,7 +166,7 @@ namespace Wacs.Core.Instructions
 
         public LocalIdx GetIndex() => Index;
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Index = (LocalIdx)reader.ReadLeb128_u32();
             return this;
