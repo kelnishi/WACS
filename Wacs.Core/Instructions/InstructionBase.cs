@@ -31,8 +31,6 @@ namespace Wacs.Core.Instructions
     /// </summary>
     public abstract class InstructionBase
     {
-        protected static Stack<Value> _aside = new();
-
         public bool IsAsync = false;
         public int Size = 1;
 

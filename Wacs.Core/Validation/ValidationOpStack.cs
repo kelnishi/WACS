@@ -46,6 +46,8 @@ namespace Wacs.Core.Validation
         Value PopAny();
 
         void PopValues(ResultType types, ref Stack<Value> aside);
+        void DiscardValues(ResultType types);
+        
         public void ReturnResults(ResultType type);
     }
 
@@ -256,6 +258,14 @@ namespace Wacs.Core.Validation
             foreach (var type in types.Types.Reverse())
             {
                 aside.Push(PopType(type));
+            }
+        }
+        
+        public void DiscardValues(ResultType types)
+        {
+            foreach (var type in types.Types.Reverse())
+            {
+                PopType(type);
             }
         }
 

@@ -89,8 +89,7 @@ namespace Wacs.Core.Instructions
                 context.Assert(funcType,  "Invalid BlockType: {0}",Block.Type);
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(funcType.ParameterTypes, ref _aside);
-                _aside.Clear();
+                context.OpStack.DiscardValues(funcType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
                 context.PushControlFrame(BlockOp, funcType);
@@ -164,8 +163,7 @@ namespace Wacs.Core.Instructions
                 context.Assert(funcType, "Invalid BlockType: {0}",Block.Type);
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(funcType.ParameterTypes, ref _aside);
-                _aside.Clear();
+                context.OpStack.DiscardValues(funcType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
                 context.PushControlFrame(LoopOp, funcType);
@@ -247,8 +245,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PopI32();
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(ifType.ParameterTypes, ref _aside);
-                _aside.Clear();
+                context.OpStack.DiscardValues(ifType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
                 context.PushControlFrame(IfOp, ifType);
@@ -444,8 +441,7 @@ namespace Wacs.Core.Instructions
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
             
             //Validate results, but leave them on the stack
-            context.OpStack.PopValues(nthFrame.LabelTypes, ref _aside);
-            _aside.Clear();
+            context.OpStack.DiscardValues(nthFrame.LabelTypes);
 
             // if (!context.Unreachable)
             //     nthFrame.ConditionallyReachable = true;
@@ -544,7 +540,7 @@ namespace Wacs.Core.Instructions
             //     nthFrame.ConditionallyReachable = true;
             
             //Pop values like we branch
-            context.OpStack.PopValues(nthFrame.LabelTypes, ref _aside);
+            context.OpStack.DiscardValues(nthFrame.LabelTypes);
             //But actually, we don't, so push them back on.
             context.OpStack.PushResult(nthFrame.LabelTypes);
         }
@@ -610,7 +606,8 @@ namespace Wacs.Core.Instructions
             
             // if (!context.Unreachable)
             //     mthFrame.ConditionallyReachable = true;
-            
+
+            Stack<Value> aside = new();
             foreach (var lidx in Ls)
             {
                 context.Assert(context.ContainsLabel(lidx.Value),
@@ -619,16 +616,12 @@ namespace Wacs.Core.Instructions
                 var nthFrame = context.ControlStack.PeekAt((int)lidx.Value);
                 context.Assert(nthFrame.LabelTypes.Arity == arity,
                     "Instruction br_table invalid. Label {0} had different arity {1} =/= {2}", lidx, nthFrame.LabelTypes.Arity,arity);
-
-                // if (!context.Unreachable)
-                //     nthFrame.ConditionallyReachable = true;
                 
-                context.OpStack.PopValues(nthFrame.LabelTypes, ref _aside);
-                context.OpStack.PushValues(_aside);
+                context.OpStack.PopValues(nthFrame.LabelTypes, ref aside);
+                context.OpStack.PushValues(aside);
             }
 
-            context.OpStack.PopValues(mthFrame.LabelTypes, ref _aside);
-            _aside.Clear();
+            context.OpStack.PopValues(mthFrame.LabelTypes, ref aside);
             context.SetUnreachable();
         }
 
@@ -723,8 +716,9 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             //keep the results for the block or function to validate
-            context.OpStack.PopValues(context.ReturnType, ref _aside);
-            context.OpStack.PushValues(_aside);
+            Stack<Value> aside = new();
+            context.OpStack.PopValues(context.ReturnType, ref aside);
+            context.OpStack.PushValues(aside);
             context.SetUnreachable();
         }
 
@@ -770,8 +764,7 @@ namespace Wacs.Core.Instructions
                 "Instruction call was invalid. Function {0} was not in the Context.",X);
             var func = context.Funcs[X];
             var type = context.Types[func.TypeIndex];
-            context.OpStack.PopValues(type.ParameterTypes, ref _aside);
-            _aside.Clear();
+            context.OpStack.DiscardValues(type.ParameterTypes);
             context.OpStack.PushResult(type.ResultType);
         }
 
@@ -891,8 +884,7 @@ namespace Wacs.Core.Instructions
             var funcType = context.Types[Y];
 
             context.OpStack.PopI32();
-            context.OpStack.PopValues(funcType.ParameterTypes, ref _aside);
-            _aside.Clear();
+            context.OpStack.DiscardValues(funcType.ParameterTypes);
             context.OpStack.PushResult(funcType.ResultType);
         }
 
