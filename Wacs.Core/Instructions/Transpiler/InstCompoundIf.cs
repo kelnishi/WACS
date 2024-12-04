@@ -74,8 +74,7 @@ namespace Wacs.Core.Instructions.Transpiler
                 // context.OpStack.PopI32();
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(ifType.ParameterTypes, ref _aside);
-                _aside.Clear();
+                context.OpStack.DiscardValues(ifType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
                 context.PushControlFrame(IfOp, ifType);
