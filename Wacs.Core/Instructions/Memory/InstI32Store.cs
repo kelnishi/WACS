@@ -100,10 +100,8 @@ namespace Wacs.Core.Instructions.Memory
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
-            Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
-            
-            byte cU8 = (byte)(0xFF & cU32);
-            bs[0] = cU8;
+            // Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
+            mem.Data[(int)ea] = (byte)(0xFF & cU32);
         }
 
         public Action<ExecContext, uint, uint> GetFunc => SetMemoryValue;

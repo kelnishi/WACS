@@ -39,7 +39,7 @@ namespace Wacs.Core
         /// </summary>
         public class ElementSegment : IRenderable
         {
-            private ElementSegment(ReferenceType type, IInstruction[] funcIndices, ElementMode mode)
+            private ElementSegment(ReferenceType type, InstructionBase[] funcIndices, ElementMode mode)
             {
                 Type = type;
                 Initializers = funcIndices.Select(inst => new Expression(inst, 1)).ToArray();
@@ -55,7 +55,7 @@ namespace Wacs.Core
                 Mode.SegmentType = Type;
             }
 
-            private ElementSegment(TableIdx tableIndex, Expression e, ReferenceType type, IInstruction[] funcIndices)
+            private ElementSegment(TableIdx tableIndex, Expression e, ReferenceType type, InstructionBase[] funcIndices)
             {
                 Type = type;
                 Initializers = funcIndices.Select(inst => new Expression(inst, 1)).ToArray();
@@ -120,7 +120,7 @@ namespace Wacs.Core
             /// <summary>
             /// Generate a InstRefFunc for a funcidx
             /// </summary>
-            private static IInstruction ParseFuncIdxInstructions(BinaryReader reader) =>
+            private static InstructionBase ParseFuncIdxInstructions(BinaryReader reader) =>
                 BinaryModuleParser.InstructionFactory.CreateInstruction(OpCode.RefFunc).Parse(reader);
 
             private static ReferenceType ParseElementKind(BinaryReader reader) =>

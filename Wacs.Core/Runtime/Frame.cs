@@ -17,6 +17,7 @@
 using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
@@ -25,7 +26,7 @@ using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime
 {
-    public class Frame : IPoolable
+    public sealed class Frame : IPoolable
     {
         public InstructionPointer ContinuationAddress = InstructionPointer.Nil;
         public string FuncId = "";
@@ -96,29 +97,34 @@ namespace Wacs.Core.Runtime
             LabelCount = 0;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void SetLabel(BlockTarget baselabel)
+        {
+            TopLabel = baselabel;
+            LabelCount = 1;
+            Label = ReturnLabel;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void PushLabel(BlockTarget target)
         {
             TopLabel = target;
-            LabelCount += 1;
-
-            Label = LabelCount > 1
-                ? TopLabel.Label 
-                : ReturnLabel;
+            LabelCount++;
+            Label = TopLabel.Label;
         }
 
         public InstructionPointer PopLabels(int idx)
         {
             if (LabelCount <= idx + 1)
                 throw new InvalidDataException("Label Stack underflow");
-            
+
+            idx = LabelCount - (idx + 1);
             BlockTarget oldLabel;
             do
             {
                 oldLabel = TopLabel;
                 TopLabel = TopLabel.EnclosingBlock;
-                idx -= 1;
-                LabelCount -= 1;
-            } while (idx >= 0);
+            } while (--LabelCount > idx);
 
             Label = LabelCount > 1
                 ? TopLabel.Label 

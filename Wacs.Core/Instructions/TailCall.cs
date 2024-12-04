@@ -53,8 +53,9 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             //Return
-            context.OpStack.PopValues(context.ReturnType, ref _aside);
-            context.OpStack.PushValues(_aside);
+            Stack<Value> aside = new();
+            context.OpStack.PopValues(context.ReturnType, ref aside);
+            context.OpStack.PushValues(aside);
             context.SetUnreachable();
             
             //Call
@@ -62,8 +63,8 @@ namespace Wacs.Core.Instructions
                 "Instruction call was invalid. Function {0} was not in the Context.",X);
             var func = context.Funcs[X];
             var type = context.Types[func.TypeIndex];
-            context.OpStack.PopValues(type.ParameterTypes, ref _aside);
-            _aside.Clear();
+            context.OpStack.PopValues(type.ParameterTypes, ref aside);
+            aside.Clear();
             context.OpStack.PushResult(type.ResultType);
         }
 
@@ -115,14 +116,14 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             IsAsync = true;
             X = (FuncIdx)reader.ReadLeb128_u32();
             return this;
         }
 
-        public IInstruction Immediate(FuncIdx value)
+        public InstructionBase Immediate(FuncIdx value)
         {
             X = value;
             return this;
@@ -203,8 +204,9 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             //Return
-            context.OpStack.PopValues(context.ReturnType, ref _aside);
-            context.OpStack.PushValues(_aside);
+            Stack<Value> aside = new();
+            context.OpStack.PopValues(context.ReturnType, ref aside);
+            context.OpStack.PushValues(aside);
             context.SetUnreachable();
             
             //Call Indirect
@@ -218,8 +220,8 @@ namespace Wacs.Core.Instructions
             var funcType = context.Types[Y];
 
             context.OpStack.PopI32();
-            context.OpStack.PopValues(funcType.ParameterTypes, ref _aside);
-            _aside.Clear();
+            context.OpStack.PopValues(funcType.ParameterTypes, ref aside);
+            aside.Clear();
             context.OpStack.PushResult(funcType.ResultType);
         }
 
@@ -351,7 +353,7 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Y = (TypeIdx)reader.ReadLeb128_u32();
             X = (TableIdx)reader.ReadLeb128_u32();

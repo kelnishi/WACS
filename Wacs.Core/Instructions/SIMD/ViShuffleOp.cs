@@ -60,7 +60,7 @@ namespace Wacs.Core.Instructions
         public static V128 ParseLanes(BinaryReader reader) => 
             new(reader.ReadBytes(16));
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             X = ParseLanes(reader);
             return this;

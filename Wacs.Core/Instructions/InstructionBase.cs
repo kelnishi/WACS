@@ -14,9 +14,11 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
@@ -27,12 +29,12 @@ namespace Wacs.Core.Instructions
     /// <summary>
     /// An abstract base class for all instruction implementations, providing common functionality.
     /// </summary>
-    public abstract class InstructionBase : IInstruction
+    public abstract class InstructionBase
     {
-        protected static Stack<Value> _aside = new();
-
         public bool IsAsync = false;
         public int Size = 1;
+
+        public readonly Action<ExecContext> Executor;
 
         /// <summary>
         /// Gets the opcode associated with the instruction.
@@ -67,8 +69,26 @@ namespace Wacs.Core.Instructions
         /// </summary>
         /// <param name="reader"></param>
         /// <returns>The parsed instruction</returns>
-        public virtual IInstruction Parse(BinaryReader reader) => this;
+        public virtual InstructionBase Parse(BinaryReader reader) => this;
 
+        /// <summary>
+        /// Render the instruction at a given label stack depth
+        /// </summary>
         public virtual string RenderText(ExecContext? context) => Op.GetMnemonic();
+        
+        public static bool IsEnd(InstructionBase inst) => inst.Op.x00 == OpCode.End;
+
+        public static bool IsElseOrEnd(InstructionBase inst) => inst is InstEnd;
+
+        public static bool IsBranch(InstructionBase? inst) => inst is IBranchInstruction;
+
+        public static bool IsNumeric(InstructionBase? inst) => inst is NumericInst;
+
+        public static bool IsVar(InstructionBase? inst) => inst is IVarInstruction;
+
+        public static bool IsLoad(InstructionBase? inst) => inst is InstMemoryLoad;
+
+        public static bool IsBound(ExecContext context, InstructionBase? inst) => 
+            inst is ICallInstruction ci && ci.IsBound(context);
     }
 }

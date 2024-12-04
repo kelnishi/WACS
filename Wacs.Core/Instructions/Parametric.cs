@@ -112,6 +112,7 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             int c = context.OpStack.PopI32();
+            //TODO implement in OpStack with array move
             Value val2 = context.OpStack.PopAny();
             Value val1 = context.OpStack.PopAny();
             context.OpStack.PushValue(Select(context, val1, val2, c));
@@ -121,7 +122,7 @@ namespace Wacs.Core.Instructions
             c != 0 ? val1 : val2;
 
         public Func<ExecContext, Value, Value, int, Value> GetFunc => Select;
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             if (WithTypes) {
                 Types = reader.ParseVector(ValTypeParser.Parse);

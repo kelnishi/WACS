@@ -20,6 +20,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.Instructions;
@@ -56,9 +57,9 @@ namespace Wacs.Core.Runtime
         public readonly Store Store;
 
         private InstructionSequence _currentSequence;
-        private int _sequenceCount;
-        private int _sequenceIndex;
-        private InstructionBase[] _sequenceInstructions;
+        public int _sequenceCount;
+        public int _sequenceIndex;
+        public InstructionBase[] _sequenceInstructions;
 
         public Frame Frame = NullFrame;
 
@@ -87,7 +88,7 @@ namespace Wacs.Core.Runtime
             OpStack = new(Attributes.MaxOpStack);
         }
 
-        public IInstructionFactory InstructionFactory => Attributes.InstructionFactory;
+        public InstructionBaseFactory InstructionFactory => Attributes.InstructionFactory;
 
         public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[default]];
         public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
@@ -124,7 +125,7 @@ namespace Wacs.Core.Runtime
             frame.ClearLabels();
             int capacity = type.ParameterTypes.Types.Length + locals.Length;
             var localData = _localsDataPool.Rent(capacity);
-            frame.Locals = new(localData, type.ParameterTypes.Types, locals);
+            frame.Locals = new(localData, type.ParameterTypes.Types, locals, true);
             frame.StackHeight = OpStack.Count;
             
             return frame;
@@ -155,10 +156,11 @@ namespace Wacs.Core.Runtime
 
         public void ResetStack(Label label)
         {
-            for (int c = OpStack.Count, h = label.StackHeight + Frame.StackHeight; c > h; --c)
-            {
-                OpStack.PopAny();
-            }
+            // for (int c = OpStack.Count, h = label.StackHeight + Frame.StackHeight; c > h; --c)
+            // {
+            //     OpStack.PopAny();
+            // }
+            OpStack.PopTo(label.StackHeight + Frame.StackHeight);
         }
 
         public void FlushCallStack()
@@ -175,6 +177,7 @@ namespace Wacs.Core.Runtime
             _sequenceIndex = -1;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void EnterSequence(InstructionSequence seq)
         {
             _currentSequence = seq;
@@ -204,19 +207,23 @@ namespace Wacs.Core.Runtime
         }
 
         // @Spec 4.4.9.1. Enter Block
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void EnterBlock(BlockTarget target, Block block)
         {
             //HACK: Labels are a linked list with each node residing on its respective block instruction.
             Frame.PushLabel(target);
+            //Manually inline PushLabel
+            // Frame.TopLabel = target;
+            // Frame.LabelCount++;
+            // Frame.Label = target.Label;
             
             //Sets the Pointer to the start of the block sequence
-            // EnterSequence(block.Instructions);
-            
+            EnterSequence(block.Instructions);
             //Manually inline EnterSequence
-            _currentSequence = block.Instructions;
-            _sequenceCount = _currentSequence.Count;
-            _sequenceInstructions = _currentSequence._instructions;
-            _sequenceIndex = -1;
+            // _currentSequence = block.Instructions;
+            // _sequenceCount = _currentSequence.Count;
+            // _sequenceInstructions = _currentSequence._instructions;
+            // _sequenceIndex = -1;
         }
 
         // @Spec 4.4.9.2. Exit Block
@@ -282,8 +289,6 @@ namespace Wacs.Core.Runtime
             
             //2.
             var funcInst = Store[addr];
-            if (funcInst.IsAsync)
-                throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
             
             switch (funcInst)
             {
@@ -292,6 +297,9 @@ namespace Wacs.Core.Runtime
                     return;
                 case HostFunction hostFunc:
                 {
+                    if (funcInst.IsAsync)
+                        throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
+                    
                     var funcType = hostFunc.Type;
                     //Fetch the parameters
                     OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
@@ -389,6 +397,10 @@ namespace Wacs.Core.Runtime
                 Stats[(ushort)(ByteCode)opcode] = new ExecStat();
             }
             foreach (AtomCode opcode in Enum.GetValues(typeof(AtomCode)))
+            { 
+                Stats[(ushort)(ByteCode)opcode] = new ExecStat();
+            }
+            foreach (WacsCode opcode in Enum.GetValues(typeof(WacsCode)))
             { 
                 Stats[(ushort)(ByteCode)opcode] = new ExecStat();
             }

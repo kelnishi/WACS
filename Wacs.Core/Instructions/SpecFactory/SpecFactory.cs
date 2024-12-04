@@ -22,7 +22,7 @@ using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions
 {
-    public partial class SpecFactory : IInstructionFactory
+    public partial class SpecFactory : InstructionBaseFactory
     {
         public static readonly SpecFactory Factory = new();
         public SpecFactory() {}
@@ -31,7 +31,7 @@ namespace Wacs.Core.Instructions
             where T : InstructionBase =>
             CreateInstruction(code) as T ?? throw new InvalidOperationException($"Could not create instruction of type {typeof(T).Name} for the given ByteCode.");
 
-        public IInstruction CreateInstruction(ByteCode opcode) => opcode.x00 switch {
+        public InstructionBase CreateInstruction(ByteCode opcode) => opcode.x00 switch {
             OpCode.FB                => CreateInstruction(opcode.xFB),
             OpCode.FC                => CreateInstruction(opcode.xFC),
             OpCode.FD                => CreateInstruction(opcode.xFD),

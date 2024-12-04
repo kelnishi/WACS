@@ -29,7 +29,7 @@ namespace Wacs.Core.Instructions.Transpiler
             Size = 0;
         }
 
-        public override ByteCode Op => OpCode.StackVal;
+        public override ByteCode Op => WacsCode.StackVal;
 
         public Func<ExecContext, Value> GetFunc => FetchFromStack;
 
@@ -56,7 +56,7 @@ namespace Wacs.Core.Instructions.Transpiler
             Size = 0;
         }
 
-        public override ByteCode Op => OpCode.StackVal;
+        public override ByteCode Op => WacsCode.StackU32;
 
         public Func<ExecContext, uint> GetFunc => FetchFromStack;
 
@@ -82,7 +82,7 @@ namespace Wacs.Core.Instructions.Transpiler
             Size = 0;
         }
 
-        public override ByteCode Op => OpCode.StackVal;
+        public override ByteCode Op => WacsCode.StackI32;
 
         public Func<ExecContext, int> GetFunc => FetchFromStack;
 

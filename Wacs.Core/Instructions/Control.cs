@@ -35,7 +35,7 @@ using Wacs.Core.Validation;
 namespace Wacs.Core.Instructions
 {
     //0x00
-    public class InstUnreachable : InstructionBase
+    public sealed class InstUnreachable : InstructionBase
     {
         public static readonly InstUnreachable Inst = new();
         public override ByteCode Op => OpCode.Unreachable;
@@ -52,7 +52,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x01
-    public class InstNop : InstructionBase
+    public sealed class InstNop : InstructionBase
     {
         public static readonly InstNop Inst = new();
         public override ByteCode Op => OpCode.Nop;
@@ -89,8 +89,7 @@ namespace Wacs.Core.Instructions
                 context.Assert(funcType,  "Invalid BlockType: {0}",Block.Type);
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(funcType.ParameterTypes, ref _aside);
-                _aside.Clear();
+                context.OpStack.DiscardValues(funcType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
                 context.PushControlFrame(BlockOp, funcType);
@@ -110,18 +109,17 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.3. block
         public override void Execute(ExecContext context)
         {
-            if (Block.Instructions.Count != 0)
-                context.EnterBlock(this, Block);
+            context.EnterBlock(this, Block);
         }
 
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Block = new Block(
                 type: Block.ParseBlockType(reader),
-                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd))
+                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd))
             );
             return this;
         }
@@ -165,8 +163,7 @@ namespace Wacs.Core.Instructions
                 context.Assert(funcType, "Invalid BlockType: {0}",Block.Type);
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(funcType.ParameterTypes, ref _aside);
-                _aside.Clear();
+                context.OpStack.DiscardValues(funcType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
                 context.PushControlFrame(LoopOp, funcType);
@@ -193,11 +190,11 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Block = new Block(
                 type: Block.ParseBlockType(reader),
-                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd))
+                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd))
             );
             return this;
         }
@@ -248,8 +245,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PopI32();
                 
                 //Check the parameters [t1*] and discard
-                context.OpStack.PopValues(ifType.ParameterTypes, ref _aside);
-                _aside.Clear();
+                context.OpStack.DiscardValues(ifType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
                 context.PushControlFrame(IfOp, ifType);
@@ -297,12 +293,12 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             IfBlock = new Block(
                 type: Block.ParseBlockType(reader),
                 new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
-                    IInstruction.IsElseOrEnd))
+                    InstructionBase.IsElseOrEnd))
             );
 
             if (IfBlock.Instructions.EndsWithElse)
@@ -310,7 +306,7 @@ namespace Wacs.Core.Instructions
                 ElseBlock = new Block(
                     type: IfBlock.Type,
                     seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
-                        IInstruction.IsEnd))
+                        InstructionBase.IsEnd))
                 );
             }
             else if (!IfBlock.Instructions.HasExplicitEnd)
@@ -409,7 +405,7 @@ namespace Wacs.Core.Instructions
                     if (context.Attributes.Live)
                     {
                         sb.Append(" ");
-                        Stack<Value> values = new Stack<Value>();
+                        var values = new Stack<Value>();
                         context.OpStack.PopResults(func.Type.ResultType, ref values);
                         sb.Append("[");
                         while (values.Count > 0)
@@ -429,7 +425,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x0C
-    public class InstBranch : InstructionBase, IBranchInstruction
+    public sealed class InstBranch : InstructionBase, IBranchInstruction
     {
         private static Stack<Value> _asideVals = new();
 
@@ -445,8 +441,7 @@ namespace Wacs.Core.Instructions
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
             
             //Validate results, but leave them on the stack
-            context.OpStack.PopValues(nthFrame.LabelTypes, ref _aside);
-            _aside.Clear();
+            context.OpStack.DiscardValues(nthFrame.LabelTypes);
 
             // if (!context.Unreachable)
             //     nthFrame.ConditionallyReachable = true;
@@ -484,6 +479,7 @@ namespace Wacs.Core.Instructions
             // An ideal solution would be to slice the OpStack array, but we don't have access.
             if (context.OpStack.Count > context.Frame.StackHeight + label.StackHeight + label.Arity)
             {
+                //TODO Move the elements in OpStack's registers array.
                 context.OpStack.PopResults(label.Arity, ref _asideVals);
                 //6.
                 context.ResetStack(label);
@@ -510,7 +506,7 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             L = (LabelIdx)reader.ReadLeb128_u32();
             return this;
@@ -525,7 +521,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x0D
-    public class InstBranchIf : InstructionBase, IBranchInstruction, INodeConsumer<int>
+    public sealed class InstBranchIf : InstructionBase, IBranchInstruction, INodeConsumer<int>
     {
         public LabelIdx L;
         public override ByteCode Op => OpCode.BrIf;
@@ -544,7 +540,7 @@ namespace Wacs.Core.Instructions
             //     nthFrame.ConditionallyReachable = true;
             
             //Pop values like we branch
-            context.OpStack.PopValues(nthFrame.LabelTypes, ref _aside);
+            context.OpStack.DiscardValues(nthFrame.LabelTypes);
             //But actually, we don't, so push them back on.
             context.OpStack.PushResult(nthFrame.LabelTypes);
         }
@@ -569,7 +565,7 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             L = (LabelIdx)reader.ReadLeb128_u32();
             return this;
@@ -583,14 +579,14 @@ namespace Wacs.Core.Instructions
             string taken = "";
             if (context.Attributes.Live)
             {
-                taken = (int)context.OpStack.Peek() != 0 ? "-> " : "X: ";
+                taken = context.OpStack.Peek().Int32 != 0 ? "-> " : "X: ";
             }
             return $"{base.RenderText(context)} {L.Value} (;{taken}@{depth - L.Value};)";
         }
     }
 
     //0x0E
-    public class InstBranchTable : InstructionBase, IBranchInstruction, INodeConsumer<int>
+    public sealed class InstBranchTable : InstructionBase, IBranchInstruction, INodeConsumer<int>
     {
         private LabelIdx Ln; //Default m
 
@@ -610,7 +606,8 @@ namespace Wacs.Core.Instructions
             
             // if (!context.Unreachable)
             //     mthFrame.ConditionallyReachable = true;
-            
+
+            Stack<Value> aside = new();
             foreach (var lidx in Ls)
             {
                 context.Assert(context.ContainsLabel(lidx.Value),
@@ -619,16 +616,12 @@ namespace Wacs.Core.Instructions
                 var nthFrame = context.ControlStack.PeekAt((int)lidx.Value);
                 context.Assert(nthFrame.LabelTypes.Arity == arity,
                     "Instruction br_table invalid. Label {0} had different arity {1} =/= {2}", lidx, nthFrame.LabelTypes.Arity,arity);
-
-                // if (!context.Unreachable)
-                //     nthFrame.ConditionallyReachable = true;
                 
-                context.OpStack.PopValues(nthFrame.LabelTypes, ref _aside);
-                context.OpStack.PushValues(_aside);
+                context.OpStack.PopValues(nthFrame.LabelTypes, ref aside);
+                context.OpStack.PushValues(aside);
             }
 
-            context.OpStack.PopValues(mthFrame.LabelTypes, ref _aside);
-            _aside.Clear();
+            context.OpStack.PopValues(mthFrame.LabelTypes, ref aside);
             context.SetUnreachable();
         }
 
@@ -667,7 +660,7 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Ls = reader.ParseVector(ParseLabelIndex);
             Ln = (LabelIdx)reader.ReadLeb128_u32();
@@ -683,7 +676,7 @@ namespace Wacs.Core.Instructions
             int index = -2;
             if (context.Attributes.Live)
             {
-                int c = context.OpStack.Peek();
+                int c = context.OpStack.Peek().Int32;
                 if (c < Ls.Length)
                 {
                     index = c;
@@ -714,7 +707,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x0F
-    public class InstReturn : InstructionBase
+    public sealed class InstReturn : InstructionBase
     {
         public static readonly InstReturn Inst = new();
         public override ByteCode Op => OpCode.Return;
@@ -723,8 +716,9 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             //keep the results for the block or function to validate
-            context.OpStack.PopValues(context.ReturnType, ref _aside);
-            context.OpStack.PushValues(_aside);
+            Stack<Value> aside = new();
+            context.OpStack.PopValues(context.ReturnType, ref aside);
+            context.OpStack.PushValues(aside);
             context.SetUnreachable();
         }
 
@@ -742,7 +736,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x10
-    public class InstCall : InstructionBase, ICallInstruction
+    public sealed class InstCall : InstructionBase, ICallInstruction
     {
         public FuncIdx X;
 
@@ -770,8 +764,7 @@ namespace Wacs.Core.Instructions
                 "Instruction call was invalid. Function {0} was not in the Context.",X);
             var func = context.Funcs[X];
             var type = context.Types[func.TypeIndex];
-            context.OpStack.PopValues(type.ParameterTypes, ref _aside);
-            _aside.Clear();
+            context.OpStack.DiscardValues(type.ParameterTypes);
             context.OpStack.PushResult(type.ResultType);
         }
 
@@ -795,13 +788,13 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             X = (FuncIdx)reader.ReadLeb128_u32();
             return this;
         }
 
-        public IInstruction Immediate(FuncIdx value)
+        public InstructionBase Immediate(FuncIdx value)
         {
             X = value;
             return this;
@@ -819,7 +812,7 @@ namespace Wacs.Core.Instructions
                     if (context.Attributes.Live)
                     {
                         sb.Append(" ");
-                        Stack<Value> values = new Stack<Value>();
+                        var values = new Stack<Value>();
                         context.OpStack.PopResults(func.Type.ParameterTypes, ref values);
                         sb.Append("[");
                         while (values.Count > 0)
@@ -840,7 +833,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x11
-    public class InstCallIndirect : InstructionBase, ICallInstruction
+    public sealed class InstCallIndirect : InstructionBase, ICallInstruction
     {
         private TableIdx X;
 
@@ -859,7 +852,7 @@ namespace Wacs.Core.Instructions
             {
                 var ta = context.Frame.Module.TableAddrs[X];
                 var tab = context.Store[ta];
-                int i = context.OpStack.Peek();
+                int i = context.OpStack.Peek().Int32;
                 if (i >= tab.Elements.Count)
                     throw new TrapException($"Instruction call_indirect could not find element {i}");
                 var r = tab.Elements[i];
@@ -891,8 +884,7 @@ namespace Wacs.Core.Instructions
             var funcType = context.Types[Y];
 
             context.OpStack.PopI32();
-            context.OpStack.PopValues(funcType.ParameterTypes, ref _aside);
-            _aside.Clear();
+            context.OpStack.DiscardValues(funcType.ParameterTypes);
             context.OpStack.PushResult(funcType.ResultType);
         }
 
@@ -998,7 +990,7 @@ namespace Wacs.Core.Instructions
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Y = (TypeIdx)reader.ReadLeb128_u32();
             X = (TableIdx)reader.ReadLeb128_u32();

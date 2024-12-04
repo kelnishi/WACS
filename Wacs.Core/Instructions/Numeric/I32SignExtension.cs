@@ -23,7 +23,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstI32SignExtend : InstructionBase, INodeComputer<uint,uint>
+    public sealed class InstI32SignExtend : InstructionBase, INodeComputer<uint,uint>
     {
         private const uint ByteSign = 0x80;
         private const uint I32ByteExtend = 0xFFFF_FF80;

@@ -28,22 +28,22 @@ namespace Wacs.Core
     /// We'll use this instead of arrays or lists, so we can abstract
     /// pointers into the code.
     /// </summary>
-    public class InstructionSequence : IEnumerable<IInstruction>
+    public class InstructionSequence : IEnumerable<InstructionBase>
     {
-        public static readonly InstructionSequence Empty = new(new List<IInstruction>());
+        public static readonly InstructionSequence Empty = new(new List<InstructionBase>());
 
         //public for direct array access on critical path
         public readonly InstructionBase[] _instructions;
 
         public readonly int Count;
 
-        public InstructionSequence(IList<IInstruction> list)
+        public InstructionSequence(IList<InstructionBase> list)
         {
             _instructions = list.Cast<InstructionBase>().ToArray();
             Count = _instructions.Length;
         }
 
-        public IInstruction? this[int index]
+        public InstructionBase? this[int index]
         {
             get
             {
@@ -73,9 +73,9 @@ namespace Wacs.Core
             }
         }
 
-        public IInstruction LastInstruction => _instructions[^1];
+        public InstructionBase LastInstruction => _instructions[^1];
 
-        public IEnumerator<IInstruction> GetEnumerator() => ((IEnumerable<IInstruction>)_instructions).GetEnumerator();
+        public IEnumerator<InstructionBase> GetEnumerator() => ((IEnumerable<InstructionBase>)_instructions).GetEnumerator();
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
         public bool IsConstant(IWasmValidationContext? ctx) =>

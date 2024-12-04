@@ -26,7 +26,7 @@ namespace Wacs.Core.Instructions
 {
     public partial class SpecFactory
     {
-        public static IInstruction? CreateInstruction(SimdCode opcode) => opcode switch
+        public static InstructionBase? CreateInstruction(SimdCode opcode) => opcode switch
         {
             SimdCode.V128Const => new InstV128Const(),
             

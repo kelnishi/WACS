@@ -58,7 +58,7 @@ namespace Wacs.Core.Instructions.Memory
             //13,14,15
             Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
-#if NET8_0
+#if NET8_0_OR_GREATER
             MemoryMarshal.Write(bs, in cU64);
 #else
             MemoryMarshal.Write(bs, ref cU64);
@@ -100,10 +100,7 @@ namespace Wacs.Core.Instructions.Memory
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
-            Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
-            
-            byte cU8 = (byte)(0xFF & cU64);
-            bs[0] = cU8;
+            mem.Data[(int)ea] = (byte)(0xFF & cU64);
         }
 
         public Action<ExecContext, uint, ulong> GetFunc => SetMemoryValue;
@@ -144,7 +141,7 @@ namespace Wacs.Core.Instructions.Memory
             Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
             ushort cI16 = (ushort)cU64;
-#if NET8_0
+#if NET8_0_OR_GREATER
             MemoryMarshal.Write(bs, in cI16); // Assume you can change to 'in'
 #else
             MemoryMarshal.Write(bs, ref cI16);
@@ -189,7 +186,7 @@ namespace Wacs.Core.Instructions.Memory
             Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
             uint cI32 = (uint)cU64;
-#if NET8_0
+#if NET8_0_OR_GREATER
             MemoryMarshal.Write(bs, in cI32); // Assume you can change to 'in'
 #else
             MemoryMarshal.Write(bs, ref cI32);

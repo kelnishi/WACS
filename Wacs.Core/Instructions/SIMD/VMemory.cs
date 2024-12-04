@@ -52,8 +52,14 @@ namespace Wacs.Core.Instructions.SIMD
             long ea = (long)i + (long)M.Offset;
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
-            var bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
-            return new V128(bs);
+            var bs = new ReadOnlySpan<byte>(mem.Data, (int)ea, WidthTByteSize);
+         
+            // return new V128(bs);
+#if NET8_0_OR_GREATER
+            return MemoryMarshal.AsRef<V128>(bs);
+#else
+            return MemoryMarshal.Read<V128>(bs);
+#endif
         }
 
         public Func<ExecContext, uint, V128> GetFunc => FetchFromMemory;
@@ -93,7 +99,7 @@ namespace Wacs.Core.Instructions.SIMD
             //13,14,15
             Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
-#if NET8_0
+#if NET8_0_OR_GREATER
             MemoryMarshal.Write(bs, in cV128);
 #else
             MemoryMarshal.Write(bs, ref cV128);
@@ -108,10 +114,15 @@ namespace Wacs.Core.Instructions.SIMD
         private readonly int CountN;
 
         private readonly BitWidth WidthT;
+        private int WidthTByteSize;
         private MemArg M;
 
-        public InstMemoryLoadMxN(BitWidth width, int count) =>
-            (WidthT, CountN) = (width, count);
+        public InstMemoryLoadMxN(BitWidth width, int count)
+        {
+            WidthT = width;
+            WidthTByteSize = WidthT.ByteSize();
+            CountN = count;
+        }
 
         public override ByteCode Op => CountN switch
         {
@@ -143,7 +154,7 @@ namespace Wacs.Core.Instructions.SIMD
         {
             context.Assert(context.Mems.Contains(M.M),
                 "Instruction {0} failed with invalid context memory 0.",Op.GetMnemonic());
-            context.Assert(M.Align.LinearSize() <= WidthT.ByteSize() * CountN,
+            context.Assert(M.Align.LinearSize() <= WidthTByteSize * CountN,
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),WidthT);
 
             context.OpStack.PopI32();
@@ -171,18 +182,18 @@ namespace Wacs.Core.Instructions.SIMD
             //8.
             long ea = (long)i + (long)M.Offset;
             //9.
-            int mn = WidthT.ByteSize() * CountN;
+            int mn = WidthTByteSize * CountN;
             if (ea + mn > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{mn} out of bounds ({mem.Data.Length}).");
             //10.
-            var bs = mem.Data.AsSpan((int)ea, mn);
+            var bs = new ReadOnlySpan<byte>(mem.Data,(int)ea, mn);
             //11,12,13,14
-            int m = WidthT.ByteSize();
+            int m = WidthTByteSize;
             MV128 c = new MV128();
             for (int k = 0; k < CountN; ++k)
             {
                 int km = k * m;
-                int kmEnd = km + WidthT.ByteSize();
+                int kmEnd = km + WidthTByteSize;
                 var cell = bs[km..kmEnd];
                 switch (WidthT)
                 {
@@ -198,13 +209,13 @@ namespace Wacs.Core.Instructions.SIMD
             context.OpStack.PushV128((V128)c);
         }
 
-        public IInstruction Immediate(MemArg m)
+        public InstructionBase Immediate(MemArg m)
         {
             M = m;
             return this;
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
             return this;
@@ -302,13 +313,13 @@ namespace Wacs.Core.Instructions.SIMD
             }
         }
 
-        public IInstruction Immediate(MemArg m)
+        public InstructionBase Immediate(MemArg m)
         {
             M = m;
             return this;
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
             return this;
@@ -398,13 +409,13 @@ namespace Wacs.Core.Instructions.SIMD
             }
         }
 
-        public IInstruction Immediate(MemArg m, LaneIdx l)
+        public InstructionBase Immediate(MemArg m, LaneIdx l)
         {
             M = m;
             return this;
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
             return this;
@@ -503,14 +514,14 @@ namespace Wacs.Core.Instructions.SIMD
             context.OpStack.PushV128(value);
         }
 
-        public IInstruction Immediate(MemArg m, LaneIdx l)
+        public InstructionBase Immediate(MemArg m, LaneIdx l)
         {
             M = m;
             X = l;
             return this;
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
             X = reader.ReadByte();
@@ -548,7 +559,7 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
-        public IInstruction Immediate(MemArg m)
+        public InstructionBase Immediate(MemArg m)
         {
             M = m;
             return this;
@@ -623,7 +634,7 @@ namespace Wacs.Core.Instructions.SIMD
             }
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = MemArg.Parse(reader);
             X = reader.ReadByte();

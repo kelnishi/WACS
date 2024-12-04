@@ -38,7 +38,7 @@ namespace Wacs.Core.Instructions
 
         public int CalculateSize() => 1;
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Index = (GlobalIdx)reader.ReadLeb128_u32();
             return this;
@@ -105,7 +105,7 @@ namespace Wacs.Core.Instructions
 
         public override ByteCode Op => OpCode.GlobalSet;
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Index = (GlobalIdx)reader.ReadLeb128_u32();
             return this;

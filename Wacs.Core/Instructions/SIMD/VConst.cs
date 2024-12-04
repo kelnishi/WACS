@@ -42,13 +42,13 @@ namespace Wacs.Core.Instructions.Simd
             context.OpStack.PushV128(V128);
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             V128 = new V128(reader.ReadBytes(16));
             return this;
         }
 
-        public IInstruction Immediate(V128 value)
+        public InstructionBase Immediate(V128 value)
         {
             V128 = value;
             return this;

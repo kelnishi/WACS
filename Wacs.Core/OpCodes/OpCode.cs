@@ -310,11 +310,11 @@ namespace Wacs.Core.OpCodes
         // Prefix Threads
         FE = 0xFE,
         
+        // Admin
+        FF = 0xFF,
+        
         //Custom
         [OpCode("func")] Func = 0xF0,
         [OpCode("expr")] Expr = 0xF1,
-        
-        [OpCode("aggregate")] Aggr = 0xF2,
-        [OpCode("stackval")] StackVal = 0xF3,
     }
 }
