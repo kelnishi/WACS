@@ -31,7 +31,7 @@ namespace Wacs.Core.Runtime
 {
     public partial class WasmRuntime
     {
-        private IInstruction? lastInstruction = null;
+        private InstructionBase? lastInstruction = null;
 
         public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr, InvokerOptions? options = default)
             where TDelegate : Delegate
@@ -358,30 +358,54 @@ namespace Wacs.Core.Runtime
 
         public async Task ProcessThreadAsync(long gasLimit)
         {
-            if (gasLimit <= 0) gasLimit = long.MaxValue;
-            while (Context.Next() is { } inst)
+            InstructionBase inst;
+            if (gasLimit <= 0)
             {
-                if (inst.IsAsync)
+                //Manually inline Next()
+                // while (Context.Next() is { } inst)
+                while (++Context._sequenceIndex < Context._sequenceCount)
                 {
-                    await inst.ExecuteAsync(Context);
-                    Context.steps += inst.Size;
-                    if (Context.steps >= gasLimit)
-                        throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
+                    inst = Context._sequenceInstructions[Context._sequenceIndex];
+                    if (inst.IsAsync)
+                    {
+                        await inst.ExecuteAsync(Context);
+                    }
+                    else
+                    {
+                        inst.Execute(Context);
+                    }
                 }
-                else
+            }
+            else
+            {
+                //Manually inline Next()
+                // while (Context.Next() is { } inst)
+                while (++Context._sequenceIndex < Context._sequenceCount)
                 {
-                    inst.Execute(Context);
+                    inst = Context._sequenceInstructions[Context._sequenceIndex];
+                    if (inst.IsAsync)
+                    {
+                        await inst.ExecuteAsync(Context);
+                    }
+                    else
+                    {
+                        inst.Execute(Context);
+                    }
+                    //Counting gas costs about 18% throughput!
                     Context.steps += inst.Size;
                     if (Context.steps >= gasLimit)
+                    {
                         throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
+                    }
                 }
             }
         }
 
-        public async Task ProcessThreadWithOptions(InvokerOptions options)
+        public async Task ProcessThreadWithOptions(InvokerOptions options) 
         {
             long highwatermark = 0;
             long gasLimit = options.GasLimit > 0 ? options.GasLimit : long.MaxValue;
+            
             while (Context.Next() is { } inst)
             {
                 //Trace execution
@@ -440,18 +464,18 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        private void LogPreInstruction(InvokerOptions options, IInstruction inst)
+        private void LogPreInstruction(InvokerOptions options, InstructionBase inst)
         {
             switch ((OpCode)inst.Op)
             {
                 //Handle these post
-                case var _ when IInstruction.IsNumeric(inst): break;
-                case var _ when IInstruction.IsVar(inst): break;
-                case var _ when IInstruction.IsLoad(inst): break;
+                case var _ when InstructionBase.IsNumeric(inst): break;
+                case var _ when InstructionBase.IsVar(inst): break;
+                case var _ when InstructionBase.IsLoad(inst): break;
                 
-                case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && IInstruction.IsBound(Context, inst):
-                case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && IInstruction.IsBound(Context, inst):
-                // case OpCode.CallRef when options.LogInstructionExecution&(int)InstructionLogging.Binds) && IInstruction.IsBound(Context, inst):
+                case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && InstructionBase.IsBound(Context, inst):
+                case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && InstructionBase.IsBound(Context, inst):
+                // case OpCode.CallRef when options.LogInstructionExecution&(int)InstructionLogging.Binds) && InstructionBase.IsBound(Context, inst):
                 
                 case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
                 case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
@@ -471,7 +495,7 @@ namespace Wacs.Core.Runtime
                 case OpCode.BrIf when ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
                 case OpCode.BrTable when ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
                 
-                case var _ when IInstruction.IsBranch(lastInstruction) && ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
+                case var _ when InstructionBase.IsBranch(lastInstruction) && ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
                 case var _ when ((int)options.LogInstructionExecution&(int)InstructionLogging.Computes)!=0:
                     string location = "";
                     if (options.CalculateLineNumbers)
@@ -495,16 +519,16 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        private void LogPostInstruction(InvokerOptions options, IInstruction inst)
+        private void LogPostInstruction(InvokerOptions options, InstructionBase inst)
         {
             if ((options.LogInstructionExecution & InstructionLogging.Computes) == 0)
                 return;
             
             switch ((OpCode)inst.Op)
             {
-                case var _ when IInstruction.IsLoad(inst):
-                case var _ when IInstruction.IsNumeric(inst): 
-                case var _ when IInstruction.IsVar(inst):
+                case var _ when InstructionBase.IsLoad(inst):
+                case var _ when InstructionBase.IsNumeric(inst): 
+                case var _ when InstructionBase.IsVar(inst):
                     string location = "";
                     if (options.CalculateLineNumbers)
                     {

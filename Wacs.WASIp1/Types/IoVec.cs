@@ -43,7 +43,7 @@ namespace Wacs.WASIp1.Types
         public Value ToWasmType()
         {
             byte[] bytes = new byte[8];
-#if NET8_0
+#if NET8_0_OR_GREATER
             MemoryMarshal.Write(bytes, in this);
 #else
             MemoryMarshal.Write(bytes, ref this);

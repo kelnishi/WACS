@@ -72,9 +72,9 @@ namespace Wacs.Core
         };
 
         static readonly HashSet<ByteCode> MemoryInstructions = new HashSet<ByteCode> { ExtCode.MemoryInit, ExtCode.DataDrop };
-        public static IInstructionFactory InstructionFactory { get; private set; } = SpecFactory.Factory;
+        public static InstructionBaseFactory InstructionFactory { get; private set; } = SpecFactory.Factory;
 
-        public static void UseInstructionFactory(IInstructionFactory factory) =>
+        public static void UseInstructionFactory(InstructionBaseFactory factory) =>
             InstructionFactory = factory;
 
         /// <summary>
@@ -288,7 +288,7 @@ namespace Wacs.Core
         /// @Spec 5.4 Instructions
         /// Parse an instruction sequence, return null for End (0x0B)
         /// </summary>
-        public static IInstruction? ParseInstruction(BinaryReader reader)
+        public static InstructionBase? ParseInstruction(BinaryReader reader)
         {
             
             //Splice another byte if the first byte is a prefix

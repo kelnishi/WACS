@@ -54,7 +54,7 @@ namespace Spec.Test
             var fa = runtime.GetExportedFunction(("binding", "4x4"));
             var invoker = runtime.CreateStackInvoker(fa);
             
-            var result = invoker(new Value[]{1, 1, 1f, 1.0});
+            var result = invoker(new Value[]{1, 1L, 1f, 1.0});
             
             Assert.Equal(1 * 2, (int)result[0]);
             Assert.Equal(1 * 3, (long)result[1]);

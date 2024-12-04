@@ -77,10 +77,10 @@ namespace Wacs.Core.Types
         }
 
         //Single Initializer
-        public Expression(IInstruction single, int arity)
+        public Expression(InstructionBase single, int arity)
         {
             IsStatic = true;
-            Instructions = new InstructionSequence(new List<IInstruction> { single });
+            Instructions = new InstructionSequence(new List<InstructionBase> { single });
             LabelTarget = new (new Label
             {
                 Arity = arity,
@@ -151,7 +151,7 @@ namespace Wacs.Core.Types
             if (context.OpStack.Count != 0)
                 throw new InvalidDataException("OpStack should be empty");
             frame.ReturnLabel = LabelTarget.Label;
-            frame.PushLabel(LabelTarget);
+            frame.SetLabel(LabelTarget);
             context.PushFrame(frame);
             foreach (var inst in Instructions)
             {
@@ -164,10 +164,10 @@ namespace Wacs.Core.Types
         /// @Spec 5.4.9 Expressions
         /// </summary>
         public static Expression Parse(BinaryReader reader) =>
-            new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd)), true);
+            new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd)), true);
 
         public static Expression ParseInitializer(BinaryReader reader) =>
-            new(1, new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IInstruction.IsEnd)), true);
+            new(1, new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd)), true);
 
         /// <summary>
         /// For Single instruction renders (globals, elements)

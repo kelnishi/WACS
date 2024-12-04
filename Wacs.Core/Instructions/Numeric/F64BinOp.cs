@@ -24,7 +24,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstF64BinOp : InstructionBase, INodeComputer<double,double,double>
+    public sealed class InstF64BinOp : InstructionBase, INodeComputer<double,double,double>
     {
         // Mask for the sign bit (most significant bit)
         private const ulong F64SignMask = 0x8000_0000_0000_0000;

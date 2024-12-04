@@ -29,7 +29,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushRef(Value.RefNull(Type));
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             Type = ReferenceTypeParser.Parse(reader);
             return this;
@@ -93,7 +93,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushFuncref(new Value(ValType.Funcref, a.Value));
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             FunctionIndex = (FuncIdx)reader.ReadLeb128_u32();
             return this;

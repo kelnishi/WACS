@@ -49,9 +49,13 @@ namespace Wacs.Core.Instructions.Memory
             long ea = (long)i + (long)M.Offset;
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
-            var bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
+            var bs = new ReadOnlySpan<byte>(mem.Data, (int)ea, WidthTByteSize);
             
+            #if NET8_0_OR_GREATER
+            return MemoryMarshal.AsRef<uint>(bs);
+            #else
             return MemoryMarshal.Read<uint>(bs);
+            #endif
         }
 
         public Func<ExecContext, uint, uint> GetFunc => FetchFromMemory;
@@ -82,10 +86,8 @@ namespace Wacs.Core.Instructions.Memory
             long ea = (long)i + (long)M.Offset;
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
-            var bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
-            int cS8 = (sbyte)bs[0];
-            return cS8;
+            return (sbyte)mem.Data[(int)ea];
         }
 
         public Func<ExecContext, uint, int> GetFunc => FetchFromMemory;
@@ -116,11 +118,8 @@ namespace Wacs.Core.Instructions.Memory
             long ea = (long)i + (long)M.Offset;
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
-            var bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             
-            
-            uint cU8 = bs[0];
-            return cU8;
+            return mem.Data[(int)ea];
         }
 
         public Func<ExecContext, uint, uint> GetFunc => FetchFromMemory;
@@ -151,9 +150,13 @@ namespace Wacs.Core.Instructions.Memory
             long ea = (long)i + (long)M.Offset;
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
-            var bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
+            var bs = new ReadOnlySpan<byte>(mem.Data, (int)ea, WidthTByteSize);
 
+#if NET8_0_OR_GREATER
+            return MemoryMarshal.AsRef<short>(bs);
+#else
             return MemoryMarshal.Read<short>(bs);
+#endif
         }
 
         public Func<ExecContext, uint, int> GetFunc => FetchFromMemory;
@@ -184,9 +187,13 @@ namespace Wacs.Core.Instructions.Memory
             long ea = (long)i + (long)M.Offset;
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
-            var bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
+            var bs = new ReadOnlySpan<byte>(mem.Data, (int)ea, WidthTByteSize);
 
+#if NET8_0_OR_GREATER
+            return MemoryMarshal.AsRef<ushort>(bs);
+#else
             return MemoryMarshal.Read<ushort>(bs);
+#endif
         }
 
         public Func<ExecContext, uint, uint> GetFunc => FetchFromMemory;

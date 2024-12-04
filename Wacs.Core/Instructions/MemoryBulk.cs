@@ -60,7 +60,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushU32(sz);
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = (MemIdx)reader.ReadByte();
             return this;
@@ -117,7 +117,7 @@ namespace Wacs.Core.Instructions
             }
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             M = (MemIdx)reader.ReadByte();
             return this;
@@ -224,7 +224,7 @@ namespace Wacs.Core.Instructions
             }
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             X = (DataIdx)reader.ReadLeb128_u32();
             Y = (MemIdx)reader.ReadByte();
@@ -232,7 +232,7 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public IInstruction Immediate(DataIdx x)
+        public InstructionBase Immediate(DataIdx x)
         {
             X = x;
             return this;
@@ -271,13 +271,13 @@ namespace Wacs.Core.Instructions
             context.Store.DropData(a);
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             X = (DataIdx)reader.ReadLeb128_u32();
             return this;
         }
 
-        public IInstruction Immediate(DataIdx x)
+        public InstructionBase Immediate(DataIdx x)
         {
             X = x;
             return this;
@@ -402,7 +402,7 @@ namespace Wacs.Core.Instructions
             }
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             SrcX = (MemIdx)reader.ReadByte();
             DstY = (MemIdx)reader.ReadByte();
@@ -487,7 +487,7 @@ namespace Wacs.Core.Instructions
             }
         }
 
-        public override IInstruction Parse(BinaryReader reader)
+        public override InstructionBase Parse(BinaryReader reader)
         {
             X = (MemIdx)reader.ReadByte();
             return this;

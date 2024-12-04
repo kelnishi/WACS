@@ -23,7 +23,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public class InstF64UnOp : InstructionBase, INodeComputer<double, double>
+    public sealed class InstF64UnOp : InstructionBase, INodeComputer<double, double>
     {
         // @Spec 3.3.1.2. f.unop
         public static readonly InstF64UnOp F64Abs      = new(OpCode.F64Abs       , ExecuteF64Abs     , NumericInst.ValidateOperands(pop: ValType.F64, push: ValType.F64));

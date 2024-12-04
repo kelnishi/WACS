@@ -29,38 +29,35 @@ namespace Wacs.Core.Runtime
     /// @Spec 4.2.1. Values
     /// </summary>
     [StructLayout(LayoutKind.Explicit)]
-    public readonly struct Value : IComparable<Value>
+    public struct Value
     {
-        public static readonly Value Unknown = new(ValType.Unknown);
-            
-        [FieldOffset(0)] public readonly ValType Type;
+        [FieldOffset(0)] public ValType Type;
+        [FieldOffset(4)] public byte U8;
 
-        [FieldOffset(1)] public readonly byte U8;
-        
-        [FieldOffset(1)] public readonly short Int16;
-        
+        [FieldOffset(4)] public short Int16;
+
         // 32-bit integer
-        [FieldOffset(1)] public readonly int Int32;
-        [FieldOffset(1)] public readonly uint UInt32;
-        
+        [FieldOffset(4)] public int Int32;
+        [FieldOffset(4)] public uint UInt32;
+
         // Ref Address
-        [FieldOffset(1)] public readonly int Ptr;
+        [FieldOffset(4)] public int Ptr;
 
         // 64-bit integer
-        [FieldOffset(1)] public readonly long Int64;
-        [FieldOffset(1)] public readonly ulong UInt64;
+        [FieldOffset(4)] public long Int64;
+        [FieldOffset(4)] public ulong UInt64;
 
         // 32-bit float
-        [FieldOffset(1)] public readonly float Float32;
+        [FieldOffset(4)] public float Float32;
 
         // 64-bit float
-        [FieldOffset(1)] public readonly double Float64;
+        [FieldOffset(4)] public double Float64;
 
         // 128-bit vector
-        [FieldOffset(1)] public readonly V128 V128;
+        [FieldOffset(4)] public MV128 V128;
 
         // ref.extern externIdx
-        [FieldOffset(1)] public readonly ulong ExternIdx;
+        [FieldOffset(4)] public ulong ExternIdx;
 
         // Constructors for each type
         public Value(int value)
@@ -286,7 +283,7 @@ namespace Wacs.Core.Runtime
                     Float64 = 0.0d;
                     break;
                 case ValType.V128:
-                    V128 = (0L, 0L);
+                    V128 = (V128)(0L, 0L);
                     break;
                 case ValType.Funcref:
                     Ptr = -1;
@@ -353,7 +350,7 @@ namespace Wacs.Core.Runtime
                     break;
                 case BigInteger bi:
                     Type = ValType.V128;
-                    V128 = bi.ToV128();
+                    V128 = (V128)bi.ToV128();
                     break;
                 case V128 v128:
                     Type = ValType.V128;
@@ -410,7 +407,7 @@ namespace Wacs.Core.Runtime
                     throw new InvalidDataException($"Cannot define StackValue of type {type}");
             }
         }
-
+        
         public Value Default => new Value(Type);
 
         public object Scalar => Type switch
@@ -438,6 +435,7 @@ namespace Wacs.Core.Runtime
             throw new InvalidCastException($"Cannot cast ValType {Type} to Scalar");
         }
 
+        public static readonly Value Unknown = new(ValType.Unknown);
         public static readonly Value NullFuncRef = new(ValType.Funcref);
         public static readonly Value NullExternRef = new(ValType.Externref);
         public static readonly Value Void = new (ValType.Nil);

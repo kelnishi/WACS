@@ -28,6 +28,7 @@ namespace Wacs.Core.OpCodes
         private static readonly ConcurrentDictionary<ExtCode, string> MnemonicCacheFC = new();
         private static readonly ConcurrentDictionary<SimdCode, string> MnemonicCacheFD = new();
         private static readonly ConcurrentDictionary<AtomCode, string> MnemonicCacheFE = new();
+        private static readonly ConcurrentDictionary<WacsCode, string> MnemonicCacheFF = new();
 
         /// <summary>
         /// Retrieves the WAT mnemonic associated with the given opcode.
@@ -40,6 +41,7 @@ namespace Wacs.Core.OpCodes
                 OpCode.FC => opcode.xFC.GetMnemonic(),
                 OpCode.FD => opcode.xFD.GetMnemonic(),
                 OpCode.FE => opcode.xFE.GetMnemonic(),
+                OpCode.FF => opcode.xFF.GetMnemonic(),
                 _ => opcode.x00.GetMnemonic()
             };
 
@@ -75,5 +77,6 @@ namespace Wacs.Core.OpCodes
         public static string GetMnemonic(this ExtCode opcode) => GetOpCode(opcode, MnemonicCacheFC);
         public static string GetMnemonic(this SimdCode opcode) => GetOpCode(opcode, MnemonicCacheFD);
         public static string GetMnemonic(this AtomCode opcode) => GetOpCode(opcode, MnemonicCacheFE);
+        public static string GetMnemonic(this WacsCode opcode) => GetOpCode(opcode, MnemonicCacheFF);
     }
 }
