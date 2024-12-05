@@ -51,6 +51,7 @@ namespace Wacs.Core
         //Add Ids to objects while parsing
         public static bool AnnotateWhileParsing = true;
         public static bool SkipFinalization = false;
+        public static bool ParseCustomNames = false;
         public static uint MaximumFunctionLocals = 2048;
 
         public static int InstructionsParsed = 0;
@@ -249,12 +250,11 @@ namespace Wacs.Core
                 var customSectionName = reader.ReadUtf8String();
                 switch (customSectionName)
                 {
-                    case "name":
+                    case "name" when ParseCustomNames:
                         using (var subreader = reader.GetSubsectionTo((int)payloadEnd))
                         {
                             module.Names = ParseNameSection(subreader);
                         }
-
                         break;
                     default:
                         //Skip others
