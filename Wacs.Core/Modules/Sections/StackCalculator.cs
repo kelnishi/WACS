@@ -50,8 +50,8 @@ namespace Wacs.Core
         public void PushF32(float f32 = 0) => _context.Push(ValType.F32);
         public void PushF64(double f64 = 0) => _context.Push(ValType.F64);
         public void PushV128(V128 v128 = default) => _context.Push(ValType.V128);
-        public void PushFuncref(Value value) => _context.Push(ValType.Funcref);
-        public void PushExternref(Value value) => _context.Push(ValType.Externref);
+        public void PushFuncref(Value value) => _context.Push(ValType.Func);
+        public void PushExternref(Value value) => _context.Push(ValType.Extern);
         public void PushType(ValType type) => _context.Push(type);
 
         public void PushValues(Stack<Value> vals) {
@@ -67,7 +67,7 @@ namespace Wacs.Core
         public Value PopF32() => _context.Pop(ValType.F32);
         public Value PopF64() => _context.Pop(ValType.F64);
         public Value PopV128() => _context.Pop(ValType.V128);
-        public Value PopRefType() => _context.Pop(ValType.Funcref);
+        public Value PopRefType() => _context.Pop(ValType.Func);
 
         public Value PopType(ValType type) => _context.Pop(type);
         public Value PopAny() => _context.Pop(ValType.Nil);

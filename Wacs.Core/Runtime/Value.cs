@@ -128,10 +128,10 @@ namespace Wacs.Core.Runtime
                 case ValType.I64:
                     Int64 = idx;
                     break;
-                case ValType.Funcref:
+                case ValType.Func:
                     Ptr = idx;
                     break;
-                case ValType.Externref:
+                case ValType.Extern:
                     Ptr = idx;
                     break;
                 default:
@@ -157,10 +157,10 @@ namespace Wacs.Core.Runtime
                 case ValType.F64:
                     Float64 = BitBashDouble(text);
                     break;
-                case ValType.Funcref:
+                case ValType.Func:
                     Ptr = BitBashRef(text);
                     break;
-                case ValType.Externref:
+                case ValType.Extern:
                     Ptr = BitBashRef(text);
                     break;
                 default:
@@ -245,10 +245,10 @@ namespace Wacs.Core.Runtime
                 case ValType.I64:
                     Int64 = idx;
                     break;
-                case ValType.Funcref:
+                case ValType.Func:
                     Ptr = (int)idx;
                     break;
-                case ValType.Externref:
+                case ValType.Extern:
                     Ptr = (int)idx;
                     break;
                 default:
@@ -285,10 +285,10 @@ namespace Wacs.Core.Runtime
                 case ValType.V128:
                     V128 = (V128)(0L, 0L);
                     break;
-                case ValType.Funcref:
+                case ValType.Func:
                     Ptr = -1;
                     break;
-                case ValType.Externref:
+                case ValType.Extern:
                     Ptr = -1;
                     break;
                 case ValType.Nil:
@@ -396,10 +396,10 @@ namespace Wacs.Core.Runtime
                 case ValType.V128:
                     V128 = (V128)externalValue;
                     break;
-                case ValType.Funcref:
+                case ValType.Func:
                     Ptr = (int)externalValue;
                     break;
-                case ValType.Externref:
+                case ValType.Extern:
                     Ptr = (int)externalValue;
                     break;
                 case ValType.Undefined:
@@ -417,8 +417,8 @@ namespace Wacs.Core.Runtime
             ValType.F32 => Float32,
             ValType.F64 => Float64,
             ValType.V128 => V128,
-            ValType.Funcref => Ptr,
-            ValType.Externref => Ptr,
+            ValType.Func => Ptr,
+            ValType.Extern => Ptr,
             _ => throw new InvalidCastException($"Cannot cast ValType {Type} to Scalar")
         };
 
@@ -436,20 +436,21 @@ namespace Wacs.Core.Runtime
         }
 
         public static readonly Value Unknown = new(ValType.Unknown);
-        public static readonly Value NullFuncRef = new(ValType.Funcref);
-        public static readonly Value NullExternRef = new(ValType.Externref);
+        public static readonly Value NullRef = new(ValType.None);
+        public static readonly Value NullFuncRef = new(ValType.NoFunc);
+        public static readonly Value NullExternRef = new(ValType.NoExtern);
         public static readonly Value Void = new (ValType.Nil);
 
-        public static Value RefNull(ReferenceType type) => type switch
+        public static Value RefNull(ValType type) => type switch
         {
-            ReferenceType.Funcref => NullFuncRef,
-            ReferenceType.Externref => NullExternRef,
-            _ => throw new InvalidDataException($"Unsupported RefType: {type}"),
+            ValType.Func => NullFuncRef,
+            ValType.Extern => NullExternRef,
+            _ => NullRef,
         };
 
         public bool IsI32 => Type == ValType.I32;
         public bool IsV128 => Type == ValType.V128;
-        public bool IsRef => Type == ValType.Funcref || Type == ValType.Externref;
+        public bool IsRef => Type == ValType.Func || Type == ValType.Extern;
         public bool IsNullRef => IsRef && Ptr == -1;
 
         public static object ToObject(Value value) => value.Scalar;
@@ -520,8 +521,8 @@ namespace Wacs.Core.Runtime
                 ValType.F32 => $"f32={Float32.ToString("G10", CultureInfo.InvariantCulture)}",
                 ValType.F64 => $"f64={Float64.ToString("G10", CultureInfo.InvariantCulture)}",
                 ValType.V128 => $"v128={V128.ToString()}",
-                ValType.Funcref => $"Funcref: {Ptr}",
-                ValType.Externref => $"Externref: {Ptr}",
+                ValType.Func => $"Funcref: {Ptr}",
+                ValType.Extern => $"Externref: {Ptr}",
                 ValType.Unknown => "Unknown",
                 _ => "Undefined",
             };

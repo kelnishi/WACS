@@ -122,17 +122,17 @@ namespace Wacs.Core.Validation
 
         public void PushFuncref(Value value)
         {
-            if (!value.Type.IsCompatible(ValType.Funcref))
+            if (!value.Type.IsCompatible(ValType.Func))
                 throw new ValidationException(
-                    $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.Funcref}");
+                    $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.Func}");
             _stack.Push(value);
         }
 
         public void PushExternref(Value value)
         {
-            if (!value.Type.IsCompatible(ValType.Externref))
+            if (!value.Type.IsCompatible(ValType.Extern))
                 throw new ValidationException(
-                    $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.Externref}");
+                    $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.Extern}");
             _stack.Push(value);
         }
 
@@ -228,8 +228,8 @@ namespace Wacs.Core.Validation
             Value value = _stack.Pop();
             switch (value.Type)
             {
-                case ValType.Funcref:
-                case ValType.Externref:
+                case ValType.Func:
+                case ValType.Extern:
                 case ValType.Unknown:
                     return value;
                 default:

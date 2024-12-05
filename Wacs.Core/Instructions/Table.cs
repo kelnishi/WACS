@@ -39,7 +39,7 @@ namespace Wacs.Core.Instructions
                  "Instruction table.get failed to get table {0} from context",X);
             var type = context.Tables[X];
             context.OpStack.PopI32();
-            context.OpStack.PushType(type.ElementType.StackType());
+            context.OpStack.PushType(type.ElementType);
         }
 
         // @Spec 4.4.6.1. table.get 
@@ -97,7 +97,7 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Tables.Contains(X),
                  "Instruction table.set failed to get table {0} from context", X);
             var type = context.Tables[X];
-            context.OpStack.PopType(type.ElementType.StackType());
+            context.OpStack.PopType(type.ElementType);
             context.OpStack.PopI32();
         }
 
@@ -446,7 +446,7 @@ namespace Wacs.Core.Instructions
                  "Instruction table.grow failed to get table {0} from context",X);
             var type = context.Tables[X];
             context.OpStack.PopI32();
-            context.OpStack.PopType(type.ElementType.StackType());
+            context.OpStack.PopType(type.ElementType);
             context.OpStack.PushI32();
         }
 
@@ -556,7 +556,7 @@ namespace Wacs.Core.Instructions
                  "Instruction table.set failed to get table {0} from context",X);
             var type = context.Tables[X];
             context.OpStack.PopI32();
-            context.OpStack.PopType(type.ElementType.StackType());
+            context.OpStack.PopType(type.ElementType);
             context.OpStack.PopI32();
         }
 

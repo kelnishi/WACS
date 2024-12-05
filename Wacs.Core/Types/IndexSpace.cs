@@ -154,17 +154,19 @@ namespace Wacs.Core.Types
         public override bool Contains(TypeIdx idx) =>
             idx.Value < _moduleTypes.Count;
 
-        public FunctionType? ResolveBlockType(BlockType blockType) =>
+        public FunctionType? ResolveBlockType(ValType blockType) =>
             blockType switch
             {
-                BlockType.Empty     => FunctionType.Empty,
-                BlockType.I32       => FunctionType.SingleI32,
-                BlockType.I64       => FunctionType.SingleI64,
-                BlockType.F32       => FunctionType.SingleF32,
-                BlockType.F64       => FunctionType.SingleF64,
-                BlockType.V128      => FunctionType.SingleV128,
-                BlockType.Funcref   => FunctionType.SingleFuncref,
-                BlockType.Externref => FunctionType.SingleExternref,
+                ValType.Empty  => FunctionType.Empty,
+                ValType.I32    => FunctionType.SingleI32,
+                ValType.I64    => FunctionType.SingleI64,
+                ValType.F32    => FunctionType.SingleF32,
+                ValType.F64    => FunctionType.SingleF64,
+                ValType.V128   => FunctionType.SingleV128,
+                
+                //TODO: Handle HeapTypes
+                ValType.Func   => FunctionType.SingleFuncref,
+                ValType.Extern => FunctionType.SingleExternref,
                 _ when Contains((TypeIdx)(int)blockType) => this[(TypeIdx)(int)blockType],
                 _ => null
             };

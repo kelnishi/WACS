@@ -22,12 +22,12 @@ namespace Wacs.Core.Types
     
     public readonly struct TypeIdx : IEquatable<Index>
     {
-        public readonly uint Value;
-        private TypeIdx(uint value) => Value = value;
+        public readonly int Value;
+        private TypeIdx(int value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;
-        public static explicit operator Index(TypeIdx functionIndex) => new((int)functionIndex.Value);
-        public static explicit operator TypeIdx(int value) => new((uint)value);
-        public static explicit operator TypeIdx(uint value) => new(value);
+        public static explicit operator Index(TypeIdx functionIndex) => new(functionIndex.Value);
+        public static explicit operator TypeIdx(int value) => new(value);
+        public static explicit operator TypeIdx(uint value) => new((int)value);
         
     }
 

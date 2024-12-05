@@ -14,24 +14,13 @@
 //  * limitations under the License.
 //  */
 
-using System.Collections.Generic;
-using Wacs.Core.Types;
-
-namespace Wacs.Core.Runtime.Types
+namespace Wacs.Core.Types
 {
-    /// <summary>
-    /// @Spec 4.2.10. Element Instances
-    /// </summary>
-    public class ElementInstance
+    public enum TypePrefix : byte
     {
-        public readonly static ElementInstance Empty = new(ValType.Func, new List<Value>());
-
-        public ElementInstance(ValType type, List<Value> refs) =>
-            (Type, Elements) = (type, refs);
-
-        public ValType Type { get; }
-
-        //Refs
-        public List<Value> Elements { get; }
+        EmptyBlock = 0x40, // -0xc0
+        
+        RefHt      = 0x64, // -0x1c  
+        RefNullHt  = 0x63, // -0x1d
     }
 }

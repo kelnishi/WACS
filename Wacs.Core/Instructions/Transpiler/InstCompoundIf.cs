@@ -37,17 +37,17 @@ namespace Wacs.Core.Instructions.Transpiler
         private Func<ExecContext, int> valueFunc;
         
         public InstCompoundIf(
-            BlockType type,
+            ValType blockType,
             InstructionSequence ifSeq,
             InstructionSequence elseSeq,
             ITypedValueProducer<int> valueProducer)
         {
             IfBlock = new Block(
-                type: type,
+                blockType: blockType,
                 seq: ifSeq
             );
             ElseBlock = new Block(
-                type: type,
+                blockType: blockType,
                 seq: elseSeq
             );
             ElseCount = ElseBlock.Instructions.Count;
@@ -55,7 +55,7 @@ namespace Wacs.Core.Instructions.Transpiler
             valueFunc = valueProducer.GetFunc;
         }
         
-        public BlockType Type => IfBlock.Type;
+        public ValType BlockType => IfBlock.BlockType;
 
         public int Count => ElseBlock.Length == 0 ? 1 : 2;
 
@@ -67,8 +67,8 @@ namespace Wacs.Core.Instructions.Transpiler
         {
             try
             {
-                var ifType = context.Types.ResolveBlockType(IfBlock.Type);
-                context.Assert(ifType,  "Invalid BlockType: {0}",IfBlock.Type);
+                var ifType = context.Types.ResolveBlockType(IfBlock.BlockType);
+                context.Assert(ifType,  "Invalid BlockType: {0}",IfBlock.BlockType);
 
                 //Pop the predicate
                 // context.OpStack.PopI32();
@@ -84,7 +84,7 @@ namespace Wacs.Core.Instructions.Transpiler
                 // *any (else) contained within will pop and repush the control frame
                 context.ValidateBlock(IfBlock);
                 
-                var elseType = context.Types.ResolveBlockType(ElseBlock.Type);
+                var elseType = context.Types.ResolveBlockType(ElseBlock.BlockType);
                 if (!ifType.Equivalent(elseType))
                     throw new ValidationException($"If block returned type {ifType} without matching else block");
                 
@@ -100,7 +100,7 @@ namespace Wacs.Core.Instructions.Transpiler
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.Type);
+                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.BlockType);
             }
         }
         

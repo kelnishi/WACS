@@ -102,7 +102,7 @@ namespace Wacs.Core
                             depth += 1;
                             stackRenderer.FakeContext.LastEvent = "[";
                             var mnemonic = inst.Op.GetMnemonic();
-                            var funcType = ComputeBlockType(blockInst.Type, module);
+                            var funcType = ComputeBlockType(blockInst.BlockType, module);
                             var blockParams = funcType.ParameterTypes.Arity > 0
                                 ? funcType.ParameterTypes.ToParameters()
                                 : "";
@@ -153,17 +153,17 @@ namespace Wacs.Core
                 }
             }
 
-            private FunctionType ComputeBlockType(BlockType type, Module module) =>
+            private FunctionType ComputeBlockType(ValType type, Module module) =>
                 type switch
                 {
-                    BlockType.Empty => new FunctionType(ResultType.Empty, ResultType.Empty),
-                    BlockType.I32 => new FunctionType(ResultType.Empty, new ResultType(ValType.I32)),
-                    BlockType.F32 => new FunctionType(ResultType.Empty, new ResultType(ValType.F32)),
-                    BlockType.F64 => new FunctionType(ResultType.Empty, new ResultType(ValType.F64)),
-                    BlockType.I64 => new FunctionType(ResultType.Empty, new ResultType(ValType.I64)),
-                    BlockType.V128 => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
-                    BlockType.Funcref => new FunctionType(ResultType.Empty, new ResultType(ValType.Funcref)),
-                    BlockType.Externref => new FunctionType(ResultType.Empty, new ResultType(ValType.Externref)),
+                    ValType.Empty => new FunctionType(ResultType.Empty, ResultType.Empty),
+                    ValType.I32 => new FunctionType(ResultType.Empty, new ResultType(ValType.I32)),
+                    ValType.F32 => new FunctionType(ResultType.Empty, new ResultType(ValType.F32)),
+                    ValType.F64 => new FunctionType(ResultType.Empty, new ResultType(ValType.F64)),
+                    ValType.I64 => new FunctionType(ResultType.Empty, new ResultType(ValType.I64)),
+                    ValType.V128 => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
+                    ValType.Func => new FunctionType(ResultType.Empty, new ResultType(ValType.Func)),
+                    ValType.Extern => new FunctionType(ResultType.Empty, new ResultType(ValType.Extern)),
                     _ => module.Types[(int)((TypeIdx)(uint)type).Value]
                 };
 

@@ -16,12 +16,13 @@ namespace Wacs.Core.Instructions
     public class InstRefNull : InstructionBase, IConstInstruction
     {
         public override ByteCode Op => OpCode.RefNull;
-        public ReferenceType Type { get; internal set; }
+        public ValType Type { get; internal set; }
 
         // @Spec 3.3.2.1. ref.null t
         public override void Validate(IWasmValidationContext context)
         {
-             context.OpStack.PushType(Type.StackType());
+            context.Assert(Type.IsRefType(), $"Type was not a RefType:{Type}");
+            context.OpStack.PushType(Type);
         }
 
         // @Spec 4.4.2.1. ref.null t
@@ -31,7 +32,7 @@ namespace Wacs.Core.Instructions
 
         public override InstructionBase Parse(BinaryReader reader)
         {
-            Type = ReferenceTypeParser.Parse(reader);
+            Type = ValTypeParser.ParseRefType(reader);
             return this;
         }
         
@@ -90,7 +91,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Frame?.Module.FuncAddrs.Contains(FunctionIndex),
                 $"Instruction ref.func failed. Could not find function address in the context");
             var a = context.Frame!.Module.FuncAddrs[FunctionIndex];
-            context.OpStack.PushFuncref(new Value(ValType.Funcref, a.Value));
+            context.OpStack.PushFuncref(new Value(ValType.Func, a.Value));
         }
 
         public override InstructionBase Parse(BinaryReader reader)

@@ -26,7 +26,7 @@ namespace Wacs.Core.Instructions
     {
         public int Size { get; }
 
-        public BlockType Type { get; }
+        public ValType BlockType { get; }
 
         public int Count { get; }
 
