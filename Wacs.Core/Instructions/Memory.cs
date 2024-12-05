@@ -14,14 +14,11 @@
 //  * limitations under the License.
 //  */
 
-using System;
 using System.IO;
-using System.Runtime.InteropServices;
-using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 // 5.4.6 Memory Instructions
@@ -35,8 +32,6 @@ namespace Wacs.Core.Instructions
 
         protected MemArg M;
 
-        public override ByteCode Op { get; }
-
         protected InstMemoryLoad(ValType type, BitWidth width, ByteCode opcode)
         {
             Type = type;
@@ -44,6 +39,8 @@ namespace Wacs.Core.Instructions
             WidthTByteSize = WidthT.ByteSize();
             Op = opcode;
         }
+
+        public override ByteCode Op { get; }
 
         /// <summary>
         /// @Spec 3.3.7.1. t.load
@@ -71,7 +68,7 @@ namespace Wacs.Core.Instructions
             M = m;
             return this;
         }
-        
+
         public override string RenderText(ExecContext? context)
         {
             if (context != null)
@@ -84,7 +81,7 @@ namespace Wacs.Core.Instructions
             }
             return $"{base.RenderText(context)}{M.ToWat(WidthT)}";
         }
-        
+
         public int CalculateSize() => 1;
     }
 
@@ -102,7 +99,7 @@ namespace Wacs.Core.Instructions
             WidthTByteSize = WidthT.ByteSize();
             Op = opcode;
         }
-        
+
         public override ByteCode Op { get; }
 
         /// <summary>
@@ -126,6 +123,7 @@ namespace Wacs.Core.Instructions
             M = MemArg.Parse(reader);
             return this;
         }
+
         public InstructionBase Immediate(MemArg m)
         {
             M = m;

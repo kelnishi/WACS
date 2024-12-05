@@ -14,11 +14,15 @@
 //  * limitations under the License.
 //  */
 
+using Wacs.Core.Attributes;
+
 namespace Wacs.Core.Types
 {
-    public enum PackedType : byte
+    public enum NumType : byte
     {
-        I8  = 0x78, // -0x08
-        I16 = 0x77, // -0x09
+        [WatToken("i32")] I32 = 0x7F, // -0x01
+        [WatToken("i64")] I64 = 0x7E, // -0x02
+        [WatToken("f32")] F32 = 0x7D, // -0x03
+        [WatToken("f64")] F64 = 0x7C, // -0x04
     }
 }

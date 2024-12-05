@@ -138,7 +138,7 @@ namespace Spec.Test
             
             Assert.Equal(10*2, invoker(10));
         }
-        
+
         [Fact]
         public async Task BindAsyncWasmFunction()
         {

@@ -15,7 +15,6 @@
 //  */
 
 using System.IO;
-using Wacs.Core.Instructions.Memory;
 using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.Instructions.Simd;
 using Wacs.Core.Instructions.SIMD;

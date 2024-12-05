@@ -21,12 +21,16 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Instructions.Memory
 {
     public class InstF32Load : InstMemoryLoad, INodeComputer<uint, float>
     {
         public InstF32Load() : base(ValType.F32, BitWidth.U32, OpCode.F32Load) {}
+
+        public Func<ExecContext, uint, float> GetFunc => FetchFromMemory;
+
         public override void Execute(ExecContext context)
         {
             context.Assert( context.OpStack.Peek().IsI32,
@@ -35,7 +39,7 @@ namespace Wacs.Core.Instructions.Memory
             float value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
-        
+
         //@Spec 4.4.7.1. t.load and t.loadN_sx
         public float FetchFromMemory(ExecContext context, uint offset)
         {
@@ -53,14 +57,15 @@ namespace Wacs.Core.Instructions.Memory
             
             return MemoryMarshal.Read<float>(bs);
         }
-
-        public Func<ExecContext, uint, float> GetFunc => FetchFromMemory;
     }
     
     
     public class InstF64Load : InstMemoryLoad, INodeComputer<uint, double>
     {
         public InstF64Load() : base(ValType.F64, BitWidth.U64, OpCode.F64Load) {}
+
+        public Func<ExecContext, uint, double> GetFunc => FetchFromMemory;
+
         public override void Execute(ExecContext context)
         {
             context.Assert( context.OpStack.Peek().IsI32,
@@ -69,7 +74,7 @@ namespace Wacs.Core.Instructions.Memory
             double value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
-        
+
         //@Spec 4.4.7.1. t.load and t.loadN_sx
         public double FetchFromMemory(ExecContext context, uint offset)
         {
@@ -87,7 +92,5 @@ namespace Wacs.Core.Instructions.Memory
             
             return MemoryMarshal.Read<double>(bs);
         }
-
-        public Func<ExecContext, uint, double> GetFunc => FetchFromMemory;
     }
 }

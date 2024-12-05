@@ -20,7 +20,7 @@ using Wacs.Core.Attributes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Utilities;
 
-namespace Wacs.Core.Types
+namespace Wacs.Core.Types.Defs
 {
     /// <summary>
     /// @Spec 2.3.4 Value Types
@@ -101,6 +101,7 @@ namespace Wacs.Core.Types
     public static class ValueTypeExtensions
     {
         private const uint NNMask = ~(uint)0x4000_0000;
+
         public static TypeIdx Index(this ValType type) => 
             (TypeIdx)(NNMask & (uint)type);
 
@@ -131,6 +132,7 @@ namespace Wacs.Core.Types
                 _ => (HeapType)0
             };
         }
+
         public static bool IsRefType(this ValType type)
         {
             return type switch
@@ -197,7 +199,7 @@ namespace Wacs.Core.Types
                 _ => false
             };
         }
-        
+
         public static bool IsCompatible(this ValType left, ValType right)
         {
             if (left == right || left == ValType.Unknown || right == ValType.Unknown)
@@ -270,6 +272,7 @@ namespace Wacs.Core.Types
         }
 
         public static ValType Parse(BinaryReader reader) => Parse(reader, false);
+
         public static ValType Parse(BinaryReader reader, bool parseBlockIndex)
         {
             long pos = reader.BaseStream.Position;

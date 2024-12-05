@@ -19,6 +19,7 @@ using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Runtime
 {
@@ -226,7 +227,7 @@ namespace Wacs.Core.Runtime
             }
             return arity;
         }
-        
+
         public void PopResults(ResultType type, ref Stack<Value> results)
         {
             for (int i = 0, l = type.Arity; i < l; ++i)
@@ -267,7 +268,7 @@ namespace Wacs.Core.Runtime
                 targetBuf[i] = PopAny();
             }
         }
-        
+
         public void PushValues(Value[] scalars)
         {
             for (int i = 0, l = scalars.Length; i < l; ++i)

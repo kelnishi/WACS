@@ -23,6 +23,7 @@ using System.Threading.Tasks;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Runtime
 {

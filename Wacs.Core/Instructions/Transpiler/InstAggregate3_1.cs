@@ -30,7 +30,7 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly Func<ExecContext, TIn2> _in2;
         private readonly Func<ExecContext, TIn3> _in3;
         private readonly Func<ExecContext, Value> _wrap;
-        
+
         public InstAggregate3_1(
             ITypedValueProducer<TIn1> in1,
             ITypedValueProducer<TIn2> in2,

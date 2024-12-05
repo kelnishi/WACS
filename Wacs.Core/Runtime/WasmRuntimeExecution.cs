@@ -85,7 +85,7 @@ namespace Wacs.Core.Runtime
                 return invoker(p);
             };
         }
-        
+
         public Delegates.GenericFuncsAsync CreateStackInvokerAsync(FuncAddr funcAddr, InvokerOptions? options = default)
         {
             options ??= new InvokerOptions();
@@ -221,7 +221,7 @@ namespace Wacs.Core.Runtime
                 return results;
             }
         }
-        
+
         private Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
         {
             return GenericDelegate;

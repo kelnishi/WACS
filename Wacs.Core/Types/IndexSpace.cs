@@ -20,6 +20,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Types
 {

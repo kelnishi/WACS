@@ -18,7 +18,7 @@ using System;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -46,6 +46,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         public override ByteCode Op { get; }
 
+        public Func<ExecContext, float,float> GetFunc => (_, i1) => _execute(i1);
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
 
         public override void Execute(ExecContext context)
@@ -54,8 +56,6 @@ namespace Wacs.Core.Instructions.Numeric
             float result = _execute(a);
             context.OpStack.PushF32(result);
         }
-
-        public Func<ExecContext, float,float> GetFunc => (_, i1) => _execute(i1);
 
         private static float ExecuteF32Abs(float a) => Math.Abs(a);
         private static float ExecuteF32Neg(float a) => -a;

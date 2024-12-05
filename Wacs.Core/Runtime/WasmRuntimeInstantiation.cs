@@ -27,6 +27,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 // using System.Diagnostics.CodeAnalysis;
 
@@ -400,7 +401,7 @@ namespace Wacs.Core.Runtime
             }
             return moduleInstance;
         }
-        
+
         public void SynchronizeFunctionCalls(ModuleInstance moduleInstance)
         {
             foreach (var funcAddr in moduleInstance.FuncAddrs)

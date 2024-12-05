@@ -24,9 +24,9 @@ using FluentValidation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -119,7 +119,7 @@ namespace Wacs.Core.Instructions
         {
             Block = new Block(
                 blockType: ValTypeParser.Parse(reader, true),
-                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd))
+                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IsEnd))
             );
             return this;
         }
@@ -194,7 +194,7 @@ namespace Wacs.Core.Instructions
         {
             Block = new Block(
                 blockType: ValTypeParser.Parse(reader, true),
-                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd))
+                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IsEnd))
             );
             return this;
         }
@@ -220,9 +220,9 @@ namespace Wacs.Core.Instructions
     {
         private static readonly ByteCode IfOp = OpCode.If;
         private static readonly ByteCode ElseOp = OpCode.Else;
-        private Block IfBlock = Block.Empty;
         private Block ElseBlock = Block.Empty;
         private int ElseCount;
+        private Block IfBlock = Block.Empty;
         public override ByteCode Op => IfOp;
 
 
@@ -274,7 +274,7 @@ namespace Wacs.Core.Instructions
                     "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.BlockType);
             }
         }
-        
+
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
@@ -298,7 +298,7 @@ namespace Wacs.Core.Instructions
             IfBlock = new Block(
                 blockType: ValTypeParser.Parse(reader, true),
                 new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
-                    InstructionBase.IsElseOrEnd))
+                    IsElseOrEnd))
             );
 
             if (IfBlock.Instructions.EndsWithElse)
@@ -306,7 +306,7 @@ namespace Wacs.Core.Instructions
                 ElseBlock = new Block(
                     blockType: IfBlock.BlockType,
                     seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
-                        InstructionBase.IsEnd))
+                        IsEnd))
                 );
             }
             else if (!IfBlock.Instructions.HasExplicitEnd)
@@ -526,6 +526,8 @@ namespace Wacs.Core.Instructions
         public LabelIdx L;
         public override ByteCode Op => OpCode.BrIf;
 
+        public Action<ExecContext, int> GetFunc => BranchIf;
+
         // @Spec 3.3.8.7. br_if
         public override void Validate(IWasmValidationContext context)
         {
@@ -560,8 +562,6 @@ namespace Wacs.Core.Instructions
             }
         }
 
-        public Action<ExecContext, int> GetFunc => BranchIf;
-
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
@@ -592,6 +592,8 @@ namespace Wacs.Core.Instructions
 
         private LabelIdx[] Ls = null!;
         public override ByteCode Op => OpCode.BrTable;
+
+        public Action<ExecContext, int> GetFunc => BranchTable;
 
         // @Spec 3.3.8.8. br_table
         public override void Validate(IWasmValidationContext context)
@@ -635,8 +637,8 @@ namespace Wacs.Core.Instructions
             int i = context.OpStack.PopI32();
             BranchTable(context, i);
         }
-        
-        
+
+
         private void BranchTable(ExecContext context, int i)
         {
             //3.
@@ -651,8 +653,6 @@ namespace Wacs.Core.Instructions
                 InstBranch.ExecuteInstruction(context, Ln);
             }
         }
-
-        public Action<ExecContext, int> GetFunc => BranchTable;
 
         private static LabelIdx ParseLabelIndex(BinaryReader reader) =>
             (LabelIdx)reader.ReadLeb128_u32();
