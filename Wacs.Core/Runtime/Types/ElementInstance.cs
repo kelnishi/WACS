@@ -15,6 +15,7 @@
 //  */
 
 using System.Collections.Generic;
+using System.Linq;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime.Types
@@ -26,8 +27,12 @@ namespace Wacs.Core.Runtime.Types
     {
         public readonly static ElementInstance Empty = new(ValType.Func, new List<Value>());
 
-        public ElementInstance(ValType type, List<Value> refs) =>
-            (Type, Elements) = (type, refs);
+        public ElementInstance(ValType type, List<Value> refs)
+        {
+            Type = type;
+            //If the initialized value type fits, use it, otherwise coerce it to the proper type.
+            Elements = refs.Select(v => !v.Type.IsSubType(Type) ? new Value(v, Type) : v).ToList();
+        }
 
         public ValType Type { get; }
 
