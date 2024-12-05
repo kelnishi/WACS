@@ -34,7 +34,7 @@ namespace Wacs.Core.Runtime
         public static explicit operator FuncAddr(Value value)
         {
             if (value.Type != ValType.Func)
-                throw new ArgumentException("Cannot convert non-funcref Value to FuncAddr");
+                throw new ArgumentException($"Cannot convert non-funcref ({value.Type}) Value to FuncAddr");
             return new FuncAddr(value.Int32);
         }
         

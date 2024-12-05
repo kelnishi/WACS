@@ -152,7 +152,7 @@ namespace Wacs.Core.Types
         }
 
         public override bool Contains(TypeIdx idx) =>
-            idx.Value < _moduleTypes.Count;
+            idx.Value >= 0 && idx.Value < _moduleTypes.Count;
 
         public FunctionType? ResolveBlockType(ValType blockType) =>
             blockType switch

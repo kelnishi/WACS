@@ -202,7 +202,7 @@ namespace Wacs.Core.Runtime
                 throw new InvalidDataException($"Stackunderflow");
             
             var val = _registers[Count];
-            if (val.Type != type)
+            if (val.Type != type && !val.Type.IsCompatible(type))
                 throw new InvalidDataException($"OperandStack contained wrong type {val.Type} expected {type}");
             return val;
         }

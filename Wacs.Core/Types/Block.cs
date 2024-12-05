@@ -23,7 +23,7 @@ namespace Wacs.Core.Types
 {
     public class Block
     {
-        public static readonly Block Empty = new(ValType.EmptyBlock, InstructionSequence.Empty);
+        public static readonly Block Empty = new(ValType.Empty, InstructionSequence.Empty);
 
         public readonly InstructionSequence Instructions;
 
@@ -63,11 +63,8 @@ namespace Wacs.Core.Types
 
                 // @Spec 3.2.2.2. [valtype?]
                 RuleFor(b => b.BlockType)
-                    .Must((_, type, ctx) =>
-                    {
-                        //TODO: Validate BlockType
-                        return false;
-                    })
+                    .Must((_, type, ctx) => 
+                        Enum.IsDefined(typeof(ValType), type))
                     .When(b => b.TypeIndex.Value < 0)
                     .WithMessage("Blocks must have a defined BlockType if not a ValType index");
 

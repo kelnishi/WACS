@@ -145,10 +145,6 @@ namespace Wacs.Core.Utilities
             long result = 0;
             int shift = 0;
             bool moreBytes = true;
-            
-            //Negative values encode enum type values, we should not encounter them here.
-            if ((byteValue & 0x40) != 0)
-                throw new FormatException($"s33 encoded index cannot be negative.");
 
             while (moreBytes)
             {
@@ -175,8 +171,8 @@ namespace Wacs.Core.Utilities
                 }
 
                 // Prevent shift overflow
-                if (shift >= 64)
-                    throw new FormatException("Shift count exceeds 64 bits while decoding s33.");
+                if (shift >= 40)
+                    throw new FormatException("Shift count exceeds 40 bits while decoding s33.");
 
                 byteValue = reader.ReadByte();
                 if (byteValue == 0xFF)
