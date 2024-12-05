@@ -18,117 +18,96 @@ using System;
 using System.IO;
 using Wacs.Core.Attributes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
 {
     /// <summary>
     /// @Spec 2.3.4 Value Types
     /// Represents the value types used in WebAssembly.
+    ///
+    /// All the abstract type encodings fit within the byte/s33 format as negative numbers.
+    /// The spec allows for 2^32 concrete types (indices), but we'll just do 2^30 for practicality. 
     /// </summary>
-    public enum ValType : byte
+    [Flags]
+    public enum ValType : int
     {
-        // =========================
-        // Numeric Types
-        // =========================
-
-        /// <summary>
-        /// 32-bit integer
-        /// </summary>
-        [WatToken("i32")] I32 = 0x7F,
-
-        /// <summary>
-        /// 64-bit integer
-        /// </summary>
-        [WatToken("i64")] I64 = 0x7E,
-
-        /// <summary>
-        /// 32-bit floating point
-        /// </summary>
-        [WatToken("f32")] F32 = 0x7D,
-
-        /// <summary>
-        /// 64-bit floating point
-        /// </summary>
-        [WatToken("f64")] F64 = 0x7C,
-
-        // =========================
-        // Vector Types (SIMD)
-        // =========================
-
-        /// <summary>
-        /// 128-bit vector
-        /// </summary>
-        [WatToken("v128")] V128 = 0x7B, // (SIMD extension)
-
-        // =========================
-        // Reference Types
-        // =========================
-
-        /// <summary>
-        /// Function reference
-        /// </summary>
-        [WatToken("funcref")] Funcref = 0x70,
-
-        /// <summary>
-        /// External reference
-        /// </summary>
-        [WatToken("externref")] Externref = 0x6F,
-
-        // =========================
-        // Future Types
-        // =========================
-
-        // Additional types from future extensions can be added here.
+        [WatToken("i32")]  I32               = unchecked((sbyte)(0x80|NumType.I32)),             // -0x01
+        [WatToken("i64")]  F32               = unchecked((sbyte)(0x80|NumType.F32)),             // -0x02
+        [WatToken("f32")]  I64               = unchecked((sbyte)(0x80|NumType.I64)),             // -0x03
+        [WatToken("f64")]  F64               = unchecked((sbyte)(0x80|NumType.F64)),             // -0x04
+        [WatToken("v128")] V128              = unchecked((sbyte)(0x80|VecType.V128)),            // -0x05
         
+        [WatToken("u32")]  U32               = -0x06, // not in spec
+        [WatToken("u64")]  U64               = -0x07, // not in spec
         
-        //Special types
+        //Aggregate Types
+        I8                                   = unchecked((sbyte)(0x80|PackedType.I8)),           // -0x08
+        I16                                  = unchecked((sbyte)(0x80|PackedType.I16)),          // -0x09
         
+        //Host Reference
+        Host                                 = -0x0c,
         
-        //Special case for transpiler
-        U32 = 0xFB,
-        U64 = 0xFA,
+        //Reference Types
+        [WatToken("nullfuncref")]   NoFunc   = unchecked((sbyte)(0x80|HeapType.NoFunc)),         // -0x0d
+        [WatToken("nullexternref")] NoExtern = unchecked((sbyte)(0x80|HeapType.NoExtern)),       // -0x0e
+        [WatToken("nullref")]       None     = unchecked((sbyte)(0x80|HeapType.None)),           // -0x0f
+        [WatToken("funcref")]       Func     = unchecked((sbyte)(0x80|HeapType.Func)),           // -0x10
+        [WatToken("externref")]     Extern   = unchecked((sbyte)(0x80|HeapType.Extern)),         // -0x11
+        [WatToken("anyref")]        Any      = unchecked((sbyte)(0x80|HeapType.Any)),            // -0x12
+        [WatToken("eqref")]         Eq       = unchecked((sbyte)(0x80|HeapType.Eq)),             // -0x13
+        [WatToken("i31ref")]        I31      = unchecked((sbyte)(0x80|HeapType.I31)),            // -0x14
+        [WatToken("structref")]     Struct   = unchecked((sbyte)(0x80|HeapType.Struct)),         // -0x15
+        [WatToken("arrayref")]      Array    = unchecked((sbyte)(0x80|HeapType.Array)),          // -0x16
+           
+        [WatToken("ref ht")]      RefHt      = unchecked((sbyte)(0x80|TypePrefix.RefHt)),        // -0x1c
+        [WatToken("ref null ht")] RefNullHt  = unchecked((sbyte)(0x80|TypePrefix.RefNullHt)),    // -0x1d
         
-        [WatToken("Unknown")] Unknown = 0xFC, //for validation
+        Empty                                = unchecked((sbyte)(0x80|TypePrefix.EmptyBlock)),   // -0xc0
         
-        ExecContext = 0xFD,
-        Nil = 0xFE,
-        Undefined = 0xFF,
+        //Recursive Types
+        RecSt                                = unchecked((sbyte)(0x80|RecType.RecSt)),           // -0xce
+        SubXCt                               = unchecked((sbyte)(0x80|RecType.SubXCt)),          // -0xcf
+        SubFinalXCt                          = unchecked((sbyte)(0x80|RecType.SubFinalXCt)),     // -0xd0
+        
+        //Composite Types
+        ArrayAt                              = unchecked((sbyte)(0x80|CompType.ArrayAt)),        // -0xde
+        Structst                             = unchecked((sbyte)(0x80|CompType.StructSt)),       // -0xdf
+        FuncFt                               = unchecked((sbyte)(0x80|CompType.FuncFt)),         // -0xe0
+        
+        SignBit = unchecked((int)0x8000_0000),
+        NullBit = 0x4000_0000,
+        
+        //NonNullable (unset null bit)
+        NoFuncNN   = NoFunc & ~NullBit,  
+        NoExternNN = NoExtern & ~NullBit,
+        NoneNN     = None & ~NullBit,    
+        FuncNN     = Func & ~NullBit,    
+        ExternNN   = Extern & ~NullBit,  
+        AnyNN      = Any & ~NullBit,     
+        EqNN       = Eq & ~NullBit,      
+        I31NN      = I31 & ~NullBit,     
+        StructNN   = Struct & ~NullBit,  
+        ArrayNN    = Array & ~NullBit,
+        
+        //for validation
+        Undefined = SignBit | NullBit,
+        Nil = Undefined + 1,
+        ExecContext = Undefined + 2,
+        [WatToken("Unknown")] Unknown = Undefined + 3, 
+        EmptyBlock = Undefined + 4,
     }
+
 
     public static class ValueTypeExtensions
     {
+        private const uint NNMask = ~(uint)0x4000_0000;
+        public static TypeIdx Index(this ValType type) => 
+            (TypeIdx)(NNMask & (uint)type);
+
         public static bool IsCompatible(this ValType left, ValType right) => 
             left == right || left == ValType.Unknown || right == ValType.Unknown;
 
-        public static bool IsNumeric(this ValType type) => type switch {
-            ValType.I32 => true,
-            ValType.I64 => true,
-            ValType.F32 => true,
-            ValType.F64 => true,
-            _ => false
-        };
-
-        public static bool IsInteger(this ValType type) => type switch {
-            ValType.I32 => true,
-            ValType.I64 => true,
-            _ => false
-        };
-
-        public static bool IsFloat(this ValType type) => type switch {
-            ValType.F32 => true,
-            ValType.F64 => true,
-            _ => false
-        };
-
-        public static bool IsVector(this ValType type) => type == ValType.V128;
-
-        public static bool IsReference(this ValType type) => type switch {
-            ValType.Funcref => true,
-            ValType.Externref => true,
-            _ => false
-        };
-
-        public static ResultType SingleResult(this ValType type) => new(type);
     }
 
     public static class ValTypeUtilities
@@ -159,21 +138,97 @@ namespace Wacs.Core.Types
 
     public static class ValTypeParser
     {
-        public static ValType Parse(BinaryReader reader) =>
-            // _ handles Undefined should throw
-            // ReSharper disable once SwitchExpressionHandlesSomeKnownEnumValuesWithExceptionInDefault
-            (ValType)reader.ReadByte() switch {
-                //Numeric Types
-                ValType.I32 => ValType.I32,
-                ValType.I64 => ValType.I64,
-                ValType.F32 => ValType.F32,
-                ValType.F64 => ValType.F64,
-                //Vector Types (SIMD)
-                ValType.V128 => ValType.V128,
-                //Reference Types
-                ValType.Funcref => ValType.Funcref,
-                ValType.Externref => ValType.Externref,
-                _ => throw new FormatException($"Invalid value type at offset {reader.BaseStream.Position}.")
+        public static bool IsRefType(this ValType type)
+        {
+            return type switch
+            {
+                ValType.NoFunc => true,
+                ValType.NoExtern => true,
+                ValType.None => true,
+                ValType.Func => true,
+                ValType.Extern => true,
+                ValType.Any => true,
+                ValType.Eq => true,
+                ValType.I31 => true,
+                ValType.Struct => true,
+                ValType.Array => true,
+                ValType.NoFuncNN => true,  
+                ValType.NoExternNN => true,
+                ValType.NoneNN => true,    
+                ValType.FuncNN => true,    
+                ValType.ExternNN => true,  
+                ValType.AnyNN => true,     
+                ValType.EqNN => true,      
+                ValType.I31NN => true,     
+                ValType.StructNN => true,  
+                ValType.ArrayNN => true,   
+                _ when (int)type >= 0 => true,
+                _ => false
             };
+        }
+        
+        public static ValType ParseHeapType(BinaryReader reader)
+        {
+            byte token = reader.ReadByte();
+            return token switch
+            {
+                (byte)HeapType.NoFunc => ValType.NoFunc,
+                (byte)HeapType.NoExtern => ValType.NoExtern,
+                (byte)HeapType.None => ValType.None,
+                (byte)HeapType.Func => ValType.Func,
+                (byte)HeapType.Extern => ValType.Extern,
+                (byte)HeapType.Any => ValType.Any,
+                (byte)HeapType.Eq => ValType.Eq,
+                (byte)HeapType.I31 => ValType.I31,
+                (byte)HeapType.Struct => ValType.Struct,
+                (byte)HeapType.Array => ValType.Array,
+                //Index
+                _ => (ValType)reader.ContinueReading_s33(token), 
+            };
+        }
+
+        public static ValType ParseRefType(BinaryReader reader)
+        {
+            var type = Parse(reader, false);
+            if (!type.IsRefType())
+                throw new FormatException($"Type is not a Reference Type:{type}");
+            return type;
+        }
+
+        public static ValType Parse(BinaryReader reader) => Parse(reader, false);
+        public static ValType Parse(BinaryReader reader, bool parseBlockIndex)
+        {
+            long pos = reader.BaseStream.Position;
+            byte token = reader.ReadByte();
+            return token switch
+            {
+                //Numeric Types
+                (byte)NumType.I32 => ValType.I32,
+                (byte)NumType.I64 => ValType.I64,
+                (byte)NumType.F32 => ValType.F32,
+                (byte)NumType.F64 => ValType.F64,
+                //Vector Types (SIMD)
+                (byte)VecType.V128 => ValType.V128,
+                //Reference Types (nullable abstract)
+                (byte)HeapType.NoFunc => ValType.NoFunc,
+                (byte)HeapType.NoExtern => ValType.NoExtern,
+                (byte)HeapType.None => ValType.None,
+                (byte)HeapType.Func => ValType.Func,
+                (byte)HeapType.Extern => ValType.Extern,
+                (byte)HeapType.Any => ValType.Any,
+                (byte)HeapType.Eq => ValType.Eq,
+                (byte)HeapType.I31 => ValType.I31,
+                (byte)HeapType.Struct => ValType.Struct,
+                (byte)HeapType.Array => ValType.Array,
+                //Abstract or Index
+                (byte)TypePrefix.RefHt => ParseHeapType(reader) & ~ValType.NullBit,   //non-nullable
+                (byte)TypePrefix.RefNullHt => ParseHeapType(reader),                  //nullable
+                
+                //Parse an index
+                _ when parseBlockIndex => (ValType)reader.ContinueReading_s33(token),
+
+                _ => throw new FormatException($"Invalid value type at offset {pos}.")
+            };
+        }
     }
 }

@@ -37,16 +37,22 @@ namespace Wacs.Core.Types
         {
         }
 
-        public TableType(ReferenceType elementType, Limits limits) =>
-            (ElementType, Limits) = (elementType, limits);
+        public TableType(ValType elementType, Limits limits)
+        {
+            ElementType = elementType;
+            Limits = limits;
+        }
 
-        private TableType(BinaryReader reader) =>
-            (ElementType, Limits) = (ReferenceTypeParser.Parse(reader), Limits.Parse(reader));
+        private TableType(BinaryReader reader)
+        {
+            ElementType = ValTypeParser.ParseRefType(reader);
+            Limits = Limits.Parse(reader);
+        }
 
         /// <summary>
         /// The element type of the table (e.g., funcref or externref).
         /// </summary>
-        public ReferenceType ElementType { get; private set; }
+        public ValType ElementType { get; private set; }
 
         public string Id { get; set; } = "";
 

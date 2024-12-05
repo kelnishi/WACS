@@ -14,24 +14,31 @@
 //  * limitations under the License.
 //  */
 
-using System.Collections.Generic;
-using Wacs.Core.Types;
+using System;
 
-namespace Wacs.Core.Runtime.Types
+namespace Wacs.Core.Types
 {
-    /// <summary>
-    /// @Spec 4.2.10. Element Instances
-    /// </summary>
-    public class ElementInstance
+    [Flags]
+    public enum ValTypeTag
     {
-        public readonly static ElementInstance Empty = new(ValType.Func, new List<Value>());
+        Unknown = 0,
+        Nil = 0b0000_0001,
 
-        public ElementInstance(ValType type, List<Value> refs) =>
-            (Type, Elements) = (type, refs);
+        //Defaultable
+        Default = 0b0000_1000,
 
-        public ValType Type { get; }
+        NumType = 0b0000_0100 | Default,
+        VecType = 0b0000_0010 | Default,
 
-        //Refs
-        public List<Value> Elements { get; }
+        RefType = 0b0001_0000,
+        IdxType = 0b0010_0000,
+        NulType = 0b0100_0000,
+        RefNull = RefType | NulType | Default,
+        IdxRef = RefType | IdxType,
+        IdxNull = RefNull | IdxType,
+
+        Mask = 0b1111_1111,
+        Block = 0b0001_0000_0000,
+        ExecContext = 0b1000_0000_0000,
     }
 }

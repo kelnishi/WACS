@@ -69,7 +69,7 @@ namespace Wacs.Core.Runtime.Transpiler
                 {
                     case InstBlock instBlock:
                         var newBlockSeq = OptimizeSequence(instBlock.GetBlock(0).Instructions);
-                        var newBlock = new InstBlock().Immediate(instBlock.Type, newBlockSeq);
+                        var newBlock = new InstBlock().Immediate(instBlock.BlockType, newBlockSeq);
                         //HACK: We're copying the StackHeight here. Ideally we would recalculate,
                         //but InstAggregates would need to report correct stack consumption to Validate
                         newBlock.Label = new Label(instBlock.Label);
@@ -78,7 +78,7 @@ namespace Wacs.Core.Runtime.Transpiler
                         break;
                     case InstLoop instLoop:
                         var newLoopSeq = OptimizeSequence(instLoop.GetBlock(0).Instructions);
-                        var newLoop = new InstLoop().Immediate(instLoop.Type, newLoopSeq);
+                        var newLoop = new InstLoop().Immediate(instLoop.BlockType, newLoopSeq);
                         //copy stackheight
                         newLoop.Label = new Label(instLoop.Label);
                         stack.Push(newLoop);
@@ -99,7 +99,7 @@ namespace Wacs.Core.Runtime.Transpiler
                             };
                             if (intProducer != null)
                             {
-                                newIf = new InstCompoundIf(instIf.Type, newIfSeq, newElseSeq, intProducer);
+                                newIf = new InstCompoundIf(instIf.BlockType, newIfSeq, newElseSeq, intProducer);
                             }
                             else
                             {
@@ -107,7 +107,7 @@ namespace Wacs.Core.Runtime.Transpiler
                             }
                         }
                         if (newIf == null)
-                            newIf = new InstIf().Immediate(instIf.Type, newIfSeq, newElseSeq);
+                            newIf = new InstIf().Immediate(instIf.BlockType, newIfSeq, newElseSeq);
                         
                         //copy stackheight
                         newIf.Label = new Label(instIf.Label);

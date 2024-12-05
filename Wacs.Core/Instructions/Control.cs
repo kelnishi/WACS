@@ -73,7 +73,7 @@ namespace Wacs.Core.Instructions
         private Block Block;
         public override ByteCode Op => BlockOp;
 
-        public BlockType Type => Block.Type;
+        public ValType BlockType => Block.BlockType;
 
         public int Count => 1;
 
@@ -85,8 +85,8 @@ namespace Wacs.Core.Instructions
         {
             try
             {
-                var funcType = context.Types.ResolveBlockType(Block.Type);
-                context.Assert(funcType,  "Invalid BlockType: {0}",Block.Type);
+                var funcType = context.Types.ResolveBlockType(Block.BlockType);
+                context.Assert(funcType,  "Invalid BlockType: {0}",Block.BlockType);
                 
                 //Check the parameters [t1*] and discard
                 context.OpStack.DiscardValues(funcType.ParameterTypes);
@@ -102,7 +102,7 @@ namespace Wacs.Core.Instructions
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    "Instruction block was invalid. BlockType {0} did not exist in the Context.",Block.Type);
+                    "Instruction block was invalid. BlockType {0} did not exist in the Context.",Block.BlockType);
             }
         }
 
@@ -118,16 +118,16 @@ namespace Wacs.Core.Instructions
         public override InstructionBase Parse(BinaryReader reader)
         {
             Block = new Block(
-                type: Block.ParseBlockType(reader),
+                blockType: ValTypeParser.Parse(reader, true),
                 seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd))
             );
             return this;
         }
 
-        public BlockTarget Immediate(BlockType type, InstructionSequence sequence)
+        public BlockTarget Immediate(ValType blockType, InstructionSequence sequence)
         {
             Block = new Block(
-                type: type,
+                blockType: blockType,
                 seq: sequence
             );
             return this;
@@ -147,7 +147,7 @@ namespace Wacs.Core.Instructions
         private Block Block = null!;
         public override ByteCode Op => LoopOp;
 
-        public BlockType Type => Block.Type;
+        public ValType BlockType => Block.BlockType;
 
         public int Count => 1;
 
@@ -159,8 +159,8 @@ namespace Wacs.Core.Instructions
         {
             try
             {
-                var funcType = context.Types.ResolveBlockType(Block.Type);
-                context.Assert(funcType, "Invalid BlockType: {0}",Block.Type);
+                var funcType = context.Types.ResolveBlockType(Block.BlockType);
+                context.Assert(funcType, "Invalid BlockType: {0}",Block.BlockType);
                 
                 //Check the parameters [t1*] and discard
                 context.OpStack.DiscardValues(funcType.ParameterTypes);
@@ -176,7 +176,7 @@ namespace Wacs.Core.Instructions
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",Block.Type);
+                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",Block.BlockType);
             }
         }
 
@@ -193,16 +193,16 @@ namespace Wacs.Core.Instructions
         public override InstructionBase Parse(BinaryReader reader)
         {
             Block = new Block(
-                type: Block.ParseBlockType(reader),
+                blockType: ValTypeParser.Parse(reader, true),
                 seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd))
             );
             return this;
         }
 
-        public BlockTarget Immediate(BlockType type, InstructionSequence sequence)
+        public BlockTarget Immediate(ValType blockType, InstructionSequence sequence)
         {
             Block = new Block(
-                type: type,
+                blockType: blockType,
                 seq: sequence
             );
             return this;
@@ -226,7 +226,7 @@ namespace Wacs.Core.Instructions
         public override ByteCode Op => IfOp;
 
 
-        public BlockType Type => IfBlock.Type;
+        public ValType BlockType => IfBlock.BlockType;
 
         public int Count => ElseBlock.Length == 0 ? 1 : 2;
 
@@ -238,8 +238,8 @@ namespace Wacs.Core.Instructions
         {
             try
             {
-                var ifType = context.Types.ResolveBlockType(IfBlock.Type);
-                context.Assert(ifType,  "Invalid BlockType: {0}",IfBlock.Type);
+                var ifType = context.Types.ResolveBlockType(IfBlock.BlockType);
+                context.Assert(ifType,  "Invalid BlockType: {0}",IfBlock.BlockType);
 
                 //Pop the predicate
                 context.OpStack.PopI32();
@@ -255,7 +255,7 @@ namespace Wacs.Core.Instructions
                 // *any (else) contained within will pop and repush the control frame
                 context.ValidateBlock(IfBlock);
                 
-                var elseType = context.Types.ResolveBlockType(ElseBlock.Type);
+                var elseType = context.Types.ResolveBlockType(ElseBlock.BlockType);
                 if (!ifType.Equivalent(elseType))
                     throw new ValidationException($"If block returned type {ifType} without matching else block");
                 
@@ -271,7 +271,7 @@ namespace Wacs.Core.Instructions
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.Type);
+                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.BlockType);
             }
         }
         
@@ -296,7 +296,7 @@ namespace Wacs.Core.Instructions
         public override InstructionBase Parse(BinaryReader reader)
         {
             IfBlock = new Block(
-                type: Block.ParseBlockType(reader),
+                blockType: ValTypeParser.Parse(reader, true),
                 new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
                     InstructionBase.IsElseOrEnd))
             );
@@ -304,7 +304,7 @@ namespace Wacs.Core.Instructions
             if (IfBlock.Instructions.EndsWithElse)
             {
                 ElseBlock = new Block(
-                    type: IfBlock.Type,
+                    blockType: IfBlock.BlockType,
                     seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
                         InstructionBase.IsEnd))
                 );
@@ -318,14 +318,14 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public BlockTarget Immediate(BlockType type, InstructionSequence ifSeq, InstructionSequence elseSeq)
+        public BlockTarget Immediate(ValType blockType, InstructionSequence ifSeq, InstructionSequence elseSeq)
         {
             IfBlock = new Block(
-                type: type,
+                blockType: blockType,
                 seq: ifSeq
             );
             ElseBlock = new Block(
-                type: type,
+                blockType: blockType,
                 seq: elseSeq
             );
             ElseCount = ElseBlock.Instructions.Count;
@@ -877,7 +877,7 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Tables.Contains(X),
                 "Instruction call_indirect was invalid. Table {0} was not in the Context.",X);
             var tableType = context.Tables[X];
-            context.Assert(tableType.ElementType == ReferenceType.Funcref,
+            context.Assert(tableType.ElementType == ValType.Func,
                 "Instruction call_indirect was invalid. Table type was not funcref");
             context.Assert(context.Types.Contains(Y),
                 "Instruction call_indirect was invalid. Function type {0} was not in the Context.",Y);
@@ -920,7 +920,7 @@ namespace Wacs.Core.Instructions
             if (r.IsNullRef)
                 throw new TrapException($"Instruction call_indirect NullReference.");
             //13.
-            context.Assert( r.Type == ValType.Funcref,
+            context.Assert( r.Type == ValType.Func,
                 $"Instruction call_indirect failed. Element was not a FuncRef");
             //14.
             var a = (FuncAddr)r;
@@ -969,7 +969,7 @@ namespace Wacs.Core.Instructions
             if (r.IsNullRef)
                 throw new TrapException($"Instruction call_indirect NullReference.");
             //13.
-            context.Assert( r.Type == ValType.Funcref,
+            context.Assert( r.Type == ValType.Func,
                 $"Instruction call_indirect failed. Element was not a FuncRef");
             //14.
             var a = (FuncAddr)r;

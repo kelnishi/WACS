@@ -490,7 +490,7 @@ namespace Wacs.Core.Runtime
         /// <summary>
         /// @Spec 4.5.3.6. Element segments
         /// </summary>
-        private static ElemAddr AllocateElement(Store store, ReferenceType refType, List<Value> refs)
+        private static ElemAddr AllocateElement(Store store, ValType refType, List<Value> refs)
         {
             var elemInst = new ElementInstance(refType, refs);
             var elemAddr = store.AddElement(elemInst);

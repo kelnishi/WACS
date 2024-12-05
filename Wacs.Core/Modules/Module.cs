@@ -321,14 +321,14 @@ namespace Wacs.Core
             foreach (var funcDesc in funcDescs) fullyDeclared.Add(funcDesc.FunctionIndex);
 
             var elementIni = module.Elements
-                .Where(elem => elem.Type == ReferenceType.Funcref)
+                .Where(elem => elem.Type == ValType.Func)
                 .SelectMany(elem => elem.Initializers)
                 .SelectMany(ini => ini.Instructions)
                 .OfType<InstRefFunc>();
             foreach (var refFunc in elementIni) fullyDeclared.Add(refFunc.FunctionIndex);
 
             var globalIni = module.Globals
-                .Where(global => global.Type.ContentType == ValType.Funcref)
+                .Where(global => global.Type.ContentType == ValType.Func)
                 .SelectMany(global => global.Initializer.Instructions)
                 .OfType<InstRefFunc>();
             foreach (var refFunc in globalIni) fullyDeclared.Add(refFunc.FunctionIndex);
