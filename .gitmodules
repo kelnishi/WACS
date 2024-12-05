@@ -1,6 +1,6 @@
 [submodule "Spec.Test/spec"]
 	path = Spec.Test/spec
-	url = git@github.com:WebAssembly/spec.git
+	url = git@github.com:WebAssembly/gc.git
 [submodule "Spec.Test/wasi"]
 	path = Spec.Test/wasi
 	url = git@github.com:WebAssembly/wasi-testsuite.git

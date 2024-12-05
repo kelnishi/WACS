@@ -52,7 +52,8 @@ find "$base_dir" -type f -name "*.wast" | while read -r wast_file; do
     json_output="$output_dir/$filename.json"
 
     # Call wast2json to convert the .wast file to JSON format
-    wast2json --no-check --debug-names -o "$json_output" "$wast_file"
+    wasm-tools json-from-wast --wasm-dir $output_dir -o "$json_output" "$wast_file"
+    node format-wast-json.js $json_output
     
     # Call wasm2wat on any $wast_file.#.wasm files that get created
     # Search for all corresponding .wasm files in the output directory
@@ -62,7 +63,7 @@ find "$base_dir" -type f -name "*.wast" | while read -r wast_file; do
       
       # Call wasm2wat to convert .wasm to .wat if the option was set
       if $generate_wat; then
-        wasm2wat "$wasm_file" -o "$wat_output" --no-check
+        wasm-tools print "$wasm_file" -o "$wat_output" --no-check
         echo "Converted $wasm_file to $wat_output"
       fi
     done
