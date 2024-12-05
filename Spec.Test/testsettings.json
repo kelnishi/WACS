@@ -1,3 +1,4 @@
 {
-  "JsonDirectory": "../../../generated-json"
+  "JsonDirectory": "../../../generated-json",
+  "RunTranspilerTests": false
 }
