@@ -24,6 +24,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core
@@ -60,7 +61,7 @@ namespace Wacs.Core
         public void PushValues(Stack<Value> vals) {
             while (vals.Count > 0) _context.Push(vals.Pop().Type);
         }
-        
+
         public void DiscardValues(ResultType types) {
             foreach (var type in types.Types.Reverse()) PopType(type);
         }

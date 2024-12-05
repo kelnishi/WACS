@@ -100,10 +100,12 @@ namespace Wacs.Core.Instructions
     {
         private GlobalIdx Index;
 
+        public override ByteCode Op => OpCode.GlobalSet;
+
         public bool IsConstant(IWasmValidationContext? context) => 
             context == null || context.Globals.Contains(Index) && context.Globals[Index].IsImport && context.Globals[Index].Type.Mutability == Mutability.Immutable;
 
-        public override ByteCode Op => OpCode.GlobalSet;
+        public Action<ExecContext, Value> GetFunc => SetGlobal;
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -161,8 +163,6 @@ namespace Wacs.Core.Instructions
             var val = context.OpStack.PopType(glob.Type.ContentType);
             SetGlobal(context, val);
         }
-
-        public Action<ExecContext, Value> GetFunc => SetGlobal;
 
         public void SetGlobal(ExecContext context, Value value)
         {

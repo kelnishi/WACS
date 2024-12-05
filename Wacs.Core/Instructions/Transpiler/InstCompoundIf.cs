@@ -15,12 +15,11 @@
 //  */
 
 using System;
-using System.IO;
 using FluentValidation;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
-using Wacs.Core.Utilities;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Transpiler
@@ -29,13 +28,12 @@ namespace Wacs.Core.Instructions.Transpiler
     {
         private static readonly ByteCode IfOp = OpCode.If;
         private static readonly ByteCode ElseOp = OpCode.Else;
-        private Block IfBlock = Block.Empty;
-        private Block ElseBlock = Block.Empty;
-        private int ElseCount;
-        public override ByteCode Op => IfOp;
+        private readonly Block ElseBlock = Block.Empty;
+        private readonly int ElseCount;
+        private readonly Block IfBlock = Block.Empty;
 
-        private Func<ExecContext, int> valueFunc;
-        
+        private readonly Func<ExecContext, int> valueFunc;
+
         public InstCompoundIf(
             ValType blockType,
             InstructionSequence ifSeq,
@@ -54,7 +52,9 @@ namespace Wacs.Core.Instructions.Transpiler
 
             valueFunc = valueProducer.GetFunc;
         }
-        
+
+        public override ByteCode Op => IfOp;
+
         public ValType BlockType => IfBlock.BlockType;
 
         public int Count => ElseBlock.Length == 0 ? 1 : 2;
@@ -103,7 +103,7 @@ namespace Wacs.Core.Instructions.Transpiler
                     "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.BlockType);
             }
         }
-        
+
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
@@ -118,6 +118,5 @@ namespace Wacs.Core.Instructions.Transpiler
                     context.EnterBlock(this, ElseBlock);
             }
         }
-
     }
 }

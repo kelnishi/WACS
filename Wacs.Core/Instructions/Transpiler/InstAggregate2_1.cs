@@ -29,7 +29,7 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly Func<ExecContext, TIn1> _in1;
         private readonly Func<ExecContext, TIn2> _in2;
         private readonly Func<ExecContext, Value> _wrap;
-        
+
         public InstAggregate2_1(ITypedValueProducer<TIn1> in1, ITypedValueProducer<TIn2> in2, INodeComputer<TIn1,TIn2,TOut> compute)
         {
             _in1 = in1.GetFunc;

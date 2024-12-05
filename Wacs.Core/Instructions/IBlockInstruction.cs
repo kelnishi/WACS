@@ -16,6 +16,7 @@
 
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Instructions
 {

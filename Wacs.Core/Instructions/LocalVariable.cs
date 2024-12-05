@@ -31,11 +31,11 @@ namespace Wacs.Core.Instructions
         private LocalIdx Index;
         public override ByteCode Op => OpCode.LocalGet;
 
-        public LocalIdx GetIndex() => Index;
-        
         public Func<ExecContext, Value> GetFunc => FetchFromLocals;
 
         public int CalculateSize() => 1;
+
+        public LocalIdx GetIndex() => Index;
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -93,9 +93,11 @@ namespace Wacs.Core.Instructions
     public class InstLocalSet : InstructionBase, IVarInstruction, INodeConsumer<Value>
     {
         private LocalIdx Index;
-        
-        public LocalIdx GetIndex() => Index;
         public override ByteCode Op => OpCode.LocalSet;
+
+        public Action<ExecContext, Value> GetFunc => SetLocal;
+
+        public LocalIdx GetIndex() => Index;
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -142,8 +144,6 @@ namespace Wacs.Core.Instructions
             var value = context.OpStack.PopType(type);
             SetLocal(context, value);
         }
-
-        public Action<ExecContext, Value> GetFunc => SetLocal;
 
         public InstructionBase Immediate(LocalIdx idx)
         {

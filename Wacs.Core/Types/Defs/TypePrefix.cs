@@ -14,12 +14,13 @@
 //  * limitations under the License.
 //  */
 
-namespace Wacs.Core.Types
+namespace Wacs.Core.Types.Defs
 {
-    public enum CompType : byte
+    public enum TypePrefix : byte
     {
-        ArrayAt  = 0x5E, // -0xde
-        StructSt = 0x5F, // -0xdf
-        FuncFt   = 0x60, // -0xe0
+        EmptyBlock = 0x40, // -0xc0
+        
+        RefHt      = 0x64, // -0x1c  
+        RefNullHt  = 0x63, // -0x1d
     }
 }

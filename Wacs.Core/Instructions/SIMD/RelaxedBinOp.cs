@@ -17,7 +17,7 @@
 using System;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 // ReSharper disable InconsistentNaming
 namespace Wacs.Core.Instructions.Numeric

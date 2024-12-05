@@ -21,6 +21,7 @@ using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -32,6 +33,8 @@ namespace Wacs.Core.Instructions
     {
         public static readonly InstDrop Inst = new();
         public override ByteCode Op => OpCode.Drop;
+
+        public Action<ExecContext, Value> GetFunc => (_, _) => { };
 
         /// <summary>
         /// @Spec 3.3.4.1. drop
@@ -49,8 +52,6 @@ namespace Wacs.Core.Instructions
         {
             context.OpStack.PopAny();
         }
-
-        public Action<ExecContext, Value> GetFunc => (_, _) => { };
     }
     
     //0x1B
@@ -63,6 +64,8 @@ namespace Wacs.Core.Instructions
 
         public InstSelect(bool withTypes = false) => WithTypes = withTypes;
         public override ByteCode Op => OpCode.Select;
+
+        public Func<ExecContext, Value, Value, int, Value> GetFunc => Select;
 
         /// <summary>
         /// @Spec 3.3.4.2. select
@@ -121,7 +124,6 @@ namespace Wacs.Core.Instructions
         private Value Select(ExecContext _, Value val1, Value val2, int c) => 
             c != 0 ? val1 : val2;
 
-        public Func<ExecContext, Value, Value, int, Value> GetFunc => Select;
         public override InstructionBase Parse(BinaryReader reader)
         {
             if (WithTypes) {

@@ -64,13 +64,16 @@ namespace Wacs.Core.OpCodes
         // Reference Types
         // =========================
 
-        [OpCode("ref.null")]    RefNull   = 0xD0,
-        [OpCode("ref.is_null")] RefIsNull = 0xD1,
-        [OpCode("ref.func")]    RefFunc   = 0xD2,
+        [OpCode("ref.null")]        RefNull       = 0xD0,
+        [OpCode("ref.is_null")]     RefIsNull     = 0xD1,
+        [OpCode("ref.func")]        RefFunc       = 0xD2,
         
-        [OpCode("ref.as_non_null")] RefAsNonNull   = 0xD4,
-        [OpCode("br_on_null")]      BrOnNull   = 0xD5,
+        [OpCode("ref.eq")]          RefEq         = 0xD3,
+        
+        [OpCode("ref.as_non_null")] RefAsNonNull  = 0xD4,
+        [OpCode("br_on_null")]      BrOnNull      = 0xD5,
         [OpCode("br_on_non_null")]  BrOnNonNull   = 0xD6,
+        //continued in Gc.cs...
 
         // =========================
         // Parametric Instructions
