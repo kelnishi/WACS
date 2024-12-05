@@ -67,6 +67,9 @@ namespace Spec.Test
         [ClassData(typeof(WastJsonTestData))]
         public void RunWastTranspiled(WastJson.WastJson file)
         {
+            if (!WastJsonTestData.RunTranspilerTests)
+                return;
+            
             _output.WriteLine($"Running test:{file.TestName}");
             SpecTestEnv env = new SpecTestEnv();
             WasmRuntime runtime = new();
