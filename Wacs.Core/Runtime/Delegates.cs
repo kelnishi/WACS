@@ -222,8 +222,8 @@ namespace Wacs.Core.Runtime
             if (type == typeof(float)) return ValType.F32;
             if (type == typeof(double)) return ValType.F64;
             if (type == typeof(byte[])) return ValType.V128;
-            if (typeof(Delegate).IsAssignableFrom(type)) return ValType.Funcref;
-            return ValType.Externref;
+            if (typeof(Delegate).IsAssignableFrom(type)) return ValType.Func;
+            return ValType.Extern;
         }
 
         public static Type ConvertValTypeToSystemType(ValType valType)
@@ -235,8 +235,8 @@ namespace Wacs.Core.Runtime
                 ValType.F32 => typeof(float),
                 ValType.F64 => typeof(double),
                 ValType.V128 => typeof(byte[]), // Representing V128 as byte array
-                ValType.Funcref => typeof(Delegate), // Generic function reference
-                ValType.Externref => typeof(object),
+                ValType.Func => typeof(Delegate), // Generic function reference
+                ValType.Extern => typeof(object),
                 _ => throw new ArgumentException($"Unsupported ValType: {valType}")
             };
         }

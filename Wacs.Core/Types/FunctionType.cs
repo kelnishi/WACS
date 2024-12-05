@@ -34,8 +34,8 @@ namespace Wacs.Core.Types
         public static readonly FunctionType SingleF32 = new(ResultType.Empty, new ResultType(ValType.F32));
         public static readonly FunctionType SingleF64 = new(ResultType.Empty, new ResultType(ValType.F64));
         public static readonly FunctionType SingleV128 = new(ResultType.Empty, new ResultType(ValType.V128));
-        public static readonly FunctionType SingleFuncref = new(ResultType.Empty, new ResultType(ValType.Funcref));
-        public static readonly FunctionType SingleExternref = new(ResultType.Empty, new ResultType(ValType.Externref));
+        public static readonly FunctionType SingleFuncref = new(ResultType.Empty, new ResultType(ValType.Func));
+        public static readonly FunctionType SingleExternref = new(ResultType.Empty, new ResultType(ValType.Extern));
 
         /// <summary>
         /// The vec of parameter types for the function.

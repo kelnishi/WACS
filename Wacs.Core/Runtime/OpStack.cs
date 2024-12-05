@@ -110,21 +110,21 @@ namespace Wacs.Core.Runtime
 
         public void PushFuncref(Value value)
         {
-            if (value.Type != ValType.Funcref)
+            if (value.Type != ValType.Func)
                 throw new InvalidDataException($"Pushed non-funcref {value.Type} onto the stack");
             PushValue(value);
         }
 
         public void PushExternref(Value value)
         {
-            if (value.Type != ValType.Externref)
+            if (value.Type != ValType.Extern)
                 throw new InvalidDataException($"Pushed non-externref {value.Type} onto the stack");
             PushValue(value);
         }
 
         public void PushRef(Value value)
         {
-            if (!value.Type.IsReference())
+            if (!value.Type.IsRefType())
                 throw new InvalidDataException($"Pushed non-reftype {value.Type} onto the stack");
             PushValue(value);
         }

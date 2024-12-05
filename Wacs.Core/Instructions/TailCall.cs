@@ -213,7 +213,7 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Tables.Contains(X),
                 "Instruction call_indirect was invalid. Table {0} was not in the Context.",X);
             var tableType = context.Tables[X];
-            context.Assert(tableType.ElementType == ReferenceType.Funcref,
+            context.Assert(tableType.ElementType == ValType.Func,
                 "Instruction call_indirect was invalid. Table type was not funcref");
             context.Assert(context.Types.Contains(Y),
                 "Instruction call_indirect was invalid. Function type {0} was not in the Context.",Y);
@@ -258,7 +258,7 @@ namespace Wacs.Core.Instructions
             if (r.IsNullRef)
                 throw new TrapException($"Instruction call_indirect NullReference.");
             //13.
-            context.Assert( r.Type == ValType.Funcref,
+            context.Assert( r.Type == ValType.Func,
                 $"Instruction call_indirect failed. Element was not a FuncRef");
             //14.
             var a = (FuncAddr)r;
@@ -320,7 +320,7 @@ namespace Wacs.Core.Instructions
             if (r.IsNullRef)
                 throw new TrapException($"Instruction call_indirect NullReference.");
             //13.
-            context.Assert( r.Type == ValType.Funcref,
+            context.Assert( r.Type == ValType.Func,
                 $"Instruction call_indirect failed. Element was not a FuncRef");
             //14.
             var a = (FuncAddr)r;

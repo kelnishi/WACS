@@ -14,24 +14,16 @@
 //  * limitations under the License.
 //  */
 
-using System.Collections.Generic;
-using Wacs.Core.Types;
+using System;
+using Wacs.Core.Attributes;
 
-namespace Wacs.Core.Runtime.Types
+namespace Wacs.Core.Types
 {
-    /// <summary>
-    /// @Spec 4.2.10. Element Instances
-    /// </summary>
-    public class ElementInstance
+    public enum NumType : byte
     {
-        public readonly static ElementInstance Empty = new(ValType.Func, new List<Value>());
-
-        public ElementInstance(ValType type, List<Value> refs) =>
-            (Type, Elements) = (type, refs);
-
-        public ValType Type { get; }
-
-        //Refs
-        public List<Value> Elements { get; }
+        [WatToken("i32")] I32 = 0x7F, // -0x01
+        [WatToken("i64")] I64 = 0x7E, // -0x02
+        [WatToken("f32")] F32 = 0x7D, // -0x03
+        [WatToken("f64")] F64 = 0x7C, // -0x04
     }
 }

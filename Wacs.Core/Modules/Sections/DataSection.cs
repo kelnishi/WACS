@@ -140,7 +140,7 @@ namespace Wacs.Core
                         RuleFor(mode => mode.Offset)
                             .Custom((expr, ctx) =>
                             {
-                                var exprValidator = new Expression.Validator(ValType.I32.SingleResult(), isConstant: true);
+                                var exprValidator = new Expression.Validator(new ResultType(ValType.I32), isConstant: true);
                                 var validationContext = ctx.GetValidationContext();
                                 var subContext = validationContext.PushSubContext(expr);
                                 var result = exprValidator.Validate(subContext);

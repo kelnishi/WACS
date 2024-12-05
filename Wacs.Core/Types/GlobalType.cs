@@ -39,7 +39,7 @@ namespace Wacs.Core.Types
         public GlobalType(ValType valtype, Mutability mut) =>
             (ContentType, Mutability) = (valtype, mut);
 
-        public ResultType ResultType => ContentType.SingleResult();
+        public ResultType ResultType => new(ContentType);
 
         public override string ToString() =>
             $"GlobalType({(Mutability == Mutability.Immutable ? "const" : "var")} {ContentType})";

@@ -39,7 +39,7 @@ namespace Wacs.Core
         /// </summary>
         public class ElementSegment : IRenderable
         {
-            private ElementSegment(ReferenceType type, InstructionBase[] funcIndices, ElementMode mode)
+            private ElementSegment(ValType type, InstructionBase[] funcIndices, ElementMode mode)
             {
                 Type = type;
                 Initializers = funcIndices.Select(inst => new Expression(inst, 1)).ToArray();
@@ -47,7 +47,7 @@ namespace Wacs.Core
                 Mode.SegmentType = Type;
             }
 
-            private ElementSegment(ReferenceType type, Expression[] expressions, ElementMode mode)
+            private ElementSegment(ValType type, Expression[] expressions, ElementMode mode)
             {
                 Type = type;
                 Initializers = expressions;
@@ -55,7 +55,7 @@ namespace Wacs.Core
                 Mode.SegmentType = Type;
             }
 
-            private ElementSegment(TableIdx tableIndex, Expression e, ReferenceType type, InstructionBase[] funcIndices)
+            private ElementSegment(TableIdx tableIndex, Expression e, ValType type, InstructionBase[] funcIndices)
             {
                 Type = type;
                 Initializers = funcIndices.Select(inst => new Expression(inst, 1)).ToArray();
@@ -63,7 +63,7 @@ namespace Wacs.Core
                 Mode.SegmentType = Type;
             }
 
-            private ElementSegment(TableIdx tableIndex, Expression e, ReferenceType type, Expression[] expressions)
+            private ElementSegment(TableIdx tableIndex, Expression e, ValType type, Expression[] expressions)
             {
                 Type = type;
                 Initializers = expressions;
@@ -71,7 +71,7 @@ namespace Wacs.Core
                 Mode.SegmentType = Type;
             }
 
-            public ReferenceType Type { get; }
+            public ValType Type { get; }
 
             //A vector of (ref.func x) instructions
             public Expression[] Initializers { get; }
@@ -94,7 +94,7 @@ namespace Wacs.Core
                 };
                 string elemListText = "";
                 
-                if (Type == ReferenceType.Funcref && IsAllRefFunc())
+                if (Type == ValType.Func && IsAllRefFunc())
                 {
                     var listElems = Initializers
                         .Select(expr => expr.Instructions[0])
@@ -123,9 +123,9 @@ namespace Wacs.Core
             private static InstructionBase ParseFuncIdxInstructions(BinaryReader reader) =>
                 BinaryModuleParser.InstructionFactory.CreateInstruction(OpCode.RefFunc).Parse(reader);
 
-            private static ReferenceType ParseElementKind(BinaryReader reader) =>
+            private static ValType ParseElementKind(BinaryReader reader) =>
                 reader.ReadByte() switch {
-                    0x00 => ReferenceType.Funcref,
+                    0x00 => ValType.Func,
                     var b =>
                         throw new FormatException($"Invalid ElementKind {b} at {reader.BaseStream.Position - 1:x}")
                 };
@@ -139,7 +139,7 @@ namespace Wacs.Core
                         new ElementSegment(
                             (TableIdx)0,
                             Expression.ParseInitializer(reader),
-                            ReferenceType.Funcref,
+                            ValType.Func,
                             reader.ParseVector(ParseFuncIdxInstructions)),
                     ElementType.PassiveWithElemKind =>
                         new ElementSegment(
@@ -161,22 +161,22 @@ namespace Wacs.Core
                         new ElementSegment(
                             (TableIdx)0,
                             Expression.ParseInitializer(reader),
-                            ReferenceType.Funcref,
+                            ValType.Func,
                             reader.ParseVector(Expression.ParseInitializer)),
                     ElementType.PassiveWithElemType =>
                         new ElementSegment(
-                            ReferenceTypeParser.Parse(reader),
+                            ValTypeParser.ParseRefType(reader),
                             reader.ParseVector(Expression.ParseInitializer),
                             new ElementMode.PassiveMode()),
                     ElementType.ActiveWithIndexAndElemType =>
                         new ElementSegment(
                             ParseTableIndex(reader),
                             Expression.ParseInitializer(reader),
-                            ReferenceTypeParser.Parse(reader),
+                            ValTypeParser.ParseRefType(reader),
                             reader.ParseVector(Expression.ParseInitializer)),
                     ElementType.DeclarativeWithElemType =>
                         new ElementSegment(
-                            ReferenceTypeParser.Parse(reader),
+                            ValTypeParser.ParseRefType(reader),
                             reader.ParseVector(Expression.ParseInitializer),
                             new ElementMode.DeclarativeMode()),
                     _ => throw new FormatException($"Invalid Element at {reader.BaseStream.Position}")
@@ -200,11 +200,11 @@ namespace Wacs.Core
                         .Custom((expr, ctx) =>
                         {
                             var es = ctx.InstanceToValidate;
-                            var resultType = es.Type switch {
-                                ReferenceType.Funcref => ValType.Funcref.SingleResult(),
-                                ReferenceType.Externref => ValType.Externref.SingleResult(),
-                                _ => throw new InvalidDataException($"Element Segment has invalid reference type:{es.Type}")
-                            };
+
+                            if (!es.Type.IsRefType())
+                                throw new InvalidDataException($"Element Segment has invalid reference type:{es.Type}");
+
+                            var resultType = new ResultType(es.Type);
                             
                             // @Spec 3.4.5.1. base
                             var validationContext = ctx.GetValidationContext();
@@ -229,7 +229,7 @@ namespace Wacs.Core
 
         public abstract class ElementMode
         {
-            public ReferenceType SegmentType;
+            public ValType SegmentType;
 
             public class PassiveMode : ElementMode
             {
@@ -268,7 +268,7 @@ namespace Wacs.Core
                                         $"Table index {mode.TableIndex.Value} exceeds table size {validationContext.Tables.Count}");
                                 
                                 var tableType = validationContext.Tables[mode.TableIndex];
-                                var exprValidator = new Expression.Validator(ValType.I32.SingleResult(), isConstant: true);
+                                var exprValidator = new Expression.Validator(new ResultType(ValType.I32), isConstant: true);
                                 var subContext = validationContext.PushSubContext(mode.Offset);
                                 var result = exprValidator.Validate(subContext);
                                 foreach (var error in result.Errors)
