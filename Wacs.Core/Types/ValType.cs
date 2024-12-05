@@ -79,23 +79,22 @@ namespace Wacs.Core.Types
         NullBit = 0x4000_0000,
         
         //NonNullable (unset null bit)
-        NoFuncNN   = NoFunc & ~NullBit,  
-        NoExternNN = NoExtern & ~NullBit,
-        NoneNN     = None & ~NullBit,    
-        FuncNN     = Func & ~NullBit,    
-        ExternNN   = Extern & ~NullBit,  
-        AnyNN      = Any & ~NullBit,     
-        EqNN       = Eq & ~NullBit,      
-        I31NN      = I31 & ~NullBit,     
-        StructNN   = Struct & ~NullBit,  
-        ArrayNN    = Array & ~NullBit,
+        [WatToken("ref nofunc")]   NoFuncNN   = NoFunc & ~NullBit,  
+        [WatToken("ref noextern")] NoExternNN = NoExtern & ~NullBit,
+        [WatToken("ref none")]     NoneNN     = None & ~NullBit,    
+        [WatToken("ref func")]     FuncNN     = Func & ~NullBit,    
+        [WatToken("ref extern")]   ExternNN   = Extern & ~NullBit,  
+        [WatToken("ref any")]      AnyNN      = Any & ~NullBit,     
+        [WatToken("ref eq")]       EqNN       = Eq & ~NullBit,      
+        [WatToken("ref i31")]      I31NN      = I31 & ~NullBit,     
+        [WatToken("ref struct")]   StructNN   = Struct & ~NullBit,  
+        [WatToken("ref array")]    ArrayNN    = Array & ~NullBit,
         
         //for validation
         Undefined = SignBit | NullBit,
         Nil = Undefined + 1,
         ExecContext = Undefined + 2,
         [WatToken("Unknown")] Unknown = Undefined + 3, 
-        EmptyBlock = Undefined + 4,
     }
 
 
@@ -105,9 +104,113 @@ namespace Wacs.Core.Types
         public static TypeIdx Index(this ValType type) => 
             (TypeIdx)(NNMask & (uint)type);
 
-        public static bool IsCompatible(this ValType left, ValType right) => 
-            left == right || left == ValType.Unknown || right == ValType.Unknown;
+        public static HeapType GetHeapType(this ValType type)
+        {
+            return type switch
+            {
+                ValType.NoFunc => HeapType.NoFunc,
+                ValType.NoExtern => HeapType.NoExtern,
+                ValType.None => HeapType.None,
+                ValType.Func => HeapType.Func,
+                ValType.Extern => HeapType.Extern,
+                ValType.Any => HeapType.Any,
+                ValType.Eq => HeapType.Eq,
+                ValType.I31 => HeapType.I31,
+                ValType.Struct => HeapType.Struct,
+                ValType.Array => HeapType.Array,
+                ValType.NoFuncNN => HeapType.NoFunc,
+                ValType.NoExternNN => HeapType.NoExtern,
+                ValType.NoneNN => HeapType.None,
+                ValType.FuncNN => HeapType.Func,
+                ValType.ExternNN => HeapType.Extern,
+                ValType.AnyNN => HeapType.Any,
+                ValType.EqNN => HeapType.Eq,
+                ValType.I31NN => HeapType.I31,
+                ValType.StructNN => HeapType.Struct,
+                ValType.ArrayNN => HeapType.Array,
+                _ => (HeapType)0
+            };
+        }
+        public static bool IsRefType(this ValType type)
+        {
+            return type switch
+            {
+                ValType.NoFunc => true,
+                ValType.NoExtern => true,
+                ValType.None => true,
+                ValType.Func => true,
+                ValType.Extern => true,
+                ValType.Any => true,
+                ValType.Eq => true,
+                ValType.I31 => true,
+                ValType.Struct => true,
+                ValType.Array => true,
+                ValType.NoFuncNN => true,  
+                ValType.NoExternNN => true,
+                ValType.NoneNN => true,    
+                ValType.FuncNN => true,    
+                ValType.ExternNN => true,  
+                ValType.AnyNN => true,     
+                ValType.EqNN => true,      
+                ValType.I31NN => true,     
+                ValType.StructNN => true,  
+                ValType.ArrayNN => true,   
+                _ when (int)type >= 0 => true,
+                _ => false
+            };
+        }
 
+        public static bool IsSubType(this ValType type, ValType ofType)
+        {
+            return type.GetHeapType() switch
+            {
+                HeapType.NoFunc => ofType switch {
+                    ValType.Func => true,
+                    _ => false
+                },
+                HeapType.NoExtern => ofType switch {
+                    ValType.Extern => true,
+                    _ => false
+                },
+                HeapType.None => ofType switch {
+                    ValType.I31 => true,
+                    ValType.Array => true,
+                    ValType.Struct => true,
+                    _ => ValType.I31.IsSubType(ofType) || ValType.Array.IsSubType(ofType) || ValType.Struct.IsSubType(ofType)  
+                },
+                HeapType.Array => ofType switch {
+                    ValType.Eq => true,
+                    _ => ValType.Eq.IsSubType(ofType)
+                },
+                HeapType.Struct => ofType switch {
+                    ValType.Eq => true,
+                    _ => ValType.Eq.IsSubType(ofType)
+                },
+                HeapType.I31 => ofType switch {
+                    ValType.Eq => true,
+                    _ => ValType.Eq.IsSubType(ofType)
+                },
+                HeapType.Eq => ofType switch {
+                    ValType.Any => true,
+                    _ => false,
+                },
+                _ => false
+            };
+        }
+        
+        public static bool IsCompatible(this ValType left, ValType right)
+        {
+            if (left == right || left == ValType.Unknown || right == ValType.Unknown)
+                return true;
+            
+            if (right.IsRefType())
+            {
+                if (left.IsSubType(right))
+                    return true;
+            }
+
+            return false;
+        }
     }
 
     public static class ValTypeUtilities
@@ -138,35 +241,6 @@ namespace Wacs.Core.Types
 
     public static class ValTypeParser
     {
-        public static bool IsRefType(this ValType type)
-        {
-            return type switch
-            {
-                ValType.NoFunc => true,
-                ValType.NoExtern => true,
-                ValType.None => true,
-                ValType.Func => true,
-                ValType.Extern => true,
-                ValType.Any => true,
-                ValType.Eq => true,
-                ValType.I31 => true,
-                ValType.Struct => true,
-                ValType.Array => true,
-                ValType.NoFuncNN => true,  
-                ValType.NoExternNN => true,
-                ValType.NoneNN => true,    
-                ValType.FuncNN => true,    
-                ValType.ExternNN => true,  
-                ValType.AnyNN => true,     
-                ValType.EqNN => true,      
-                ValType.I31NN => true,     
-                ValType.StructNN => true,  
-                ValType.ArrayNN => true,   
-                _ when (int)type >= 0 => true,
-                _ => false
-            };
-        }
-        
         public static ValType ParseHeapType(BinaryReader reader)
         {
             byte token = reader.ReadByte();
@@ -224,6 +298,8 @@ namespace Wacs.Core.Types
                 (byte)TypePrefix.RefHt => ParseHeapType(reader) & ~ValType.NullBit,   //non-nullable
                 (byte)TypePrefix.RefNullHt => ParseHeapType(reader),                  //nullable
                 
+                //Blocks
+                (byte)TypePrefix.EmptyBlock when parseBlockIndex => ValType.Empty,
                 //Parse an index
                 _ when parseBlockIndex => (ValType)reader.ContinueReading_s33(token),
 

@@ -226,16 +226,10 @@ namespace Wacs.Core.Validation
                 throw new ValidationException("Operand stack underflow. pop(ref)");
 
             Value value = _stack.Pop();
-            switch (value.Type)
-            {
-                case ValType.Func:
-                case ValType.Extern:
-                case ValType.Unknown:
-                    return value;
-                default:
-                    throw new ValidationException(
-                        $"Wrong operand type {value.Type} at top of stack. Expected: FuncRef or ExternRef");
-            }
+            if (!value.Type.IsRefType() && value.Type != ValType.Unknown)
+                throw new ValidationException(
+                    $"Wrong operand type {value.Type} at top of stack. Expected: FuncRef or ExternRef");
+            return value;
         }
 
         public Value PopType(ValType expectedType)

@@ -19,6 +19,7 @@ using System.Globalization;
 using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Wacs.Core.Attributes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
@@ -141,6 +142,11 @@ namespace Wacs.Core.Runtime
 
         public Value(ValType type, string text)
         {
+            if (text == "null")
+            {
+                this = RefNull(type);
+                return;
+            }
             this = default;
             Type = type;
             switch (Type)
@@ -297,6 +303,15 @@ namespace Wacs.Core.Runtime
                 case ValType.Unknown:
                     Ptr = -1;
                     break;
+                case ValType.None:
+                    Ptr = -1;
+                    break;
+                case ValType.NoFunc:
+                    Ptr = -1;
+                    break;
+                case ValType.NoExtern:
+                    Ptr = -1;
+                    break;
                 case ValType.Undefined:
                 default:
                     throw new InvalidDataException($"Cannot define StackValue of type {type}");
@@ -407,6 +422,12 @@ namespace Wacs.Core.Runtime
                     throw new InvalidDataException($"Cannot define StackValue of type {type}");
             }
         }
+
+        public Value(Value copy, ValType newType)
+        {
+            this = copy;
+            Type = newType;
+        }
         
         public Value Default => new Value(Type);
 
@@ -417,23 +438,9 @@ namespace Wacs.Core.Runtime
             ValType.F32 => Float32,
             ValType.F64 => Float64,
             ValType.V128 => V128,
-            ValType.Func => Ptr,
-            ValType.Extern => Ptr,
+            _ when Type.IsRefType() => Ptr,
             _ => throw new InvalidCastException($"Cannot cast ValType {Type} to Scalar")
         };
-
-        public object CastScalar<T>()
-        {
-            if (typeof(T) == typeof(int)) return Int32;
-            if (typeof(T) == typeof(uint)) return UInt32;
-            if (typeof(T) == typeof(long)) return Int64;
-            if (typeof(T) == typeof(ulong)) return (ulong)Int64;
-            if (typeof(T) == typeof(float)) return Float32;
-            if (typeof(T) == typeof(double)) return Float64;
-            if (typeof(T) == typeof(V128)) return V128;
-
-            throw new InvalidCastException($"Cannot cast ValType {Type} to Scalar");
-        }
 
         public static readonly Value Unknown = new(ValType.Unknown);
         public static readonly Value NullRef = new(ValType.None);
@@ -450,7 +457,7 @@ namespace Wacs.Core.Runtime
 
         public bool IsI32 => Type == ValType.I32;
         public bool IsV128 => Type == ValType.V128;
-        public bool IsRef => Type == ValType.Func || Type == ValType.Extern;
+        public bool IsRef => Type.IsRefType();
         public bool IsNullRef => IsRef && Ptr == -1;
 
         public static object ToObject(Value value) => value.Scalar;
@@ -516,14 +523,13 @@ namespace Wacs.Core.Runtime
         {
             return Type switch
             {
-                ValType.I32 => $"i32={Int32.ToString()}",
-                ValType.I64 => $"i64={Int64.ToString()}",
-                ValType.F32 => $"f32={Float32.ToString("G10", CultureInfo.InvariantCulture)}",
-                ValType.F64 => $"f64={Float64.ToString("G10", CultureInfo.InvariantCulture)}",
-                ValType.V128 => $"v128={V128.ToString()}",
-                ValType.Func => $"Funcref: {Ptr}",
-                ValType.Extern => $"Externref: {Ptr}",
+                ValType.I32 => $"{Type.ToWat()}={Int32.ToString()}",
+                ValType.I64 => $"{Type.ToWat()}={Int64.ToString()}",
+                ValType.F32 => $"{Type.ToWat()}={Float32.ToString("G10", CultureInfo.InvariantCulture)}",
+                ValType.F64 => $"{Type.ToWat()}={Float64.ToString("G10", CultureInfo.InvariantCulture)}",
+                ValType.V128 => $"{Type.ToWat()}={V128.ToString()}",
                 ValType.Unknown => "Unknown",
+                _ when Type.IsRefType() => $"{Type.ToWat()}={Ptr}",
                 _ => "Undefined",
             };
         }
