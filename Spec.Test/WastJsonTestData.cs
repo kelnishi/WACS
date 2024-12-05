@@ -40,6 +40,7 @@ namespace Spec.Test
         }
 
         private static string JsonDirectory => Path.Combine(AppContext.BaseDirectory, Configuration["JsonDirectory"] ?? "");
+        public static bool RunTranspilerTests => Configuration["RunTranspilerTests"] == "True";
 
         public IEnumerator<object[]> GetEnumerator()
         {
