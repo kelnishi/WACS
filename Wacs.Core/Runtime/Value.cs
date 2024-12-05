@@ -21,7 +21,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Wacs.Core.Attributes;
 using Wacs.Core.Runtime.Types;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime

@@ -18,7 +18,7 @@ using System;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -42,6 +42,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         public override ByteCode Op { get; }
 
+        public Func<ExecContext, ulong, ulong> GetFunc => (_, i1) => _execute(i1);
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
 
         public override void Execute(ExecContext context)
@@ -50,8 +52,6 @@ namespace Wacs.Core.Instructions.Numeric
             ulong result = _execute(x);
             context.OpStack.PushU64(result);
         }
-
-        public Func<ExecContext, ulong, ulong> GetFunc => (_, i1) => _execute(i1);
 
         // @Spec 4.3.2.20 iclz
         private static ulong ExecuteI64Clz(ulong x)

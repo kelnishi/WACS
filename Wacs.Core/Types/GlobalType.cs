@@ -17,6 +17,7 @@
 using System;
 using System.IO;
 using FluentValidation;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Types
 {

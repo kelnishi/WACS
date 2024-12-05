@@ -14,11 +14,9 @@
 //  * limitations under the License.
 //  */
 
-using System;
-using System.IO;
 using Wacs.Core.Attributes;
 
-namespace Wacs.Core.Types
+namespace Wacs.Core.Types.Defs
 {
     /// <summary>
     /// https://webassembly.github.io/gc/core/bikeshed/index.html#heap-types⑦

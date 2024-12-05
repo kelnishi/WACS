@@ -131,7 +131,7 @@ namespace Wacs.Core.Utilities
             return result;
         }
 
-        
+
         /// <summary>
         /// Decode an s33 (u32) index
         /// </summary>
@@ -185,8 +185,8 @@ namespace Wacs.Core.Utilities
             //Just take the U32 bits since the unset sign bit is 33.
             return (uint)(result & 0xFFFF_FFFF);
         }
-        
-        
+
+
         public static float Read_f32(this BinaryReader reader)
         {
             byte[] bytes = reader.ReadBytes(4);

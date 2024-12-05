@@ -6,11 +6,12 @@ using Wacs.Core.Runtime;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
 // 5.4.2 Reference Instructions
-namespace Wacs.Core.Instructions
+namespace Wacs.Core.Instructions.Reference
 {
     //0xD0
     public class InstRefNull : InstructionBase, IConstInstruction
@@ -63,7 +64,6 @@ namespace Wacs.Core.Instructions
 
         public static readonly InstRefIsNull Inst = new InstRefIsNull();
     }
-        
     
     //0xD2
     public class InstRefFunc : InstructionBase, IConstInstruction
@@ -102,5 +102,59 @@ namespace Wacs.Core.Instructions
         
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {FunctionIndex.Value}";
     }
+
+    /// <summary>
+    /// https://webassembly.github.io/gc/core/bikeshed/#-hrefsyntax-instr-refmathsfrefeq①
+    /// </summary>
+    public class InstRefEq : InstructionBase
+    {
+        public override ByteCode Op => OpCode.RefEq;
+        public override void Validate(IWasmValidationContext context)
+        {
+            context.OpStack.PopType(ValType.Eq);
+            context.OpStack.PopType(ValType.Eq);
+            context.OpStack.PushI32();
+        }
+
+        public override void Execute(ExecContext context)
+        {
+            context.Assert( context.OpStack.Peek().IsRef,
+                $"Instruction ref.is_null failed. Expected reftype on top of the stack.");
+            Value v2 = context.OpStack.PopRefType();
+            context.Assert( context.OpStack.Peek().IsRef,
+                $"Instruction ref.is_null failed. Expected reftype on top of the stack.");
+            Value v1 = context.OpStack.PopRefType();
+
+            int c = v1.Equals(v2) ? 1 : 0;
+            context.OpStack.PushI32(c);
+        }
+
+        public static readonly InstRefEq Inst = new InstRefEq();
+    }
     
+    /// <summary>
+    /// https://webassembly.github.io/gc/core/bikeshed/#-hrefsyntax-instr-refmathsfrefas_non_null①
+    /// </summary>
+    public class InstRefAsNonNull : InstructionBase
+    {
+        public override ByteCode Op => OpCode.RefAsNonNull;
+        public override void Validate(IWasmValidationContext context)
+        {
+            var vRef = context.OpStack.PopRefType();
+            context.OpStack.PushType(vRef.Type);
+        }
+
+        public override void Execute(ExecContext context)
+        {
+            context.Assert( context.OpStack.Peek().IsRef,
+                $"Instruction ref.is_null failed. Expected reftype on top of the stack.");
+            Value vRef = context.OpStack.PopRefType();
+            if (vRef.IsNullRef)
+                throw new TrapException("Ref was null.");
+            
+            context.OpStack.PushRef(vRef);
+        }
+
+        public static readonly InstRefAsNonNull Inst = new InstRefAsNonNull();
+    }
 }

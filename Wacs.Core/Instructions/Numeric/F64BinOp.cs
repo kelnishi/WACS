@@ -19,7 +19,7 @@ using System.Runtime.InteropServices;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -67,6 +67,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         public override ByteCode Op { get; }
 
+        public Func<ExecContext, double,double,double> GetFunc => (_, i1, i2) => _execute(i1, i2);
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
 
         public override void Execute(ExecContext context)
@@ -76,8 +78,6 @@ namespace Wacs.Core.Instructions.Numeric
             double result = _execute(z1, z2);
             context.OpStack.PushF64(result);
         }
-
-        public Func<ExecContext, double,double,double> GetFunc => (_, i1, i2) => _execute(i1, i2);
 
         private static double ExecuteF64Add(double z1, double z2) => z1 + z2;
 

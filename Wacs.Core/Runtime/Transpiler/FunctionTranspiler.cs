@@ -14,10 +14,7 @@
 //  * limitations under the License.
 //  */
 
-using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.IO;
 using System.Linq;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
@@ -25,6 +22,7 @@ using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Runtime.Transpiler
 {
@@ -401,6 +399,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
+
         private static InstructionBase BindU32F32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,float> floatConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -432,6 +431,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
+
         private static InstructionBase BindU32F64(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,double> doubleConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -463,6 +463,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
+
         private static InstructionBase BindU32V128(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,V128> vecConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -494,6 +495,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
+
         private static InstructionBase BindU32I32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,int> intConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -698,7 +700,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        
+
         private static InstructionBase BindU32Value(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,Value> intConsumer)
         {
             if (stack.Count < 1) return inst;
@@ -744,7 +746,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        
+
         private static InstructionBase BindValueValueI32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<Value,Value,int> valueConsumer)
         {
             Stack<InstructionBase> operands = new();
@@ -821,7 +823,7 @@ namespace Wacs.Core.Runtime.Transpiler
             
             return inst;
         }
-        
+
         private static InstructionBase BindF32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<float> floatConsumer)
         {
             if (stack.Count < 1) return inst;

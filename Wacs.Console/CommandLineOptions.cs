@@ -14,9 +14,8 @@
 //  * limitations under the License.
 //  */
 
-using System;
-using System.Diagnostics.CodeAnalysis;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using CommandLine;
 using Wacs.Core.Runtime;
 
@@ -30,7 +29,7 @@ namespace Wacs.Console
         [DynamicDependency(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.PublicProperties, 
             typeof(CommandLineOptions))]
         public CommandLineOptions() {}
-        
+
         [Option('e',"env", Separator = ',', HelpText = "Comma-separated list of environment variables (format: KEY=VALUE)")]
         public IEnumerable<string> EnvironmentVars { get; set; } = new List<string>();
 
@@ -78,7 +77,6 @@ namespace Wacs.Console
         public string WasmModule { get; set; } = "";
 
         public IEnumerable<string> ExecutableArgs { get; set; } = new List<string>();
-        
     }
 
 }

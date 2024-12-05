@@ -14,7 +14,7 @@
 //  * limitations under the License.
 //  */
 
-namespace Wacs.Core.Types
+namespace Wacs.Core.Types.Defs
 {
     public enum ElementType: uint
     {

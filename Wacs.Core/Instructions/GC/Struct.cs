@@ -15,36 +15,39 @@
 //  */
 
 using System;
+using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Types;
+using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
-namespace Wacs.Core.Instructions.Transpiler
+namespace Wacs.Core.Instructions.GC
 {
-    public class InstAggregate1_0<TIn> : InstructionBase
+    public class InstStructNew : InstructionBase
     {
-        private readonly Action<ExecContext, TIn> _compute;
-        private readonly Func<ExecContext, TIn> _inA;
-
-        public InstAggregate1_0(ITypedValueProducer<TIn> inA, INodeConsumer<TIn> consumer)
-        {
-            _inA = inA.GetFunc;
-            _compute = consumer.GetFunc;
-
-            Size = inA.CalculateSize() + 1;
-        }
-
-        public override ByteCode Op => WacsCode.Aggr1_0;
+        private TypeIdx X;
+        public override ByteCode Op => GcCode.StructNew;
 
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(false, "Validation of transpiled instructions not supported.");
+            context.Assert(context.Types.Contains(X),
+                "Instruction struct.new was invalid. Type {0} was not in the Context.", X);
+
+            var type = context.Types[X];
+
+            throw new NotImplementedException();
         }
 
         public override void Execute(ExecContext context)
         {
-            _compute(context, _inA(context));
+            throw new NotImplementedException();
+        }
+
+        public override InstructionBase Parse(BinaryReader reader)
+        {
+            X = (TypeIdx)reader.ReadLeb128_u32();
+            return this;
         }
     }
-    
 }

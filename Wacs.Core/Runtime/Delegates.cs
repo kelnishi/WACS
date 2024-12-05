@@ -19,6 +19,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Expression = System.Linq.Expressions.Expression;
 
 namespace Wacs.Core.Runtime
@@ -148,7 +149,7 @@ namespace Wacs.Core.Runtime
                 _ => throw new NotSupportedException($"Cannot auto-bind function signature: ({string.Join(", ", paramTypes)}) -> ({string.Join(", ", resultTypes)})")
             };
         }
-        
+
         public static Delegate CreateTypedDelegate(Delegate genericDelegate, Type desiredDelegateType)
         {
             var genericMethod = typeof(Delegates).GetMethod(nameof(CreateTypedDelegateInternal), BindingFlags.NonPublic | BindingFlags.Static);

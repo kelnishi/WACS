@@ -19,6 +19,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FluentValidation;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Types
 {

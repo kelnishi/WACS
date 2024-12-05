@@ -19,6 +19,7 @@ using System.Linq;
 using FluentValidation;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Validation
 {
@@ -47,7 +48,7 @@ namespace Wacs.Core.Validation
 
         void PopValues(ResultType types, ref Stack<Value> aside);
         void DiscardValues(ResultType types);
-        
+
         public void ReturnResults(ResultType type);
     }
 
@@ -254,7 +255,7 @@ namespace Wacs.Core.Validation
                 aside.Push(PopType(type));
             }
         }
-        
+
         public void DiscardValues(ResultType types)
         {
             foreach (var type in types.Types.Reverse())

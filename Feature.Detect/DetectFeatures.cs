@@ -22,6 +22,7 @@ using Spec.Test;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Xunit;
 
 namespace Feature.Detect

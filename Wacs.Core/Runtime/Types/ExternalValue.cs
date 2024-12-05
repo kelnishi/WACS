@@ -14,7 +14,7 @@
 //  * limitations under the License.
 //  */
 
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Runtime.Types
 {

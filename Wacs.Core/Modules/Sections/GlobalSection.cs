@@ -20,6 +20,7 @@ using System.IO;
 using FluentValidation;
 using Wacs.Core.Attributes;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 

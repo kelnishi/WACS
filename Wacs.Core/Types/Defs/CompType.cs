@@ -14,31 +14,12 @@
 //  * limitations under the License.
 //  */
 
-using System;
-
-namespace Wacs.Core.Types
+namespace Wacs.Core.Types.Defs
 {
-    [Flags]
-    public enum ValTypeTag
+    public enum CompType : byte
     {
-        Unknown = 0,
-        Nil = 0b0000_0001,
-
-        //Defaultable
-        Default = 0b0000_1000,
-
-        NumType = 0b0000_0100 | Default,
-        VecType = 0b0000_0010 | Default,
-
-        RefType = 0b0001_0000,
-        IdxType = 0b0010_0000,
-        NulType = 0b0100_0000,
-        RefNull = RefType | NulType | Default,
-        IdxRef = RefType | IdxType,
-        IdxNull = RefNull | IdxType,
-
-        Mask = 0b1111_1111,
-        Block = 0b0001_0000_0000,
-        ExecContext = 0b1000_0000_0000,
+        ArrayAt  = 0x5E, // -0xde
+        StructSt = 0x5F, // -0xdf
+        FuncFt   = 0x60, // -0xe0
     }
 }

@@ -15,8 +15,8 @@
 //  */
 
 using System;
-using System.IO;
 using FluentValidation;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
@@ -25,9 +25,9 @@ namespace Wacs.Core.Types
     {
         public static readonly Block Empty = new(ValType.Empty, InstructionSequence.Empty);
 
-        public readonly InstructionSequence Instructions;
-
         public readonly ValType BlockType;
+
+        public readonly InstructionSequence Instructions;
 
         public Block(ValType blockType, InstructionSequence seq)
         {

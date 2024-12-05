@@ -14,13 +14,12 @@
 //  * limitations under the License.
 //  */
 
-namespace Wacs.Core.Types
+using Wacs.Core.Attributes;
+
+namespace Wacs.Core.Types.Defs
 {
-    public enum TypePrefix : byte
+    public enum VecType : byte
     {
-        EmptyBlock = 0x40, // -0xc0
-        
-        RefHt      = 0x64, // -0x1c  
-        RefNullHt  = 0x63, // -0x1d
+        [WatToken("v128")] V128 = 0x7B, // -0x05
     }
 }

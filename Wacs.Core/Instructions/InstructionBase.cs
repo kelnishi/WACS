@@ -15,7 +15,6 @@
 //  */
 
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Wacs.Core.Instructions.Numeric;
@@ -31,10 +30,9 @@ namespace Wacs.Core.Instructions
     /// </summary>
     public abstract class InstructionBase
     {
+        public readonly Action<ExecContext> Executor;
         public bool IsAsync = false;
         public int Size = 1;
-
-        public readonly Action<ExecContext> Executor;
 
         /// <summary>
         /// Gets the opcode associated with the instruction.
@@ -75,7 +73,7 @@ namespace Wacs.Core.Instructions
         /// Render the instruction at a given label stack depth
         /// </summary>
         public virtual string RenderText(ExecContext? context) => Op.GetMnemonic();
-        
+
         public static bool IsEnd(InstructionBase inst) => inst.Op.x00 == OpCode.End;
 
         public static bool IsElseOrEnd(InstructionBase inst) => inst is InstEnd;

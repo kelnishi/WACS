@@ -17,8 +17,8 @@
 using System;
 using Wacs.Core.Instructions.Memory;
 using Wacs.Core.Instructions.Numeric;
+using Wacs.Core.Instructions.Reference;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions
 {
@@ -64,6 +64,9 @@ namespace Wacs.Core.Instructions
             OpCode.RefNull           => new InstRefNull(),
             OpCode.RefIsNull         => InstRefIsNull.Inst,
             OpCode.RefFunc           => new InstRefFunc(),
+            
+            OpCode.RefEq             => InstRefEq.Inst,
+            OpCode.RefAsNonNull      => InstRefAsNonNull.Inst,
                 
             //Parametric Instructions
             OpCode.Drop              => InstDrop.Inst,

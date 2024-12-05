@@ -14,13 +14,8 @@
 //  * limitations under the License.
 //  */
 
-using System;
-using Wacs.Core.Attributes;
-
 namespace Wacs.Core.Types
 {
-    public enum VecType : byte
-    {
-        [WatToken("v128")] V128 = 0x7B, // -0x05
-    }
+    public class RecursiveType
+    {}
 }
