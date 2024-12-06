@@ -27,7 +27,7 @@ namespace Wacs.Core.Types
     /// @Spec 2.3.6 Function Types
     /// Represents the type signature of a WebAssembly function, including parameter and return types.
     /// </summary>
-    public class FunctionType : IRenderable
+    public class FunctionType : CompositeType
     {
         public static readonly FunctionType Empty = new(ResultType.Empty, ResultType.Empty);
         public static readonly FunctionType SingleI32 = new(ResultType.Empty, new ResultType(ValType.I32));
@@ -50,21 +50,6 @@ namespace Wacs.Core.Types
 
         public FunctionType(ResultType parameterTypes, ResultType resultType) =>
             (ParameterTypes, ResultType) = (parameterTypes, resultType);
-
-        /// <summary>
-        /// For rendering/debugging
-        /// </summary>
-        public string Id { get; set; } = "";
-
-        public void RenderText(StreamWriter writer, Module module, string indent)
-        {
-            var symbol = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
-            var parameters = ParameterTypes.ToParameters();
-            var results = ResultType.ToResults();
-            var func = $" (func{parameters}{results})";
-            
-            writer.WriteLine($"{indent}(type{symbol}{func})");
-        }
 
         public bool Matches(FunctionType other) =>
             ParameterTypes.Matches(other.ParameterTypes) &&
@@ -108,11 +93,7 @@ namespace Wacs.Core.Types
         /// @Spec 5.3.6. Function Types
         /// </summary>
         public static FunctionType Parse(BinaryReader reader) =>
-            reader.ReadByte() switch {
-                0x60 => new FunctionType(ResultType.Parse(reader), ResultType.Parse(reader)),
-                var form => throw new FormatException(
-                    $"Invalid function type form {form} at offset {reader.BaseStream.Position}.")
-            };
+            new(ResultType.Parse(reader), ResultType.Parse(reader));
 
         public override string ToString() =>
             $"FunctionType({ToNotation()})";

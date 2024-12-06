@@ -60,7 +60,7 @@ namespace Wacs.Core
             {
                 var id = string.IsNullOrWhiteSpace(Id) ? $" (;{Index.Value};)" : $" (;{Id};)";
                 var type = $" (type {TypeIndex.Value})";
-                var functionType = module.Types[(int)TypeIndex.Value];
+                var functionType = (FunctionType)module.Types[(int)TypeIndex.Value];
                 var param = functionType.ParameterTypes.Arity > 0
                     ? functionType.ParameterTypes.ToParameters()
                     : "";
@@ -197,7 +197,7 @@ namespace Wacs.Core
                                 throw new ValidationException(
                                     $"Function[{func.Index}] locals count {func.Locals.Length} exceeds maximum allowed {vContext.Attributes.MaxFunctionLocals}");
                             
-                            var funcType = types[func.TypeIndex];
+                            var funcType = (FunctionType)types[func.TypeIndex];
                             vContext.FunctionIndex = func.Index;
                             vContext.SetExecFrame(funcType, func.Locals);
                             

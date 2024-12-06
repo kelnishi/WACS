@@ -14,12 +14,34 @@
 //  * limitations under the License.
 //  */
 
+using System;
+using System.IO;
+
 namespace Wacs.Core.Types
 {
-    public enum RecType
+    public class SubType
     {
-        RecSt       = 0x4E, // -0xce
-        SubFinalXCt = 0x4F, // -0xd0
-        SubXCt      = 0x50, // -0xcf
+        public readonly bool Final;
+        public readonly TypeIdx[] TypeIndexes;
+        public readonly CompositeType CompType;
+
+        public SubType(TypeIdx[] idxs, CompositeType cmpType, bool final)
+        {
+            TypeIndexes = idxs;
+            CompType = cmpType;
+            Final = final;
+        }
+        
+        public SubType(CompositeType cmpType, bool final)
+        {
+            TypeIndexes = Array.Empty<TypeIdx>();
+            CompType = cmpType;
+            Final = final;
+        }
+        
+        public static SubType Parse(BinaryReader reader)
+        {
+            return null;
+        }
     }
 }

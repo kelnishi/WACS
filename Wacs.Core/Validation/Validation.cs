@@ -35,7 +35,7 @@ namespace Wacs.Core.Validation
                     ctx.RootContextData[nameof(WasmValidationContext)] = new WasmValidationContext(module, ctx);
                 });
 
-            RuleForEach(module => module.Types).SetValidator(new FunctionType.Validator());
+            RuleForEach(module => module.Types).SetValidator(new RecursiveType.Validator());
             RuleForEach(module => module.Imports).SetValidator(new Module.Import.Validator());
             RuleForEach(module => module.ValidationFuncs)
                 .SetValidator(new Module.Function.Validator()).OverridePropertyName("Function");
@@ -58,7 +58,8 @@ namespace Wacs.Core.Validation
                 {
                     var execContext = ctx.GetValidationContext();
                     var typeIndex = execContext.Funcs[idx].TypeIndex;
-                    var type = execContext.Types[typeIndex];
+                    var type = (FunctionType)execContext.Types[typeIndex];
+                    //TODO: handle any type
                     if (type.ParameterTypes.Arity != 0 || type.ResultType.Arity != 0)
                     {
                         ctx.AddFailure($"Invalid Start function with type: {type}");

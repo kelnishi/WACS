@@ -14,27 +14,26 @@
 //  * limitations under the License.
 //  */
 
-using System.Collections.Generic;
 using System.IO;
-using Wacs.Core.Types;
-using Wacs.Core.Utilities;
+using Wacs.Core.Types.Defs;
 
-namespace Wacs.Core
+namespace Wacs.Core.Types
 {
-    public partial class Module
+    public class FieldType
     {
-        /// <summary>
-        /// @Spec 2.5.2. Types
-        /// </summary>
-        public List<RecursiveType> Types { get; internal set; } = new();
-    }
-    
-    public static partial class BinaryModuleParser
-    {
-        /// <summary>
-        /// @Spec 5.5.4 Type Section
-        /// </summary>
-        private static List<RecursiveType> ParseTypeSection(BinaryReader reader) => 
-            reader.ParseList(RecursiveType.Parse);
+        public readonly Mutability Mut;
+        public readonly ValType StorageType; //ValType includes PackedType defs
+
+        public FieldType(ValType st, Mutability mut)
+        {
+            Mut = mut;
+            StorageType = st;
+        }
+        
+        public static FieldType Parse(BinaryReader reader) => 
+            new(
+                ValTypeParser.Parse(reader, parseBlockIndex: false, parseStorageType: true),
+                MutabilityParser.Parse(reader)
+            );
     }
 }

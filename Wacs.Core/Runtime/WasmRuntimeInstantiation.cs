@@ -70,7 +70,7 @@ namespace Wacs.Core.Runtime
                 {
                     case Module.ImportDesc.FuncDesc funcDesc:
                         // @Spec 4.5.3.2. @note: Host Functions must be bound to the environment prior to module instantiation!
-                        var funcSig = moduleInstance.Types[funcDesc.TypeIndex];
+                        var funcSig = (FunctionType)moduleInstance.Types[funcDesc.TypeIndex];
                         if (GetBoundEntity(entityId) is not FuncAddr funcAddr)
                             throw new NotSupportedException(
                                 $"The imported Function was not provided by the environment: {entityId.module}.{entityId.entity} {funcSig.ToNotation()}");

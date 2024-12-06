@@ -33,8 +33,8 @@ namespace Wacs.Core.Types.Defs
     public enum ValType : int
     {
         [WatToken("i32")]  I32               = unchecked((sbyte)(0x80|NumType.I32)),             // -0x01
-        [WatToken("i64")]  F32               = unchecked((sbyte)(0x80|NumType.F32)),             // -0x02
-        [WatToken("f32")]  I64               = unchecked((sbyte)(0x80|NumType.I64)),             // -0x03
+        [WatToken("f32")]  F32               = unchecked((sbyte)(0x80|NumType.F32)),             // -0x02
+        [WatToken("i64")]  I64               = unchecked((sbyte)(0x80|NumType.I64)),             // -0x03
         [WatToken("f64")]  F64               = unchecked((sbyte)(0x80|NumType.F64)),             // -0x04
         [WatToken("v128")] V128              = unchecked((sbyte)(0x80|VecType.V128)),            // -0x05
         
@@ -265,15 +265,15 @@ namespace Wacs.Core.Types.Defs
 
         public static ValType ParseRefType(BinaryReader reader)
         {
-            var type = Parse(reader, false);
+            var type = Parse(reader);
             if (!type.IsRefType())
                 throw new FormatException($"Type is not a Reference Type:{type}");
             return type;
         }
 
-        public static ValType Parse(BinaryReader reader) => Parse(reader, false);
+        public static ValType Parse(BinaryReader reader) => Parse(reader, false, false);
 
-        public static ValType Parse(BinaryReader reader, bool parseBlockIndex)
+        public static ValType Parse(BinaryReader reader, bool parseBlockIndex, bool parseStorageType)
         {
             long pos = reader.BaseStream.Position;
             byte token = reader.ReadByte();
@@ -301,6 +301,10 @@ namespace Wacs.Core.Types.Defs
                 (byte)TypePrefix.RefHt => ParseHeapType(reader) & ~ValType.NullBit,   //non-nullable
                 (byte)TypePrefix.RefNullHt => ParseHeapType(reader),                  //nullable
                 
+                //StorageType
+                (byte)PackedType.I8 when parseStorageType => ValType.I8,
+                (byte)PackedType.I16 when parseStorageType => ValType.I16,
+
                 //Blocks
                 (byte)TypePrefix.EmptyBlock when parseBlockIndex => ValType.Empty,
                 //Parse an index
