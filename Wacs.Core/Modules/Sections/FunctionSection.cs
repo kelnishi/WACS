@@ -165,6 +165,7 @@ namespace Wacs.Core
                     ValType.V128 => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
                     ValType.Func => new FunctionType(ResultType.Empty, new ResultType(ValType.Func)),
                     ValType.Extern => new FunctionType(ResultType.Empty, new ResultType(ValType.Extern)),
+                    //TODO: handle refs like ResolveBlockType
                     _ => module.Types[(int)((TypeIdx)(uint)type).Value]
                 };
 
@@ -197,7 +198,7 @@ namespace Wacs.Core
                                 throw new ValidationException(
                                     $"Function[{func.Index}] locals count {func.Locals.Length} exceeds maximum allowed {vContext.Attributes.MaxFunctionLocals}");
 
-                            var type = types[func.TypeIndex].CmpType;
+                            var type = types[func.TypeIndex].Expansion;
                             var funcType = type as FunctionType;
                             if (funcType is null)
                                 throw new ValidationException($"Function[{func.Index}] type {type} is not a FuncType.");

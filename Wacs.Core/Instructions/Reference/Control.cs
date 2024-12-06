@@ -23,6 +23,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -38,8 +39,6 @@ namespace Wacs.Core.Instructions.Reference
                 "Instruction {0} invalid. Could not branch to label {1}",Op.GetMnemonic(), L);
 
             var refType = context.OpStack.PopRefType();
-            //Push the ref back for the else case.
-            context.OpStack.PushRef(refType);
             
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
             //Pop values like we branch
@@ -47,6 +46,8 @@ namespace Wacs.Core.Instructions.Reference
             //But actually, we don't, so push them back on.
             context.OpStack.PushResult(nthFrame.LabelTypes);
             
+            //Push the non-null ref back for the else case.
+            context.OpStack.PushRef(new Value(refType, refType.Type.ToConcrete()));
         }
 
         /// <summary>
@@ -83,7 +84,7 @@ namespace Wacs.Core.Instructions.Reference
                 "Instruction {0} invalid. Could not branch to label {1}",Op.GetMnemonic(), L);
 
             var refType = context.OpStack.PopRefType();
-            //Push the ref back for the branch case.
+            //Push the ref for the branch case.
             context.OpStack.PushRef(refType);
             
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
@@ -92,6 +93,8 @@ namespace Wacs.Core.Instructions.Reference
             //But actually, we don't, so push them back on.
             context.OpStack.PushResult(nthFrame.LabelTypes);
             
+            //Unpush the ref we pushed for the branch
+            context.OpStack.PopRefType();
         }
 
         /// <summary>
@@ -135,7 +138,7 @@ namespace Wacs.Core.Instructions.Reference
         {
             context.Assert(context.Types.Contains(X),
                 "Instruction call_ref was invalid. Function Type {0} was not in the Context.",X);
-            var type = context.Types[X].CmpType;
+            var type = context.Types[X].Expansion;
             var funcType = type as FunctionType;
             context.Assert(funcType,
                 "Instruction call_ref was invalid. Not a FuncType. {0}", type);
@@ -159,7 +162,7 @@ namespace Wacs.Core.Instructions.Reference
             if (r.IsNullRef)
                 throw new TrapException($"Null reference in call_ref");
 
-            var funcType = context.Frame.Module.Types[X].CmpType as FunctionType;
+            var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
             
             var a = (FuncAddr)r;
             context.Assert( context.Store.Contains(a),
@@ -183,7 +186,7 @@ namespace Wacs.Core.Instructions.Reference
             if (r.IsNullRef)
                 throw new TrapException($"Null reference in call_ref");
 
-            var funcType = context.Frame.Module.Types[X].CmpType as FunctionType;
+            var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
             
             var a = (FuncAddr)r;
             context.Assert( context.Store.Contains(a),

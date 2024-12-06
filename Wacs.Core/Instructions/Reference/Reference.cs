@@ -23,7 +23,7 @@ namespace Wacs.Core.Instructions.Reference
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(Type.IsRefType(), $"Type was not a RefType:{Type}");
-            context.OpStack.PushType(Type);
+            context.OpStack.PushRef(Value.Null(Type));
         }
 
         // @Spec 4.4.2.1. ref.null t
@@ -33,7 +33,7 @@ namespace Wacs.Core.Instructions.Reference
 
         public override InstructionBase Parse(BinaryReader reader)
         {
-            Type = ValTypeParser.ParseRefType(reader);
+            Type = ValTypeParser.ParseDefType(reader) | ValType.RefBit;
             return this;
         }
         

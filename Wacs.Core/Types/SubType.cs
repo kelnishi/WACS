@@ -24,20 +24,20 @@ namespace Wacs.Core.Types
     public class SubType
     {
         public readonly bool Final;
-        public readonly TypeIdx[] TypeIndexes;
-        public readonly CompositeType CmpType;
+        public readonly TypeIdx[] SuperTypes;
+        public readonly CompositeType Body;
 
-        public SubType(TypeIdx[] idxs, CompositeType cmpType, bool final)
+        public SubType(TypeIdx[] idxs, CompositeType body, bool final)
         {
-            TypeIndexes = idxs;
-            CmpType = cmpType;
+            SuperTypes = idxs;
+            Body = body;
             Final = final;
         }
         
-        public SubType(CompositeType cmpType, bool final)
+        public SubType(CompositeType body, bool final)
         {
-            TypeIndexes = Array.Empty<TypeIdx>();
-            CmpType = cmpType;
+            SuperTypes = Array.Empty<TypeIdx>();
+            Body = body;
             Final = final;
         }
         
@@ -73,14 +73,5 @@ namespace Wacs.Core.Types
             return true;
         }
         
-        
-        public ValType Ref =>
-            CmpType switch
-            {
-                FunctionType ft => ValType.Func,
-                ArrayType at => ValType.Array,
-                StructType st => ValType.Struct,
-                _ => ValType.None,
-            };
     }
 }

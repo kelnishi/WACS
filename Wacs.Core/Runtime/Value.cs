@@ -276,7 +276,7 @@ namespace Wacs.Core.Runtime
 
             if ((int)type >= 0)
             {
-                Type = ValType.Any;
+                Type = ValType.None;
                 Ptr = type.Index().Value;
                 return;
             }
@@ -302,8 +302,14 @@ namespace Wacs.Core.Runtime
                 case ValType.Func:
                     Ptr = -1;
                     break;
+                case ValType.FuncNN:
+                    Ptr = 0;
+                    break;
                 case ValType.Extern:
                     Ptr = -1;
+                    break;
+                case ValType.ExternNN:
+                    Ptr = 0;
                     break;
                 case ValType.Nil:
                     Ptr = -1;

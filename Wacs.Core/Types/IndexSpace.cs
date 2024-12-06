@@ -139,14 +139,14 @@ namespace Wacs.Core.Types
         public abstract bool Contains(TIndex idx);
     }
 
-    public class TypesSpace : AbstractIndexSpace<TypeIdx, SubType>
+    public class TypesSpace : AbstractIndexSpace<TypeIdx, DefType>
     {
-        private readonly ReadOnlyCollection<SubType> _moduleTypes;
+        private readonly ReadOnlyCollection<DefType> _moduleTypes;
 
         public TypesSpace(Module module) =>
             _moduleTypes = module.UnrollTypes().AsReadOnly();
 
-        public override SubType this[TypeIdx idx]
+        public override DefType this[TypeIdx idx]
         {
             get => _moduleTypes[(Index)idx];
             set => throw new InvalidOperationException(InvalidSetterMessage);
@@ -167,6 +167,7 @@ namespace Wacs.Core.Types
                 
                 //TODO: Make static versions, reduce allocation
                 var type when type.IsRefType() => new(ResultType.Empty, new ResultType(type)),
+                var type when type.Index().Value >= 0 => this[type.Index()].Expansion as FunctionType,
                 _ => null
             };
     }

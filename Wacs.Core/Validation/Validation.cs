@@ -58,7 +58,7 @@ namespace Wacs.Core.Validation
                 {
                     var execContext = ctx.GetValidationContext();
                     var typeIndex = execContext.Funcs[idx].TypeIndex;
-                    var type = execContext.Types[typeIndex].CmpType;
+                    var type = execContext.Types[typeIndex].Expansion;
                     //TODO: handle any type
 
                     if (type is FunctionType funcType)
