@@ -159,16 +159,12 @@ namespace Wacs.Core.Validation
                 throw new ValidationException("Validation Control Stack underflow");
             
             //Check to make sure we have the correct results, but only if we didn't jump
-            OpStack.PopValues(ControlFrame.EndTypes, ref _aside);
-            _aside.Clear();
+            OpStack.DiscardValues(ControlFrame.EndTypes);
             
             //Check the stack
             if (OpStack.Height != ControlFrame.Height)
                 throw new ValidationException(
                     $"Operand stack height {OpStack.Height} differed from Control Frame height {ControlFrame.Height}");
-            
-            // if (ControlFrame.ConditionallyReachable)
-            //     Unreachable = false;
 
             return ControlStack.Pop();
         }

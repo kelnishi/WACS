@@ -38,6 +38,8 @@ namespace Wacs.Core.Instructions.Reference
                 "Instruction {0} invalid. Could not branch to label {1}",Op.GetMnemonic(), L);
 
             var refType = context.OpStack.PopRefType();
+            //Push the ref back for the else case.
+            context.OpStack.PushRef(refType);
             
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
             //Pop values like we branch
@@ -45,8 +47,6 @@ namespace Wacs.Core.Instructions.Reference
             //But actually, we don't, so push them back on.
             context.OpStack.PushResult(nthFrame.LabelTypes);
             
-            //Push the ref back for the else case.
-            context.OpStack.PushRef(refType);
         }
 
         /// <summary>
@@ -83,6 +83,8 @@ namespace Wacs.Core.Instructions.Reference
                 "Instruction {0} invalid. Could not branch to label {1}",Op.GetMnemonic(), L);
 
             var refType = context.OpStack.PopRefType();
+            //Push the ref back for the branch case.
+            context.OpStack.PushRef(refType);
             
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
             //Pop values like we branch
@@ -90,8 +92,6 @@ namespace Wacs.Core.Instructions.Reference
             //But actually, we don't, so push them back on.
             context.OpStack.PushResult(nthFrame.LabelTypes);
             
-            //Push the ref back for the branch case.
-            context.OpStack.PushRef(refType);
         }
 
         /// <summary>
@@ -117,7 +117,7 @@ namespace Wacs.Core.Instructions.Reference
     
     public class InstCallRef : InstructionBase, ICallInstruction
     {
-        public FuncIdx X;
+        public TypeIdx X;
 
         public InstCallRef()
         {
@@ -128,25 +128,21 @@ namespace Wacs.Core.Instructions.Reference
 
         public bool IsBound(ExecContext context)
         {
-            var a = context.Frame.Module.FuncAddrs[X];
-            var func = context.Store[a];
-            return func is HostFunction;
+            return false;
         }
 
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.Funcs.Contains(X),
-                "Instruction call_ref was invalid. Function {0} was not in the Context.",X);
-            var func = context.Funcs[X];
-
-            var refVal = context.OpStack.PopRefType();
-            context.Assert(refVal.IsRef,
-                "Instruction call_ref was invalid. Not a RefType. {0}", refVal);
-            
-            var type = context.Types[func.TypeIndex].CmpType;
+            context.Assert(context.Types.Contains(X),
+                "Instruction call_ref was invalid. Function Type {0} was not in the Context.",X);
+            var type = context.Types[X].CmpType;
             var funcType = type as FunctionType;
             context.Assert(funcType,
                 "Instruction call_ref was invalid. Not a FuncType. {0}", type);
+            
+            var refVal = context.OpStack.PopRefType();
+            context.Assert(refVal.IsRef,
+                "Instruction call_ref was invalid. Not a RefType. {0}", refVal);
             
             context.OpStack.DiscardValues(funcType.ParameterTypes);
             context.OpStack.PushResult(funcType.ResultType);
@@ -156,25 +152,21 @@ namespace Wacs.Core.Instructions.Reference
         {
             context.Assert(context.OpStack.Peek().IsFuncRef,
                 $"Instruction {Op.GetMnemonic()} failed. Expected FuncRef on top of stack.");
-            context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
-                $"Instruction call failed. Function address for {X} was not in the Context.");
+            context.Assert( context.Frame.Module.Types.Contains(X),
+                $"Instruction call_ref failed. Function Type for {X} was not in the Context.");
 
             var r = context.OpStack.PopRefType();
             if (r.IsNullRef)
                 throw new TrapException($"Null reference in call_ref");
-            
-            
-            context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
-                $"Instruction call_ref failed. Function Type {X} was not in the Context.");
-            var xAddr = context.Frame.Module.FuncAddrs[X];
-            var xInst = context.Store[xAddr];
+
+            var funcType = context.Frame.Module.Types[X].CmpType as FunctionType;
             
             var a = (FuncAddr)r;
             context.Assert( context.Store.Contains(a),
                 $"Instruction call_ref failed. Invalid Function Reference {r}.");
             var funcInst = context.Store[a];
             var ftActual = funcInst.Type;
-            if (!xInst.Type.Matches(ftActual))
+            if (!funcType!.Matches(ftActual))
                 throw new TrapException($"Instruction call_ref failed. Expected FunctionType differed.");
             
             context.Invoke(a);
@@ -184,37 +176,32 @@ namespace Wacs.Core.Instructions.Reference
         {
             context.Assert(context.OpStack.Peek().IsFuncRef,
                 $"Instruction {Op.GetMnemonic()} failed. Expected FuncRef on top of stack.");
-            context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
-                $"Instruction call failed. Function address for {X} was not in the Context.");
+            context.Assert( context.Frame.Module.Types.Contains(X),
+                $"Instruction call_ref failed. Function Type for {X} was not in the Context.");
 
             var r = context.OpStack.PopRefType();
             if (r.IsNullRef)
                 throw new TrapException($"Null reference in call_ref");
-            
-            
-            context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
-                $"Instruction call_ref failed. Function Type {X} was not in the Context.");
-            var xAddr = context.Frame.Module.FuncAddrs[X];
-            var xInst = context.Store[xAddr];
+
+            var funcType = context.Frame.Module.Types[X].CmpType as FunctionType;
             
             var a = (FuncAddr)r;
             context.Assert( context.Store.Contains(a),
                 $"Instruction call_ref failed. Invalid Function Reference {r}.");
             var funcInst = context.Store[a];
             var ftActual = funcInst.Type;
-            if (!xInst.Type.Matches(ftActual))
+            if (!funcType!.Matches(ftActual))
                 throw new TrapException($"Instruction call_ref failed. Expected FunctionType differed.");
-
             await context.InvokeAsync(a);
         }
 
         public override InstructionBase Parse(BinaryReader reader)
         {
-            X = (FuncIdx)reader.ReadLeb128_u32();
+            X = (TypeIdx)reader.ReadLeb128_u32();
             return this;
         }
 
-        public InstructionBase Immediate(FuncIdx value)
+        public InstructionBase Immediate(TypeIdx value)
         {
             X = value;
             return this;
@@ -224,29 +211,8 @@ namespace Wacs.Core.Instructions.Reference
         {
             if (context != null)
             {
-                var a = context.Frame.Module.FuncAddrs[X];
-                var func = context.Store[a];
-                if (!string.IsNullOrEmpty(func.Id))
-                {
-                    StringBuilder sb = new();
-                    if (context.Attributes.Live)
-                    {
-                        sb.Append(" ");
-                        var values = new Stack<Value>();
-                        context.OpStack.PopResults(func.Type.ParameterTypes, ref values);
-                        sb.Append("[");
-                        while (values.Count > 0)
-                        {
-                            sb.Append(values.Peek().ToString());
-                            if (values.Count > 1)
-                                sb.Append(" ");
-                            context.OpStack.PushValue(values.Pop());
-                        }
-                        sb.Append("]");
-                    }
-                    
-                    return $"{base.RenderText(context)} {X.Value} (; -> {func.Id}{sb};)";
-                }
+                var type = context.Frame.Module.Types[X];
+                return $"{base.RenderText(context)} {type} {X.Value}";    
             }
             return $"{base.RenderText(context)} {X.Value}";
         }

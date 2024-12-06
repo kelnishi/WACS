@@ -196,6 +196,7 @@ namespace Wacs.Core.Types.Defs
                     ValType.Any => true,
                     _ => false,
                 },
+                HeapType.Any => true,
                 _ => false
             };
         }
@@ -239,6 +240,15 @@ namespace Wacs.Core.Types.Defs
 
         public static ValType UnpackRef(Type type) => 
             type.IsByRef ? type.GetElementType()?.ToValType() ?? ValType.Nil : type.ToValType();
+
+
+        public static string ToNotation(this ValType type) =>
+            Enum.IsDefined(typeof(ValType), type)
+                ? type.ToWat()
+                : type.Index().Value switch {
+                    -1 => "ref.null",
+                    var idx => $"ref {idx}"
+                };
     }
 
     public static class ValTypeParser
