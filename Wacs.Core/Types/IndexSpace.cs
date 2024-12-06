@@ -165,9 +165,8 @@ namespace Wacs.Core.Types
                 ValType.F64    => FunctionType.SingleF64,
                 ValType.V128   => FunctionType.SingleV128,
                 
-                ValType.Func   => FunctionType.SingleFuncref,
-                ValType.Extern => FunctionType.SingleExternref,
-                var type when Contains((TypeIdx)type) => this[(TypeIdx)type].CmpType as FunctionType,
+                //TODO: Make static versions, reduce allocation
+                var type when type.IsRefType() => new(ResultType.Empty, new ResultType(type)),
                 _ => null
             };
     }
