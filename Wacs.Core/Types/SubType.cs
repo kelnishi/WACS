@@ -74,12 +74,13 @@ namespace Wacs.Core.Types
         }
         
         
-        public ValType Ref
-        {
-            get
+        public ValType Ref =>
+            CmpType switch
             {
-                return ValType.None;
-            }
-        }
+                FunctionType ft => ValType.Func,
+                ArrayType at => ValType.Array,
+                StructType st => ValType.Struct,
+                _ => ValType.None,
+            };
     }
 }

@@ -105,6 +105,16 @@ namespace Wacs.Core.Types.Defs
         public static TypeIdx Index(this ValType type) => 
             (TypeIdx)(NNMask & (uint)type);
 
+        public static bool IsNullable(this ValType type) => (type & ValType.NullBit) != 0;
+
+        public static bool IsNull(this ValType type) => type switch
+        {
+            ValType.None => true,
+            ValType.NoFunc => true,
+            ValType.NoExtern => true,
+            _ => false,
+        };
+
         public static HeapType GetHeapType(this ValType type)
         {
             return type switch
@@ -209,6 +219,8 @@ namespace Wacs.Core.Types.Defs
             if (right.IsRefType())
             {
                 if (left.IsSubType(right))
+                    return true;
+                if (right.IsNullable() && left.IsNull())
                     return true;
             }
 
