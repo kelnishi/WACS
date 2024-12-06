@@ -70,7 +70,7 @@ namespace Wacs.Core.Runtime
                 {
                     case Module.ImportDesc.FuncDesc funcDesc:
                         // @Spec 4.5.3.2. @note: Host Functions must be bound to the environment prior to module instantiation!
-                        var type = moduleInstance.Types[funcDesc.TypeIndex].CmpType;
+                        var type = moduleInstance.Types[funcDesc.TypeIndex].Expansion;
                         var funcSig = type as FunctionType;
                         if (funcSig is null)
                             throw new InvalidDataException($"Function had invalid type:{type}");

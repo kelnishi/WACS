@@ -138,7 +138,7 @@ namespace Wacs.Core
 
             OpStack = new CalculatorOpStack(this);
             
-            var funcType = Types[func.TypeIndex].CmpType as FunctionType;
+            var funcType = Types[func.TypeIndex].Expansion as FunctionType;
             var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
 
             int capacity = funcType.ParameterTypes.Types.Length + func.Locals.Length;

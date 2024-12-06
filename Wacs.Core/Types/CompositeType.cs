@@ -32,5 +32,15 @@ namespace Wacs.Core.Types
                     $"Invalid comptype format {form} at offset {reader.BaseStream.Position - 1}.")
             };
         
+        
+        
+        public ValType TopType =>
+            this switch
+            {
+                FunctionType ft => ValType.Func,
+                ArrayType at => ValType.Array,
+                StructType st => ValType.Struct,
+                _ => ValType.None,
+            };
     }
 }

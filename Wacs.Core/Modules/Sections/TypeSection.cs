@@ -29,9 +29,18 @@ namespace Wacs.Core
         /// </summary>
         public List<RecursiveType> Types { get; internal set; } = new();
 
-        public List<SubType> UnrollTypes()
+        public List<DefType> UnrollTypes()
         {
-            return Types.SelectMany(rec => rec.SubTypes).ToList();
+            var defs = new List<DefType>();
+            for (int r = 0, t = Types.Count; r < t; ++r)
+            {
+                var recType = Types[r];
+                for (int s = 0, l = recType.SubTypes.Length; s < l; ++s)
+                {
+                    defs.Add(new DefType(recType, s));
+                }
+            }
+            return defs;
         }
     }
     
