@@ -145,7 +145,7 @@ namespace Wacs.Core
 
             _opStack = new FakeOpStack(this);
             
-            var funcType = Types[func.TypeIndex].CmpType as FunctionType;
+            var funcType = Types[func.TypeIndex].Expansion as FunctionType;
             var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
 
             DummyContext = BuildDummyContext(module, ModuleInst, func);
@@ -239,7 +239,7 @@ namespace Wacs.Core
                 switch (import.Desc)
                 {
                     case Module.ImportDesc.FuncDesc funcDesc:
-                        var type = moduleInst.Types[funcDesc.TypeIndex].CmpType;
+                        var type = moduleInst.Types[funcDesc.TypeIndex].Expansion;
                         var funcSig = type as FunctionType;
                         if (funcSig is null)
                             throw new InvalidDataException($"Function had invalid type:{type}");
@@ -271,7 +271,7 @@ namespace Wacs.Core
                 }
             }
 
-            var ftype = Types[modFunc.TypeIndex].CmpType;
+            var ftype = Types[modFunc.TypeIndex].Expansion;
             var funcType = ftype as FunctionType;
             if (funcType is null)
                 throw new InvalidDataException("Function had invalid type:{ftype}");

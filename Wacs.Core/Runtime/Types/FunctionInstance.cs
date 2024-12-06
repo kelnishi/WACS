@@ -55,7 +55,7 @@ namespace Wacs.Core.Runtime.Types
         /// </summary>
         public FunctionInstance(ModuleInstance module, Module.Function definition)
         {
-            var type = module.Types[definition.TypeIndex].CmpType;
+            var type = module.Types[definition.TypeIndex].Expansion;
             if (!(type is FunctionType funcType))
                 throw new FormatException($"Function defined with type {type}");
             
@@ -114,11 +114,10 @@ namespace Wacs.Core.Runtime.Types
             //Push the frame and operate on the frame on the stack.
             var frame = context.ReserveFrame(Module, funcType, Index, t);
                 
-            //Unwrap ParameterTypes (refs)
-
+            //Deref ParameterTypes
             var paramTypes =
                 funcType.ParameterTypes.Types
-                    .Select(type => type.IsRefType() && type.Index().Value >= 0 ? Module.Types[type.Index()].Ref : type)
+                    .Select(type => type.IsRefType() && type.Index().Value >= 0 ? Module.Types[type.Index()].Expansion.TopType : type)
                     .ToArray();
 
             //Load parameters
