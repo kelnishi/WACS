@@ -14,27 +14,22 @@
 //  * limitations under the License.
 //  */
 
-using System.Collections.Generic;
+using System;
 using System.IO;
-using Wacs.Core.Types;
-using Wacs.Core.Utilities;
+using Wacs.Core.Types.Defs;
 
-namespace Wacs.Core
+namespace Wacs.Core.Types
 {
-    public partial class Module
+    public abstract class CompositeType
     {
-        /// <summary>
-        /// @Spec 2.5.2. Types
-        /// </summary>
-        public List<RecursiveType> Types { get; internal set; } = new();
-    }
-    
-    public static partial class BinaryModuleParser
-    {
-        /// <summary>
-        /// @Spec 5.5.4 Type Section
-        /// </summary>
-        private static List<RecursiveType> ParseTypeSection(BinaryReader reader) => 
-            reader.ParseList(RecursiveType.Parse);
+        public static CompositeType ParseTagged(BinaryReader reader) =>
+            reader.ReadByte() switch
+            {
+                (byte)CompType.ArrayAt => ArrayType.Parse(reader),
+                (byte)CompType.StructSt => StructType.Parse(reader),
+                (byte)CompType.FuncFt => FunctionType.Parse(reader),
+                var form => throw new FormatException(
+                    $"Invalid comptype format {form} at offset {reader.BaseStream.Position - 1}.")
+            };
     }
 }
