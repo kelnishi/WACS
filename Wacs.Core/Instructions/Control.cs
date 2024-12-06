@@ -762,6 +762,7 @@ namespace Wacs.Core.Instructions
             var funcType = type as FunctionType;
             context.Assert(funcType,
                 "Instruction call was invalid. Not a FuncType. {0}", type);
+            
             context.OpStack.DiscardValues(funcType.ParameterTypes);
             context.OpStack.PushResult(funcType.ResultType);
         }

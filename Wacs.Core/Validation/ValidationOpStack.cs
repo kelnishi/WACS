@@ -124,7 +124,7 @@ namespace Wacs.Core.Validation
 
         public void PushRef(Value value)
         {
-            if (!value.Type.IsRefType())
+            if (!value.Type.IsCompatible(ValType.Any))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} pushed to stack. Expected: RefType");
             _stack.Push(value);
@@ -269,7 +269,15 @@ namespace Wacs.Core.Validation
         {
             foreach (var type in types.Types.Reverse())
             {
-                PopType(type);
+                if (type.IsRefType() && type.Index().Value >= 0)
+                {
+                    var specType = _context.Types[type.Index()];
+                    PopType(specType.Ref);
+                }
+                else
+                {
+                    PopType(type);
+                }
             }
         }
 
