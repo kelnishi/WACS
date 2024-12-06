@@ -14,6 +14,7 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.Collections.Generic;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
@@ -53,7 +54,11 @@ namespace Wacs.Core.Runtime.Types
         /// </summary>
         public FunctionInstance(ModuleInstance module, Module.Function definition)
         {
-            Type = module.Types[definition.TypeIndex];
+            var type = module.Types[definition.TypeIndex].CmpType;
+            if (!(type is FunctionType funcType))
+                throw new FormatException($"Function defined with type {type}");
+            
+            Type = funcType;
             Module = module;
             
             Definition = definition;

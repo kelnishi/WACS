@@ -16,6 +16,8 @@
 
 using System;
 using System.IO;
+using Wacs.Core.Types.Defs;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
 {
@@ -23,25 +25,61 @@ namespace Wacs.Core.Types
     {
         public readonly bool Final;
         public readonly TypeIdx[] TypeIndexes;
-        public readonly CompositeType CompType;
+        public readonly CompositeType CmpType;
 
         public SubType(TypeIdx[] idxs, CompositeType cmpType, bool final)
         {
             TypeIndexes = idxs;
-            CompType = cmpType;
+            CmpType = cmpType;
             Final = final;
         }
         
         public SubType(CompositeType cmpType, bool final)
         {
             TypeIndexes = Array.Empty<TypeIdx>();
-            CompType = cmpType;
+            CmpType = cmpType;
             Final = final;
         }
         
+        public static TypeIdx ParseTypeIndexes(BinaryReader reader) => 
+            (TypeIdx)reader.ReadLeb128_u32();
+        
         public static SubType Parse(BinaryReader reader)
         {
-            return null;
+            return reader.ReadByte() switch
+            {
+                (byte)RecType.SubXCt => new SubType(
+                    reader.ParseVector(ParseTypeIndexes),
+                    CompositeType.ParseTagged(reader),
+                    false
+                ),
+                (byte)RecType.SubFinalXCt => new SubType(
+                    reader.ParseVector(ParseTypeIndexes),
+                    CompositeType.ParseTagged(reader),
+                    true
+                ),
+                (byte)CompType.ArrayAt => new SubType(ArrayType.Parse(reader), true),
+                (byte)CompType.StructSt => new SubType(StructType.Parse(reader), true),
+                (byte)CompType.FuncFt => new SubType(FunctionType.Parse(reader), true),
+                
+                var form => throw new FormatException(
+                    $"Invalid type format {form} at offset {reader.BaseStream.Position-1}.")
+            };
+        }
+
+        public bool Matches(CompositeType type)
+        {
+            //TODO: Compute type heirarchy
+            return true;
+        }
+        
+        
+        public ValType Ref
+        {
+            get
+            {
+                return ValType.None;
+            }
         }
     }
 }

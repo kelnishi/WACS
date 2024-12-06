@@ -144,7 +144,7 @@ namespace Wacs.Core.Runtime
         {
             if (text == "null")
             {
-                this = RefNull(type);
+                this = Null(type);
                 return;
             }
             this = default;
@@ -273,6 +273,14 @@ namespace Wacs.Core.Runtime
         public Value(ValType type)
         {
             this = default;
+
+            if ((int)type >= 0)
+            {
+                Type = ValType.Any;
+                Ptr = type.Index().Value;
+                return;
+            }
+            
             Type = type;
             switch (Type)
             {
@@ -310,6 +318,9 @@ namespace Wacs.Core.Runtime
                     Ptr = -1;
                     break;
                 case ValType.NoExtern:
+                    Ptr = -1;
+                    break;
+                case ValType.Any:
                     Ptr = -1;
                     break;
                 case ValType.Undefined:
@@ -448,7 +459,7 @@ namespace Wacs.Core.Runtime
         public static readonly Value NullExternRef = new(ValType.NoExtern);
         public static readonly Value Void = new (ValType.Nil);
 
-        public static Value RefNull(ValType type) => type switch
+        public static Value Null(ValType type) => type switch
         {
             ValType.Func => NullFuncRef,
             ValType.Extern => NullExternRef,
@@ -459,6 +470,8 @@ namespace Wacs.Core.Runtime
         public bool IsV128 => Type == ValType.V128;
         public bool IsRef => Type.IsRefType();
         public bool IsNullRef => IsRef && Ptr == -1;
+
+        public bool IsFuncRef => Type.IsSubType(ValType.Func);
 
         public static object ToObject(Value value) => value.Scalar;
 

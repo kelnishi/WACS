@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Types
 {
@@ -28,7 +29,7 @@ namespace Wacs.Core.Types
         public static explicit operator Index(TypeIdx functionIndex) => new(functionIndex.Value);
         public static explicit operator TypeIdx(int value) => new(value);
         public static explicit operator TypeIdx(uint value) => new((int)value);
-        
+        public static explicit operator TypeIdx(ValType type) => type.Index();
     }
 
     public readonly struct FuncIdx : IEquatable<Index>
