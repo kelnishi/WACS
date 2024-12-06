@@ -38,12 +38,11 @@ namespace Wacs.Core.Types
         
         public static implicit operator FunctionType(RecursiveType recursiveType)
         {
-            var func = recursiveType.SubTypes[0].CompType as FunctionType;
+            var func = recursiveType.SubTypes[0].CmpType as FunctionType;
             if (func is null)
                 throw new InvalidDataException($"RecursiveType ({recursiveType}) was not a FunctionType");
             return func;
         }
-        
         
         /// <summary>
         /// For rendering/debugging

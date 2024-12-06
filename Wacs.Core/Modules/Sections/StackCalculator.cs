@@ -51,6 +51,7 @@ namespace Wacs.Core
         public void PushF32(float f32 = 0) => _context.Push(ValType.F32);
         public void PushF64(double f64 = 0) => _context.Push(ValType.F64);
         public void PushV128(V128 v128 = default) => _context.Push(ValType.V128);
+        public void PushRef(Value value) => _context.Push(ValType.None);
         public void PushFuncref(Value value) => _context.Push(ValType.Func);
         public void PushExternref(Value value) => _context.Push(ValType.Extern);
         public void PushType(ValType type) => _context.Push(type);
@@ -137,7 +138,7 @@ namespace Wacs.Core
 
             OpStack = new CalculatorOpStack(this);
             
-            var funcType = (FunctionType)Types[func.TypeIndex];
+            var funcType = Types[func.TypeIndex].CmpType as FunctionType;
             var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
 
             int capacity = funcType.ParameterTypes.Types.Length + func.Locals.Length;

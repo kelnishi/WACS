@@ -16,6 +16,7 @@
 
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
@@ -27,6 +28,11 @@ namespace Wacs.Core
         /// @Spec 2.5.2. Types
         /// </summary>
         public List<RecursiveType> Types { get; internal set; } = new();
+
+        public List<SubType> UnrollTypes()
+        {
+            return Types.SelectMany(rec => rec.SubTypes).ToList();
+        }
     }
     
     public static partial class BinaryModuleParser

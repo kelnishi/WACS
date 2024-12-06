@@ -443,9 +443,6 @@ namespace Wacs.Core.Instructions
             //Validate results, but leave them on the stack
             context.OpStack.DiscardValues(nthFrame.LabelTypes);
 
-            // if (!context.Unreachable)
-            //     nthFrame.ConditionallyReachable = true;
-            
             context.SetUnreachable();
         }
 
@@ -538,8 +535,6 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopI32();
             
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
-            // if (!context.Unreachable)
-            //     nthFrame.ConditionallyReachable = true;
             
             //Pop values like we branch
             context.OpStack.DiscardValues(nthFrame.LabelTypes);
@@ -763,9 +758,12 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Funcs.Contains(X),
                 "Instruction call was invalid. Function {0} was not in the Context.",X);
             var func = context.Funcs[X];
-            var type = (FunctionType)context.Types[func.TypeIndex];
-            context.OpStack.DiscardValues(type.ParameterTypes);
-            context.OpStack.PushResult(type.ResultType);
+            var type = context.Types[func.TypeIndex].CmpType;
+            var funcType = type as FunctionType;
+            context.Assert(funcType,
+                "Instruction call was invalid. Not a FuncType. {0}", type);
+            context.OpStack.DiscardValues(funcType.ParameterTypes);
+            context.OpStack.PushResult(funcType.ResultType);
         }
 
         // @Spec 4.4.8.10. call
@@ -881,7 +879,10 @@ namespace Wacs.Core.Instructions
                 "Instruction call_indirect was invalid. Table type was not funcref");
             context.Assert(context.Types.Contains(Y),
                 "Instruction call_indirect was invalid. Function type {0} was not in the Context.",Y);
-            var funcType = (FunctionType)context.Types[Y];
+            var type = context.Types[Y].CmpType;
+            var funcType = type as FunctionType;
+            context.Assert(funcType,
+                "Instruction call_indirect was invalid. Not a FuncType. {0}", type);
 
             context.OpStack.PopI32();
             context.OpStack.DiscardValues(funcType.ParameterTypes);
@@ -905,7 +906,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Frame.Module.Types.Contains(Y),
                 $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
             //7.
-            var ftExpect = (FunctionType)context.Frame.Module.Types[Y];
+            var ftExpect = context.Frame.Module.Types[Y].CmpType as FunctionType;
             //8.
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
@@ -954,7 +955,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Frame.Module.Types.Contains(Y),
                 $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
             //7.
-            var ftExpect = (FunctionType)context.Frame.Module.Types[Y];
+            var ftExpect = context.Frame.Module.Types[Y].CmpType as FunctionType;
             //8.
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");

@@ -265,7 +265,7 @@ namespace Wacs.Core.Types.Defs
 
         public static ValType ParseRefType(BinaryReader reader)
         {
-            var type = Parse(reader);
+            var type = Parse(reader, true, false);
             if (!type.IsRefType())
                 throw new FormatException($"Type is not a Reference Type:{type}");
             return type;
@@ -310,7 +310,7 @@ namespace Wacs.Core.Types.Defs
                 //Parse an index
                 _ when parseBlockIndex => (ValType)reader.ContinueReading_s33(token),
 
-                _ => throw new FormatException($"Invalid value type at offset {pos}.")
+                var b => throw new FormatException($"Invalid value type {b:X} at offset 0x{pos:X}.")
             };
         }
     }

@@ -31,5 +31,6 @@ namespace Wacs.Core.Types
                 var form => throw new FormatException(
                     $"Invalid comptype format {form} at offset {reader.BaseStream.Position - 1}.")
             };
+        
     }
 }

@@ -54,6 +54,7 @@ namespace Wacs.Core
         public void PushF32(float f32 = 0) => _context.Push(ValType.F32);
         public void PushF64(double f64 = 0) => _context.Push(ValType.F64);
         public void PushV128(V128 v128 = default) => _context.Push(ValType.V128);
+        public void PushRef(Value value) => _context.Push(ValType.None);
         public void PushFuncref(Value value) => _context.Push(ValType.Func);
         public void PushExternref(Value value) => _context.Push(ValType.Extern);
         public void PushType(ValType type) => _context.Push(type);
@@ -144,7 +145,7 @@ namespace Wacs.Core
 
             _opStack = new FakeOpStack(this);
             
-            var funcType = (FunctionType)Types[func.TypeIndex];
+            var funcType = Types[func.TypeIndex].CmpType as FunctionType;
             var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
 
             DummyContext = BuildDummyContext(module, ModuleInst, func);
@@ -238,7 +239,10 @@ namespace Wacs.Core
                 switch (import.Desc)
                 {
                     case Module.ImportDesc.FuncDesc funcDesc:
-                        var funcSig = moduleInst.Types[funcDesc.TypeIndex];
+                        var type = moduleInst.Types[funcDesc.TypeIndex].CmpType;
+                        var funcSig = type as FunctionType;
+                        if (funcSig is null)
+                            throw new InvalidDataException($"Function had invalid type:{type}");
                         var funcAddr = store.AllocateHostFunction(entityId, funcSig, typeof(FakeHostDelegate), fakeHostFunc, false);
                         moduleInst.FuncAddrs.Add(funcAddr);
                         break;
@@ -266,8 +270,12 @@ namespace Wacs.Core
                     funcInst.SetName(export.Name);
                 }
             }
+
+            var ftype = Types[modFunc.TypeIndex].CmpType;
+            var funcType = ftype as FunctionType;
+            if (funcType is null)
+                throw new InvalidDataException("Function had invalid type:{ftype}");
             
-            var funcType = (FunctionType)Types[modFunc.TypeIndex];
             var dummyContext = new ExecContext(store, new RuntimeAttributes { Live = false } );
             var execFrame = dummyContext.ReserveFrame(
                 ModuleInst, 

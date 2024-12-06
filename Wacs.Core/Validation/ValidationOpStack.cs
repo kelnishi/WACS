@@ -33,6 +33,7 @@ namespace Wacs.Core.Validation
         void PushF32(float f32 = 0.0f);
         void PushF64(double f64 = 0.0d);
         void PushV128(V128 v128 = default);
+        void PushRef(Value value);
         void PushFuncref(Value value);
         void PushExternref(Value value);
         void PushType(ValType type);
@@ -118,6 +119,14 @@ namespace Wacs.Core.Validation
             if (value.Type != ValType.V128)
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.V128}");
+            _stack.Push(value);
+        }
+
+        public void PushRef(Value value)
+        {
+            if (!value.Type.IsRefType())
+                throw new ValidationException(
+                    $"Wrong operand type {value.Type} pushed to stack. Expected: RefType");
             _stack.Push(value);
         }
 

@@ -196,8 +196,12 @@ namespace Wacs.Core
                             if (func.Locals.Length > vContext.Attributes.MaxFunctionLocals)
                                 throw new ValidationException(
                                     $"Function[{func.Index}] locals count {func.Locals.Length} exceeds maximum allowed {vContext.Attributes.MaxFunctionLocals}");
+
+                            var type = types[func.TypeIndex].CmpType;
+                            var funcType = type as FunctionType;
+                            if (funcType is null)
+                                throw new ValidationException($"Function[{func.Index}] type {type} is not a FuncType.");
                             
-                            var funcType = (FunctionType)types[func.TypeIndex];
                             vContext.FunctionIndex = func.Index;
                             vContext.SetExecFrame(funcType, func.Locals);
                             
