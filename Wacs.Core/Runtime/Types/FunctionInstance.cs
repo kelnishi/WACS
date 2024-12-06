@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
@@ -113,8 +114,15 @@ namespace Wacs.Core.Runtime.Types
             //Push the frame and operate on the frame on the stack.
             var frame = context.ReserveFrame(Module, funcType, Index, t);
                 
+            //Unwrap ParameterTypes (refs)
+
+            var paramTypes =
+                funcType.ParameterTypes.Types
+                    .Select(type => type.IsRefType() && type.Index().Value >= 0 ? Module.Types[type.Index()].Ref : type)
+                    .ToArray();
+
             //Load parameters
-            int li = context.OpStack.PopResults(funcType.ParameterTypes, ref frame.Locals.Data);
+            int li = context.OpStack.PopResults(new ResultType(paramTypes), ref frame.Locals.Data);
             frame.StackHeight -= li;
             
             int localCount = funcType.ParameterTypes.Arity + t.Length;
