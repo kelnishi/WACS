@@ -21,6 +21,7 @@ using System.Linq;
 using FluentValidation;
 using FluentValidation.Results;
 using Wacs.Core.Instructions;
+using Wacs.Core.Instructions.Reference;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;

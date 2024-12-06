@@ -62,7 +62,7 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Funcs.Contains(X),
                 "Instruction call was invalid. Function {0} was not in the Context.",X);
             var func = context.Funcs[X];
-            var type = context.Types[func.TypeIndex];
+            var type = (FunctionType)context.Types[func.TypeIndex];
             context.OpStack.PopValues(type.ParameterTypes, ref aside);
             aside.Clear();
             context.OpStack.PushResult(type.ResultType);
@@ -217,7 +217,7 @@ namespace Wacs.Core.Instructions
                 "Instruction call_indirect was invalid. Table type was not funcref");
             context.Assert(context.Types.Contains(Y),
                 "Instruction call_indirect was invalid. Function type {0} was not in the Context.",Y);
-            var funcType = context.Types[Y];
+            var funcType = (FunctionType)context.Types[Y];
 
             context.OpStack.PopI32();
             context.OpStack.PopValues(funcType.ParameterTypes, ref aside);
@@ -243,7 +243,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Frame.Module.Types.Contains(Y),
                 $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
             //7.
-            var ftExpect = context.Frame.Module.Types[Y];
+            var ftExpect = (FunctionType)context.Frame.Module.Types[Y];
             //8.
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
@@ -305,7 +305,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Frame.Module.Types.Contains(Y),
                 $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
             //7.
-            var ftExpect = context.Frame.Module.Types[Y];
+            var ftExpect = (FunctionType)context.Frame.Module.Types[Y];
             //8.
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");

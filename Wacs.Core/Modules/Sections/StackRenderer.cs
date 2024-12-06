@@ -144,7 +144,7 @@ namespace Wacs.Core
 
             _opStack = new FakeOpStack(this);
             
-            var funcType = Types[func.TypeIndex];
+            var funcType = (FunctionType)Types[func.TypeIndex];
             var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
 
             DummyContext = BuildDummyContext(module, ModuleInst, func);
@@ -267,7 +267,7 @@ namespace Wacs.Core
                 }
             }
             
-            var funcType = Types[modFunc.TypeIndex];
+            var funcType = (FunctionType)Types[modFunc.TypeIndex];
             var dummyContext = new ExecContext(store, new RuntimeAttributes { Live = false } );
             var execFrame = dummyContext.ReserveFrame(
                 ModuleInst, 

@@ -44,12 +44,6 @@ namespace Wacs.Core.Types
             Limits = limits;
         }
 
-        private TableType(BinaryReader reader)
-        {
-            ElementType = ValTypeParser.ParseRefType(reader);
-            Limits = Limits.Parse(reader);
-        }
-
         /// <summary>
         /// The element type of the table (e.g., funcref or externref).
         /// </summary>
@@ -80,7 +74,11 @@ namespace Wacs.Core.Types
         /// <summary>
         /// @Spec 5.3.9. Table Types
         /// </summary>
-        public static TableType Parse(BinaryReader reader) => new(reader);
+        public static TableType Parse(BinaryReader reader) => 
+            new(
+                ValTypeParser.ParseRefType(reader),
+                Limits.Parse(reader)
+            );
 
         /// <summary>
         /// Tables imported from host or other modules must fit within the import definition.
