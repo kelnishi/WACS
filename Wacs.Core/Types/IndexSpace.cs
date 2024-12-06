@@ -139,14 +139,14 @@ namespace Wacs.Core.Types
         public abstract bool Contains(TIndex idx);
     }
 
-    public class TypesSpace : AbstractIndexSpace<TypeIdx, RecursiveType>
+    public class TypesSpace : AbstractIndexSpace<TypeIdx, SubType>
     {
-        private readonly ReadOnlyCollection<RecursiveType> _moduleTypes;
+        private readonly ReadOnlyCollection<SubType> _moduleTypes;
 
         public TypesSpace(Module module) =>
-            _moduleTypes = module.Types.AsReadOnly();
+            _moduleTypes = module.UnrollTypes().AsReadOnly();
 
-        public override RecursiveType this[TypeIdx idx]
+        public override SubType this[TypeIdx idx]
         {
             get => _moduleTypes[(Index)idx];
             set => throw new InvalidOperationException(InvalidSetterMessage);
@@ -165,10 +165,9 @@ namespace Wacs.Core.Types
                 ValType.F64    => FunctionType.SingleF64,
                 ValType.V128   => FunctionType.SingleV128,
                 
-                //TODO: Handle HeapTypes
                 ValType.Func   => FunctionType.SingleFuncref,
                 ValType.Extern => FunctionType.SingleExternref,
-                _ when Contains((TypeIdx)(int)blockType) => (FunctionType)this[(TypeIdx)(int)blockType],
+                var type when Contains((TypeIdx)type) => this[(TypeIdx)type].CmpType as FunctionType,
                 _ => null
             };
     }

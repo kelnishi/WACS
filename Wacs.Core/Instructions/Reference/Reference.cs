@@ -17,7 +17,7 @@ namespace Wacs.Core.Instructions.Reference
     public class InstRefNull : InstructionBase, IConstInstruction
     {
         public override ByteCode Op => OpCode.RefNull;
-        public ValType Type { get; internal set; }
+        public ValType Type;
 
         // @Spec 3.3.2.1. ref.null t
         public override void Validate(IWasmValidationContext context)
@@ -28,7 +28,7 @@ namespace Wacs.Core.Instructions.Reference
 
         // @Spec 4.4.2.1. ref.null t
         public override void Execute(ExecContext context) {
-            context.OpStack.PushRef(Value.RefNull(Type));
+            context.OpStack.PushRef(Value.Null(Type));
         }
 
         public override InstructionBase Parse(BinaryReader reader)

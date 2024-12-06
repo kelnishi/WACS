@@ -58,11 +58,15 @@ namespace Wacs.Core.Validation
                 {
                     var execContext = ctx.GetValidationContext();
                     var typeIndex = execContext.Funcs[idx].TypeIndex;
-                    var type = (FunctionType)execContext.Types[typeIndex];
+                    var type = execContext.Types[typeIndex].CmpType;
                     //TODO: handle any type
-                    if (type.ParameterTypes.Arity != 0 || type.ResultType.Arity != 0)
+
+                    if (type is FunctionType funcType)
                     {
-                        ctx.AddFailure($"Invalid Start function with type: {type}");
+                        if (funcType.ParameterTypes.Arity != 0 || funcType.ResultType.Arity != 0)
+                        {
+                            ctx.AddFailure($"Invalid Start function with type: {type}");
+                        }
                     }
                 })
                 .When(module => module.StartIndex.Value < module.Funcs.Count);

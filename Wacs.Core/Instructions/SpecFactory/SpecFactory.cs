@@ -53,6 +53,7 @@ namespace Wacs.Core.Instructions
             OpCode.Return            => InstReturn.Inst,
             OpCode.Call              => new InstCall(),
             OpCode.CallIndirect      => new InstCallIndirect(),
+            OpCode.CallRef           => new InstCallRef(),
             
             OpCode.ReturnCall         => new InstReturnCall(),
             OpCode.ReturnCallIndirect => new InstReturnCallIndirect(),
@@ -67,6 +68,9 @@ namespace Wacs.Core.Instructions
             
             OpCode.RefEq             => InstRefEq.Inst,
             OpCode.RefAsNonNull      => InstRefAsNonNull.Inst,
+            
+            OpCode.BrOnNull          => new InstBrOnNull(),
+            OpCode.BrOnNonNull       => new InstBrOnNonNull(),
                 
             //Parametric Instructions
             OpCode.Drop              => InstDrop.Inst,
