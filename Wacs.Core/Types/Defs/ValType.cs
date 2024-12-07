@@ -123,6 +123,7 @@ namespace Wacs.Core.Types.Defs
             ValType.None => true,
             ValType.NoFunc => true,
             ValType.NoExtern => true,
+            ValType.Bot => true,
             _ => false,
         };
 

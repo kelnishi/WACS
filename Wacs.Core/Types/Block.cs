@@ -57,7 +57,7 @@ namespace Wacs.Core.Types
                 // @Spec 3.2.2.1. typeidx
                 // @Spec 3.2.2.2. [valtype?]
                 RuleFor(b => b.BlockType)
-                    .Must((_, type, ctx) => ctx.GetValidationContext().ValidateType(type))
+                    .Must((_, type, ctx) => ctx.GetValidationContext().ValidateBlockType(type))
                     .WithMessage("Blocks must have a defined BlockType if not a ValType index");
 
             }
