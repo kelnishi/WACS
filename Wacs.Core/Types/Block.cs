@@ -55,17 +55,9 @@ namespace Wacs.Core.Types
             public Validator()
             {
                 // @Spec 3.2.2.1. typeidx
-                RuleFor(b => b.TypeIndex)
-                    .Must((_, index, ctx) =>
-                        ctx.GetValidationContext().Types.Contains(index))
-                    .When(b => b.TypeIndex.Value >= 0)
-                    .WithMessage("Blocks must have a valid typeidx referenced in Types");
-
                 // @Spec 3.2.2.2. [valtype?]
                 RuleFor(b => b.BlockType)
-                    .Must((_, type, ctx) => 
-                        Enum.IsDefined(typeof(ValType), type))
-                    .When(b => b.TypeIndex.Value < 0)
+                    .Must((_, type, ctx) => ctx.GetValidationContext().ValidateType(type))
                     .WithMessage("Blocks must have a defined BlockType if not a ValType index");
 
             }
