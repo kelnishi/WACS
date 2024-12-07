@@ -146,7 +146,8 @@ namespace Wacs.Core.Instructions.Reference
             var refVal = context.OpStack.PopRefType();
             context.Assert(refVal.IsRef,
                 "Instruction call_ref was invalid. Not a RefType. {0}", refVal);
-            
+            context.Assert(refVal.Type.IsNull() || refVal.Type.Index() == X,
+                "Instruction call_ref was invalid. type mismatch: expected (ref null {0}), found {1}", X.Value, refVal.Type);
             context.OpStack.DiscardValues(funcType.ParameterTypes);
             context.OpStack.PushResult(funcType.ResultType);
         }

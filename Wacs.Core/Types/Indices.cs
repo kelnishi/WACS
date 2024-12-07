@@ -30,6 +30,9 @@ namespace Wacs.Core.Types
         public static explicit operator TypeIdx(int value) => new(value);
         public static explicit operator TypeIdx(uint value) => new((int)value);
         public static explicit operator TypeIdx(ValType type) => type.Index();
+        
+        public static bool operator ==(TypeIdx left, TypeIdx right) => left.Value == right.Value;
+        public static bool operator !=(TypeIdx left, TypeIdx right) => !(left == right);
     }
 
     public readonly struct FuncIdx : IEquatable<Index>
