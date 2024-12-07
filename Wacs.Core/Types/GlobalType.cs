@@ -18,6 +18,7 @@ using System;
 using System.IO;
 using FluentValidation;
 using Wacs.Core.Types.Defs;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
 {
@@ -77,7 +78,8 @@ namespace Wacs.Core.Types
             public Validator() {
                 // @Spec 3.2.6.1. mut valtype
                 RuleFor(gt => gt.Mutability).IsInEnum();
-                RuleFor(gt => gt.ContentType).IsInEnum();
+                RuleFor(gt => gt.ContentType)
+                    .Must((gtype, vtype, ctx) => ctx.GetValidationContext().ValidateType(vtype));
             }
         }
     }
