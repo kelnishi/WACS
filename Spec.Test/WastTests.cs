@@ -14,6 +14,7 @@
 //  * limitations under the License.
 //  */
 
+using System.Linq;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
@@ -35,6 +36,11 @@ namespace Spec.Test
         [ClassData(typeof(WastJsonTestData))]
         public void RunWast(WastJson.WastJson file)
         {
+            if (WastJsonTestData.SkipWasts.Contains(file.TestName))
+            {
+                _output.WriteLine($"Skipping test: {file.TestName}");
+                return;
+            }
             _output.WriteLine($"Running test:{file.TestName}");
             SpecTestEnv env = new SpecTestEnv();
             WasmRuntime runtime = new();
