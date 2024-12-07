@@ -87,7 +87,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PopI32();
                 Value val2 = context.OpStack.PopAny();
                 Value val1 = context.OpStack.PopAny();
-                context.Assert(val1.Type.IsCompatible(val2.Type),
+                context.Assert(val1.Type.Matches(val2.Type, context.Types),
                     "Select instruction expected matching types on the stack: {0} == {1}",val1.Type,val2.Type);
 
                 if (!context.Attributes.Configure_RefTypes)
@@ -98,14 +98,14 @@ namespace Wacs.Core.Instructions
                         case ValType.I64:
                         case ValType.F32:
                         case ValType.F64:
-                        case ValType.Unknown:
+                        case ValType.Bot:
                             break;
                         default:
                             throw new ValidationException($"select does not support {val1.Type} in MVP");
                     }
                 }
                 
-                context.OpStack.PushType(val1.Type == ValType.Unknown ? val2.Type : val1.Type);
+                context.OpStack.PushType(val1.Type == ValType.Bot ? val2.Type : val1.Type);
             }
         }
 

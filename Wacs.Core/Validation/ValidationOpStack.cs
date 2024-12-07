@@ -132,7 +132,7 @@ namespace Wacs.Core.Validation
 
         public void PushFuncref(Value value)
         {
-            if (!value.Type.IsCompatible(ValType.Func))
+            if (!value.Type.Matches(ValType.Func,_context.Types))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.Func}");
             _stack.Push(value);
@@ -140,7 +140,7 @@ namespace Wacs.Core.Validation
 
         public void PushExternref(Value value)
         {
-            if (!value.Type.IsCompatible(ValType.Extern))
+            if (!value.Type.Matches(ValType.Extern,_context.Types))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.Extern}");
             _stack.Push(value);
@@ -160,13 +160,13 @@ namespace Wacs.Core.Validation
         public Value PopI32()
         {
             if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
-                return Value.Unknown;
+                return Value.Bot;
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow. pop(i32)");
 
             Value value = _stack.Pop();
             
-            if (!value.Type.IsCompatible(ValType.I32))
+            if (!value.Type.Matches(ValType.I32,_context.Types))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.I32}");
             return value;
@@ -175,12 +175,12 @@ namespace Wacs.Core.Validation
         public Value PopI64()
         {
             if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
-                return Value.Unknown;
+                return Value.Bot;
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow. pop(i64)");
 
             Value value = _stack.Pop();
-            if (!value.Type.IsCompatible(ValType.I64))
+            if (!value.Type.Matches(ValType.I64,_context.Types))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.I64}");
             return value;
@@ -189,12 +189,12 @@ namespace Wacs.Core.Validation
         public Value PopF32()
         {
             if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
-                return Value.Unknown;
+                return Value.Bot;
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow. pop(f32)");
 
             Value value = _stack.Pop();
-            if (!value.Type.IsCompatible(ValType.F32))
+            if (!value.Type.Matches(ValType.F32,_context.Types))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.F32}");
             return value;
@@ -203,12 +203,12 @@ namespace Wacs.Core.Validation
         public Value PopF64()
         {
             if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
-                return Value.Unknown;
+                return Value.Bot;
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow. pop(f64)");
 
             Value value = _stack.Pop();
-            if (!value.Type.IsCompatible(ValType.F64))
+            if (!value.Type.Matches(ValType.F64,_context.Types))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.F64}");
             return value;
@@ -217,12 +217,12 @@ namespace Wacs.Core.Validation
         public Value PopV128()
         {
             if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
-                return Value.Unknown;
+                return Value.Bot;
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow. pop(v128)");
 
             Value value = _stack.Pop();
-            if (!value.Type.IsCompatible(ValType.V128))
+            if (!value.Type.Matches(ValType.V128,_context.Types))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected {ValType.V128}");
             return value;
@@ -231,30 +231,42 @@ namespace Wacs.Core.Validation
         public Value PopRefType()
         {
             if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
-                return Value.Unknown;
+                return Value.Bot;
             if (_stack.Count == 0)
                 throw new ValidationException("Operand stack underflow. pop(ref)");
 
-            Value value = _stack.Pop();
-            if (!value.Type.IsRefType() && value.Type != ValType.Unknown)
+            Value actual = _stack.Pop();
+            if (!actual.Type.IsRefType())
                 throw new ValidationException(
-                    $"Wrong operand type {value.Type} at top of stack. Expected: FuncRef or ExternRef");
-            return value;
+                    $"Wrong operand type {actual.Type} at top of stack. Expected: RefType");
+            if (actual.Type == ValType.Bot)
+                return Value.Bot;
+            return actual;
         }
 
         public Value PopType(ValType expectedType)
         {
             if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
-                return Value.Unknown;
+                return Value.Bot;
             if (_stack.Count <= _context.ControlFrame.Height)
                 throw new ValidationException($"Operand stack underflow. pop({expectedType})");
 
             Value actual = _stack.Pop();
-            if (!actual.Type.IsCompatible(expectedType))
+            if (!actual.Type.Matches(expectedType,_context.Types))
                 throw new ValidationException(
                     $"Wrong operand type {actual.Type} at top of stack. Expected: {expectedType}");
             
             return actual;
+        }
+        
+        public Value PopAny()
+        {
+            if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
+                return Value.Bot;
+            if (_stack.Count == 0)
+                throw new ValidationException("Operand stack underflow. pop(any)");
+
+            return _stack.Pop();
         }
 
         public void PopValues(ResultType types, ref Stack<Value> aside)
@@ -269,15 +281,7 @@ namespace Wacs.Core.Validation
         {
             foreach (var type in types.Types.Reverse())
             {
-                if (type.IsRefType() && type.Index().Value >= 0)
-                {
-                    var specType = _context.Types[type.Index()];
-                    PopType(specType.Expansion.TopType);
-                }
-                else
-                {
-                    PopType(type);
-                }
+                PopType(type);
             }
         }
 
@@ -289,14 +293,5 @@ namespace Wacs.Core.Validation
             }
         }
 
-        public Value PopAny()
-        {
-            if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
-                return Value.Unknown;
-            if (_stack.Count == 0)
-                throw new ValidationException("Operand stack underflow. pop(any)");
-
-            return _stack.Pop();
-        }
     }
 }

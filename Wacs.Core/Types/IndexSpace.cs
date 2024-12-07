@@ -155,21 +155,22 @@ namespace Wacs.Core.Types
         public override bool Contains(TypeIdx idx) =>
             idx.Value >= 0 && idx.Value < _moduleTypes.Count;
 
-        public FunctionType? ResolveBlockType(ValType blockType) =>
-            blockType switch
+        public FunctionType? ResolveBlockType(ValType blockType)
+        {
+            switch (blockType)
             {
-                ValType.Empty  => FunctionType.Empty,
-                ValType.I32    => FunctionType.SingleI32,
-                ValType.I64    => FunctionType.SingleI64,
-                ValType.F32    => FunctionType.SingleF32,
-                ValType.F64    => FunctionType.SingleF64,
-                ValType.V128   => FunctionType.SingleV128,
-                
+                case ValType.Empty: return FunctionType.Empty;
+                case ValType.I32: return FunctionType.SingleI32;
+                case ValType.I64: return FunctionType.SingleI64;
+                case ValType.F32: return FunctionType.SingleF32;
+                case ValType.F64: return FunctionType.SingleF64;
+                case ValType.V128: return FunctionType.SingleV128;
                 //TODO: Make static versions, reduce allocation
-                var type when type.IsRefType() => new(ResultType.Empty, new ResultType(type)),
-                var type when type.Index().Value >= 0 => this[type.Index()].Expansion as FunctionType,
-                _ => null
-            };
+                case var type when type.IsRefType(): return new(ResultType.Empty, new ResultType(type));
+                case var type when type.IsDefType(): return this[type.Index()].Expansion as FunctionType;
+                default: return null;
+            }
+        }
     }
 
     public class FunctionsSpace : AbstractIndexSpace<FuncIdx, Module.Function>
