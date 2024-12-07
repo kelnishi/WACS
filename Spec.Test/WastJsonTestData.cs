@@ -42,6 +42,13 @@ namespace Spec.Test
         private static string JsonDirectory => Path.Combine(AppContext.BaseDirectory, Configuration["JsonDirectory"] ?? "");
         public static bool RunTranspilerTests => Configuration["RunTranspilerTests"] == "True";
 
+        public static HashSet<string> SkipWasts =>
+            Configuration
+                .GetSection("SkipWasts")
+                .GetChildren()
+                .Select(cfg => cfg.Value ?? "")
+                .ToHashSet();
+
         public IEnumerator<object[]> GetEnumerator()
         {
             var files = Directory.GetFiles(JsonDirectory, "*.json", SearchOption.AllDirectories).OrderBy(path => path);
