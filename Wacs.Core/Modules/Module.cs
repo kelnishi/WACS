@@ -342,8 +342,8 @@ namespace Wacs.Core
                     if (module.DataCount == uint.MaxValue)
                         throw new FormatException($"memory.init instruction requires Data Count section");
                 }
-                
-                func.IsFullyDeclared = fullyDeclared.Contains(func.Index);
+                if (fullyDeclared.Contains(func.Index))
+                    func.IsFullyDeclared = true;
             }
             
             if (module.DataCount == uint.MaxValue)
