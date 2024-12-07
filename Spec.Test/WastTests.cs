@@ -20,6 +20,7 @@ using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
 using Xunit;
 using Xunit.Abstractions;
+using Xunit.Sdk;
 
 namespace Spec.Test
 {
@@ -64,12 +65,12 @@ namespace Spec.Test
             }
         }
 
-        [Theory]
+        [Theory(Skip = "Skip transpiled tests for now.")]
         [ClassData(typeof(WastJsonTestData))]
         public void RunWastTranspiled(WastJson.WastJson file)
         {
             if (!WastJsonTestData.RunTranspilerTests)
-                return;
+                throw SkipException.ForSkip("Skipping transpiled test");
             
             _output.WriteLine($"Running test:{file.TestName}");
             SpecTestEnv env = new SpecTestEnv();
