@@ -154,6 +154,7 @@ namespace Wacs.Core
                 }
             }
 
+            //TODO: This doesn't really work...
             private FunctionType ComputeBlockType(ValType type, Module module) =>
                 type switch
                 {
@@ -165,7 +166,7 @@ namespace Wacs.Core
                     ValType.V128 => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
                     ValType.Func => new FunctionType(ResultType.Empty, new ResultType(ValType.Func)),
                     ValType.Extern => new FunctionType(ResultType.Empty, new ResultType(ValType.Extern)),
-                    //TODO: handle refs like ResolveBlockType
+                    //TODO: not so much...
                     _ => module.Types[(int)((TypeIdx)(uint)type).Value]
                 };
 

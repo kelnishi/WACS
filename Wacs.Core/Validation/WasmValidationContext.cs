@@ -93,7 +93,6 @@ namespace Wacs.Core.Validation
         /// </summary>
         public void SetUnreachable()
         {
-            // Unreachable = true;
             PopOperandsToHeight(ControlFrame.Height);
             ControlFrame.Unreachable = true;
         }
@@ -196,6 +195,7 @@ namespace Wacs.Core.Validation
         {
             int capacity = funcType.ParameterTypes.Types.Length + localTypes.Length;
             var data = new Value[capacity];
+            
             var locals = new LocalsSpace(data, funcType.ParameterTypes.Types, localTypes);
             ExecFrame = new Frame
             {

@@ -113,15 +113,8 @@ namespace Wacs.Core.Runtime.Types
             //8.
             //Push the frame and operate on the frame on the stack.
             var frame = context.ReserveFrame(Module, funcType, Index, t);
-                
-            //Deref ParameterTypes
-            var paramTypes =
-                funcType.ParameterTypes.Types
-                    .Select(type => type.IsRefType() && type.Index().Value >= 0 ? Module.Types[type.Index()].Expansion.TopType : type)
-                    .ToArray();
-
             //Load parameters
-            int li = context.OpStack.PopResults(new ResultType(paramTypes), ref frame.Locals.Data);
+            int li = context.OpStack.PopResults(funcType.ParameterTypes, ref frame.Locals.Data);
             frame.StackHeight -= li;
             
             int localCount = funcType.ParameterTypes.Arity + t.Length;

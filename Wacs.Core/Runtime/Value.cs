@@ -274,10 +274,10 @@ namespace Wacs.Core.Runtime
         {
             this = default;
 
-            if ((int)type >= 0)
+            if (type.IsRefType() && type.IsDefType())
             {
-                Type = ValType.None;
-                Ptr = type.Index().Value;
+                Type = type;
+                Ptr = -1;
                 return;
             }
             
@@ -314,7 +314,7 @@ namespace Wacs.Core.Runtime
                 case ValType.Nil:
                     Ptr = -1;
                     break;
-                case ValType.Unknown:
+                case ValType.Bot:
                     Ptr = -1;
                     break;
                 case ValType.None:
@@ -458,8 +458,8 @@ namespace Wacs.Core.Runtime
             _ when Type.IsRefType() => Ptr,
             _ => throw new InvalidCastException($"Cannot cast ValType {Type} to Scalar")
         };
-
-        public static readonly Value Unknown = new(ValType.Unknown);
+        
+        public static readonly Value Bot = new(ValType.Bot);
         public static readonly Value NullRef = new(ValType.None);
         public static readonly Value NullFuncRef = new(ValType.NoFunc);
         public static readonly Value NullExternRef = new(ValType.NoExtern);
@@ -469,15 +469,14 @@ namespace Wacs.Core.Runtime
         {
             ValType.Func => NullFuncRef,
             ValType.Extern => NullExternRef,
-            _ => NullRef,
+            _ when type.IsRefType() && type.IsNullable() => new(type),
+            _ => throw new InvalidCastException($"Cannot create null value for type {type}")
         };
 
         public bool IsI32 => Type == ValType.I32;
         public bool IsV128 => Type == ValType.V128;
         public bool IsRef => Type.IsRefType();
         public bool IsNullRef => IsRef && Ptr == -1;
-
-        public bool IsFuncRef => Type.IsSubType(ValType.Func);
 
         public static object ToObject(Value value) => value.Scalar;
 
@@ -547,7 +546,7 @@ namespace Wacs.Core.Runtime
                 ValType.F32 => $"{Type.ToWat()}={Float32.ToString("G10", CultureInfo.InvariantCulture)}",
                 ValType.F64 => $"{Type.ToWat()}={Float64.ToString("G10", CultureInfo.InvariantCulture)}",
                 ValType.V128 => $"{Type.ToWat()}={V128.ToString()}",
-                ValType.Unknown => "Unknown",
+                ValType.Bot => "Bot",
                 _ when Type.IsRefType() => $"{Type.ToWat()}={Ptr}",
                 _ => "Undefined",
             };

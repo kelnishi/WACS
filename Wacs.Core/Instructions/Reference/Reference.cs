@@ -17,7 +17,7 @@ namespace Wacs.Core.Instructions.Reference
     public class InstRefNull : InstructionBase, IConstInstruction
     {
         public override ByteCode Op => OpCode.RefNull;
-        public ValType Type;
+        private ValType Type;
 
         // @Spec 3.3.2.1. ref.null t
         public override void Validate(IWasmValidationContext context)
@@ -33,7 +33,7 @@ namespace Wacs.Core.Instructions.Reference
 
         public override InstructionBase Parse(BinaryReader reader)
         {
-            Type = ValTypeParser.ParseDefType(reader) | ValType.RefBit;
+            Type = ValTypeParser.ParseDefType(reader) | ValType.NullableRef;
             return this;
         }
         
