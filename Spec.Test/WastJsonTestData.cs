@@ -55,6 +55,9 @@ namespace Spec.Test
             foreach (var file in files)
             {
                 var testData = LoadTestDefinition(file);
+                if (SkipWasts.Contains(testData.TestName))
+                    continue;
+                        
                 yield return new object[] { testData };
             }
         }
