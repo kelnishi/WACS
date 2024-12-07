@@ -108,6 +108,9 @@ namespace Wacs.Core.Runtime
                 throw new TrapException(message);
         }
 
+        public ValType StackTopTopType() => 
+            OpStack.Peek().Type.TopHeapType(Frame.Module.Types);
+
         public Frame ReserveFrame(
             ModuleInstance module,
             FunctionType type,

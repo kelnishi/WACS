@@ -31,7 +31,8 @@ namespace Wacs.Core.Runtime.Types
         {
             Type = type;
             //If the initialized value type fits, use it, otherwise coerce it to the proper type.
-            Elements = refs.Select(v => !v.Type.IsSubType(Type) ? new Value(v, Type) : v).ToList();
+            //TODO fix this type resolution
+            Elements = refs.Select(v => /*!v.Type.Matches(Type) ? new Value(v, Type) :*/ v).ToList();
         }
 
         public ValType Type { get; }

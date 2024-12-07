@@ -20,7 +20,7 @@ namespace Wacs.Core.Runtime
 {
     public class RuntimeAttributes
     {
-        public bool Configure_RefTypes = false;
+        public bool Configure_RefTypes = true;
         public int GrowCallStack = 512;
 
         public int GrowLabelsStack = 512;

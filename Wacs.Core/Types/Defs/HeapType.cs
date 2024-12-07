@@ -34,5 +34,7 @@ namespace Wacs.Core.Types.Defs
         [WatToken("i31")]      I31      = 0x6C, // -0x14
         [WatToken("struct")]   Struct   = 0x6B, // -0x15
         [WatToken("array")]    Array    = 0x6A, // -0x16
+        
+        Bot = 0x81, // -0x81
     }
 }

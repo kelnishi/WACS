@@ -30,6 +30,16 @@ namespace Wacs.Core.Types
             
             Expansion = RecType.SubTypes[Projection].Body;
         }
+
+        /// <summary>
+        /// https://webassembly.github.io/gc/core/bikeshed/index.html#defined-types⑤
+        /// </summary>
+        /// <param name="other"></param>
+        /// <returns></returns>
+        public bool Matches(DefType other)
+        {
+            return false;
+        }
         
     }
 }
