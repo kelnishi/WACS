@@ -87,3 +87,4 @@ riderModule.iml
 /Wacs.Console/Data/**
 
 .DS_Store
+Spec.Test/TestResults/**
