@@ -283,7 +283,7 @@ namespace Wacs.Core.Types
             int idx = 0;
             foreach (var t in parameters)
             {
-                Data[idx++] = new Value(t);
+                Data[idx++] = new Value(t).MakeSet();
             }
             foreach (var t in locals)
             {
