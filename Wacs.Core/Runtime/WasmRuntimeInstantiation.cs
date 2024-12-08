@@ -138,7 +138,7 @@ namespace Wacs.Core.Runtime
             //9. index ordered table addresses
             foreach (var table in module.Tables)
             {
-                moduleInstance.TableAddrs.Add(AllocateTable(Store, table, Value.Null(table.ElementType)));
+                moduleInstance.TableAddrs.Add(AllocateTable(Store, table, Value.DefaultOrNull(table.ElementType)));
             }
 
             //4. Allocate Memories and capture their addresses in the Store

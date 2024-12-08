@@ -20,6 +20,7 @@ using FluentValidation;
 using Wacs.Core.Attributes;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
 {
@@ -111,7 +112,8 @@ namespace Wacs.Core.Types
             {
                 // @Spec 3.2.4.1. limits reftype
                 RuleFor(tt => tt.Limits).SetValidator(Limits);
-                RuleFor(tt => tt.ElementType).IsInEnum();
+                RuleFor(tt => tt.ElementType)
+                    .Must((_, type, ctx) => ctx.GetValidationContext().ValidateType(type));
             }
         }
     }

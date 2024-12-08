@@ -17,6 +17,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
 using Wacs.Core.Attributes;
 using Wacs.Core.Runtime;
@@ -105,9 +106,38 @@ namespace Wacs.Core.Types.Defs
         ExecContext                   = 0x04 << 8 | SignBit,
     }
 
+    public class Wat
+    {
+        public static explicit operator Wat(ValType type) => new Wat(type);
+
+        private ValType _type;
+        private Wat(ValType type) => _type = type;
+                 
+        public override string ToString()
+        {
+            StringBuilder sb = new();
+            sb.Append("(");
+            if (_type.IsDefType())
+            {
+                if (_type.IsRefType())
+                    sb.Append("ref");
+                if (_type.IsNullable())
+                    sb.Append(" null");
+                sb.Append($" ${_type.Index().Value}");
+            }
+            else
+                sb.Append(_type.ToWat());
+            sb.Append(")");
+            return sb.ToString();
+        }
+    }
 
     public static class ValueTypeExtensions
     {
+
+        public static string ToString(this ValType type) =>
+            Enum.IsDefined(typeof(ValType), type) ? type.ToWat() : $"ValType({type:X})";
+        
         public static TypeIdx Index(this ValType type) => 
             (TypeIdx)((int)type & (int)ValType.IndexMask);
 
@@ -192,7 +222,7 @@ namespace Wacs.Core.Types.Defs
         /// <param name="ofType"></param>
         /// <param name="types"></param>
         /// <returns></returns>
-        public static bool IsSubType(this ValType type, ValType ofType, TypesSpace types)
+        public static bool IsSubType(this ValType type, ValType ofType, TypesSpace? types)
         {
             return type.GetHeapType() switch
             {
@@ -205,17 +235,17 @@ namespace Wacs.Core.Types.Defs
                     _ => ValType.Eq.IsSubType(ofType, types)
                 },
                 //DefType/Index
-                (HeapType)0 when types[type.Index()].Expansion is StructType => ofType switch
+                (HeapType)0 when types?[type.Index()].Expansion is StructType => ofType switch
                 {
                     ValType.Struct => true,
                     _ => ValType.Struct.IsSubType(ofType, types),
                 },
-                (HeapType)0 when types[type.Index()].Expansion is ArrayType => ofType switch
+                (HeapType)0 when types?[type.Index()].Expansion is ArrayType => ofType switch
                 {
                     ValType.Array => true,
                     _ => ValType.Array.IsSubType(ofType, types),
                 },
-                (HeapType)0 when types[type.Index()].Expansion is FunctionType => ofType switch
+                (HeapType)0 when types?[type.Index()].Expansion is FunctionType => ofType switch
                 {
                     ValType.Func => true,
                     _ => ValType.Func.IsSubType(ofType, types),
@@ -229,7 +259,7 @@ namespace Wacs.Core.Types.Defs
             };
         }
 
-        public static bool Matches(this ValType left, ValType right, TypesSpace types)
+        public static bool Matches(this ValType left, ValType right, TypesSpace? types)
         {
             if (left == right || left == ValType.Bot || right == ValType.Bot)
                 return true;

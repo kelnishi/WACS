@@ -600,9 +600,6 @@ namespace Wacs.Core.Instructions
             
             var mthFrame = context.ControlStack.PeekAt((int)Ln.Value);
             var arity = mthFrame.LabelTypes.Arity;
-            
-            // if (!context.Unreachable)
-            //     mthFrame.ConditionallyReachable = true;
 
             Stack<Value> aside = new();
             foreach (var lidx in Ls)

@@ -277,7 +277,7 @@ namespace Wacs.Core.Runtime
             if (type.IsRefType() && type.IsDefType())
             {
                 Type = type;
-                Ptr = -1;
+                Ptr = type.IsNullable()? -1 : 0;
                 return;
             }
             
@@ -470,7 +470,14 @@ namespace Wacs.Core.Runtime
             ValType.Func => NullFuncRef,
             ValType.Extern => NullExternRef,
             _ when type.IsRefType() && type.IsNullable() => new(type),
-            _ => throw new InvalidCastException($"Cannot create null value for type {type}")
+            _ => throw new InvalidCastException($"Cannot create null value for type {(Wat)type}")
+        };
+
+        public static Value DefaultOrNull(ValType type) => type switch
+        {
+            ValType.Func => NullFuncRef,
+            ValType.Extern => NullExternRef,
+            _ => new(type),
         };
 
         public bool IsI32 => Type == ValType.I32;
@@ -547,7 +554,7 @@ namespace Wacs.Core.Runtime
                 ValType.F64 => $"{Type.ToWat()}={Float64.ToString("G10", CultureInfo.InvariantCulture)}",
                 ValType.V128 => $"{Type.ToWat()}={V128.ToString()}",
                 ValType.Bot => "Bot",
-                _ when Type.IsRefType() => $"{Type.ToWat()}={Ptr}",
+                _ when Type.IsRefType() => $"{(Wat)Type}=&{Ptr}",
                 _ => "Undefined",
             };
         }
