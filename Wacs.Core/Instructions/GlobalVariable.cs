@@ -31,8 +31,11 @@ namespace Wacs.Core.Instructions
         private GlobalIdx Index;
         public override ByteCode Op => OpCode.GlobalGet;
 
-        public bool IsConstant(IWasmValidationContext? context) => 
-            context == null || context.Globals.Contains(Index) && context.Globals[Index].IsImport && context.Globals[Index].Type.Mutability == Mutability.Immutable;
+        public bool IsConstant(IWasmValidationContext? context) =>
+            context == null ||
+            context.Globals.Contains(Index)
+            && context.Globals[Index].Type.Mutability == Mutability.Immutable
+            && context.Globals[Index].Initializer.Instructions.IsConstantT(); 
 
         public Func<ExecContext, Value> GetFunc => FetchFromGlobals;
 
