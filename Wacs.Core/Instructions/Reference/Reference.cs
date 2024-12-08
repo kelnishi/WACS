@@ -36,6 +36,12 @@ namespace Wacs.Core.Instructions.Reference
             Type = ValTypeParser.ParseDefType(reader) | ValType.NullableRef;
             return this;
         }
+
+        public InstructionBase Immediate(ValType type)
+        {
+            Type = type;
+            return this;
+        }
         
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {((HeapType)Type).ToWat()}";
     }

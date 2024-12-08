@@ -44,7 +44,7 @@ namespace Wacs.Core
             private ElementSegment(ValType type, InstructionBase[] funcIndices, ElementMode mode)
             {
                 Type = type;
-                Initializers = funcIndices.Select(inst => new Expression(inst, 1)).ToArray();
+                Initializers = funcIndices.Select(inst => new Expression(1, inst)).ToArray();
                 Mode = mode;
                 Mode.SegmentType = Type;
             }
@@ -60,7 +60,7 @@ namespace Wacs.Core
             private ElementSegment(TableIdx tableIndex, Expression e, ValType type, InstructionBase[] funcIndices)
             {
                 Type = type;
-                Initializers = funcIndices.Select(inst => new Expression(inst, 1)).ToArray();
+                Initializers = funcIndices.Select(inst => new Expression(1, inst)).ToArray();
                 Mode = new ElementMode.ActiveMode(tableIndex, e);
                 Mode.SegmentType = Type;
             }

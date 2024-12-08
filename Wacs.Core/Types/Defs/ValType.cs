@@ -340,12 +340,8 @@ namespace Wacs.Core.Types.Defs
         }
         
         //For parsing unrolled recursive (module-level) type indexes
-        public static ValType ParseDefType(BinaryReader reader)
-        {
-            var type = Parse(reader, true, false);
-            
-            return type;
-        }
+        public static ValType ParseDefType(BinaryReader reader) => 
+            Parse(reader, true, false);
 
         public static ValType Parse(BinaryReader reader) => Parse(reader, false, false);
 
