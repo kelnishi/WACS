@@ -385,7 +385,7 @@ namespace Wacs.Core.Types.Defs
                 (byte)HeapType.Array => ValType.Array,
                 //Abstract or Index (set ref bit)
                 (byte)TypePrefix.RefHt => (ParseHeapType(reader) | ValType.Ref) & ~ValType.Nullable,   //non-nullable
-                (byte)TypePrefix.RefNullHt => ParseHeapType(reader) | ValType.Ref,                  //nullable
+                (byte)TypePrefix.RefNullHt => ParseHeapType(reader) | ValType.Ref | ValType.Nullable,  //nullable
                 
                 //StorageType
                 (byte)PackedType.I8 when parseStorageType => ValType.I8,
