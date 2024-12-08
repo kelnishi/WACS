@@ -127,6 +127,7 @@ namespace Wacs.Core.Runtime
                 }
             }
 
+            
             //2. Allocate Functions and capture their addresses in the Store
             //8. index ordered function addresses
             foreach (var func in module.Funcs)
@@ -134,11 +135,18 @@ namespace Wacs.Core.Runtime
                 moduleInstance.FuncAddrs.Add(AllocateWasmFunc(Store, func, moduleInstance));
             }
 
+            //@Spec 4.5.4 Step 7
+            Frame initFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.TableInitializers);
+            Context.PushFrame(initFrame);
+            
             //3. Allocate Tables and capture their addresses in the Store
             //9. index ordered table addresses
             foreach (var table in module.Tables)
             {
-                moduleInstance.TableAddrs.Add(AllocateTable(Store, table, Value.DefaultOrNull(table.ElementType)));
+                var refVal = EvaluateInitializer(table.Init);
+                if (Context.Frame != initFrame)
+                    throw new TrapException($"Call stack was manipulated while initializing tables");
+                moduleInstance.TableAddrs.Add(AllocateTable(Store, table, refVal));
             }
 
             //4. Allocate Memories and capture their addresses in the Store
@@ -150,23 +158,23 @@ namespace Wacs.Core.Runtime
             //Make the address space permanent
             moduleInstance.MemAddrs.Finalize();
 
-            //@Spec 4.5.4 Step 7
-            Frame initFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.GlobalInitializers);
-            Context.PushFrame(initFrame);
+            Context.PopFrame();
+            Frame initFrame2 = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.GlobalInitializers);
+            Context.PushFrame(initFrame2);
 
             //5. Allocate Globals and capture their addresses in the Store
             //11. index ordered global addresses
             foreach (var global in module.Globals)
             {
                 var val = EvaluateInitializer(global.Initializer);
-                if (Context.Frame != initFrame)
+                if (Context.Frame != initFrame2)
                     throw new TrapException($"Call stack was manipulated while initializing globals");
                 moduleInstance.GlobalAddrs.Add(AllocateGlobal(Store, global.Type, val));
             }
 
             Context.PopFrame();
-            Frame initFrame2 = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.ElementInitializers);
-            Context.PushFrame(initFrame2);
+            Frame initFrame3 = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.ElementInitializers);
+            Context.PushFrame(initFrame3);
 
             //6. Allocate Elements
             //12. index ordered element addresses
@@ -261,7 +269,7 @@ namespace Wacs.Core.Runtime
                 var auxFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.ElementInitialization);
                 //13.
                 Context.PushFrame(auxFrame);
-
+                
                 //14, 15
                 for (int i = 0, l = module.Elements.Length; i < l; ++i)
                 {
