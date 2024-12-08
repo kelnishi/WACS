@@ -77,7 +77,7 @@ namespace Wacs.Core.Types
         }
 
         //Single Initializer
-        public Expression(InstructionBase single, int arity)
+        public Expression(int arity, InstructionBase single)
         {
             IsStatic = true;
             Instructions = new InstructionSequence(new List<InstructionBase> { single });
