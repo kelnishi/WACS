@@ -132,17 +132,17 @@ namespace Wacs.Core.Validation
 
         public void PushFuncref(Value value)
         {
-            if (!value.Type.Matches(ValType.Func,_context.Types))
+            if (!value.Type.Matches(ValType.FuncRef,_context.Types))
                 throw new ValidationException(
-                    $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.Func}");
+                    $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.FuncRef}");
             _stack.Push(value);
         }
 
         public void PushExternref(Value value)
         {
-            if (!value.Type.Matches(ValType.Extern,_context.Types))
+            if (!value.Type.Matches(ValType.ExternRef,_context.Types))
                 throw new ValidationException(
-                    $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.Extern}");
+                    $"Wrong operand type {value.Type} pushed to stack. Expected: {ValType.ExternRef}");
             _stack.Push(value);
         }
 

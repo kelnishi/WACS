@@ -129,10 +129,10 @@ namespace Wacs.Core.Runtime
                 case ValType.I64:
                     Int64 = idx;
                     break;
-                case ValType.Func:
+                case ValType.FuncRef:
                     Ptr = idx;
                     break;
-                case ValType.Extern:
+                case ValType.ExternRef:
                     Ptr = idx;
                     break;
                 default:
@@ -163,10 +163,10 @@ namespace Wacs.Core.Runtime
                 case ValType.F64:
                     Float64 = BitBashDouble(text);
                     break;
-                case ValType.Func:
+                case ValType.FuncRef:
                     Ptr = BitBashRef(text);
                     break;
-                case ValType.Extern:
+                case ValType.ExternRef:
                     Ptr = BitBashRef(text);
                     break;
                 default:
@@ -251,10 +251,10 @@ namespace Wacs.Core.Runtime
                 case ValType.I64:
                     Int64 = idx;
                     break;
-                case ValType.Func:
+                case ValType.FuncRef:
                     Ptr = (int)idx;
                     break;
-                case ValType.Extern:
+                case ValType.ExternRef:
                     Ptr = (int)idx;
                     break;
                 default:
@@ -299,16 +299,16 @@ namespace Wacs.Core.Runtime
                 case ValType.V128:
                     V128 = (V128)(0L, 0L);
                     break;
-                case ValType.Func:
+                case ValType.FuncRef:
                     Ptr = -1;
                     break;
-                case ValType.FuncNN:
+                case ValType.Func:
                     Ptr = 0;
                     break;
-                case ValType.Extern:
+                case ValType.ExternRef:
                     Ptr = -1;
                     break;
-                case ValType.ExternNN:
+                case ValType.Extern:
                     Ptr = 0;
                     break;
                 case ValType.Nil:
@@ -428,10 +428,10 @@ namespace Wacs.Core.Runtime
                 case ValType.V128:
                     V128 = (V128)externalValue;
                     break;
-                case ValType.Func:
+                case ValType.FuncRef:
                     Ptr = (int)externalValue;
                     break;
-                case ValType.Extern:
+                case ValType.ExternRef:
                     Ptr = (int)externalValue;
                     break;
                 case ValType.Undefined:
@@ -467,16 +467,16 @@ namespace Wacs.Core.Runtime
 
         public static Value Null(ValType type) => type switch
         {
-            ValType.Func => NullFuncRef,
-            ValType.Extern => NullExternRef,
+            ValType.FuncRef => NullFuncRef,
+            ValType.ExternRef => NullExternRef,
             _ when type.IsRefType() && type.IsNullable() => new(type),
             _ => throw new InvalidCastException($"Cannot create null value for type {(Wat)type}")
         };
 
         public static Value DefaultOrNull(ValType type) => type switch
         {
-            ValType.Func => NullFuncRef,
-            ValType.Extern => NullExternRef,
+            ValType.FuncRef => NullFuncRef,
+            ValType.ExternRef => NullExternRef,
             _ => new(type),
         };
 
