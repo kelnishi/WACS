@@ -87,6 +87,16 @@ namespace Wacs.Core
                 InstEnd => false,
                 _ => true
             });
+        
+        public bool IsConstantT() =>
+            !_instructions.Any(inst => inst switch
+            {
+                IContextConstInstruction => true, //No recursive instructions! 
+                IConstInstruction => false,
+                IConstOpInstruction opInst => !opInst.IsConstant,
+                InstEnd => false,
+                _ => true
+            });
 
         public bool ContainsInstruction(HashSet<ByteCode> opcodes)
         {
