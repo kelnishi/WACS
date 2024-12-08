@@ -164,8 +164,8 @@ namespace Wacs.Core
                     ValType.F64 => new FunctionType(ResultType.Empty, new ResultType(ValType.F64)),
                     ValType.I64 => new FunctionType(ResultType.Empty, new ResultType(ValType.I64)),
                     ValType.V128 => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
-                    ValType.Func => new FunctionType(ResultType.Empty, new ResultType(ValType.Func)),
-                    ValType.Extern => new FunctionType(ResultType.Empty, new ResultType(ValType.Extern)),
+                    ValType.FuncRef => new FunctionType(ResultType.Empty, new ResultType(ValType.FuncRef)),
+                    ValType.ExternRef => new FunctionType(ResultType.Empty, new ResultType(ValType.ExternRef)),
                     //TODO: not so much...
                     _ => module.Types[(int)((TypeIdx)(uint)type).Value]
                 };

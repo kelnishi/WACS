@@ -79,7 +79,8 @@ namespace Wacs.Core.Types
                 // @Spec 3.2.6.1. mut valtype
                 RuleFor(gt => gt.Mutability).IsInEnum();
                 RuleFor(gt => gt.ContentType)
-                    .Must((gtype, vtype, ctx) => ctx.GetValidationContext().ValidateType(vtype));
+                    .Must((gtype, vtype, ctx) => ctx.GetValidationContext().ValidateType(vtype))
+                    .WithMessage(gt => $"GlobalType had invalid ContentType {gt.ContentType}");
             }
         }
     }

@@ -154,7 +154,7 @@ namespace Wacs.Core.Instructions.Reference
 
         public override void Execute(ExecContext context)
         {
-            context.Assert(context.StackTopTopType() == ValType.Func,
+            context.Assert(context.StackTopTopType() == ValType.FuncRef,
                 $"Instruction {Op.GetMnemonic()} failed. Expected FuncRef on top of stack.");
             context.Assert( context.Frame.Module.Types.Contains(X),
                 $"Instruction call_ref failed. Function Type for {X} was not in the Context.");
@@ -178,7 +178,7 @@ namespace Wacs.Core.Instructions.Reference
 
         public override async ValueTask ExecuteAsync(ExecContext context)
         {
-            context.Assert(context.StackTopTopType() == ValType.Func,
+            context.Assert(context.StackTopTopType() == ValType.FuncRef,
                 $"Instruction {Op.GetMnemonic()} failed. Expected FuncRef on top of stack.");
             context.Assert( context.Frame.Module.Types.Contains(X),
                 $"Instruction call_ref failed. Function Type for {X} was not in the Context.");

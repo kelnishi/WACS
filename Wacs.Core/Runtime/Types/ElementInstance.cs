@@ -25,7 +25,7 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class ElementInstance
     {
-        public readonly static ElementInstance Empty = new(ValType.Func, new List<Value>());
+        public readonly static ElementInstance Empty = new(ValType.FuncRef, new List<Value>());
 
         public ElementInstance(ValType type, List<Value> refs)
         {

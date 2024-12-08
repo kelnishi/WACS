@@ -19,6 +19,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -163,7 +164,7 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Elements.Contains(Y),
                  "Instruction table.init is invalid. Element {0} not in the Context.",Y);
             var t2 = context.Elements[Y];
-            context.Assert(t1.ElementType == t2.Type,
+            context.Assert(t2.Type.Matches(t1.ElementType, context.Types),
                  "Instruction table.init is invalid. Type mismatch {0} != {1}",t1.ElementType,t2.Type);
             context.OpStack.PopI32();
             context.OpStack.PopI32();
