@@ -35,7 +35,7 @@ namespace Wacs.Core.Types
         public ValType HeapType =>
             this switch
             {
-                FunctionType ft => ValType.Func,
+                FunctionType ft => ValType.FuncRef,
                 ArrayType at => ValType.Array,
                 StructType st => ValType.Struct,
                 _ => throw new InvalidDataException($"Unknown CompType:{this}"),

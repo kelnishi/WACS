@@ -46,8 +46,8 @@ namespace Spec.Test.WastJson
                 "f32" => new Value(ValType.F32, Value?.ToString()??""),
                 "f64" => new Value(ValType.F64, Value?.ToString()??""),
                 "v128" => ParseV128(Value),
-                "funcref" => new Value(ValType.Func, Value?.ToString()??"null"),
-                "externref" => new Value(ValType.Extern, Value?.ToString()??"null"),
+                "funcref" => new Value(ValType.FuncRef, Value?.ToString()??"null"),
+                "externref" => new Value(ValType.ExternRef, Value?.ToString()??"null"),
                 _ => throw new ArgumentException($"Cannot parse value {Value} of type {Type}")
             };
 

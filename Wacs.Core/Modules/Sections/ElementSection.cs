@@ -96,7 +96,7 @@ namespace Wacs.Core
                 };
                 string elemListText = "";
                 
-                if (Type == ValType.Func && IsAllRefFunc())
+                if (Type == ValType.FuncRef && IsAllRefFunc())
                 {
                     var listElems = Initializers
                         .Select(expr => expr.Instructions[0])
@@ -135,6 +135,12 @@ namespace Wacs.Core
             private static TableIdx ParseTableIndex(BinaryReader reader) =>
                 (TableIdx)reader.ReadLeb128_u32();
 
+            /// <summary>
+            /// https://webassembly.github.io/gc/core/bikeshed/index.html#element-section①
+            /// </summary>
+            /// <param name="reader"></param>
+            /// <returns></returns>
+            /// <exception cref="FormatException"></exception>
             public static ElementSegment Parse(BinaryReader reader) =>
                 (ElementType)reader.ReadLeb128_u32() switch {
                     ElementType.ActiveNoIndexWithElemKind => 
@@ -163,7 +169,7 @@ namespace Wacs.Core
                         new ElementSegment(
                             (TableIdx)0,
                             Expression.ParseInitializer(reader),
-                            ValType.Func,
+                            ValType.FuncRef, //<-- The Spec makes no mention as to why this is a funcref and not a func!
                             reader.ParseVector(Expression.ParseInitializer)),
                     ElementType.PassiveWithElemType =>
                         new ElementSegment(
@@ -242,7 +248,8 @@ namespace Wacs.Core
                     {
                         //Valid for all reference types
                         RuleFor(mode => mode.SegmentType)
-                            .IsInEnum();
+                            .Must((mode, type, ctx) => ctx.GetValidationContext().ValidateType(type))
+                            .WithMessage(mode => $"Passive Element Type was invalid {mode.SegmentType}");
                     }
                 }
             }
@@ -279,9 +286,9 @@ namespace Wacs.Core
                                 }
                                 validationContext.PopValidationContext();
                                 
-                                if (mode.SegmentType != tableType.ElementType)
+                                if (!mode.SegmentType.Matches(tableType.ElementType, ctx.GetValidationContext().Types))
                                 {
-                                    ctx.AddFailure($"Active ElementMode {mode.SegmentType} is not valid for table type {tableType.ElementType}");                                    
+                                    ctx.AddFailure($"Active ElementMode {(Wat)mode.SegmentType} is not valid for table type {(Wat)tableType.ElementType}");                                    
                                 }
                             });
                     }
@@ -297,7 +304,8 @@ namespace Wacs.Core
                     {
                         //Valid for all reference types
                         RuleFor(mode => mode.SegmentType)
-                            .IsInEnum();
+                            .Must((mode, type, ctx) => ctx.GetValidationContext().ValidateType(type))
+                            .WithMessage(mode => $"Declarative Element Type was invalid {mode.SegmentType}");
                     }
                 }
             }
