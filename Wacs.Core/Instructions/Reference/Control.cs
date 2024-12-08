@@ -47,7 +47,7 @@ namespace Wacs.Core.Instructions.Reference
             context.OpStack.PushResult(nthFrame.LabelTypes);
             
             //Push the non-null ref back for the else case.
-            context.OpStack.PushRef(new Value(refType, refType.Type.ToConcrete()));
+            context.OpStack.PushRef(refType.ToConcrete());
         }
 
         /// <summary>
@@ -85,7 +85,7 @@ namespace Wacs.Core.Instructions.Reference
 
             var refType = context.OpStack.PopRefType();
             //Push the ref for the branch case.
-            context.OpStack.PushRef(refType);
+            context.OpStack.PushRef(refType.ToConcrete());
             
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
             //Pop values like we branch
