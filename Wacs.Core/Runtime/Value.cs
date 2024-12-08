@@ -29,7 +29,7 @@ namespace Wacs.Core.Runtime
     /// <summary>
     /// @Spec 4.2.1. Values
     /// </summary>
-    [StructLayout(LayoutKind.Explicit)]
+    [StructLayout(LayoutKind.Explicit, Size = 20)]
     public struct Value
     {
         [FieldOffset(0)] public ValType Type;
@@ -43,6 +43,8 @@ namespace Wacs.Core.Runtime
 
         // Ref Address
         [FieldOffset(4)] public int Ptr;
+        //Local Variables
+        [FieldOffset(16)] public bool Set;
 
         // 64-bit integer
         [FieldOffset(4)] public long Int64;
@@ -269,6 +271,12 @@ namespace Wacs.Core.Runtime
             Int64 = (long)v;
         }
 
+        public Value MakeSet()
+        {
+            Set = true;
+            return this;
+        }
+
         //Default Values
         public Value(ValType type)
         {
@@ -277,7 +285,11 @@ namespace Wacs.Core.Runtime
             if (type.IsRefType() && type.IsDefType())
             {
                 Type = type;
-                Ptr = type.IsNullable()? -1 : 0;
+                if (type.IsNullable())
+                {
+                    Ptr = -1;
+                    Set = true;
+                }
                 return;
             }
             
@@ -286,48 +298,61 @@ namespace Wacs.Core.Runtime
             {
                 case ValType.I32:
                     Int32 = 0;
+                    Set = true;
                     break;
                 case ValType.I64:
                     Int64 = 0;
+                    Set = true;
                     break;
                 case ValType.F32:
                     Float32 = 0.0f;
+                    Set = true;
                     break;
                 case ValType.F64:
                     Float64 = 0.0d;
+                    Set = true;
                     break;
                 case ValType.V128:
                     V128 = (V128)(0L, 0L);
+                    Set = true;
                     break;
                 case ValType.FuncRef:
                     Ptr = -1;
+                    Set = true;
                     break;
                 case ValType.Func:
                     Ptr = 0;
                     break;
                 case ValType.ExternRef:
                     Ptr = -1;
+                    Set = true;
                     break;
                 case ValType.Extern:
                     Ptr = 0;
                     break;
                 case ValType.Nil:
                     Ptr = -1;
+                    Set = true;
                     break;
                 case ValType.Bot:
                     Ptr = -1;
+                    Set = true;
                     break;
                 case ValType.None:
                     Ptr = -1;
+                    Set = true;
                     break;
                 case ValType.NoFunc:
                     Ptr = -1;
+                    Set = true;
                     break;
                 case ValType.NoExtern:
                     Ptr = -1;
+                    Set = true;
                     break;
                 case ValType.Any:
                     Ptr = -1;
+                    Set = true;
                     break;
                 case ValType.Undefined:
                 default:
