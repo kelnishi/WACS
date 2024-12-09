@@ -135,6 +135,7 @@ namespace Wacs.Core
             Datas = new DataValidationSpace(moduleInst.Repr.Datas.Length);
 
             Globals = new GlobalValidationSpace(moduleInst.Repr);
+            Globals.IncrementalHighWatermark = int.MaxValue;
 
             OpStack = new CalculatorOpStack(this);
             
