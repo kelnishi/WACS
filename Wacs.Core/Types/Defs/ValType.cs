@@ -157,6 +157,17 @@ namespace Wacs.Core.Types.Defs
             _ => false,
         };
 
+        public static bool IsVal(this ValType type) => type switch
+        {
+            ValType.I32 
+                or ValType.I64 
+                or ValType.F32 
+                or ValType.F64 
+                or ValType.V128
+                or ValType.Bot => true,
+            _ => false
+        };
+
         public static HeapType GetHeapType(this ValType type)
         {
             return type switch
@@ -260,31 +271,28 @@ namespace Wacs.Core.Types.Defs
 
         public static bool Matches(this ValType left, ValType right, TypesSpace? types)
         {
-            if (left == right || left == ValType.Bot || right == ValType.Bot)
+            if (left == ValType.Bot || right == ValType.Bot)
                 return true;
             
             if (left.IsRefType() && right.IsRefType())
             {
-                //Non-nullable cannot receive nullable
-                if (!right.IsNullable())
-                {
-                    switch (left)
-                    {
-                        case ValType.None:
-                        case ValType.NoFunc:
-                        case ValType.NoExtern:
-                            break;
-                        case {} when left.IsNullable():
-                            return false;
-                    }
-                }
-                
                 //Check the HeapType
-                if (left.IsSubType(right, types))
+                //Non-nullable cannot receive nullable
+                if (left.IsSubType(right, types) && (!left.IsNullable() || right.IsNullable()))
                     return true;
+                
+                switch (left)
+                {
+                    case ValType.None:
+                    case ValType.NoFunc:
+                    case ValType.NoExtern:
+                        return true;
+                    default:
+                        return false;
+                }
             }
 
-            return false;
+            return left == right;
         }
     }
 

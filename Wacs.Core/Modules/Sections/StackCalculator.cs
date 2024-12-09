@@ -148,10 +148,7 @@ namespace Wacs.Core
             
             ReturnType = funcType.ResultType;
             PushControlFrame(OpCode.Block, fakeType);
-            Attributes = new RuntimeAttributes
-            {
-                Configure_RefTypes = true,
-            };
+            Attributes = new RuntimeAttributes();
         }
 
         public RuntimeAttributes Attributes { get; }
