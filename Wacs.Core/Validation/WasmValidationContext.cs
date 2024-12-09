@@ -82,7 +82,11 @@ namespace Wacs.Core.Validation
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
-        public LocalsSpace Locals => ExecFrame.Locals;
+        public LocalsSpace Locals =>
+            ControlStack.Count == 0
+                ? ExecFrame.Locals 
+                : ControlFrame.Locals;
+
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
 
@@ -182,6 +186,7 @@ namespace Wacs.Core.Validation
                 Opcode = opCode,
                 Types = types,
                 Height = OpStack.Height,
+                Locals = new LocalsSpace(Locals),
             };
             
             ControlStack.Push(frame);
@@ -230,6 +235,8 @@ namespace Wacs.Core.Validation
 
         public void SetExecFrame(FunctionType funcType, ValType[] localTypes)
         {
+            ControlStack.Clear();
+            
             int capacity = funcType.ParameterTypes.Types.Length + localTypes.Length;
             var data = new Value[capacity];
             
