@@ -147,7 +147,20 @@ namespace Spec.Test.WastJson
 
         private static ulong BitBashLong(string longval)
         {
-            return ulong.Parse(longval);
+            decimal value = decimal.Parse(longval);
+            if (value > ulong.MaxValue)
+                throw new InvalidDataException($"Integer value {longval} out of range");
+            if (value < long.MinValue)
+                throw new InvalidDataException($"Integer value {longval} out of range");
+                
+            if (value > long.MaxValue && value <= ulong.MaxValue)
+            {
+                return (ulong)value;
+            }
+            if (value < 0)
+                return (ulong)(long)value;
+            
+            return (ulong)value;
         }
 
         private static double BitBashDouble(string longval)
