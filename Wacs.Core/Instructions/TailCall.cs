@@ -52,12 +52,6 @@ namespace Wacs.Core.Instructions
         /// <param name="context"></param>
         public override void Validate(IWasmValidationContext context)
         {
-            //Return
-            Stack<Value> aside = new();
-            context.OpStack.PopValues(context.ReturnType, ref aside);
-            context.OpStack.PushValues(aside);
-            context.SetUnreachable();
-            
             //Call
             context.Assert(context.Funcs.Contains(X),
                 "Instruction returncall was invalid. Function {0} was not in the Context.",X);
@@ -67,9 +61,17 @@ namespace Wacs.Core.Instructions
             context.Assert(funcType,
                 "Instruction returncall was invalid. {0} is not a FuncType", type);
             
-            context.OpStack.PopValues(funcType.ParameterTypes, ref aside);
-            aside.Clear();
+            context.Assert(context.ReturnType.Matches(funcType.ResultType),
+                "Instruction return_call_indirect was invalid. Mismatched result types: calltype:{0} returntype:{1}", funcType.ResultType.ToNotation(), context.ReturnType.ToNotation());
+            
+            context.OpStack.DiscardValues(funcType.ParameterTypes);
             context.OpStack.PushResult(funcType.ResultType);
+            
+            //Return
+            Stack<Value> aside = new();
+            context.OpStack.PopValues(context.ReturnType, ref aside);
+            context.OpStack.PushValues(aside);
+            context.SetUnreachable();
         }
 
         // @Spec 4.4.8.10. call
@@ -207,30 +209,32 @@ namespace Wacs.Core.Instructions
         /// <param name="context"></param>
         public override void Validate(IWasmValidationContext context)
         {
+            //Call Indirect
+            context.Assert(context.Tables.Contains(X),
+                "Instruction return_call_indirect was invalid. Table {0} was not in the Context.",X);
+            var tableType = context.Tables[X];
+            context.Assert(tableType.ElementType == ValType.FuncRef,
+                "Instruction return_call_indirect was invalid. Table type was not funcref");
+            context.Assert(context.Types.Contains(Y),
+                "Instruction return_call_indirect was invalid. Function type {0} was not in the Context.",Y);
+            
+            var type = context.Types[Y].Expansion;
+            var funcType = type as FunctionType;
+            context.Assert(funcType,
+                "Instruction return_call_indirect was invalid. Not a FuncType. {0}", type);
+
+            context.Assert(context.ReturnType.Matches(funcType.ResultType),
+                "Instruction return_call_indirect was invalid. Mismatched result types: calltype:{0} returntype:{1}", funcType.ResultType.ToNotation(), context.ReturnType.ToNotation());
+            
+            context.OpStack.PopI32();
+            context.OpStack.DiscardValues(funcType.ParameterTypes);
+            context.OpStack.PushResult(funcType.ResultType);
+            
             //Return
             Stack<Value> aside = new();
             context.OpStack.PopValues(context.ReturnType, ref aside);
             context.OpStack.PushValues(aside);
             context.SetUnreachable();
-            
-            //Call Indirect
-            context.Assert(context.Tables.Contains(X),
-                "Instruction call_indirect was invalid. Table {0} was not in the Context.",X);
-            var tableType = context.Tables[X];
-            context.Assert(tableType.ElementType == ValType.FuncRef,
-                "Instruction call_indirect was invalid. Table type was not funcref");
-            context.Assert(context.Types.Contains(Y),
-                "Instruction call_indirect was invalid. Function type {0} was not in the Context.",Y);
-            
-            var type = context.Types[Y].Expansion;
-            var funcType = type as FunctionType;
-            context.Assert(funcType,
-                "Instruction returncall_indirect was invalid. Not a FuncType. {0}", type);
-
-            context.OpStack.PopI32();
-            context.OpStack.PopValues(funcType.ParameterTypes, ref aside);
-            aside.Clear();
-            context.OpStack.PushResult(funcType.ResultType);
         }
 
         // @Spec 4.4.8.11. call_indirect
