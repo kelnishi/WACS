@@ -83,6 +83,9 @@ namespace Wacs.Core.Types
                     .WithMessage(gt => $"GlobalType had invalid ContentType {gt.ContentType}");
             }
         }
+
+        public bool Matches(GlobalType other, TypesSpace? types) => 
+            Mutability == other.Mutability && ContentType.Matches(other.ContentType, types);
     }
 
     /// <summary>
