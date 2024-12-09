@@ -95,7 +95,7 @@ namespace Wacs.Core
                             var result = exprValidator.Validate(subContext);
                             foreach (var error in result.Errors)
                             {
-                                ctx.AddFailure($"Expression.{error.PropertyName}", error.ErrorMessage);
+                                ctx.AddFailure($"Global.Initializer.{error.PropertyName}", error.ErrorMessage);
                             }
                             
                             validationContext.PopValidationContext();

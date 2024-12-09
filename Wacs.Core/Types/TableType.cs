@@ -148,6 +148,26 @@ namespace Wacs.Core.Types
                 RuleFor(tt => tt.ElementType)
                     .Must((_, type, ctx) => ctx.GetValidationContext().ValidateType(type))
                     .WithMessage(tt => $"TableType had invalid ElementType {tt.ElementType}");
+                RuleFor(tt => tt.Init)
+                    .Custom((expr, ctx) =>
+                    {
+                        var validationContext = ctx.GetValidationContext();
+                        var subContext = validationContext.PushSubContext(expr);
+
+                        var funcType = FunctionType.Empty;
+                        validationContext.FunctionIndex = FuncIdx.Default;
+                        validationContext.SetExecFrame(funcType, Array.Empty<ValType>());
+                            
+                        var tt = ctx.InstanceToValidate;
+                        var exprValidator = new Expression.Validator(new ResultType(tt.ElementType), isConstant: true);
+                            
+                        var result = exprValidator.Validate(subContext);
+                        foreach (var error in result.Errors)
+                        {
+                            ctx.AddFailure($"TableType.Init.{error.PropertyName}", error.ErrorMessage);
+                        }
+                        validationContext.PopValidationContext();
+                    });
             }
         }
     }

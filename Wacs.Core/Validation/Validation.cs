@@ -40,9 +40,6 @@ namespace Wacs.Core.Validation
             RuleFor(module => module.Imports)
                 .Custom((_, ctx) => 
                     ctx.GetValidationContext().Globals.SetHighImportWatermark());
-            RuleForEach(module => module.Globals).SetValidator(new Module.Global.Validator());
-            RuleForEach(module => module.ValidationFuncs)
-                .SetValidator(new Module.Function.Validator()).OverridePropertyName("Function");
             RuleForEach(module => module.Tables).SetValidator(new TableType.Validator());
             RuleForEach(module => module.Memories).SetValidator(new MemoryType.Validator());
             if (!ValidateMultipleMemories)
@@ -51,6 +48,9 @@ namespace Wacs.Core.Validation
                     .LessThan(2)
                     .WithMessage("Multiple memories are not supported.");
             }
+            RuleForEach(module => module.Globals).SetValidator(new Module.Global.Validator());
+            RuleForEach(module => module.ValidationFuncs)
+                .SetValidator(new Module.Function.Validator()).OverridePropertyName("Function");
             RuleForEach(module => module.Exports).SetValidator(new Module.Export.Validator());
             RuleForEach(module => module.Elements).SetValidator(new Module.ElementSegment.Validator());
             RuleForEach(module => module.Datas).SetValidator(new Module.Data.Validator());
