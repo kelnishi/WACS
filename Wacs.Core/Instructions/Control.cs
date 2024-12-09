@@ -931,7 +931,7 @@ namespace Wacs.Core.Instructions
             //17.
             var ftActual = funcInst.Type;
             //18.
-            if (!ftExpect.Matches(ftActual))
+            if (!ftExpect.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
             //19.
             context.Invoke(a);
@@ -980,7 +980,7 @@ namespace Wacs.Core.Instructions
             //17.
             var ftActual = funcInst.Type;
             //18.
-            if (!ftExpect.Matches(ftActual))
+            if (!ftExpect.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
             //19.
             await context.InvokeAsync(a);

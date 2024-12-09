@@ -170,7 +170,7 @@ namespace Wacs.Core.Instructions.Reference
                 $"Instruction call_ref failed. Invalid Function Reference {r}.");
             var funcInst = context.Store[a];
             var ftActual = funcInst.Type;
-            if (!funcType!.Matches(ftActual))
+            if (!funcType!.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction call_ref failed. Expected FunctionType differed.");
             
             context.Invoke(a);
@@ -194,7 +194,7 @@ namespace Wacs.Core.Instructions.Reference
                 $"Instruction call_ref failed. Invalid Function Reference {r}.");
             var funcInst = context.Store[a];
             var ftActual = funcInst.Type;
-            if (!funcType!.Matches(ftActual))
+            if (!funcType!.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction call_ref failed. Expected FunctionType differed.");
             await context.InvokeAsync(a);
         }

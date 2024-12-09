@@ -57,6 +57,7 @@ namespace Wacs.Core.Instructions
             
             OpCode.ReturnCall         => new InstReturnCall(),
             OpCode.ReturnCallIndirect => new InstReturnCallIndirect(),
+            OpCode.ReturnCallRef      => new InstReturnCallRef(),
             
             //When invoking externally
             OpCode.Func              => new InstFuncReturn(),

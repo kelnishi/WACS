@@ -329,6 +329,14 @@ namespace Wacs.Core
                 .OfType<InstRefFunc>();
             foreach (var refFunc in elementIni) fullyDeclared.Add(refFunc.FunctionIndex);
 
+            var elementDecl = module.Elements
+                .Where(elem => elem.Mode is Module.ElementMode.DeclarativeMode)
+                .SelectMany(elem => elem.Initializers)
+                .SelectMany(ini => ini.Instructions)
+                .OfType<InstRefFunc>();
+            
+            foreach (var refFunc in elementDecl) fullyDeclared.Add(refFunc.FunctionIndex);
+            
             var globalIni = module.Globals
                 .Where(global => global.Type.ContentType == ValType.FuncRef)
                 .SelectMany(global => global.Initializer.Instructions)
@@ -343,7 +351,7 @@ namespace Wacs.Core
                         throw new FormatException($"memory.init instruction requires Data Count section");
                 }
                 if (fullyDeclared.Contains(func.Index))
-                    func.IsFullyDeclared = true;
+                    func.ElementDeclared = true;
             }
             
             if (module.DataCount == uint.MaxValue)
