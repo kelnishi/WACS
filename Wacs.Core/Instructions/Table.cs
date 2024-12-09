@@ -324,7 +324,7 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Tables.Contains(SrcY),
                  "Instruction table.copy failed. Table index {0} does not exist in Context",SrcY);
             var t2 = context.Tables[SrcY];
-            context.Assert(t1.ElementType == t2.ElementType,
+            context.Assert(t2.ElementType.Matches(t1.ElementType, context.Types),
                  "Instruction table.copy failed. Table type mismatch {0} != {1}",t1.ElementType,t2.ElementType);
             context.OpStack.PopI32();
             context.OpStack.PopI32();
