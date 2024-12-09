@@ -265,6 +265,12 @@ namespace Wacs.Core.Types
 
     public struct LocalsSpace
     {
+        public static readonly LocalsSpace Empty = new LocalsSpace(
+            Array.Empty<Value>(),
+            Array.Empty<ValType>(),
+            Array.Empty<ValType>(),
+            true);
+        
         public Value[] Data;
 
         public int Capacity { get; }
@@ -303,8 +309,14 @@ namespace Wacs.Core.Types
             }
         }
 
-        public bool Contains(LocalIdx idx) =>
-            idx.Value < Capacity;
+        public LocalsSpace(LocalsSpace copy)
+        {
+            Capacity = copy.Capacity;
+            Data = new Value[copy.Data.Length];
+            copy.Data.CopyTo(Data,0);
+        }
+
+        public bool Contains(LocalIdx idx) => idx.Value < Capacity;
     }
 
     public class ElementsSpace : AbstractIndexSpace<ElemIdx, Module.ElementSegment>

@@ -154,11 +154,11 @@ namespace Wacs.Core.Types
                         var validationContext = ctx.GetValidationContext();
                         var subContext = validationContext.PushSubContext(expr);
 
+                        var tt = ctx.InstanceToValidate;
+                            
                         var funcType = FunctionType.Empty;
                         validationContext.FunctionIndex = FuncIdx.Default;
                         validationContext.SetExecFrame(funcType, Array.Empty<ValType>());
-                            
-                        var tt = ctx.InstanceToValidate;
                         var exprValidator = new Expression.Validator(new ResultType(tt.ElementType), isConstant: true);
                             
                         var result = exprValidator.Validate(subContext);
