@@ -23,7 +23,7 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public sealed class InstF32UnOp : InstructionBase, INodeComputer<float, float>
+    public sealed class InstF32UnOp : InstructionBase, IConstOpInstruction, INodeComputer<float, float>
     {
         // @Spec 3.3.1.2. f.unop
         public static readonly InstF32UnOp F32Abs      = new(OpCode.F32Abs       , ExecuteF32Abs     , NumericInst.ValidateOperands(pop: ValType.F32, push: ValType.F32));
@@ -37,12 +37,15 @@ namespace Wacs.Core.Instructions.Numeric
 
         private readonly NumericInst.ValidationDelegate _validate;
 
-        private InstF32UnOp(ByteCode op, Func<float,float> execute, NumericInst.ValidationDelegate validate)
+        private InstF32UnOp(ByteCode op, Func<float,float> execute, NumericInst.ValidationDelegate validate, bool isConst = false)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
+            IsConstant = isConst;
         }
+        
+        public bool IsConstant { get; }
 
         public override ByteCode Op { get; }
 
