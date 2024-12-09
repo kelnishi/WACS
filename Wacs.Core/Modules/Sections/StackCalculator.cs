@@ -156,7 +156,7 @@ namespace Wacs.Core
 
         public RuntimeAttributes Attributes { get; }
         public IValidationOpStack OpStack { get; }
-        public FuncIdx FunctionIndex { get; }
+        public FuncIdx FunctionIndex => FuncIdx.Default;
         public ResultType ReturnType { get; }
         public bool Unreachable { get; set; }
         public TypesSpace Types { get; }

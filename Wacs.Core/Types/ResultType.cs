@@ -74,13 +74,13 @@ namespace Wacs.Core.Types
         public string ToResults() => Types.Length == 0 ? "" : $" (result{ToTypes()})";
 
 
-        public bool Matches(ResultType other)
+        public bool Matches(ResultType other, TypesSpace? types)
         {
             if (Types.Length != other.Types.Length)
                 return false;
             for (int i = 0, l = Types.Length; i < l; ++i)
             {
-                if (Types[i] != other.Types[i])
+                if (!Types[i].Matches(other.Types[i], types))
                     return false;
             }
 

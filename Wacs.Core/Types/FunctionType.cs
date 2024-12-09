@@ -51,9 +51,9 @@ namespace Wacs.Core.Types
         public FunctionType(ResultType parameterTypes, ResultType resultType) =>
             (ParameterTypes, ResultType) = (parameterTypes, resultType);
 
-        public bool Matches(FunctionType other) =>
-            ParameterTypes.Matches(other.ParameterTypes) &&
-            ResultType.Matches(other.ResultType);
+        public bool Matches(FunctionType other, TypesSpace? types) =>
+            ParameterTypes.Matches(other.ParameterTypes, types) &&
+            ResultType.Matches(other.ResultType, types);
 
         /// <summary>
         /// Determine if the stack deltas are equivalent.
