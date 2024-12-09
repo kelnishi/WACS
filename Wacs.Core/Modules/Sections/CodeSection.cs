@@ -99,7 +99,6 @@ namespace Wacs.Core
                 
                 module.Funcs[i].Locals = localsbody.Locals;
                 module.Funcs[i].Body = localsbody.Body;
-                module.Funcs[i].IsFullyDeclared = true;
             }
 
             module.Codes = Array.Empty<Module.CodeDesc>();

@@ -38,7 +38,7 @@ namespace Wacs.Core
             Imports
                 .Select(import => import.Desc)
                 .OfType<ImportDesc.FuncDesc>()
-                .Select(funcDesc => new Function { TypeIndex = funcDesc.TypeIndex, IsImport = true, IsFullyDeclared = true })
+                .Select(funcDesc => new Function { TypeIndex = funcDesc.TypeIndex, IsImport = true })
                 .ToList().AsReadOnly();
 
         public ReadOnlyCollection<TableType> ImportedTables =>

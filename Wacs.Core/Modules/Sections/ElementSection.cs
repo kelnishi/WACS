@@ -216,6 +216,7 @@ namespace Wacs.Core
                             
                             // @Spec 3.4.5.1. base
                             var validationContext = ctx.GetValidationContext();
+                            validationContext.FunctionIndex = FuncIdx.Default;
                             var exprValidator = new Expression.Validator(resultType, isConstant: true);
                             var subContext = validationContext.PushSubContext(expr);
                             var result = exprValidator.Validate(subContext);

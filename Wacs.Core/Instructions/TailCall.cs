@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions
             context.Assert(funcType,
                 "Instruction returncall was invalid. {0} is not a FuncType", type);
             
-            context.Assert(context.ReturnType.Matches(funcType.ResultType),
+            context.Assert(funcType.ResultType.Matches(context.ReturnType, context.Types),
                 "Instruction return_call_indirect was invalid. Mismatched result types: calltype:{0} returntype:{1}", funcType.ResultType.ToNotation(), context.ReturnType.ToNotation());
             
             context.OpStack.DiscardValues(funcType.ParameterTypes);
@@ -223,7 +223,7 @@ namespace Wacs.Core.Instructions
             context.Assert(funcType,
                 "Instruction return_call_indirect was invalid. Not a FuncType. {0}", type);
 
-            context.Assert(context.ReturnType.Matches(funcType.ResultType),
+            context.Assert(funcType.ResultType.Matches(context.ReturnType, context.Types),
                 "Instruction return_call_indirect was invalid. Mismatched result types: calltype:{0} returntype:{1}", funcType.ResultType.ToNotation(), context.ReturnType.ToNotation());
             
             context.OpStack.PopI32();
@@ -282,7 +282,7 @@ namespace Wacs.Core.Instructions
             //17.
             var ftActual = funcInst.Type;
             //18.
-            if (!ftExpect.Matches(ftActual))
+            if (!ftExpect.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
             
             //Return
@@ -344,7 +344,7 @@ namespace Wacs.Core.Instructions
             //17.
             var ftActual = funcInst.Type;
             //18.
-            if (!ftExpect.Matches(ftActual))
+            if (!ftExpect.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
             
             //Return
@@ -420,6 +420,152 @@ namespace Wacs.Core.Instructions
             }
             
             return $"{base.RenderText(context)}{(X.Value == 0 ? "" : $" {X.Value}")} (type {Y.Value})";
+        }
+    }
+    
+    public class InstReturnCallRef : InstructionBase, ICallInstruction
+    {
+        public TypeIdx X;
+
+        public InstReturnCallRef()
+        {
+            IsAsync = true;
+        }
+
+        public override ByteCode Op => OpCode.Call;
+
+        public bool IsBound(ExecContext context)
+        {
+            return false;
+        }
+
+        public override void Validate(IWasmValidationContext context)
+        {
+            //Call
+            context.Assert(context.Types.Contains(X),
+                "Instruction call_ref was invalid. Function Type {0} was not in the Context.",X);
+            var type = context.Types[X].Expansion;
+            var funcType = type as FunctionType;
+            context.Assert(funcType,
+                "Instruction call_ref was invalid. Not a FuncType. {0}", type);
+            
+            var refVal = context.OpStack.PopRefType();
+            context.Assert(refVal.IsRef,
+                "Instruction call_ref was invalid. Not a RefType. {0}", refVal);
+            context.Assert(refVal.Type.IsNull() || refVal.Type.Index() == X,
+                "Instruction call_ref was invalid. type mismatch: expected (ref null {0}), found {1}", X.Value, refVal.Type);
+            
+            context.Assert(funcType.ResultType.Matches(context.ReturnType, context.Types),
+                "Instruction return_call_ref was invalid. Mismatched result types: calltype:(func {0}){1} returntype:=(func {2}){3}",
+                X.Value,
+                funcType.ResultType.ToNotation(),
+                context.FunctionIndex,
+                context.ReturnType.ToNotation());
+            
+            context.OpStack.DiscardValues(funcType.ParameterTypes);
+            context.OpStack.PushResult(funcType.ResultType);
+            
+            //Return
+            Stack<Value> aside = new();
+            context.OpStack.PopValues(context.ReturnType, ref aside);
+            context.OpStack.PushValues(aside);
+            context.SetUnreachable();
+        }
+
+        public override void Execute(ExecContext context)
+        {
+            context.Assert(context.StackTopTopType() == ValType.FuncRef,
+                $"Instruction {Op.GetMnemonic()} failed. Expected FuncRef on top of stack.");
+            context.Assert( context.Frame.Module.Types.Contains(X),
+                $"Instruction return_call_ref failed. Function Type for {X} was not in the Context.");
+
+            var r = context.OpStack.PopRefType();
+            if (r.IsNullRef)
+                throw new TrapException($"Null reference in call_ref");
+
+            var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
+            
+            var a = (FuncAddr)r;
+            context.Assert( context.Store.Contains(a),
+                $"Instruction return_call_ref failed. Invalid Function Reference {r}.");
+            
+            //Return
+            // Split stack will preserve the operands, don't bother moving them.
+            // Stack<Value> values = new Stack<Value>();
+            // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
+            var address = context.PopFrame();
+            //Push back operands
+            // context.OpStack.Push(values);
+            
+            var funcInst = context.Store[a];
+            var ftActual = funcInst.Type;
+            if (!funcType!.Matches(ftActual, context.Frame.Module.Types))
+                throw new TrapException($"Instruction return_call_ref failed. Expected FunctionType differed.");
+            
+            //Call
+            context.Invoke(a);
+            
+            //Reuse the pointer from the outgoing function
+            context.Frame.ContinuationAddress = address;
+        }
+
+        public override async ValueTask ExecuteAsync(ExecContext context)
+        {
+            context.Assert(context.StackTopTopType() == ValType.FuncRef,
+                $"Instruction {Op.GetMnemonic()} failed. Expected FuncRef on top of stack.");
+            context.Assert( context.Frame.Module.Types.Contains(X),
+                $"Instruction return_call_ref failed. Function Type for {X} was not in the Context.");
+
+            var r = context.OpStack.PopRefType();
+            if (r.IsNullRef)
+                throw new TrapException($"Null reference in call_ref");
+
+            var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
+            
+            var a = (FuncAddr)r;
+            context.Assert( context.Store.Contains(a),
+                $"Instruction return_call_ref failed. Invalid Function Reference {r}.");
+            
+            var funcInst = context.Store[a];
+            var ftActual = funcInst.Type;
+            if (!funcType!.Matches(ftActual, context.Frame.Module.Types))
+                throw new TrapException($"Instruction return_call_ref failed. Expected FunctionType differed.");
+            
+            //Return
+            // Split stack will preserve the operands, don't bother moving them.
+            // Stack<Value> values = new Stack<Value>();
+            // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
+            var address = context.PopFrame();
+            //Push back operands
+            // context.OpStack.Push(values);
+            
+            //Call
+            await context.InvokeAsync(a);
+            
+            //Reuse the pointer from the outgoing function
+            context.Frame.ContinuationAddress = address;
+        }
+
+        public override InstructionBase Parse(BinaryReader reader)
+        {
+            X = (TypeIdx)reader.ReadLeb128_u32();
+            return this;
+        }
+
+        public InstructionBase Immediate(TypeIdx value)
+        {
+            X = value;
+            return this;
+        }
+
+        public override string RenderText(ExecContext? context)
+        {
+            if (context != null)
+            {
+                var type = context.Frame.Module.Types[X];
+                return $"{base.RenderText(context)} {type} {X.Value}";    
+            }
+            return $"{base.RenderText(context)} {X.Value}";
         }
     }
 }

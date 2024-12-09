@@ -82,7 +82,7 @@ namespace Wacs.Core.Runtime
                         {
                             wasmFunc.SetName(entityId.entity);
                         }
-                        if (!functionInstance.Type.Matches(funcSig))
+                        if (!functionInstance.Type.Matches(funcSig, moduleInstance.Types))
                             throw new NotSupportedException(
                                 $"Type mismatch while importing Function {entityId.module}.{entityId.entity}: expected {funcSig.ToNotation()}, env provided Function {functionInstance.Type.ToNotation()}");
                         //14. external imported addresses first

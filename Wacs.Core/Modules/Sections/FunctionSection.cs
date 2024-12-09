@@ -40,7 +40,11 @@ namespace Wacs.Core
         public class Function : IRenderable
         {
             public FuncIdx Index;
-            public bool IsFullyDeclared = false;
+
+            public bool ElementDeclared = false;
+
+            public bool IsFullyDeclared(IWasmValidationContext ctx) => 
+                ElementDeclared || Index.Value < ctx.FunctionIndex.Value;
 
             public bool IsImport = false;
             public string Id { get; set; } = "";
