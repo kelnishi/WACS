@@ -140,7 +140,8 @@ namespace Wacs.Core
                     public Validator()
                     {
                         RuleFor(gd => gd.GlobalIndex)
-                            .Must((_, index, ctx) => ctx.GetValidationContext().Globals.Contains(index));
+                            .Must((_, index, ctx) => ctx.GetValidationContext().Globals.Contains(index))
+                            .WithMessage(gd => $"Validation context did not contain GlobalDesc Index {gd.GlobalIndex.Value}");
                     }
                 }
             }

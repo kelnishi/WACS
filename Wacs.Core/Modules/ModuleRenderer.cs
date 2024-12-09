@@ -152,7 +152,11 @@ namespace Wacs.Core
                             case "InstElse":
                             {
                                 if (pointerInst == null)
-                                    throw new ArgumentException("Validation path was invalid.");
+                                    {
+                                        Console.Error.WriteLine($"Validation path was invalid. {validationPath}");
+                                        break;
+                                    // throw new ArgumentException("Validation path was invalid.");
+                                    }
 
                                 if (print)
                                     Console.WriteLine($"{indent}{strata}[{index}]:{line}");

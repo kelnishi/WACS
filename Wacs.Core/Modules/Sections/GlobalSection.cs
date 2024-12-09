@@ -100,6 +100,9 @@ namespace Wacs.Core
                             
                             validationContext.PopValidationContext();
                         });
+                    RuleFor(g => g)
+                        .Custom((glob, ctx) => 
+                            ctx.GetValidationContext().Globals.SetHighWatermark(glob));
                 }
             }
         }

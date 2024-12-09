@@ -18,6 +18,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types.Defs;
@@ -234,6 +235,7 @@ namespace Wacs.Core.Types
     {
         private readonly ReadOnlyCollection<Module.Global> _globals;
         private readonly ReadOnlyCollection<Module.Global> _imports;
+        public int IncrementalHighWatermark = -1;
 
         public GlobalValidationSpace(Module module)
         {
@@ -247,8 +249,18 @@ namespace Wacs.Core.Types
             set => throw new InvalidOperationException(InvalidSetterMessage);
         }
 
-        public override bool Contains(GlobalIdx idx) =>
-            idx.Value < _imports.Count + _globals.Count;
+        public void SetHighWatermark(Module.Global target)
+        {
+            IncrementalHighWatermark = _imports.Concat(_globals).ToList().FindIndex(p => p == target);
+        }
+
+        public void SetHighImportWatermark()
+        {
+            IncrementalHighWatermark = _imports.Count - 1;
+        }
+
+        public override bool Contains(GlobalIdx idx) => 
+            idx.Value < _imports.Count + _globals.Count && idx.Value <= IncrementalHighWatermark;
     }
 
     public struct LocalsSpace
