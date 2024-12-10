@@ -255,7 +255,11 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Frame.Module.Types.Contains(Y),
                 $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
             //7.
-            var ftExpect = context.Frame.Module.Types[Y].Expansion as FunctionType;
+            var ftExpect = context.Frame.Module.Types[Y];
+            var ftFunc = ftExpect.Expansion as FunctionType;
+            context.Assert(ftFunc,
+                $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
+            
             //8.
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
@@ -280,10 +284,13 @@ namespace Wacs.Core.Instructions
             //16.
             var funcInst = context.Store[a];
             //17.
-            var ftActual = funcInst.Type;
+            
             //18.
-            if (!ftExpect.Matches(ftActual, context.Frame.Module.Types))
-                throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
+            if (funcInst is FunctionInstance ftAct)
+                if (ftAct.DefTypeHash != ftExpect.GetHashCode())
+                    throw new TrapException($"Instruction return_call_indirect failed. RecursiveType differed.");
+            if (!ftFunc.Matches(funcInst.Type, context.Frame.Module.Types))
+                throw new TrapException($"Instruction return_call_indirect failed. Expected FunctionType differed.");
             
             //Return
             // Split stack will preserve the operands, don't bother moving them.
@@ -317,7 +324,10 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Frame.Module.Types.Contains(Y),
                 $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
             //7.
-            var ftExpect = context.Frame.Module.Types[Y].Expansion as FunctionType;
+            var ftExpect = context.Frame.Module.Types[Y];
+            var ftFunc = ftExpect.Expansion as FunctionType;
+            context.Assert(ftFunc,
+                $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
             //8.
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
@@ -342,9 +352,11 @@ namespace Wacs.Core.Instructions
             //16.
             var funcInst = context.Store[a];
             //17.
-            var ftActual = funcInst.Type;
             //18.
-            if (!ftExpect.Matches(ftActual, context.Frame.Module.Types))
+            if (funcInst is FunctionInstance ftAct)
+                if (ftAct.DefTypeHash != ftExpect.GetHashCode())
+                    throw new TrapException($"Instruction call_indirect failed. RecursiveType differed.");
+            if (!ftFunc.Matches(funcInst.Type, context.Frame.Module.Types))
                 throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
             
             //Return
