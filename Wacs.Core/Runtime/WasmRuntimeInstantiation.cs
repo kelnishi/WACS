@@ -121,9 +121,17 @@ namespace Wacs.Core.Runtime
                             throw new NotSupportedException(
                                 $"The imported Global was not provided by the environment: {entityId.module}.{entityId.entity}");
                         var globalInstance = Store[globalAddr];
+                        if (globalType.Mutability != globalInstance.Type.Mutability)
+                            throw new NotSupportedException(
+                                $"Mutability mismatch while importing Global {entityId.module}.{entityId.entity} {globalType}, env provided Global {globalInstance.Type}");
+                        if (globalInstance.Type.ContentType.IsDefType() &&
+                            !moduleInstance.Types.Contains(globalInstance.Type.ContentType.Index()))
+                            throw new NotSupportedException(
+                                $"Incompatible import type for Global {entityId.module}.{entityId.entity}: {globalInstance.Type}");
                         if (!globalInstance.Type.Matches(globalType, moduleInstance.Types))
                             throw new NotSupportedException(
                                 $"Type mismatch while importing Global {entityId.module}.{entityId.entity}: expected {globalType}, env provided Global {globalInstance.Type}");
+                        
                         //17. external imported addresses first
                         moduleInstance.GlobalAddrs.Add(globalAddr);
                         break;
