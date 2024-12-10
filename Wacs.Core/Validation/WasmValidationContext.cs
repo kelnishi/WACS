@@ -141,43 +141,9 @@ namespace Wacs.Core.Validation
             
             PopValidationContext();
         }
-
-        public bool ValidateType(ValType type)
-        {
-            return type switch
-            {
-                ValType.I32 or 
-                    ValType.I64 or 
-                    ValType.F32 or 
-                    ValType.F64 or 
-                    ValType.V128 or
-                    ValType.NoFunc or 
-                    ValType.NoExtern or 
-                    ValType.None or 
-                    ValType.FuncRef or 
-                    ValType.ExternRef or
-                    ValType.Any or
-                    ValType.Eq or 
-                    ValType.I31 or 
-                    ValType.Struct or 
-                    ValType.Array => true,
-                ValType.NoFuncNN or  
-                    ValType.NoExternNN or
-                    ValType.NoneNN or    
-                    ValType.Func or    
-                    ValType.Extern or  
-                    ValType.AnyNN or     
-                    ValType.EqNN or      
-                    ValType.I31NN or     
-                    ValType.StructNN or  
-                    ValType.ArrayNN => true, 
-                _ when type.IsDefType() => Types.Contains(type.Index()),
-                _ => false
-            };
-        }
         
         public bool ValidateBlockType(ValType type) => 
-            ValidateType(type) || type == ValType.Empty;
+            type.Validate(Types) || type == ValType.Empty;
 
         public void PushControlFrame(ByteCode opCode, FunctionType types)
         {

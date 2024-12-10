@@ -108,10 +108,10 @@ namespace Wacs.Core.Types
             public Validator()
             {
                 RuleForEach(f => f.ParameterTypes.Types)
-                    .Must((_, pt, ctx) => ctx.GetValidationContext().ValidateType(pt))
+                    .Must((_, pt, ctx) => pt.Validate(ctx.GetValidationContext().Types))
                     .WithMessage(f => $"FunctionType had invalid parameter types:{f}");
                 RuleForEach(f => f.ResultType.Types)
-                    .Must((_, pt, ctx) => ctx.GetValidationContext().ValidateType(pt))
+                    .Must((_, pt, ctx) => pt.Validate(ctx.GetValidationContext().Types))
                     .WithMessage(f => $"FunctionType had invalid result types:{f}");
             }
         }

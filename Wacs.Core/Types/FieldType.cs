@@ -50,7 +50,7 @@ namespace Wacs.Core.Types
                 
                 //StorageType
                 RuleFor(ft => ft.StorageType)
-                    .Must((_, vt, ctx) => ctx.GetValidationContext().ValidateType(vt))
+                    .Must((_, vt, ctx) => vt.Validate(ctx.GetValidationContext().Types))
                     .When(ft => !ft.StorageType.IsPacked())
                     .WithMessage(ft => $"FieldType had invalid StorageType:{ft.StorageType}");
                 
