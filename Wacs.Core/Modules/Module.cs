@@ -315,7 +315,13 @@ namespace Wacs.Core
         private static void FinalizeModule(Module module)
         {
             PatchFuncSection(module);
-
+            
+            foreach (var (def, index) in module.UnrollTypes().Select((d, i) => (d, i)))
+            {
+                if (def.RecType.DefIndex == TypeIdx.Default)
+                    def.RecType.DefIndex = (TypeIdx)index;
+            }
+            
             HashSet<FuncIdx> fullyDeclared = new();
             var funcDescs = module.Exports
                 .Select(export => export.Desc)
