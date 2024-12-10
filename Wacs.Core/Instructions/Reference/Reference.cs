@@ -85,6 +85,9 @@ namespace Wacs.Core.Instructions.Reference
             //Seems like C.Refs isn't strictly necessary since FunctionSpace collects all the references
             var func = context.Funcs[FunctionIndex];
             
+            context.Assert(context.Types.Contains(func.TypeIndex),
+                "Instruction ref.func is invalid. (type {0}) was not in the context.", func.TypeIndex);
+            
             context.Assert(func.IsFullyDeclared(context),
                 "Instruction ref.func is invalid. (func {0}) is not fully declared in the module.",FunctionIndex);
             var val = new Value(ValType.Ref | (ValType)func.TypeIndex.Value);
