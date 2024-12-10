@@ -29,7 +29,6 @@ namespace Wacs.Core.Types
         public readonly bool Final;
         public readonly TypeIdx[] SuperTypes;
         public readonly CompositeType Body;
-        public int SubIndex;
 
         public SubType(TypeIdx[] idxs, CompositeType body, bool final)
         {
@@ -74,6 +73,7 @@ namespace Wacs.Core.Types
         public bool Matches(CompositeType type)
         {
             //TODO: Compute type heirarchy
+            throw new NotImplementedException();
             return true;
         }
 
@@ -103,8 +103,8 @@ namespace Wacs.Core.Types
                             if (subtypeI.Unroll.Final)
                                 throw new ValidationException($"SuperType {y} is final and cannot be subtyped");
                             var comptypeI = subtypeI.Expansion;
-                            if (!comptype.Matches(comptypeI))
-                                throw new ValidationException($"SubType {defIndex} does not match SuperType {y}");
+                            if (!comptype.Matches(comptypeI, vContext.Types))
+                                throw new ValidationException($"SubType {defIndex} does not match SuperType {y.Value}");
                         }
                     });
 

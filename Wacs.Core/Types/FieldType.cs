@@ -39,6 +39,19 @@ namespace Wacs.Core.Types
                 MutabilityParser.Parse(reader)
             );
 
+        public bool Matches(FieldType other, TypesSpace? types)
+        {
+            if (!StorageType.Matches(other.StorageType, types))
+                return false;
+            if (Mut != other.Mut)
+                return false;
+            //const, const
+            if (Mut == Mutability.Immutable && other.Mut == Mutability.Immutable)
+                return true;
+            //var,var case matches reciprocally
+            return other.StorageType.Matches(StorageType, types);
+        }
+        
         public class Validator : AbstractValidator<FieldType>
         {
             public Validator()
