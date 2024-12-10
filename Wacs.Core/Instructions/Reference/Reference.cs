@@ -87,8 +87,8 @@ namespace Wacs.Core.Instructions.Reference
             
             context.Assert(func.IsFullyDeclared(context),
                 "Instruction ref.func is invalid. (func {0}) is not fully declared in the module.",FunctionIndex);
-            
-            context.OpStack.PushFuncref(Value.NullFuncRef);
+            var val = new Value(ValType.Ref | (ValType)func.TypeIndex.Value);
+            context.OpStack.PushFuncref(val);
         }
 
         // @Spec 4.4.2.3. ref.func x

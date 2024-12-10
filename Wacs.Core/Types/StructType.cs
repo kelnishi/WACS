@@ -14,6 +14,8 @@
 //  * limitations under the License.
 //  */
 
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FluentValidation;
@@ -42,10 +44,22 @@ namespace Wacs.Core.Types
                 return false;
             foreach (var (ft, index) in other.FieldTypes.Select((t, i) => (t, i)))
             {
-                if (!ft.Matches(FieldTypes[index], types))
+                if (!FieldTypes[index].Matches(ft, types))
                     return false;
             }
             return true;
+        }
+        
+        public override int ComputeHash(int defIndexValue, List<DefType> defs)
+        {
+            var hash = new StableHash();
+            hash.Add(nameof(StructType));
+            foreach (var (ft, index) in FieldTypes.Select((t, i) => (t, i)))
+            {
+                hash.Add(index);
+                hash.Add(ft.ComputeHash(defIndexValue, defs));
+            }
+            return hash.ToHashCode();
         }
     }
 }

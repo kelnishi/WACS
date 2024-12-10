@@ -428,6 +428,13 @@ namespace Wacs.Core.Runtime
         {
             this = default;
             Type = type;
+
+            if (Type.IsRefType())
+            {
+                Ptr = (int)externalValue;
+                return;
+            }
+            
             switch (Type)
             {
                 case ValType.I32:
@@ -452,12 +459,6 @@ namespace Wacs.Core.Runtime
                     break;
                 case ValType.V128:
                     V128 = (V128)externalValue;
-                    break;
-                case ValType.FuncRef:
-                    Ptr = (int)externalValue;
-                    break;
-                case ValType.ExternRef:
-                    Ptr = (int)externalValue;
                     break;
                 case ValType.Undefined:
                 default:
