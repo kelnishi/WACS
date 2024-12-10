@@ -310,15 +310,6 @@ namespace Wacs.Core.Types.Defs
             
             if (left.IsRefType() && right.IsRefType())
             {
-                //Special case these for validation
-                left = left switch
-                {
-                    ValType.None => ValType.NoneNN,
-                    ValType.NoFunc => ValType.NoFuncNN,
-                    ValType.NoExtern => ValType.NoExternNN,
-                    _ => left
-                };
-
                 //Check the HeapType
                 //Non-nullable cannot receive nullable
                 return left.IsSubType(right, types) && (!left.IsNullable() || right.IsNullable());
