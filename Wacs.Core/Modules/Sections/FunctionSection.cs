@@ -203,10 +203,27 @@ namespace Wacs.Core
                                 throw new ValidationException(
                                     $"Function[{func.Index}] locals count {func.Locals.Length} exceeds maximum allowed {vContext.Attributes.MaxFunctionLocals}");
 
-                            var type = types[func.TypeIndex].Expansion;
-                            var funcType = type as FunctionType;
+                            foreach (var (localType,index) in func.Locals.Select((l,i)=>(l,i)))
+                            {
+                                if (!localType.Validate(vContext.Types))
+                                    throw new ValidationException($"Function[{func.Index}] Local[{index}] had invalid type:{localType}");
+                            }
+                            
+                            var type = types[func.TypeIndex];
+                            var funcType = type.Expansion as FunctionType;
                             if (funcType is null)
                                 throw new ValidationException($"Function[{func.Index}] type {type} is not a FuncType.");
+
+                            foreach (var (paramType, index) in funcType.ParameterTypes.Types.Select((t, i) => (t, i)))
+                            {
+                                if (!paramType.Validate(vContext.Types))
+                                    throw new ValidationException($"Function[{func.Index}] Parameter[{index}] had invalid type:{paramType}");
+                            }
+                            foreach (var (resType, index) in funcType.ResultType.Types.Select((t, i) => (t, i)))
+                            {
+                                if (!resType.Validate(vContext.Types))
+                                    throw new ValidationException($"Function[{func.Index}] Result[{index}] had invalid type:{resType}");
+                            }                            
                             
                             vContext.FunctionIndex = func.Index;
                             vContext.SetExecFrame(funcType, func.Locals);
