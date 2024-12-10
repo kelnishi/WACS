@@ -84,8 +84,16 @@ namespace Wacs.Core.Types
             }
         }
 
-        public bool Matches(GlobalType other, TypesSpace? types) => 
-            Mutability == other.Mutability && ContentType.Matches(other.ContentType, types);
+        public bool Matches(GlobalType other, TypesSpace? types)
+        {
+            if (Mutability != other.Mutability)
+                return false;
+            if (!ContentType.Matches(other.ContentType, types))
+                return false;
+            if (Mutability == Mutability.Mutable && !other.ContentType.Matches(ContentType, types))
+                return false;
+            return true;
+        }
     }
 
     /// <summary>
