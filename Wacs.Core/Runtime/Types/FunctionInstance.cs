@@ -55,12 +55,13 @@ namespace Wacs.Core.Runtime.Types
         /// </summary>
         public FunctionInstance(ModuleInstance module, Module.Function definition)
         {
-            var type = module.Types[definition.TypeIndex].Expansion;
-            if (!(type is FunctionType funcType))
+            var type = module.Types[definition.TypeIndex];
+            if (!(type.Expansion is FunctionType funcType))
                 throw new FormatException($"Function defined with type {type}");
             
             Type = funcType;
             Module = module;
+            DefTypeHash = type.GetHashCode();
             
             Definition = definition;
             SetBody(definition.Body);
@@ -72,6 +73,8 @@ namespace Wacs.Core.Runtime.Types
                 Name = Definition.Id;
         }
 
+        public readonly int DefTypeHash;
+        
         public string ModuleName => Module.Name;
         public string Name { get; set; } = "";
         public FunctionType Type { get; }

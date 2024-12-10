@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Wacs.Core.Attributes;
@@ -91,5 +92,16 @@ namespace Wacs.Core.Types
         /// @Spec 5.3.5 Result Types
         /// </summary>
         public static ResultType Parse(BinaryReader reader) => new(reader);
+
+        public object ComputeHash(int defIndexValue, List<DefType> defs)
+        {
+            var hash = new StableHash();
+            hash.Add(nameof(ResultType));
+            foreach (var type in Types)
+            {
+                hash.Add(type.ComputeHash(defIndexValue, defs));
+            }
+            return hash.ToHashCode();
+        }
     }
 }

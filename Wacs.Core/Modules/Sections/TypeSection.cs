@@ -32,12 +32,22 @@ namespace Wacs.Core
         public List<DefType> UnrollTypes()
         {
             var defs = new List<DefType>();
+            int idx = 0;
             for (int r = 0, t = Types.Count; r < t; ++r)
             {
                 var recType = Types[r];
+                recType.DefIndex = (TypeIdx)idx;
+                var subs = new List<DefType>();
                 for (int s = 0, l = recType.SubTypes.Length; s < l; ++s)
                 {
-                    defs.Add(new DefType(recType, s));
+                    var subtype = new DefType(recType, s, (TypeIdx)idx++);
+                    subs.Add(subtype);
+                }
+                defs.AddRange(subs);
+                recType.ComputeHash(defs);
+                foreach (var sub in subs)
+                {
+                    sub.ComputeHash();
                 }
             }
             return defs;

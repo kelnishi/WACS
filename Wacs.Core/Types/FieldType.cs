@@ -14,10 +14,11 @@
 //  * limitations under the License.
 //  */
 
-using System;
+using System.Collections.Generic;
 using System.IO;
 using FluentValidation;
 using Wacs.Core.Types.Defs;
+using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
@@ -69,6 +70,15 @@ namespace Wacs.Core.Types
                 
                 //Spec ignores Mutability for validation
             }
+        }
+
+        public int ComputeHash(int defIndexValue, List<DefType> defs)
+        {
+            var hash = new StableHash();
+            hash.Add(nameof(FieldType));
+            hash.Add(Mut);
+            hash.Add(StorageType.ComputeHash(defIndexValue,defs));
+            return hash.ToHashCode();
         }
     }
 }

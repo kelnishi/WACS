@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FluentValidation;
@@ -39,7 +40,24 @@ namespace Wacs.Core.Types
         {
             SubTypes = subTypes;
         }
+
+        private int _computedHash;
         
+        public void ComputeHash(List<DefType> defs)
+        {
+            var hash = new StableHash();
+            hash.Add(nameof(RecursiveType));
+            foreach (var (subtype, index) in SubTypes.Select((s,i)=>(s,i)))
+            {
+                hash.Add(index);
+                subtype.ComputeHash(DefIndex.Value, defs);
+                hash.Add(subtype.GetHashCode());
+            }
+            _computedHash = hash.ToHashCode();
+        }
+
+        public override int GetHashCode() => _computedHash;
+
         public static implicit operator FunctionType(RecursiveType recursiveType)
         {
             var func = recursiveType.SubTypes[0].Body as FunctionType;
@@ -126,5 +144,6 @@ namespace Wacs.Core.Types
                     });
             }
         }
+
     }
 }

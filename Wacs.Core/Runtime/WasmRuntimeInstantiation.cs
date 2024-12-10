@@ -70,8 +70,8 @@ namespace Wacs.Core.Runtime
                 {
                     case Module.ImportDesc.FuncDesc funcDesc:
                         // @Spec 4.5.3.2. @note: Host Functions must be bound to the environment prior to module instantiation!
-                        var type = moduleInstance.Types[funcDesc.TypeIndex].Expansion;
-                        var funcSig = type as FunctionType;
+                        var type = moduleInstance.Types[funcDesc.TypeIndex];
+                        var funcSig = type.Expansion as FunctionType;
                         if (funcSig is null)
                             throw new InvalidDataException($"Function had invalid type:{type}");
                         if (GetBoundEntity(entityId) is not FuncAddr funcAddr)
@@ -81,6 +81,9 @@ namespace Wacs.Core.Runtime
                         if (functionInstance is FunctionInstance wasmFunc)
                         {
                             wasmFunc.SetName(entityId.entity);
+                            if (type.GetHashCode() != wasmFunc.DefTypeHash)
+                                throw new NotSupportedException(
+                                    $"Recursive Type mismatch while importing Function {entityId.module}.{entityId.entity}: expected {funcSig.ToNotation()}, env provided Function {functionInstance.Type.ToNotation()}");    
                         }
                         if (!functionInstance.Type.Matches(funcSig, moduleInstance.Types))
                             throw new NotSupportedException(

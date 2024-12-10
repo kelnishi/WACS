@@ -14,12 +14,12 @@
 //  * limitations under the License.
 //  */
 
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FluentValidation;
 using Wacs.Core.Types.Defs;
+using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
@@ -52,8 +52,16 @@ namespace Wacs.Core.Types
         public FunctionType(ResultType parameterTypes, ResultType resultType) =>
             (ParameterTypes, ResultType) = (parameterTypes, resultType);
 
+        /// <summary>
+        /// Matches function types
+        /// * parameters from supertype to subtype
+        ///    * results from subtype to supertype
+        /// </summary>
+        /// <param name="other"></param>
+        /// <param name="types"></param>
+        /// <returns></returns>
         public bool Matches(FunctionType other, TypesSpace? types) =>
-            ParameterTypes.Matches(other.ParameterTypes, types) &&
+            other.ParameterTypes.Matches(ParameterTypes, types) &&
             ResultType.Matches(other.ResultType, types);
 
         /// <summary>
@@ -99,6 +107,15 @@ namespace Wacs.Core.Types
         public override string ToString() =>
             $"FunctionType({ToNotation()})";
 
+        public override int ComputeHash(int defIndexValue, List<DefType> defs)
+        {
+            var hash = new StableHash();
+            hash.Add(nameof(FunctionType));
+            hash.Add(ParameterTypes.ComputeHash(defIndexValue,defs));
+            hash.Add(ResultType.ComputeHash(defIndexValue,defs));
+            return hash.ToHashCode();
+        }
+        
         /// <summary>
         /// 3.2.3. Function Types
         /// Always valid
