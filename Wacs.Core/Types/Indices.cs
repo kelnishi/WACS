@@ -23,6 +23,7 @@ namespace Wacs.Core.Types
     
     public readonly struct TypeIdx : IEquatable<Index>
     {
+        public static readonly TypeIdx Default = new(int.MinValue);
         public readonly int Value;
         private TypeIdx(int value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;

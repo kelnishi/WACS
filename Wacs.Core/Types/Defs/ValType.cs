@@ -168,6 +168,12 @@ namespace Wacs.Core.Types.Defs
             _ => false
         };
 
+        public static bool IsPacked(this ValType type) => type switch
+        {
+            ValType.I8 or ValType.I16 => true,
+            _ => false
+        };
+
         public static HeapType GetHeapType(this ValType type)
         {
             return type switch

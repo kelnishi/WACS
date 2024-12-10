@@ -16,7 +16,10 @@
 
 using System;
 using System.IO;
+using System.Linq;
+using FluentValidation;
 using Wacs.Core.Types.Defs;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
 {
@@ -40,5 +43,64 @@ namespace Wacs.Core.Types
                 StructType st => ValType.Struct,
                 _ => throw new InvalidDataException($"Unknown CompType:{this}"),
             };
+
+        public bool Matches(CompositeType super)
+        {
+            throw new NotImplementedException();
+        }
+
+        public class Validator : AbstractValidator<CompositeType>
+        {
+            public Validator()
+            {
+                RuleFor(ct => ct)
+                    .Custom((ct, ctx) =>
+                    {
+                        var vContext = ctx.GetValidationContext();
+                        var fieldValidator = new FieldType.Validator();
+                        switch (ct)
+                        {
+                            case FunctionType ft:
+                                var funcValidator = new FunctionType.Validator();
+                                var funcContext = vContext.PushSubContext(ft);
+                                var funcResult = funcValidator.Validate(funcContext);
+                                if (funcResult.IsValid)
+                                    break;
+                                foreach (var failure in funcResult.Errors)
+                                {
+                                    var propertyName = $"{ctx.PropertyPath}.{failure.PropertyName}";
+                                    ctx.AddFailure(propertyName, failure.ErrorMessage);
+                                }
+                                break;
+                            case StructType st:
+                                foreach (var (field,index) in st.FieldTypes.Select((f,i)=>(f,i)))
+                                {
+                                    var structContext = vContext.PushSubContext(field, index);
+                                    var structResult = fieldValidator.Validate(structContext);
+                                    if (structResult.IsValid) 
+                                        continue;
+                                    foreach (var failure in structResult.Errors)
+                                    {
+                                        var propertyName = $"{ctx.PropertyPath}.{failure.PropertyName}";
+                                        ctx.AddFailure(propertyName, failure.ErrorMessage);
+                                    }
+                                    break;
+                                }
+                                break;
+                            case ArrayType at:
+                                var arrayContext = vContext.PushSubContext(at.ElementType);
+                                var arrayResult = fieldValidator.Validate(arrayContext);
+                                if (arrayResult.IsValid)
+                                    break;
+                                foreach (var failure in arrayResult.Errors)
+                                {
+                                    var propertyName = $"{ctx.PropertyPath}.{failure.PropertyName}";
+                                    ctx.AddFailure(propertyName, failure.ErrorMessage);
+                                }
+                                break;
+                        }
+                    });
+            }
+        }
     }
 }

@@ -18,7 +18,7 @@ namespace Wacs.Core.Types
 {
     public class DefType
     {
-        private RecursiveType RecType;
+        public readonly RecursiveType RecType;
         private int Projection;
 
         public CompositeType Expansion;
@@ -30,6 +30,8 @@ namespace Wacs.Core.Types
             
             Expansion = RecType.SubTypes[Projection].Body;
         }
+
+        public SubType Unroll => RecType.SubTypes[Projection];
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#defined-types⑤

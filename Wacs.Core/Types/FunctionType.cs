@@ -20,6 +20,7 @@ using System.IO;
 using System.Linq;
 using FluentValidation;
 using Wacs.Core.Types.Defs;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
 {
@@ -102,6 +103,17 @@ namespace Wacs.Core.Types
         /// 3.2.3. Function Types
         /// Always valid
         /// </summary>
-        public class Validator : AbstractValidator<FunctionType> {}
+        public class Validator : AbstractValidator<FunctionType>
+        {
+            public Validator()
+            {
+                RuleForEach(f => f.ParameterTypes.Types)
+                    .Must((_, pt, ctx) => ctx.GetValidationContext().ValidateType(pt))
+                    .WithMessage(f => $"FunctionType had invalid parameter types:{f}");
+                RuleForEach(f => f.ResultType.Types)
+                    .Must((_, pt, ctx) => ctx.GetValidationContext().ValidateType(pt))
+                    .WithMessage(f => $"FunctionType had invalid result types:{f}");
+            }
+        }
     }
 }

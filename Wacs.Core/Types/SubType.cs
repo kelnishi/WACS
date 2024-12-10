@@ -15,9 +15,12 @@
 //  */
 
 using System;
+using System.Data;
 using System.IO;
+using FluentValidation;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
 {
@@ -26,6 +29,7 @@ namespace Wacs.Core.Types
         public readonly bool Final;
         public readonly TypeIdx[] SuperTypes;
         public readonly CompositeType Body;
+        public int SubIndex;
 
         public SubType(TypeIdx[] idxs, CompositeType body, bool final)
         {
@@ -71,6 +75,40 @@ namespace Wacs.Core.Types
         {
             //TODO: Compute type heirarchy
             return true;
+        }
+
+        public class Validator : AbstractValidator<SubType>
+        {
+            ///https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-subtypemathsfsubhrefsyntax-subtypemathsffinalyasthrefsyntax-comptypemathitcomptype
+            public Validator(RecursiveType recType)
+            {
+                RuleFor(st => st.Body)
+                    .SetValidator(new CompositeType.Validator());
+                RuleFor(st => st.SuperTypes)
+                    .Must(types => types.Length < 2)
+                    .WithMessage("SubType can have at most 1 super type");
+                RuleFor(st => st)
+                    .Custom((sub, ctx) =>
+                    {
+                        var vContext = ctx.GetValidationContext();
+                        var subIndex = (int)ctx.RootContextData["Index"];
+                        var defIndex = recType.DefIndex.Value + subIndex;
+                        var comptype = sub.Body;
+                        
+                        foreach (var y in sub.SuperTypes)
+                        {
+                            if (!vContext.Types.Contains(y))
+                                throw new ValidationException($"SuperType {y} does not exist in the context");
+                            var subtypeI = vContext.Types[y];
+                            if (subtypeI.Unroll.Final)
+                                throw new ValidationException($"SuperType {y} is final and cannot be subtyped");
+                            var comptypeI = subtypeI.Expansion;
+                            if (!comptype.Matches(comptypeI))
+                                throw new ValidationException($"SubType {defIndex} does not match SuperType {y}");
+                        }
+                    });
+
+            }
         }
         
     }
