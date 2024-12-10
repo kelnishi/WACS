@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -265,37 +266,39 @@ namespace Wacs.Core.Types.Defs
         /// <returns></returns>
         public static bool IsSubType(this ValType type, ValType ofType, TypesSpace? types)
         {
-            return type.GetHeapType() switch
+            if (type == ofType)
+                return true;
+            
+            var typeHt = type.GetHeapType();
+            var ofTypeHt = ofType.GetHeapType();
+
+            if (type.IsDefType())
             {
-                _ when type == ofType => true,
-                var ht when ht == ofType.GetHeapType() => true,
-                HeapType.Eq => ofType == ValType.Any,
-                HeapType.I31 or HeapType.Struct or HeapType.Array => ofType switch
+                var typeDef = types?[type.Index()];
+                if (ofType.IsDefType())
                 {
-                    ValType.Eq => true,
-                    _ => ValType.Eq.IsSubType(ofType, types)
-                },
-                //DefType/Index
-                (HeapType)0 when types?[type.Index()].Expansion is StructType => ofType switch
+                    var ofTypeDef = types?[ofType.Index()];
+                    return typeDef!.Matches(ofTypeDef!, types);
+                }
+                return typeDef!.Expansion switch
                 {
-                    ValType.Struct => true,
-                    _ => ValType.Struct.IsSubType(ofType, types),
-                },
-                (HeapType)0 when types?[type.Index()].Expansion is ArrayType => ofType switch
-                {
-                    ValType.Array => true,
-                    _ => ValType.Array.IsSubType(ofType, types),
-                },
-                (HeapType)0 when types?[type.Index()].Expansion is FunctionType => ofType switch
-                {
-                    ValType.FuncRef => true,
-                    _ => ValType.FuncRef.IsSubType(ofType, types),
-                },
-                (HeapType)0 when type.IsDefType() && ofType.IsDefType() => type.Index().Matches(ofType.Index(), types),
+                    StructType => ofType == ValType.Struct || ValType.Struct.IsSubType(ofType, types),
+                    ArrayType => ofType == ValType.Array || ValType.Array.IsSubType(ofType, types),
+                    FunctionType => ofType == ValType.Func || ValType.Func.IsSubType(ofType, types),
+                    _ => throw new InvalidDataException($"Unknown CompositeType: {typeDef.Expansion}")
+                };
+            }
+
+            return typeHt switch
+            {
+                HeapType.Eq when ofTypeHt == HeapType.Any => true,
+                HeapType.I31 or HeapType.Struct or HeapType.Array => 
+                    ofType == ValType.Eq || ValType.Eq.IsSubType(ofType, types),
                 HeapType.None => ofType.IsSubType(ValType.Any, types),
                 HeapType.NoFunc => ofType.IsSubType(ValType.FuncRef, types),
                 HeapType.NoExtern => ofType.IsSubType(ValType.ExternRef, types),
                 HeapType.Bot => true,
+                var ht when ht == ofTypeHt => true,
                 _ => false
             };
         }
@@ -322,6 +325,29 @@ namespace Wacs.Core.Types.Defs
             }
 
             return left == right;
+        }
+
+        public static int ComputeHash(this ValType type, int defIndexValue, List<DefType> defs)
+        {
+            var hash = new StableHash();
+            hash.Add(nameof(ValType));
+            if (type.IsDefType())
+            {
+                if (type.Index().Value >= defs.Count)
+                    throw new FormatException($"Types cannot forward-declare beyond the recursive block.");
+                
+                int index = type.Index().Value - defIndexValue;
+                if (index < 0)
+                {
+                    index = defs[type.Index().Value].GetHashCode();
+                }
+                hash.Add(index);
+            }
+            else
+            {
+                hash.Add(type);
+            }
+            return hash.ToHashCode();
         }
     }
 

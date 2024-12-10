@@ -14,7 +14,9 @@
 //  * limitations under the License.
 //  */
 
+using System.Collections.Generic;
 using System.IO;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
 {
@@ -32,6 +34,14 @@ namespace Wacs.Core.Types
         public bool Matches(ArrayType other, TypesSpace? types)
         {
             return ElementType.Matches(other.ElementType, types);
+        }
+        
+        public override int ComputeHash(int defIndexValue, List<DefType> defs)
+        {
+            var hash = new StableHash();
+            hash.Add(nameof(ArrayType));
+            hash.Add(ElementType.ComputeHash(defIndexValue,defs));
+            return hash.ToHashCode();
         }
     }
 }

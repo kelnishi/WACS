@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.IO;
 using FluentValidation;
@@ -42,6 +43,10 @@ namespace Wacs.Core.Types
             SuperTypes = Array.Empty<TypeIdx>();
             Body = body;
             Final = final;
+            
+            var hash = new StableHash();
+            hash.Add(nameof(SubType));
+            ComputedHash = hash.ToHashCode();
         }
         
         public static TypeIdx ParseTypeIndexes(BinaryReader reader) => 
@@ -70,12 +75,30 @@ namespace Wacs.Core.Types
             };
         }
 
-        public bool Matches(CompositeType type)
+        private int ComputedHash { get; set; }
+        
+        public void ComputeHash(int defIndexValue, List<DefType> defs)
         {
-            //TODO: Compute type heirarchy
-            throw new NotImplementedException();
-            return true;
+            var hash = new StableHash();
+            hash.Add(nameof(SubType));
+            hash.Add(Final);
+            foreach (var super in SuperTypes)
+            {
+                if (super.Value >= defs.Count)
+                    throw new FormatException($"SubTypes cannot forward-declare beyond the recursive block.");
+                
+                int superIndex = super.Value - defIndexValue;
+                if (superIndex < 0)
+                {
+                    superIndex = defs[super.Value].GetHashCode();
+                }
+                hash.Add(superIndex);
+            }
+            hash.Add(Body.ComputeHash(defIndexValue, defs));
+            ComputedHash = hash.ToHashCode();
         }
+
+        public override int GetHashCode() => ComputedHash;
 
         public class Validator : AbstractValidator<SubType>
         {
@@ -104,12 +127,11 @@ namespace Wacs.Core.Types
                                 throw new ValidationException($"SuperType {y} is final and cannot be subtyped");
                             var comptypeI = subtypeI.Expansion;
                             if (!comptype.Matches(comptypeI, vContext.Types))
-                                throw new ValidationException($"SubType {defIndex} does not match SuperType {y.Value}");
+                                throw new ValidationException($"(sub {defIndex} {comptype}) does not match (sup {y.Value} {comptypeI})");
                         }
                     });
 
             }
         }
-        
     }
 }

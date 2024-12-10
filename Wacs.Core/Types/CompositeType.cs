@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using FluentValidation;
@@ -112,5 +113,7 @@ namespace Wacs.Core.Types
                     });
             }
         }
+
+        public abstract int ComputeHash(int defIndexValue, List<DefType> defs);
     }
 }

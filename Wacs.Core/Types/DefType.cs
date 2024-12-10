@@ -14,44 +14,55 @@
 //  * limitations under the License.
 //  */
 
-using System;
-using System.IO;
 using System.Linq;
-using Wacs.Core.Types.Defs;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
 {
     public class DefType
     {
         public readonly RecursiveType RecType;
-        public TypeIdx DefIndex = TypeIdx.Default;
+        public readonly TypeIdx DefIndex;
         private int Projection;
 
         public CompositeType Expansion;
 
-        public DefType(RecursiveType recType, int proj)
+        public DefType(RecursiveType recType, int proj, TypeIdx def)
         {
             RecType = recType;
             Projection = proj;
-            
+            DefIndex = def;
             Expansion = RecType.SubTypes[Projection].Body;
+
+            var hash = new StableHash();
+            hash.Add(nameof(DefType));
+            _computedHash = hash.ToHashCode();
         }
 
         public SubType Unroll => RecType.SubTypes[Projection];
 
+        private int _computedHash;
+
+        public void ComputeHash()
+        {
+            var hash = new StableHash();
+            hash.Add(nameof(DefType));
+            hash.Add(RecType.GetHashCode());
+            hash.Add(Projection);
+            _computedHash = hash.ToHashCode();
+        }
+
+        public override int GetHashCode() => _computedHash;
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#defined-types⑤
+        /// https://webassembly.github.io/gc/core/bikeshed/index.html#rolling-and-unrolling①
         /// </summary>
         /// <param name="other"></param>
         /// <param name="types"></param>
         /// <returns></returns>
-        public bool Matches(DefType other, TypesSpace? types)
-        {
-            if (DefIndex == TypeIdx.Default)
-                throw new InvalidDataException("DefType was not finalized before validation");
-            
-            return DefIndex == other.DefIndex || Unroll.SuperTypes.Any(super => DefIndex.Matches(super, types));
-        }
-        
+        public bool Matches(DefType other, TypesSpace? types) => 
+            GetHashCode() == other.GetHashCode() 
+            || Unroll.SuperTypes.Any(super => super.Matches(other.DefIndex, types));
     }
 }
