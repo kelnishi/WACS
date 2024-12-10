@@ -249,7 +249,7 @@ namespace Wacs.Core
                     {
                         //Valid for all reference types
                         RuleFor(mode => mode.SegmentType)
-                            .Must((mode, type, ctx) => ctx.GetValidationContext().ValidateType(type))
+                            .Must((mode, type, ctx) => type.Validate(ctx.GetValidationContext().Types))
                             .WithMessage(mode => $"Passive Element Type was invalid {mode.SegmentType}");
                     }
                 }
@@ -305,7 +305,7 @@ namespace Wacs.Core
                     {
                         //Valid for all reference types
                         RuleFor(mode => mode.SegmentType)
-                            .Must((mode, type, ctx) => ctx.GetValidationContext().ValidateType(type))
+                            .Must((mode, type, ctx) => type.Validate(ctx.GetValidationContext().Types))
                             .WithMessage(mode => $"Declarative Element Type was invalid {mode.SegmentType}");
                     }
                 }

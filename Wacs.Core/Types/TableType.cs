@@ -146,7 +146,7 @@ namespace Wacs.Core.Types
                 // @Spec 3.2.4.1. limits reftype
                 RuleFor(tt => tt.Limits).SetValidator(Limits);
                 RuleFor(tt => tt.ElementType)
-                    .Must((_, type, ctx) => ctx.GetValidationContext().ValidateType(type))
+                    .Must((_, type, ctx) => type.Validate(ctx.GetValidationContext().Types))
                     .WithMessage(tt => $"TableType had invalid ElementType {tt.ElementType}");
                 RuleFor(tt => tt.Init)
                     .Custom((expr, ctx) =>
