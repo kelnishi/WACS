@@ -77,6 +77,9 @@ namespace Wacs.Core.Instructions
             {
                 context.Assert(Types.Length == 1, "Select instruction type must be of length 1");
                 var type = Types[0];
+                context.Assert(type.Validate(context.Types),
+                    "Select instruction had invalid type:{0}", type);
+                
                 context.OpStack.PopI32();
                 context.OpStack.PopType(type);
                 context.OpStack.PopType(type);
