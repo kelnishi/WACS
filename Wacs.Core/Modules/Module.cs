@@ -316,10 +316,11 @@ namespace Wacs.Core
         {
             PatchFuncSection(module);
             
-            foreach (var (def, index) in module.UnrollTypes().Select((d, i) => (d, i)))
+            foreach (var (def, index) in module.UnrollTypes().Select((d, i) => (d, (TypeIdx)i)))
             {
+                def.DefIndex = index;
                 if (def.RecType.DefIndex == TypeIdx.Default)
-                    def.RecType.DefIndex = (TypeIdx)index;
+                    def.RecType.DefIndex = index;
             }
             
             HashSet<FuncIdx> fullyDeclared = new();
