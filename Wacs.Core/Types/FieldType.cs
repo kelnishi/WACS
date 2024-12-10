@@ -14,8 +14,11 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.IO;
+using FluentValidation;
 using Wacs.Core.Types.Defs;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
 {
@@ -35,5 +38,24 @@ namespace Wacs.Core.Types
                 ValTypeParser.Parse(reader, parseBlockIndex: false, parseStorageType: true),
                 MutabilityParser.Parse(reader)
             );
+
+        public class Validator : AbstractValidator<FieldType>
+        {
+            public Validator()
+            {
+                //PackedTypes are always valid
+                RuleFor(ft => ft.StorageType)
+                    .IsInEnum()
+                    .When(ft => ft.StorageType.IsPacked());
+                
+                //StorageType
+                RuleFor(ft => ft.StorageType)
+                    .Must((_, vt, ctx) => ctx.GetValidationContext().ValidateType(vt))
+                    .When(ft => !ft.StorageType.IsPacked())
+                    .WithMessage(ft => $"FieldType had invalid StorageType:{ft.StorageType}");
+                
+                //Spec ignores Mutability for validation
+            }
+        }
     }
 }

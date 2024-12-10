@@ -16,15 +16,19 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using FluentValidation;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
 {
     public class RecursiveType : IRenderable
     {
         public readonly SubType[] SubTypes;
+        //The defType index of the first subtype
+        public TypeIdx DefIndex = TypeIdx.Default;
 
         public RecursiveType(SubType single)
         {
@@ -98,7 +102,29 @@ namespace Wacs.Core.Types
         
         public class Validator : AbstractValidator<RecursiveType>
         {
-            //TODO: validation
+            /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-rectypemathsfrechrefsyntax-subtypemathitsubtypeast
+            public Validator()
+            {
+                RuleFor(rt => rt)
+                    .Custom((rt, ctx) =>
+                    {
+                        var vContext = ctx.GetValidationContext();
+                        var subTypeValidator = new SubType.Validator(rt);
+                        foreach (var (subtype, index) in rt.SubTypes.Select((s,i)=>(s,i)))
+                        {
+                            var subcontext = vContext.PushSubContext(subtype, index);
+                            var validationResult = subTypeValidator.Validate(subcontext);
+                            if (!validationResult.IsValid)
+                            {
+                                foreach (var failure in validationResult.Errors)
+                                {
+                                    var propertyName = $"{ctx.PropertyPath}.{failure.PropertyName}";
+                                    ctx.AddFailure(propertyName, failure.ErrorMessage);
+                                }
+                            }
+                        }
+                    });
+            }
         }
     }
 }
