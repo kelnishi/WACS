@@ -15,6 +15,7 @@
 //  */
 
 using System;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Types
@@ -34,6 +35,16 @@ namespace Wacs.Core.Types
         
         public static bool operator ==(TypeIdx left, TypeIdx right) => left.Value == right.Value;
         public static bool operator !=(TypeIdx left, TypeIdx right) => !(left == right);
+        
+        //For matching heaptypes
+        public bool Matches(TypeIdx def2, TypesSpace? types)
+        {
+            if (types is null)
+                throw new WasmRuntimeException("Cannot match types without a context");
+            var defType1 = types[this];
+            var defType2 = types[def2];
+            return defType1.Matches(defType2, types);
+        }
     }
 
     public readonly struct FuncIdx : IEquatable<Index>

@@ -44,10 +44,20 @@ namespace Wacs.Core.Types
                 _ => throw new InvalidDataException($"Unknown CompType:{this}"),
             };
 
-        public bool Matches(CompositeType super)
-        {
-            throw new NotImplementedException();
-        }
+        /// <summary>
+        /// https://webassembly.github.io/gc/core/bikeshed/index.html#composite-types⑤
+        /// </summary>
+        /// <param name="super"></param>
+        /// <param name="types"></param>
+        /// <returns></returns>
+        public bool Matches(CompositeType super, TypesSpace? types) =>
+            this switch
+            {
+                FunctionType ft1 when super is FunctionType ft2 => ft1.Matches(ft2, types),
+                StructType st1 when super is StructType st2 => st1.Matches(st2, types),
+                ArrayType at1 when super is ArrayType at2 => at1.Matches(at2, types),
+                _ => false
+            };
 
         public class Validator : AbstractValidator<CompositeType>
         {

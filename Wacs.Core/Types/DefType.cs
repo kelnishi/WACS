@@ -14,11 +14,17 @@
 //  * limitations under the License.
 //  */
 
+using System;
+using System.IO;
+using System.Linq;
+using Wacs.Core.Types.Defs;
+
 namespace Wacs.Core.Types
 {
     public class DefType
     {
         public readonly RecursiveType RecType;
+        public TypeIdx DefIndex = TypeIdx.Default;
         private int Projection;
 
         public CompositeType Expansion;
@@ -37,10 +43,14 @@ namespace Wacs.Core.Types
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#defined-types⑤
         /// </summary>
         /// <param name="other"></param>
+        /// <param name="types"></param>
         /// <returns></returns>
-        public bool Matches(DefType other)
+        public bool Matches(DefType other, TypesSpace? types)
         {
-            return false;
+            if (DefIndex == TypeIdx.Default)
+                throw new InvalidDataException("DefType was not finalized before validation");
+            
+            return DefIndex == other.DefIndex || Unroll.SuperTypes.Any(super => DefIndex.Matches(super, types));
         }
         
     }

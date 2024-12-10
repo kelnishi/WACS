@@ -223,13 +223,6 @@ namespace Wacs.Core.Types.Defs
                 },
                 ValType.Bot or _ => throw new Exception($"HeapType {heapType} cannot occur in source"),
             };
-
-        public static bool Matches(TypeIdx def1, TypeIdx def2, TypesSpace types)
-        {
-            var defType1 = types[def1];
-            var defType2 = types[def2];
-            return defType1.Matches(defType2);
-        }
         
         public static bool Validate(this ValType type, TypesSpace? types) =>
             type switch
@@ -298,7 +291,7 @@ namespace Wacs.Core.Types.Defs
                     ValType.FuncRef => true,
                     _ => ValType.FuncRef.IsSubType(ofType, types),
                 },
-                (HeapType)0 when type.IsDefType() && ofType.IsDefType() => Matches(type.Index(), ofType.Index(), types),
+                (HeapType)0 when type.IsDefType() && ofType.IsDefType() => type.Index().Matches(ofType.Index(), types),
                 HeapType.None => ofType.IsSubType(ValType.Any, types),
                 HeapType.NoFunc => ofType.IsSubType(ValType.FuncRef, types),
                 HeapType.NoExtern => ofType.IsSubType(ValType.ExternRef, types),

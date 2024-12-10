@@ -28,5 +28,10 @@ namespace Wacs.Core.Types
         
         public static ArrayType Parse(BinaryReader reader) => 
             new(FieldType.Parse(reader));
+        
+        public bool Matches(ArrayType other, TypesSpace? types)
+        {
+            return ElementType.Matches(other.ElementType, types);
+        }
     }
 }

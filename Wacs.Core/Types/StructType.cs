@@ -15,6 +15,8 @@
 //  */
 
 using System.IO;
+using System.Linq;
+using FluentValidation;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 
@@ -23,6 +25,7 @@ namespace Wacs.Core.Types
     public class StructType : CompositeType
     {
         public readonly FieldType[] FieldTypes;
+        public int Arity => FieldTypes.Length;
 
         public StructType(FieldType[] types)
         {
@@ -31,5 +34,18 @@ namespace Wacs.Core.Types
 
         public static StructType Parse(BinaryReader reader) => 
             new(reader.ParseVector(FieldType.Parse));
+
+
+        public bool Matches(StructType other, TypesSpace? types)
+        {
+            if (Arity < other.Arity)
+                return false;
+            foreach (var (ft, index) in other.FieldTypes.Select((t, i) => (t, i)))
+            {
+                if (!ft.Matches(FieldTypes[index], types))
+                    return false;
+            }
+            return true;
+        }
     }
 }
