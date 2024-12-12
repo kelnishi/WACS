@@ -14,18 +14,33 @@
 //  * limitations under the License.
 //  */
 
-namespace Wacs.Core.Types.Defs
+using System.IO;
+using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime;
+using Wacs.Core.Types;
+using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
+
+namespace Wacs.Core.Instructions.GC
 {
-    public enum PackedType : byte
+    public class InstArrayNew : InstructionBase
     {
-        NotPacked = 0x79,
+        private TypeIdx X;
+        public override ByteCode Op => GcCode.ArrayNew;
+        public override void Validate(IWasmValidationContext context)
+        {
+            
+        }
+
+        public override void Execute(ExecContext context)
+        {
+            
+        }
         
-        I8  = 0x78, // -0x08
-        I16 = 0x77, // -0x09
-        
-        S8  = I8,
-        S16 = I16,
-        U8  = 0x76,
-        U16 = 0x75,
+        public override InstructionBase Parse(BinaryReader reader)
+        {
+            X = (TypeIdx)reader.ReadLeb128_u32();
+            return this;
+        }
     }
 }

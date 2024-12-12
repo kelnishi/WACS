@@ -16,16 +16,10 @@
 
 namespace Wacs.Core.Types.Defs
 {
-    public enum PackedType : byte
+    public enum PackedExt : int
     {
-        NotPacked = 0x79,
-        
-        I8  = 0x78, // -0x08
-        I16 = 0x77, // -0x09
-        
-        S8  = I8,
-        S16 = I16,
-        U8  = 0x76,
-        U16 = 0x75,
+        Signed = -1,
+        NotPacked = 0,
+        Unsigned = 1,
     }
 }
