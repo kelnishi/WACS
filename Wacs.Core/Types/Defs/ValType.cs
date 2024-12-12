@@ -294,6 +294,7 @@ namespace Wacs.Core.Types.Defs
 
             return typeHt switch
             {
+                var ht when ht == ofTypeHt => true,
                 HeapType.Eq when ofTypeHt == HeapType.Any => true,
                 HeapType.I31 or HeapType.Struct or HeapType.Array => 
                     ofType == ValType.Eq || ValType.Eq.IsSubType(ofType, types),
@@ -301,7 +302,6 @@ namespace Wacs.Core.Types.Defs
                 HeapType.NoFunc => ofType.IsSubType(ValType.FuncRef, types),
                 HeapType.NoExtern => ofType.IsSubType(ValType.ExternRef, types),
                 HeapType.Bot => true,
-                var ht when ht == ofTypeHt => true,
                 _ => false
             };
         }

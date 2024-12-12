@@ -50,7 +50,7 @@ namespace Wacs.Core.Runtime.GC
             _data = new Value[fieldTypes.Length];
             for (int i = 0, l = fieldTypes.Length; i < l; ++i)
             {
-                _data[i] = new Value(fieldTypes[i].Unpack());
+                _data[i] = new Value(fieldTypes[i].UnpackType());
             }
         }
 
