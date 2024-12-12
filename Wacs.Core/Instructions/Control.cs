@@ -574,7 +574,7 @@ namespace Wacs.Core.Instructions
             string taken = "";
             if (context.Attributes.Live)
             {
-                taken = context.OpStack.Peek().Int32 != 0 ? "-> " : "X: ";
+                taken = context.OpStack.Peek().Data.Int32 != 0 ? "-> " : "X: ";
             }
             return $"{base.RenderText(context)} {L.Value} (;{taken}@{depth - L.Value};)";
         }
@@ -668,7 +668,7 @@ namespace Wacs.Core.Instructions
             int index = -2;
             if (context.Attributes.Live)
             {
-                int c = context.OpStack.Peek().Int32;
+                int c = context.OpStack.Peek().Data.Int32;
                 if (c < Ls.Length)
                 {
                     index = c;
@@ -848,7 +848,7 @@ namespace Wacs.Core.Instructions
             {
                 var ta = context.Frame.Module.TableAddrs[X];
                 var tab = context.Store[ta];
-                int i = context.OpStack.Peek().Int32;
+                int i = context.OpStack.Peek().Data.Int32;
                 if (i >= tab.Elements.Count)
                     throw new TrapException($"Instruction call_indirect could not find element {i}");
                 var r = tab.Elements[i];

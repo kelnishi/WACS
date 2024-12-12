@@ -35,7 +35,7 @@ namespace Wacs.Core.Runtime
         {
             if (value.Type != ValType.FuncRef)
                 throw new ArgumentException($"Cannot convert non-funcref ({value.Type}) Value to FuncAddr");
-            return new FuncAddr(value.Int32);
+            return new FuncAddr(value.Data.Int32);
         }
         
         public bool Equals(FuncAddr other) => Value == other.Value;

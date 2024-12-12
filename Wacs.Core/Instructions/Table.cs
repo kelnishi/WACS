@@ -119,7 +119,7 @@ namespace Wacs.Core.Instructions
             //5.
             var tab = context.Store.GetMutableTable(a);
             //6.
-            context.Assert( context.OpStack.Peek().IsRef,
+            context.Assert( context.OpStack.Peek().IsRefType,
                  $"Instruction table.set found non reftype on top of the Stack");
             //7.
             var val = context.OpStack.PopRefType();
@@ -473,7 +473,7 @@ namespace Wacs.Core.Instructions
             //8.
             long n = (uint)context.OpStack.PopI32();
             //9.
-            context.Assert( context.OpStack.Peek().IsRef,
+            context.Assert( context.OpStack.Peek().IsRefType,
                  "Instruction table.grow found incorrect type on top of the Stack");
             //10.
             var val = context.OpStack.PopRefType();
@@ -585,7 +585,7 @@ namespace Wacs.Core.Instructions
                 //7.
                 int n = context.OpStack.PopI32();
                 //8.
-                context.Assert( context.OpStack.Peek().IsRef,
+                context.Assert( context.OpStack.Peek().IsRefType,
                      "Instruction table.grow found incorrect type on top of the Stack");
                 //9.
                 var val = context.OpStack.PopRefType();

@@ -52,7 +52,7 @@ namespace Wacs.Core.Runtime
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
             _registers[Count - 1].Type = ValType.I32;
-            _registers[Count - 1].Int32 = value;
+            _registers[Count - 1].Data.Int32 = value;
         }
 
         public void PushU32(uint value)
@@ -61,7 +61,7 @@ namespace Wacs.Core.Runtime
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
             _registers[Count - 1].Type = ValType.I32;
-            _registers[Count - 1].UInt32 = value;
+            _registers[Count - 1].Data.UInt32 = value;
         }
 
         public void PushI64(long value)
@@ -70,7 +70,7 @@ namespace Wacs.Core.Runtime
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
             _registers[Count - 1].Type = ValType.I64;
-            _registers[Count - 1].Int64 = value;
+            _registers[Count - 1].Data.Int64 = value;
         }
 
         public void PushU64(ulong value)
@@ -79,7 +79,7 @@ namespace Wacs.Core.Runtime
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
             _registers[Count - 1].Type = ValType.I64;
-            _registers[Count - 1].UInt64 = value;
+            _registers[Count - 1].Data.UInt64 = value;
         }
 
         public void PushF32(float value)
@@ -88,7 +88,7 @@ namespace Wacs.Core.Runtime
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
             _registers[Count - 1].Type = ValType.F32;
-            _registers[Count - 1].Float32 = value;
+            _registers[Count - 1].Data.Float32 = value;
         }
 
         public void PushF64(double value)
@@ -97,7 +97,7 @@ namespace Wacs.Core.Runtime
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
             _registers[Count - 1].Type = ValType.F64;
-            _registers[Count - 1].Float64 = value;
+            _registers[Count - 1].Data.Float64 = value;
         }
 
         public void PushV128(V128 value)
@@ -106,7 +106,7 @@ namespace Wacs.Core.Runtime
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
             _registers[Count - 1].Type = ValType.V128;
-            _registers[Count - 1].V128 = value;
+            _registers[Count - 1].GcRef = new VecRef(value);
         }
 
         public void PushFuncref(Value value)
@@ -140,55 +140,61 @@ namespace Wacs.Core.Runtime
         public int PopI32()
         {
             --Count;
-            return _registers[Count].Int32;
+            return _registers[Count].Data.Int32;
         }
 
         public uint PopU32()
         {
             --Count;
-            return _registers[Count].UInt32;
+            return _registers[Count].Data.UInt32;
         }
 
         public long PopI64()
         {
             --Count;
-            return _registers[Count].Int64;
+            return _registers[Count].Data.Int64;
         }
 
         public ulong PopU64()
         {
             --Count;
-            return _registers[Count].UInt64;
+            return _registers[Count].Data.UInt64;
         }
 
         public float PopF32()
         {
             --Count;
-            return _registers[Count].Float32;
+            return _registers[Count].Data.Float32;
         }
 
         public double PopF64()
         {
             --Count;
-            return _registers[Count].Float64;
+            return _registers[Count].Data.Float64;
         }
 
         public V128 PopV128()
         {
             --Count;
-            return _registers[Count].V128;
+            var value = (_registers[Count].GcRef as VecRef)!.V128;
+            _registers[Count].GcRef = null;
+            return value;
         }
 
         public Value PopRefType()
         {
             --Count;
-            return _registers[Count];
+            var value = _registers[Count];
+            _registers[Count].GcRef = null;
+            return value;
         }
 
         public Value PopAny()
         {
             --Count;
-            return _registers[Count];
+            var value = _registers[Count];
+            _registers[Count].GcRef = null;
+            return value;
         }
 
         public void PopTo(int height)
@@ -205,6 +211,7 @@ namespace Wacs.Core.Runtime
             var val = _registers[Count];
             // if (val.Type != type && !val.Type.Matches(type))
             //     throw new InvalidDataException($"OperandStack contained wrong type {val.Type} expected {type}");
+            _registers[Count].GcRef = null;
             return val;
         }
 
