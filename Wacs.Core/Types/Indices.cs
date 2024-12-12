@@ -47,6 +47,9 @@ namespace Wacs.Core.Types
             var defType2 = types[def2];
             return defType1.Matches(defType2, types);
         }
+        
+        public override string ToString() => $"Type[{Value.ToString()}]";
+        
     }
 
     public readonly struct FuncIdx : IEquatable<Index>

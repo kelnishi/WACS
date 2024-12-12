@@ -43,12 +43,12 @@ namespace Wacs.Core.Runtime
         {
             _index = storeIndex;
             _definition = def;
-
             _data = new Value[n];
-            for (int i = 0; i < n; ++i)
-            {
-                _data[i] = elementVals;
-            }
+            Array.Fill(_data, elementVals);
+            // for (int i = 0; i < n; ++i)
+            // {
+            //     _data[i] = elementVals;
+            // }
         }
         
         //Default values
@@ -58,10 +58,12 @@ namespace Wacs.Core.Runtime
             _definition = def;
             _data = new Value[n];
             var fieldType = _definition.ElementType;
-            for (int i = 0; i < n; ++i)
-            {
-                _data[i] = new Value(fieldType.UnpackType());
-            }
+            var val = new Value(fieldType.UnpackType());
+            Array.Fill(_data, val);
+            // for (int i = 0; i < n; ++i)
+            // {
+            //     _data[i] = new Value(fieldType.UnpackType());
+            // }
         }
         
         //Fixed values
@@ -71,10 +73,12 @@ namespace Wacs.Core.Runtime
             _definition = def;
             int n = values.Count;
             _data = new Value[n];
-            for (int i = 0; i < n; ++i)
-            {
-                _data[i] = values.Pop();
-            }
+            var src = values.ToArray();
+            Array.Copy(src, _data, n);
+            // for (int i = 0; i < n; ++i)
+            // {
+            //     _data[i] = values.Pop();
+            // }
         }
 
         //Data values
@@ -101,10 +105,50 @@ namespace Wacs.Core.Runtime
             _definition = def;
             int n = values.Count;
             _data = new Value[n];
-            for (int i = 0; i < n; ++i)
-            {
-                _data[i] = values[i];
-            }
+            var src = values.ToArray();
+            Array.Copy(src, _data, n);
+            // for (int i = 0; i < n; ++i)
+            // {
+            //     _data[i] = values[i];
+            // }
+        }
+
+        public void Fill(Value val, int offset, int count)
+        {
+            Array.Fill(_data, val,offset, count);
+            // int end = offset + count;
+            // for (int i = offset; i < end; ++i)
+            // {
+            //     _data[i] = val;
+            // }
+        }
+
+        //Copy this array to a destination array
+        public void Copy(int srcOffset, StoreArray dst, int dstOffset, int count)
+        {
+            Array.Copy(_data, srcOffset, dst._data, dstOffset, count);
+            // int sStart = srcOffset;
+            // int sEnd = sStart + count;
+            // var sbuf = _data.AsSpan()[sStart..sEnd];
+            //
+            // int dStart = dstOffset;
+            // int dEnd = dStart + count;
+            // var dbuf = dst._data.AsSpan()[dStart..dEnd];
+            // //For copying to/from the same array, go backwards if necessary to shift the data.
+            // if (dStart < sStart)
+            // {
+            //     for (int i = 0; i < count; ++i)
+            //     {
+            //         dbuf[i] = sbuf[i];
+            //     }    
+            // }
+            // else
+            // {
+            //     for (int i = count-1; i >= 0; --i)
+            //     {
+            //         dbuf[i] = sbuf[i];
+            //     }
+            // }
         }
     }
 }
