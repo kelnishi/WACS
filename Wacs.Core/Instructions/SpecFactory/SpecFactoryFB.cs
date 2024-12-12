@@ -47,9 +47,15 @@ namespace Wacs.Core.Instructions
             GcCode.ArrayFill        => new InstArrayFill(),
             GcCode.ArrayCopy        => new InstArrayCopy(),
             
-
-
+            GcCode.RefTest          => new InstRefTest(false),
+            GcCode.RefTestNull      => new InstRefTest(true),
+            GcCode.RefCast          => new InstRefCast(false),
+            GcCode.RefCastNull      => new InstRefCast(true),
             
+            GcCode.RefI31           => new InstRefI31(),
+            GcCode.I31GetS          => new InstI32GetS(),
+            GcCode.I31GetU          => new InstI32GetU(),
+
             _ => throw new InvalidDataException($"Unsupported instruction {opcode.GetMnemonic()}. ByteCode: 0xFB{(byte)opcode:X2}")
         };
     }
