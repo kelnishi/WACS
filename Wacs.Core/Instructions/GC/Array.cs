@@ -288,10 +288,19 @@ namespace Wacs.Core.Instructions.GC
             //14
             var z = ft.BitWidth().ByteSize();
             //15
-            if ((s + n) * z > datainst.Data.Length)
+            int start = s * z;
+            int end = start + n * z;
+            int span = end - z + 1;
+            if (span > datainst.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Array size exceeds data length");
             //16
-            var b = datainst.Data.AsSpan()[(s * z)..((s + n) * z)];
+            //HACK: Unaligned read is some nonsense
+            if (end > datainst.Data.Length)
+            {
+                end = datainst.Data.Length;
+                start = end - n * z;
+            }
+            var b = datainst.Data.AsSpan()[start..end];
             //19 skip the stack since we're inline
             var a = context.Store.AddArray();
             //17,18
