@@ -509,9 +509,9 @@ namespace Wacs.Core.Runtime
         };
         
         public static readonly Value Bot = new(ValType.Bot);
-        public static readonly Value NullRef = new(ValType.None);
-        public static readonly Value NullFuncRef = new(ValType.NoFunc);
-        public static readonly Value NullExternRef = new(ValType.NoExtern);
+        public static readonly Value NullRef = new(ValType.NullableRef);
+        public static readonly Value NullFuncRef = new(ValType.FuncRef);
+        public static readonly Value NullExternRef = new(ValType.ExternRef);
         public static readonly Value Void = new (ValType.Nil);
 
         public static Value Null(ValType type) => type switch
