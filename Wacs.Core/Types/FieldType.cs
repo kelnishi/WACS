@@ -14,10 +14,13 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using FluentValidation;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
@@ -54,10 +57,48 @@ namespace Wacs.Core.Types
             return other.StorageType.Matches(StorageType, types);
         }
 
-        public ValType Unpack() => StorageType switch {
+        public ValType UnpackType() => StorageType switch {
             ValType.I8 => ValType.I32,
             ValType.I16 => ValType.I32,
             _ => StorageType
+        };
+
+        public Value UnpackValue(ReadOnlySpan<byte> bytes)
+        {
+            switch (StorageType)
+            {
+                case ValType.I8:
+                    return new Value(ValType.I32, (int)(sbyte)bytes[0]);
+                case ValType.I16:
+                    return new Value(ValType.I32, (int)BitConverter.ToInt16(bytes));
+                case ValType.I32:
+                    return new Value(ValType.I32, BitConverter.ToUInt32(bytes));
+                case ValType.I64:
+                    return new Value(ValType.I64, BitConverter.ToInt64(bytes));
+                case ValType.F32:
+                    return new Value(ValType.F32, BitConverter.ToSingle(bytes));
+                case ValType.F64:
+                    return new Value(ValType.F64, BitConverter.ToDouble(bytes));
+                case ValType.V128:
+#if NET8_0_OR_GREATER
+                    var vec = MemoryMarshal.AsRef<V128>(bytes);
+#else
+                    var vec = MemoryMarshal.Read<V128>(bytes);
+#endif
+                    return new Value(ValType.V128, vec);
+                default:
+                    throw new WasmRuntimeException($"Cannot unpack byte sequence for fieldtype:{StorageType}");
+            }
+        }
+
+        public BitWidth BitWidth() => StorageType switch
+        {
+            ValType.I8 => Types.BitWidth.U8,
+            ValType.I16 => Types.BitWidth.U16,
+            ValType.I32 or ValType.F32 => Types.BitWidth.U32,
+            ValType.I64 or ValType.U64 => Types.BitWidth.U64,
+            ValType.V128 => Types.BitWidth.V128,
+            _ => Types.BitWidth.None,
         };
         
         public bool ValidExtension(PackedExt pt) => pt switch

@@ -51,8 +51,9 @@ namespace Wacs.Core.Instructions.GC
 
             foreach (var ft in structType.FieldTypes.Reverse())
             {
-                context.OpStack.PopType(ft.Unpack());
+                context.OpStack.PopType(ft.UnpackType());
             }
+
             var resultType = ValType.Ref | (ValType)X;
             context.OpStack.PushType(resultType);
         }
@@ -180,7 +181,6 @@ namespace Wacs.Core.Instructions.GC
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructgetmathsf_hrefsyntax-sxmathitsxxy
         /// </summary>
         /// <param name="context"></param>
-        /// <exception cref="NotImplementedException"></exception>
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -195,7 +195,7 @@ namespace Wacs.Core.Instructions.GC
                 "Instruction {0} was invalid. Fields did not include index:{1}",Op.GetMnemonic(),Y.Value);
             
             var fieldtype = structType[Y];
-            var t = fieldtype.Unpack();
+            var t = fieldtype.UnpackType();
             
             context.Assert(fieldtype.ValidExtension(Sx),
                 "Instruction {0} was invalid. Bad packing extension:{1}",Op.GetMnemonic(), Sx);
@@ -288,7 +288,7 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(fieldtype.Mut == Mutability.Mutable,
                 "Instruction {0} was invalid. Cannot set immutable field:{1}",Op.GetMnemonic(),Y.Value);
             
-            var t = fieldtype.Unpack();
+            var t = fieldtype.UnpackType();
             var refType = ValType.NullableRef | (ValType)X;
 
             context.OpStack.PopType(t);
