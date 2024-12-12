@@ -53,6 +53,8 @@ namespace Spec.Test.WastJson
                 "nullfuncref" => Wacs.Core.Runtime.Value.NullFuncRef,
                 "nullexternref" => Wacs.Core.Runtime.Value.NullExternRef,
                 "anyref" => new Value(ValType.Any, Value?.ToString()??"null"),
+                "structref" => new Value(ValType.Struct, Value?.ToString()??"null"),
+                "arrayref" => new Value(ValType.Array, Value?.ToString()??"null"),
                 _ => throw new ArgumentException($"Cannot parse value {Value} of type {Type}")
             };
 

@@ -14,8 +14,10 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.Collections.Generic;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Runtime.Types
 {
@@ -47,5 +49,23 @@ namespace Wacs.Core.Runtime.Types
         public string Name { get; set; } = "_";
 
         public FuncAddr StartFunc { get; set; } = FuncAddr.Null;
+
+        public void DerefTypes(Span<Value> span)
+        {
+            for (int i = 0, l = span.Length; i < l; ++i)
+            {
+                if (span[i].Type.IsDefType())
+                {
+                    var derefType = Types[span[i].Type.Index()];
+                    span[i].Type = derefType.Expansion switch
+                    {
+                        StructType => ValType.Struct,
+                        ArrayType => ValType.Array,
+                        FunctionType => ValType.Func,
+                        _ => span[i].Type
+                    };
+                }
+            }
+        }
     }
 }

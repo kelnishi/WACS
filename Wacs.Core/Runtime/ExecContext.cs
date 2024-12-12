@@ -416,5 +416,18 @@ namespace Wacs.Core.Runtime
                 return OpCode.Func;    
             return OpCode.Block;
         }
+
+        public ModuleInstance? GetModule(FuncAddr funcAddr)
+        {
+            var functionInstance = Store[funcAddr];
+            switch (functionInstance)
+            {
+                case FunctionInstance wasmFunc: return wasmFunc.Module;
+                case HostFunction hostFunc:
+                    //TODO: maybe implement ref binding for host functions
+                default:
+                    return null;
+            }
+        }
     }
 }
