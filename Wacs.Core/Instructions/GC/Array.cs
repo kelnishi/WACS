@@ -624,4 +624,209 @@ namespace Wacs.Core.Instructions.GC
             context.OpStack.PushI32(n);
         }
     }
+
+    public class InstArrayFill : InstructionBase
+    {
+        private TypeIdx X;
+        public override ByteCode Op => GcCode.ArrayFill;
+        public override void Validate(IWasmValidationContext context)
+        {
+            context.Assert(context.Types.Contains(X),
+                "Instruction {0} was invalid. DefType {1} was not in the context.", Op.GetMnemonic(), X);
+            
+            var defType = context.Types[X];
+            var compositeType = defType.Expansion;
+            var arrayType = compositeType as ArrayType;
+            context.Assert(arrayType,
+                "Instruction {0} was invalid. Referenced Type was not array:{1}",Op.GetMnemonic(),compositeType);
+            
+            var fieldType = arrayType.ElementType;
+            context.Assert(fieldType.Mut == Mutability.Mutable,
+                "Instruction {0} was invalid. Cannot set immutable field:{1}",Op.GetMnemonic(), fieldType);
+            
+            var t = fieldType.UnpackType();
+            var refType = ValType.NullableRef | (ValType)X;
+
+            context.OpStack.PopI32();
+            context.OpStack.PopType(t);
+            context.OpStack.PopI32();
+            context.OpStack.PopType(refType);
+            
+        }
+
+        public override void Execute(ExecContext context)
+        {
+            //1
+            context.Assert(context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong operand type on top of stack");
+            //2
+            var n = context.OpStack.PopI32();
+            //3
+            context.Assert(context.OpStack.Count > 0,
+                $"Instruction {Op.GetMnemonic()} failed. Operand stack underflow");
+            //4
+            var val = context.OpStack.PopAny();
+            //5
+            context.Assert(context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong operand type on top of stack");
+            //6
+            var d = context.OpStack.PopI32();
+            //7
+            var refType = ValType.NullableRef | (ValType)X;
+            context.Assert(context.OpStack.Peek().IsRef(refType),
+                $"Instruction {Op.GetMnemonic()} failed. Wrong operand type on top of stack");
+            //8
+            var refVal = context.OpStack.PopRefType();
+            //9
+            if (refVal.IsNullRef)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Reference was null.");
+            //10,11
+            var a = refVal.GcRef as StoreArray;
+            context.Assert(a,
+                $"Instruction {Op.GetMnemonic()} failed. Reference was not an array.");
+            //12
+            context.Assert(context.Store.Contains(a.ArrayIndex),
+                $"Instruction {Op.GetMnemonic()} failed. Store did not contain reference {a.ArrayIndex}");
+            //13
+            if (d + n > a.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Array overflow.");
+            //14
+            if (n == 0)
+                return;
+            //15 - 24 delegate the recursive part to StoreArray.Fill
+            a.Fill(val, d, n);
+        }
+
+        public override InstructionBase Parse(BinaryReader reader)
+        {
+            X = (TypeIdx)reader.ReadLeb128_u32();
+            return this;
+        }
+    }
+    
+    public class InstArrayCopy : InstructionBase
+    {
+        private TypeIdx X; //dest
+        private TypeIdx Y; //src
+        public override ByteCode Op => GcCode.ArrayFill;
+        public override void Validate(IWasmValidationContext context)
+        {
+            context.Assert(context.Types.Contains(X),
+                "Instruction {0} was invalid. DefType {1} was not in the context.", Op.GetMnemonic(), X);
+            
+            var defTypeX = context.Types[X];
+            var compositeTypeX = defTypeX.Expansion;
+            var arrayTypeX = compositeTypeX as ArrayType;
+            context.Assert(arrayTypeX,
+                "Instruction {0} was invalid. Referenced Type was not array:{1}",Op.GetMnemonic(),compositeTypeX);
+            
+            var fieldTypeX = arrayTypeX.ElementType;
+            context.Assert(fieldTypeX.Mut == Mutability.Mutable,
+                "Instruction {0} was invalid. Cannot set immutable field:{1}",Op.GetMnemonic(), fieldTypeX);
+            
+            context.Assert(context.Types.Contains(Y),
+                "Instruction {0} was invalid. DefType {1} was not in the context.", Op.GetMnemonic(), Y);
+            
+            var defTypeY = context.Types[Y];
+            var compositeTypeY = defTypeY.Expansion;
+            var arrayTypeY = compositeTypeY as ArrayType;
+            context.Assert(arrayTypeY,
+                "Instruction {0} was invalid. Referenced Type was not array:{1}",Op.GetMnemonic(),compositeTypeY);
+            
+            var fieldTypeY = arrayTypeY.ElementType;
+            context.Assert(fieldTypeY.StorageType.Matches(fieldTypeX.StorageType, context.Types),
+                "Instruction {0} was invalid. Array FieldType {1} does not match {2}",Op.GetMnemonic(), fieldTypeY, fieldTypeX);
+            
+            var refTypeX = ValType.NullableRef | (ValType)X;
+            var refTypeY = ValType.NullableRef | (ValType)Y;
+
+            context.OpStack.PopI32();
+            context.OpStack.PopI32();
+            context.OpStack.PopType(refTypeY);
+            context.OpStack.PopI32();
+            context.OpStack.PopType(refTypeX);
+        }
+
+        public override void Execute(ExecContext context)
+        {
+            //2
+            context.Assert(context.Frame.Module.Types.Contains(Y),
+                $"Instruction {Op.GetMnemonic()} failed. DefType {Y} was not in the context");
+            //3
+            var defType = context.Frame.Module.Types[Y];
+            var compositeType = defType.Expansion;
+            //4
+            var arrayType = compositeType as ArrayType;
+            context.Assert(arrayType,
+                $"Instruction {Op.GetMnemonic()} was invalid. Referenced Type was not struct:{compositeType}");
+            //5
+            var st = arrayType.ElementType;
+            //6
+            context.Assert(context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong operand type on top of stack");
+            //7
+            var n = context.OpStack.PopI32();
+            //8
+            context.Assert(context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong operand type on top of stack");
+            //9
+            var s = context.OpStack.PopI32();
+            //10
+            var refNullY = ValType.NullableRef | (ValType)Y;
+            context.Assert(context.OpStack.Peek().IsRef(refNullY),
+                $"Instruction {Op.GetMnemonic()} failed. Wrong operand type on top of stack");
+            //11
+            var ref2 = context.OpStack.PopType(refNullY);
+            //12
+            context.Assert(context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong operand type on top of stack");
+            //13
+            var d = context.OpStack.PopI32();
+            //14
+            var refNullX = ValType.NullableRef | (ValType)X;
+            context.Assert(context.OpStack.Peek().IsRef(refNullX),
+                $"Instruction {Op.GetMnemonic()} failed. Wrong operand type on top of stack");
+            //15
+            var ref1 = context.OpStack.PopType(refNullX);
+            //16
+            if (ref1.IsNullRef)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Array reference was null.");
+            //17,18
+            var a1 = ref1.GcRef as StoreArray;
+            context.Assert(a1,
+                $"Instruction {Op.GetMnemonic()} failed. Reference was not an array.");
+            //19
+            if (ref2.IsNullRef)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Array reference was null.");
+            //20,21
+            var a2 = ref2.GcRef as StoreArray;
+            context.Assert(a2,
+                $"Instruction {Op.GetMnemonic()} failed. Reference was not an array.");
+            //22
+            context.Assert(context.Store.Contains(a1.ArrayIndex),
+                $"Instruction {Op.GetMnemonic()} failed. Store did not contain reference {a1.ArrayIndex}");
+            //23
+            context.Assert(context.Store.Contains(a2.ArrayIndex),
+                $"Instruction {Op.GetMnemonic()} failed. Store did not contain reference {a2.ArrayIndex}");
+            //24
+            if (d+n > a1.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Destination array overflow.");
+            //25
+            if (s+n > a2.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Source array overflow.");
+            //26
+            if (n == 0)
+                return;
+
+            //27 - 30 delegate the recursive part to StoreArray.Copy
+            a2.Copy(s, a1, d, n);
+        }
+
+        public override InstructionBase Parse(BinaryReader reader)
+        {
+            X = (TypeIdx)reader.ReadLeb128_u32();
+            Y = (TypeIdx)reader.ReadLeb128_u32();
+            return this;
+        }
+    }
 }
