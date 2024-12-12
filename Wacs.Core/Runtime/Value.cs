@@ -20,6 +20,7 @@ using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Wacs.Core.Attributes;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
@@ -211,10 +212,10 @@ namespace Wacs.Core.Runtime
             return (long)value;
         }
 
-        private static int BitBashRef(string textVal)
+        private static long BitBashRef(string textVal)
         {
             if (textVal == "null")
-                return -1;
+                return long.MinValue;
             uint v = uint.Parse(textVal);
             return (int)v;
         }
@@ -292,7 +293,7 @@ namespace Wacs.Core.Runtime
                 Type = type;
                 if (type.IsNullable())
                 {
-                    Data.Ptr = -1;
+                    Data.Ptr = long.MinValue;
                     Data.Set = true;
                 }
                 return;
@@ -322,41 +323,41 @@ namespace Wacs.Core.Runtime
                     Data.Set = true;
                     break;
                 case ValType.FuncRef:
-                    Data.Ptr = -1;
+                    Data.Ptr = long.MinValue;
                     Data.Set = true;
                     break;
                 case ValType.Func:
                     Data.Ptr = 0;
                     break;
                 case ValType.ExternRef:
-                    Data.Ptr = -1;
+                    Data.Ptr = long.MinValue;
                     Data.Set = true;
                     break;
                 case ValType.Extern:
                     Data.Ptr = 0;
                     break;
                 case ValType.Nil:
-                    Data.Ptr = -1;
+                    Data.Ptr = long.MinValue;
                     Data.Set = true;
                     break;
                 case ValType.Bot:
-                    Data.Ptr = -1;
+                    Data.Ptr = long.MinValue;
                     Data.Set = true;
                     break;
                 case ValType.None:
-                    Data.Ptr = -1;
+                    Data.Ptr = long.MinValue;
                     Data.Set = true;
                     break;
                 case ValType.NoFunc:
-                    Data.Ptr = -1;
+                    Data.Ptr = long.MinValue;
                     Data.Set = true;
                     break;
                 case ValType.NoExtern:
-                    Data.Ptr = -1;
+                    Data.Ptr = long.MinValue;
                     Data.Set = true;
                     break;
                 case ValType.Any:
-                    Data.Ptr = -1;
+                    Data.Ptr = long.MinValue;
                     Data.Set = true;
                     break;
                 case ValType.Undefined:
@@ -443,6 +444,16 @@ namespace Wacs.Core.Runtime
                 _ => throw new ArgumentException($"Unknown RefValue:{refVal}")
             };
             GcRef = refVal;
+        }
+
+        public Value(ValType refType, long address, IGcRef? gcRef)
+        {
+            this = default;
+            if (!refType.Matches(ValType.I31, null))
+                throw new WasmRuntimeException($"Direct pointer creation is disallowed for type:{Type}");
+            Type = refType;
+            Data.Ptr = address;
+            GcRef = gcRef;
         }
         
         public Value(ValType type, object externalValue)
@@ -532,7 +543,7 @@ namespace Wacs.Core.Runtime
         public bool IsI32 => Type == ValType.I32;
         public bool IsV128 => Type == ValType.V128;
         public bool IsRefType => Type.IsRefType();
-        public bool IsNullRef => IsRefType && Data.Ptr == -1;
+        public bool IsNullRef => IsRefType && Data.Ptr == long.MinValue;
 
         public bool IsType(ValType type) => Type == type;
         public bool IsRef(ValType reftype) => Type == reftype;
