@@ -40,6 +40,20 @@ namespace Wacs.Core.Runtime.GC
                 _data[i] = fieldVals.Pop();
             }
         }
+        
+        //Defaults
+        public StoreStruct(StructIdx storeIndex, StructType def)
+        {
+            _index = storeIndex;
+            _definition = def;
+            var fieldTypes = _definition.FieldTypes;
+
+            _data = new Value[fieldTypes.Length];
+            for (int i = 0, l = fieldTypes.Length; i < l; ++i)
+            {
+                _data[i] = new Value(fieldTypes[i].Unpack());
+            }
+        }
 
         public Value this[FieldIdx y]
         {

@@ -37,6 +37,7 @@ namespace Wacs.Core.Types
         public static StructType Parse(BinaryReader reader) => 
             new(reader.ParseVector(FieldType.Parse));
 
+        public FieldType this[FieldIdx y] => FieldTypes[y.Value];
 
         public bool Matches(StructType other, TypesSpace? types)
         {
