@@ -352,6 +352,8 @@ namespace Wacs.Core.Runtime
                 var span = results.AsSpan();
                 Context.OpStack.PopScalars(funcType.ResultType, span);
 
+                Context.GetModule(funcAddr)?.DerefTypes(span);
+                
                 return results;
             }
         }

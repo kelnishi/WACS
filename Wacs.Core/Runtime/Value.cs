@@ -287,7 +287,7 @@ namespace Wacs.Core.Runtime
         {
             this = default;
 
-            if (type.IsRefType() && type.IsDefType())
+            if (type.IsRefType())
             {
                 Type = type;
                 if (type.IsNullable())
