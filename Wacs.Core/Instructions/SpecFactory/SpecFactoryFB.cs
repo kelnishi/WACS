@@ -32,6 +32,21 @@ namespace Wacs.Core.Instructions
             GcCode.StructGetU       => new InstStructGet(PackedExt.Unsigned),
             GcCode.StructSet        => new InstStructSet(),
             
+            GcCode.ArrayNew         => new InstArrayNew(),
+            GcCode.ArrayNewDefault  => new InstArrayNewDefault(),
+            GcCode.ArrayNewFixed    => new InstArrayNewFixed(),
+            GcCode.ArrayNewData     => new InstArrayNewData(),
+            GcCode.ArrayNewElem     => new InstArrayNewElem(),
+            
+            GcCode.ArrayGet         => new InstArrayGet(PackedExt.NotPacked),
+            GcCode.ArrayGetS        => new InstArrayGet(PackedExt.Signed),
+            GcCode.ArrayGetU        => new InstArrayGet(PackedExt.Unsigned),
+            GcCode.ArraySet         => new InstArraySet(),
+
+            GcCode.ArrayLen         => new InstArrayLen(),
+
+
+            
             _ => throw new InvalidDataException($"Unsupported instruction {opcode.GetMnemonic()}. ByteCode: 0xFB{(byte)opcode:X2}")
         };
     }
