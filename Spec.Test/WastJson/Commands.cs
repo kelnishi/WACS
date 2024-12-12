@@ -138,7 +138,7 @@ namespace Spec.Test.WastJson
                         //HACK: null ref comparison
                         if (expected.IsNullRef)
                         {
-                            if (!actual.IsNullRef && !expected.Type.Matches(actual.Type, null))
+                            if (!actual.IsNullRef && !actual.Type.Matches(expected.Type, null))
                                 throw new TestException(
                                     $"Test failed {this} \"{invokeAction.Field}\": Expected [{string.Join(" ", Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
                         }
