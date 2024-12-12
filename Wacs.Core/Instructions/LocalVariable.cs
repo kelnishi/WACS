@@ -71,7 +71,7 @@ namespace Wacs.Core.Instructions
                 "Instruction local.get was invalid. Context Locals did not contain variable at index {0}", Index.Value);
             var value = context.Locals.Get(Index);
             
-            context.Assert(value.Set,
+            context.Assert(value.Data.Set,
                 "Instruction local.get was invalid. The non-defaultable local variable at index {0} was unset", Index.Value);
             
             context.OpStack.PushType(value.Type);
@@ -128,7 +128,7 @@ namespace Wacs.Core.Instructions
         {
             context.Assert(context.Locals.Contains(Index),
                 "Instruction local.set was invalid. Context Locals did not contain {0}",Index);
-            context.Locals.Data[Index.Value].Set = true;
+            context.Locals.Data[Index.Value].Data.Set = true;
             var value = context.Locals.Get(Index);
             context.OpStack.PopType(value.Type);
         }
@@ -197,7 +197,7 @@ namespace Wacs.Core.Instructions
         {
             context.Assert(context.Locals.Contains(Index),
                 "Instruction local.tee was invalid. Context Locals did not contain {0}",Index);
-            context.Locals.Data[Index.Value].Set = true;
+            context.Locals.Data[Index.Value].Data.Set = true;
             var value = context.Locals.Get(Index);
             context.OpStack.PopType(value.Type);
             context.OpStack.PushType(value.Type);
