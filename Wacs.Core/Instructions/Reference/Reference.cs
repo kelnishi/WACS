@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions.Reference
         // @Spec 4.4.2.2. ref.is_null
         public override void Execute(ExecContext context)
         {
-            context.Assert( context.OpStack.Peek().IsRef,
+            context.Assert( context.OpStack.Peek().IsRefType,
                 $"Instruction ref.is_null failed. Expected reftype on top of the stack.");
             Value val = context.OpStack.PopRefType();
             int booleanResult = val.IsNullRef ? 1 : 0;
@@ -90,7 +90,7 @@ namespace Wacs.Core.Instructions.Reference
             
             context.Assert(func.IsFullyDeclared(context),
                 "Instruction ref.func is invalid. (func {0}) is not fully declared in the module.",FunctionIndex);
-            var val = new Value(ValType.Ref | (ValType)func.TypeIndex.Value);
+            var val = new Value(ValType.Ref | (ValType)func.TypeIndex);
             context.OpStack.PushFuncref(val);
         }
 
@@ -127,10 +127,10 @@ namespace Wacs.Core.Instructions.Reference
 
         public override void Execute(ExecContext context)
         {
-            context.Assert( context.OpStack.Peek().IsRef,
+            context.Assert( context.OpStack.Peek().IsRefType,
                 $"Instruction ref.is_null failed. Expected reftype on top of the stack.");
             Value v2 = context.OpStack.PopRefType();
-            context.Assert( context.OpStack.Peek().IsRef,
+            context.Assert( context.OpStack.Peek().IsRefType,
                 $"Instruction ref.is_null failed. Expected reftype on top of the stack.");
             Value v1 = context.OpStack.PopRefType();
 
@@ -155,7 +155,7 @@ namespace Wacs.Core.Instructions.Reference
 
         public override void Execute(ExecContext context)
         {
-            context.Assert( context.OpStack.Peek().IsRef,
+            context.Assert( context.OpStack.Peek().IsRefType,
                 $"Instruction ref.is_null failed. Expected reftype on top of the stack.");
             Value vRef = context.OpStack.PopRefType();
             if (vRef.IsNullRef)
