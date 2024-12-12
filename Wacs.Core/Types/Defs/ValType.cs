@@ -169,6 +169,9 @@ namespace Wacs.Core.Types.Defs
             _ => false
         };
 
+        public static bool IsDefaultable(this ValType type) => 
+            !type.IsRefType() || type.IsNullable();
+
         public static bool IsPacked(this ValType type) => type switch
         {
             ValType.I8 or ValType.I16 => true,

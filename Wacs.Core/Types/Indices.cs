@@ -32,6 +32,8 @@ namespace Wacs.Core.Types
         public static explicit operator TypeIdx(int value) => new(value);
         public static explicit operator TypeIdx(uint value) => new((int)value);
         public static explicit operator TypeIdx(ValType type) => type.Index();
+
+        public static explicit operator ValType(TypeIdx type) => (ValType)type.Value;
         
         public static bool operator ==(TypeIdx left, TypeIdx right) => left.Value == right.Value;
         public static bool operator !=(TypeIdx left, TypeIdx right) => !(left == right);
@@ -166,4 +168,41 @@ namespace Wacs.Core.Types
         public static explicit operator LabelIdx(int value) => new((uint)value);
         public static explicit operator LabelIdx(uint value) => new(value);
     }
+    
+    public readonly struct FieldIdx : IEquatable<Index>
+    {
+        public readonly int Value;
+        private FieldIdx(int value) => Value = value;
+        public bool Equals(Index other) => Value == other.Value;
+        public static explicit operator Index(FieldIdx fieldIdx) => new(fieldIdx.Value);
+        public static explicit operator FieldIdx(int value) => new(value);
+        public static explicit operator FieldIdx(uint value) => new((int)value);
+    }
+
+    public interface RefIdx {}
+    
+    public readonly struct VecIdx : RefIdx
+    {
+        public readonly long Value;
+        private VecIdx(long value) => Value = value;
+        public bool Equals(Index other) => Value == other.Value;
+        public static explicit operator VecIdx(long value) => new(value);
+    }
+    
+    public readonly struct StructIdx : RefIdx
+    {
+        public readonly long Value;
+        private StructIdx(long value) => Value = value;
+        public bool Equals(Index other) => Value == other.Value;
+        public static explicit operator StructIdx(long value) => new(value);
+    }
+    
+    public readonly struct ArrayIdx : RefIdx
+    {
+        public readonly long Value;
+        private ArrayIdx(long value) => Value = value;
+        public bool Equals(Index other) => Value == other.Value;
+        public static explicit operator ArrayIdx(long value) => new(value);
+    }
+    
 }

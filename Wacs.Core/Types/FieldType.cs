@@ -17,6 +17,7 @@
 using System.Collections.Generic;
 using System.IO;
 using FluentValidation;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
@@ -52,7 +53,20 @@ namespace Wacs.Core.Types
             //var,var case matches reciprocally
             return other.StorageType.Matches(StorageType, types);
         }
+
+        public ValType Unpack() => StorageType switch {
+            ValType.I8 => ValType.I32,
+            ValType.I16 => ValType.I32,
+            _ => StorageType
+        };
         
+        public bool ValidExtension(PackedExt pt) => pt switch
+        {
+            PackedExt.NotPacked => StorageType is not (ValType.I8 or ValType.I16),
+            PackedExt.Signed or PackedExt.Unsigned => StorageType is ValType.I8 or ValType.I16,
+            _ => false
+        };
+
         public class Validator : AbstractValidator<FieldType>
         {
             public Validator()

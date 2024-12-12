@@ -35,6 +35,9 @@ namespace Wacs.Core.Runtime
         private readonly List<TableInstance> Tables = new();
         private StoreTransaction? CurrentTransaction = null;
 
+        private long Structs = 0;
+        private long Arrays = 0;
+
         private MemoryInstance?[] Mems = new MemoryInstance[32];
         private int MemsCount = 0;
 
@@ -63,6 +66,10 @@ namespace Wacs.Core.Runtime
         public bool Contains(ElemAddr addr) => addr.Value < Elems.Count || (CurrentTransaction?.Elems.ContainsKey(addr) ?? false);
         public bool Contains(DataAddr addr) => addr.Value < Datas.Count || (CurrentTransaction?.Datas.ContainsKey(addr) ?? false);
 
+        public bool Contains(StructIdx heapIdx) => Structs > heapIdx.Value && heapIdx.Value >= 0;
+        public bool Contains(ArrayIdx heapIdx) => Arrays > heapIdx.Value && heapIdx.Value >= 0;
+        
+        
         public void OpenTransaction()
         {
             if (CurrentTransaction != null)
@@ -135,6 +142,16 @@ namespace Wacs.Core.Runtime
             CurrentTransaction.Tables.Add(addr, table);
 
             return addr;
+        }
+
+        public StructIdx AddStruct()
+        {
+            return (StructIdx)Structs++;
+        }
+
+        public ArrayIdx AddArray()
+        {
+            return (ArrayIdx)Arrays++;
         }
 
         public TableInstance GetMutableTable(TableAddr addr)

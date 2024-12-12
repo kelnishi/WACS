@@ -15,7 +15,9 @@
 //  */
 
 using System.IO;
+using Wacs.Core.Instructions.GC;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Instructions
 {
@@ -23,6 +25,13 @@ namespace Wacs.Core.Instructions
     {
         public static InstructionBase? CreateInstruction(GcCode opcode) => opcode switch
         {
+            GcCode.StructNew        => new InstStructNew(),
+            GcCode.StructNewDefault => new InstStructNewDefault(),
+            GcCode.StructGet        => new InstStructGet(PackedExt.NotPacked),
+            GcCode.StructGetS       => new InstStructGet(PackedExt.Signed),
+            GcCode.StructGetU       => new InstStructGet(PackedExt.Unsigned),
+            GcCode.StructSet        => new InstStructSet(),
+            
             _ => throw new InvalidDataException($"Unsupported instruction {opcode.GetMnemonic()}. ByteCode: 0xFB{(byte)opcode:X2}")
         };
     }
