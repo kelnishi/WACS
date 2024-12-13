@@ -46,7 +46,8 @@ namespace Wacs.Core.Instructions
             GcCode.ArrayLen         => new InstArrayLen(),
             GcCode.ArrayFill        => new InstArrayFill(),
             GcCode.ArrayCopy        => new InstArrayCopy(),
-            
+            GcCode.ArrayInitData    => new InstArrayInitData(),
+            GcCode.ArrayInitElem    => new InstArrayInitElem(),
             GcCode.RefTest          => new InstRefTest(false),
             GcCode.RefTestNull      => new InstRefTest(true),
             GcCode.RefCast          => new InstRefCast(false),
