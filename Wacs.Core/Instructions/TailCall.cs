@@ -286,11 +286,12 @@ namespace Wacs.Core.Instructions
             //17.
             
             //18.
+            //Check wasmfuncs, not hostfuncs
             if (funcInst is FunctionInstance ftAct)
-                if (ftAct.DefTypeHash != ftExpect.GetHashCode())
-                    throw new TrapException($"Instruction return_call_indirect failed. RecursiveType differed.");
-            if (!ftFunc.Matches(funcInst.Type, context.Frame.Module.Types))
-                throw new TrapException($"Instruction return_call_indirect failed. Expected FunctionType differed.");
+                if (!ftAct.DefType.Matches(ftExpect, context.Frame.Module.Types))
+                    throw new TrapException($"Instruction {Op.GetMnemonic()} failed. RecursiveType differed.");
+            if (!funcInst.Type.Matches(ftExpect.Unroll.Body, context.Frame.Module.Types))
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Expected FunctionType differed.");
             
             //Return
             // Split stack will preserve the operands, don't bother moving them.
@@ -353,11 +354,12 @@ namespace Wacs.Core.Instructions
             var funcInst = context.Store[a];
             //17.
             //18.
+            //Check wasmfuncs, not hostfuncs
             if (funcInst is FunctionInstance ftAct)
-                if (ftAct.DefTypeHash != ftExpect.GetHashCode())
-                    throw new TrapException($"Instruction call_indirect failed. RecursiveType differed.");
-            if (!ftFunc.Matches(funcInst.Type, context.Frame.Module.Types))
-                throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
+                if (!ftAct.DefType.Matches(ftExpect, context.Frame.Module.Types))
+                    throw new TrapException($"Instruction {Op.GetMnemonic()} failed. RecursiveType differed.");
+            if (!funcInst.Type.Matches(ftExpect.Unroll.Body, context.Frame.Module.Types))
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Expected FunctionType differed.");
             
             //Return
             // Split stack will preserve the operands, don't bother moving them.
