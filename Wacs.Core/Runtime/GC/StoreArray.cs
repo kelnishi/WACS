@@ -150,5 +150,27 @@ namespace Wacs.Core.Runtime
             //     }
             // }
         }
+
+        public void Init(int offset, ReadOnlySpan<byte> data, int n, int stride)
+        {
+            var ft = _definition.ElementType;
+            int dstart = offset;
+            int dend = dstart + n;
+            var dest = _data.AsSpan()[dstart..dend];
+            
+            for (int i = 0; i < n; ++i)
+            {
+                int start = i * stride;
+                int end = start + stride;
+                var source = data[start..end];
+                dest[i] = ft.UnpackValue(source);
+            }
+        }
+        
+        public void Init(int offset, List<Value> elems, int n)
+        {
+            var src = elems.ToArray();
+            Array.Copy(src,  0, _data, offset, n);
+        }
     }
 }
