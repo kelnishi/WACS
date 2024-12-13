@@ -100,7 +100,7 @@ namespace Wacs.Core.Instructions.GC
     public class InstArrayNewDefault : InstructionBase, IConstInstruction
     {
         private TypeIdx X;
-        public override ByteCode Op => GcCode.ArrayNew;
+        public override ByteCode Op => GcCode.ArrayNewDefault;
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -158,7 +158,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         private uint N;
-        public override ByteCode Op => GcCode.ArrayNew;
+        public override ByteCode Op => GcCode.ArrayNewFixed;
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -288,9 +288,13 @@ namespace Wacs.Core.Instructions.GC
             //14
             var z = ft.BitWidth().ByteSize();
             //15
-            int start = s * z;
-            int end = start + n * z;
-            int span = end - z + 1;
+            int end = s + n * z;
+            int span = end;
+            if (z != 4)
+            {
+                span -= z;
+                span += 1;
+            }
             if (span > datainst.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Array size exceeds data length");
             //16
@@ -298,9 +302,9 @@ namespace Wacs.Core.Instructions.GC
             if (end > datainst.Data.Length)
             {
                 end = datainst.Data.Length;
-                start = end - n * z;
+                s = end - n * z;
             }
-            var b = datainst.Data.AsSpan()[start..end];
+            var b = datainst.Data.AsSpan()[s..end];
             //19 skip the stack since we're inline
             var a = context.Store.AddArray();
             //17,18
@@ -322,7 +326,7 @@ namespace Wacs.Core.Instructions.GC
         private TypeIdx X;
         private ElemIdx Y;
         
-        public override ByteCode Op => GcCode.ArrayNewData;
+        public override ByteCode Op => GcCode.ArrayNewElem;
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -511,7 +515,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         
-        public override ByteCode Op => GcCode.StructSet;
+        public override ByteCode Op => GcCode.ArraySet;
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -708,7 +712,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X; //dest
         private TypeIdx Y; //src
-        public override ByteCode Op => GcCode.ArrayFill;
+        public override ByteCode Op => GcCode.ArrayCopy;
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -826,6 +830,255 @@ namespace Wacs.Core.Instructions.GC
         {
             X = (TypeIdx)reader.ReadLeb128_u32();
             Y = (TypeIdx)reader.ReadLeb128_u32();
+            return this;
+        }
+    }
+    
+    public class InstArrayInitData : InstructionBase
+    {
+        private TypeIdx X;
+        private DataIdx Y;
+        
+        public override ByteCode Op => GcCode.ArrayInitData;
+        /// <summary>
+        /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_dataxy
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(IWasmValidationContext context)
+        {
+            context.Assert(context.Types.Contains(X),
+                "Instruction {0} was invalid. DefType {1} was not in the Context.",Op.GetMnemonic(), X);
+
+            var defType = context.Types[X];
+            var compositeType = defType.Expansion;
+            var arrayType = compositeType as ArrayType;
+            context.Assert(arrayType,
+                "Instruction {0} was invalid. Referenced Type was not array:{1}",Op.GetMnemonic(),compositeType);
+
+            var fieldType = arrayType.ElementType;
+            context.Assert(fieldType.Mut == Mutability.Mutable,
+                "Instruction {0} was invalid. Cannot set immutable field:{1}",Op.GetMnemonic(), fieldType);
+            
+            var t = arrayType.ElementType.UnpackType();
+            context.Assert(t.IsVal(),
+                "Instruction {0} was invalid. Array data can only be numeric or vector:{1}",Op.GetMnemonic(),t);
+
+            context.Assert(context.Datas.Contains(Y),
+                "Instruction {0} was invalid. Data {1} was not in the Context.",Op.GetMnemonic(), Y);
+            
+            context.OpStack.PopI32();
+            context.OpStack.PopI32();
+            context.OpStack.PopI32();
+            var resultType = ValType.NullableRef | (ValType)X;
+            context.OpStack.PopType(resultType);
+        }
+
+        /// <summary>
+        /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_dataxy①
+        /// </summary>
+        /// <param name="context"></param>
+        /// <exception cref="TrapException"></exception>
+        public override void Execute(ExecContext context)
+        {
+            //2
+            context.Assert(context.Frame.Module.Types.Contains(X),
+                $"Instruction {Op.GetMnemonic()} failed. Context did not contain type {X.Value}.");
+            //3  
+            var defType = context.Frame.Module.Types[X];
+            //5
+            var arrayType = defType.Expansion as ArrayType;
+            //4
+            context.Assert(arrayType,
+                $"Instruction {Op.GetMnemonic()} failed. Defined Type was not an array {defType}.");
+            //6
+            context.Assert(context.Frame.Module.DataAddrs.Contains(Y),
+                $"Instruction {Op.GetMnemonic()} was invalid. Data {Y} address was not in the Context.");
+            //7
+            var da = context.Frame.Module.DataAddrs[Y];
+            //8
+            context.Assert(context.Store.Contains(da),
+                $"Instruction {Op.GetMnemonic()} was invalid. Data &{da} was not in the Store.");
+            //9
+            var datainst = context.Store[da];
+            
+            //10,11,12,13
+            context.Assert(context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type at top of stack {context.OpStack.Peek().Type}.");
+            var n = context.OpStack.PopI32();
+            context.Assert(context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type at top of stack {context.OpStack.Peek().Type}.");
+            var s = context.OpStack.PopI32();
+            context.Assert(context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type at top of stack {context.OpStack.Peek().Type}.");
+            var d = context.OpStack.PopI32();
+            //14
+            var refType = ValType.NullableRef | (ValType)X;
+            context.Assert(context.OpStack.Peek().IsRef(refType),
+                $"Instruction {Op.GetMnemonic()} failed. Wrong operand at top of stack:{context.OpStack.Peek().Type}");
+            //15
+            var refVal = context.OpStack.PopType(refType);
+            //16
+            if (refVal.IsNullRef)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Ref was null");
+            //17,18
+            var a = refVal.GcRef as StoreArray;
+            context.Assert(a,
+                $"Instruction {Op.GetMnemonic()} failed. Ref was not an array.");
+            //19
+            context.Assert(context.Store.Contains(a.ArrayIndex),
+                $"Instruction {Op.GetMnemonic()} failed. Store did not contain array reference {a.ArrayIndex.Value}");
+            //20
+            var ft = arrayType.ElementType;
+            context.Assert(ft.BitWidth() != BitWidth.None,
+                $"Instruction {Op.GetMnemonic()} failed. FieldType does not have a valid bitwidth {ft}.");
+            //21
+            var z = ft.BitWidth().ByteSize();
+            //22
+            if (d+n > a.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Data length exceeds array bounds");
+            int end = s + n * z;
+            int span = end;
+            if (span > datainst.Data.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Array size exceeds data length");
+            //HACK: Unaligned read is some nonsense
+            if (end > datainst.Data.Length)
+            {
+                end = datainst.Data.Length;
+                s = end - n * z;
+            }
+
+            if (n == 0)
+                return;
+            //24
+            var b = datainst.Data.AsSpan()[s..end];
+            //25 - 36 skip the stack and delegate to StoreArray.Init
+            a.Init(d, b, n, z);
+        }
+
+        public override InstructionBase Parse(BinaryReader reader)
+        {
+            X = (TypeIdx)reader.ReadLeb128_u32();
+            Y = (DataIdx)reader.ReadLeb128_u32();
+            return this;
+        }
+    }
+    
+    public class InstArrayInitElem : InstructionBase
+    {
+        private TypeIdx X;
+        private ElemIdx Y;
+        
+        public override ByteCode Op => GcCode.ArrayInitElem;
+        /// <summary>
+        /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_elemxy
+        /// </summary>
+        /// <param name="context"></param>
+        public override void Validate(IWasmValidationContext context)
+        {
+            context.Assert(context.Types.Contains(X),
+                "Instruction {0} was invalid. DefType {1} was not in the Context.",Op.GetMnemonic(), X);
+
+            var defType = context.Types[X];
+            var compositeType = defType.Expansion;
+            var arrayType = compositeType as ArrayType;
+            context.Assert(arrayType,
+                "Instruction {0} was invalid. Referenced Type was not array:{1}",Op.GetMnemonic(),compositeType);
+            
+            var fieldType = arrayType.ElementType;
+            context.Assert(fieldType.Mut == Mutability.Mutable,
+                "Instruction {0} was invalid. Cannot set immutable field:{1}",Op.GetMnemonic(), fieldType);
+            
+            var rt = arrayType.ElementType.StorageType;
+            context.Assert(rt.IsRefType(),
+                "Instruction {0} was invalid. Array field type is not a RefType:{1}",Op.GetMnemonic(),rt);
+            
+            context.Assert(context.Elements.Contains(Y),
+                "Instruction {0} was invalid. Element {1} was not in the Context.",Op.GetMnemonic(), Y);
+
+            var rtp = context.Elements[Y].Type;
+            
+            context.Assert(rtp.Matches(rt, context.Types),
+                "Instruction {0} was invalid. ElementType {1} does not match FieldType {2}",Op.GetMnemonic(), rtp, rt);
+            
+            context.OpStack.PopI32();
+            context.OpStack.PopI32();
+            context.OpStack.PopI32();
+            
+            var resultType = ValType.NullableRef | (ValType)X;
+            context.OpStack.PopType(resultType);
+        }
+
+        /// <summary>
+        /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_elemxy①
+        /// </summary>
+        /// <param name="context"></param>
+        /// <exception cref="TrapException"></exception>
+        public override void Execute(ExecContext context)
+        {
+            //2
+            context.Assert(context.Frame.Module.Types.Contains(X),
+                $"Instruction {Op.GetMnemonic()} failed. Context did not contain type {X.Value}.");
+            //3  
+            var defType = context.Frame.Module.Types[X];
+            //4
+            var arrayType = defType.Expansion as ArrayType;
+            context.Assert(arrayType,
+                $"Instruction {Op.GetMnemonic()} failed. Defined Type was not an array {defType}.");
+            //5
+            var ft = arrayType.ElementType;
+            //6
+            context.Assert(context.Frame.Module.ElemAddrs.Contains(Y),
+                $"Instruction {Op.GetMnemonic()} failed. Context did not contain element {Y.Value}.");
+            //7
+            var ea = context.Frame.Module.ElemAddrs[Y];
+            //8
+            context.Assert(context.Store.Contains(ea),
+                $"Instruction {Op.GetMnemonic()} failed. Store did not contain element &{ea}.");
+            //9
+            var eleminst = context.Store[ea];
+            //10,11,12,13
+            context.Assert(context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type at top of stack {context.OpStack.Peek().Type}.");
+            var n = context.OpStack.PopI32();
+            context.Assert(context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type at top of stack {context.OpStack.Peek().Type}.");
+            var s = context.OpStack.PopI32();
+            context.Assert(context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type at top of stack {context.OpStack.Peek().Type}.");
+            var d = context.OpStack.PopI32();
+            //14
+            var refType = ValType.NullableRef | (ValType)X;
+            context.Assert(context.OpStack.Peek().IsRef(refType),
+                $"Instruction {Op.GetMnemonic()} failed. Wrong operand at top of stack:{context.OpStack.Peek().Type}");
+            //15
+            var refVal = context.OpStack.PopType(refType);
+            //16
+            if (refVal.IsNullRef)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Ref was null");
+            //17,18
+            var a = refVal.GcRef as StoreArray;
+            context.Assert(a,
+                $"Instruction {Op.GetMnemonic()} failed. Ref was not an array.");
+            //19
+            context.Assert(context.Store.Contains(a.ArrayIndex),
+                $"Instruction {Op.GetMnemonic()} failed. Store did not contain array reference {a.ArrayIndex.Value}");
+            //20
+            if (d+n > a.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Element length exceeds array bounds");
+            if (s + n > eleminst.Elements.Count)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Array size exceeds elements length");
+            //21
+            if (n == 0)
+                return;
+            //22 - 31 skip the stack and delegate copy to StoreArray.Init
+            var refs = eleminst.Elements.Skip(s).Take(n).ToList();
+            a.Init(d, refs, n);
+        }
+
+        public override InstructionBase Parse(BinaryReader reader)
+        {
+            X = (TypeIdx)reader.ReadLeb128_u32();
+            Y = (ElemIdx)reader.ReadLeb128_u32();
             return this;
         }
     }
