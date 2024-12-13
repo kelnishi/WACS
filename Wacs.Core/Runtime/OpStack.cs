@@ -109,20 +109,6 @@ namespace Wacs.Core.Runtime
             _registers[Count - 1].GcRef = new VecRef(value);
         }
 
-        public void PushFuncref(Value value)
-        {
-            if (value.Type != ValType.FuncRef)
-                throw new InvalidDataException($"Pushed non-funcref {value.Type} onto the stack");
-            PushValue(value);
-        }
-
-        public void PushExternref(Value value)
-        {
-            if (value.Type != ValType.ExternRef)
-                throw new InvalidDataException($"Pushed non-externref {value.Type} onto the stack");
-            PushValue(value);
-        }
-
         public void PushRef(Value value)
         {
             if (!value.Type.IsRefType())

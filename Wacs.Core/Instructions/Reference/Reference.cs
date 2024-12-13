@@ -100,7 +100,14 @@ namespace Wacs.Core.Instructions.Reference
             context.Assert( context.Frame?.Module.FuncAddrs.Contains(FunctionIndex),
                 $"Instruction ref.func failed. Could not find function address in the context");
             var a = context.Frame!.Module.FuncAddrs[FunctionIndex];
-            context.OpStack.PushFuncref(new Value(ValType.FuncRef, a.Value));
+            var func = context.Store[a];
+            var val = new Value(ValType.FuncRef, a.Value);
+            //Increase type specificity
+            if (func is FunctionInstance funcInst)
+            {
+                val.Type = ValType.Ref | (ValType)funcInst.DefType.DefIndex;
+            }
+            context.OpStack.PushRef(val);
         }
 
         public override InstructionBase Parse(BinaryReader reader)
