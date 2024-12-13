@@ -74,6 +74,12 @@ namespace Wacs.Core.Types
         public string ToParameters() => Types.Length == 0 ? "" : $" (param{ToTypes()})";
         public string ToResults() => Types.Length == 0 ? "" : $" (result{ToTypes()})";
 
+        public ValType Last()
+        {
+            if (Types.Length == 0)
+                throw new InvalidDataException("ResultType had no elements");
+            return Types.Last();
+        }
 
         public bool Matches(ResultType other, TypesSpace? types)
         {

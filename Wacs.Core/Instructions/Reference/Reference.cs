@@ -134,7 +134,7 @@ namespace Wacs.Core.Instructions.Reference
                 $"Instruction ref.is_null failed. Expected reftype on top of the stack.");
             Value v1 = context.OpStack.PopRefType();
 
-            int c = v1.Equals(v2) ? 1 : 0;
+            int c = v1.RefEquals(v2, context.Frame.Module.Types) ? 1 : 0;
             context.OpStack.PushI32(c);
         }
 

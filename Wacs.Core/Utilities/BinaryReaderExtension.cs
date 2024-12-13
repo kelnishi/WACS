@@ -180,7 +180,7 @@ namespace Wacs.Core.Utilities
             }
 
             if (result < 0)
-                throw new FormatException($"HeapType Index {result} was negative");
+                throw new FormatException($"HeapType Index {result:x8} was negative");
             
             //Just take the U32 bits since the unset sign bit is 33.
             return (uint)(result & 0xFFFF_FFFF);
