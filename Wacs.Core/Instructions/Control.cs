@@ -934,11 +934,12 @@ namespace Wacs.Core.Instructions
             //17.
             
             //18.
+            //Check wasmfuncs, not hostfuncs
             if (funcInst is FunctionInstance ftAct)
-                if (ftAct.DefTypeHash != ftExpect.GetHashCode())
-                    throw new TrapException($"Instruction call_indirect failed. RecursiveType differed.");
-            if (!ftFunc.Matches(funcInst.Type, context.Frame.Module.Types))
-                throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
+                if (!ftAct.DefType.Matches(ftExpect, context.Frame.Module.Types))
+                    throw new TrapException($"Instruction {Op.GetMnemonic()} failed. RecursiveType differed.");
+            if (!funcInst.Type.Matches(ftExpect.Unroll.Body, context.Frame.Module.Types))
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Expected FunctionType differed.");
             //19.
             context.Invoke(a);
         }
@@ -987,13 +988,14 @@ namespace Wacs.Core.Instructions
             //16.
             var funcInst = context.Store[a];
             //17.
-            
+
             //18.
+            //Check wasmfuncs, not hostfuncs
             if (funcInst is FunctionInstance ftAct)
-                if (ftAct.DefTypeHash != ftExpect.GetHashCode())
-                    throw new TrapException($"Instruction call_indirect failed. RecursiveType differed.");
-            if (!ftFunc.Matches(funcInst.Type, context.Frame.Module.Types))
-                throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
+                if (!ftAct.DefType.Matches(ftExpect, context.Frame.Module.Types))
+                    throw new TrapException($"Instruction {Op.GetMnemonic()} failed. RecursiveType differed.");
+            if (!funcInst.Type.Matches(ftExpect.Unroll.Body, context.Frame.Module.Types))
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Expected FunctionType differed.");
             //19.
             await context.InvokeAsync(a);
         }

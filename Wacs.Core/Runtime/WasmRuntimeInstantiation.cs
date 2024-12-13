@@ -81,7 +81,7 @@ namespace Wacs.Core.Runtime
                         if (functionInstance is FunctionInstance wasmFunc)
                         {
                             wasmFunc.SetName(entityId.entity);
-                            if (type.GetHashCode() != wasmFunc.DefTypeHash)
+                            if (!wasmFunc.DefType.Matches(type, moduleInstance.Types))
                                 throw new NotSupportedException(
                                     $"Recursive Type mismatch while importing Function {entityId.module}.{entityId.entity}: expected {funcSig.ToNotation()}, env provided Function {functionInstance.Type.ToNotation()}");    
                         }
