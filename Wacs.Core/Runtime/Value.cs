@@ -543,6 +543,13 @@ namespace Wacs.Core.Runtime
             _ => new(type),
         };
 
+        public FuncAddr GetFuncAddr(TypesSpace types)
+        {
+            if (!Type.Matches(ValType.FuncRef, types))
+                 throw new ArgumentException($"Cannot convert non-funcref ({Type}) Value to FuncAddr");
+            return new FuncAddr((int)Data.Ptr);
+        }
+
         public bool IsI32 => Type == ValType.I32;
         public bool IsV128 => Type == ValType.V128;
         public bool IsRefType => Type.IsRefType();
