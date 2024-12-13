@@ -177,6 +177,9 @@ namespace Wacs.Core.Runtime
                 case ValType.ExternRef:
                     Data.Ptr = BitBashRef(text);
                     break;
+                case ValType.Any:
+                    Data.Ptr = BitBashRef(text);
+                    break;
                 default:
                     throw new InvalidDataException($"Cannot define StackValue of type {type}");
             }
@@ -544,6 +547,17 @@ namespace Wacs.Core.Runtime
         public bool IsV128 => Type == ValType.V128;
         public bool IsRefType => Type.IsRefType();
         public bool IsNullRef => IsRefType && Data.Ptr == long.MinValue;
+
+        public bool RefEquals(Value other, TypesSpace types)
+        {
+            if (this == other)
+                return true;
+            if (IsNullRef && other.IsNullRef)
+                return true;
+            if (Type.IsRefType() && other.Type.IsRefType() && Type.Matches(other.Type,types) && Data.Ptr == other.Data.Ptr)
+                return true;
+            return false;
+        }
 
         public bool IsType(ValType type) => Type == type;
         public bool IsRef(ValType reftype) => Type == reftype;
