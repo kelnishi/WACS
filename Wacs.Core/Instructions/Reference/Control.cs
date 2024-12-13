@@ -163,13 +163,15 @@ namespace Wacs.Core.Instructions.Reference
             if (r.IsNullRef)
                 throw new TrapException($"Null reference in call_ref");
 
-            var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
+            context.Assert(r.Type.Matches(ValType.FuncRef, context.Frame.Module.Types),
+                $"Instruction call_indirect failed. Element was not a FuncRef");
+            var a = r.GetFuncAddr(context.Frame.Module.Types);
             
-            var a = (FuncAddr)r;
             context.Assert( context.Store.Contains(a),
                 $"Instruction call_ref failed. Invalid Function Reference {r}.");
             var funcInst = context.Store[a];
             var ftActual = funcInst.Type;
+            var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
             if (!funcType!.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction call_ref failed. Expected FunctionType differed.");
             
@@ -187,13 +189,15 @@ namespace Wacs.Core.Instructions.Reference
             if (r.IsNullRef)
                 throw new TrapException($"Null reference in call_ref");
 
-            var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
+            context.Assert(r.Type.Matches(ValType.FuncRef, context.Frame.Module.Types),
+                $"Instruction call_indirect failed. Element was not a FuncRef");
+            var a = r.GetFuncAddr(context.Frame.Module.Types);
             
-            var a = (FuncAddr)r;
             context.Assert( context.Store.Contains(a),
                 $"Instruction call_ref failed. Invalid Function Reference {r}.");
             var funcInst = context.Store[a];
             var ftActual = funcInst.Type;
+            var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
             if (!funcType!.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction call_ref failed. Expected FunctionType differed.");
             await context.InvokeAsync(a);

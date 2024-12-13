@@ -30,13 +30,6 @@ namespace Wacs.Core.Runtime
         public FuncAddr(int value) => Value = value;
         public readonly int Value;
         public static implicit operator Index(FuncAddr addr) => new(addr.Value);
-
-        public static explicit operator FuncAddr(Value value)
-        {
-            if (value.Type != ValType.FuncRef)
-                throw new ArgumentException($"Cannot convert non-funcref ({value.Type}) Value to FuncAddr");
-            return new FuncAddr(value.Data.Int32);
-        }
         
         public bool Equals(FuncAddr other) => Value == other.Value;
         public static bool operator ==(FuncAddr left, FuncAddr right) => left.Equals(right);

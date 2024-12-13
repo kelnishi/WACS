@@ -854,7 +854,9 @@ namespace Wacs.Core.Instructions
                 var r = tab.Elements[i];
                 if (r.IsNullRef)
                     throw new TrapException($"Instruction call_indirect NullReference.");
-                var a = (FuncAddr)r;
+                context.Assert(r.Type.Matches(ValType.FuncRef, context.Frame.Module.Types),
+                    $"Instruction call_indirect failed. Element was not a FuncRef");
+                var a = r.GetFuncAddr(context.Frame.Module.Types);
                 var func = context.Store[a];
                 return func is HostFunction;
             }
@@ -873,7 +875,7 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Tables.Contains(X),
                 "Instruction call_indirect was invalid. Table {0} was not in the Context.",X);
             var tableType = context.Tables[X];
-            context.Assert(tableType.ElementType == ValType.FuncRef,
+            context.Assert(tableType.ElementType.Matches(ValType.FuncRef, context.Types),
                 "Instruction call_indirect was invalid. Table type was not funcref");
             context.Assert(context.Types.Contains(Y),
                 "Instruction call_indirect was invalid. Function type {0} was not in the Context.",Y);
@@ -922,10 +924,10 @@ namespace Wacs.Core.Instructions
             if (r.IsNullRef)
                 throw new TrapException($"Instruction call_indirect NullReference.");
             //13.
-            context.Assert( r.Type == ValType.FuncRef,
+            context.Assert(r.Type.Matches(ValType.FuncRef, context.Frame.Module.Types),
                 $"Instruction call_indirect failed. Element was not a FuncRef");
-            //14.
-            var a = (FuncAddr)r;
+            //14
+            var a = r.GetFuncAddr(context.Frame.Module.Types);
             //15.
             context.Assert( context.Store.Contains(a),
                 $"Instruction call_indirect failed. Validation of table mutation failed.");
@@ -978,10 +980,10 @@ namespace Wacs.Core.Instructions
             if (r.IsNullRef)
                 throw new TrapException($"Instruction call_indirect NullReference.");
             //13.
-            context.Assert( r.Type == ValType.FuncRef,
+            context.Assert(r.Type.Matches(ValType.FuncRef, context.Frame.Module.Types),
                 $"Instruction call_indirect failed. Element was not a FuncRef");
             //14.
-            var a = (FuncAddr)r;
+            var a = r.GetFuncAddr(context.Frame.Module.Types);
             //15.
             context.Assert( context.Store.Contains(a),
                 $"Instruction call_indirect failed. Validation of table mutation failed.");
@@ -1024,7 +1026,9 @@ namespace Wacs.Core.Instructions
                     var r = tab.Elements[i];
                     if (r.IsNullRef)
                         throw new TrapException($"Instruction call_indirect NullReference.");
-                    var a = (FuncAddr)r;
+                    if (!r.Type.Matches(ValType.FuncRef, context.Frame.Module.Types))
+                        throw new TrapException($"Instruction call_indirect failed. Element was not a FuncRef");
+                    var a = r.GetFuncAddr(context.Frame.Module.Types);
                     var func = context.Store[a];
 
 
