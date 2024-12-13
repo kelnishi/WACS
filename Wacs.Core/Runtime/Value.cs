@@ -509,7 +509,7 @@ namespace Wacs.Core.Runtime
         
         public Value Default => new Value(Type);
 
-        public Value ToConcrete() => new(this, this.Type.ToConcrete());
+        public Value ToConcrete() => new(this, this.Type.AsNonNullable());
 
         public object Scalar => Type switch
         {

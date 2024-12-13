@@ -143,9 +143,6 @@ namespace Wacs.Core.Types.Defs
             (TypeIdx)((int)type & (int)ValType.IndexMask);
 
         public static bool IsDefType(this ValType type) => type.Index().Value >= 0;
-
-        public static ValType ToConcrete(this ValType type) => 
-            type & ~ValType.Nullable;
         
         public static bool IsNullable(this ValType type) => (type & ValType.Nullable) != 0;
 
@@ -306,6 +303,37 @@ namespace Wacs.Core.Types.Defs
             };
         }
 
+        public static ValType AsNonNullable(this ValType type) => type & ~ValType.Nullable;
+        public static ValType AsNullable(this ValType type) => type | ValType.Nullable;
+        
+        //For matching a (nullable?) Value directly
+        public static bool Matches(this ValType rt1, Value refVal, TypesSpace types)
+        {
+            if (rt1 is ValType.Any)
+                return true;
+            if (refVal.IsNullRef)
+            {
+                if (rt1.IsNullable() || rt1 is ValType.None or ValType.NoneNN)
+                    return true;
+                if (refVal.Type is ValType.FuncRef or ValType.NoFunc && rt1 is ValType.NoFunc or ValType.NoFuncNN)
+                    return true;
+                if (refVal.Type is ValType.ExternRef or ValType.NoExtern && rt1 is ValType.NoExtern or ValType.NoExternNN)
+                    return true;
+
+                return refVal.Type.Matches(rt1, types);
+            }
+            else
+            {
+                if (rt1 is ValType.None or ValType.NoneNN or ValType.NoFunc or ValType.NoFuncNN or ValType.NoExtern or ValType.NoExternNN)
+                    return false;
+                if (rt1 is ValType.AnyNN)
+                    return true;
+
+                var concreteType = refVal.Type.AsNonNullable();
+                return concreteType.Matches(rt1, types);
+            }
+        }
+
         public static bool Matches(this ValType left, ValType right, TypesSpace? types)
         {
             if (left == ValType.Bot || right == ValType.Bot)
@@ -382,10 +410,10 @@ namespace Wacs.Core.Types.Defs
 
     public static class ValTypeParser
     {
-        public static ValType ParseHeapType(BinaryReader reader)
+        public static ValType ParseHeapType(BinaryReader reader, bool nullable)
         {
             byte token = reader.ReadByte();
-            return token switch
+            var type = token switch
             {
                 (byte)HeapType.NoFunc => ValType.NoFunc,
                 (byte)HeapType.NoExtern => ValType.NoExtern,
@@ -400,6 +428,9 @@ namespace Wacs.Core.Types.Defs
                 //Index
                 _ => (ValType)reader.ContinueReading_s33(token), 
             };
+            return nullable
+                ? type | ValType.Ref | ValType.Nullable
+                : (type | ValType.Ref) & ~ValType.Nullable;
         }
 
         public static ValType ParseRefType(BinaryReader reader)
@@ -441,8 +472,8 @@ namespace Wacs.Core.Types.Defs
                 (byte)HeapType.Struct => ValType.Struct,
                 (byte)HeapType.Array => ValType.Array,
                 //Abstract or Index (set ref bit)
-                (byte)TypePrefix.RefHt => (ParseHeapType(reader) | ValType.Ref) & ~ValType.Nullable,   //non-nullable
-                (byte)TypePrefix.RefNullHt => ParseHeapType(reader) | ValType.Ref | ValType.Nullable,  //nullable
+                (byte)TypePrefix.RefHt => ParseHeapType(reader, false),   //non-nullable
+                (byte)TypePrefix.RefNullHt => ParseHeapType(reader, true),  //nullable
                 
                 //StorageType
                 (byte)PackedType.I8 when parseStorageType => ValType.I8,

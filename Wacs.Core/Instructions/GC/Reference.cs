@@ -18,6 +18,7 @@ using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
@@ -43,7 +44,7 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(Ht.Validate(context.Types),
                 "Instruction {0} is invalid. {1} is not a valid reference type.", Op.GetMnemonic(), Ht);
 
-            var rtp = Ht.TopHeapType(context.Types);
+            var rtp = Ht.AsNullable().TopHeapType(context.Types);
             context.Assert(Ht.Matches(rtp, context.Types),
                 "Instruction {0} is invalid. {1} did not match top type {2}", Op.GetMnemonic(), Ht, rtp);
             
@@ -61,17 +62,16 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(context.OpStack.Peek().IsRefType,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong operand type on top of stack:{context.OpStack.Peek().Type}");
             var refVal = context.OpStack.PopRefType();
-            var rt2 = refVal.Type;
-            if (!rt2.Matches(rt1, context.Frame.Module.Types))
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Type {rt2} does not match {rt1}");
 
-            refVal.Type = rt1;
+            if (!Ht.Matches(refVal, context.Frame.Module.Types))
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Type {refVal} does not match {rt1}");
+            
             context.OpStack.PushRef(refVal);
         }
 
         public override InstructionBase Parse(BinaryReader reader)
         {
-            Ht = (Nullable?ValType.NullableRef:ValType.Ref) | ValTypeParser.ParseHeapType(reader);
+            Ht = ValTypeParser.ParseHeapType(reader, Nullable);
             return this;
         }
     }
@@ -96,7 +96,7 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(Ht.Validate(context.Types),
                 "Instruction {0} is invalid. {1} is not a valid reference type.", Op.GetMnemonic(), Ht);
 
-            var rtp = Ht.TopHeapType(context.Types);
+            var rtp = Ht.AsNullable().TopHeapType(context.Types);
             context.Assert(Ht.Matches(rtp, context.Types),
                 "Instruction {0} is invalid. {1} did not match top type {2}", Op.GetMnemonic(), Ht, rtp);
             
@@ -110,18 +110,18 @@ namespace Wacs.Core.Instructions.GC
         /// <param name="context"></param>
         public override void Execute(ExecContext context)
         {
-            var rt1 = Ht;
             context.Assert(context.OpStack.Peek().IsRefType,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong operand type on top of stack:{context.OpStack.Peek().Type}");
+
             var refVal = context.OpStack.PopRefType();
-            var rt2 = refVal.Type;
-            int c = rt2.Matches(rt1, context.Frame.Module.Types) ? 1 : 0;
+            int c = Ht.Matches(refVal, context.Frame.Module.Types) ? 1 : 0;
+            
             context.OpStack.PushI32(c);
         }
 
         public override InstructionBase Parse(BinaryReader reader)
         {
-            Ht = (Nullable?ValType.NullableRef:ValType.Ref) | ValTypeParser.ParseHeapType(reader);
+            Ht = ValTypeParser.ParseHeapType(reader, Nullable);
             return this;
         }
     }
