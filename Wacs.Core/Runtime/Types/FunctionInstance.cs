@@ -61,8 +61,7 @@ namespace Wacs.Core.Runtime.Types
             
             Type = funcType;
             Module = module;
-            DefTypeHash = type.GetHashCode();
-            
+            DefType = type;
             Definition = definition;
             SetBody(definition.Body);
             
@@ -73,7 +72,7 @@ namespace Wacs.Core.Runtime.Types
                 Name = Definition.Id;
         }
 
-        public readonly int DefTypeHash;
+        public readonly DefType DefType;
         
         public string ModuleName => Module.Name;
         public string Name { get; set; } = "";
