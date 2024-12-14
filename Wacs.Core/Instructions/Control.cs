@@ -719,9 +719,10 @@ namespace Wacs.Core.Instructions
         {
             context.Assert( context.OpStack.Count >= context.Frame.Arity,
                 $"Instruction return failed. Operand stack underflow");
-            //We're managing separate stacks, so we won't need to shift the operands
-            // Stack<Value> values = new Stack<Value>();
-            // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
+            int resultCount = context.Frame.Type.ResultType.Arity;
+            int resultsHeight = context.Frame.StackHeight + resultCount;
+            if (resultsHeight < context.OpStack.Count)
+                context.OpStack.ShiftResults(resultCount, resultsHeight);
             var address = context.PopFrame();
             context.ResumeSequence(address);
         }

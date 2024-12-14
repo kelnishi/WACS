@@ -272,6 +272,9 @@ namespace Wacs.Core.Runtime
             try
             {
                 Store.OpenTransaction();
+                
+                if (Context.OpStack.Count != 0)
+                    throw new WasmRuntimeException("OpStack should be empty");
 
                 //2, 3, 4 Checks if imports are satisfied
                 moduleInstance = AllocateModule(module);
@@ -543,6 +546,9 @@ namespace Wacs.Core.Runtime
             ini.ExecuteInitializer(Context);
             
             var value = Context.OpStack.PopAny();
+            if (Context.OpStack.Count > 0)
+                throw new WasmRuntimeException("Values left on stack");
+            
             return value;
         }
 
