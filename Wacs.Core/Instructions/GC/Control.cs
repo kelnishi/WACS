@@ -60,6 +60,7 @@ namespace Wacs.Core.Instructions.GC
 
             var rt2 = context.OpStack.PopAny();
             var diffType = rt2.Type.AsDiff(Rt1, context.Types);
+            
             context.OpStack.PushType(diffType);
         }
 
@@ -112,12 +113,17 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(Rt2.Matches(rtp, context.Types),
                 "Instruction {0} invalid. Cast type {1} did not match {2}.",Op.GetMnemonic(), Rt2, rtp);
             context.OpStack.PopType(Rt1);
-            context.OpStack.PushType(Rt2);
+            
+            var diffType = Rt2.AsDiff(Rt1, context.Types);
+            context.OpStack.PushType(diffType);
             
             //Pop values like we branch
             context.OpStack.DiscardValues(nthFrame.LabelTypes);
             //But actually, we don't, so push them back on.
             context.OpStack.PushResult(nthFrame.LabelTypes);
+            
+            context.OpStack.PopAny();
+            context.OpStack.PushType(Rt2);
         }
 
         public override void Execute(ExecContext context)
