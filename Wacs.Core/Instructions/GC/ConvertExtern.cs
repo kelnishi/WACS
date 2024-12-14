@@ -17,6 +17,7 @@
 using FluentValidation;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.GC;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
@@ -49,7 +50,13 @@ namespace Wacs.Core.Instructions.GC
         public override void Execute(ExecContext context)
         {
             var refVal = context.OpStack.PopRefType();
-            refVal.Type = refVal.Type.IsNullable() ? ValType.Any : ValType.Ref;
+            refVal.Type = refVal.GcRef switch
+            {
+                StoreStruct => refVal.Type.IsNullable() ? ValType.Struct : ValType.StructNN,
+                StoreArray => refVal.Type.IsNullable() ? ValType.Array : ValType.ArrayNN,
+                I31Ref => refVal.Type.IsNullable() ? ValType.I31 : ValType.I31NN,
+                _ => refVal.Type.IsNullable() ? ValType.Any : ValType.Ref,
+            };
             context.OpStack.PushValue(refVal);
         }
     }

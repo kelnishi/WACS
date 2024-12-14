@@ -452,8 +452,6 @@ namespace Wacs.Core.Runtime
         public Value(ValType refType, long address, IGcRef? gcRef)
         {
             this = default;
-            if (!refType.Matches(ValType.I31, null))
-                throw new WasmRuntimeException($"Direct pointer creation is disallowed for type:{Type}");
             Type = refType;
             Data.Ptr = address;
             GcRef = gcRef;

@@ -14,8 +14,10 @@
 //  * limitations under the License.
 //  */
 
+using System.Transactions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.GC;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
@@ -58,8 +60,7 @@ namespace Wacs.Core.Instructions.GC
             {
                 i &= UnsignedMask;
             }
-            
-            var val = new Value(ValType.I31NN, i, null);
+            var val = new Value(ValType.I31NN, i, new I31Ref(i));
             context.OpStack.PushValue(val);
         }
     }
@@ -84,7 +85,11 @@ namespace Wacs.Core.Instructions.GC
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Reference was null");
             context.Assert(refVal.Type.Matches(ValType.I31, context.Frame.Module.Types),
                 $"Instruction {Op.GetMnemonic()} failed. Wrong reference type {refVal.Type}.");
-            int j = (int)refVal.Data.Ptr;
+            var i31Ref = refVal.GcRef as I31Ref;
+            if (i31Ref is null)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Wrong reference type {refVal.GcRef}.");
+            
+            int j = i31Ref.Value;
             switch (j)
             {
                 case < 0: j |= SignBit31; break;
@@ -113,7 +118,11 @@ namespace Wacs.Core.Instructions.GC
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Reference was null");
             context.Assert(refVal.Type.Matches(ValType.I31, context.Frame.Module.Types),
                 $"Instruction {Op.GetMnemonic()} failed. Wrong reference type {refVal.Type}.");
-            uint j = (uint)refVal.Data.Ptr & BitMask31;
+            var i31Ref = refVal.GcRef as I31Ref;
+            if (i31Ref is null)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Wrong reference type {refVal.GcRef}.");
+            
+            uint j = (uint)i31Ref.Value  & BitMask31;
             context.OpStack.PushU32(j);
         }
     }

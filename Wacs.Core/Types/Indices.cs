@@ -183,6 +183,14 @@ namespace Wacs.Core.Types
     }
 
     public interface RefIdx {}
+
+    public readonly struct PtrIdx : RefIdx
+    {
+        public readonly long Value;
+        public PtrIdx(long value) => Value = value;
+        public bool Equals(Index other) => Value == other.Value;
+        public static explicit operator PtrIdx(long value) => new(value);
+    }
     
     public readonly struct VecIdx : RefIdx
     {
