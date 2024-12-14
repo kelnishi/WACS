@@ -26,6 +26,7 @@ namespace Wacs.Core.Instructions.GC
 {
     public class InstBrOnCast : InstructionBase
     {
+        public CastFlags Flags;
         public LabelIdx L;
         private ValType Rt1;
         private ValType Rt2;
@@ -56,6 +57,10 @@ namespace Wacs.Core.Instructions.GC
             context.OpStack.DiscardValues(nthFrame.LabelTypes);
             //But actually, we don't, so push them back on.
             context.OpStack.PushResult(nthFrame.LabelTypes);
+
+            var rt2 = context.OpStack.PopAny();
+            var diffType = rt2.Type.AsDiff(Rt1, context.Types);
+            context.OpStack.PushType(diffType);
         }
 
         public override void Execute(ExecContext context)
@@ -63,25 +68,26 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(context.OpStack.Peek().IsRefType,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong operand type on top of stack:{context.OpStack.Peek().Type}");
             var refVal = context.OpStack.PopRefType();
-            var rt1 = refVal.Type;
-            refVal.Type = Rt2;
+            
             context.OpStack.PushRef(refVal);
 
-            if (rt1.Matches(Rt2, context.Frame.Module.Types))
+            if (Rt2.Matches(refVal, context.Frame.Module.Types))
                 InstBranch.ExecuteInstruction(context, L);
         }
 
         public override InstructionBase Parse(BinaryReader reader)
         {
+            Flags = (CastFlags)reader.ReadByte();
             L = (LabelIdx)reader.ReadLeb128_u32();
-            Rt1 = ValTypeParser.ParseRefType(reader);
-            Rt1 = ValTypeParser.ParseRefType(reader);
+            Rt1 = ValTypeParser.ParseHeapType(reader, Flags.HasFlag(CastFlags.NullEmpty));
+            Rt2 = ValTypeParser.ParseHeapType(reader, Flags.HasFlag(CastFlags.EmptyNull));
             return this;
         }
     } 
     
     public class InstBrOnCastFail : InstructionBase
     {
+        public CastFlags Flags;
         public LabelIdx L;
         private ValType Rt1;
         private ValType Rt2;
@@ -119,19 +125,17 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(context.OpStack.Peek().IsRefType,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong operand type on top of stack:{context.OpStack.Peek().Type}");
             var refVal = context.OpStack.PopRefType();
-            var rt1 = refVal.Type;
-            refVal.Type = Rt2;
             context.OpStack.PushRef(refVal);
-
-            if (!rt1.Matches(Rt2, context.Frame.Module.Types))
+            if (!Rt2.Matches(refVal, context.Frame.Module.Types))
                 InstBranch.ExecuteInstruction(context, L);
         }
 
         public override InstructionBase Parse(BinaryReader reader)
         {
+            Flags = (CastFlags)reader.ReadByte();
             L = (LabelIdx)reader.ReadLeb128_u32();
-            Rt1 = ValTypeParser.ParseRefType(reader);
-            Rt1 = ValTypeParser.ParseRefType(reader);
+            Rt1 = ValTypeParser.ParseHeapType(reader, Flags.HasFlag(CastFlags.NullEmpty));
+            Rt2 = ValTypeParser.ParseHeapType(reader, Flags.HasFlag(CastFlags.EmptyNull));
             return this;
         }
     }

@@ -229,6 +229,9 @@ namespace Wacs.Core.Runtime
             {
                 var funcInst = Context.Store[funcAddr];
                 var funcType = funcInst.Type;
+
+                if (Context.OpStack.Count > 0)
+                    throw new WasmRuntimeException("Values left on operand stack");
                 
                 Context.OpStack.PushScalars(funcType.ParameterTypes, args);
 
@@ -353,6 +356,10 @@ namespace Wacs.Core.Runtime
                 Context.OpStack.PopScalars(funcType.ResultType, span);
 
                 Context.GetModule(funcAddr)?.DerefTypes(span);
+                
+                
+                if (Context.OpStack.Count > 0)
+                    throw new WasmRuntimeException("Values left on operand stack");
                 
                 return results;
             }
