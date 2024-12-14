@@ -217,6 +217,8 @@ namespace Wacs.Core.Types.Defs
                     ValType.FuncRef,
                 ValType.ExternRef or ValType.NoExtern =>
                     ValType.ExternRef,
+                ValType.AnyNN or ValType.EqNN or ValType.I31NN or ValType.StructNN or ValType.ArrayNN or ValType.NoneNN =>
+                    ValType.AnyNN,
                 _ when heapType.Index().Value >= 0 => types[heapType.Index()].Expansion switch {
                     StructType or ArrayType => ValType.Any,
                     FunctionType => ValType.FuncRef,
@@ -305,7 +307,17 @@ namespace Wacs.Core.Types.Defs
 
         public static ValType AsNonNullable(this ValType type) => type & ~ValType.Nullable;
         public static ValType AsNullable(this ValType type) => type | ValType.Nullable;
-        
+
+        public static ValType AsDiff(this ValType type, ValType other, TypesSpace types)
+        {
+            bool nullable = type.IsNullable();
+            if (type.IsNullable() == other.IsNullable())
+                nullable = !nullable;
+            if (type.Matches(other, types))
+                return nullable ? ValType.NullableRef : ValType.Ref;
+            return nullable ? other.AsNullable() : other.AsNonNullable();
+        }
+
         //For matching a (nullable?) Value directly
         public static bool Matches(this ValType rt1, Value refVal, TypesSpace types)
         {
@@ -336,6 +348,10 @@ namespace Wacs.Core.Types.Defs
 
         public static bool Matches(this ValType left, ValType right, TypesSpace? types)
         {
+            if (right == ValType.Any)
+                return true;
+            if (right == ValType.AnyNN && !left.IsNullable())
+                return true;
             if (left == ValType.Bot || right == ValType.Bot)
                 return true;
             
