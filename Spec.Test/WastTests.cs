@@ -65,7 +65,8 @@ namespace Spec.Test
             }
         }
 
-        [Theory(Skip = "Skip transpiled tests for now.")]
+        // [Theory(Skip = "Skip transpiled tests for now.")]
+        [Theory]
         [ClassData(typeof(WastJsonTestData))]
         public void RunWastTranspiled(WastJson.WastJson file)
         {
