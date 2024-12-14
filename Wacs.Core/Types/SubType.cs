@@ -28,19 +28,19 @@ namespace Wacs.Core.Types
     public class SubType
     {
         public readonly bool Final;
-        public readonly TypeIdx[] SuperTypes;
+        public readonly TypeIdx[] SuperTypeIndexes;
         public readonly CompositeType Body;
 
         public SubType(TypeIdx[] idxs, CompositeType body, bool final)
         {
-            SuperTypes = idxs;
+            SuperTypeIndexes = idxs;
             Body = body;
             Final = final;
         }
         
         public SubType(CompositeType body, bool final)
         {
-            SuperTypes = Array.Empty<TypeIdx>();
+            SuperTypeIndexes = Array.Empty<TypeIdx>();
             Body = body;
             Final = final;
             
@@ -82,7 +82,7 @@ namespace Wacs.Core.Types
             var hash = new StableHash();
             hash.Add(nameof(SubType));
             hash.Add(Final);
-            foreach (var super in SuperTypes)
+            foreach (var super in SuperTypeIndexes)
             {
                 if (super.Value >= defs.Count)
                     throw new FormatException($"SubTypes cannot forward-declare beyond the recursive block.");
@@ -107,7 +107,7 @@ namespace Wacs.Core.Types
             {
                 RuleFor(st => st.Body)
                     .SetValidator(new CompositeType.Validator());
-                RuleFor(st => st.SuperTypes)
+                RuleFor(st => st.SuperTypeIndexes)
                     .Must(types => types.Length < 2)
                     .WithMessage("SubType can have at most 1 super type");
                 RuleFor(st => st)
@@ -118,7 +118,7 @@ namespace Wacs.Core.Types
                         var defIndex = recType.DefIndex.Value + subIndex;
                         var comptype = sub.Body;
                         
-                        foreach (var y in sub.SuperTypes)
+                        foreach (var y in sub.SuperTypeIndexes)
                         {
                             if (!vContext.Types.Contains(y))
                                 throw new ValidationException($"SuperType {y} does not exist in the context");

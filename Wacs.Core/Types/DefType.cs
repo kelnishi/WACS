@@ -14,6 +14,7 @@
 //  * limitations under the License.
 //  */
 
+using System.Collections.Generic;
 using System.Linq;
 using Wacs.Core.Utilities;
 
@@ -24,6 +25,8 @@ namespace Wacs.Core.Types
         public readonly RecursiveType RecType;
         public readonly TypeIdx DefIndex;
         private int Projection;
+
+        public List<DefType> SuperTypes;
 
         public CompositeType Expansion;
 
@@ -61,8 +64,13 @@ namespace Wacs.Core.Types
         /// <param name="other"></param>
         /// <param name="types"></param>
         /// <returns></returns>
-        public bool Matches(DefType other, TypesSpace? types) => 
-            GetHashCode() == other.GetHashCode() 
-            || Unroll.SuperTypes.Any(super => super.Matches(other.DefIndex, types));
+        public bool Matches(DefType other, TypesSpace? types)
+        {
+            if (GetHashCode() == other.GetHashCode())
+                return true;
+            if (SuperTypes.Any(super => super.Matches(other, types))) 
+                return true;
+            return false;
+        }
     }
 }
