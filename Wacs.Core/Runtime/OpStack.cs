@@ -281,5 +281,22 @@ namespace Wacs.Core.Runtime
                     PushValue(new Value(type.Types[i], scalar));
             }
         }
+
+        /// <summary>
+        /// Shrink the OpStack to resultsHeight.
+        /// </summary>
+        /// <param name="resultCount">The number of results that should be shifted</param>
+        /// <param name="resultsHeight">The OpStack height after shrinking</param>
+        public void ShiftResults(int resultCount, int resultsHeight)
+        {
+            int src = Count - resultCount;
+            int dest = resultsHeight - resultCount;
+            Array.Copy(_registers, src, _registers, dest, resultCount);
+            for (int i = resultsHeight; i < Count; ++i)
+            {
+                _registers[i].GcRef = null;
+            }
+            Count = resultsHeight;
+        }
     }
 }
