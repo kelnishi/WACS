@@ -48,6 +48,7 @@ namespace Wacs.Core
                 foreach (var sub in subs)
                 {
                     sub.ComputeHash();
+                    sub.SuperTypes = sub.Unroll.SuperTypeIndexes.Select(typeIdx => defs[typeIdx.Value]).ToList();
                 }
             }
             return defs;
