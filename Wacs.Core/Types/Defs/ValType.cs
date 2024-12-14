@@ -310,12 +310,12 @@ namespace Wacs.Core.Types.Defs
 
         public static ValType AsDiff(this ValType type, ValType other, TypesSpace types)
         {
-            bool nullable = type.IsNullable();
-            if (type.IsNullable() == other.IsNullable())
-                nullable = !nullable;
-            if (type.Matches(other, types))
-                return nullable ? ValType.NullableRef : ValType.Ref;
-            return nullable ? other.AsNullable() : other.AsNonNullable();
+            //Subtypes differ in only super types
+            return type.Matches(other, types)
+                //But, the difference set could be all the nullables
+                ? other.IsNullable() && !type.IsNullable() ? other : ValType.Bot
+                //Disjoint types are just the other
+                : other;
         }
 
         //For matching a (nullable?) Value directly
