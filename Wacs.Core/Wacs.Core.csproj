@@ -4,8 +4,8 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>9</LangVersion>
-    <AssemblyVersion>0.3.0</AssemblyVersion>
-    <Version>0.3.0</Version>
+    <AssemblyVersion>0.6.0</AssemblyVersion>
+    <Version>0.6.0</Version>
     <Authors>Kelvin Nishikawa</Authors>
     <Description>A Pure C# WebAssembly Interpreter</Description>
     <TrimUnusedDependencies>true</TrimUnusedDependencies>
