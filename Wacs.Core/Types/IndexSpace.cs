@@ -18,8 +18,10 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Types
 {
@@ -138,36 +140,38 @@ namespace Wacs.Core.Types
         public abstract bool Contains(TIndex idx);
     }
 
-    public class TypesSpace : AbstractIndexSpace<TypeIdx, FunctionType>
+    public class TypesSpace : AbstractIndexSpace<TypeIdx, DefType>
     {
-        private readonly ReadOnlyCollection<FunctionType> _moduleTypes;
+        private readonly ReadOnlyCollection<DefType> _moduleTypes;
 
         public TypesSpace(Module module) =>
-            _moduleTypes = module.Types.AsReadOnly();
+            _moduleTypes = module.UnrollTypes().AsReadOnly();
 
-        public override FunctionType this[TypeIdx idx]
+        public override DefType this[TypeIdx idx]
         {
             get => _moduleTypes[(Index)idx];
             set => throw new InvalidOperationException(InvalidSetterMessage);
         }
 
         public override bool Contains(TypeIdx idx) =>
-            idx.Value < _moduleTypes.Count;
+            idx.Value >= 0 && idx.Value < _moduleTypes.Count;
 
-        public FunctionType? ResolveBlockType(BlockType blockType) =>
-            blockType switch
+        public FunctionType? ResolveBlockType(ValType blockType)
+        {
+            switch (blockType)
             {
-                BlockType.Empty     => FunctionType.Empty,
-                BlockType.I32       => FunctionType.SingleI32,
-                BlockType.I64       => FunctionType.SingleI64,
-                BlockType.F32       => FunctionType.SingleF32,
-                BlockType.F64       => FunctionType.SingleF64,
-                BlockType.V128      => FunctionType.SingleV128,
-                BlockType.Funcref   => FunctionType.SingleFuncref,
-                BlockType.Externref => FunctionType.SingleExternref,
-                _ when Contains((TypeIdx)(int)blockType) => this[(TypeIdx)(int)blockType],
-                _ => null
-            };
+                case ValType.Empty: return FunctionType.Empty;
+                case ValType.I32: return FunctionType.SingleI32;
+                case ValType.I64: return FunctionType.SingleI64;
+                case ValType.F32: return FunctionType.SingleF32;
+                case ValType.F64: return FunctionType.SingleF64;
+                case ValType.V128: return FunctionType.SingleV128;
+                //TODO: Make static versions, reduce allocation
+                case var type when type.IsRefType(): return new(ResultType.Empty, new ResultType(type));
+                case var type when type.IsDefType(): return this[type.Index()].Expansion as FunctionType;
+                default: return null;
+            }
+        }
     }
 
     public class FunctionsSpace : AbstractIndexSpace<FuncIdx, Module.Function>
@@ -231,6 +235,7 @@ namespace Wacs.Core.Types
     {
         private readonly ReadOnlyCollection<Module.Global> _globals;
         private readonly ReadOnlyCollection<Module.Global> _imports;
+        public int IncrementalHighWatermark = -1;
 
         public GlobalValidationSpace(Module module)
         {
@@ -244,12 +249,28 @@ namespace Wacs.Core.Types
             set => throw new InvalidOperationException(InvalidSetterMessage);
         }
 
-        public override bool Contains(GlobalIdx idx) =>
-            idx.Value < _imports.Count + _globals.Count;
+        public void SetHighWatermark(Module.Global target)
+        {
+            IncrementalHighWatermark = _imports.Concat(_globals).ToList().FindIndex(p => p == target);
+        }
+
+        public void SetHighImportWatermark()
+        {
+            IncrementalHighWatermark = _imports.Count - 1;
+        }
+
+        public override bool Contains(GlobalIdx idx) => 
+            idx.Value < _imports.Count + _globals.Count && idx.Value <= IncrementalHighWatermark;
     }
 
     public struct LocalsSpace
     {
+        public static readonly LocalsSpace Empty = new LocalsSpace(
+            Array.Empty<Value>(),
+            Array.Empty<ValType>(),
+            Array.Empty<ValType>(),
+            true);
+        
         public Value[] Data;
 
         public int Capacity { get; }
@@ -280,7 +301,7 @@ namespace Wacs.Core.Types
             int idx = 0;
             foreach (var t in parameters)
             {
-                Data[idx++] = new Value(t);
+                Data[idx++] = new Value(t).MakeSet();
             }
             foreach (var t in locals)
             {
@@ -288,8 +309,14 @@ namespace Wacs.Core.Types
             }
         }
 
-        public bool Contains(LocalIdx idx) =>
-            idx.Value < Capacity;
+        public LocalsSpace(LocalsSpace copy)
+        {
+            Capacity = copy.Capacity;
+            Data = new Value[copy.Data.Length];
+            copy.Data.CopyTo(Data,0);
+        }
+
+        public bool Contains(LocalIdx idx) => idx.Value < Capacity;
     }
 
     public class ElementsSpace : AbstractIndexSpace<ElemIdx, Module.ElementSegment>

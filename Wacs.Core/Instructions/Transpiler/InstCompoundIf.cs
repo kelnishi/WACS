@@ -15,12 +15,11 @@
 //  */
 
 using System;
-using System.IO;
 using FluentValidation;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
-using Wacs.Core.Utilities;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Transpiler
@@ -29,33 +28,34 @@ namespace Wacs.Core.Instructions.Transpiler
     {
         private static readonly ByteCode IfOp = OpCode.If;
         private static readonly ByteCode ElseOp = OpCode.Else;
-        private Block IfBlock = Block.Empty;
-        private Block ElseBlock = Block.Empty;
-        private int ElseCount;
-        public override ByteCode Op => IfOp;
+        private readonly Block ElseBlock = Block.Empty;
+        private readonly int ElseCount;
+        private readonly Block IfBlock = Block.Empty;
 
-        private Func<ExecContext, int> valueFunc;
-        
+        private readonly Func<ExecContext, int> valueFunc;
+
         public InstCompoundIf(
-            BlockType type,
+            ValType blockType,
             InstructionSequence ifSeq,
             InstructionSequence elseSeq,
             ITypedValueProducer<int> valueProducer)
         {
             IfBlock = new Block(
-                type: type,
+                blockType: blockType,
                 seq: ifSeq
             );
             ElseBlock = new Block(
-                type: type,
+                blockType: blockType,
                 seq: elseSeq
             );
             ElseCount = ElseBlock.Instructions.Count;
 
             valueFunc = valueProducer.GetFunc;
         }
-        
-        public BlockType Type => IfBlock.Type;
+
+        public override ByteCode Op => IfOp;
+
+        public ValType BlockType => IfBlock.BlockType;
 
         public int Count => ElseBlock.Length == 0 ? 1 : 2;
 
@@ -67,8 +67,8 @@ namespace Wacs.Core.Instructions.Transpiler
         {
             try
             {
-                var ifType = context.Types.ResolveBlockType(IfBlock.Type);
-                context.Assert(ifType,  "Invalid BlockType: {0}",IfBlock.Type);
+                var ifType = context.Types.ResolveBlockType(IfBlock.BlockType);
+                context.Assert(ifType,  "Invalid BlockType: {0}",IfBlock.BlockType);
 
                 //Pop the predicate
                 // context.OpStack.PopI32();
@@ -84,7 +84,7 @@ namespace Wacs.Core.Instructions.Transpiler
                 // *any (else) contained within will pop and repush the control frame
                 context.ValidateBlock(IfBlock);
                 
-                var elseType = context.Types.ResolveBlockType(ElseBlock.Type);
+                var elseType = context.Types.ResolveBlockType(ElseBlock.BlockType);
                 if (!ifType.Equivalent(elseType))
                     throw new ValidationException($"If block returned type {ifType} without matching else block");
                 
@@ -100,10 +100,10 @@ namespace Wacs.Core.Instructions.Transpiler
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.Type);
+                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.BlockType);
             }
         }
-        
+
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
@@ -118,6 +118,5 @@ namespace Wacs.Core.Instructions.Transpiler
                     context.EnterBlock(this, ElseBlock);
             }
         }
-
     }
 }

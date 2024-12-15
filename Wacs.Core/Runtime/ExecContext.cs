@@ -28,6 +28,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime
@@ -106,6 +107,9 @@ namespace Wacs.Core.Runtime
             if (!assertion)
                 throw new TrapException(message);
         }
+
+        public ValType StackTopTopType() => 
+            OpStack.Peek().Type.TopHeapType(Frame.Module.Types);
 
         public Frame ReserveFrame(
             ModuleInstance module,
@@ -411,6 +415,19 @@ namespace Wacs.Core.Runtime
             if (Frame.LabelCount == 1 && Frame.Label.Instruction.x00 == OpCode.Func)
                 return OpCode.Func;    
             return OpCode.Block;
+        }
+
+        public ModuleInstance? GetModule(FuncAddr funcAddr)
+        {
+            var functionInstance = Store[funcAddr];
+            switch (functionInstance)
+            {
+                case FunctionInstance wasmFunc: return wasmFunc.Module;
+                case HostFunction hostFunc:
+                    //TODO: maybe implement ref binding for host functions
+                default:
+                    return null;
+            }
         }
     }
 }

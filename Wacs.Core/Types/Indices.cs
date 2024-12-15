@@ -15,6 +15,8 @@
 //  */
 
 using System;
+using Wacs.Core.Runtime.Exceptions;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Types
 {
@@ -22,12 +24,31 @@ namespace Wacs.Core.Types
     
     public readonly struct TypeIdx : IEquatable<Index>
     {
-        public readonly uint Value;
-        private TypeIdx(uint value) => Value = value;
+        public static readonly TypeIdx Default = new(int.MinValue);
+        public readonly int Value;
+        private TypeIdx(int value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;
-        public static explicit operator Index(TypeIdx functionIndex) => new((int)functionIndex.Value);
-        public static explicit operator TypeIdx(int value) => new((uint)value);
-        public static explicit operator TypeIdx(uint value) => new(value);
+        public static explicit operator Index(TypeIdx functionIndex) => new(functionIndex.Value);
+        public static explicit operator TypeIdx(int value) => new(value);
+        public static explicit operator TypeIdx(uint value) => new((int)value);
+        public static explicit operator TypeIdx(ValType type) => type.Index();
+
+        public static explicit operator ValType(TypeIdx type) => (ValType)type.Value;
+        
+        public static bool operator ==(TypeIdx left, TypeIdx right) => left.Value == right.Value;
+        public static bool operator !=(TypeIdx left, TypeIdx right) => !(left == right);
+        
+        //For matching heaptypes
+        public bool Matches(TypeIdx def2, TypesSpace? types)
+        {
+            if (types is null)
+                throw new WasmRuntimeException("Cannot match types without a context");
+            var defType1 = types[this];
+            var defType2 = types[def2];
+            return defType1.Matches(defType2, types);
+        }
+        
+        public override string ToString() => $"Type[{Value.ToString()}]";
         
     }
 
@@ -47,10 +68,11 @@ namespace Wacs.Core.Types
         
         
         public static readonly FuncIdx Default = new(uint.MaxValue);
-        public static readonly FuncIdx GlobalInitializers = new(uint.MaxValue - 1);
-        public static readonly FuncIdx ElementInitializers = new(uint.MaxValue - 2);
-        public static readonly FuncIdx ElementInitialization = new(uint.MaxValue - 3);
-        public static readonly FuncIdx ExpressionEvaluation = new(uint.MaxValue - 4);
+        public static readonly FuncIdx TableInitializers = new(uint.MaxValue - 1);
+        public static readonly FuncIdx GlobalInitializers = new(uint.MaxValue - 2);
+        public static readonly FuncIdx ElementInitializers = new(uint.MaxValue - 3);
+        public static readonly FuncIdx ElementInitialization = new(uint.MaxValue - 4);
+        public static readonly FuncIdx ExpressionEvaluation = new(uint.MaxValue - 5);
 
         public override string ToString() => Value switch
         {
@@ -149,4 +171,49 @@ namespace Wacs.Core.Types
         public static explicit operator LabelIdx(int value) => new((uint)value);
         public static explicit operator LabelIdx(uint value) => new(value);
     }
+    
+    public readonly struct FieldIdx : IEquatable<Index>
+    {
+        public readonly int Value;
+        private FieldIdx(int value) => Value = value;
+        public bool Equals(Index other) => Value == other.Value;
+        public static explicit operator Index(FieldIdx fieldIdx) => new(fieldIdx.Value);
+        public static explicit operator FieldIdx(int value) => new(value);
+        public static explicit operator FieldIdx(uint value) => new((int)value);
+    }
+
+    public interface RefIdx {}
+
+    public readonly struct PtrIdx : RefIdx
+    {
+        public readonly long Value;
+        public PtrIdx(long value) => Value = value;
+        public bool Equals(Index other) => Value == other.Value;
+        public static explicit operator PtrIdx(long value) => new(value);
+    }
+    
+    public readonly struct VecIdx : RefIdx
+    {
+        public readonly long Value;
+        private VecIdx(long value) => Value = value;
+        public bool Equals(Index other) => Value == other.Value;
+        public static explicit operator VecIdx(long value) => new(value);
+    }
+    
+    public readonly struct StructIdx : RefIdx
+    {
+        public readonly long Value;
+        private StructIdx(long value) => Value = value;
+        public bool Equals(Index other) => Value == other.Value;
+        public static explicit operator StructIdx(long value) => new(value);
+    }
+    
+    public readonly struct ArrayIdx : RefIdx
+    {
+        public readonly long Value;
+        private ArrayIdx(long value) => Value = value;
+        public bool Equals(Index other) => Value == other.Value;
+        public static explicit operator ArrayIdx(long value) => new(value);
+    }
+    
 }

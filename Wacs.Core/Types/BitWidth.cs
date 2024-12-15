@@ -20,6 +20,8 @@ namespace Wacs.Core.Types
 {
     public enum BitWidth : short
     {
+        None = 0,
+        
         S8 = -8,
         S16 = -16,
         S32 = -32,

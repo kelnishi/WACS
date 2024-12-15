@@ -19,12 +19,12 @@ using System.Runtime.InteropServices;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public sealed class InstF32BinOp : InstructionBase, INodeComputer<float,float,float>
+    public sealed class InstF32BinOp : InstructionBase, IConstOpInstruction, INodeComputer<float,float,float>
     {
         // Mask for the sign bit (most significant bit)
         private const uint F32SignMask = 0x8000_0000;
@@ -32,13 +32,13 @@ namespace Wacs.Core.Instructions.Numeric
 
         // @Spec 3.3.1.3. f.binop
         public static readonly InstF32BinOp F32Add = new(OpCode.F32Add, ExecuteF32Add,
-            NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
+            NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32), isConst: true);
 
         public static readonly InstF32BinOp F32Sub = new(OpCode.F32Sub, ExecuteF32Sub,
-            NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
+            NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32), isConst: true);
 
         public static readonly InstF32BinOp F32Mul = new(OpCode.F32Mul, ExecuteF32Mul,
-            NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
+            NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32), isConst: true);
 
         public static readonly InstF32BinOp F32Div = new(OpCode.F32Div, ExecuteF32Div,
             NumericInst.ValidateOperands(pop1: ValType.F32, pop2: ValType.F32, push: ValType.F32));
@@ -56,14 +56,19 @@ namespace Wacs.Core.Instructions.Numeric
 
         private readonly NumericInst.ValidationDelegate _validate;
 
-        private InstF32BinOp(ByteCode op, Func<float,float,float> execute, NumericInst.ValidationDelegate validate)
+        private InstF32BinOp(ByteCode op, Func<float,float,float> execute, NumericInst.ValidationDelegate validate, bool isConst = false)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
+            IsConstant = isConst;
         }
 
+        public bool IsConstant { get; }
+        
         public override ByteCode Op { get; }
+
+        public Func<ExecContext, float, float, float> GetFunc => (_, i1, i2) => _execute(i1, i2);
 
         public override void Validate(IWasmValidationContext context) => _validate(context);
 
@@ -74,8 +79,6 @@ namespace Wacs.Core.Instructions.Numeric
             float result = _execute(z1, z2);
             context.OpStack.PushF32(result);
         }
-
-        public Func<ExecContext, float, float, float> GetFunc => (_, i1, i2) => _execute(i1, i2);
 
         private static float ExecuteF32Add(float z1, float z2) => z1 + z2;
 

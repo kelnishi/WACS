@@ -18,6 +18,7 @@ using System;
 using System.IO;
 using FluentValidation;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -139,7 +140,8 @@ namespace Wacs.Core
                     public Validator()
                     {
                         RuleFor(gd => gd.GlobalIndex)
-                            .Must((_, index, ctx) => ctx.GetValidationContext().Globals.Contains(index));
+                            .Must((_, index, ctx) => ctx.GetValidationContext().Globals.Contains(index))
+                            .WithMessage(gd => $"Validation context did not contain GlobalDesc Index {gd.GlobalIndex.Value}");
                     }
                 }
             }

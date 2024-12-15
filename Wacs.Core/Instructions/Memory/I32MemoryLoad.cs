@@ -21,12 +21,16 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Instructions.Memory
 {
     public class InstI32Load : InstMemoryLoad, INodeComputer<uint, uint>
     {
         public InstI32Load() : base(ValType.I32, BitWidth.U32, OpCode.I32Load) {}
+
+        public Func<ExecContext, uint, uint> GetFunc => FetchFromMemory;
+
         public override void Execute(ExecContext context)
         {
             context.Assert( context.OpStack.Peek().IsI32,
@@ -35,7 +39,7 @@ namespace Wacs.Core.Instructions.Memory
             uint value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
-        
+
         //@Spec 4.4.7.1. t.load and t.loadN_sx
         public uint FetchFromMemory(ExecContext context, uint offset)
         {
@@ -57,13 +61,14 @@ namespace Wacs.Core.Instructions.Memory
             return MemoryMarshal.Read<uint>(bs);
             #endif
         }
-
-        public Func<ExecContext, uint, uint> GetFunc => FetchFromMemory;
     }
     
     public class InstI32Load8S : InstMemoryLoad, INodeComputer<uint, int>
     {
         public InstI32Load8S() : base(ValType.I32, BitWidth.S8, OpCode.I32Load8S) {}
+
+        public Func<ExecContext, uint, int> GetFunc => FetchFromMemory;
+
         public override void Execute(ExecContext context)
         {
             context.Assert( context.OpStack.Peek().IsI32,
@@ -72,7 +77,7 @@ namespace Wacs.Core.Instructions.Memory
             int value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
-        
+
         //@Spec 4.4.7.1. t.load and t.loadN_sx
         public int FetchFromMemory(ExecContext context, uint offset)
         {
@@ -89,13 +94,14 @@ namespace Wacs.Core.Instructions.Memory
             
             return (sbyte)mem.Data[(int)ea];
         }
-
-        public Func<ExecContext, uint, int> GetFunc => FetchFromMemory;
     }
     
     public class InstI32Load8U : InstMemoryLoad, INodeComputer<uint, uint>
     {
         public InstI32Load8U() : base(ValType.I32, BitWidth.U8, OpCode.I32Load8U) {}
+
+        public Func<ExecContext, uint, uint> GetFunc => FetchFromMemory;
+
         public override void Execute(ExecContext context)
         {
             context.Assert( context.OpStack.Peek().IsI32,
@@ -104,7 +110,7 @@ namespace Wacs.Core.Instructions.Memory
             uint value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
-        
+
         //@Spec 4.4.7.1. t.load and t.loadN_sx
         public uint FetchFromMemory(ExecContext context, uint offset)
         {
@@ -121,13 +127,14 @@ namespace Wacs.Core.Instructions.Memory
             
             return mem.Data[(int)ea];
         }
-
-        public Func<ExecContext, uint, uint> GetFunc => FetchFromMemory;
     }
     
     public class InstI32Load16S : InstMemoryLoad, INodeComputer<uint, int>
     {
         public InstI32Load16S() : base(ValType.I32, BitWidth.S16, OpCode.I32Load16S) {}
+
+        public Func<ExecContext, uint, int> GetFunc => FetchFromMemory;
+
         public override void Execute(ExecContext context)
         {
             context.Assert( context.OpStack.Peek().IsI32,
@@ -136,7 +143,7 @@ namespace Wacs.Core.Instructions.Memory
             int value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
-        
+
         //@Spec 4.4.7.1. t.load and t.loadN_sx
         public int FetchFromMemory(ExecContext context, uint offset)
         {
@@ -158,13 +165,14 @@ namespace Wacs.Core.Instructions.Memory
             return MemoryMarshal.Read<short>(bs);
 #endif
         }
-
-        public Func<ExecContext, uint, int> GetFunc => FetchFromMemory;
     }
     
     public class InstI32Load16U : InstMemoryLoad, INodeComputer<uint, uint>
     {
         public InstI32Load16U() : base(ValType.I32, BitWidth.U16, OpCode.I32Load16U) {}
+
+        public Func<ExecContext, uint, uint> GetFunc => FetchFromMemory;
+
         public override void Execute(ExecContext context)
         {
             context.Assert( context.OpStack.Peek().IsI32,
@@ -173,7 +181,7 @@ namespace Wacs.Core.Instructions.Memory
             uint value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
-        
+
         //@Spec 4.4.7.1. t.load and t.loadN_sx
         public uint FetchFromMemory(ExecContext context, uint offset)
         {
@@ -195,7 +203,5 @@ namespace Wacs.Core.Instructions.Memory
             return MemoryMarshal.Read<ushort>(bs);
 #endif
         }
-
-        public Func<ExecContext, uint, uint> GetFunc => FetchFromMemory;
     }
 }

@@ -17,7 +17,7 @@
 using System.Runtime.InteropServices;
 using Wacs.Core.Attributes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.WASIp1.Types
 {

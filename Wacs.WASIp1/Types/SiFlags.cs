@@ -16,7 +16,7 @@
 
 using System;
 using Wacs.Core.Attributes;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.WASIp1.Types
 {

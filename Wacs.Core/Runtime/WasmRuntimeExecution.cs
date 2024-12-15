@@ -85,7 +85,7 @@ namespace Wacs.Core.Runtime
                 return invoker(p);
             };
         }
-        
+
         public Delegates.GenericFuncsAsync CreateStackInvokerAsync(FuncAddr funcAddr, InvokerOptions? options = default)
         {
             options ??= new InvokerOptions();
@@ -221,7 +221,7 @@ namespace Wacs.Core.Runtime
                 return results;
             }
         }
-        
+
         private Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
         {
             return GenericDelegate;
@@ -229,6 +229,9 @@ namespace Wacs.Core.Runtime
             {
                 var funcInst = Context.Store[funcAddr];
                 var funcType = funcInst.Type;
+
+                if (Context.OpStack.Count > 0)
+                    throw new WasmRuntimeException("Values left on operand stack");
                 
                 Context.OpStack.PushScalars(funcType.ParameterTypes, args);
 
@@ -352,6 +355,12 @@ namespace Wacs.Core.Runtime
                 var span = results.AsSpan();
                 Context.OpStack.PopScalars(funcType.ResultType, span);
 
+                Context.GetModule(funcAddr)?.DerefTypes(span);
+                
+                
+                if (Context.OpStack.Count > 0)
+                    throw new WasmRuntimeException("Values left on operand stack");
+                
                 return results;
             }
         }

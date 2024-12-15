@@ -17,6 +17,8 @@
 using System;
 using System.IO;
 using FluentValidation;
+using Wacs.Core.Types.Defs;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
 {
@@ -39,7 +41,7 @@ namespace Wacs.Core.Types
         public GlobalType(ValType valtype, Mutability mut) =>
             (ContentType, Mutability) = (valtype, mut);
 
-        public ResultType ResultType => ContentType.SingleResult();
+        public ResultType ResultType => new(ContentType);
 
         public override string ToString() =>
             $"GlobalType({(Mutability == Mutability.Immutable ? "const" : "var")} {ContentType})";
@@ -76,8 +78,21 @@ namespace Wacs.Core.Types
             public Validator() {
                 // @Spec 3.2.6.1. mut valtype
                 RuleFor(gt => gt.Mutability).IsInEnum();
-                RuleFor(gt => gt.ContentType).IsInEnum();
+                RuleFor(gt => gt.ContentType)
+                    .Must((gtype, vtype, ctx) => vtype.Validate(ctx.GetValidationContext().Types))
+                    .WithMessage(gt => $"GlobalType had invalid ContentType {gt.ContentType}");
             }
+        }
+
+        public bool Matches(GlobalType other, TypesSpace? types)
+        {
+            if (Mutability != other.Mutability)
+                return false;
+            if (!ContentType.Matches(other.ContentType, types))
+                return false;
+            if (Mutability == Mutability.Mutable && !other.ContentType.Matches(ContentType, types))
+                return false;
+            return true;
         }
     }
 

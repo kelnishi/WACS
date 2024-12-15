@@ -21,8 +21,10 @@ using System.Linq;
 using FluentValidation;
 using FluentValidation.Results;
 using Wacs.Core.Instructions;
+using Wacs.Core.Instructions.Reference;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -51,6 +53,7 @@ namespace Wacs.Core
         //Add Ids to objects while parsing
         public static bool AnnotateWhileParsing = true;
         public static bool SkipFinalization = false;
+        public static bool ParseCustomNames = false;
         public static uint MaximumFunctionLocals = 2048;
 
         public static int InstructionsParsed = 0;
@@ -249,12 +252,11 @@ namespace Wacs.Core
                 var customSectionName = reader.ReadUtf8String();
                 switch (customSectionName)
                 {
-                    case "name":
+                    case "name" when ParseCustomNames:
                         using (var subreader = reader.GetSubsectionTo((int)payloadEnd))
                         {
                             module.Names = ParseNameSection(subreader);
                         }
-
                         break;
                     default:
                         //Skip others
@@ -313,7 +315,7 @@ namespace Wacs.Core
         private static void FinalizeModule(Module module)
         {
             PatchFuncSection(module);
-
+            
             HashSet<FuncIdx> fullyDeclared = new();
             var funcDescs = module.Exports
                 .Select(export => export.Desc)
@@ -321,14 +323,22 @@ namespace Wacs.Core
             foreach (var funcDesc in funcDescs) fullyDeclared.Add(funcDesc.FunctionIndex);
 
             var elementIni = module.Elements
-                .Where(elem => elem.Type == ReferenceType.Funcref)
+                .Where(elem => elem.Type == ValType.FuncRef)
                 .SelectMany(elem => elem.Initializers)
                 .SelectMany(ini => ini.Instructions)
                 .OfType<InstRefFunc>();
             foreach (var refFunc in elementIni) fullyDeclared.Add(refFunc.FunctionIndex);
 
+            var elementDecl = module.Elements
+                .Where(elem => elem.Mode is Module.ElementMode.DeclarativeMode)
+                .SelectMany(elem => elem.Initializers)
+                .SelectMany(ini => ini.Instructions)
+                .OfType<InstRefFunc>();
+            
+            foreach (var refFunc in elementDecl) fullyDeclared.Add(refFunc.FunctionIndex);
+            
             var globalIni = module.Globals
-                .Where(global => global.Type.ContentType == ValType.Funcref)
+                .Where(global => global.Type.ContentType == ValType.FuncRef)
                 .SelectMany(global => global.Initializer.Instructions)
                 .OfType<InstRefFunc>();
             foreach (var refFunc in globalIni) fullyDeclared.Add(refFunc.FunctionIndex);
@@ -340,8 +350,8 @@ namespace Wacs.Core
                     if (module.DataCount == uint.MaxValue)
                         throw new FormatException($"memory.init instruction requires Data Count section");
                 }
-                
-                func.IsFullyDeclared = fullyDeclared.Contains(func.Index);
+                if (fullyDeclared.Contains(func.Index))
+                    func.ElementDeclared = true;
             }
             
             if (module.DataCount == uint.MaxValue)

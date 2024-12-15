@@ -24,6 +24,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core
@@ -53,14 +54,15 @@ namespace Wacs.Core
         public void PushF32(float f32 = 0) => _context.Push(ValType.F32);
         public void PushF64(double f64 = 0) => _context.Push(ValType.F64);
         public void PushV128(V128 v128 = default) => _context.Push(ValType.V128);
-        public void PushFuncref(Value value) => _context.Push(ValType.Funcref);
-        public void PushExternref(Value value) => _context.Push(ValType.Externref);
+        public void PushRef(Value value) => _context.Push(ValType.None);
+        public void PushFuncref(Value value) => _context.Push(ValType.FuncRef);
+        public void PushExternref(Value value) => _context.Push(ValType.ExternRef);
         public void PushType(ValType type) => _context.Push(type);
 
         public void PushValues(Stack<Value> vals) {
             while (vals.Count > 0) _context.Push(vals.Pop().Type);
         }
-        
+
         public void DiscardValues(ResultType types) {
             foreach (var type in types.Types.Reverse()) PopType(type);
         }
@@ -70,7 +72,7 @@ namespace Wacs.Core
         public Value PopF32() => _context.Pop(ValType.F32);
         public Value PopF64() => _context.Pop(ValType.F64);
         public Value PopV128() => _context.Pop(ValType.V128);
-        public Value PopRefType() => _context.Pop(ValType.Funcref);
+        public Value PopRefType() => _context.Pop(ValType.FuncRef);
 
         public Value PopType(ValType type) => _context.Pop(type);
         public Value PopAny() => _context.Pop(ValType.Nil);
@@ -140,10 +142,11 @@ namespace Wacs.Core
             Datas = new DataValidationSpace(module.Datas.Length);
 
             Globals = new GlobalValidationSpace(module);
+            Globals.IncrementalHighWatermark = int.MaxValue;
 
             _opStack = new FakeOpStack(this);
             
-            var funcType = Types[func.TypeIndex];
+            var funcType = Types[func.TypeIndex].Expansion as FunctionType;
             var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
 
             DummyContext = BuildDummyContext(module, ModuleInst, func);
@@ -237,7 +240,10 @@ namespace Wacs.Core
                 switch (import.Desc)
                 {
                     case Module.ImportDesc.FuncDesc funcDesc:
-                        var funcSig = moduleInst.Types[funcDesc.TypeIndex];
+                        var type = moduleInst.Types[funcDesc.TypeIndex].Expansion;
+                        var funcSig = type as FunctionType;
+                        if (funcSig is null)
+                            throw new InvalidDataException($"Function had invalid type:{type}");
                         var funcAddr = store.AllocateHostFunction(entityId, funcSig, typeof(FakeHostDelegate), fakeHostFunc, false);
                         moduleInst.FuncAddrs.Add(funcAddr);
                         break;
@@ -265,8 +271,12 @@ namespace Wacs.Core
                     funcInst.SetName(export.Name);
                 }
             }
+
+            var ftype = Types[modFunc.TypeIndex].Expansion;
+            var funcType = ftype as FunctionType;
+            if (funcType is null)
+                throw new InvalidDataException("Function had invalid type:{ftype}");
             
-            var funcType = Types[modFunc.TypeIndex];
             var dummyContext = new ExecContext(store, new RuntimeAttributes { Live = false } );
             var execFrame = dummyContext.ReserveFrame(
                 ModuleInst, 
@@ -292,8 +302,8 @@ namespace Wacs.Core
                 case ValType.F32: fakeStack.Push("F"); break;
                 case ValType.F64: fakeStack.Push("D"); break;
                 case ValType.V128: fakeStack.Push("V"); break;
-                case ValType.Funcref: fakeStack.Push("R"); break;
-                case ValType.Externref: fakeStack.Push("E"); break;
+                case ValType.FuncRef: fakeStack.Push("R"); break;
+                case ValType.ExternRef: fakeStack.Push("E"); break;
                 case ValType.Nil: fakeStack.Push("N"); break;
                 case ValType.ExecContext: fakeStack.Push("|"); break;
             }

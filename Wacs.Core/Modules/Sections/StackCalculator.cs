@@ -22,6 +22,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core
@@ -50,14 +51,15 @@ namespace Wacs.Core
         public void PushF32(float f32 = 0) => _context.Push(ValType.F32);
         public void PushF64(double f64 = 0) => _context.Push(ValType.F64);
         public void PushV128(V128 v128 = default) => _context.Push(ValType.V128);
-        public void PushFuncref(Value value) => _context.Push(ValType.Funcref);
-        public void PushExternref(Value value) => _context.Push(ValType.Externref);
+        public void PushRef(Value value) => _context.Push(ValType.None);
+        public void PushFuncref(Value value) => _context.Push(ValType.FuncRef);
+        public void PushExternref(Value value) => _context.Push(ValType.ExternRef);
         public void PushType(ValType type) => _context.Push(type);
 
         public void PushValues(Stack<Value> vals) {
             while (vals.Count > 0) _context.Push(vals.Pop().Type);
         }
-        
+
         public void DiscardValues(ResultType types) {
             foreach (var type in types.Types.Reverse()) PopType(type);
         }
@@ -67,7 +69,7 @@ namespace Wacs.Core
         public Value PopF32() => _context.Pop(ValType.F32);
         public Value PopF64() => _context.Pop(ValType.F64);
         public Value PopV128() => _context.Pop(ValType.V128);
-        public Value PopRefType() => _context.Pop(ValType.Funcref);
+        public Value PopRefType() => _context.Pop(ValType.FuncRef);
 
         public Value PopType(ValType type) => _context.Pop(type);
         public Value PopAny() => _context.Pop(ValType.Nil);
@@ -133,10 +135,11 @@ namespace Wacs.Core
             Datas = new DataValidationSpace(moduleInst.Repr.Datas.Length);
 
             Globals = new GlobalValidationSpace(moduleInst.Repr);
+            Globals.IncrementalHighWatermark = int.MaxValue;
 
             OpStack = new CalculatorOpStack(this);
             
-            var funcType = Types[func.TypeIndex];
+            var funcType = Types[func.TypeIndex].Expansion as FunctionType;
             var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
 
             int capacity = funcType.ParameterTypes.Types.Length + func.Locals.Length;
@@ -145,15 +148,12 @@ namespace Wacs.Core
             
             ReturnType = funcType.ResultType;
             PushControlFrame(OpCode.Block, fakeType);
-            Attributes = new RuntimeAttributes
-            {
-                Configure_RefTypes = true,
-            };
+            Attributes = new RuntimeAttributes();
         }
 
         public RuntimeAttributes Attributes { get; }
         public IValidationOpStack OpStack { get; }
-        public FuncIdx FunctionIndex { get; }
+        public FuncIdx FunctionIndex => FuncIdx.Default;
         public ResultType ReturnType { get; }
         public bool Unreachable { get; set; }
         public TypesSpace Types { get; }
