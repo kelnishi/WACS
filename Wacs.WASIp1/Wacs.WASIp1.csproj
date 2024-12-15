@@ -12,9 +12,9 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASIp1</AssemblyName>
-        <AssemblyVersion>0.9.3</AssemblyVersion>
+        <AssemblyVersion>0.9.6</AssemblyVersion>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <Version>0.9.3</Version>
+        <Version>0.9.6</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible>true</IsAotCompatible>
