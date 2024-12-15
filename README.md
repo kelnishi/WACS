@@ -8,14 +8,14 @@
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including AOT environments like Unity's IL2CPP.
 
-The architecture is my literal interpretation of the WebAssembly spec, so it should be conceptually similar to the OCaml reference interpreter.
-The chapters and sections from the spec are commented throughout the source code and should serve as a good reference for others. 
+WACS supports the latest standardized webassembly feature extensions including **Garbage Collection** and **JSPI**-like async execution. 
 
 ![Wasm in Unity](UnityScreenshot.png)
 
 ## Table of Contents
 
 - [Features](#features)
+- [WebAssembly Feature Extensions](#webassembly-feature-extensions)
 - [Getting Started](#getting-started)
 - [Installation](#installation)
 - [Usage](#usage)
@@ -24,18 +24,60 @@ The chapters and sections from the spec are commented throughout the source code
 - [Customization](#customization)
 - [Performance](#performance)
 - [Roadmap](#roadmap)
-- [WebAssembly Feature Extensions](#webassembly-feature-extensions)
 - [License](#license)
 
 ## Features
 
+- **Unity Compatibility**: Compatible with **Unity 2021.3+** including AOT/IL2CPP modes for iOS.
 - **Pure C# Implementation**: Written in C# 9.0/.NET Standard 2.1. (No unsafe code)
 - **No Complex Dependencies**: Uses [FluentValidation](https://github.com/FluentValidation/FluentValidation) and [Microsoft.Extensions.ObjectPool](https://www.nuget.org/packages/Microsoft.Extensions.ObjectPool) as its only dependencies.
-- **Unity Compatibility**: Compatible with **Unity 2021.3+** including AOT/IL2CPP modes for iOS.
-- **Full WebAssembly MVP Compliance**: Passes the  [WebAssembly spec test suite](https://github.com/WebAssembly/spec/tree/main/test/core).
+- **WebAssembly+GC Spec Compliance**: Passes the [WebAssembly GC spec test suite](https://github.com/WebAssembly/gc/tree/main/test/core).
 - **Magical Interop**: Host bindings are validated with reflection, no boilerplate code required.
 - **Async Tasks**: [JSPI](https://github.com/WebAssembly/js-promise-integration)-like non-blocking calls for async functions.
 - **WASI:** Wacs.WASIp1 provides a [wasi\_snapshot\_preview1](https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md) implementation.
+
+**WACS is for _mobile games_**. 
+
+Because WebAssembly is memory-safe and can be ahead-of-time validated, WACS makes it possible to build safe, verifiable
+UGC, DLC, or plugin systems that include executable logic.
+
+## WebAssembly Feature Extensions
+WACS is based on the [WebAssembly Core 2 + gc spec](https://webassembly.github.io/gc/core/bikeshed/index.html) and passes the associated test suite.
+
+Support for all standardized extensions is listed below.
+
+Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs/wasm-feature-detect) as compares to [other runtimes](https://webassembly.org/features/):
+
+|Proposal |Features|    |
+|------|-------|----|
+|Phase 5|
+|[JavaScript BigInt to WebAssembly i64 integration](https://github.com/WebAssembly/JS-BigInt-integration)||<span title="Browser idiom, but conceptually supported">✳️</span>|
+|[Bulk memory operations](https://github.com/webassembly/bulk-memory-operations)||✅|
+|[Extended Constant Expressions](https://github.com/WebAssembly/extended-const)|extended_const|✅|
+|[Garbage collection](https://github.com/WebAssembly/gc)|gc|✅|
+|[Multiple memories](https://github.com/WebAssembly/multi-memory)|multi-memory|✅|
+|[Multi-value](https://github.com/WebAssembly/multi-value)|multi_value|✅|
+|[Import/Export of Mutable Globals](https://github.com/WebAssembly/mutable-global)||✅|
+|[Reference Types](https://github.com/WebAssembly/reference-types)||✅|
+|[Relaxed SIMD](https://github.com/webassembly/relaxed-simd)|relaxed_simd|✅|
+|[Non-trapping float-to-int conversions](https://github.com/WebAssembly/nontrapping-float-to-int-conversions)||✅|
+|[Sign-extension operators](https://github.com/WebAssembly/sign-extension-ops)||✅|
+|[Fixed-width SIMD](https://github.com/webassembly/simd)||✅|
+|[Tail call](https://github.com/webassembly/tail-call)|tail_call|✅|
+|[Typed Function References](https://github.com/WebAssembly/function-references)|function-references|✅|
+|Phase 4|
+|[Exception handling](https://github.com/WebAssembly/exception-handling)|exceptions|❌|
+|[JS String Builtins](https://github.com/WebAssembly/js-string-builtins)||❌|
+|[Memory64](https://github.com/WebAssembly/memory64)|memory64|❌|
+|[Threads](https://github.com/webassembly/threads)|threads|❌|
+|Phase 3|
+|[JS Promise Integration](https://github.com/WebAssembly/js-promise-integration)|jspi|<span title="Browser idiom, but conceptually supported">✳️</span>|
+|[Type Reflection for WebAssembly JavaScript API](https://github.com/WebAssembly/js-types)|type-reflection|<span title="Browser idioms, not directly supported">🌐</span>|
+||
+|[Legacy Exception Handling]( https://github.com/WebAssembly/exception-handling)|exceptions|❌|
+|[Streaming Compilation](https://webassembly.github.io/spec/web-api/index.html#streaming-modules)|streaming_compilation|<span title="Browser idioms, not directly supported">🌐</span>|
+
+###### This table was generated with the Feature.Detect test harness.
 
 ## Getting Started
 
@@ -191,17 +233,15 @@ performance closer to other languages in other VMs.
 
 ### The Spec-Defined Implementation
 The Wasm Virtual Machine is a stack machine. This means that instructions produce operands, place them on the stack, and then other
-instructions consume them by popping them from the stack. WACS's implementation does exactly this with the data structure you might expect 
-in C#: `Stack<Value>`. So for every _instruction_, WACS performs some number of Pops and Pushes to this stack. Each Pop or Push 
-is a function call to a class and may or may not require a constructor to initialize a Value or memory to be resized for the 
-Stack<> operation. This is **extremely** heavy. The CLR is manipulating its function call stack, managing memory, checking bounds,
-boxing/unboxing, etc. All for a single WASM instruction! And, while most C# runtimes have these kinds of things heavily optimized,
-It's still a lot compared to what our instruction represents. I've taken great care to minimize memory allocation or any extra code
-within these critical paths, but the core paradigm of objects and function calls is difficult to avoid.
+instructions consume them by popping them from the stack. WACS uses a pre-allocated linear stack for more register-like performance.
+However, even a virtualized stack is costly to manage as the CLR will still need to manage memory and objects at its boundaries.
+To optimize further, we'll need to opportunistically use register-machine semantics by swapping out equivalent operations. 
 
 ### In-Memory Transpiling
-If it can't be avoided, then what? Acceptance. Here's where we break WASM semantics and go off-road to claw back some performance.
-A linear list of WASM instructions can be inverted into an expression tree. Take for example, this sequence:
+Here's where we break WASM semantics and go off-road to claw back some performance.
+A linear list of WASM instructions can be inverted into an expression tree. The WAT text format supports both the linear
+and the tree structure; they are conceptually equivalent. We'll use this similarity by applying the transform to the binary AST.
+Take for example, this sequence:
 > i32.const 5   <- Pushes 5 onto the stack
 > 
 > i32.const 7   <- Pushes 7 onto the stack
@@ -247,56 +287,21 @@ My plan for 1.0 includes:
 - Implement the above transpiling for SIMD instructions (currently only i32/i64/f32/f64 instructions are optimized)
 - Provide an API for 3rd party super-instruction optimization
 
+### Expected Runtime Performance
+When built in AOT or Release mode, my benchmarks show WACS runs between 2~10% native throughput for benchmark programs
+like coremark. This is roughly on par with interpreted-only Python or about ~25% of an equivalent program written in C# on dotnet.
+
 ## Roadmap
 
 The current TODO list includes:
 
 - **Source Generated Bindings**: Use Roslyn source generator for generating bindings.
-- **Wasm Garbage Collection**: Support  wasm-gc and heaptypes.
 - **WASI p1 Test Suite**: Validate WASIp1 with the test suite for improved standard compliance.
 - **WASI p2 and Component Model**: Implement the component model proposal.
 - **Text Format Parsing**: Add support for WebAssembly text format.
 - **SIMD Intrinsics**: Add hardware-accelerated SIMD (software implementation included in Wacs.Core).
 - **Unity Bindings for SDL**: Implement SDL2 with Unity bindings.
 - **JavaScript Proxy Bindings**: Maybe support common JS env functions.
-
-## WebAssembly Feature Extensions
-WACS is based on the [WebAssembly Core 2 spec](https://www.w3.org/TR/wasm-core-2/).
-I am implementing and adding support for as many phase 5 extensions as I can.
-Progress depends mostly on complexity and non-javascriptiness.
-
-Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs/wasm-feature-detect) as compares to [other runtimes](https://webassembly.org/features/):
-
-|Proposal |Features|    |
-|------|-------|----|
-|Phase 5|
-|[JavaScript BigInt to WebAssembly i64 integration](https://github.com/WebAssembly/JS-BigInt-integration)||<span title="Browser idiom, but conceptually supported">✳️</span>|
-|[Bulk memory operations](https://github.com/webassembly/bulk-memory-operations)||✅|
-|[Extended Constant Expressions](https://github.com/WebAssembly/extended-const)|extended_const|✅|
-|[Garbage collection](https://github.com/WebAssembly/gc)|gc|❌|
-|[Multiple memories](https://github.com/WebAssembly/multi-memory)|multi-memory|✅|
-|[Multi-value](https://github.com/WebAssembly/multi-value)|multi_value|✅|
-|[Import/Export of Mutable Globals](https://github.com/WebAssembly/mutable-global)||✅|
-|[Reference Types](https://github.com/WebAssembly/reference-types)||✅|
-|[Relaxed SIMD](https://github.com/webassembly/relaxed-simd)|relaxed_simd|✅|
-|[Non-trapping float-to-int conversions](https://github.com/WebAssembly/nontrapping-float-to-int-conversions)||✅|
-|[Sign-extension operators](https://github.com/WebAssembly/sign-extension-ops)||✅|
-|[Fixed-width SIMD](https://github.com/webassembly/simd)||✅|
-|[Tail call](https://github.com/webassembly/tail-call)|tail_call|✅|
-|[Typed Function References](https://github.com/WebAssembly/function-references)|function-references|❌|
-|Phase 4|
-|[Exception handling](https://github.com/WebAssembly/exception-handling)|exceptions|❌|
-|[JS String Builtins](https://github.com/WebAssembly/js-string-builtins)||❌|
-|[Memory64](https://github.com/WebAssembly/memory64)|memory64|❌|
-|[Threads](https://github.com/webassembly/threads)|threads|❌|
-|Phase 3|
-|[JS Promise Integration](https://github.com/WebAssembly/js-promise-integration)|jspi|<span title="Browser idiom, but conceptually supported">✳️</span>|
-|[Type Reflection for WebAssembly JavaScript API](https://github.com/WebAssembly/js-types)|type-reflection|<span title="Browser idioms, not directly supported">🌐</span>|
-||
-|[Legacy Exception Handling]( https://github.com/WebAssembly/exception-handling)|exceptions|❌|
-|[Streaming Compilation](https://webassembly.github.io/spec/web-api/index.html#streaming-modules)|streaming_compilation|<span title="Browser idioms, not directly supported">🌐</span>|
-
-This table was generated with the Feature.Detect test harness.
 
 ## Sponsorship & Collaboration
 
