@@ -18,12 +18,12 @@ using System;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
 {
-    public sealed class InstF32UnOp : InstructionBase, INodeComputer<float, float>
+    public sealed class InstF32UnOp : InstructionBase, IConstOpInstruction, INodeComputer<float, float>
     {
         // @Spec 3.3.1.2. f.unop
         public static readonly InstF32UnOp F32Abs      = new(OpCode.F32Abs       , ExecuteF32Abs     , NumericInst.ValidateOperands(pop: ValType.F32, push: ValType.F32));
@@ -37,14 +37,19 @@ namespace Wacs.Core.Instructions.Numeric
 
         private readonly NumericInst.ValidationDelegate _validate;
 
-        private InstF32UnOp(ByteCode op, Func<float,float> execute, NumericInst.ValidationDelegate validate)
+        private InstF32UnOp(ByteCode op, Func<float,float> execute, NumericInst.ValidationDelegate validate, bool isConst = false)
         {
             Op = op;
             _execute = execute;
             _validate = validate;
+            IsConstant = isConst;
         }
+        
+        public bool IsConstant { get; }
 
         public override ByteCode Op { get; }
+
+        public Func<ExecContext, float,float> GetFunc => (_, i1) => _execute(i1);
 
         public override void Validate(IWasmValidationContext context) => _validate(context);
 
@@ -54,8 +59,6 @@ namespace Wacs.Core.Instructions.Numeric
             float result = _execute(a);
             context.OpStack.PushF32(result);
         }
-
-        public Func<ExecContext, float,float> GetFunc => (_, i1) => _execute(i1);
 
         private static float ExecuteF32Abs(float a) => Math.Abs(a);
         private static float ExecuteF32Neg(float a) => -a;

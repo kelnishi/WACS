@@ -31,11 +31,11 @@ namespace Wacs.Core.Instructions
         private LocalIdx Index;
         public override ByteCode Op => OpCode.LocalGet;
 
-        public LocalIdx GetIndex() => Index;
-        
         public Func<ExecContext, Value> GetFunc => FetchFromLocals;
 
         public int CalculateSize() => 1;
+
+        public LocalIdx GetIndex() => Index;
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -68,8 +68,12 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Locals.Contains(Index),
-                "Instruction local.get was invalid. Context Locals did not contain {0}",Index);
+                "Instruction local.get was invalid. Context Locals did not contain variable at index {0}", Index.Value);
             var value = context.Locals.Get(Index);
+            
+            context.Assert(value.Data.Set,
+                "Instruction local.get was invalid. The non-defaultable local variable at index {0} was unset", Index.Value);
+            
             context.OpStack.PushType(value.Type);
         }
 
@@ -93,9 +97,11 @@ namespace Wacs.Core.Instructions
     public class InstLocalSet : InstructionBase, IVarInstruction, INodeConsumer<Value>
     {
         private LocalIdx Index;
-        
-        public LocalIdx GetIndex() => Index;
         public override ByteCode Op => OpCode.LocalSet;
+
+        public Action<ExecContext, Value> GetFunc => SetLocal;
+
+        public LocalIdx GetIndex() => Index;
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -122,6 +128,7 @@ namespace Wacs.Core.Instructions
         {
             context.Assert(context.Locals.Contains(Index),
                 "Instruction local.set was invalid. Context Locals did not contain {0}",Index);
+            context.Locals.Data[Index.Value].Data.Set = true;
             var value = context.Locals.Get(Index);
             context.OpStack.PopType(value.Type);
         }
@@ -142,8 +149,6 @@ namespace Wacs.Core.Instructions
             var value = context.OpStack.PopType(type);
             SetLocal(context, value);
         }
-
-        public Action<ExecContext, Value> GetFunc => SetLocal;
 
         public InstructionBase Immediate(LocalIdx idx)
         {
@@ -192,6 +197,7 @@ namespace Wacs.Core.Instructions
         {
             context.Assert(context.Locals.Contains(Index),
                 "Instruction local.tee was invalid. Context Locals did not contain {0}",Index);
+            context.Locals.Data[Index.Value].Data.Set = true;
             var value = context.Locals.Get(Index);
             context.OpStack.PopType(value.Type);
             context.OpStack.PushType(value.Type);

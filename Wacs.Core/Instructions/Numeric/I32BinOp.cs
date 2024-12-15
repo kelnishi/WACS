@@ -19,7 +19,7 @@ using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -185,6 +185,8 @@ namespace Wacs.Core.Instructions.Numeric
             public Signed(ByteCode op, Func<int,int,int> execute, NumericInst.ValidationDelegate validate,
                 bool isConst = false) : base(op, validate, isConst) => _execute = execute;
 
+            public Func<ExecContext, int, int, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
+
             public override void Execute(ExecContext context)
             {
                 int i2 = context.OpStack.PopI32();
@@ -192,8 +194,6 @@ namespace Wacs.Core.Instructions.Numeric
                 int result = _execute(i1, i2);
                 context.OpStack.PushI32(result);
             }
-
-            public Func<ExecContext, int, int, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
 
         private sealed class Unsigned : InstI32BinOp, INodeComputer<uint,uint,uint>
@@ -203,6 +203,8 @@ namespace Wacs.Core.Instructions.Numeric
             public Unsigned(ByteCode op, Func<uint,uint,uint> execute, NumericInst.ValidationDelegate validate,
                 bool isConst = false) : base(op, validate, isConst) => _execute = execute;
 
+            public Func<ExecContext, uint, uint, uint> GetFunc => (_, i1, i2) => _execute(i1, i2);
+
             public override void Execute(ExecContext context)
             {
                 uint i2 = context.OpStack.PopU32();
@@ -210,8 +212,6 @@ namespace Wacs.Core.Instructions.Numeric
                 uint result = _execute(i1, i2);
                 context.OpStack.PushU32(result);
             }
-
-            public Func<ExecContext, uint, uint, uint> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
 
         private sealed class Mixed : InstI32BinOp, INodeComputer<uint,int,uint>
@@ -221,6 +221,8 @@ namespace Wacs.Core.Instructions.Numeric
             public Mixed(ByteCode op, Func<uint,int,uint> execute, NumericInst.ValidationDelegate validate,
                 bool isConst = false) : base(op, validate, isConst) => _execute = execute;
 
+            public Func<ExecContext, uint, int, uint> GetFunc => (_, i1, i2) => _execute(i1, i2);
+
             public override void Execute(ExecContext context)
             {
                 int i2 = context.OpStack.PopI32();
@@ -228,8 +230,6 @@ namespace Wacs.Core.Instructions.Numeric
                 uint result = _execute(i1, i2);
                 context.OpStack.PushU32(result);
             }
-
-            public Func<ExecContext, uint, int, uint> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
     }
 }

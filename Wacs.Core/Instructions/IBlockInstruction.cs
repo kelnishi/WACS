@@ -16,6 +16,7 @@
 
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Instructions
 {
@@ -26,7 +27,7 @@ namespace Wacs.Core.Instructions
     {
         public int Size { get; }
 
-        public BlockType Type { get; }
+        public ValType BlockType { get; }
 
         public int Count { get; }
 

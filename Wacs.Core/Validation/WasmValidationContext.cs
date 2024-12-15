@@ -25,6 +25,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Validation
 {
@@ -81,7 +82,11 @@ namespace Wacs.Core.Validation
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
-        public LocalsSpace Locals => ExecFrame.Locals;
+        public LocalsSpace Locals =>
+            ControlStack.Count == 0
+                ? ExecFrame.Locals 
+                : ControlFrame.Locals;
+
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
 
@@ -92,7 +97,6 @@ namespace Wacs.Core.Validation
         /// </summary>
         public void SetUnreachable()
         {
-            // Unreachable = true;
             PopOperandsToHeight(ControlFrame.Height);
             ControlFrame.Unreachable = true;
         }
@@ -137,6 +141,9 @@ namespace Wacs.Core.Validation
             
             PopValidationContext();
         }
+        
+        public bool ValidateBlockType(ValType type) => 
+            type.Validate(Types) || type == ValType.Empty;
 
         public void PushControlFrame(ByteCode opCode, FunctionType types)
         {
@@ -145,6 +152,7 @@ namespace Wacs.Core.Validation
                 Opcode = opCode,
                 Types = types,
                 Height = OpStack.Height,
+                Locals = new LocalsSpace(Locals),
             };
             
             ControlStack.Push(frame);
@@ -158,16 +166,12 @@ namespace Wacs.Core.Validation
                 throw new ValidationException("Validation Control Stack underflow");
             
             //Check to make sure we have the correct results, but only if we didn't jump
-            OpStack.PopValues(ControlFrame.EndTypes, ref _aside);
-            _aside.Clear();
+            OpStack.DiscardValues(ControlFrame.EndTypes);
             
             //Check the stack
             if (OpStack.Height != ControlFrame.Height)
                 throw new ValidationException(
                     $"Operand stack height {OpStack.Height} differed from Control Frame height {ControlFrame.Height}");
-            
-            // if (ControlFrame.ConditionallyReachable)
-            //     Unreachable = false;
 
             return ControlStack.Pop();
         }
@@ -197,8 +201,11 @@ namespace Wacs.Core.Validation
 
         public void SetExecFrame(FunctionType funcType, ValType[] localTypes)
         {
+            ControlStack.Clear();
+            
             int capacity = funcType.ParameterTypes.Types.Length + localTypes.Length;
             var data = new Value[capacity];
+            
             var locals = new LocalsSpace(data, funcType.ParameterTypes.Types, localTypes);
             ExecFrame = new Frame
             {

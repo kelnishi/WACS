@@ -14,10 +14,7 @@
 //  * limitations under the License.
 //  */
 
-using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.IO;
 using System.Linq;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
@@ -25,6 +22,7 @@ using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Runtime.Transpiler
 {
@@ -69,7 +67,7 @@ namespace Wacs.Core.Runtime.Transpiler
                 {
                     case InstBlock instBlock:
                         var newBlockSeq = OptimizeSequence(instBlock.GetBlock(0).Instructions);
-                        var newBlock = new InstBlock().Immediate(instBlock.Type, newBlockSeq);
+                        var newBlock = new InstBlock().Immediate(instBlock.BlockType, newBlockSeq);
                         //HACK: We're copying the StackHeight here. Ideally we would recalculate,
                         //but InstAggregates would need to report correct stack consumption to Validate
                         newBlock.Label = new Label(instBlock.Label);
@@ -78,7 +76,7 @@ namespace Wacs.Core.Runtime.Transpiler
                         break;
                     case InstLoop instLoop:
                         var newLoopSeq = OptimizeSequence(instLoop.GetBlock(0).Instructions);
-                        var newLoop = new InstLoop().Immediate(instLoop.Type, newLoopSeq);
+                        var newLoop = new InstLoop().Immediate(instLoop.BlockType, newLoopSeq);
                         //copy stackheight
                         newLoop.Label = new Label(instLoop.Label);
                         stack.Push(newLoop);
@@ -99,7 +97,7 @@ namespace Wacs.Core.Runtime.Transpiler
                             };
                             if (intProducer != null)
                             {
-                                newIf = new InstCompoundIf(instIf.Type, newIfSeq, newElseSeq, intProducer);
+                                newIf = new InstCompoundIf(instIf.BlockType, newIfSeq, newElseSeq, intProducer);
                             }
                             else
                             {
@@ -107,7 +105,7 @@ namespace Wacs.Core.Runtime.Transpiler
                             }
                         }
                         if (newIf == null)
-                            newIf = new InstIf().Immediate(instIf.Type, newIfSeq, newElseSeq);
+                            newIf = new InstIf().Immediate(instIf.BlockType, newIfSeq, newElseSeq);
                         
                         //copy stackheight
                         newIf.Label = new Label(instIf.Label);
@@ -401,6 +399,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
+
         private static InstructionBase BindU32F32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,float> floatConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -432,6 +431,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
+
         private static InstructionBase BindU32F64(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,double> doubleConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -463,6 +463,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
+
         private static InstructionBase BindU32V128(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,V128> vecConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -494,6 +495,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
+
         private static InstructionBase BindU32I32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,int> intConsumer)
         {
             if (stack.Count < 2) return inst;
@@ -698,7 +700,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        
+
         private static InstructionBase BindU32Value(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<uint,Value> intConsumer)
         {
             if (stack.Count < 1) return inst;
@@ -744,7 +746,7 @@ namespace Wacs.Core.Runtime.Transpiler
             stack.Push(i2);
             return inst;
         }
-        
+
         private static InstructionBase BindValueValueI32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<Value,Value,int> valueConsumer)
         {
             Stack<InstructionBase> operands = new();
@@ -821,7 +823,7 @@ namespace Wacs.Core.Runtime.Transpiler
             
             return inst;
         }
-        
+
         private static InstructionBase BindF32(InstructionBase inst, Stack<InstructionBase> stack, IValueConsumer<float> floatConsumer)
         {
             if (stack.Count < 1) return inst;

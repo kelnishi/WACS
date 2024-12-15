@@ -41,7 +41,7 @@ namespace Spec.Test
             Assert.Equal(479_001_600, invoker(12));
             Assert.Equal(2_432_902_008_176_640_000 , invoker(20));
         }
-        
+
         [Fact]
         public void TailCallFactorialTranspiled()
         {

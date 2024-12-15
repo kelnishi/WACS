@@ -22,6 +22,7 @@ using Wacs.Core.Attributes;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -39,7 +40,11 @@ namespace Wacs.Core
         public class Function : IRenderable
         {
             public FuncIdx Index;
-            public bool IsFullyDeclared = false;
+
+            public bool ElementDeclared = false;
+
+            public bool IsFullyDeclared(IWasmValidationContext ctx) => 
+                ElementDeclared || Index.Value < ctx.FunctionIndex.Value;
 
             public bool IsImport = false;
             public string Id { get; set; } = "";
@@ -59,7 +64,7 @@ namespace Wacs.Core
             {
                 var id = string.IsNullOrWhiteSpace(Id) ? $" (;{Index.Value};)" : $" (;{Id};)";
                 var type = $" (type {TypeIndex.Value})";
-                var functionType = module.Types[(int)TypeIndex.Value];
+                var functionType = (FunctionType)module.Types[(int)TypeIndex.Value];
                 var param = functionType.ParameterTypes.Arity > 0
                     ? functionType.ParameterTypes.ToParameters()
                     : "";
@@ -102,7 +107,7 @@ namespace Wacs.Core
                             depth += 1;
                             stackRenderer.FakeContext.LastEvent = "[";
                             var mnemonic = inst.Op.GetMnemonic();
-                            var funcType = ComputeBlockType(blockInst.Type, module);
+                            var funcType = ComputeBlockType(blockInst.BlockType, module);
                             var blockParams = funcType.ParameterTypes.Arity > 0
                                 ? funcType.ParameterTypes.ToParameters()
                                 : "";
@@ -153,17 +158,19 @@ namespace Wacs.Core
                 }
             }
 
-            private FunctionType ComputeBlockType(BlockType type, Module module) =>
+            //TODO: This doesn't really work...
+            private FunctionType ComputeBlockType(ValType type, Module module) =>
                 type switch
                 {
-                    BlockType.Empty => new FunctionType(ResultType.Empty, ResultType.Empty),
-                    BlockType.I32 => new FunctionType(ResultType.Empty, new ResultType(ValType.I32)),
-                    BlockType.F32 => new FunctionType(ResultType.Empty, new ResultType(ValType.F32)),
-                    BlockType.F64 => new FunctionType(ResultType.Empty, new ResultType(ValType.F64)),
-                    BlockType.I64 => new FunctionType(ResultType.Empty, new ResultType(ValType.I64)),
-                    BlockType.V128 => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
-                    BlockType.Funcref => new FunctionType(ResultType.Empty, new ResultType(ValType.Funcref)),
-                    BlockType.Externref => new FunctionType(ResultType.Empty, new ResultType(ValType.Externref)),
+                    ValType.Empty => new FunctionType(ResultType.Empty, ResultType.Empty),
+                    ValType.I32 => new FunctionType(ResultType.Empty, new ResultType(ValType.I32)),
+                    ValType.F32 => new FunctionType(ResultType.Empty, new ResultType(ValType.F32)),
+                    ValType.F64 => new FunctionType(ResultType.Empty, new ResultType(ValType.F64)),
+                    ValType.I64 => new FunctionType(ResultType.Empty, new ResultType(ValType.I64)),
+                    ValType.V128 => new FunctionType(ResultType.Empty, new ResultType(ValType.V128)),
+                    ValType.FuncRef => new FunctionType(ResultType.Empty, new ResultType(ValType.FuncRef)),
+                    ValType.ExternRef => new FunctionType(ResultType.Empty, new ResultType(ValType.ExternRef)),
+                    //TODO: not so much...
                     _ => module.Types[(int)((TypeIdx)(uint)type).Value]
                 };
 
@@ -195,8 +202,29 @@ namespace Wacs.Core
                             if (func.Locals.Length > vContext.Attributes.MaxFunctionLocals)
                                 throw new ValidationException(
                                     $"Function[{func.Index}] locals count {func.Locals.Length} exceeds maximum allowed {vContext.Attributes.MaxFunctionLocals}");
+
+                            foreach (var (localType,index) in func.Locals.Select((l,i)=>(l,i)))
+                            {
+                                if (!localType.Validate(vContext.Types))
+                                    throw new ValidationException($"Function[{func.Index}] Local[{index}] had invalid type:{localType}");
+                            }
                             
-                            var funcType = types[func.TypeIndex];
+                            var type = types[func.TypeIndex];
+                            var funcType = type.Expansion as FunctionType;
+                            if (funcType is null)
+                                throw new ValidationException($"Function[{func.Index}] type {type} is not a FuncType.");
+
+                            foreach (var (paramType, index) in funcType.ParameterTypes.Types.Select((t, i) => (t, i)))
+                            {
+                                if (!paramType.Validate(vContext.Types))
+                                    throw new ValidationException($"Function[{func.Index}] Parameter[{index}] had invalid type:{paramType}");
+                            }
+                            foreach (var (resType, index) in funcType.ResultType.Types.Select((t, i) => (t, i)))
+                            {
+                                if (!resType.Validate(vContext.Types))
+                                    throw new ValidationException($"Function[{func.Index}] Result[{index}] had invalid type:{resType}");
+                            }                            
+                            
                             vContext.FunctionIndex = func.Index;
                             vContext.SetExecFrame(funcType, func.Locals);
                             

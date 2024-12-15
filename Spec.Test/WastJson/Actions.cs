@@ -32,7 +32,7 @@ namespace Spec.Test.WastJson
         public ActionType Type => ActionType.Invoke;
         [JsonPropertyName("field")] public string Field { get; set; } = "";
 
-        public override string ToString() => $"{Field} - Args: {string.Join(", ", Args ?? new List<Argument>())}";
+        public override string ToString() => $"Invoke \"{Field}\" - Args: {string.Join(", ", Args ?? new List<Argument>())}";
 
         public Value[] Invoke(ref WasmRuntime runtime, ref Module? module)
         {

@@ -22,7 +22,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Spec.Test.WastJson
 {
@@ -46,8 +46,17 @@ namespace Spec.Test.WastJson
                 "f32" => new Value(ValType.F32, Value?.ToString()??""),
                 "f64" => new Value(ValType.F64, Value?.ToString()??""),
                 "v128" => ParseV128(Value),
-                "funcref" => new Value(ValType.Funcref, Value?.ToString()??"null"),
-                "externref" => new Value(ValType.Externref, Value?.ToString()??"null"),
+                "funcref" => new Value(ValType.FuncRef, Value?.ToString()??"null"),
+                "externref" => new Value(ValType.ExternRef, Value?.ToString()??"null"),
+                "refnull" => Wacs.Core.Runtime.Value.NullRef,
+                "nullref" => Wacs.Core.Runtime.Value.NullRef,
+                "nullfuncref" => Wacs.Core.Runtime.Value.NullFuncRef,
+                "nullexternref" => Wacs.Core.Runtime.Value.NullExternRef,
+                "anyref" => new Value(ValType.Any, Value?.ToString()??"null"),
+                "structref" => new Value(ValType.Struct, Value?.ToString()??"null"),
+                "arrayref" => new Value(ValType.Array, Value?.ToString()??"null"),
+                "eqref" => new Value(ValType.Eq, Value?.ToString()??"null"),
+                "i31ref" => new Value(ValType.I31, Value?.ToString()??"null"),
                 _ => throw new ArgumentException($"Cannot parse value {Value} of type {Type}")
             };
 
@@ -146,7 +155,20 @@ namespace Spec.Test.WastJson
 
         private static ulong BitBashLong(string longval)
         {
-            return ulong.Parse(longval);
+            decimal value = decimal.Parse(longval);
+            if (value > ulong.MaxValue)
+                throw new InvalidDataException($"Integer value {longval} out of range");
+            if (value < long.MinValue)
+                throw new InvalidDataException($"Integer value {longval} out of range");
+                
+            if (value > long.MaxValue && value <= ulong.MaxValue)
+            {
+                return (ulong)value;
+            }
+            if (value < 0)
+                return (ulong)(long)value;
+            
+            return (ulong)value;
         }
 
         private static double BitBashDouble(string longval)

@@ -22,6 +22,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 using LaneIdx = System.Byte;
 
@@ -30,6 +31,9 @@ namespace Wacs.Core.Instructions.SIMD
     public class InstV128Load : InstMemoryLoad, INodeComputer<uint, V128>
     {
         public InstV128Load() : base(ValType.V128, BitWidth.V128, SimdCode.V128Load) {}
+
+        public Func<ExecContext, uint, V128> GetFunc => FetchFromMemory;
+
         public override void Execute(ExecContext context)
         {
             context.Assert( context.OpStack.Peek().IsI32,
@@ -38,7 +42,7 @@ namespace Wacs.Core.Instructions.SIMD
             V128 value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
-        
+
         //@Spec 4.4.7.1. t.load and t.loadN_sx
         public V128 FetchFromMemory(ExecContext context, uint offset)
         {
@@ -61,13 +65,13 @@ namespace Wacs.Core.Instructions.SIMD
             return MemoryMarshal.Read<V128>(bs);
 #endif
         }
-
-        public Func<ExecContext, uint, V128> GetFunc => FetchFromMemory;
     }
     
     public class InstV128Store : InstMemoryStore, INodeConsumer<uint, V128>
     {
         public InstV128Store() : base(ValType.V128, BitWidth.V128, SimdCode.V128Store) { }
+
+        public Action<ExecContext, uint, V128> GetFunc => SetMemoryValue;
 
         // @Spec 4.4.7.6. t.store
         // @Spec 4.4.7.6. t.storeN
@@ -82,7 +86,7 @@ namespace Wacs.Core.Instructions.SIMD
             
             SetMemoryValue(context, offset, c);
         }
-        
+
         public void SetMemoryValue(ExecContext context, uint offset, V128 cV128)
         {
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -105,8 +109,6 @@ namespace Wacs.Core.Instructions.SIMD
             MemoryMarshal.Write(bs, ref cV128);
 #endif
         }
-
-        public Action<ExecContext, uint, V128> GetFunc => SetMemoryValue;
     }
     
     public class InstMemoryLoadMxN : InstructionBase
@@ -114,7 +116,7 @@ namespace Wacs.Core.Instructions.SIMD
         private readonly int CountN;
 
         private readonly BitWidth WidthT;
-        private int WidthTByteSize;
+        private readonly int WidthTByteSize;
         private MemArg M;
 
         public InstMemoryLoadMxN(BitWidth width, int count)

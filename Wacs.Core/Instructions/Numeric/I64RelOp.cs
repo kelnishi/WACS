@@ -18,7 +18,7 @@ using System;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -95,6 +95,8 @@ namespace Wacs.Core.Instructions.Numeric
             public Signed(ByteCode op, Func<long, long ,int> execute, NumericInst.ValidationDelegate validate)
                 : base(op, validate) => _execute = execute;
 
+            public Func<ExecContext, long, long, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
+
             public override void Execute(ExecContext context)
             {
                 long i2 = context.OpStack.PopI64();
@@ -102,8 +104,6 @@ namespace Wacs.Core.Instructions.Numeric
                 int result = _execute(i1, i2);
                 context.OpStack.PushI32(result);
             }
-
-            public Func<ExecContext, long, long, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
 
         private sealed class Unsigned : InstI64RelOp, INodeComputer<ulong,ulong,int>
@@ -113,6 +113,8 @@ namespace Wacs.Core.Instructions.Numeric
             public Unsigned(ByteCode op, Func<ulong, ulong, int> execute, NumericInst.ValidationDelegate validate)
                 : base(op, validate) => _execute = execute;
 
+            public Func<ExecContext, ulong, ulong, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
+
             public override void Execute(ExecContext context)
             {
                 ulong i2 = context.OpStack.PopU64();
@@ -120,8 +122,6 @@ namespace Wacs.Core.Instructions.Numeric
                 int result = _execute(i1, i2);
                 context.OpStack.PushI32(result);
             }
-
-            public Func<ExecContext, ulong, ulong, int> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
     }
 }

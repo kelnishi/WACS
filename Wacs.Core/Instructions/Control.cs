@@ -24,9 +24,9 @@ using FluentValidation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -73,7 +73,7 @@ namespace Wacs.Core.Instructions
         private Block Block;
         public override ByteCode Op => BlockOp;
 
-        public BlockType Type => Block.Type;
+        public ValType BlockType => Block.BlockType;
 
         public int Count => 1;
 
@@ -85,8 +85,8 @@ namespace Wacs.Core.Instructions
         {
             try
             {
-                var funcType = context.Types.ResolveBlockType(Block.Type);
-                context.Assert(funcType,  "Invalid BlockType: {0}",Block.Type);
+                var funcType = context.Types.ResolveBlockType(Block.BlockType);
+                context.Assert(funcType,  "Invalid BlockType: {0}",Block.BlockType);
                 
                 //Check the parameters [t1*] and discard
                 context.OpStack.DiscardValues(funcType.ParameterTypes);
@@ -102,7 +102,7 @@ namespace Wacs.Core.Instructions
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    "Instruction block was invalid. BlockType {0} did not exist in the Context.",Block.Type);
+                    "Instruction block was invalid. BlockType {0} did not exist in the Context.",Block.BlockType);
             }
         }
 
@@ -118,16 +118,16 @@ namespace Wacs.Core.Instructions
         public override InstructionBase Parse(BinaryReader reader)
         {
             Block = new Block(
-                type: Block.ParseBlockType(reader),
-                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd))
+                blockType: ValTypeParser.Parse(reader, parseBlockIndex: true, parseStorageType: false),
+                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IsEnd))
             );
             return this;
         }
 
-        public BlockTarget Immediate(BlockType type, InstructionSequence sequence)
+        public BlockTarget Immediate(ValType blockType, InstructionSequence sequence)
         {
             Block = new Block(
-                type: type,
+                blockType: blockType,
                 seq: sequence
             );
             return this;
@@ -147,7 +147,7 @@ namespace Wacs.Core.Instructions
         private Block Block = null!;
         public override ByteCode Op => LoopOp;
 
-        public BlockType Type => Block.Type;
+        public ValType BlockType => Block.BlockType;
 
         public int Count => 1;
 
@@ -159,8 +159,8 @@ namespace Wacs.Core.Instructions
         {
             try
             {
-                var funcType = context.Types.ResolveBlockType(Block.Type);
-                context.Assert(funcType, "Invalid BlockType: {0}",Block.Type);
+                var funcType = context.Types.ResolveBlockType(Block.BlockType);
+                context.Assert(funcType, "Invalid BlockType: {0}",Block.BlockType);
                 
                 //Check the parameters [t1*] and discard
                 context.OpStack.DiscardValues(funcType.ParameterTypes);
@@ -176,7 +176,7 @@ namespace Wacs.Core.Instructions
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",Block.Type);
+                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",Block.BlockType);
             }
         }
 
@@ -193,16 +193,16 @@ namespace Wacs.Core.Instructions
         public override InstructionBase Parse(BinaryReader reader)
         {
             Block = new Block(
-                type: Block.ParseBlockType(reader),
-                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd))
+                blockType: ValTypeParser.Parse(reader, parseBlockIndex: true, parseStorageType: false),
+                seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, IsEnd))
             );
             return this;
         }
 
-        public BlockTarget Immediate(BlockType type, InstructionSequence sequence)
+        public BlockTarget Immediate(ValType blockType, InstructionSequence sequence)
         {
             Block = new Block(
-                type: type,
+                blockType: blockType,
                 seq: sequence
             );
             return this;
@@ -220,13 +220,13 @@ namespace Wacs.Core.Instructions
     {
         private static readonly ByteCode IfOp = OpCode.If;
         private static readonly ByteCode ElseOp = OpCode.Else;
-        private Block IfBlock = Block.Empty;
         private Block ElseBlock = Block.Empty;
         private int ElseCount;
+        private Block IfBlock = Block.Empty;
         public override ByteCode Op => IfOp;
 
 
-        public BlockType Type => IfBlock.Type;
+        public ValType BlockType => IfBlock.BlockType;
 
         public int Count => ElseBlock.Length == 0 ? 1 : 2;
 
@@ -238,8 +238,8 @@ namespace Wacs.Core.Instructions
         {
             try
             {
-                var ifType = context.Types.ResolveBlockType(IfBlock.Type);
-                context.Assert(ifType,  "Invalid BlockType: {0}",IfBlock.Type);
+                var ifType = context.Types.ResolveBlockType(IfBlock.BlockType);
+                context.Assert(ifType,  "Invalid BlockType: {0}",IfBlock.BlockType);
 
                 //Pop the predicate
                 context.OpStack.PopI32();
@@ -255,7 +255,7 @@ namespace Wacs.Core.Instructions
                 // *any (else) contained within will pop and repush the control frame
                 context.ValidateBlock(IfBlock);
                 
-                var elseType = context.Types.ResolveBlockType(ElseBlock.Type);
+                var elseType = context.Types.ResolveBlockType(ElseBlock.BlockType);
                 if (!ifType.Equivalent(elseType))
                     throw new ValidationException($"If block returned type {ifType} without matching else block");
                 
@@ -271,10 +271,10 @@ namespace Wacs.Core.Instructions
                 _ = exc;
                 //Types didn't hit
                 context.Assert(false,
-                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.Type);
+                    "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.BlockType);
             }
         }
-        
+
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
@@ -296,17 +296,17 @@ namespace Wacs.Core.Instructions
         public override InstructionBase Parse(BinaryReader reader)
         {
             IfBlock = new Block(
-                type: Block.ParseBlockType(reader),
+                blockType: ValTypeParser.Parse(reader, parseBlockIndex: true, parseStorageType: false),
                 new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
-                    InstructionBase.IsElseOrEnd))
+                    IsElseOrEnd))
             );
 
             if (IfBlock.Instructions.EndsWithElse)
             {
                 ElseBlock = new Block(
-                    type: IfBlock.Type,
+                    blockType: IfBlock.BlockType,
                     seq: new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction,
-                        InstructionBase.IsEnd))
+                        IsEnd))
                 );
             }
             else if (!IfBlock.Instructions.HasExplicitEnd)
@@ -318,14 +318,14 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public BlockTarget Immediate(BlockType type, InstructionSequence ifSeq, InstructionSequence elseSeq)
+        public BlockTarget Immediate(ValType blockType, InstructionSequence ifSeq, InstructionSequence elseSeq)
         {
             IfBlock = new Block(
-                type: type,
+                blockType: blockType,
                 seq: ifSeq
             );
             ElseBlock = new Block(
-                type: type,
+                blockType: blockType,
                 seq: elseSeq
             );
             ElseCount = ElseBlock.Instructions.Count;
@@ -443,9 +443,6 @@ namespace Wacs.Core.Instructions
             //Validate results, but leave them on the stack
             context.OpStack.DiscardValues(nthFrame.LabelTypes);
 
-            // if (!context.Unreachable)
-            //     nthFrame.ConditionallyReachable = true;
-            
             context.SetUnreachable();
         }
 
@@ -526,6 +523,8 @@ namespace Wacs.Core.Instructions
         public LabelIdx L;
         public override ByteCode Op => OpCode.BrIf;
 
+        public Action<ExecContext, int> GetFunc => BranchIf;
+
         // @Spec 3.3.8.7. br_if
         public override void Validate(IWasmValidationContext context)
         {
@@ -536,8 +535,6 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopI32();
             
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
-            // if (!context.Unreachable)
-            //     nthFrame.ConditionallyReachable = true;
             
             //Pop values like we branch
             context.OpStack.DiscardValues(nthFrame.LabelTypes);
@@ -560,8 +557,6 @@ namespace Wacs.Core.Instructions
             }
         }
 
-        public Action<ExecContext, int> GetFunc => BranchIf;
-
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
@@ -579,7 +574,7 @@ namespace Wacs.Core.Instructions
             string taken = "";
             if (context.Attributes.Live)
             {
-                taken = context.OpStack.Peek().Int32 != 0 ? "-> " : "X: ";
+                taken = context.OpStack.Peek().Data.Int32 != 0 ? "-> " : "X: ";
             }
             return $"{base.RenderText(context)} {L.Value} (;{taken}@{depth - L.Value};)";
         }
@@ -593,6 +588,8 @@ namespace Wacs.Core.Instructions
         private LabelIdx[] Ls = null!;
         public override ByteCode Op => OpCode.BrTable;
 
+        public Action<ExecContext, int> GetFunc => BranchTable;
+
         // @Spec 3.3.8.8. br_table
         public override void Validate(IWasmValidationContext context)
         {
@@ -603,9 +600,6 @@ namespace Wacs.Core.Instructions
             
             var mthFrame = context.ControlStack.PeekAt((int)Ln.Value);
             var arity = mthFrame.LabelTypes.Arity;
-            
-            // if (!context.Unreachable)
-            //     mthFrame.ConditionallyReachable = true;
 
             Stack<Value> aside = new();
             foreach (var lidx in Ls)
@@ -635,8 +629,8 @@ namespace Wacs.Core.Instructions
             int i = context.OpStack.PopI32();
             BranchTable(context, i);
         }
-        
-        
+
+
         private void BranchTable(ExecContext context, int i)
         {
             //3.
@@ -651,8 +645,6 @@ namespace Wacs.Core.Instructions
                 InstBranch.ExecuteInstruction(context, Ln);
             }
         }
-
-        public Action<ExecContext, int> GetFunc => BranchTable;
 
         private static LabelIdx ParseLabelIndex(BinaryReader reader) =>
             (LabelIdx)reader.ReadLeb128_u32();
@@ -676,7 +668,7 @@ namespace Wacs.Core.Instructions
             int index = -2;
             if (context.Attributes.Live)
             {
-                int c = context.OpStack.Peek().Int32;
+                int c = context.OpStack.Peek().Data.Int32;
                 if (c < Ls.Length)
                 {
                     index = c;
@@ -727,9 +719,10 @@ namespace Wacs.Core.Instructions
         {
             context.Assert( context.OpStack.Count >= context.Frame.Arity,
                 $"Instruction return failed. Operand stack underflow");
-            //We're managing separate stacks, so we won't need to shift the operands
-            // Stack<Value> values = new Stack<Value>();
-            // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
+            int resultCount = context.Frame.Type.ResultType.Arity;
+            int resultsHeight = context.Frame.StackHeight + resultCount;
+            if (resultsHeight < context.OpStack.Count)
+                context.OpStack.ShiftResults(resultCount, resultsHeight);
             var address = context.PopFrame();
             context.ResumeSequence(address);
         }
@@ -763,9 +756,13 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Funcs.Contains(X),
                 "Instruction call was invalid. Function {0} was not in the Context.",X);
             var func = context.Funcs[X];
-            var type = context.Types[func.TypeIndex];
-            context.OpStack.DiscardValues(type.ParameterTypes);
-            context.OpStack.PushResult(type.ResultType);
+            var type = context.Types[func.TypeIndex].Expansion;
+            var funcType = type as FunctionType;
+            context.Assert(funcType,
+                "Instruction call was invalid. Not a FuncType. {0}", type);
+            
+            context.OpStack.DiscardValues(funcType.ParameterTypes);
+            context.OpStack.PushResult(funcType.ResultType);
         }
 
         // @Spec 4.4.8.10. call
@@ -852,13 +849,15 @@ namespace Wacs.Core.Instructions
             {
                 var ta = context.Frame.Module.TableAddrs[X];
                 var tab = context.Store[ta];
-                int i = context.OpStack.Peek().Int32;
+                int i = context.OpStack.Peek().Data.Int32;
                 if (i >= tab.Elements.Count)
                     throw new TrapException($"Instruction call_indirect could not find element {i}");
                 var r = tab.Elements[i];
                 if (r.IsNullRef)
                     throw new TrapException($"Instruction call_indirect NullReference.");
-                var a = (FuncAddr)r;
+                context.Assert(r.Type.Matches(ValType.FuncRef, context.Frame.Module.Types),
+                    $"Instruction call_indirect failed. Element was not a FuncRef");
+                var a = r.GetFuncAddr(context.Frame.Module.Types);
                 var func = context.Store[a];
                 return func is HostFunction;
             }
@@ -877,11 +876,14 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Tables.Contains(X),
                 "Instruction call_indirect was invalid. Table {0} was not in the Context.",X);
             var tableType = context.Tables[X];
-            context.Assert(tableType.ElementType == ReferenceType.Funcref,
+            context.Assert(tableType.ElementType.Matches(ValType.FuncRef, context.Types),
                 "Instruction call_indirect was invalid. Table type was not funcref");
             context.Assert(context.Types.Contains(Y),
                 "Instruction call_indirect was invalid. Function type {0} was not in the Context.",Y);
-            var funcType = context.Types[Y];
+            var type = context.Types[Y].Expansion;
+            var funcType = type as FunctionType;
+            context.Assert(funcType,
+                "Instruction call_indirect was invalid. Not a FuncType. {0}", type);
 
             context.OpStack.PopI32();
             context.OpStack.DiscardValues(funcType.ParameterTypes);
@@ -906,6 +908,9 @@ namespace Wacs.Core.Instructions
                 $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
             //7.
             var ftExpect = context.Frame.Module.Types[Y];
+            var ftFunc = ftExpect.Expansion as FunctionType;
+            context.Assert(ftFunc,
+                $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
             //8.
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
@@ -920,20 +925,24 @@ namespace Wacs.Core.Instructions
             if (r.IsNullRef)
                 throw new TrapException($"Instruction call_indirect NullReference.");
             //13.
-            context.Assert( r.Type == ValType.Funcref,
+            context.Assert(r.Type.Matches(ValType.FuncRef, context.Frame.Module.Types),
                 $"Instruction call_indirect failed. Element was not a FuncRef");
-            //14.
-            var a = (FuncAddr)r;
+            //14
+            var a = r.GetFuncAddr(context.Frame.Module.Types);
             //15.
             context.Assert( context.Store.Contains(a),
                 $"Instruction call_indirect failed. Validation of table mutation failed.");
             //16.
             var funcInst = context.Store[a];
             //17.
-            var ftActual = funcInst.Type;
+            
             //18.
-            if (!ftExpect.Matches(ftActual))
-                throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
+            //Check wasmfuncs, not hostfuncs
+            if (funcInst is FunctionInstance ftAct)
+                if (!ftAct.DefType.Matches(ftExpect, context.Frame.Module.Types))
+                    throw new TrapException($"Instruction {Op.GetMnemonic()} failed. RecursiveType differed.");
+            if (!funcInst.Type.Matches(ftExpect.Unroll.Body, context.Frame.Module.Types))
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Expected FunctionType differed.");
             //19.
             context.Invoke(a);
         }
@@ -955,6 +964,9 @@ namespace Wacs.Core.Instructions
                 $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
             //7.
             var ftExpect = context.Frame.Module.Types[Y];
+            var ftFunc = ftExpect.Expansion as FunctionType;
+            context.Assert(ftFunc,
+                $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
             //8.
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
@@ -969,20 +981,24 @@ namespace Wacs.Core.Instructions
             if (r.IsNullRef)
                 throw new TrapException($"Instruction call_indirect NullReference.");
             //13.
-            context.Assert( r.Type == ValType.Funcref,
+            context.Assert(r.Type.Matches(ValType.FuncRef, context.Frame.Module.Types),
                 $"Instruction call_indirect failed. Element was not a FuncRef");
             //14.
-            var a = (FuncAddr)r;
+            var a = r.GetFuncAddr(context.Frame.Module.Types);
             //15.
             context.Assert( context.Store.Contains(a),
                 $"Instruction call_indirect failed. Validation of table mutation failed.");
             //16.
             var funcInst = context.Store[a];
             //17.
-            var ftActual = funcInst.Type;
+
             //18.
-            if (!ftExpect.Matches(ftActual))
-                throw new TrapException($"Instruction call_indirect failed. Expected FunctionType differed.");
+            //Check wasmfuncs, not hostfuncs
+            if (funcInst is FunctionInstance ftAct)
+                if (!ftAct.DefType.Matches(ftExpect, context.Frame.Module.Types))
+                    throw new TrapException($"Instruction {Op.GetMnemonic()} failed. RecursiveType differed.");
+            if (!funcInst.Type.Matches(ftExpect.Unroll.Body, context.Frame.Module.Types))
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Expected FunctionType differed.");
             //19.
             await context.InvokeAsync(a);
         }
@@ -1011,7 +1027,9 @@ namespace Wacs.Core.Instructions
                     var r = tab.Elements[i];
                     if (r.IsNullRef)
                         throw new TrapException($"Instruction call_indirect NullReference.");
-                    var a = (FuncAddr)r;
+                    if (!r.Type.Matches(ValType.FuncRef, context.Frame.Module.Types))
+                        throw new TrapException($"Instruction call_indirect failed. Element was not a FuncRef");
+                    var a = r.GetFuncAddr(context.Frame.Module.Types);
                     var func = context.Store[a];
 
 

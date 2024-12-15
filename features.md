@@ -4,7 +4,7 @@
 |[JavaScript BigInt to WebAssembly i64 integration](https://github.com/WebAssembly/JS-BigInt-integration)||<span title="Browser idiom, but conceptually supported">✳️</span>|
 |[Bulk memory operations](https://github.com/webassembly/bulk-memory-operations)||✅|
 |[Extended Constant Expressions](https://github.com/WebAssembly/extended-const)|extended_const|✅|
-|[Garbage collection](https://github.com/WebAssembly/gc)|gc|❌|
+|[Garbage collection](https://github.com/WebAssembly/gc)|gc|✅|
 |[Multiple memories](https://github.com/WebAssembly/multi-memory)|multi-memory|✅|
 |[Multi-value](https://github.com/WebAssembly/multi-value)|multi_value|✅|
 |[Import/Export of Mutable Globals](https://github.com/WebAssembly/mutable-global)||✅|
@@ -14,7 +14,7 @@
 |[Sign-extension operators](https://github.com/WebAssembly/sign-extension-ops)||✅|
 |[Fixed-width SIMD](https://github.com/webassembly/simd)||✅|
 |[Tail call](https://github.com/webassembly/tail-call)|tail_call|✅|
-|[Typed Function References](https://github.com/WebAssembly/function-references)|function-references|❌|
+|[Typed Function References](https://github.com/WebAssembly/function-references)|function-references|✅|
 |Phase 4|
 |[Exception handling](https://github.com/WebAssembly/exception-handling)|exceptions|❌|
 |[JS String Builtins](https://github.com/WebAssembly/js-string-builtins)||❌|

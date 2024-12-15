@@ -131,6 +131,62 @@ namespace Wacs.Core.Utilities
             return result;
         }
 
+
+        /// <summary>
+        /// Decode an s33 (u32) index
+        /// </summary>
+        /// <param name="reader"></param>
+        /// <param name="byteValue">We tried decoding the first byte as a type, but ended up here.</param>
+        /// <returns>A u32 type index</returns>
+        /// <exception cref="FormatException">We're s33 encoded, but negative values are invalid.</exception>
+        public static uint ContinueReading_s33(this BinaryReader reader, byte byteValue)
+        {
+            //Continue parsing as LEB128_S33
+            long result = 0;
+            int shift = 0;
+            bool moreBytes = true;
+
+            while (moreBytes)
+            {
+                // Extract the lower 7 bits and add them to the result
+                byte lower7Bits = (byte)(byteValue & 0x7F);
+                result |= (long)lower7Bits << shift;
+
+                // Increment the shift for the next 7 bits
+                shift += 7;
+
+                // Check if this is the last byte
+                moreBytes = (byteValue & 0x80) != 0;
+
+                // If it's the last byte, check the sign bit and perform sign extension if necessary
+                if (!moreBytes)
+                {
+                    // If the sign bit of the last byte is set and shift is less than 33, sign-extend the result
+                    if ((byteValue & 0x40) != 0 && shift < 33)
+                    {
+                        result |= -1L << shift;
+                    }
+
+                    break;
+                }
+
+                // Prevent shift overflow
+                if (shift >= 40)
+                    throw new FormatException("Shift count exceeds 40 bits while decoding s33.");
+
+                byteValue = reader.ReadByte();
+                if (byteValue == 0xFF)
+                    throw new FormatException("Unexpected end of stream while decoding s33.");
+            }
+
+            if (result < 0)
+                throw new FormatException($"HeapType Index {result:x8} was negative");
+            
+            //Just take the U32 bits since the unset sign bit is 33.
+            return (uint)(result & 0xFFFF_FFFF);
+        }
+
+
         public static float Read_f32(this BinaryReader reader)
         {
             byte[] bytes = reader.ReadBytes(4);

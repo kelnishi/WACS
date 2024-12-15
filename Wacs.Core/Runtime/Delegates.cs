@@ -19,6 +19,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Expression = System.Linq.Expressions.Expression;
 
 namespace Wacs.Core.Runtime
@@ -148,7 +149,7 @@ namespace Wacs.Core.Runtime
                 _ => throw new NotSupportedException($"Cannot auto-bind function signature: ({string.Join(", ", paramTypes)}) -> ({string.Join(", ", resultTypes)})")
             };
         }
-        
+
         public static Delegate CreateTypedDelegate(Delegate genericDelegate, Type desiredDelegateType)
         {
             var genericMethod = typeof(Delegates).GetMethod(nameof(CreateTypedDelegateInternal), BindingFlags.NonPublic | BindingFlags.Static);
@@ -222,8 +223,8 @@ namespace Wacs.Core.Runtime
             if (type == typeof(float)) return ValType.F32;
             if (type == typeof(double)) return ValType.F64;
             if (type == typeof(byte[])) return ValType.V128;
-            if (typeof(Delegate).IsAssignableFrom(type)) return ValType.Funcref;
-            return ValType.Externref;
+            if (typeof(Delegate).IsAssignableFrom(type)) return ValType.FuncRef;
+            return ValType.ExternRef;
         }
 
         public static Type ConvertValTypeToSystemType(ValType valType)
@@ -235,8 +236,8 @@ namespace Wacs.Core.Runtime
                 ValType.F32 => typeof(float),
                 ValType.F64 => typeof(double),
                 ValType.V128 => typeof(byte[]), // Representing V128 as byte array
-                ValType.Funcref => typeof(Delegate), // Generic function reference
-                ValType.Externref => typeof(object),
+                ValType.FuncRef => typeof(Delegate), // Generic function reference
+                ValType.ExternRef => typeof(object),
                 _ => throw new ArgumentException($"Unsupported ValType: {valType}")
             };
         }
