@@ -49,7 +49,11 @@ namespace Wacs.Core.Validation
             where T : class
             => new(child, parent.PropertyChain.AppendIndex(index).Append(child), new DefaultValidatorSelector())
             {
-                RootContextData = { [nameof(WasmValidationContext)] = parent.GetValidationContext() }
+                RootContextData =
+                {
+                    [nameof(WasmValidationContext)] = parent.GetValidationContext(),
+                    ["Index"] = index
+                }
             };
     }
 }

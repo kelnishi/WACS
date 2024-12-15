@@ -27,6 +27,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 // using System.Diagnostics.CodeAnalysis;
 
@@ -69,7 +70,10 @@ namespace Wacs.Core.Runtime
                 {
                     case Module.ImportDesc.FuncDesc funcDesc:
                         // @Spec 4.5.3.2. @note: Host Functions must be bound to the environment prior to module instantiation!
-                        var funcSig = moduleInstance.Types[funcDesc.TypeIndex];
+                        var type = moduleInstance.Types[funcDesc.TypeIndex];
+                        var funcSig = type.Expansion as FunctionType;
+                        if (funcSig is null)
+                            throw new InvalidDataException($"Function had invalid type:{type}");
                         if (GetBoundEntity(entityId) is not FuncAddr funcAddr)
                             throw new NotSupportedException(
                                 $"The imported Function was not provided by the environment: {entityId.module}.{entityId.entity} {funcSig.ToNotation()}");
@@ -77,8 +81,11 @@ namespace Wacs.Core.Runtime
                         if (functionInstance is FunctionInstance wasmFunc)
                         {
                             wasmFunc.SetName(entityId.entity);
+                            if (!wasmFunc.DefType.Matches(type, moduleInstance.Types))
+                                throw new NotSupportedException(
+                                    $"Recursive Type mismatch while importing Function {entityId.module}.{entityId.entity}: expected {funcSig.ToNotation()}, env provided Function {functionInstance.Type.ToNotation()}");    
                         }
-                        if (!functionInstance.Type.Matches(funcSig))
+                        if (!functionInstance.Type.Matches(funcSig, moduleInstance.Types))
                             throw new NotSupportedException(
                                 $"Type mismatch while importing Function {entityId.module}.{entityId.entity}: expected {funcSig.ToNotation()}, env provided Function {functionInstance.Type.ToNotation()}");
                         //14. external imported addresses first
@@ -114,15 +121,24 @@ namespace Wacs.Core.Runtime
                             throw new NotSupportedException(
                                 $"The imported Global was not provided by the environment: {entityId.module}.{entityId.entity}");
                         var globalInstance = Store[globalAddr];
-                        if (globalInstance.Type != globalType)
+                        if (globalType.Mutability != globalInstance.Type.Mutability)
+                            throw new NotSupportedException(
+                                $"Mutability mismatch while importing Global {entityId.module}.{entityId.entity} {globalType}, env provided Global {globalInstance.Type}");
+                        if (globalInstance.Type.ContentType.IsDefType() &&
+                            !moduleInstance.Types.Contains(globalInstance.Type.ContentType.Index()))
+                            throw new NotSupportedException(
+                                $"Incompatible import type for Global {entityId.module}.{entityId.entity}: {globalInstance.Type}");
+                        if (!globalInstance.Type.Matches(globalType, moduleInstance.Types))
                             throw new NotSupportedException(
                                 $"Type mismatch while importing Global {entityId.module}.{entityId.entity}: expected {globalType}, env provided Global {globalInstance.Type}");
+                        
                         //17. external imported addresses first
                         moduleInstance.GlobalAddrs.Add(globalAddr);
                         break;
                 }
             }
 
+            
             //2. Allocate Functions and capture their addresses in the Store
             //8. index ordered function addresses
             foreach (var func in module.Funcs)
@@ -130,11 +146,18 @@ namespace Wacs.Core.Runtime
                 moduleInstance.FuncAddrs.Add(AllocateWasmFunc(Store, func, moduleInstance));
             }
 
+            //@Spec 4.5.4 Step 7
+            Frame initFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.TableInitializers);
+            Context.PushFrame(initFrame);
+            
             //3. Allocate Tables and capture their addresses in the Store
             //9. index ordered table addresses
             foreach (var table in module.Tables)
             {
-                moduleInstance.TableAddrs.Add(AllocateTable(Store, table, Value.RefNull(table.ElementType)));
+                var refVal = EvaluateInitializer(table.Init);
+                if (Context.Frame != initFrame)
+                    throw new TrapException($"Call stack was manipulated while initializing tables");
+                moduleInstance.TableAddrs.Add(AllocateTable(Store, table, refVal));
             }
 
             //4. Allocate Memories and capture their addresses in the Store
@@ -146,23 +169,23 @@ namespace Wacs.Core.Runtime
             //Make the address space permanent
             moduleInstance.MemAddrs.Finalize();
 
-            //@Spec 4.5.4 Step 7
-            Frame initFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.GlobalInitializers);
-            Context.PushFrame(initFrame);
+            Context.PopFrame();
+            Frame initFrame2 = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.GlobalInitializers);
+            Context.PushFrame(initFrame2);
 
             //5. Allocate Globals and capture their addresses in the Store
             //11. index ordered global addresses
             foreach (var global in module.Globals)
             {
                 var val = EvaluateInitializer(global.Initializer);
-                if (Context.Frame != initFrame)
+                if (Context.Frame != initFrame2)
                     throw new TrapException($"Call stack was manipulated while initializing globals");
                 moduleInstance.GlobalAddrs.Add(AllocateGlobal(Store, global.Type, val));
             }
 
             Context.PopFrame();
-            Frame initFrame2 = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.ElementInitializers);
-            Context.PushFrame(initFrame2);
+            Frame initFrame3 = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.ElementInitializers);
+            Context.PushFrame(initFrame3);
 
             //6. Allocate Elements
             //12. index ordered element addresses
@@ -249,6 +272,9 @@ namespace Wacs.Core.Runtime
             try
             {
                 Store.OpenTransaction();
+                
+                if (Context.OpStack.Count != 0)
+                    throw new WasmRuntimeException("OpStack should be empty");
 
                 //2, 3, 4 Checks if imports are satisfied
                 moduleInstance = AllocateModule(module);
@@ -257,7 +283,7 @@ namespace Wacs.Core.Runtime
                 var auxFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.ElementInitialization);
                 //13.
                 Context.PushFrame(auxFrame);
-
+                
                 //14, 15
                 for (int i = 0, l = module.Elements.Length; i < l; ++i)
                 {
@@ -400,7 +426,7 @@ namespace Wacs.Core.Runtime
             }
             return moduleInstance;
         }
-        
+
         public void SynchronizeFunctionCalls(ModuleInstance moduleInstance)
         {
             foreach (var funcAddr in moduleInstance.FuncAddrs)
@@ -490,7 +516,7 @@ namespace Wacs.Core.Runtime
         /// <summary>
         /// @Spec 4.5.3.6. Element segments
         /// </summary>
-        private static ElemAddr AllocateElement(Store store, ReferenceType refType, List<Value> refs)
+        private static ElemAddr AllocateElement(Store store, ValType refType, List<Value> refs)
         {
             var elemInst = new ElementInstance(refType, refs);
             var elemAddr = store.AddElement(elemInst);
@@ -520,6 +546,9 @@ namespace Wacs.Core.Runtime
             ini.ExecuteInitializer(Context);
             
             var value = Context.OpStack.PopAny();
+            if (Context.OpStack.Count > 0)
+                throw new WasmRuntimeException("Values left on stack");
+            
             return value;
         }
 

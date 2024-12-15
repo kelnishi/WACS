@@ -19,6 +19,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -39,7 +40,7 @@ namespace Wacs.Core.Instructions
                  "Instruction table.get failed to get table {0} from context",X);
             var type = context.Tables[X];
             context.OpStack.PopI32();
-            context.OpStack.PushType(type.ElementType.StackType());
+            context.OpStack.PushType(type.ElementType);
         }
 
         // @Spec 4.4.6.1. table.get 
@@ -97,7 +98,7 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Tables.Contains(X),
                  "Instruction table.set failed to get table {0} from context", X);
             var type = context.Tables[X];
-            context.OpStack.PopType(type.ElementType.StackType());
+            context.OpStack.PopType(type.ElementType);
             context.OpStack.PopI32();
         }
 
@@ -118,7 +119,7 @@ namespace Wacs.Core.Instructions
             //5.
             var tab = context.Store.GetMutableTable(a);
             //6.
-            context.Assert( context.OpStack.Peek().IsRef,
+            context.Assert( context.OpStack.Peek().IsRefType,
                  $"Instruction table.set found non reftype on top of the Stack");
             //7.
             var val = context.OpStack.PopRefType();
@@ -163,7 +164,7 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Elements.Contains(Y),
                  "Instruction table.init is invalid. Element {0} not in the Context.",Y);
             var t2 = context.Elements[Y];
-            context.Assert(t1.ElementType == t2.Type,
+            context.Assert(t2.Type.Matches(t1.ElementType, context.Types),
                  "Instruction table.init is invalid. Type mismatch {0} != {1}",t1.ElementType,t2.Type);
             context.OpStack.PopI32();
             context.OpStack.PopI32();
@@ -323,7 +324,7 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Tables.Contains(SrcY),
                  "Instruction table.copy failed. Table index {0} does not exist in Context",SrcY);
             var t2 = context.Tables[SrcY];
-            context.Assert(t1.ElementType == t2.ElementType,
+            context.Assert(t2.ElementType.Matches(t1.ElementType, context.Types),
                  "Instruction table.copy failed. Table type mismatch {0} != {1}",t1.ElementType,t2.ElementType);
             context.OpStack.PopI32();
             context.OpStack.PopI32();
@@ -446,7 +447,7 @@ namespace Wacs.Core.Instructions
                  "Instruction table.grow failed to get table {0} from context",X);
             var type = context.Tables[X];
             context.OpStack.PopI32();
-            context.OpStack.PopType(type.ElementType.StackType());
+            context.OpStack.PopType(type.ElementType);
             context.OpStack.PushI32();
         }
 
@@ -472,7 +473,7 @@ namespace Wacs.Core.Instructions
             //8.
             long n = (uint)context.OpStack.PopI32();
             //9.
-            context.Assert( context.OpStack.Peek().IsRef,
+            context.Assert( context.OpStack.Peek().IsRefType,
                  "Instruction table.grow found incorrect type on top of the Stack");
             //10.
             var val = context.OpStack.PopRefType();
@@ -556,7 +557,7 @@ namespace Wacs.Core.Instructions
                  "Instruction table.set failed to get table {0} from context",X);
             var type = context.Tables[X];
             context.OpStack.PopI32();
-            context.OpStack.PopType(type.ElementType.StackType());
+            context.OpStack.PopType(type.ElementType);
             context.OpStack.PopI32();
         }
 
@@ -584,7 +585,7 @@ namespace Wacs.Core.Instructions
                 //7.
                 int n = context.OpStack.PopI32();
                 //8.
-                context.Assert( context.OpStack.Peek().IsRef,
+                context.Assert( context.OpStack.Peek().IsRefType,
                      "Instruction table.grow found incorrect type on top of the Stack");
                 //9.
                 var val = context.OpStack.PopRefType();

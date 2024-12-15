@@ -77,7 +77,7 @@ namespace Wacs.Core.Types
         }
 
         //Single Initializer
-        public Expression(InstructionBase single, int arity)
+        public Expression(int arity, InstructionBase single)
         {
             IsStatic = true;
             Instructions = new InstructionSequence(new List<InstructionBase> { single });
@@ -113,7 +113,7 @@ namespace Wacs.Core.Types
                     int arity = 0;
                     try
                     {
-                        var funcType = vContext.Types.ResolveBlockType(block.Type);
+                        var funcType = vContext.Types.ResolveBlockType(block.BlockType);
                         if (funcType == null)
                             throw new IndexOutOfRangeException();
 
@@ -121,7 +121,7 @@ namespace Wacs.Core.Types
                     }
                     catch (IndexOutOfRangeException)
                     {
-                        throw new InvalidDataException($"Failure computing Labels. BlockType:{block.Type} did not exist in the Module");
+                        throw new InvalidDataException($"Failure computing Labels. BlockType:{block.BlockType} did not exist in the Module");
                     }
 
                     var label = target.Label ?? new Label();

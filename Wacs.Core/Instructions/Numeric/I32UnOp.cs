@@ -18,7 +18,7 @@ using System;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -42,6 +42,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         public override ByteCode Op { get; }
 
+        public Func<ExecContext, uint, uint> GetFunc => (_, i1) => _execute(i1);
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
 
         public override void Execute(ExecContext context)
@@ -50,8 +52,6 @@ namespace Wacs.Core.Instructions.Numeric
             uint result = _execute(x);
             context.OpStack.PushU32(result);
         }
-
-        public Func<ExecContext, uint, uint> GetFunc => (_, i1) => _execute(i1);
 
         // @Spec 4.3.2.20 iclz
         private static uint ExecuteI32Clz(uint x)

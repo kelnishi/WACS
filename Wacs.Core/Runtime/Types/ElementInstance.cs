@@ -15,7 +15,8 @@
 //  */
 
 using System.Collections.Generic;
-using Wacs.Core.Types;
+using System.Linq;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Runtime.Types
 {
@@ -24,12 +25,17 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class ElementInstance
     {
-        public readonly static ElementInstance Empty = new(ReferenceType.Funcref, new List<Value>());
+        public readonly static ElementInstance Empty = new(ValType.FuncRef, new List<Value>());
 
-        public ElementInstance(ReferenceType type, List<Value> refs) =>
-            (Type, Elements) = (type, refs);
+        public ElementInstance(ValType type, List<Value> refs)
+        {
+            Type = type;
+            //If the initialized value type fits, use it, otherwise coerce it to the proper type.
+            //TODO fix this type resolution
+            Elements = refs.Select(v => /*!v.Type.Matches(Type) ? new Value(v, Type) :*/ v).ToList();
+        }
 
-        public ReferenceType Type { get; }
+        public ValType Type { get; }
 
         //Refs
         public List<Value> Elements { get; }

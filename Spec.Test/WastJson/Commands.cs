@@ -26,6 +26,7 @@ using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Spec.Test.WastJson
 {
@@ -127,9 +128,26 @@ namespace Spec.Test.WastJson
             {
                 case InvokeAction invokeAction:
                     var result = invokeAction.Invoke(ref runtime, ref module);
-                    if (!result.SequenceEqual(Expected.Select(e => e.AsValue)))
+                    
+                    if (result.Length != Expected.Count)
                         throw new TestException(
                             $"Test failed {this} \"{invokeAction.Field}\": Expected [{string.Join(" ", Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
+
+                    foreach (var (actual, expected) in result.Zip(Expected, (a, e) => (a, e.AsValue)))
+                    {
+                        //HACK: null ref comparison
+                        if (expected.IsNullRef)
+                        {
+                            if (!actual.IsNullRef && !actual.Type.Matches(expected.Type, null))
+                                throw new TestException(
+                                    $"Test failed {this} \"{invokeAction.Field}\": Expected [{string.Join(" ", Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
+                        }
+                        else if (!actual.Equals(expected))
+                        {
+                            throw new TestException(
+                                $"Test failed {this} \"{invokeAction.Field}\": Expected [{string.Join(" ", Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");    
+                        }
+                    }                    
                     break;
             }
             return errors;

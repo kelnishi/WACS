@@ -26,15 +26,15 @@ jobs:
       - name: Verify Submodule Status
         run: git submodule status
 
-      - name: Install WABT 1.0.36
+      - name: Install wasm-tools 1.221.2
         run: |
-          wget https://github.com/WebAssembly/wabt/releases/download/1.0.36/wabt-1.0.36-ubuntu-20.04.tar.gz -O wabt.tar.gz
-          mkdir wabt
-          tar -xzf wabt.tar.gz -C wabt --strip-components=1
-          sudo cp wabt/bin/* /usr/local/bin/
+          wget https://github.com/bytecodealliance/wasm-tools/releases/download/v1.221.2/wasm-tools-1.221.2-x86_64-linux.tar.gz -O wasm-tools.tar.gz
+          mkdir wasm-tools
+          tar -xzf wasm-tools.tar.gz -C wasm-tools --strip-components=1
+          sudo cp wasm-tools/wasm-tools /usr/local/bin/
 
-      - name: Verify WABT Installation
-        run: wast2json --version
+      - name: Verify wasm-tools Installation
+        run: wasm-tools --version
 
       - name: Run build_tests.sh script
         working-directory: ./Spec.Test

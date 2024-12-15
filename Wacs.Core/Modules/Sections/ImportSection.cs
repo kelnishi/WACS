@@ -21,6 +21,7 @@ using System.Linq;
 using FluentValidation;
 using Wacs.Core.Attributes;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -37,7 +38,7 @@ namespace Wacs.Core
             Imports
                 .Select(import => import.Desc)
                 .OfType<ImportDesc.FuncDesc>()
-                .Select(funcDesc => new Function { TypeIndex = funcDesc.TypeIndex, IsImport = true, IsFullyDeclared = true })
+                .Select(funcDesc => new Function { TypeIndex = funcDesc.TypeIndex, IsImport = true })
                 .ToList().AsReadOnly();
 
         public ReadOnlyCollection<TableType> ImportedTables =>

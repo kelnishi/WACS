@@ -15,7 +15,7 @@
 //  */
 
 using System;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Runtime
 {
@@ -30,13 +30,6 @@ namespace Wacs.Core.Runtime
         public FuncAddr(int value) => Value = value;
         public readonly int Value;
         public static implicit operator Index(FuncAddr addr) => new(addr.Value);
-
-        public static explicit operator FuncAddr(Value value)
-        {
-            if (value.Type != ValType.Funcref)
-                throw new ArgumentException("Cannot convert non-funcref Value to FuncAddr");
-            return new FuncAddr(value.Int32);
-        }
         
         public bool Equals(FuncAddr other) => Value == other.Value;
         public static bool operator ==(FuncAddr left, FuncAddr right) => left.Equals(right);

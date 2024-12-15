@@ -16,6 +16,7 @@
 
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
@@ -26,7 +27,32 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 2.5.2. Types
         /// </summary>
-        public List<FunctionType> Types { get; internal set; } = new();
+        public List<RecursiveType> Types { get; internal set; } = new();
+
+        public List<DefType> UnrollTypes()
+        {
+            var defs = new List<DefType>();
+            int idx = 0;
+            for (int r = 0, t = Types.Count; r < t; ++r)
+            {
+                var recType = Types[r];
+                recType.DefIndex = (TypeIdx)idx;
+                var subs = new List<DefType>();
+                for (int s = 0, l = recType.SubTypes.Length; s < l; ++s)
+                {
+                    var subtype = new DefType(recType, s, (TypeIdx)idx++);
+                    subs.Add(subtype);
+                }
+                defs.AddRange(subs);
+                recType.ComputeHash(defs);
+                foreach (var sub in subs)
+                {
+                    sub.ComputeHash();
+                    sub.SuperTypes = sub.Unroll.SuperTypeIndexes.Select(typeIdx => defs[typeIdx.Value]).ToList();
+                }
+            }
+            return defs;
+        }
     }
     
     public static partial class BinaryModuleParser
@@ -34,8 +60,7 @@ namespace Wacs.Core
         /// <summary>
         /// @Spec 5.5.4 Type Section
         /// </summary>
-        private static List<FunctionType> ParseTypeSection(BinaryReader reader) => 
-            reader.ParseList(FunctionType.Parse,
-                postProcess: AnnotateWhileParsing ? (i, newType) => newType.Id = $"{i}" : null);
+        private static List<RecursiveType> ParseTypeSection(BinaryReader reader) => 
+            reader.ParseList(RecursiveType.Parse);
     }
 }

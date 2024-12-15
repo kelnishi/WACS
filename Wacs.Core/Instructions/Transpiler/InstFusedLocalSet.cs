@@ -17,22 +17,26 @@
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Transpiler
 {
     public class InstLocalGetSet : InstructionBase
     {
-        private int _from;
-        private int _to;
+        private readonly int _from;
+        private readonly int _to;
+
         public InstLocalGetSet(InstLocalGet from, InstLocalSet to)
         {
             _from = from.GetIndex().Value;
             _to = to.GetIndex().Value;
             Size = 2;
         }
+
         public override ByteCode Op => WacsCode.LocalGetSet;
         public override void Validate(IWasmValidationContext context) {}
+
         public override void Execute(ExecContext context)
         {
             context.Assert( context.Frame.Locals.Contains((LocalIdx)_from),
@@ -46,16 +50,17 @@ namespace Wacs.Core.Instructions.Transpiler
 
     public class InstLocalConstSet<T> : InstructionBase
     {
-        private Value _constantValue;
+        private readonly Value _constantValue;
+        private readonly int _to;
         private ValType type;
-        private int _to;
-        
+
         public InstLocalConstSet(T c, InstLocalSet to)
         {
             _to = to.GetIndex().Value;
             _constantValue = new Value(typeof(T).ToValType(), c!);
             Size = 2;
         }
+
         public override ByteCode Op => WacsCode.LocalConstSet;
         public override void Validate(IWasmValidationContext context) { }
 

@@ -17,7 +17,6 @@
 using System;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Transpiler

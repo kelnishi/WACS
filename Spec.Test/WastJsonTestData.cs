@@ -40,6 +40,15 @@ namespace Spec.Test
         }
 
         private static string JsonDirectory => Path.Combine(AppContext.BaseDirectory, Configuration["JsonDirectory"] ?? "");
+        public static bool RunTranspilerTests => Configuration["RunTranspilerTests"] == "True";
+
+        public static string SingleTest => Configuration["Single"] ?? "";
+        public static HashSet<string> SkipWasts =>
+            Configuration
+                .GetSection("SkipWasts")
+                .GetChildren()
+                .Select(cfg => cfg.Value ?? "")
+                .ToHashSet();
 
         public IEnumerator<object[]> GetEnumerator()
         {
@@ -47,6 +56,13 @@ namespace Spec.Test
             foreach (var file in files)
             {
                 var testData = LoadTestDefinition(file);
+
+                if (!string.IsNullOrEmpty(SingleTest) && SingleTest != testData.TestName)
+                    continue;
+                
+                if (SkipWasts.Contains(testData.TestName))
+                    continue;
+                        
                 yield return new object[] { testData };
             }
         }

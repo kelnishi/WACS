@@ -16,7 +16,7 @@
 
 using System;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Instructions.Transpiler
 {
@@ -148,7 +148,7 @@ namespace Wacs.Core.Instructions.Transpiler
         public UnwrapValueI32(ITypedValueProducer<Value> inA) : base(inA)
         {
             var func = InA.GetFunc;
-            GetFunc = context => func(context).Int32;
+            GetFunc = context => func(context).Data.Int32;
         }
 
         public override Func<ExecContext, int> GetFunc { get; }
@@ -159,7 +159,7 @@ namespace Wacs.Core.Instructions.Transpiler
         public UnwrapValueU32(ITypedValueProducer<Value> inA) : base(inA)
         {
             var func = InA.GetFunc;
-            GetFunc = context => func(context).UInt32;
+            GetFunc = context => func(context).Data.UInt32;
         }
 
         public override Func<ExecContext, uint> GetFunc { get; }
@@ -170,7 +170,7 @@ namespace Wacs.Core.Instructions.Transpiler
         public UnwrapValueF32(ITypedValueProducer<Value> inA) : base(inA)
         {
             var func = InA.GetFunc;
-            GetFunc = context => func(context).Float32;
+            GetFunc = context => func(context).Data.Float32;
         }
 
         public override Func<ExecContext, float> GetFunc { get; }
@@ -181,7 +181,7 @@ namespace Wacs.Core.Instructions.Transpiler
         public UnwrapValueI64(ITypedValueProducer<Value> inA) : base(inA)
         {
             var func = InA.GetFunc;
-            GetFunc = context => func(context).Int64;
+            GetFunc = context => func(context).Data.Int64;
         }
 
         public override Func<ExecContext, long> GetFunc { get; }
@@ -192,7 +192,7 @@ namespace Wacs.Core.Instructions.Transpiler
         public UnwrapValueU64(ITypedValueProducer<Value> inA) : base(inA)
         {
             var func = InA.GetFunc;
-            GetFunc = context => func(context).UInt64;
+            GetFunc = context => func(context).Data.UInt64;
         }
 
         public override Func<ExecContext, ulong> GetFunc { get; }
@@ -203,7 +203,7 @@ namespace Wacs.Core.Instructions.Transpiler
         public UnwrapValueF64(ITypedValueProducer<Value> inA) : base(inA)
         {
             var func = InA.GetFunc;
-            GetFunc = context => func(context).Float64;
+            GetFunc = context => func(context).Data.Float64;
         }
 
         public override Func<ExecContext, double> GetFunc { get; }
@@ -214,7 +214,7 @@ namespace Wacs.Core.Instructions.Transpiler
         public UnwrapValueV128(ITypedValueProducer<Value> inA) : base(inA)
         {
             var func = InA.GetFunc;
-            GetFunc = context => func(context).V128;
+            GetFunc = context => (func(context).GcRef as VecRef)!.V128;
         }
 
         public override Func<ExecContext, V128> GetFunc { get; }

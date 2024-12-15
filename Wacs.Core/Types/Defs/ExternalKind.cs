@@ -17,7 +17,7 @@
 using System;
 using System.IO;
 
-namespace Wacs.Core.Types
+namespace Wacs.Core.Types.Defs
 {
     /// <summary>
     /// @Spec 5.5.5 Import Section

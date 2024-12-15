@@ -15,7 +15,9 @@
 //  */
 
 using System.IO;
+using Wacs.Core.Instructions.GC;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Instructions
 {
@@ -23,6 +25,44 @@ namespace Wacs.Core.Instructions
     {
         public static InstructionBase? CreateInstruction(GcCode opcode) => opcode switch
         {
+            GcCode.StructNew        => new InstStructNew(),
+            GcCode.StructNewDefault => new InstStructNewDefault(),
+            GcCode.StructGet        => new InstStructGet(PackedExt.NotPacked),
+            GcCode.StructGetS       => new InstStructGet(PackedExt.Signed),
+            GcCode.StructGetU       => new InstStructGet(PackedExt.Unsigned),
+            GcCode.StructSet        => new InstStructSet(),
+            
+            GcCode.ArrayNew         => new InstArrayNew(),
+            GcCode.ArrayNewDefault  => new InstArrayNewDefault(),
+            GcCode.ArrayNewFixed    => new InstArrayNewFixed(),
+            GcCode.ArrayNewData     => new InstArrayNewData(),
+            GcCode.ArrayNewElem     => new InstArrayNewElem(),
+            
+            GcCode.ArrayGet         => new InstArrayGet(PackedExt.NotPacked),
+            GcCode.ArrayGetS        => new InstArrayGet(PackedExt.Signed),
+            GcCode.ArrayGetU        => new InstArrayGet(PackedExt.Unsigned),
+            GcCode.ArraySet         => new InstArraySet(),
+
+            GcCode.ArrayLen         => new InstArrayLen(),
+            GcCode.ArrayFill        => new InstArrayFill(),
+            GcCode.ArrayCopy        => new InstArrayCopy(),
+            GcCode.ArrayInitData    => new InstArrayInitData(),
+            GcCode.ArrayInitElem    => new InstArrayInitElem(),
+            GcCode.RefTest          => new InstRefTest(false),
+            GcCode.RefTestNull      => new InstRefTest(true),
+            GcCode.RefCast          => new InstRefCast(false),
+            GcCode.RefCastNull      => new InstRefCast(true),
+            GcCode.AnyConvertExtern => new InstAnyConvertExtern(),
+            GcCode.ExternConvertAny => new InstExternConvertAny(),
+            
+            GcCode.RefI31           => new InstRefI31(),
+            GcCode.I31GetS          => new InstI32GetS(),
+            GcCode.I31GetU          => new InstI32GetU(),
+            
+            GcCode.BrOnCast         => new InstBrOnCast(),
+            GcCode.BrOnCastFail     => new InstBrOnCastFail(),
+
+
             _ => throw new InvalidDataException($"Unsupported instruction {opcode.GetMnemonic()}. ByteCode: 0xFB{(byte)opcode:X2}")
         };
     }

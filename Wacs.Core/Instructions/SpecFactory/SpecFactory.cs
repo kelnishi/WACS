@@ -17,8 +17,8 @@
 using System;
 using Wacs.Core.Instructions.Memory;
 using Wacs.Core.Instructions.Numeric;
+using Wacs.Core.Instructions.Reference;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Types;
 
 namespace Wacs.Core.Instructions
 {
@@ -53,9 +53,11 @@ namespace Wacs.Core.Instructions
             OpCode.Return            => InstReturn.Inst,
             OpCode.Call              => new InstCall(),
             OpCode.CallIndirect      => new InstCallIndirect(),
+            OpCode.CallRef           => new InstCallRef(),
             
             OpCode.ReturnCall         => new InstReturnCall(),
             OpCode.ReturnCallIndirect => new InstReturnCallIndirect(),
+            OpCode.ReturnCallRef      => new InstReturnCallRef(),
             
             //When invoking externally
             OpCode.Func              => new InstFuncReturn(),
@@ -64,6 +66,12 @@ namespace Wacs.Core.Instructions
             OpCode.RefNull           => new InstRefNull(),
             OpCode.RefIsNull         => InstRefIsNull.Inst,
             OpCode.RefFunc           => new InstRefFunc(),
+            
+            OpCode.RefEq             => InstRefEq.Inst,
+            OpCode.RefAsNonNull      => InstRefAsNonNull.Inst,
+            
+            OpCode.BrOnNull          => new InstBrOnNull(),
+            OpCode.BrOnNonNull       => new InstBrOnNonNull(),
                 
             //Parametric Instructions
             OpCode.Drop              => InstDrop.Inst,

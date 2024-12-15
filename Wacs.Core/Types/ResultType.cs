@@ -15,9 +15,11 @@
 //  */
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Wacs.Core.Attributes;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
@@ -67,19 +69,25 @@ namespace Wacs.Core.Types
             Arity = Types.Length;
         }
 
-        public string ToNotation() => $"[{string.Join(" ",Types)}]";
-        public string ToTypes() => string.Join("", Types.Select(t => $" {t.ToWat()}"));
+        public string ToNotation() => $"[{string.Join(" ",Types.Select(t=>t.ToNotation()))}]";
+        public string ToTypes() => string.Join("", Types.Select(t => $" {t.ToNotation()}"));
         public string ToParameters() => Types.Length == 0 ? "" : $" (param{ToTypes()})";
         public string ToResults() => Types.Length == 0 ? "" : $" (result{ToTypes()})";
 
+        public ValType Last()
+        {
+            if (Types.Length == 0)
+                throw new InvalidDataException("ResultType had no elements");
+            return Types.Last();
+        }
 
-        public bool Matches(ResultType other)
+        public bool Matches(ResultType other, TypesSpace? types)
         {
             if (Types.Length != other.Types.Length)
                 return false;
             for (int i = 0, l = Types.Length; i < l; ++i)
             {
-                if (Types[i] != other.Types[i])
+                if (!Types[i].Matches(other.Types[i], types))
                     return false;
             }
 
@@ -90,5 +98,16 @@ namespace Wacs.Core.Types
         /// @Spec 5.3.5 Result Types
         /// </summary>
         public static ResultType Parse(BinaryReader reader) => new(reader);
+
+        public object ComputeHash(int defIndexValue, List<DefType> defs)
+        {
+            var hash = new StableHash();
+            hash.Add(nameof(ResultType));
+            foreach (var type in Types)
+            {
+                hash.Add(type.ComputeHash(defIndexValue, defs));
+            }
+            return hash.ToHashCode();
+        }
     }
 }

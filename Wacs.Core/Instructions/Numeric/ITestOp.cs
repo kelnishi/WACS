@@ -18,7 +18,7 @@ using System;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -39,6 +39,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         public override ByteCode Op { get; }
 
+        public Func<ExecContext, int, int> GetFunc => (_, i1) => _execute(i1);
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
 
         public override void Execute(ExecContext context)
@@ -47,8 +49,6 @@ namespace Wacs.Core.Instructions.Numeric
             int result = _execute(i);
             context.OpStack.PushI32(result);
         }
-
-        public Func<ExecContext, int, int> GetFunc => (_, i1) => _execute(i1);
 
         // @Spec 4.6.1.4. t.testop
         private static int ExecuteI32Eqz(int i) => i == 0 ? 1 : 0;
@@ -70,6 +70,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         public override ByteCode Op { get; }
 
+        public Func<ExecContext, long, int> GetFunc => (_, i1) => _execute(i1);
+
         public override void Validate(IWasmValidationContext context) => _validate(context);
 
         public override void Execute(ExecContext context)
@@ -78,8 +80,6 @@ namespace Wacs.Core.Instructions.Numeric
             int result = _execute(i);
             context.OpStack.PushI32(result);
         }
-
-        public Func<ExecContext, long, int> GetFunc => (_, i1) => _execute(i1);
 
         private static int ExecuteI64Eqz(long i) => i == 0 ? 1 : 0;
     }

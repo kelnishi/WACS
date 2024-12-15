@@ -18,6 +18,7 @@ using System;
 using System.IO;
 using FluentValidation;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -140,8 +141,11 @@ namespace Wacs.Core
                         RuleFor(mode => mode.Offset)
                             .Custom((expr, ctx) =>
                             {
-                                var exprValidator = new Expression.Validator(ValType.I32.SingleResult(), isConstant: true);
                                 var validationContext = ctx.GetValidationContext();
+                                var resultType = new ResultType(ValType.I32);
+                                var execType = new FunctionType(ResultType.Empty, resultType);
+                                validationContext.SetExecFrame(execType, Array.Empty<ValType>());
+                                var exprValidator = new Expression.Validator(resultType, isConstant: true);
                                 var subContext = validationContext.PushSubContext(expr);
                                 var result = exprValidator.Validate(subContext);
                                 foreach (var error in result.Errors)

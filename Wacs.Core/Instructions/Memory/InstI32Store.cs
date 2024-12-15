@@ -21,12 +21,15 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Instructions.Memory
 {
     public class InstI32Store : InstMemoryStore, INodeConsumer<uint, uint>
     {
         public InstI32Store() : base(ValType.I32, BitWidth.U32, OpCode.I32Store) { }
+
+        public Action<ExecContext, uint, uint> GetFunc => SetMemoryValue;
 
         // @Spec 4.4.7.6. t.store
         // @Spec 4.4.7.6. t.storeN
@@ -41,7 +44,7 @@ namespace Wacs.Core.Instructions.Memory
             
             SetMemoryValue(context, offset, c);
         }
-        
+
         public void SetMemoryValue(ExecContext context, uint offset, uint cU32)
         {
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -64,13 +67,13 @@ namespace Wacs.Core.Instructions.Memory
             MemoryMarshal.Write(bs, ref cU32);
 #endif
         }
-
-        public Action<ExecContext, uint, uint> GetFunc => SetMemoryValue;
     }
     
     public class InstI32Store8 : InstMemoryStore, INodeConsumer<uint, uint>
     {
         public InstI32Store8() : base(ValType.I32, BitWidth.U8, OpCode.I32Store8) { }
+
+        public Action<ExecContext, uint, uint> GetFunc => SetMemoryValue;
 
         // @Spec 4.4.7.6. t.store
         // @Spec 4.4.7.6. t.storeN
@@ -85,7 +88,7 @@ namespace Wacs.Core.Instructions.Memory
             
             SetMemoryValue(context, offset, c);
         }
-        
+
         public void SetMemoryValue(ExecContext context, uint offset, uint cU32)
         {
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -103,13 +106,13 @@ namespace Wacs.Core.Instructions.Memory
             // Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
             mem.Data[(int)ea] = (byte)(0xFF & cU32);
         }
-
-        public Action<ExecContext, uint, uint> GetFunc => SetMemoryValue;
     }
     
     public class InstI32Store16 : InstMemoryStore, INodeConsumer<uint, uint>
     {
         public InstI32Store16() : base(ValType.I32, BitWidth.U16, OpCode.I32Store16) { }
+
+        public Action<ExecContext, uint, uint> GetFunc => SetMemoryValue;
 
         // @Spec 4.4.7.6. t.store
         // @Spec 4.4.7.6. t.storeN
@@ -124,7 +127,7 @@ namespace Wacs.Core.Instructions.Memory
             
             SetMemoryValue(context, offset, c);
         }
-        
+
         public void SetMemoryValue(ExecContext context, uint offset, uint cU32)
         {
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
@@ -148,7 +151,5 @@ namespace Wacs.Core.Instructions.Memory
             MemoryMarshal.Write(bs, ref cI16);
 #endif
         }
-
-        public Action<ExecContext, uint, uint> GetFunc => SetMemoryValue;
     }
 }

@@ -14,9 +14,12 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Runtime.Types
 {
@@ -52,9 +55,13 @@ namespace Wacs.Core.Runtime.Types
         /// </summary>
         public FunctionInstance(ModuleInstance module, Module.Function definition)
         {
-            Type = module.Types[definition.TypeIndex];
-            Module = module;
+            var type = module.Types[definition.TypeIndex];
+            if (!(type.Expansion is FunctionType funcType))
+                throw new FormatException($"Function defined with type {type}");
             
+            Type = funcType;
+            Module = module;
+            DefType = type;
             Definition = definition;
             SetBody(definition.Body);
             
@@ -65,6 +72,8 @@ namespace Wacs.Core.Runtime.Types
                 Name = Definition.Id;
         }
 
+        public readonly DefType DefType;
+        
         public string ModuleName => Module.Name;
         public string Name { get; set; } = "";
         public FunctionType Type { get; }
@@ -106,7 +115,6 @@ namespace Wacs.Core.Runtime.Types
             //8.
             //Push the frame and operate on the frame on the stack.
             var frame = context.ReserveFrame(Module, funcType, Index, t);
-                
             //Load parameters
             int li = context.OpStack.PopResults(funcType.ParameterTypes, ref frame.Locals.Data);
             frame.StackHeight -= li;

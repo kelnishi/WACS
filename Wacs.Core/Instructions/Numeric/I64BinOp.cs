@@ -19,7 +19,7 @@ using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
-using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Numeric
@@ -158,6 +158,8 @@ namespace Wacs.Core.Instructions.Numeric
             public Signed(ByteCode op, Func<long,long,long> execute, NumericInst.ValidationDelegate validate,
                 bool isConst = false) : base(op, validate, isConst) => _execute = execute;
 
+            public Func<ExecContext, long,long,long> GetFunc => (_, i1, i2) => _execute(i1, i2);
+
             public override void Execute(ExecContext context)
             {
                 long i2 = context.OpStack.PopI64();
@@ -165,8 +167,6 @@ namespace Wacs.Core.Instructions.Numeric
                 long result = _execute(i1, i2);
                 context.OpStack.PushI64(result);
             }
-
-            public Func<ExecContext, long,long,long> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
 
         private sealed class Unsigned : InstI64BinOp, INodeComputer<ulong,ulong,ulong>
@@ -176,6 +176,8 @@ namespace Wacs.Core.Instructions.Numeric
             public Unsigned(ByteCode op, Func<ulong,ulong,ulong> execute, NumericInst.ValidationDelegate validate,
                 bool isConst = false) : base(op, validate, isConst) => _execute = execute;
 
+            public Func<ExecContext, ulong,ulong,ulong> GetFunc => (_, i1, i2) => _execute(i1, i2);
+
             public override void Execute(ExecContext context)
             {
                 ulong i2 = context.OpStack.PopU64();
@@ -183,8 +185,6 @@ namespace Wacs.Core.Instructions.Numeric
                 ulong result = _execute(i1, i2);
                 context.OpStack.PushU64(result);
             }
-
-            public Func<ExecContext, ulong,ulong,ulong> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
 
         private sealed class Mixed : InstI64BinOp, INodeComputer<ulong,long,ulong>
@@ -194,6 +194,8 @@ namespace Wacs.Core.Instructions.Numeric
             public Mixed(ByteCode op, Func<ulong,long,ulong> execute, NumericInst.ValidationDelegate validate,
                 bool isConst = false) : base(op, validate, isConst) => _execute = execute;
 
+            public Func<ExecContext, ulong,long,ulong> GetFunc => (_, i1, i2) => _execute(i1, i2);
+
             public override void Execute(ExecContext context)
             {
                 long i2 = context.OpStack.PopI64();
@@ -201,8 +203,6 @@ namespace Wacs.Core.Instructions.Numeric
                 ulong result = _execute(i1, i2);
                 context.OpStack.PushU64(result);
             }
-
-            public Func<ExecContext, ulong,long,ulong> GetFunc => (_, i1, i2) => _execute(i1, i2);
         }
     }
 }

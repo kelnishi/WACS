@@ -23,6 +23,7 @@ using System.Threading.Tasks;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Runtime
 {
@@ -221,7 +222,7 @@ namespace Wacs.Core.Runtime
 
         public TableInstance BindHostTable((string module, string entity) id, TableType tableType, Value val)
         {
-            if (tableType.ElementType.StackType() != val.Type)
+            if (tableType.ElementType != val.Type)
                 throw new ArgumentException(
                     $"Table {tableType.ElementType} must be defined with matching element type value {val}");
             

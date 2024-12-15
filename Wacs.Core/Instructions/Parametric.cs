@@ -21,6 +21,7 @@ using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -32,6 +33,8 @@ namespace Wacs.Core.Instructions
     {
         public static readonly InstDrop Inst = new();
         public override ByteCode Op => OpCode.Drop;
+
+        public Action<ExecContext, Value> GetFunc => (_, _) => { };
 
         /// <summary>
         /// @Spec 3.3.4.1. drop
@@ -49,8 +52,6 @@ namespace Wacs.Core.Instructions
         {
             context.OpStack.PopAny();
         }
-
-        public Action<ExecContext, Value> GetFunc => (_, _) => { };
     }
     
     //0x1B
@@ -64,6 +65,8 @@ namespace Wacs.Core.Instructions
         public InstSelect(bool withTypes = false) => WithTypes = withTypes;
         public override ByteCode Op => OpCode.Select;
 
+        public Func<ExecContext, Value, Value, int, Value> GetFunc => Select;
+
         /// <summary>
         /// @Spec 3.3.4.2. select
         /// @Spec Appendix A.3 #validation-of-opcode-sequences①
@@ -74,6 +77,9 @@ namespace Wacs.Core.Instructions
             {
                 context.Assert(Types.Length == 1, "Select instruction type must be of length 1");
                 var type = Types[0];
+                context.Assert(type.Validate(context.Types),
+                    "Select instruction had invalid type:{0}", type);
+                
                 context.OpStack.PopI32();
                 context.OpStack.PopType(type);
                 context.OpStack.PopType(type);
@@ -84,25 +90,10 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PopI32();
                 Value val2 = context.OpStack.PopAny();
                 Value val1 = context.OpStack.PopAny();
-                context.Assert(val1.Type.IsCompatible(val2.Type),
-                    "Select instruction expected matching types on the stack: {0} == {1}",val1.Type,val2.Type);
-
-                if (!context.Attributes.Configure_RefTypes)
-                {
-                    switch (val1.Type)
-                    {
-                        case ValType.I32:
-                        case ValType.I64:
-                        case ValType.F32:
-                        case ValType.F64:
-                        case ValType.Unknown:
-                            break;
-                        default:
-                            throw new ValidationException($"select does not support {val1.Type} in MVP");
-                    }
-                }
+                context.Assert(val1.Type.Matches(val2.Type, context.Types) && val1.Type.IsVal() && val2.Type.IsVal(),
+                    "Select instruction expected matching non-ref types on the stack: {0} == {1}",val1.Type,val2.Type);
                 
-                context.OpStack.PushType(val1.Type == ValType.Unknown ? val2.Type : val1.Type);
+                context.OpStack.PushType(val1.Type == ValType.Bot ? val2.Type : val1.Type);
             }
         }
 
@@ -121,7 +112,6 @@ namespace Wacs.Core.Instructions
         private Value Select(ExecContext _, Value val1, Value val2, int c) => 
             c != 0 ? val1 : val2;
 
-        public Func<ExecContext, Value, Value, int, Value> GetFunc => Select;
         public override InstructionBase Parse(BinaryReader reader)
         {
             if (WithTypes) {

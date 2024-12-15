@@ -20,6 +20,7 @@ using System.IO;
 using FluentValidation;
 using Wacs.Core.Attributes;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -94,11 +95,14 @@ namespace Wacs.Core
                             var result = exprValidator.Validate(subContext);
                             foreach (var error in result.Errors)
                             {
-                                ctx.AddFailure($"Expression.{error.PropertyName}", error.ErrorMessage);
+                                ctx.AddFailure($"Global.Initializer.{error.PropertyName}", error.ErrorMessage);
                             }
                             
                             validationContext.PopValidationContext();
                         });
+                    RuleFor(g => g)
+                        .Custom((glob, ctx) => 
+                            ctx.GetValidationContext().Globals.SetHighWatermark(glob));
                 }
             }
         }

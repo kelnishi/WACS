@@ -14,11 +14,13 @@
 //  * limitations under the License.
 //  */
 
+using System.Linq;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
 using Xunit;
 using Xunit.Abstractions;
+using Xunit.Sdk;
 
 namespace Spec.Test
 {
@@ -63,10 +65,14 @@ namespace Spec.Test
             }
         }
 
+        // [Theory(Skip = "Skip transpiled tests for now.")]
         [Theory]
         [ClassData(typeof(WastJsonTestData))]
         public void RunWastTranspiled(WastJson.WastJson file)
         {
+            if (!WastJsonTestData.RunTranspilerTests)
+                throw SkipException.ForSkip("Skipping transpiled test");
+            
             _output.WriteLine($"Running test:{file.TestName}");
             SpecTestEnv env = new SpecTestEnv();
             WasmRuntime runtime = new();

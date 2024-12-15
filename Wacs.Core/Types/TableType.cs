@@ -18,7 +18,11 @@ using System;
 using System.IO;
 using FluentValidation;
 using Wacs.Core.Attributes;
+using Wacs.Core.Instructions.Reference;
+using Wacs.Core.OpCodes;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
+using Wacs.Core.Validation;
 
 namespace Wacs.Core.Types
 {
@@ -29,34 +33,37 @@ namespace Wacs.Core.Types
     public class TableType : ICloneable, IRenderable
     {
         /// <summary>
+        /// The element type of the table (e.g., funcref or externref).
+        /// </summary>
+        public readonly ValType ElementType;
+
+        /// <summary>
         /// The limits specifying the minimum and optional maximum number of elements.
         /// </summary>
         public Limits Limits = null!;
 
-        private TableType()
+        public readonly Expression Init;
+
+        public TableType(ValType elementType, Limits limits, Expression? init = null)
         {
+            ElementType = elementType;
+            Limits = limits;
+            
+            if (init == null)
+            { 
+                var inst = BinaryModuleParser.InstructionFactory
+                    .CreateInstruction<InstRefNull>(OpCode.RefNull).Immediate(elementType);
+                init = new Expression(1, inst);
+            }
+            
+            Init = init;
         }
-
-        public TableType(ReferenceType elementType, Limits limits) =>
-            (ElementType, Limits) = (elementType, limits);
-
-        private TableType(BinaryReader reader) =>
-            (ElementType, Limits) = (ReferenceTypeParser.Parse(reader), Limits.Parse(reader));
-
-        /// <summary>
-        /// The element type of the table (e.g., funcref or externref).
-        /// </summary>
-        public ReferenceType ElementType { get; private set; }
 
         public string Id { get; set; } = "";
 
         public object Clone()
         {
-            return new TableType
-            {
-                Limits = (Limits)Limits.Clone(), // Assuming Limits implements ICloneable
-                ElementType = ElementType // Assuming ElementType is a value type or has a suitable copy method
-            };
+            return new TableType(ElementType, (Limits)Limits.Clone(), Init);
         }
 
         public void RenderText(StreamWriter writer, Module module, string indent)
@@ -70,10 +77,42 @@ namespace Wacs.Core.Types
 
         public override string ToString() => $"TableType({ElementType}[{Limits}])";
 
+        private const byte TableTypeExpr = 0x40;
+        private const byte FutureExtByte = 0x00;
+
+        private static TableType ParseTableTypeWithExpr(BinaryReader reader)
+        {
+            switch (reader.ReadByte())
+            {
+                case FutureExtByte: break;
+                case var b: throw new FormatException($"Invalid format parsing TableType {b}");
+            }
+
+            var type = ValTypeParser.ParseRefType(reader);
+            var limits = Limits.Parse(reader);
+            var init = Expression.ParseInitializer(reader);
+            return new(type, limits, init);
+        }
+        
         /// <summary>
-        /// @Spec 5.3.9. Table Types
+        /// https://webassembly.github.io/gc/core/bikeshed/index.html#table-section①
         /// </summary>
-        public static TableType Parse(BinaryReader reader) => new(reader);
+        public static TableType Parse(BinaryReader reader)
+        {
+            long pos = reader.BaseStream.Position;
+            var type = ValTypeParser.ParseDefType(reader);
+            if (type == ValType.Empty)
+                return ParseTableTypeWithExpr(reader);
+            if (type.IsDefType())
+                type |= ValType.Ref;
+            if (!type.IsRefType())
+                throw new FormatException($"Invalid non-ref TableType {type} at {pos}");
+            if (!type.IsNullable())
+                throw new FormatException($"Invalid non-nullable TableType {type} at {pos}");
+            
+            var limits = Limits.Parse(reader);
+            return new(type, limits);
+        }
 
         /// <summary>
         /// Tables imported from host or other modules must fit within the import definition.
@@ -106,7 +145,29 @@ namespace Wacs.Core.Types
             {
                 // @Spec 3.2.4.1. limits reftype
                 RuleFor(tt => tt.Limits).SetValidator(Limits);
-                RuleFor(tt => tt.ElementType).IsInEnum();
+                RuleFor(tt => tt.ElementType)
+                    .Must((_, type, ctx) => type.Validate(ctx.GetValidationContext().Types))
+                    .WithMessage(tt => $"TableType had invalid ElementType {tt.ElementType}");
+                RuleFor(tt => tt.Init)
+                    .Custom((expr, ctx) =>
+                    {
+                        var validationContext = ctx.GetValidationContext();
+                        var subContext = validationContext.PushSubContext(expr);
+
+                        var tt = ctx.InstanceToValidate;
+                            
+                        var funcType = FunctionType.Empty;
+                        validationContext.FunctionIndex = FuncIdx.Default;
+                        validationContext.SetExecFrame(funcType, Array.Empty<ValType>());
+                        var exprValidator = new Expression.Validator(new ResultType(tt.ElementType), isConstant: true);
+                            
+                        var result = exprValidator.Validate(subContext);
+                        foreach (var error in result.Errors)
+                        {
+                            ctx.AddFailure($"TableType.Init.{error.PropertyName}", error.ErrorMessage);
+                        }
+                        validationContext.PopValidationContext();
+                    });
             }
         }
     }

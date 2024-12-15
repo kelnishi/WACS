@@ -138,7 +138,7 @@ namespace Spec.Test
             
             Assert.Equal(10*2, invoker(10));
         }
-        
+
         [Fact]
         public async Task BindAsyncWasmFunction()
         {
@@ -168,7 +168,7 @@ namespace Spec.Test
             stopwatch.Stop();
             
             Assert.InRange(stopwatch.ElapsedMilliseconds, 3000, 3500);
-            Assert.Equal(10*2, results[0].Int32);
+            Assert.Equal(10*2, results[0].Data.Int32);
         }
 
         delegate int HostInOut(int a, out int b);
