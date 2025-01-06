@@ -24,16 +24,19 @@ namespace Wacs.Core.Types.Defs
     /// </summary>
     public enum HeapType : byte
     {
-        [WatToken("nofunc")]   NoFunc   = 0x73, // -0x0d
-        [WatToken("noextern")] NoExtern = 0x72, // -0x0e
-        [WatToken("none")]     None     = 0x71, // -0x0f
-        [WatToken("func")]     Func     = 0x70, // -0x10
-        [WatToken("extern")]   Extern   = 0x6F, // -0x11
-        [WatToken("any")]      Any      = 0x6E, // -0x12
-        [WatToken("eq")]       Eq       = 0x6D, // -0x13
-        [WatToken("i31")]      I31      = 0x6C, // -0x14
-        [WatToken("struct")]   Struct   = 0x6B, // -0x15
-        [WatToken("array")]    Array    = 0x6A, // -0x16
+        [WatToken("nofunc")]   NoFunc      = 0x73,   // -0x0d
+        [WatToken("noextern")] NoExtern    = 0x72,   // -0x0e
+        [WatToken("none")]     None        = 0x71,   // -0x0f
+        [WatToken("func")]     Func        = 0x70,   // -0x10
+        [WatToken("extern")]   Extern      = 0x6F,   // -0x11
+        [WatToken("any")]      Any         = 0x6E,   // -0x12
+        [WatToken("eq")]       Eq          = 0x6D,   // -0x13
+        [WatToken("i31")]      I31         = 0x6C,   // -0x14
+        [WatToken("struct")]   Struct      = 0x6B,   // -0x15
+        [WatToken("array")]    Array       = 0x6A,   // -0x16
+        
+        [WatToken("exn")]      Exception   = 0x69,   // -0x17
+        [WatToken("noexn")]    NoException = 0x74,   // -0x0c
         
         Bot = 0x81, // -0x81
     }

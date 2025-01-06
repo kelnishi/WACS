@@ -65,6 +65,7 @@ namespace Wacs.Core
             SectionId.Function,
             SectionId.Table,
             SectionId.Memory,
+            SectionId.Tag,
             SectionId.Global,
             SectionId.Export,
             SectionId.Start,
@@ -194,6 +195,9 @@ namespace Wacs.Core
                             mem.Id = $"{idx++}";
                         }
                     }
+                    break;
+                case SectionId.Tag:
+                    module.Tags = ParseTagSection(reader);
                     break;
                 case SectionId.Global:
                     module.Globals = ParseGlobalSection(reader);

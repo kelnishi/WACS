@@ -43,7 +43,12 @@ namespace Wacs.Core.Types.Defs
         /// <summary>
         /// A global external kind.
         /// </summary>
-        Global = 0x03
+        Global = 0x03,
+        
+        /// <summary>
+        /// https://github.com/WebAssembly/exception-handling/blob/main/proposals/exception-handling/Exceptions.md#external_kind
+        /// </summary>
+        Tag = 0x04
     }
 
     public static class ExternalKindParser
@@ -58,6 +63,7 @@ namespace Wacs.Core.Types.Defs
                 ExternalKind.Table => ExternalKind.Table,
                 ExternalKind.Memory => ExternalKind.Memory,
                 ExternalKind.Global => ExternalKind.Global,
+                ExternalKind.Tag => ExternalKind.Tag,
                 _ => throw new FormatException($"Invalid Import kind type at offset {reader.BaseStream.Position}.")
             };
     }
