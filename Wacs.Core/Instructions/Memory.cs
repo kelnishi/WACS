@@ -53,7 +53,7 @@ namespace Wacs.Core.Instructions
             context.Assert(M.Align.LinearSize() <= WidthTByteSize,
                     "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),WidthT);
 
-            context.OpStack.PopI32();
+            context.OpStack.PopInt();
             context.OpStack.PushType(Type);
         }
 
@@ -115,7 +115,7 @@ namespace Wacs.Core.Instructions
 
             //Pop parameters from right to left
             context.OpStack.PopType(Type);
-            context.OpStack.PopI32();
+            context.OpStack.PopInt();
         }
 
         public override InstructionBase Parse(BinaryReader reader)

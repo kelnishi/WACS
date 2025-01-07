@@ -28,23 +28,23 @@ using LaneIdx = System.Byte;
 
 namespace Wacs.Core.Instructions.SIMD
 {
-    public class InstV128Load : InstMemoryLoad, INodeComputer<uint, V128>
+    public class InstV128Load : InstMemoryLoad, INodeComputer<long, V128>
     {
         public InstV128Load() : base(ValType.V128, BitWidth.V128, SimdCode.V128Load) {}
 
-        public Func<ExecContext, uint, V128> GetFunc => FetchFromMemory;
+        public Func<ExecContext, long, V128> GetFunc => FetchFromMemory;
 
         public override void Execute(ExecContext context)
         {
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            uint offset = context.OpStack.PopU32();
+            long offset = context.OpStack.PopInt();
             V128 value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
 
         //@Spec 4.4.7.1. t.load and t.loadN_sx
-        public V128 FetchFromMemory(ExecContext context, uint offset)
+        public V128 FetchFromMemory(ExecContext context, long offset)
         {
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
@@ -52,8 +52,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             var mem = context.Store[a];
-            long i = offset;
-            long ea = (long)i + (long)M.Offset;
+            long ea = offset + M.Offset;
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
             var bs = new ReadOnlySpan<byte>(mem.Data, (int)ea, WidthTByteSize);
@@ -67,11 +66,11 @@ namespace Wacs.Core.Instructions.SIMD
         }
     }
     
-    public class InstV128Store : InstMemoryStore, INodeConsumer<uint, V128>
+    public class InstV128Store : InstMemoryStore, INodeConsumer<long, V128>
     {
         public InstV128Store() : base(ValType.V128, BitWidth.V128, SimdCode.V128Store) { }
 
-        public Action<ExecContext, uint, V128> GetFunc => SetMemoryValue;
+        public Action<ExecContext, long, V128> GetFunc => SetMemoryValue;
 
         // @Spec 4.4.7.6. t.store
         // @Spec 4.4.7.6. t.storeN
@@ -87,7 +86,7 @@ namespace Wacs.Core.Instructions.SIMD
             SetMemoryValue(context, offset, c);
         }
 
-        public void SetMemoryValue(ExecContext context, uint offset, V128 cV128)
+        public void SetMemoryValue(ExecContext context, long offset, V128 cV128)
         {
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
@@ -95,9 +94,8 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             var mem = context.Store[a];
-            
-            long i = offset;
-            long ea = i + M.Offset;
+
+            long ea = offset + M.Offset;
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
@@ -159,7 +157,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert(M.Align.LinearSize() <= WidthTByteSize * CountN,
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),WidthT);
 
-            context.OpStack.PopI32();
+            context.OpStack.PopInt();
             context.OpStack.PushV128();
         }
 
@@ -177,12 +175,12 @@ namespace Wacs.Core.Instructions.SIMD
             //5.
             var mem = context.Store[a];
             //6.
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopU32();
+            long i = context.OpStack.PopInt();
             //8.
-            long ea = (long)i + (long)M.Offset;
+            long ea = i + M.Offset;
             //9.
             int mn = WidthTByteSize * CountN;
             if (ea + mn > mem.Data.Length)
@@ -263,7 +261,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align,BitWidth.V128);
 
-            context.OpStack.PopI32();
+            context.OpStack.PopInt();
             context.OpStack.PushV128();
         }
 
@@ -284,9 +282,9 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopU32();
+            long i = context.OpStack.PopInt();
             //8.
-            long ea = (long)i + (long)M.Offset;
+            long ea = i + M.Offset;
             //9.
             if (ea + WidthN.ByteSize() > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthN.ByteSize()} out of bounds ({mem.Data.Length}).");
@@ -367,7 +365,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert(M.Align.LinearSize() <= BitWidth.V128.ByteSize(),
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),BitWidth.V128);
 
-            context.OpStack.PopI32();
+            context.OpStack.PopInt();
             context.OpStack.PushV128();
         }
 
@@ -388,9 +386,9 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopU32();
+            long i = context.OpStack.PopInt();
             //8.
-            long ea = (long)i + (long)M.Offset;
+            long ea = i + M.Offset;
             //9.
             if (ea + WidthN.ByteSize() > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthN.ByteSize()} out of bounds ({mem.Data.Length}).");
@@ -468,7 +466,7 @@ namespace Wacs.Core.Instructions.SIMD
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8", Op.GetMnemonic(), M.Align.LinearSize(), WidthN);
             
             context.OpStack.PopV128();
-            context.OpStack.PopI32();
+            context.OpStack.PopInt();
             context.OpStack.PushV128();
         }
 
@@ -492,12 +490,12 @@ namespace Wacs.Core.Instructions.SIMD
             //7.
             MV128 value = (V128)context.OpStack.PopV128();
             //8.
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            long i = context.OpStack.PopU32();
+            long i = context.OpStack.PopInt();
             //10.
-            long ea = (long)i + (long)M.Offset;
+            long ea = i + M.Offset;
             //11.
             if (ea + WidthN.ByteSize() > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthN.ByteSize()} out of bounds ({mem.Data.Length}).");
@@ -579,7 +577,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8", Op.GetMnemonic(), M.Align.LinearSize(), WidthN);
             context.OpStack.PopV128();
-            context.OpStack.PopI32();
+            context.OpStack.PopInt();
         }
 
         // @Spec 4.4.7.7. v128.storeN_lane memarg x
@@ -601,10 +599,10 @@ namespace Wacs.Core.Instructions.SIMD
             //7.
             V128 c = context.OpStack.PopV128();
             //8.
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            long i = context.OpStack.PopU32();
+            long i = context.OpStack.PopInt();
             //10.
             long ea = i + M.Offset;
             //11.

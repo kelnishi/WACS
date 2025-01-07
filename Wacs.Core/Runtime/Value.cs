@@ -549,6 +549,16 @@ namespace Wacs.Core.Runtime
         }
 
         public bool IsI32 => Type == ValType.I32;
+
+        public bool IsInt => Type switch
+        {
+            ValType.I32 => true,
+            ValType.I64 => true,
+            ValType.U32 => true,
+            ValType.U64 => true,
+            _ => false
+        };
+        
         public bool IsV128 => Type == ValType.V128;
         public bool IsRefType => Type.IsRefType();
         public bool IsNullRef => IsRefType && Data.Ptr == long.MinValue;

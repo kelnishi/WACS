@@ -17,6 +17,7 @@
 using System;
 using System.IO;
 using FluentValidation;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
@@ -30,19 +31,19 @@ namespace Wacs.Core.Types
         /// <summary>
         /// The optional maximum number of units. If MaxValue, there is no specified maximum.
         /// </summary>
-        public uint? Maximum;
+        public long? Maximum;
 
         /// <summary>
         /// The minimum number of units (e.g., pages for memory).
         /// </summary>
-        public uint Minimum;
+        public long Minimum;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="Limits"/> class with the specified minimum and optional maximum.
         /// </summary>
         /// <param name="minimum">The minimum number of units.</param>
         /// <param name="maximum">The optional maximum number of units.</param>
-        public Limits(uint minimum, uint? maximum = null) {
+        public Limits(long minimum, long? maximum = null) {
             Minimum = minimum;
             Maximum = maximum;
         }
@@ -58,9 +59,12 @@ namespace Wacs.Core.Types
         /// @Spec 5.3.7. Limits
         /// </summary>
         public static Limits Parse(BinaryReader reader) => 
-            reader.ReadByte() switch {
-                0x00 => new Limits(reader.ReadLeb128_u32()),
-                0x01 => new Limits(reader.ReadLeb128_u32(), reader.ReadLeb128_u32()),
+            (LimitsFlag)reader.ReadByte() switch {
+                LimitsFlag.Mem32Min => new Limits(reader.ReadLeb128_u32()),
+                LimitsFlag.Mem32MinMax => new Limits(reader.ReadLeb128_u32(), reader.ReadLeb128_u32()),
+                //Clamp to 64-bit signed integer, we're not going to ever allow more than 2^63-1 pages.
+                LimitsFlag.Mem64Min => new Limits((long)reader.ReadLeb128_u64()),
+                LimitsFlag.Mem64MinMax => new Limits((long)reader.ReadLeb128_u64(), (long)reader.ReadLeb128_u64()),
                 var flag => throw new FormatException($"Invalid Limits flag {flag} at offset {reader.BaseStream.Position}.")
             };
 

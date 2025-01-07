@@ -25,11 +25,11 @@ using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Instructions.Memory
 {
-    public class InstF32Store : InstMemoryStore, INodeConsumer<uint, float>
+    public class InstF32Store : InstMemoryStore, INodeConsumer<long, float>
     {
         public InstF32Store() : base(ValType.F32, BitWidth.U32, OpCode.F32Store) { }
 
-        public Action<ExecContext, uint, float> GetFunc => SetMemoryValue;
+        public Action<ExecContext, long, float> GetFunc => SetMemoryValue;
 
         // @Spec 4.4.7.6. t.store
         // @Spec 4.4.7.6. t.storeN
@@ -38,14 +38,14 @@ namespace Wacs.Core.Instructions.Memory
             context.Assert( context.OpStack.Peek().Type == Type,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             float c = context.OpStack.PopF32();
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            uint offset = context.OpStack.PopU32();
+            long offset = context.OpStack.PopInt();
             
             SetMemoryValue(context, offset, c);
         }
 
-        public void SetMemoryValue(ExecContext context, uint offset, float cF32)
+        public void SetMemoryValue(ExecContext context, long offset, float cF32)
         {
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
@@ -53,9 +53,10 @@ namespace Wacs.Core.Instructions.Memory
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             var mem = context.Store[a];
-            
-            long i = offset;
-            long ea = i + M.Offset;
+
+            long ea = offset + M.Offset;
+            if (offset < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory offset {offset} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
@@ -69,11 +70,11 @@ namespace Wacs.Core.Instructions.Memory
         }
     }
     
-    public class InstF64Store : InstMemoryStore, INodeConsumer<uint, double>
+    public class InstF64Store : InstMemoryStore, INodeConsumer<long, double>
     {
         public InstF64Store() : base(ValType.F64, BitWidth.U64, OpCode.F64Store) { }
 
-        public Action<ExecContext, uint, double> GetFunc => SetMemoryValue;
+        public Action<ExecContext, long, double> GetFunc => SetMemoryValue;
 
         // @Spec 4.4.7.6. t.store
         // @Spec 4.4.7.6. t.storeN
@@ -82,14 +83,14 @@ namespace Wacs.Core.Instructions.Memory
             context.Assert( context.OpStack.Peek().Type == Type,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             double c = context.OpStack.PopF64();
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            uint offset = context.OpStack.PopU32();
+            long offset = context.OpStack.PopInt();
             
             SetMemoryValue(context, offset, c);
         }
 
-        public void SetMemoryValue(ExecContext context, uint offset, double cF64)
+        public void SetMemoryValue(ExecContext context, long offset, double cF64)
         {
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
@@ -97,9 +98,10 @@ namespace Wacs.Core.Instructions.Memory
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             var mem = context.Store[a];
-            
-            long i = offset;
-            long ea = i + M.Offset;
+
+            long ea = offset + M.Offset;
+            if (offset < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory offset {offset} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
