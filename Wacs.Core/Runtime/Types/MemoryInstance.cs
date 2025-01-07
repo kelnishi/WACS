@@ -37,7 +37,7 @@ namespace Wacs.Core.Runtime.Types
             if (type.Limits.Minimum > Constants.HostMaxPages)
                 throw new InstantiationException($"Cannot allocate memory of size {type.Limits.Minimum}");
             
-            uint initialSize = (type.Limits.Minimum)* Constants.PageSize;
+            long initialSize = (type.Limits.Minimum)* Constants.PageSize;
             Data = new byte[initialSize];
         }
 
