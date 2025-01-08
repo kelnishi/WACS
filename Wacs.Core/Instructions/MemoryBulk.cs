@@ -46,12 +46,12 @@ namespace Wacs.Core.Instructions
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M),
-                 $"Instruction memory.grow failed. Memory {M} was not in the Context.");
+                 $"Instruction {Op.GetMnemonic()} failed. Memory {M} was not in the Context.");
             //3.
             var a = context.Frame.Module.MemAddrs[M];
             //4.
             context.Assert( context.Store.Contains(a),
-                 $"Instruction memory.grow failed. Memory address {a} was not in the Store.");
+                 $"Instruction {Op.GetMnemonic()} failed. Memory address {a} was not in the Store.");
             //5.
             var mem = context.Store[a];
             //6.
@@ -89,12 +89,12 @@ namespace Wacs.Core.Instructions
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M),
-                 $"Instruction memory.grow failed. Memory {M} was not in the Context.");
+                 $"Instruction {Op.GetMnemonic()} failed. Memory {M} was not in the Context.");
             //3.
             var a = context.Frame.Module.MemAddrs[M];
             //4.
             context.Assert( context.Store.Contains(a),
-                 $"Instruction memory.grow failed. Memory address {a} was not in the Store.");
+                 $"Instruction {Op.GetMnemonic()} failed. Memory address {a} was not in the Store.");
             //5.
             var mem = context.Store[a];
             //6.
@@ -232,9 +232,10 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public InstructionBase Immediate(DataIdx x)
+        public InstructionBase Immediate(DataIdx x, MemIdx y)
         {
             X = x;
+            Y = y;
             return this;
         }
 
@@ -476,7 +477,7 @@ namespace Wacs.Core.Instructions
                 //17.
                 long check = d + 1L;
                 context.Assert( check < Constants.TwoTo32,
-                     $"Instruction memory.fill failed. Buffer overflow");
+                     $"Instruction {Op.GetMnemonic()} failed. Buffer overflow");
                 //18.
                 context.OpStack.PushU32((uint)(d + 1));
                 //19.

@@ -24,8 +24,6 @@ namespace Wacs.Core.Validation
     /// </summary>
     public class ModuleValidator : AbstractValidator<Module>
     {
-        public static bool ValidateMultipleMemories = true;
-
         public ModuleValidator()
         {
             //Set the validation context
@@ -42,12 +40,6 @@ namespace Wacs.Core.Validation
                     ctx.GetValidationContext().Globals.SetHighImportWatermark());
             RuleForEach(module => module.Tables).SetValidator(new TableType.Validator());
             RuleForEach(module => module.Memories).SetValidator(new MemoryType.Validator());
-            if (!ValidateMultipleMemories)
-            {
-                RuleFor(module => module.MemoryCount)
-                    .LessThan(2)
-                    .WithMessage("Multiple memories are not supported.");
-            }
             RuleForEach(module => module.Globals).SetValidator(new Module.Global.Validator());
             RuleForEach(module => module.ValidationFuncs)
                 .SetValidator(new Module.Function.Validator()).OverridePropertyName("Function");

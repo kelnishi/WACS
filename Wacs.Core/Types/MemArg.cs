@@ -35,7 +35,7 @@ namespace Wacs.Core.Types
         public static MemArg Parse(BinaryReader reader)
         {
             uint bits = reader.ReadLeb128_u32();
-            if (bits > 16)
+            if ((bits & (uint)Alignment.LogBits) > 16)
                 throw new InvalidDataException($"Invalid memory alignment");
             
             Alignment align = (Alignment)bits;
