@@ -227,8 +227,10 @@ namespace Wacs.Core.Instructions
 
             context.Assert(funcType.ResultType.Matches(context.ReturnType, context.Types),
                 "Instruction return_call_indirect was invalid. Mismatched result types: calltype:{0} returntype:{1}", funcType.ResultType.ToNotation(), context.ReturnType.ToNotation());
+
+            var at = tableType.Limits.AddressType;
             
-            context.OpStack.PopI32();
+            context.OpStack.PopType(at.ToValType());
             context.OpStack.DiscardValues(funcType.ParameterTypes);
             context.OpStack.PushResult(funcType.ResultType);
             
@@ -263,10 +265,10 @@ namespace Wacs.Core.Instructions
                 $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
             
             //8.
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            uint i = context.OpStack.PopU32();
+            long i = context.OpStack.PopAddr();
             //10.
             if (i >= tab.Elements.Count)
                 throw new TrapException($"Instruction call_indirect could not find element {i}");
@@ -332,10 +334,10 @@ namespace Wacs.Core.Instructions
             context.Assert(ftFunc,
                 $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
             //8.
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            uint i = context.OpStack.PopU32();
+            long i = context.OpStack.PopAddr();
             //10.
             if (i >= tab.Elements.Count)
                 throw new TrapException($"Instruction call_indirect could not find element {i}");
