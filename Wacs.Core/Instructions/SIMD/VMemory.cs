@@ -38,7 +38,7 @@ namespace Wacs.Core.Instructions.SIMD
         {
             context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            long offset = context.OpStack.PopInt();
+            long offset = context.OpStack.PopAddr();
             V128 value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
@@ -79,9 +79,9 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().Type == Type,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             V128 c = context.OpStack.PopV128();
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            uint offset = context.OpStack.PopU32();
+            long offset = context.OpStack.PopAddr();
             
             SetMemoryValue(context, offset, c);
         }
@@ -178,7 +178,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopInt();
+            long i = context.OpStack.PopAddr();
             //8.
             long ea = i + M.Offset;
             //9.
@@ -282,7 +282,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopInt();
+            long i = context.OpStack.PopAddr();
             //8.
             long ea = i + M.Offset;
             //9.
@@ -386,7 +386,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopInt();
+            long i = context.OpStack.PopAddr();
             //8.
             long ea = i + M.Offset;
             //9.
@@ -493,7 +493,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            long i = context.OpStack.PopInt();
+            long i = context.OpStack.PopAddr();
             //10.
             long ea = i + M.Offset;
             //11.
@@ -602,7 +602,7 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            long i = context.OpStack.PopInt();
+            long i = context.OpStack.PopAddr();
             //10.
             long ea = i + M.Offset;
             //11.
