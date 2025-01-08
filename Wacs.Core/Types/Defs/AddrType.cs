@@ -12,21 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using System.Collections.Generic;
-using System.IO;
-using Wacs.Core.Types;
-using Wacs.Core.Utilities;
-
-namespace Wacs.Core
+namespace Wacs.Core.Types.Defs
 {
-    public partial class Module
+    public enum AddrType : byte
     {
-        public List<TagType> Tags { get; internal set; } = new();
+        I32 = 32,
+        I64 = 64,
     }
     
-    public static partial class BinaryModuleParser
+    public static class AddrTypeExtensions
     {
-        private static List<TagType> ParseTagSection(BinaryReader reader)
-            => reader.ParseList(TagType.Parse);
+        public static AddrType Min(this AddrType type, AddrType other) => type <= other ? type : other;
+        
+        public static ValType ToValType(this AddrType type) => type switch
+        {
+            AddrType.I32 => ValType.I32,
+            AddrType.I64 => ValType.I64,
+            _ => throw new System.NotImplementedException()
+        };
     }
 }

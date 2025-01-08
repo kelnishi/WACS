@@ -19,6 +19,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
 
@@ -37,8 +38,10 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M),
-                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),M);
-            context.OpStack.PushI32();
+                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),M);
+            var mem = context.Mems[M];
+            var at = mem.Limits.AddressType;
+            context.OpStack.PushType(at.ToValType());
         }
 
         // @Spec 4.4.7.8. memory.size
@@ -46,18 +49,17 @@ namespace Wacs.Core.Instructions
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M),
-                 $"Instruction {Op.GetMnemonic()} failed. Memory {M} was not in the Context.");
+                $"Instruction {Op.GetMnemonic()} failed. Memory {M} was not in the Context.");
             //3.
             var a = context.Frame.Module.MemAddrs[M];
             //4.
             context.Assert( context.Store.Contains(a),
-                 $"Instruction {Op.GetMnemonic()} failed. Memory address {a} was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Memory address {a} was not in the Store.");
             //5.
             var mem = context.Store[a];
             //6.
-            uint sz = (uint)mem.Size;
-            //7.
-            context.OpStack.PushU32(sz);
+            var type = mem.Type.Limits.AddressType;
+            context.OpStack.PushValue(new Value(type, mem.Size));
         }
 
         public override InstructionBase Parse(BinaryReader reader)
@@ -79,9 +81,11 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M),
-                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),M);
-            context.OpStack.PopI32();
-            context.OpStack.PushI32();
+                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),M);
+            var mem = context.Mems[M];
+            var at = mem.Limits.AddressType.ToValType();
+            context.OpStack.PopType(at);;
+            context.OpStack.PushType(at);
         }
 
         // @Spec 4.4.7.9. memory.grow
@@ -89,31 +93,49 @@ namespace Wacs.Core.Instructions
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M),
-                 $"Instruction {Op.GetMnemonic()} failed. Memory {M} was not in the Context.");
+                $"Instruction {Op.GetMnemonic()} failed. Memory {M} was not in the Context.");
             //3.
             var a = context.Frame.Module.MemAddrs[M];
             //4.
             context.Assert( context.Store.Contains(a),
-                 $"Instruction {Op.GetMnemonic()} failed. Memory address {a} was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Memory address {a} was not in the Store.");
             //5.
             var mem = context.Store[a];
+            var type = mem.Type.Limits.AddressType.ToValType();
+            
             //6.
-            uint sz = (uint)mem.Size;
+            long sz = mem.Size;
             //7.
-            context.Assert( context.OpStack.Peek().IsI32,
-                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            context.Assert( context.OpStack.Peek().IsInt,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //8.
-            uint n = context.OpStack.PopU32();
+            long n = context.OpStack.PopInt();
             //9.
             const int err = -1;
             //10,11 TODO: implement optional constraints on memory.grow
             if (mem.Grow(n))
             {
-                context.OpStack.PushU32(sz);
+                switch (type)
+                {
+                    case ValType.I32:
+                        context.OpStack.PushU32((uint)sz);
+                        break;
+                    case ValType.I64:
+                        context.OpStack.PushI64(sz);
+                        break;
+                }
             }
             else
             {
-                context.OpStack.PushI32(err);
+                switch (type)
+                {
+                    case ValType.I32:
+                        context.OpStack.PushI32(err);
+                        break;
+                    case ValType.I64:
+                        context.OpStack.PushI64(err);
+                        break;
+                }
             }
         }
 
@@ -137,14 +159,17 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(Y),
-                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),Y);
+                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),Y);
 
             context.Assert(context.Datas.Contains(X),
-                 "Instruction {0} failed with invalid context data {1}.",Op.GetMnemonic(), X);
+                "Instruction {0} failed with invalid context data {1}.",Op.GetMnemonic(), X);
 
+            var mem = context.Mems[Y];
+            var at = mem.Limits.AddressType.ToValType();
+            
             context.OpStack.PopI32();
             context.OpStack.PopI32();
-            context.OpStack.PopI32();
+            context.OpStack.PopType(at);
         }
 
         // @Spec 4.4.7.12. memory.init x
@@ -153,23 +178,25 @@ namespace Wacs.Core.Instructions
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(Y),
                 
-                    $"Instruction {Op.GetMnemonic()} failed. Address for Memory {Y} did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {Y} did not exist in the context.");
             //3.
             var ma = context.Frame.Module.MemAddrs[Y];
             //4.
             context.Assert( context.Store.Contains(ma),
-                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory {Y} was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {Y} was not in the Store.");
             //5.
             var mem = context.Store[ma];
+            var at = mem.Type.Limits.AddressType;
+            
             //6.
             context.Assert( context.Frame.Module.DataAddrs.Contains(X),
                 
-                    $"Instruction {Op.GetMnemonic()} failed. Address for Data {X} did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Data {X} did not exist in the context.");
             //7.
             var da = context.Frame.Module.DataAddrs[X];
             //8.
             context.Assert( context.Store.Contains(da),
-                 $"Instruction {Op.GetMnemonic()} failed. Address for Data {X} was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Data {X} was not in the Store.");
             //9.
             var data = context.Store[da];
 
@@ -178,19 +205,19 @@ namespace Wacs.Core.Instructions
             {
                 //10.
                 context.Assert( context.OpStack.Peek().IsI32,
-                     $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //11.
                 long n = (uint)context.OpStack.PopI32();
                 //12.
                 context.Assert( context.OpStack.Peek().IsI32,
-                     $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //13.
                 long s = (uint)context.OpStack.PopI32();
                 //14.
-                context.Assert( context.OpStack.Peek().IsI32,
-                     $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+                context.Assert( context.OpStack.Peek().IsInt,
+                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //15.
-                long d = (uint)context.OpStack.PopI32();
+                long d = context.OpStack.PopInt();
                 //16.
                 if (s + n > data.Data.Length)
                     throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Data underflow.");
@@ -202,7 +229,7 @@ namespace Wacs.Core.Instructions
                 //18.
                 byte b = data.Data[s];
                 //19.
-                context.OpStack.PushU32((uint)d);
+                context.OpStack.PushValue(new Value(at, d));
                 //20.
                 context.OpStack.PushI32(b);
                 //21.
@@ -211,13 +238,13 @@ namespace Wacs.Core.Instructions
                 //22.
                 long check = d + 1L;
                 context.Assert( check < Constants.TwoTo32,
-                     $"Instruction {Op.GetMnemonic()} failed. Memory overflow.");
+                    $"Instruction {Op.GetMnemonic()} failed. Memory overflow.");
                 //23.
-                context.OpStack.PushU32((uint)(d + 1L));
+                context.OpStack.PushValue(new Value(at, d + 1L));
                 //24.
                 check = s + 1L;
                 context.Assert( check < Constants.TwoTo32,
-                     $"Instruction {Op.GetMnemonic()} failed. Data overflow.");
+                    $"Instruction {Op.GetMnemonic()} failed. Data overflow.");
                 //25.
                 context.OpStack.PushU32((uint)(s + 1L));
                 context.OpStack.PushU32((uint)(n - 1L));
@@ -254,7 +281,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Datas.Contains(X),
-                 "Instruction {0} failed with invalid context data {1}.",Op.GetMnemonic(),X);
+                "Instruction {0} failed with invalid context data {1}.",Op.GetMnemonic(),X);
         }
 
         // @Spec 4.4.7.13
@@ -262,12 +289,12 @@ namespace Wacs.Core.Instructions
         {
             //2.
             context.Assert( context.Frame.Module.DataAddrs.Contains(X),
-                 $"Instruction {Op.GetMnemonic()} failed. Address for Data {X} did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Data {X} did not exist in the context.");
             //3.
             var a = context.Frame.Module.DataAddrs[X];
             //4.
             context.Assert( context.Store.Contains(a),
-                 $"Instruction {Op.GetMnemonic()} failed. Address for Data {X} was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Data {X} was not in the Store.");
             //5.
             context.Store.DropData(a);
         }
@@ -300,13 +327,19 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(SrcX),
-                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),SrcX);
+                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),SrcX);
             context.Assert(context.Mems.Contains(DstY),
                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(), DstY);
 
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
+            var memX = context.Mems[SrcX];
+            var memY = context.Mems[DstY];
+            var atS = memX.Limits.AddressType;
+            var atD = memY.Limits.AddressType;
+            var atN = atS.Min(atD);
+            
+            context.OpStack.PopType(atN.ToValType());
+            context.OpStack.PopType(atD.ToValType());
+            context.OpStack.PopType(atS.ToValType());
         }
 
         // @Spec 4.4.7.11. memory.copy
@@ -315,91 +348,99 @@ namespace Wacs.Core.Instructions
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(SrcX),
                 
-                    $"Instruction {Op.GetMnemonic()} failed. Address for Memory {SrcX} did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {SrcX} did not exist in the context.");
+            //3.
             context.Assert( context.Frame.Module.MemAddrs.Contains(DstY),
                 
-                    $"Instruction {Op.GetMnemonic()} failed. Address for Memory {DstY} did not exist in the context.");
-            //3.
-            var maX = context.Frame.Module.MemAddrs[SrcX];
-            var maY = context.Frame.Module.MemAddrs[DstY];
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {DstY} did not exist in the context.");
             //4.
-            context.Assert( context.Store.Contains(maX),
-                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory {SrcX} was not in the Store.");
-            context.Assert( context.Store.Contains(maY),
-                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory {DstY} was not in the Store.");
+            var da = context.Frame.Module.MemAddrs[SrcX];
             //5.
-            var memX = context.Store[maX];
-            var memY = context.Store[maY];
+            var sa = context.Frame.Module.MemAddrs[DstY];
+            //6.
+            context.Assert( context.Store.Contains(da),
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {SrcX} was not in the Store.");
+            //7.
+            context.Assert( context.Store.Contains(sa),
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {DstY} was not in the Store.");
+            //8.
+            var memD = context.Store[da];
+            //9.
+            var memS = context.Store[sa];
+            
+            var atD = memD.Type.Limits.AddressType;
+            var atS = memS.Type.Limits.AddressType;
+            var atN = atD.Min(atS);
 
             //Tail recursive call alternative loop
             while (true)
             {
-                //6.
-                context.Assert( context.OpStack.Peek().IsI32,
-                     $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-                //7.
-                long n = (uint)context.OpStack.PopI32();
-                //8.
-                context.Assert( context.OpStack.Peek().IsI32,
-                     $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-                //9.
-                long s = (uint)context.OpStack.PopI32();
                 //10.
-                context.Assert( context.OpStack.Peek().IsI32,
-                     $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+                context.Assert( context.OpStack.Peek().IsInt,
+                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //11.
-                long d = (uint)context.OpStack.PopI32();
-                //12
+                long n = context.OpStack.PopInt();
+                //12.
+                context.Assert( context.OpStack.Peek().IsInt,
+                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+                //13.
+                long s = context.OpStack.PopInt();
+                //14.
+                context.Assert( context.OpStack.Peek().IsInt,
+                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+                //15.
+                long d = context.OpStack.PopInt();
+                //16.
                 long check = s + n;
-                if (check > memX.Data.Length)
+                if (check > memD.Data.Length)
                     throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
                 check = d + n;
-                if (check > memY.Data.Length)
+                if (check > memS.Data.Length)
                     throw new TrapException(
                         $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
-                //13.
+                //17.
                 if (n == 0)
                     return;
-                //14.
+                //18.
                 if (d <= s)
                 {
-                    context.OpStack.PushU32((uint)d);
-                    context.OpStack.PushU32((uint)s);
+                    context.OpStack.PushValue(new Value(atD, d));
+                    context.OpStack.PushValue(new Value(atS, s));
                     context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, SrcX))
                         .Execute(context);
                     context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, DstY))
                         .Execute(context);
                     check = d + 1L;
                     context.Assert( check < Constants.TwoTo32,
-                         $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
-                    context.OpStack.PushU32((uint)(d + 1L));
+                        $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
+                    context.OpStack.PushValue(new Value(atD, d + 1L));
                     check = s + 1L;
                     context.Assert( check < Constants.TwoTo32,
-                         $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
-                    context.OpStack.PushU32((uint)(s + 1L));
+                        $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
+                    context.OpStack.PushValue(new Value(atS, s + 1L));
                 }
-                //15.
+                //19.
                 else
                 {
                     check = d + n - 1L;
                     context.Assert( check < Constants.TwoTo32,
-                         $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
-                    context.OpStack.PushU32((uint)(d + n - 1));
+                        $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
+                    context.OpStack.PushValue(new Value(atD, d + n - 1));
                     check = s + n - 1L;
                     context.Assert( check < Constants.TwoTo32,
-                         $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
-                    context.OpStack.PushU32((uint)(s + n - 1));
+                        $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
+                    context.OpStack.PushValue(new Value(atS, s + n - 1));
                     context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, SrcX))
                         .Execute(context);
                     context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, DstY))
                         .Execute(context);
-                    context.OpStack.PushU32((uint)d);
-                    context.OpStack.PushU32((uint)s);
+                    context.OpStack.PushValue(new Value(atD, d));
+                    context.OpStack.PushValue(new Value(atS, s));
                 }
 
-                //16.
-                context.OpStack.PushU32((uint)n - 1);
-                //17.
+                //20.
+                context.OpStack.PushValue(new Value(atN, n - 1));
+                //21.
             }
         }
 
@@ -423,11 +464,13 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(X),
-                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),X);
-
+                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),X);
+            
+            var mem = context.Mems[X];
+            var at = mem.Limits.AddressType;
+            context.OpStack.PopType(at.ToValType());
             context.OpStack.PopI32();
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
+            context.OpStack.PopType(at.ToValType());
         }
 
         // @Spec 4.4.7.10. memory.fill
@@ -436,30 +479,31 @@ namespace Wacs.Core.Instructions
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(X),
                 
-                    $"Instruction {Op.GetMnemonic()} failed. Address for Memory {X} did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {X} did not exist in the context.");
             //3.
             var a = context.Frame.Module.MemAddrs[X];
             //4.
             context.Assert( context.Store.Contains(a),
-                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory {X} was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {X} was not in the Store.");
             //5.
             var mem = context.Store[a];
+            var at = mem.Type.Limits.AddressType;
 
             //Tail recursive call alternative loop
             while (true)
             {
                 //6.
                 context.Assert( context.OpStack.Peek().IsI32,
-                     $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //7.
                 long n = (uint)context.OpStack.PopI32();
                 //8,9. YOLO
                 var val = context.OpStack.PopAny();
                 //10.
-                context.Assert( context.OpStack.Peek().IsI32,
-                     $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+                context.Assert( context.OpStack.Peek().IsInt,
+                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //11.
-                long d = (uint)context.OpStack.PopI32();
+                long d = context.OpStack.PopInt();
                 //12.
                 if (d + n > mem.Data.Length)
                     throw new TrapException("Instruction memory.fill failed. Buffer overflow");
@@ -467,7 +511,7 @@ namespace Wacs.Core.Instructions
                 if (n == 0)
                     return;
                 //14.
-                context.OpStack.PushU32((uint)d);
+                context.OpStack.PushValue(new Value(at, d));
                 //15.
                 context.OpStack.PushValue(val);
                 //16.
@@ -477,9 +521,9 @@ namespace Wacs.Core.Instructions
                 //17.
                 long check = d + 1L;
                 context.Assert( check < Constants.TwoTo32,
-                     $"Instruction {Op.GetMnemonic()} failed. Buffer overflow");
+                    $"Instruction {Op.GetMnemonic()} failed. Buffer overflow");
                 //18.
-                context.OpStack.PushU32((uint)(d + 1));
+                context.OpStack.PushValue(new Value(at, d + 1));
                 //19.
                 context.OpStack.PushValue(val);
                 //20.
