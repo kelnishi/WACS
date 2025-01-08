@@ -321,9 +321,6 @@ namespace Wacs.Core.Runtime
                     switch (data.Mode)
                     {
                         case Module.DataMode.ActiveMode activeMode:
-                            if (activeMode.MemoryIndex != 0)
-                                throw new NotSupportedException(
-                                    "Module could not be instantiated: Multiple Memories are not supported.");
                             var n = data.Init.Length;
                             activeMode.Offset
                                 .ExecuteInitializer(Context);
@@ -332,7 +329,7 @@ namespace Wacs.Core.Runtime
                             Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(n)
                                 .Execute(Context);
                             Context.InstructionFactory.CreateInstruction<InstMemoryInit>(ExtCode.MemoryInit)
-                                .Immediate((DataIdx)i)
+                                .Immediate((DataIdx)i, activeMode.MemoryIndex)
                                 .Execute(Context);
                             Context.InstructionFactory.CreateInstruction<InstDataDrop>(ExtCode.DataDrop)
                                 .Immediate((DataIdx)i)
