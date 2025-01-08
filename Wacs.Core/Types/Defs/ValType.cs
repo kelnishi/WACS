@@ -206,6 +206,7 @@ namespace Wacs.Core.Types.Defs
                 ValType.StructNN => HeapType.Struct,
                 ValType.ArrayNN => HeapType.Array,
                 ValType.Exception => HeapType.Exception,
+                ValType.NoException => HeapType.NoException,
                 _ => (HeapType)0
             };
         }
@@ -254,6 +255,7 @@ namespace Wacs.Core.Types.Defs
                     ValType.I31 or 
                     ValType.Struct or 
                     ValType.Exception or
+                    ValType.NoException or
                     ValType.Array => true,
                 ValType.NoFuncNN or  
                     ValType.NoExternNN or
