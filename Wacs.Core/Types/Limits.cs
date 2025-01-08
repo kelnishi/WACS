@@ -44,21 +44,28 @@ namespace Wacs.Core.Types
         public AddrType AddressType;
 
         /// <summary>
+        /// For threads, indicates whether the memory is shared.
+        /// </summary>
+        public bool Shared;
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="Limits"/> class with the specified minimum and optional maximum.
         /// </summary>
         /// <param name="type">i32|i64 pointer type</param>
         /// <param name="minimum">The minimum number of units.</param>
         /// <param name="maximum">The optional maximum number of units.</param>
-        public Limits(AddrType type, long minimum, long? maximum = null) {
+        public Limits(AddrType type, long minimum, long? maximum = null, bool shared = false) {
             AddressType = type;
             Minimum = minimum;
             Maximum = maximum;
+            Shared = shared;
         }
 
         public Limits(Limits copy) {
             AddressType = copy.AddressType;
             Minimum = copy.Minimum;
             Maximum = copy.Maximum;
+            Shared = copy.Shared;
         }
 
         public object Clone() => new Limits(this);
@@ -70,9 +77,11 @@ namespace Wacs.Core.Types
             (LimitsFlag)reader.ReadByte() switch {
                 LimitsFlag.Mem32Min => new Limits(AddrType.I32,reader.ReadLeb128_u32()),
                 LimitsFlag.Mem32MinMax => new Limits(AddrType.I32,reader.ReadLeb128_u32(), reader.ReadLeb128_u32()),
+                LimitsFlag.Mem32MinMaxShared => new Limits(AddrType.I32,reader.ReadLeb128_u32(), reader.ReadLeb128_u32(), true),
                 //Clamp to 64-bit signed integer, we're not going to ever allow more than 2^63-1 pages.
                 LimitsFlag.Mem64Min => new Limits(AddrType.I64, (long)reader.ReadLeb128_u64()),
                 LimitsFlag.Mem64MinMax => new Limits(AddrType.I64,(long)reader.ReadLeb128_u64(), (long)reader.ReadLeb128_u64()),
+                LimitsFlag.Mem64MinMaxShared => new Limits(AddrType.I64,(long)reader.ReadLeb128_u64(), (long)reader.ReadLeb128_u64(), true),
                 var flag => throw new FormatException($"Invalid Limits flag {flag} at offset {reader.BaseStream.Position}.")
             };
 
