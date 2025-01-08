@@ -64,7 +64,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.OpStack.Peek().IsInt,
                  $"Instruction table.get failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopInt();
+            long i = context.OpStack.PopAddr();
             //8.
             if (i >= tab.Elements.Count || (i > (long)int.MaxValue))
             {
@@ -129,7 +129,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.OpStack.Peek().IsInt,
                  $"Instruction table.set found incorrect type on top of the Stack");
             //9.
-            long i = context.OpStack.PopInt();
+            long i = context.OpStack.PopAddr();
             //10.
             if (i >= tab.Elements.Count)
             {
@@ -203,19 +203,19 @@ namespace Wacs.Core.Instructions
             {
                 //10.
                 context.Assert( context.OpStack.Peek().IsI32,
-                     $"Instruction table.init failed. Expected i32 on top of the stack.");
+                     $"Instruction {Op.GetMnemonic()} failed. Expected i32 on top of the stack.");
                 //11.
                 long n = (uint)context.OpStack.PopI32();
                 //12.
                 context.Assert( context.OpStack.Peek().IsI32,
-                     $"Instruction table.init failed. Expected i32 on top of the stack.");
+                     $"Instruction {Op.GetMnemonic()} failed. Expected i32 on top of the stack.");
                 //13.
                 long s = (uint)context.OpStack.PopI32();
                 //14.
                 context.Assert( context.OpStack.Peek().IsInt,
-                     $"Instruction table.init failed. Expected i32 on top of the stack.");
+                    $"Instruction {Op.GetMnemonic()} found incorrect type on top of the Stack");
                 //15.
-                long d = context.OpStack.PopInt();
+                long d = context.OpStack.PopAddr();
                 //16.
                 if (s + n > elem.Elements.Count || d + n > tab.Elements.Count)
                 {
@@ -236,12 +236,14 @@ namespace Wacs.Core.Instructions
                 InstTableSet.ExecuteInstruction(context, X);
                 //22.
                 long check = d + 1L;
-                context.Assert( check < Constants.TwoTo32,  $"Instruction table.init failed. Invalid table size");
+                context.Assert( check < Constants.TwoTo32, 
+                    $"Instruction {Op.GetMnemonic()} failed. Invalid table size");
                 //23.
                 context.OpStack.PushValue(new Value(at, d + 1L));
                 //24.
                 check = s + 1L;
-                context.Assert( check < Constants.TwoTo32,  $"Instruction table.init failed. Invalid table size");
+                context.Assert( check < Constants.TwoTo32, 
+                    $"Instruction {Op.GetMnemonic()} failed. Invalid table size");
                 //25.
                 context.OpStack.PushU32((uint)(s + 1L));
                 //26.
@@ -374,19 +376,19 @@ namespace Wacs.Core.Instructions
             {
                 //10.
                 context.Assert( context.OpStack.Peek().IsInt,
-                     $"Instruction table.copy failed. Expected i32 on top of the stack.");
+                    $"Instruction {Op.GetMnemonic()} found incorrect type on top of the Stack");
                 //11.
-                long n = context.OpStack.PopInt();
+                long n = context.OpStack.PopAddr();
                 //12.
                 context.Assert( context.OpStack.Peek().IsInt,
-                     $"Instruction table.copy failed. Expected i32 on top of the stack.");
+                    $"Instruction {Op.GetMnemonic()} found incorrect type on top of the Stack");
                 //13.
-                long s = context.OpStack.PopInt();
+                long s = context.OpStack.PopAddr();
                 //14.
                 context.Assert( context.OpStack.Peek().IsInt,
-                     $"Instruction table.copy failed. Expected i32 on top of the stack.");
+                    $"Instruction {Op.GetMnemonic()} found incorrect type on top of the Stack");
                 //15.
-                long d = context.OpStack.PopInt();
+                long d = context.OpStack.PopAddr();
                 //16.
                 if (s + n > tabY.Elements.Count || d + n > tabX.Elements.Count)
                 {
@@ -486,12 +488,12 @@ namespace Wacs.Core.Instructions
             long sz = tab.Elements.Count;
             //7.
             context.Assert( context.OpStack.Peek().IsInt,
-                 "Instruction table.grow found incorrect type on top of the Stack");
+                 $"Instruction {Op.GetMnemonic()} found incorrect type on top of the Stack");
             //8.
-            long n = context.OpStack.PopInt();
+            long n = context.OpStack.PopAddr();
             //9.
             context.Assert( context.OpStack.Peek().IsRefType,
-                 "Instruction table.grow found incorrect type on top of the Stack");
+                 $"Instruction {Op.GetMnemonic()} found incorrect type on top of the Stack");
             //10.
             var val = context.OpStack.PopRefType();
             //12, 13. TODO: implement optional constraints on table.grow
@@ -603,19 +605,19 @@ namespace Wacs.Core.Instructions
             {
                 //6.
                 context.Assert( context.OpStack.Peek().IsInt,
-                     "Instruction table.grow found incorrect type on top of the Stack");
+                     $"Instruction {Op.GetMnemonic()} found incorrect type on top of the Stack");
                 //7.
-                long n = context.OpStack.PopInt();
+                long n = context.OpStack.PopAddr();
                 //8.
                 context.Assert( context.OpStack.Peek().IsRefType,
-                     "Instruction table.grow found incorrect type on top of the Stack");
+                     $"Instruction {Op.GetMnemonic()} found incorrect type on top of the Stack");
                 //9.
                 var val = context.OpStack.PopRefType();
                 //10.
                 context.Assert( context.OpStack.Peek().IsInt,
-                     "Instruction table.grow found incorrect type on top of the Stack");
+                     $"Instruction {Op.GetMnemonic()} found incorrect type on top of the Stack");
                 //11.
-                long i = context.OpStack.PopInt();
+                long i = context.OpStack.PopAddr();
                 //12.
                 if (i + n > tab.Elements.Count)
                 {

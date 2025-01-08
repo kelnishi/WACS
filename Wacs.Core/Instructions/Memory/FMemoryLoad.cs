@@ -35,7 +35,7 @@ namespace Wacs.Core.Instructions.Memory
         {
             context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            long offset = context.OpStack.PopInt();
+            long offset = context.OpStack.PopAddr();
             float value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
@@ -50,8 +50,6 @@ namespace Wacs.Core.Instructions.Memory
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             var mem = context.Store[a];
             long ea = offset + M.Offset;
-            if (offset < 0)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory offset {offset} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
             var bs = new ReadOnlySpan<byte>(mem.Data, (int)ea, WidthTByteSize);
@@ -71,7 +69,7 @@ namespace Wacs.Core.Instructions.Memory
         {
             context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            long offset = context.OpStack.PopInt();
+            long offset = context.OpStack.PopAddr();
             double value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
@@ -86,8 +84,6 @@ namespace Wacs.Core.Instructions.Memory
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             var mem = context.Store[a];
             long ea = offset + M.Offset;
-            if (offset < 0)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory offset {offset} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
             var bs = new ReadOnlySpan<byte>(mem.Data, (int)ea, WidthTByteSize);

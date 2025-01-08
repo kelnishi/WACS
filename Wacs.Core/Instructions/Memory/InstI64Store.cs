@@ -40,7 +40,7 @@ namespace Wacs.Core.Instructions.Memory
             ulong c = context.OpStack.PopU64();
             context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            long offset = context.OpStack.PopInt();
+            long offset = context.OpStack.PopAddr();
             
             SetMemoryValue(context, offset, c);
         }
@@ -55,8 +55,6 @@ namespace Wacs.Core.Instructions.Memory
             var mem = context.Store[a];
 
             long ea = offset + M.Offset;
-            if (offset < 0)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory offset {offset} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
@@ -85,7 +83,7 @@ namespace Wacs.Core.Instructions.Memory
             ulong c = context.OpStack.PopU64();
             context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            long offset = context.OpStack.PopInt();
+            long offset = context.OpStack.PopAddr();
             
             SetMemoryValue(context, offset, c);
         }
@@ -100,8 +98,6 @@ namespace Wacs.Core.Instructions.Memory
             var mem = context.Store[a];
 
             long ea = offset + M.Offset;
-            if (offset < 0)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory offset {offset} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
@@ -124,7 +120,7 @@ namespace Wacs.Core.Instructions.Memory
             ulong c = context.OpStack.PopU64();
             context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            long offset = context.OpStack.PopInt();
+            long offset = context.OpStack.PopAddr();
             
             SetMemoryValue(context, offset, c);
         }
@@ -139,8 +135,6 @@ namespace Wacs.Core.Instructions.Memory
             var mem = context.Store[a];
 
             long ea = offset + M.Offset;
-            if (offset < 0)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory offset {offset} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
@@ -170,7 +164,7 @@ namespace Wacs.Core.Instructions.Memory
             ulong c = context.OpStack.PopU64();
             context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            long offset = context.OpStack.PopInt();
+            long offset = context.OpStack.PopAddr();
             
             SetMemoryValue(context, offset, c);
         }
@@ -185,8 +179,6 @@ namespace Wacs.Core.Instructions.Memory
             var mem = context.Store[a];
 
             long ea = offset + M.Offset;
-            if (offset < 0)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory offset {offset} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15

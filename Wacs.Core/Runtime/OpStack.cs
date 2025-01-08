@@ -18,6 +18,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Runtime.Exceptions;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 
@@ -146,19 +147,22 @@ namespace Wacs.Core.Runtime
             --Count;
             return _registers[Count].Data.UInt64;
         }
-
-        public long PopInt()
+        
+        public long PopAddr()
         {
             --Count;
             var value = _registers[Count];
-            return value.Type switch
+            var addr = value.Type switch
             {
-                ValType.I32 => value.Data.Int32,
+                ValType.I32 => value.Data.UInt32,
                 ValType.I64 => value.Data.Int64,
                 ValType.U32 => value.Data.UInt32,
                 ValType.U64 => (long)value.Data.UInt64,
                 _ => throw new InvalidDataException($"OperandStack contained wrong type {value.Type} expected int")
             };
+            if (addr < 0)
+                throw new TrapException($"Address was negative {addr}");
+            return addr;
         }
 
         public float PopF32()
