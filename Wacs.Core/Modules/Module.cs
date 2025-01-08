@@ -312,7 +312,7 @@ namespace Wacs.Core
             }
             catch (InvalidDataException exc)
             {
-                throw new FormatException($"Bad Memory parameters {exc.Message}");
+                throw new FormatException($"Exception in Instruction decode: {exc.Message}");
             }
         }
 

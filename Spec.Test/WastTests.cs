@@ -41,9 +41,6 @@ namespace Spec.Test
             SpecTestEnv env = new SpecTestEnv();
             WasmRuntime runtime = new();
             env.BindToRuntime(runtime);
-
-            //Make multiple memories fail validation
-            ModuleValidator.ValidateMultipleMemories = false;
             runtime.TranspileModules = false;
             
             Module? module = null;
@@ -78,8 +75,6 @@ namespace Spec.Test
             WasmRuntime runtime = new();
             env.BindToRuntime(runtime);
 
-            //Make multiple memories fail validation
-            ModuleValidator.ValidateMultipleMemories = false;
             runtime.TranspileModules = true;
             
             Module? module = null;
