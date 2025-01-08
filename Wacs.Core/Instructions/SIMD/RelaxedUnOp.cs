@@ -33,30 +33,31 @@ namespace Wacs.Core.Instructions.Numeric
             V128 a = context.OpStack.PopV128();
             MV128 result = new MV128();
 
-            for (float i = 0.0f; i < 4.0f; i += 1.0f)
+            for (int i = 0; i < 4; i++)
             {
-                if (float.IsNaN(a[i]))
+                float f = (float)i;
+                if (float.IsNaN(a[f]))
                 {
 #if RELAXED_SIMD_ALT
-                    result[i] = 0.0f;
+                    result[i] = 0;
 #else
-                    result[i] = (float)int.MinValue;
+                    result[i] = int.MinValue;
 #endif
                     continue;
                 }
 
-                float r = (float)Math.Truncate(a[i]);
+                float r = (float)Math.Truncate(a[f]);
                 if (r < int.MinValue)
-                    result[i] = (float)int.MinValue;
+                    result[i] = int.MinValue;
                 else if (r > int.MaxValue)
 #if RELAXED_SIMD_ALT
-                    result[i] = (float)int.MinValue;
+                    result[i] = int.MinValue;
 #else
-                    result[i] = (float)int.MaxValue;
+                    result[i] = int.MaxValue;
 #endif
                 else
                 {
-                    result[i] = r;
+                    result[i] = (int)r;
                 }
             }
             context.OpStack.PushV128(result);
@@ -67,30 +68,31 @@ namespace Wacs.Core.Instructions.Numeric
             V128 a = context.OpStack.PopV128();
             MV128 result = new MV128();
 
-            for (float i = 0.0f; i < 4.0f; i += 1.0f)
+            for (uint i = 0; i < 4; i ++)
             {
-                if (float.IsNaN(a[i]))
+                float f = (float)i;
+                if (float.IsNaN(a[f]))
                 {
 #if RELAXED_SIMD_ALT
-                    result[i] = 0.0f;
+                    result[i] = 0;
 #else
-                    result[i] = (float)uint.MaxValue;
+                    result[i] = uint.MaxValue;
 #endif
                     continue;
                 }
 
-                float r = (float)Math.Truncate(a[i]);
+                float r = (float)Math.Truncate(a[f]);
                 if (r < uint.MinValue)
 #if RELAXED_SIMD_ALT
-                    result[i] = (float)uint.MinValue;
+                    result[i] = uint.MinValue;
 #else
-                    result[i] = (float)uint.MaxValue;
+                    result[i] = uint.MaxValue;
 #endif
                 else if (r > int.MaxValue)
-                    result[i] = (float)uint.MaxValue;
+                    result[i] = uint.MaxValue;
                 else
                 {
-                    result[i] = r;
+                    result[i] = (uint)r;
                 }
             }
             context.OpStack.PushV128(result);
@@ -101,28 +103,30 @@ namespace Wacs.Core.Instructions.Numeric
             V128 a = context.OpStack.PopV128();
             MV128 result = new MV128();
 
-            for (double i = 0.0; i < 2.0; i += 1.0)
+            for (int i = 0; i < 2; i++)
             {
-                if (double.IsNaN(a[i]))
+                double d = (double)i;
+                if (double.IsNaN(a[d]))
 #if RELAXED_SIMD_ALT
-                    result[i] = 0.0;
+                    result[i] = 0;
 #else
-                    result[i] = (double)int.MinValue;
+                    result[i] = int.MinValue;
 #endif
-                double r = Math.Truncate(a[i]);
+                double r = Math.Truncate(a[d]);
                 if (r < int.MinValue)
                     result[i] = int.MinValue;
                 else if (r > int.MaxValue)
 #if RELAXED_SIMD_ALT
-                    result[i] = (double)int.MinValue;
+                    result[i] = int.MinValue;
 #else
-                    result[i] = (double)int.MaxValue;
+                    result[i] = int.MaxValue;
 #endif
                 else
                 {
-                    result[i] = r;
+                    result[i] = (int)r;
                 }
             }
+            context.OpStack.PushV128(result);
         }
 
         private static void ExecuteI32x4RelaxedTruncF64x2UZero(ExecContext context)
@@ -130,28 +134,30 @@ namespace Wacs.Core.Instructions.Numeric
             V128 a = context.OpStack.PopV128();
             MV128 result = new MV128();
 
-            for (double i = 0.0; i < 2.0; i += 1.0)
+            for (uint i = 0; i < 2; i++)
             {
-                if (double.IsNaN(a[i]))
+                double d = (double)i;
+                if (double.IsNaN(a[d]))
 #if RELAXED_SIMD_ALT
-                    result[i] = 0.0;
+                    result[i] = 0;
 #else
-                    result[i] = (double)uint.MaxValue;
+                    result[i] = uint.MaxValue;
 #endif
-                double r = Math.Truncate(a[i]);
+                double r = Math.Truncate(a[d]);
                 if (r < uint.MinValue)
 #if RELAXED_SIMD_ALT
-                    result[i] = (double)uint.MinValue;
+                    result[i] = uint.MinValue;
 #else
-                    result[i] = (double)uint.MaxValue;
+                    result[i] = uint.MaxValue;
 #endif
                 else if (r > uint.MaxValue)
                     result[i] = uint.MaxValue;
                 else
                 {
-                    result[i] = r;
+                    result[i] = (uint)r;
                 }
             }
+            context.OpStack.PushV128(result);
         }
     }
 }

@@ -189,34 +189,39 @@ namespace Wacs.Core.Instructions.Numeric
 
         private static void ExecuteI16x8RelaxedDotI8x16I7x16S(ExecContext context)
         {
-            V128 b = context.OpStack.PopV128();
-            V128 a = context.OpStack.PopV128();
+            V128 c2 = context.OpStack.PopV128();
+            V128 c1 = context.OpStack.PopV128();
             MV128 result = new MV128();
-            MV128 intermediate = new MV128();
-            for (sbyte i = 0; i < 8; i += 1)
+            MV128 left = new MV128();
+            MV128 right = new MV128();
+            for (sbyte i = 0; i < 16; i += 1)
             {
-                if ((b[i] & 0x80) != 0)
+                int lhs = c1[i];
+                int rhs = c2[i];
+                if ((c2[i] & 0x80) != 0)
                 {
-                    int lhs = a[i];
 #if RELAXED_SIMD_ALT
-                    int rhs = b[(byte)i];
+                    rhs = c2[(byte)i];
 #else
-                    int rhs = b[i];
+                    rhs = c2[i];
 #endif
-                    intermediate[i] = (sbyte)(lhs * rhs);
+                }
+                if ((i & 1) == 0)
+                {
+                    left[(short)(i >> 1)] = (short)(lhs * rhs);
                 }
                 else
                 {
-                    intermediate[i] = (sbyte)(a[i] * b[i]);
+                    right[(short)(i >> 1)] = (short)(lhs * rhs);
                 }
             }
 
             for (short i = 0; i < 8; i += 1)
             {
 #if RELAXED_SIMD_ALT
-                result[i] = (short)(byte)(intermediate[(sbyte)(i * 2)] + intermediate[(sbyte)(i * 2 + 1)]);
+                result[i] = (short)(ushort)(left[i] + right[i]);
 #else
-                result[i] = (short)(intermediate[(sbyte)(i * 2)] + intermediate[(sbyte)(i * 2 + 1)]);
+                result[i] = (short)(left[i] + right[i]);
 #endif
             }
             context.OpStack.PushV128(result);
