@@ -16,12 +16,19 @@ using System;
 
 namespace Wacs.Core.Types.Defs
 {
+    [Flags]
     public enum LimitsFlag : byte
     {
-        Mem32Min = 0x00,
-        Mem32MinMax = 0x01,
+        HasMax = 0x01,
+        IsShared = 0x02 | HasMax, // Shared is only valid if there is a maximum
+        Is64Bit = 0x04,
         
-        Mem64Min = 0x04,
-        Mem64MinMax = 0x05,
+        Mem32Min = 0x00,
+        Mem32MinMax = Mem32Min | HasMax,
+        Mem32MinMaxShared = Mem32MinMax | IsShared,
+        
+        Mem64Min = Is64Bit,
+        Mem64MinMax = Is64Bit | HasMax,
+        Mem64MinMaxShared = Mem64MinMax | IsShared,
     }
 }
