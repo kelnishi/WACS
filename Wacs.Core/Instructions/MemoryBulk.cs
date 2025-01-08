@@ -109,7 +109,7 @@ namespace Wacs.Core.Instructions
             context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //8.
-            long n = context.OpStack.PopInt();
+            long n = context.OpStack.PopAddr();
             //9.
             const int err = -1;
             //10,11 TODO: implement optional constraints on memory.grow
@@ -217,7 +217,7 @@ namespace Wacs.Core.Instructions
                 context.Assert( context.OpStack.Peek().IsInt,
                     $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //15.
-                long d = context.OpStack.PopInt();
+                long d = context.OpStack.PopAddr();
                 //16.
                 if (s + n > data.Data.Length)
                     throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Data underflow.");
@@ -379,17 +379,17 @@ namespace Wacs.Core.Instructions
                 context.Assert( context.OpStack.Peek().IsInt,
                     $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //11.
-                long n = context.OpStack.PopInt();
+                long n = context.OpStack.PopAddr();
                 //12.
                 context.Assert( context.OpStack.Peek().IsInt,
                     $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //13.
-                long s = context.OpStack.PopInt();
+                long s = context.OpStack.PopAddr();
                 //14.
                 context.Assert( context.OpStack.Peek().IsInt,
                     $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //15.
-                long d = context.OpStack.PopInt();
+                long d = context.OpStack.PopAddr();
                 //16.
                 long check = s + n;
                 if (check > memD.Data.Length)
@@ -503,7 +503,7 @@ namespace Wacs.Core.Instructions
                 context.Assert( context.OpStack.Peek().IsInt,
                     $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
                 //11.
-                long d = context.OpStack.PopInt();
+                long d = context.OpStack.PopAddr();
                 //12.
                 if (d + n > mem.Data.Length)
                     throw new TrapException("Instruction memory.fill failed. Buffer overflow");
