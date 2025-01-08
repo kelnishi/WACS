@@ -770,5 +770,20 @@ namespace Wacs.Core.Runtime
         public static implicit operator MV128(V128 v128) => 
             MemoryMarshal.Cast<V128, MV128>(MemoryMarshal.CreateSpan(ref v128, 1))[0];
         
+        public override string ToString()
+        {
+            var stringBuilder = new StringBuilder("0x");
+            for (int j = 16; j > 0; --j)
+            {
+                byte i = (byte)(j - 1);
+                stringBuilder.Append(this[i].ToString("X2"));
+                if (i % 4 == 0 && i < 15 && i > 0)
+                {
+                    stringBuilder.Append('_');
+                }
+            }
+
+            return stringBuilder.ToString();
+        }
     }
 }

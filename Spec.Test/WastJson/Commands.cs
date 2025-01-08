@@ -188,6 +188,22 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("expected")] public List<Argument> Expected { get; set; } = new();
         public CommandType Type => CommandType.AssertReturn;
         [JsonPropertyName("line")] public int Line { get; set; }
+        
+        static bool CompareValues(Value actual, Value expected)
+        {
+            //HACK: null ref comparison
+            if (expected.IsNullRef)
+            {
+                if (!actual.IsNullRef && !actual.Type.Matches(expected.Type, null))
+                    return false;
+            }
+            else if (!actual.Equals(expected))
+            {
+                return false;
+            }
+
+            return true;
+        }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -202,19 +218,24 @@ namespace Spec.Test.WastJson
                         throw new TestException(
                             $"Test failed {this} \"{invokeAction.Field}\": Expected [{string.Join(" ", Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
 
-                    foreach (var (actual, expected) in result.Zip(Expected, (a, e) => (a, e.AsValue)))
+                    foreach (var (actual, arg) in result.Zip(Expected, (a, e) => (a, e)))
                     {
-                        //HACK: null ref comparison
-                        if (expected.IsNullRef)
-                        {
-                            if (!actual.IsNullRef && !actual.Type.Matches(expected.Type, null))
+                        if (arg.Type == "either")
+                        {   
+                            if (!arg.AsValues.Any(v => CompareValues(actual, v)))
+                            {
                                 throw new TestException(
-                                    $"Test failed {this} \"{invokeAction.Field}\": Expected [{string.Join(" ", Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
+                                    $"Test failed {this} \"{invokeAction.Field}\": \nExpected \n either:[{string.Join("]\n     or:[", Expected.SelectMany(e => e.AsValues))}], \nbut got:[{string.Join(" ", result)}]");
+                            }
                         }
-                        else if (!actual.Equals(expected))
+                        else
                         {
-                            throw new TestException(
-                                $"Test failed {this} \"{invokeAction.Field}\": Expected [{string.Join(" ", Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");    
+                            var expected = arg.AsValue;
+                            if (!CompareValues(actual, expected))
+                            {
+                                throw new TestException(
+                                    $"Test failed {this} \"{invokeAction.Field}\": \nExpected [{string.Join(" ", Expected.Select(e => e.AsValue))}],\n but got [{string.Join(" ", result)}]");    
+                            }
                         }
                     }                    
                     break;
