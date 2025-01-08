@@ -39,16 +39,24 @@ namespace Wacs.Core.Types
         public long Minimum;
 
         /// <summary>
+        /// The address type of the memory.
+        /// </summary>
+        public AddrType AddressType;
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="Limits"/> class with the specified minimum and optional maximum.
         /// </summary>
+        /// <param name="type">i32|i64 pointer type</param>
         /// <param name="minimum">The minimum number of units.</param>
         /// <param name="maximum">The optional maximum number of units.</param>
-        public Limits(long minimum, long? maximum = null) {
+        public Limits(AddrType type, long minimum, long? maximum = null) {
+            AddressType = type;
             Minimum = minimum;
             Maximum = maximum;
         }
 
         public Limits(Limits copy) {
+            AddressType = copy.AddressType;
             Minimum = copy.Minimum;
             Maximum = copy.Maximum;
         }
@@ -60,16 +68,16 @@ namespace Wacs.Core.Types
         /// </summary>
         public static Limits Parse(BinaryReader reader) => 
             (LimitsFlag)reader.ReadByte() switch {
-                LimitsFlag.Mem32Min => new Limits(reader.ReadLeb128_u32()),
-                LimitsFlag.Mem32MinMax => new Limits(reader.ReadLeb128_u32(), reader.ReadLeb128_u32()),
+                LimitsFlag.Mem32Min => new Limits(AddrType.I32,reader.ReadLeb128_u32()),
+                LimitsFlag.Mem32MinMax => new Limits(AddrType.I32,reader.ReadLeb128_u32(), reader.ReadLeb128_u32()),
                 //Clamp to 64-bit signed integer, we're not going to ever allow more than 2^63-1 pages.
-                LimitsFlag.Mem64Min => new Limits((long)reader.ReadLeb128_u64()),
-                LimitsFlag.Mem64MinMax => new Limits((long)reader.ReadLeb128_u64(), (long)reader.ReadLeb128_u64()),
+                LimitsFlag.Mem64Min => new Limits(AddrType.I64, (long)reader.ReadLeb128_u64()),
+                LimitsFlag.Mem64MinMax => new Limits(AddrType.I64,(long)reader.ReadLeb128_u64(), (long)reader.ReadLeb128_u64()),
                 var flag => throw new FormatException($"Invalid Limits flag {flag} at offset {reader.BaseStream.Position}.")
             };
 
-        public string ToWat() => Maximum != null ? $"{Minimum} {Maximum}" : $"{Minimum}";
-        public override string ToString() => Maximum != null ? $"Limits: [{Minimum}, {Maximum}]" : $"Limits: [{Minimum},?]";
+        public string ToWat() => Maximum != null ? $"{AddressType} {Minimum} {Maximum}" : $"{AddressType} {Minimum}";
+        public override string ToString() => Maximum != null ? $"Limits: [{AddressType} {Minimum}, {Maximum}]" : $"Limits: [{AddressType} {Minimum},?]";
 
         /// <summary>
         /// @Spec 3.2.1. Limits
