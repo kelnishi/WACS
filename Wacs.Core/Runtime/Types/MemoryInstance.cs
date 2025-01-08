@@ -51,10 +51,10 @@ namespace Wacs.Core.Runtime.Types
         /// <summary>
         /// @Spec 4.5.3.9. Growing memories
         /// </summary>
-        public bool Grow(uint numPages)
+        public bool Grow(long numPages)
         {
-            uint oldNumPages = (uint)(Data.Length / Constants.PageSize);
-            uint newNumPages = oldNumPages + numPages;
+            long oldNumPages = Data.Length / Constants.PageSize;
+            long newNumPages = oldNumPages + numPages;
 
             if (newNumPages > Constants.HostMaxPages)
                 return false;

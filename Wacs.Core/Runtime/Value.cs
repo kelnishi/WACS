@@ -457,6 +457,24 @@ namespace Wacs.Core.Runtime
             GcRef = gcRef;
         }
         
+        public Value(AddrType type, long address)
+        {
+            this = default;
+            switch (type)
+            {
+                case AddrType.I32: 
+                    Type = ValType.I32;
+                    Data.UInt32 = (uint)address;
+                    break;
+                case AddrType.I64:
+                    Type = ValType.I64;
+                    Data.Int64 = address;
+                    break;
+                default: 
+                    throw new InvalidDataException($"Cannot define Address Value of type {type}");
+            }
+        }
+        
         public Value(ValType type, object externalValue)
         {
             this = default;

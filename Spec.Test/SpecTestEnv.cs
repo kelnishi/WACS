@@ -58,7 +58,7 @@ namespace Spec.Test
             runtime.BindHostGlobal((module, "global_f64"), new GlobalType(ValType.F64, Mutability.Immutable),
                 new Value(ValType.F64, 666.6));
 
-            runtime.BindHostTable((module, "table"), new TableType(ValType.FuncRef,new Limits(10,20)),
+            runtime.BindHostTable((module, "table"), new TableType(ValType.FuncRef, new Limits(AddrType.I32, 10,20)),
                 new Value(ValType.FuncRef));
             
             runtime.BindHostMemory((module, "memory"), new MemoryType(minimum:1, maximum:2));
