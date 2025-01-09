@@ -383,6 +383,10 @@ namespace Wacs.Core.Instructions.GC
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type at top of stack {context.OpStack.Peek().Type}.");
             var s = context.OpStack.PopI32();
             //9
+            if (s < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Out of bounds Array elem source index");
+            if (n < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Out of bounds Array elem count");
             if (s + n > eleminst.Elements.Count)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Array size exceeds elements length");
             //10
