@@ -317,8 +317,8 @@ namespace Wacs.Core.Instructions
     //0xFC_0A
     public class InstMemoryCopy : InstructionBase
     {
-        private MemIdx DstY;
-        private MemIdx SrcX;
+        private MemIdx SrcY;
+        private MemIdx DstX;
         public override ByteCode Op => ExtCode.MemoryCopy;
 
         /// <summary>
@@ -326,13 +326,13 @@ namespace Wacs.Core.Instructions
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.Mems.Contains(SrcX),
-                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),SrcX);
-            context.Assert(context.Mems.Contains(DstY),
-                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(), DstY);
+            context.Assert(context.Mems.Contains(DstX),
+                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),DstX);
+            context.Assert(context.Mems.Contains(SrcY),
+                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(), SrcY);
 
-            var memX = context.Mems[SrcX];
-            var memY = context.Mems[DstY];
+            var memX = context.Mems[DstX];
+            var memY = context.Mems[SrcY];
             var atS = memX.Limits.AddressType;
             var atD = memY.Limits.AddressType;
             var atN = atS.Min(atD);
@@ -346,23 +346,23 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             //2.
-            context.Assert( context.Frame.Module.MemAddrs.Contains(SrcX),
+            context.Assert( context.Frame.Module.MemAddrs.Contains(DstX),
                 
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {SrcX} did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {DstX} did not exist in the context.");
             //3.
-            context.Assert( context.Frame.Module.MemAddrs.Contains(DstY),
+            context.Assert( context.Frame.Module.MemAddrs.Contains(SrcY),
                 
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {DstY} did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {SrcY} did not exist in the context.");
             //4.
-            var da = context.Frame.Module.MemAddrs[SrcX];
+            var da = context.Frame.Module.MemAddrs[DstX];
             //5.
-            var sa = context.Frame.Module.MemAddrs[DstY];
+            var sa = context.Frame.Module.MemAddrs[SrcY];
             //6.
             context.Assert( context.Store.Contains(da),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {SrcX} was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {DstX} was not in the Store.");
             //7.
             context.Assert( context.Store.Contains(sa),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {DstY} was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {SrcY} was not in the Store.");
             //8.
             var memD = context.Store[da];
             //9.
@@ -406,9 +406,9 @@ namespace Wacs.Core.Instructions
                 {
                     context.OpStack.PushValue(new Value(atD, d));
                     context.OpStack.PushValue(new Value(atS, s));
-                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, SrcX))
+                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, DstX))
                         .Execute(context);
-                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, DstY))
+                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, SrcY))
                         .Execute(context);
                     check = d + 1L;
                     context.Assert( check < Constants.TwoTo32,
@@ -430,9 +430,9 @@ namespace Wacs.Core.Instructions
                     context.Assert( check < Constants.TwoTo32,
                         $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
                     context.OpStack.PushValue(new Value(atS, s + n - 1));
-                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, SrcX))
+                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, DstX))
                         .Execute(context);
-                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, DstY))
+                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, SrcY))
                         .Execute(context);
                     context.OpStack.PushValue(new Value(atD, d));
                     context.OpStack.PushValue(new Value(atS, s));
@@ -446,8 +446,8 @@ namespace Wacs.Core.Instructions
 
         public override InstructionBase Parse(BinaryReader reader)
         {
-            SrcX = (MemIdx)reader.ReadByte();
-            DstY = (MemIdx)reader.ReadByte();
+            SrcY = (MemIdx)reader.ReadByte();
+            DstX = (MemIdx)reader.ReadByte();
             return this;
         }
     }
