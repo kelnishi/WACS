@@ -233,7 +233,7 @@ namespace Wacs.Core.Validation
                             {
                                 string path = ctx.PropertyPath;
                                 var (line, _) = ctx.GetValidationContext().ValidationModule.Repr.CalculateLine(path);
-                                message = $"{ctx.PropertyPath} line {line}: {message} in Instruction {inst.Op.GetMnemonic()}";
+                                message = $"line {line}: {message} in Instruction {inst.Op.GetMnemonic()}";
                             }
                             ctx.AddFailure(message);
                             // throw new ValidationException(message);
