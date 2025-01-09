@@ -79,7 +79,7 @@ namespace Wacs.Core.Types
                                     break;
                                 foreach (var failure in funcResult.Errors)
                                 {
-                                    var propertyName = $"{ctx.PropertyPath}.{failure.PropertyName}";
+                                    var propertyName = $"{failure.PropertyName}";
                                     ctx.AddFailure(propertyName, failure.ErrorMessage);
                                 }
                                 break;
@@ -92,7 +92,7 @@ namespace Wacs.Core.Types
                                         continue;
                                     foreach (var failure in structResult.Errors)
                                     {
-                                        var propertyName = $"{ctx.PropertyPath}.{failure.PropertyName}";
+                                        var propertyName = $"{failure.PropertyName}";
                                         ctx.AddFailure(propertyName, failure.ErrorMessage);
                                     }
                                     break;
@@ -105,7 +105,7 @@ namespace Wacs.Core.Types
                                     break;
                                 foreach (var failure in arrayResult.Errors)
                                 {
-                                    var propertyName = $"{ctx.PropertyPath}.{failure.PropertyName}";
+                                    var propertyName = $"{failure.PropertyName}";
                                     ctx.AddFailure(propertyName, failure.ErrorMessage);
                                 }
                                 break;
