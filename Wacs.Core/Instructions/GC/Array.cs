@@ -304,6 +304,12 @@ namespace Wacs.Core.Instructions.GC
                 end = datainst.Data.Length;
                 s = end - n * z;
             }
+
+            if (s < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Out of bounds Array start index");
+            if (end > datainst.Data.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Out of bounds Array end index");
+            
             var b = datainst.Data.AsSpan()[s..end];
             //19 skip the stack since we're inline
             var a = context.Store.AddArray();
