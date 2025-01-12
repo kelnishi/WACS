@@ -131,6 +131,8 @@ namespace Wacs.Core.Types
                 return false;
             if (imported.Limits.Maximum > Limits.Maximum)
                 return false;
+            if (imported.Limits.AddressType != Limits.AddressType)
+                return false;
             return true;
         }
 
