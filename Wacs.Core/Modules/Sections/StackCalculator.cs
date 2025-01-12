@@ -138,6 +138,8 @@ namespace Wacs.Core
 
             Globals = new GlobalValidationSpace(moduleInst.Repr);
             Globals.IncrementalHighWatermark = int.MaxValue;
+            
+            Tags = new TagsSpace(moduleInst.Repr);
 
             OpStack = new CalculatorOpStack(this);
             
@@ -163,6 +165,7 @@ namespace Wacs.Core
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
+        public TagsSpace Tags { get; }
         public LocalsSpace Locals { get; }
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
@@ -213,6 +216,7 @@ namespace Wacs.Core
 
 
         public void ValidateBlock(Block instructionBlock, int index = 0) {}
+        public void ValidateCatches(CatchType[] catches) { }
 
         public void Clear()
         {

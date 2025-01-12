@@ -32,6 +32,8 @@ namespace Wacs.Core.Runtime.Types
         public readonly List<ExportInstance> Exports = new();
         public readonly FuncAddrs FuncAddrs = new();
         public readonly GlobalAddrs GlobalAddrs = new();
+        public readonly TagAddrs TagAddrs = new();
+        public readonly ExnAddrs ExnAddrs = new();
         public readonly MemAddrs MemAddrs = new();
 
         public readonly Module Repr;
