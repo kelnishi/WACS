@@ -62,6 +62,13 @@ namespace Wacs.Core
                 .Select(globDesc => new Global(globDesc.GlobalDef){IsImport = true})
                 .ToList().AsReadOnly();
 
+        public ReadOnlyCollection<TagType> ImportedTags =>
+            Imports
+                .Select(import => import.Desc)
+                .OfType<ImportDesc.TagDesc>()
+                .Select(tagDesc => tagDesc.TagDef)
+                .ToList().AsReadOnly();
+        
         /// <summary>
         /// @Spec 2.5.11. Imports
         /// </summary>
@@ -109,6 +116,7 @@ namespace Wacs.Core
                         v.Add(new ImportDesc.TableDesc.Validator());
                         v.Add(new ImportDesc.MemDesc.Validator());
                         v.Add(new ImportDesc.GlobalDesc.Validator());
+                        v.Add(new ImportDesc.TagDesc.Validator());
                     });
                 }
             }
@@ -178,6 +186,20 @@ namespace Wacs.Core
                     }
                 }
             }
+
+            public class TagDesc : ImportDesc
+            {
+                public TagType TagDef { get; internal set; } = null!;
+                
+                public class Validator : AbstractValidator<TagDesc>
+                {
+                    public Validator()
+                    {
+                        RuleFor(desc => desc.TagDef)
+                            .SetValidator(new TagType.Validator());
+                    }
+                }
+            }
         }
     }
     
@@ -189,6 +211,7 @@ namespace Wacs.Core
                 ExternalKind.Table => new Module.ImportDesc.TableDesc { TableDef = TableType.Parse(reader) },
                 ExternalKind.Memory => new Module.ImportDesc.MemDesc { MemDef = MemoryType.Parse(reader) },
                 ExternalKind.Global => new Module.ImportDesc.GlobalDesc { GlobalDef = GlobalType.Parse(reader) },
+                ExternalKind.Tag => new Module.ImportDesc.TagDesc { TagDef = TagType.Parse(reader) },
                 var kind => throw new FormatException($"Malformed Module Import section {kind} at {reader.BaseStream.Position}")
             };
 
@@ -224,6 +247,9 @@ namespace Wacs.Core
                         break;
                     case Module.ImportDesc.GlobalDesc gd:
                         gd.Id = $"{gIdx++}";
+                        break;
+                    case Module.ImportDesc.TagDesc td:
+                        td.Id = $"{tIdx++}";
                         break;
                 }    
             }

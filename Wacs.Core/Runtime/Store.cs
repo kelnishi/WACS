@@ -31,6 +31,8 @@ namespace Wacs.Core.Runtime
 
         private readonly List<IFunctionInstance> Funcs = new();
         private readonly List<GlobalInstance> Globals = new();
+        private readonly List<TagInstance> Tags = new();
+        private readonly List<ExnInstance> Exns = new();
 
         private readonly List<TableInstance> Tables = new();
         private StoreTransaction? CurrentTransaction = null;
@@ -52,6 +54,9 @@ namespace Wacs.Core.Runtime
 
         public GlobalInstance this[GlobalAddr addr] =>
             CurrentTransaction?.Globals.GetValueOrDefault(addr)??Globals[addr.Value];
+        
+        public TagInstance this[TagAddr addr] =>
+            CurrentTransaction?.Tags.GetValueOrDefault(addr)??Tags[addr.Value];
 
         public ElementInstance this[ElemAddr addr] =>
             CurrentTransaction?.Elems.GetValueOrDefault(addr)??Elems[addr.Value];
@@ -63,6 +68,7 @@ namespace Wacs.Core.Runtime
         public bool Contains(TableAddr addr) => addr.Value < Tables.Count || (CurrentTransaction?.Tables.ContainsKey(addr) ?? false);
         public bool Contains(MemAddr addr) => addr.Value < MemsCount || (CurrentTransaction?.Mems.ContainsKey(addr) ?? false);
         public bool Contains(GlobalAddr addr) => addr.Value < Globals.Count || (CurrentTransaction?.Globals.ContainsKey(addr) ?? false);
+        public bool Contains(TagAddr addr) => addr.Value < Tags.Count || (CurrentTransaction?.Tags.ContainsKey(addr) ?? false);
         public bool Contains(ElemAddr addr) => addr.Value < Elems.Count || (CurrentTransaction?.Elems.ContainsKey(addr) ?? false);
         public bool Contains(DataAddr addr) => addr.Value < Datas.Count || (CurrentTransaction?.Datas.ContainsKey(addr) ?? false);
 
@@ -87,6 +93,7 @@ namespace Wacs.Core.Runtime
             foreach (var (addr, inst) in CurrentTransaction.Tables) Tables[addr.Value] = inst;
             foreach (var (addr, inst) in CurrentTransaction.Mems) Mems[addr.Value] = inst;
             foreach (var (addr, inst) in CurrentTransaction.Globals) Globals[addr.Value] = inst;
+            foreach (var (addr, inst) in CurrentTransaction.Tags) Tags[addr.Value] = inst;
             foreach (var (addr, inst) in CurrentTransaction.Elems) Elems[addr.Value] = inst;
             foreach (var (addr, inst) in CurrentTransaction.Datas) Datas[addr.Value] = inst;
             CurrentTransaction = null;
@@ -100,6 +107,7 @@ namespace Wacs.Core.Runtime
             while (Funcs.Count > 0 && Funcs[^1] == null) Funcs.RemoveAt(Funcs.Count - 1);
             while (Tables.Count > 0 && Tables[^1] == null) Tables.RemoveAt(Tables.Count - 1);
             while (Globals.Count > 0 && Globals[^1] == null) Globals.RemoveAt(Globals.Count - 1);
+            while (Tags.Count > 0 && Tags[^1] == null) Tags.RemoveAt(Tags.Count - 1);
             while (Elems.Count > 0 && Elems[^1] == null) Elems.RemoveAt(Elems.Count - 1);
             while (Datas.Count > 0 && Datas[^1] == null) Datas.RemoveAt(Datas.Count - 1);
             
@@ -193,6 +201,25 @@ namespace Wacs.Core.Runtime
             Globals.Add(null!);
             CurrentTransaction.Globals.Add(addr, global);
             
+            return addr;
+        }
+        
+        public TagAddr AddTag(TagInstance tag)
+        {
+            var addr = new TagAddr(Tags.Count);
+            if (CurrentTransaction == null)
+                throw new InvalidOperationException("Cannot add to Store without a transaction.");
+            Tags.Add(null!);
+            CurrentTransaction.Tags.Add(addr, tag);
+            return addr;
+        }
+        
+        public ExnAddr AddExn(ExnInstance exn)
+        {
+            var addr = new ExnAddr(Exns.Count);
+            if (CurrentTransaction == null)
+                throw new InvalidOperationException("Cannot add to Store without a transaction.");
+            Exns.Add(exn);
             return addr;
         }
 

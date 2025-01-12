@@ -90,6 +90,33 @@ namespace Wacs.Core.Runtime
 
         public override int GetHashCode() => Value;
     }
+    
+    public readonly struct TagAddr : IAddress, IEquatable<TagAddr>
+    {
+        public static readonly TagAddr Null = new(-1);
+        public TagAddr(int value) => Value = value;
+        public readonly int Value;
+        public static implicit operator Index(TagAddr addr) => new(addr.Value);
+
+        public bool Equals(TagAddr other) => Value == other.Value;
+
+        public override bool Equals(object? obj) => obj is TagAddr other && Equals(other);
+
+        public override int GetHashCode() => Value;
+    }
+
+    public readonly struct ExnAddr : IAddress, IEquatable<ExnAddr>
+    {
+        public ExnAddr(int value) => Value = value;
+        public readonly int Value;
+        public static implicit operator Index(ExnAddr addr) => new(addr.Value);
+
+        public bool Equals(ExnAddr other) => Value == other.Value;
+
+        public override bool Equals(object? obj) => obj is ExnAddr other && Equals(other);
+
+        public override int GetHashCode() => Value;
+    }
 
     public readonly struct ElemAddr : IAddress, IEquatable<ElemAddr>
     {
@@ -118,5 +145,7 @@ namespace Wacs.Core.Runtime
 
         public override int GetHashCode() => Value;
     }
+    
+    
     
 }

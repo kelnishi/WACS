@@ -41,6 +41,7 @@ namespace Wacs.Core.Validation
             RuleForEach(module => module.Tables).SetValidator(new TableType.Validator());
             RuleForEach(module => module.Memories).SetValidator(new MemoryType.Validator());
             RuleForEach(module => module.Globals).SetValidator(new Module.Global.Validator());
+            RuleForEach(module => module.Tags).SetValidator(new TagType.Validator());
             RuleForEach(module => module.ValidationFuncs)
                 .SetValidator(new Module.Function.Validator()).OverridePropertyName("Function");
             RuleForEach(module => module.Exports).SetValidator(new Module.Export.Validator());
