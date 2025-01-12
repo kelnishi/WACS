@@ -144,6 +144,8 @@ namespace Wacs.Core
 
             Globals = new GlobalValidationSpace(module);
             Globals.IncrementalHighWatermark = int.MaxValue;
+            
+            Tags = new TagsSpace(module);
 
             _opStack = new FakeOpStack(this);
             
@@ -169,7 +171,7 @@ namespace Wacs.Core
 
         public void Assert(bool factIsTrue, string formatString, params object[] args) { }
         public void Assert([NotNull] object? objIsNotNull, string formatString, params object[] args) { objIsNotNull = NonNull; }
-
+        
         public FuncIdx FunctionIndex => FuncIdx.Default;
 
         public Stack<ValidationControlFrame> ControlStack { get; } = new();
@@ -211,6 +213,7 @@ namespace Wacs.Core
         public ResultType ReturnType { get; }
 
         public void ValidateBlock(Block instructionBlock, int index = 0) { }
+        public void ValidateCatches(CatchType[] catches) { }
 
         public bool Unreachable { get; set; }
 
@@ -230,6 +233,8 @@ namespace Wacs.Core
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
 
+        public TagsSpace Tags { get; }
+        
         private ExecContext BuildDummyContext(Module module, ModuleInstance moduleInst, Module.Function modFunc)
         {
             var store = new Store();

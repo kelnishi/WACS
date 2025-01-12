@@ -135,6 +135,19 @@ namespace Wacs.Core.Runtime
                         //17. external imported addresses first
                         moduleInstance.GlobalAddrs.Add(globalAddr);
                         break;
+                    case Module.ImportDesc.TagDesc tagDesc:
+                        if (GetBoundEntity(entityId) is not TagAddr tagAddr)
+                            throw new NotSupportedException(
+                                $"The imported Tag was not provided by the environment: {entityId.module}.{entityId.entity}");
+                        var tagInstance = Store[tagAddr];
+                        var importedType = tagInstance.Type;
+                        var tagType = moduleInstance.Types[tagDesc.TagDef.TypeIndex];
+                        if (!importedType.Matches(tagType, moduleInstance.Types))
+                            throw new NotSupportedException(
+                                $"Type mismatch while importing Tag {entityId.module}.{entityId.entity}: expected {tagType.Expansion}, env provided Tag {tagInstance.Type}");
+                        
+                        moduleInstance.TagAddrs.Add(tagAddr);
+                        break;
                 }
             }
 
@@ -170,6 +183,20 @@ namespace Wacs.Core.Runtime
             moduleInstance.MemAddrs.Finalize();
 
             Context.PopFrame();
+            
+            foreach (var tag in module.Tags)
+            {
+                if (tag.Attribute != TagTypeAttribute.Exception)
+                    throw new InvalidDataException($"Tag must be an exception tag, found {tag.Attribute}");
+                if (!moduleInstance.Types.Contains(tag.TypeIndex))
+                    throw new InvalidDataException($"Tag type index {tag.TypeIndex} not found in types");
+                var tagType = moduleInstance.Types[tag.TypeIndex];
+                if (tagType.Expansion is not FunctionType)
+                    throw new InvalidDataException($"Tag type must be a function type, found {tagType.Expansion}");
+
+                moduleInstance.TagAddrs.Add(AllocateTag(Store, tagType));
+            }
+            
             Frame initFrame2 = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.GlobalInitializers);
             Context.PushFrame(initFrame2);
 
@@ -225,6 +252,8 @@ namespace Wacs.Core.Runtime
                         new ExternalValue.Memory(moduleInstance.MemAddrs[memDesc.MemoryIndex]),
                     Module.ExportDesc.GlobalDesc globalDesc =>
                         new ExternalValue.Global(moduleInstance.GlobalAddrs[globalDesc.GlobalIndex]),
+                    Module.ExportDesc.TagDesc tagDesc =>
+                        new ExternalValue.Tag(moduleInstance.TagAddrs[tagDesc.TagIndex]),
                     _ =>
                         throw new InvalidDataException($"Invalid Export {desc}")
                 };
@@ -508,6 +537,20 @@ namespace Wacs.Core.Runtime
             var globalInst = new GlobalInstance(globalType, val);
             var globalAddr = store.AddGlobal(globalInst);
             return globalAddr;
+        }
+        
+        private static TagAddr AllocateTag(Store store, DefType tagType)
+        {
+            var tagInst = new TagInstance(tagType);
+            var tagAddr = store.AddTag(tagInst);
+            return tagAddr;
+        }
+
+        private static ExnAddr AllocateExn(Store store, TagAddr ta, Value[] fields)
+        {
+            var exnInst = new ExnInstance(ta, fields);
+            var exnAddr = store.AddExn(exnInst);
+            return exnAddr;
         }
 
         /// <summary>

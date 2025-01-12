@@ -19,6 +19,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using FluentValidation;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types.Defs;
@@ -100,6 +101,38 @@ namespace Wacs.Core.Types
         public bool Contains(GlobalIdx idx) => idx.Value < _space.Count;
 
         public void Add(GlobalAddr element) => _space.Add(element);
+    }
+
+    public class TagAddrs
+    {
+        private readonly List<TagAddr> _space = new();
+        
+        public TagAddr this[TagIdx idx]
+        {
+            get => _space[(int)idx.Value];
+            set => _space[(int)idx.Value] = value;
+        }
+        
+        public bool Contains(TagIdx idx) => idx.Value < _space.Count;
+        
+        public void Add(TagAddr element) => _space.Add(element);
+        
+        public IEnumerator<TagAddr> GetEnumerator() => _space.GetEnumerator();
+    }
+
+    public class ExnAddrs
+    {
+        private readonly List<ExnAddr> _space = new();
+
+        public ExnAddr this[ExnIdx idx]
+        {
+            get => _space[(int)idx.Value];
+            set => _space[(int)idx.Value] = value;
+        }
+
+        public bool Contains(ExnIdx idx) => idx.Value < _space.Count;
+
+        public void Add(ExnAddr element) => _space.Add(element);
     }
 
     public class ElemAddrs
@@ -233,8 +266,8 @@ namespace Wacs.Core.Types
 
     public class GlobalValidationSpace : AbstractIndexSpace<GlobalIdx, Module.Global>
     {
-        private readonly ReadOnlyCollection<Module.Global> _globals;
         private readonly ReadOnlyCollection<Module.Global> _imports;
+        private readonly ReadOnlyCollection<Module.Global> _globals;
         public int IncrementalHighWatermark = -1;
 
         public GlobalValidationSpace(Module module)
@@ -350,5 +383,28 @@ namespace Wacs.Core.Types
         }
 
         public override bool Contains(DataIdx idx) => idx.Value < _size;
+    }
+
+    public class TagsSpace : AbstractIndexSpace<TagIdx, TagType>
+    {
+        private readonly ReadOnlyCollection<TagType> _imports;
+        private readonly ReadOnlyCollection<TagType> _tags;
+        
+        public TagsSpace(Module module)
+        {
+            _imports = module.ImportedTags;
+            _tags = module.Tags.AsReadOnly();
+        }
+
+        public override TagType this[TagIdx idx]
+        {
+            get => idx.Value < _imports.Count ? _imports[(Index)idx] : _tags[(Index)(idx.Value - _imports.Count)];
+            set => throw new InvalidOperationException(InvalidSetterMessage);
+        }
+
+        public override bool Contains(TagIdx idx)
+        {
+            return idx.Value < _imports.Count + _tags.Count;
+        }
     }
 }

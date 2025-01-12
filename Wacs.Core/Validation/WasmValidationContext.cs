@@ -56,6 +56,8 @@ namespace Wacs.Core.Validation
 
             Globals = new GlobalValidationSpace(module);
 
+            Tags = new TagsSpace(module);
+
             RootContext = rootContext;
             _contextStack.Push(rootContext);
         }
@@ -89,6 +91,8 @@ namespace Wacs.Core.Validation
 
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
+        
+        public TagsSpace Tags { get; }
 
         public bool Unreachable { get; set; }
 
@@ -125,11 +129,9 @@ namespace Wacs.Core.Validation
             }
 
             var instructionValidator = new InstructionValidator();
-            int instIdx = 0;
-            foreach (var inst in instructionBlock.Instructions)
+            foreach (var (inst, instIdx) in instructionBlock.Instructions.Select((ib, i)=>(inst: ib, i)))
             {
-                var subContext = PushSubContext(inst, instIdx++);
-                
+                var subContext = PushSubContext(inst, instIdx);
                 var result = instructionValidator.Validate(subContext);
                 foreach (var error in result.Errors)
                 {
@@ -140,6 +142,21 @@ namespace Wacs.Core.Validation
             }
             
             PopValidationContext();
+        }
+
+        public void ValidateCatches(CatchType[] catches)
+        {
+            var catchValidator = new CatchType.Validator();
+            foreach (var (catchType, index) in catches.Select((ct, i)=>(ct, i)))
+            {
+                var subContext = PushSubContext(catchType, index);
+                var result = catchValidator.Validate(subContext);
+                foreach (var error in result.Errors)
+                {
+                    RootContext.AddFailure($"Catch.{error.PropertyName}", error.ErrorMessage);
+                }
+                PopValidationContext();
+            }
         }
         
         public bool ValidateBlockType(ValType type) => 
@@ -178,6 +195,8 @@ namespace Wacs.Core.Validation
 
         public bool ContainsLabel(uint label) => ControlStack.Count - 2 >= label;
 
+        
+        
         public void PopOperandsToHeight(int height)
         {
             if (OpStack.Height < height)
