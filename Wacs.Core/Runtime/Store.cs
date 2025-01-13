@@ -57,6 +57,9 @@ namespace Wacs.Core.Runtime
         
         public TagInstance this[TagAddr addr] =>
             CurrentTransaction?.Tags.GetValueOrDefault(addr)??Tags[addr.Value];
+        
+        public ExnInstance this[ExnAddr addr] =>
+            Exns[addr.Value];
 
         public ElementInstance this[ElemAddr addr] =>
             CurrentTransaction?.Elems.GetValueOrDefault(addr)??Elems[addr.Value];
@@ -69,6 +72,7 @@ namespace Wacs.Core.Runtime
         public bool Contains(MemAddr addr) => addr.Value < MemsCount || (CurrentTransaction?.Mems.ContainsKey(addr) ?? false);
         public bool Contains(GlobalAddr addr) => addr.Value < Globals.Count || (CurrentTransaction?.Globals.ContainsKey(addr) ?? false);
         public bool Contains(TagAddr addr) => addr.Value < Tags.Count || (CurrentTransaction?.Tags.ContainsKey(addr) ?? false);
+        public bool Contains(ExnAddr addr) => addr.Value < Exns.Count;
         public bool Contains(ElemAddr addr) => addr.Value < Elems.Count || (CurrentTransaction?.Elems.ContainsKey(addr) ?? false);
         public bool Contains(DataAddr addr) => addr.Value < Datas.Count || (CurrentTransaction?.Datas.ContainsKey(addr) ?? false);
 
@@ -214,13 +218,12 @@ namespace Wacs.Core.Runtime
             return addr;
         }
         
-        public ExnAddr AddExn(ExnInstance exn)
+        public ExnAddr AllocateExn(TagAddr ta, Stack<Value> fields)
         {
-            var addr = new ExnAddr(Exns.Count);
-            if (CurrentTransaction == null)
-                throw new InvalidOperationException("Cannot add to Store without a transaction.");
-            Exns.Add(exn);
-            return addr;
+            var exnAddr = new ExnAddr(Exns.Count);
+            var exnInst = new ExnInstance((uint)exnAddr.Value, ta, fields);
+            Exns.Add(exnInst);
+            return exnAddr;
         }
 
         public ElemAddr AddElement(ElementInstance elem)

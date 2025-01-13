@@ -98,10 +98,9 @@ namespace Wacs.Core.Types.Defs
                         }
 
                         var controlFrame = vContext.ControlStack.PeekAt((int)labelIdx.Value);
-                        if (!functionType.ParameterTypes.Equals(controlFrame.StartTypes))
+                        if (!functionType.ParameterTypes.Equals(controlFrame.EndTypes))
                         {
-                            ctx.AddFailure(
-                                $":Catch Label {controlFrame.StartTypes} did not match Catch Tag {functionType.ParameterTypes}");
+                            ctx.AddFailure($"Catch Label {controlFrame.EndTypes.ToNotation()} did not match Catch Tag {functionType.ParameterTypes.ToNotation()}");
                             return;
                         }
                     })
@@ -142,11 +141,10 @@ namespace Wacs.Core.Types.Defs
                         }
 
                         var controlFrame = vContext.ControlStack.PeekAt((int)labelIdx.Value);
-                        var pType = functionType.ParameterTypes.Append(ValType.Exception);
-                        if (!pType.Matches(controlFrame.StartTypes, vContext.Types))
+                        var pType = functionType.ParameterTypes.Append(ValType.Exn);
+                        if (!pType.Matches(controlFrame.EndTypes, vContext.Types))
                         {
-                            ctx.AddFailure(
-                                $":Catch Label {controlFrame.StartTypes} did not match Catch Tag {functionType.ParameterTypes}");
+                            ctx.AddFailure($"Catch Label {controlFrame.EndTypes.ToNotation()} did not match Catch Tag {functionType.ParameterTypes.ToNotation()}");
                             return;
                         }
                     })
@@ -182,7 +180,7 @@ namespace Wacs.Core.Types.Defs
                             return;
                         }
                         var controlFrame = vContext.ControlStack.PeekAt((int)labelIdx.Value);
-                        var resultType = new ResultType(ValType.Exception);
+                        var resultType = new ResultType(ValType.Exn);
                         if (controlFrame.StartTypes.Matches(resultType, vContext.Types))
                         {
                             ctx.AddFailure($"Catch Label {labelIdx.Value} had non-exnref start type");

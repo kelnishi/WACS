@@ -369,6 +369,7 @@ namespace Wacs.Core.Instructions
                 case OpCode.If:
                 case OpCode.Else:
                 case OpCode.Loop:
+                case OpCode.TryTable:
                     context.ExitBlock();
                     break;
                 case OpCode.Func:

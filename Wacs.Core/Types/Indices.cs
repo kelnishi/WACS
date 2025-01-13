@@ -137,10 +137,10 @@ namespace Wacs.Core.Types
         public static explicit operator TagIdx(uint value) => new(value);
     }
 
-    public readonly struct ExnIdx : IEquatable<Index>
+    public readonly struct ExnIdx : IEquatable<Index>, RefIdx
     {
         public readonly uint Value;
-        private ExnIdx(uint value) => Value = value;
+        public ExnIdx(uint value) => Value = value;
         public bool Equals(Index other) => Value == other.Value;
         public static explicit operator Index(ExnIdx exnIdx) => new((int)exnIdx.Value);
         public static explicit operator ExnIdx(int value) => new((uint)value);
