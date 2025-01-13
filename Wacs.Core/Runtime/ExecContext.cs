@@ -63,6 +63,7 @@ namespace Wacs.Core.Runtime
         public InstructionBase[] _sequenceInstructions;
 
         public Frame Frame = NullFrame;
+        public int StackHeight => _callStack.Count;
 
         public Dictionary<ushort, ExecStat> Stats = new();
         public long steps;
