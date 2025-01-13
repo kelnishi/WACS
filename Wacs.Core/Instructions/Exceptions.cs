@@ -184,6 +184,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.OpStack.PopType(ValType.Exn);
+            context.SetUnreachable();
         }
 
         public override void Execute(ExecContext context)
@@ -208,14 +209,14 @@ namespace Wacs.Core.Instructions
             var a = exn.Tag;
             //9.
 
-            var tagAddrs = context.Frame.Module.TagAddrs;
             //Traverse the control stack
-            while (!context.Frame.ContinuationAddress.Equals(InstructionPointer.Nil))
+            while (context.StackHeight > 0)
             {
                 //Enumerate all the blocks to find catch clauses
                 while (context.Frame.LabelCount > 1)
                 {
                     var blockTarget = context.Frame.TopLabel;
+                    context.ExitBlock();
                     if (blockTarget is InstTryTable tryTable)
                     {
                         foreach (var handler in tryTable.Catches)
@@ -223,7 +224,7 @@ namespace Wacs.Core.Instructions
                             switch (handler.Mode)
                             {
                                 case CatchFlags.None:
-                                    if (a.Equals(tagAddrs[handler.X]))
+                                    if (a.Equals(context.Frame.Module.TagAddrs[handler.X]))
                                     {
                                         context.OpStack.PushResults(exn.Fields);
                                         InstBranch.ExecuteInstruction(context, handler.L);
@@ -231,7 +232,7 @@ namespace Wacs.Core.Instructions
                                     }
                                     break;
                                 case CatchFlags.CatchRef:
-                                    if (a.Equals(tagAddrs[handler.X]))
+                                    if (a.Equals(context.Frame.Module.TagAddrs[handler.X]))
                                     {
                                         context.OpStack.PushResults(exn.Fields);
                                         context.OpStack.PushValue(exnref);
@@ -241,15 +242,14 @@ namespace Wacs.Core.Instructions
                                     break;
                                 case CatchFlags.CatchAll:
                                     InstBranch.ExecuteInstruction(context, handler.L);
-                                    break;
+                                    return;
                                 case CatchFlags.CatchAllRef:
                                     context.OpStack.PushValue(exnref);
                                     InstBranch.ExecuteInstruction(context, handler.L);
-                                    break;
+                                    return;
                             }
                         }
                     }
-                    context.ExitBlock();
                 }
                 context.FunctionReturn();
             }
