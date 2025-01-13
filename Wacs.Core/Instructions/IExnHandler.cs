@@ -12,17 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-namespace Wacs.Core.Runtime.Types
+namespace Wacs.Core.Instructions
 {
-    public class ExnInstance
-    {
-        public TagAddr Tag;
-        public Value[] Fields;
-        
-        public ExnInstance(TagAddr tag, Value[] fields)
-        {
-            Tag = tag;
-            Fields = fields;
-        }
-    }
+    public interface IExnHandler { }
 }

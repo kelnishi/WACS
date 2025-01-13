@@ -546,13 +546,6 @@ namespace Wacs.Core.Runtime
             return tagAddr;
         }
 
-        private static ExnAddr AllocateExn(Store store, TagAddr ta, Value[] fields)
-        {
-            var exnInst = new ExnInstance(ta, fields);
-            var exnAddr = store.AddExn(exnInst);
-            return exnAddr;
-        }
-
         /// <summary>
         /// @Spec 4.5.3.6. Element segments
         /// </summary>
