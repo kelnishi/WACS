@@ -59,8 +59,8 @@ namespace Spec.Test.WastJson
                 "arrayref" => new Value(ValType.Array, Value?.ToString()??"null"),
                 "eqref" => new Value(ValType.Eq, Value?.ToString()??"null"),
                 "i31ref" => new Value(ValType.I31, Value?.ToString()??"null"),
-                "exnref" => new Value(ValType.Exception, Value?.ToString()??"null"),
-                "nullexnref" => new Value(ValType.NoException, Value?.ToString()??"null"),
+                "exnref" => new Value(ValType.Exn, Value?.ToString()??"null"),
+                "nullexnref" => new Value(ValType.NoExn, Value?.ToString()??"null"),
                 "ref" => new Value(ValType.Ref, Value?.ToString()??"null"),
                 _ => throw new ArgumentException($"Cannot parse value {Value} of type {Type}")
             };

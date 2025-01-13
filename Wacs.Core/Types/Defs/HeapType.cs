@@ -35,8 +35,8 @@ namespace Wacs.Core.Types.Defs
         [WatToken("struct")]   Struct      = 0x6B,   // -0x15
         [WatToken("array")]    Array       = 0x6A,   // -0x16
         
-        [WatToken("exn")]      Exception   = 0x69,   // -0x17
-        [WatToken("noexn")]    NoException = 0x74,   // -0x0c
+        [WatToken("exn")]      Exn         = 0x69,   // -0x17
+        [WatToken("noexn")]    NoExn       = 0x74,   // -0x0c
         
         Bot = 0x81, // -0x81
     }

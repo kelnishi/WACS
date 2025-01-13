@@ -133,13 +133,13 @@ namespace Wacs.Core.Runtime
             return oldLabel.Label.ContinuationAddress;
         }
 
-        public IEnumerable<Label> EnumerateLabels()
+        public IEnumerable<BlockTarget> EnumerateLabels()
         {
             int height = LabelCount;
             var current = TopLabel;
             while (height > 0)
             {
-                yield return current.Label;
+                yield return current;
                 height -= 1;
                 current = current.EnclosingBlock;
             }
