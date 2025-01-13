@@ -48,8 +48,7 @@ namespace Wacs.Core.Types
             return defType1.Matches(defType2, types);
         }
         
-        public override string ToString() => $"Type[{Value.ToString()}]";
-        
+        public override string ToString() => $"TypeIdx[{Value & ~(int)ValType.IndexMask}]";
     }
 
     public readonly struct FuncIdx : IEquatable<Index>

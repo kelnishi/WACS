@@ -77,7 +77,7 @@ namespace Wacs.Core.Types
             return new ResultType(newTypes);
         }
 
-        public string ToNotation() => $"[{string.Join(" ",Types.Select(t=>t.ToNotation()))}]";
+        public string ToNotation() => $"[{string.Join(" ",Types.Select(t=>t.ToWrappedNotation()))}]";
         public string ToTypes() => string.Join("", Types.Select(t => $" {t.ToNotation()}"));
         public string ToParameters() => Types.Length == 0 ? "" : $" (param{ToTypes()})";
         public string ToResults() => Types.Length == 0 ? "" : $" (result{ToTypes()})";

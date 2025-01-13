@@ -98,7 +98,8 @@ namespace Wacs.Core.Types.Defs
                         }
 
                         var controlFrame = vContext.ControlStack.PeekAt((int)labelIdx.Value);
-                        if (!functionType.ParameterTypes.Equals(controlFrame.EndTypes))
+                        var pType = functionType.ParameterTypes;
+                        if (!pType.Matches(controlFrame.EndTypes, vContext.Types))
                         {
                             ctx.AddFailure($"Catch Label {controlFrame.EndTypes.ToNotation()} did not match Catch Tag {functionType.ParameterTypes.ToNotation()}");
                             return;
