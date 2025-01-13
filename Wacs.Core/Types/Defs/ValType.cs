@@ -82,17 +82,6 @@ namespace Wacs.Core.Types.Defs
         
         Empty                                = (int)((uint)TypePrefix.EmptyBlock | SignBit),   // -0xc0
         
-        //Recursive Types
-        RecSt                                = (int)((uint)RecType.RecSt | SignBit),            // -0xce
-        SubXCt                               = (int)((uint)RecType.SubXCt | SignBit),           // -0xcf
-        SubFinalXCt                          = (int)((uint)RecType.SubFinalXCt | SignBit),      // -0xd0
-        
-        //Composite Types
-        ArrayAt                              = (int)((uint)CompType.ArrayAt | SignBit),         // -0xde
-        Structst                             = (int)((uint)CompType.StructSt | SignBit),        // -0xdf
-        FuncFt                               = (int)((uint)CompType.FuncFt | SignBit),          // -0xe0
-        
-        
         //NonNullable (unset null bit)
         [WatToken("ref nofunc")]   NoFuncNN   = (int)((uint)HeapType.NoFunc | Ref | SignBit),  
         [WatToken("ref noextern")] NoExternNN = (int)((uint)HeapType.NoExtern | Ref | SignBit),
@@ -427,6 +416,7 @@ namespace Wacs.Core.Types.Defs
         public static ValType UnpackRef(Type type) => 
             type.IsByRef ? type.GetElementType()?.ToValType() ?? ValType.Nil : type.ToValType();
 
+        public static string ToWrappedNotation(this ValType type) => $"({type.ToNotation()})";
 
         public static string ToNotation(this ValType type) =>
             Enum.IsDefined(typeof(ValType), type)
@@ -460,6 +450,10 @@ namespace Wacs.Core.Types.Defs
                 //Index
                 _ => (ValType)reader.ContinueReading_s33(token), 
             };
+            //Exceptions are always nullable
+            if (type == ValType.Exn)
+                return ValType.Exn;
+            
             return nullable
                 ? type | ValType.Ref | ValType.Nullable
                 : (type | ValType.Ref) & ~ValType.Nullable;
