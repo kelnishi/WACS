@@ -15,6 +15,7 @@
 //  */
 
 using System.IO;
+using System.Runtime.InteropServices;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -49,7 +50,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M.M),
-                 "Instruction {0} failed with invalid context memory 0.",Op.GetMnemonic());
+                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(), M.M.Value);
             context.Assert(M.Align.LinearSize() <= WidthTByteSize,
                     "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),WidthT);
 
@@ -109,7 +110,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M.M),
-                 "Instruction {0} failed with invalid context memory 0.",Op.GetMnemonic());
+                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(), M.M.Value);
             context.Assert(M.Align.LinearSize() <= WidthT.ByteSize(),
                     "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),WidthT);
 
