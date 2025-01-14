@@ -52,7 +52,7 @@ namespace Feature.Detect
                 }
                 catch (Exception e)
                 {
-                    Assert.Fail($"{file.Name} support not detected.\n{e}");
+                    Assert.Fail($"{file.Name} ({file.Module}) support not detected.\n{e}");
                 }
 
             }
