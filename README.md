@@ -31,7 +31,7 @@ WACS supports the latest standardized webassembly feature extensions including *
 - **Unity Compatibility**: Compatible with **Unity 2021.3+** including AOT/IL2CPP modes for iOS.
 - **Pure C# Implementation**: Written in C# 9.0/.NET Standard 2.1. (No unsafe code)
 - **No Complex Dependencies**: Uses [FluentValidation](https://github.com/FluentValidation/FluentValidation) and [Microsoft.Extensions.ObjectPool](https://www.nuget.org/packages/Microsoft.Extensions.ObjectPool) as its only dependencies.
-- **WebAssembly+GC Spec Compliance**: Passes the [WebAssembly GC spec test suite](https://github.com/WebAssembly/gc/tree/main/test/core).
+- **WebAssembly 3.0 Spec Compliance**: Passes the [WebAssembly 3.0](https://webassembly.github.io/spec/versions/core/WebAssembly-3.0-draft.pdf) spec [test suite](https://github.com/WebAssembly/spec/tree/wasm-3.0).
 - **Magical Interop**: Host bindings are validated with reflection, no boilerplate code required.
 - **Async Tasks**: [JSPI](https://github.com/WebAssembly/js-promise-integration)-like non-blocking calls for async functions.
 - **WASI:** Wacs.WASIp1 provides a [wasi\_snapshot\_preview1](https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md) implementation.
@@ -42,7 +42,7 @@ Because WebAssembly is memory-safe and can be ahead-of-time validated, WACS make
 UGC, DLC, or plugin systems that include executable logic.
 
 ## WebAssembly Feature Extensions
-WACS is based on the [WebAssembly Core 2 + gc spec](https://webassembly.github.io/gc/core/bikeshed/index.html) and passes the associated test suite.
+WACS is based on the [WebAssembly Core 3 draft spec](https://webassembly.github.io/spec/versions/core/WebAssembly-3.0-draft.pdf) and passes the associated [test suite](https://github.com/WebAssembly/spec/tree/wasm-3.0).
 
 Support for all standardized extensions is listed below.
 
@@ -66,9 +66,9 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |[Tail call](https://github.com/webassembly/tail-call)|tail_call|✅|
 |[Typed Function References](https://github.com/WebAssembly/function-references)|function-references|✅|
 |Phase 4|
-|[Exception handling](https://github.com/WebAssembly/exception-handling)|exceptions|❌|
+|[Exception handling](https://github.com/WebAssembly/exception-handling)|exceptions|✅|
 |[JS String Builtins](https://github.com/WebAssembly/js-string-builtins)||❌|
-|[Memory64](https://github.com/WebAssembly/memory64)|memory64|❌|
+|[Memory64](https://github.com/WebAssembly/memory64)|memory64|✅|
 |[Threads](https://github.com/webassembly/threads)|threads|❌|
 |Phase 3|
 |[JS Promise Integration](https://github.com/WebAssembly/js-promise-integration)|jspi|<span title="Browser idiom, but conceptually supported">✳️</span>|
