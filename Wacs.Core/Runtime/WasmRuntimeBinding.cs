@@ -70,7 +70,7 @@ namespace Wacs.Core.Runtime
             var exports = _moduleInstances.SelectMany(modInst => modInst.Exports)
                 .Where(export => export.Name == entity)
                 .Select(export => export.Value)
-                .Cast<ExternalValue.Function>()
+                .OfType<ExternalValue.Function>()
                 .Select(func => func.Address);
             addr = exports.LastOrDefault();
             return addr != null;
@@ -90,7 +90,7 @@ namespace Wacs.Core.Runtime
                     .SelectMany(modInst => modInst.Exports)
                     .Where(export => export.Name == id.entity)
                     .Select(export => export.Value)
-                    .Cast<ExternalValue.Function>()
+                    .OfType<ExternalValue.Function>()
                     .Select(func => func.Address)
                     .ToList();
 
