@@ -60,7 +60,7 @@ namespace Spec.Test
 
             runtime.BindHostTable((module, "table"), new TableType(ValType.FuncRef, new Limits(AddrType.I32, 10,20)),
                 new Value(ValType.FuncRef));
-            runtime.BindHostTable((module, "table64"), new TableType(ValType.FuncRef, new Limits(AddrType.I32, 10,20)),
+            runtime.BindHostTable((module, "table64"), new TableType(ValType.FuncRef, new Limits(AddrType.I64, 10,20)),
                 new Value(ValType.FuncRef));
             
             runtime.BindHostMemory((module, "memory"), new MemoryType(minimum:1, maximum:2));
