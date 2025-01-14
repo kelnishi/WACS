@@ -427,20 +427,20 @@ namespace Wacs.Core.Runtime
                 // see linking.wast:264
                 Store.CommitTransaction();
                 Store.OpenTransaction();
-                //Store.DiscardTransaction();
-
                 Context.FlushCallStack();
                 ExceptionDispatchInfo.Throw(exc);
             }
             catch (TrapException exc)
             {
-                Store.DiscardTransaction();
+                //Linking may succeed, so we commit the transaction
+                Store.CommitTransaction();
                 Store.OpenTransaction();
                 Context.FlushCallStack();
                 ExceptionDispatchInfo.Throw(exc);
             }
             catch (NotSupportedException exc)
             {
+                //Unlinkable
                 Store.DiscardTransaction();
                 Store.OpenTransaction();
                 Context.FlushCallStack();
