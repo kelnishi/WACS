@@ -40,7 +40,6 @@ namespace Spec.Test
         }
 
         private static string JsonDirectory => Path.Combine(AppContext.BaseDirectory, Configuration["JsonDirectory"] ?? "");
-        public static bool RunTranspilerTests => Configuration["RunTranspilerTests"] == "True";
 
         public static string SingleTest => Configuration["Single"] ?? "";
         public static HashSet<string> SkipWasts =>

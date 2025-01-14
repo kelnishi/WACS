@@ -81,7 +81,7 @@ namespace Wacs.Core.Instructions.Memory
         public int FetchFromMemory(ExecContext context, long offset)
         {
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} did not exist in the context.");
             var a = context.Frame.Module.MemAddrs[M.M];
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
