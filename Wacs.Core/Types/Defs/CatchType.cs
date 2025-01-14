@@ -57,7 +57,7 @@ namespace Wacs.Core.Types.Defs
             {
                 RuleFor(ct => ct.X)
                     .Must((_, index, ctx) => ctx.GetValidationContext().Tags.Contains(index))
-                    .When(ct => ct.Mode is not CatchFlags.CatchAll)
+                    .When(ct => ct.Mode is CatchFlags.None or CatchFlags.CatchRef)
                     .WithMessage(ct => $"Validation context did not contain Catch Tag Index {ct.X.Value}");
                 RuleFor(ct => ct.L)
                     .Must((_, index, ctx) => ctx.GetValidationContext().ContainsLabel(index.Value))
