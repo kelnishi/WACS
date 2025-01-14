@@ -123,6 +123,8 @@ namespace Wacs.Core.Types
         {
             if (ElementType != imported.ElementType)
                 return false;
+            if (imported.Limits.AddressType != Limits.AddressType)
+                return false;
             if (imported.Limits.Minimum < Limits.Minimum)
                 return false;
             if (!Limits.Maximum.HasValue)

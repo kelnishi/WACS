@@ -25,6 +25,9 @@ namespace Spec.Test.WastJson
         [EnumMember(Value = "module")]
         Module,
         
+        [EnumMember(Value = "module_definition")]
+        ModuleDefinition,
+        
         [EnumMember(Value = "register")]
         Register,
 
@@ -36,6 +39,9 @@ namespace Spec.Test.WastJson
 
         [EnumMember(Value = "assert_trap")]
         AssertTrap,
+        
+        [EnumMember(Value = "assert_exception")]
+        AssertException,
 
         [EnumMember(Value = "assert_exhaustion")]
         AssertExhaustion,

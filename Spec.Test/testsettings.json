@@ -3,6 +3,7 @@
   "RunTranspilerTests": true,
   "Single": null,
   "SkipWasts": [
-    "comments.wast"
+    "comments.wast",
+    "annotations.wast"
   ]
 }

@@ -369,6 +369,7 @@ namespace Wacs.Core.Instructions
                 case OpCode.If:
                 case OpCode.Else:
                 case OpCode.Loop:
+                case OpCode.TryTable:
                     context.ExitBlock();
                     break;
                 case OpCode.Func:
@@ -885,7 +886,8 @@ namespace Wacs.Core.Instructions
             context.Assert(funcType,
                 "Instruction call_indirect was invalid. Not a FuncType. {0}", type);
 
-            context.OpStack.PopI32();
+            var at = tableType.Limits.AddressType;
+            context.OpStack.PopType(at.ToValType());
             context.OpStack.DiscardValues(funcType.ParameterTypes);
             context.OpStack.PushResult(funcType.ResultType);
         }
@@ -912,10 +914,10 @@ namespace Wacs.Core.Instructions
             context.Assert(ftFunc,
                 $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
             //8.
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            uint i = context.OpStack.PopU32();
+            long i = context.OpStack.PopAddr();
             //10.
             if (i >= tab.Elements.Count)
                 throw new TrapException($"Instruction call_indirect could not find element {i}");
@@ -968,10 +970,10 @@ namespace Wacs.Core.Instructions
             context.Assert(ftFunc,
                 $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
             //8.
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            uint i = context.OpStack.PopU32();
+            long i = context.OpStack.PopAddr();
             //10.
             if (i >= tab.Elements.Count)
                 throw new TrapException($"Instruction call_indirect could not find element {i}");

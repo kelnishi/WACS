@@ -48,8 +48,7 @@ namespace Wacs.Core.Types
             return defType1.Matches(defType2, types);
         }
         
-        public override string ToString() => $"Type[{Value.ToString()}]";
-        
+        public override string ToString() => $"TypeIdx[{Value & ~(int)ValType.IndexMask}]";
     }
 
     public readonly struct FuncIdx : IEquatable<Index>
@@ -125,6 +124,26 @@ namespace Wacs.Core.Types
         public static explicit operator Index(GlobalIdx globalIdx) => new((int)globalIdx.Value);
         public static explicit operator GlobalIdx(int value) => new((uint)value);
         public static explicit operator GlobalIdx(uint value) => new(value);
+    }
+    
+    public readonly struct TagIdx : IEquatable<Index>
+    {
+        public readonly uint Value;
+        private TagIdx(uint value) => Value = value;
+        public bool Equals(Index other) => Value == other.Value;
+        public static explicit operator Index(TagIdx tagIdx) => new((int)tagIdx.Value);
+        public static explicit operator TagIdx(int value) => new((uint)value);
+        public static explicit operator TagIdx(uint value) => new(value);
+    }
+
+    public readonly struct ExnIdx : IEquatable<Index>, RefIdx
+    {
+        public readonly uint Value;
+        public ExnIdx(uint value) => Value = value;
+        public bool Equals(Index other) => Value == other.Value;
+        public static explicit operator Index(ExnIdx exnIdx) => new((int)exnIdx.Value);
+        public static explicit operator ExnIdx(int value) => new((uint)value);
+        public static explicit operator ExnIdx(uint value) => new(value);
     }
 
     public readonly struct ElemIdx : IEquatable<Index>

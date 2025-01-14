@@ -41,7 +41,7 @@ namespace Wacs.Core.Runtime
 
     public class ExecContext
     {
-        private static readonly Frame NullFrame = new();
+        public static readonly Frame NullFrame = new();
 
         private static readonly ValType[] EmptyLocals = Array.Empty<ValType>();
         private readonly Stack<Frame> _callStack;
@@ -63,6 +63,7 @@ namespace Wacs.Core.Runtime
         public InstructionBase[] _sequenceInstructions;
 
         public Frame Frame = NullFrame;
+        public int StackHeight => _callStack.Count;
 
         public Dictionary<ushort, ExecStat> Stats = new();
         public long steps;
@@ -245,7 +246,7 @@ namespace Wacs.Core.Runtime
             _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = addr.Index;
         }
-
+        
         // @Spec 4.4.10.1 Function Invocation
         public async Task InvokeAsync(FuncAddr addr)
         {
@@ -339,8 +340,7 @@ namespace Wacs.Core.Runtime
             _sequenceInstructions = _currentSequence._instructions;
             _sequenceIndex = address.Index;
         }
-
-
+        
         public InstructionBase? Next()
         {
             //Advance to the next instruction first.
@@ -355,7 +355,7 @@ namespace Wacs.Core.Runtime
             Stack<(string, int)> ascent = new();
             int idx = _sequenceIndex;
             
-            foreach (var label in Frame.EnumerateLabels())
+            foreach (var label in Frame.EnumerateLabels().Select(target => target.Label))
             {
                 var pointer = (label.Instruction.GetMnemonic(), idx);
                 ascent.Push(pointer);

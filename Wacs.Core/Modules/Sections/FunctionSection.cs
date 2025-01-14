@@ -240,7 +240,7 @@ namespace Wacs.Core
                                     {
                                         // Map the child validation failures to the parent context
                                         // Adjust the property name to reflect the path to the child property
-                                        var propertyName = $"{ctx.PropertyPath}.{failure.PropertyName}";
+                                        var propertyName = $"{failure.PropertyName}";
                                         ctx.AddFailure(propertyName, failure.ErrorMessage);
                                     }
                                 }

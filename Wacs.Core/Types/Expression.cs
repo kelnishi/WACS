@@ -240,7 +240,7 @@ namespace Wacs.Core.Types
                     }
                     catch (ValidationException exc)
                     {
-                        ctx.AddFailure($"{ctx.PropertyPath}: {exc.Message}");
+                        ctx.AddFailure($"{exc.Message}");
                     }
                 });
             }

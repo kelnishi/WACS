@@ -37,6 +37,8 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("value")]
         public object? Value { get; set; }
 
+        [JsonPropertyName("values")]
+        public List<Argument>? Values { get; set; }
 
         public Value AsValue =>
             Type switch
@@ -57,9 +59,14 @@ namespace Spec.Test.WastJson
                 "arrayref" => new Value(ValType.Array, Value?.ToString()??"null"),
                 "eqref" => new Value(ValType.Eq, Value?.ToString()??"null"),
                 "i31ref" => new Value(ValType.I31, Value?.ToString()??"null"),
+                "exnref" => new Value(ValType.Exn, Value?.ToString()??"null"),
+                "nullexnref" => new Value(ValType.NoExn, Value?.ToString()??"null"),
+                "ref" => new Value(ValType.Ref, Value?.ToString()??"null"),
                 _ => throw new ArgumentException($"Cannot parse value {Value} of type {Type}")
             };
 
+        public List<Value> AsValues =>
+            Values?.Select(v => v.AsValue).ToList() ?? new List<Value>();
 
         private Value ParseV128(object? value)
         {
