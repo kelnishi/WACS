@@ -19,6 +19,7 @@ using System.Diagnostics.CodeAnalysis;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Validation
 {
@@ -45,12 +46,14 @@ namespace Wacs.Core.Validation
         public LocalsSpace Locals { get; }
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
+        public TagsSpace Tags { get; }
         public bool ContainsLabel(uint label);
         public void PushControlFrame(ByteCode opCode, FunctionType types);
         public ValidationControlFrame PopControlFrame();
         public void SetUnreachable();
         public void Assert(bool factIsTrue, string formatString, params object[] args);
         public void Assert([NotNull] object? objIsNotNull, string formatString, params object[] args);
+        public void ValidateCatches(CatchType[] catches);
         public void ValidateBlock(Block instructionBlock, int index = 0);
     }
 }

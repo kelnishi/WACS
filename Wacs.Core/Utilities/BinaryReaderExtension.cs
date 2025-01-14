@@ -38,13 +38,36 @@ namespace Wacs.Core.Utilities
                 result |= (uint)(byteValue & 0x7F) << shift;
                 
                 if (shift == 28 && (byteValue & 0x70) != 0)
-                    throw new FormatException("LEB128_s32 had too many bits");
+                    throw new FormatException("LEB128_u32 had too many bits");
                 
                 shift += 7;
             } while ((byteValue & 0x80) != 0);
 
             if (shift > 35)
                 throw new FormatException("LEB128_u32 had too many bytes");
+            
+            return result;
+        }
+        
+        public static ulong ReadLeb128_u64(this BinaryReader reader)
+        {
+            ulong result = 0;
+            int shift = 0;
+            byte byteValue;
+
+            do
+            {
+                byteValue = reader.ReadByte();
+                result |= (ulong)(byteValue & 0x7F) << shift;
+                
+                if (shift == 63 && (byteValue & 0x7E) != 0)
+                    throw new FormatException("LEB128_u64 had too many bits");
+                
+                shift += 7;
+            } while ((byteValue & 0x80) != 0);
+
+            if (shift > 70)
+                throw new FormatException("LEB128_u64 had too many bytes");
             
             return result;
         }

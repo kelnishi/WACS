@@ -40,6 +40,7 @@ namespace Wacs.Core.Validation
         void PushValues(Stack<Value> vals);
         Value PopI32();
         Value PopI64();
+        Value PopInt();
         Value PopF32();
         Value PopF64();
         Value PopV128();
@@ -183,6 +184,21 @@ namespace Wacs.Core.Validation
             if (!value.Type.Matches(ValType.I64,_context.Types))
                 throw new ValidationException(
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.I64}");
+            return value;
+        }
+        
+        public Value PopInt()
+        {
+            if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
+                return Value.Bot;
+            if (_stack.Count == 0)
+                throw new ValidationException("Operand stack underflow. pop(i32)");
+
+            Value value = _stack.Pop();
+            
+            if (!value.Type.Matches(ValType.I32,_context.Types) && !value.Type.Matches(ValType.I64,_context.Types))
+                throw new ValidationException(
+                    $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.I32}");
             return value;
         }
 

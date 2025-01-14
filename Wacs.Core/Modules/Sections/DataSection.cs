@@ -136,23 +136,29 @@ namespace Wacs.Core
                 {
                     public Validator()
                     {
-                        RuleFor(mode => mode.MemoryIndex)
-                            .Must((_, idx, ctx) => ctx.GetValidationContext().Mems.Contains(idx));
-                        RuleFor(mode => mode.Offset)
-                            .Custom((expr, ctx) =>
+                        RuleFor(mode => mode)
+                            .Custom((mode, ctx) =>
                             {
-                                var validationContext = ctx.GetValidationContext();
-                                var resultType = new ResultType(ValType.I32);
+                                var vContext = ctx.GetValidationContext();
+                                if (!vContext.Mems.Contains(mode.MemoryIndex))
+                                {
+                                    ctx.AddFailure("MemoryIndex",
+                                        $"Memory index {mode.MemoryIndex} not found in module");
+                                    return;
+                                }
+                                var mem = vContext.Mems[mode.MemoryIndex];
+                                var expr = mode.Offset;
+                                var resultType = new ResultType(mem.Limits.AddressType.ToValType());
                                 var execType = new FunctionType(ResultType.Empty, resultType);
-                                validationContext.SetExecFrame(execType, Array.Empty<ValType>());
+                                vContext.SetExecFrame(execType, Array.Empty<ValType>());
                                 var exprValidator = new Expression.Validator(resultType, isConstant: true);
-                                var subContext = validationContext.PushSubContext(expr);
+                                var subContext = vContext.PushSubContext(expr);
                                 var result = exprValidator.Validate(subContext);
                                 foreach (var error in result.Errors)
                                 {
                                     ctx.AddFailure($"Expression.{error.PropertyName}", error.ErrorMessage);
                                 }
-                                validationContext.PopValidationContext();
+                                vContext.PopValidationContext();
                             });
                     }
                 }

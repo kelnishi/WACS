@@ -65,6 +65,7 @@ namespace Wacs.Core
             SectionId.Function,
             SectionId.Table,
             SectionId.Memory,
+            SectionId.Tag,
             SectionId.Global,
             SectionId.Export,
             SectionId.Start,
@@ -195,6 +196,9 @@ namespace Wacs.Core
                         }
                     }
                     break;
+                case SectionId.Tag:
+                    module.Tags = ParseTagSection(reader);
+                    break;
                 case SectionId.Global:
                     module.Globals = ParseGlobalSection(reader);
                     if (AnnotateWhileParsing)
@@ -308,7 +312,7 @@ namespace Wacs.Core
             }
             catch (InvalidDataException exc)
             {
-                throw new FormatException($"Bad Memory parameters {exc.Message}");
+                throw new FormatException($"Exception in Instruction decode: {exc.Message}");
             }
         }
 

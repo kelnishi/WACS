@@ -44,7 +44,6 @@ namespace Spec.Test.WastJson
     
     public class ModuleCommand : ICommand
     {
-        private SpecTestEnv _env = new SpecTestEnv();
         [JsonPropertyName("filename")] public string? Filename { get; set; }
         [JsonPropertyName("name")] public string? Name { get; set; }
 
@@ -69,6 +68,76 @@ namespace Spec.Test.WastJson
         }
 
         public override string ToString() => $"Load Module {{ Line = {Line}, Filename = {Filename} }}";
+    }
+
+    public class ModuleDefinition : ICommand
+    {
+        [JsonPropertyName("filename")] public string? Filename { get; set; }
+        [JsonPropertyName("name")] public string? Name { get; set; }
+        [JsonPropertyName("module_type")] public string? ModuleType { get; set; }
+        
+        public CommandType Type => CommandType.ModuleDefinition;
+        
+        [JsonPropertyName("line")] public int Line { get; set; }
+        
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
+        {
+            List<Exception> errors = new();
+
+            if (ModuleType == "text")
+            {
+                errors.Add(new Exception(
+                    $"Module Definition line {Line}: Skipping module_definition. No WAT parsing."));
+                return errors;
+            }
+            
+            if (Filename == null)
+                throw new ArgumentException("Json missing `filename` field");
+            
+            if (string.IsNullOrEmpty(Name))
+                throw new ArgumentException("Json missing `name` field");
+            
+            var filepath = Path.Combine(testDefinition.Path, Filename);
+            using var fileStream = new FileStream(filepath, FileMode.Open);
+            module = BinaryModuleParser.ParseWasm(fileStream);
+            module.SetName(Name);
+            
+            return errors;
+        }
+    }
+    
+    public class ModuleInstanceCommand : ICommand
+    {
+        [JsonPropertyName("module")] public string? Module { get; set; }
+        
+        [JsonPropertyName("instance")] public string? Instance { get; set; }
+        
+        public CommandType Type => CommandType.ModuleInstance;
+        [JsonPropertyName("line")] public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
+        {
+            List<Exception> errors = new();
+            if (Instance == null)
+                throw new ArgumentException("Json missing `instance` field");
+            
+            if (module == null)
+                throw new ArgumentException("Module not loaded");
+            
+            if (module.Name != Module)
+                throw new ArgumentException($"Module name mismatch: {module.Name} != {Module}");
+            
+            if (string.IsNullOrEmpty(Instance))
+                throw new ArgumentException("Json missing `instance` field");
+            
+            var modInst = runtime.InstantiateModule(module);
+
+            modInst.Name = Instance;
+            
+            return errors;
+        }
+
+        public override string ToString() => $"Module Instance {{ Line = {Line}, Module = {Module} }}";
     }
 
     public class RegisterCommand : ICommand
@@ -119,6 +188,22 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("expected")] public List<Argument> Expected { get; set; } = new();
         public CommandType Type => CommandType.AssertReturn;
         [JsonPropertyName("line")] public int Line { get; set; }
+        
+        static bool CompareValues(Value actual, Value expected)
+        {
+            //HACK: null ref comparison
+            if (expected.IsNullRef)
+            {
+                if (!actual.IsNullRef && !actual.Type.Matches(expected.Type, null))
+                    return false;
+            }
+            else if (!actual.Equals(expected))
+            {
+                return false;
+            }
+
+            return true;
+        }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
@@ -133,19 +218,24 @@ namespace Spec.Test.WastJson
                         throw new TestException(
                             $"Test failed {this} \"{invokeAction.Field}\": Expected [{string.Join(" ", Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
 
-                    foreach (var (actual, expected) in result.Zip(Expected, (a, e) => (a, e.AsValue)))
+                    foreach (var (actual, arg) in result.Zip(Expected, (a, e) => (a, e)))
                     {
-                        //HACK: null ref comparison
-                        if (expected.IsNullRef)
-                        {
-                            if (!actual.IsNullRef && !actual.Type.Matches(expected.Type, null))
+                        if (arg.Type == "either")
+                        {   
+                            if (!arg.AsValues.Any(v => CompareValues(actual, v)))
+                            {
                                 throw new TestException(
-                                    $"Test failed {this} \"{invokeAction.Field}\": Expected [{string.Join(" ", Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");
+                                    $"Test failed {this} \"{invokeAction.Field}\": \nExpected \n either:[{string.Join("]\n     or:[", Expected.SelectMany(e => e.AsValues))}], \nbut got:[{string.Join(" ", result)}]");
+                            }
                         }
-                        else if (!actual.Equals(expected))
+                        else
                         {
-                            throw new TestException(
-                                $"Test failed {this} \"{invokeAction.Field}\": Expected [{string.Join(" ", Expected.Select(e => e.AsValue))}], but got [{string.Join(" ", result)}]");    
+                            var expected = arg.AsValue;
+                            if (!CompareValues(actual, expected))
+                            {
+                                throw new TestException(
+                                    $"Test failed {this} \"{invokeAction.Field}\": \nExpected [{string.Join(" ", Expected.Select(e => e.AsValue))}],\n but got [{string.Join(" ", result)}]");    
+                            }
                         }
                     }                    
                     break;
@@ -184,6 +274,43 @@ namespace Spec.Test.WastJson
 
                     if (!didTrap)
                         throw new TestException($"Test failed {this} \"{trapMessage}\"");
+                    break;
+            }
+
+            return errors;
+        }
+
+        public override string ToString() => $"Assert Trap {{ Line = {Line}, Action = {Action}, Text = {Text} }}";
+    }
+    
+    public class AssertExceptionCommand : ICommand
+    {
+        [JsonPropertyName("action")] public IAction? Action { get; set; }
+        [JsonPropertyName("text")] public string? Text { get; set; }
+        public CommandType Type => CommandType.AssertException;
+        [JsonPropertyName("line")] public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
+        {
+            List<Exception> errors = new();
+            
+            switch (Action)
+            {
+                case InvokeAction invokeAction:
+                    bool didThrow = false;
+                    string throwMessage = "";
+                    try
+                    {
+                        var result = invokeAction.Invoke(ref runtime, ref module);
+                    }
+                    catch (UnhandledWasmException e)
+                    {
+                        didThrow = true;
+                        throwMessage = e.Message;
+                    }
+
+                    if (!didThrow)
+                        throw new TestException($"Test failed {this} \"{throwMessage}\"");
                     break;
             }
 
@@ -586,20 +713,6 @@ namespace Spec.Test.WastJson
         public override string ToString() => $"Assert Exclude From Must {{ Line = {Line}, Module = {Module} }}";
     }
 
-    public class ModuleInstanceCommand : ICommand
-    {
-        [JsonPropertyName("module")] public string? Module { get; set; }
-        public CommandType Type => CommandType.ModuleInstance;
-        [JsonPropertyName("line")] public int Line { get; set; }
-
-        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
-        {
-            throw new InvalidDataException($"Test command not setup:{this} from {testDefinition.TestName}");
-        }
-
-        public override string ToString() => $"Module Instance {{ Line = {Line}, Module = {Module} }}";
-    }
-
     public class ModuleExclusiveCommand : ICommand
     {
         [JsonPropertyName("module")] public string? Module { get; set; }
@@ -659,6 +772,7 @@ namespace Spec.Test.WastJson
                 CommandType.Action => JsonSerializer.Deserialize<ActionCommand>(root.GetRawText(), options),
                 CommandType.AssertReturn => JsonSerializer.Deserialize<AssertReturnCommand>(root.GetRawText(), options),
                 CommandType.AssertTrap => JsonSerializer.Deserialize<AssertTrapCommand>(root.GetRawText(), options),
+                CommandType.AssertException => JsonSerializer.Deserialize<AssertExceptionCommand>(root.GetRawText(), options),
                 CommandType.AssertExhaustion => JsonSerializer.Deserialize<AssertExhaustionCommand>(root.GetRawText(), options),
                 CommandType.AssertInvalid => JsonSerializer.Deserialize<AssertInvalidCommand>(root.GetRawText(), options),
                 CommandType.AssertMalformed => JsonSerializer.Deserialize<AssertMalformedCommand>(root.GetRawText(), options),
@@ -674,6 +788,7 @@ namespace Spec.Test.WastJson
                 CommandType.AssertTerminated => JsonSerializer.Deserialize<AssertTerminatedCommand>(root.GetRawText(), options),
                 CommandType.AssertUndefined => JsonSerializer.Deserialize<AssertUndefinedCommand>(root.GetRawText(), options),
                 CommandType.AssertExcludeFromMust => JsonSerializer.Deserialize<AssertExcludeFromMustCommand>(root.GetRawText(), options),
+                CommandType.ModuleDefinition => JsonSerializer.Deserialize<ModuleDefinition>(root.GetRawText(), options),
                 CommandType.ModuleInstance => JsonSerializer.Deserialize<ModuleInstanceCommand>(root.GetRawText(), options),
                 CommandType.ModuleExclusive => JsonSerializer.Deserialize<ModuleExclusiveCommand>(root.GetRawText(), options),
                 CommandType.Pump => JsonSerializer.Deserialize<PumpCommand>(root.GetRawText(), options),

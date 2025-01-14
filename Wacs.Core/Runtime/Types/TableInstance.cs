@@ -41,7 +41,7 @@ namespace Wacs.Core.Runtime.Types
             Type = (TableType)type.Clone();
             Elements = new List<Value>((int)type.Limits.Minimum);
 
-            for (int i = 0; i < type.Limits.Minimum; i++)
+            for (long i = 0; i < type.Limits.Minimum; i++)
             {
                 Elements.Add(refVal);
             }

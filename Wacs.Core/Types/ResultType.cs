@@ -68,8 +68,16 @@ namespace Wacs.Core.Types
             Types = reader.ParseVector(ValTypeParser.Parse);
             Arity = Types.Length;
         }
+        
+        public ResultType Append(ValType type)
+        {
+            var newTypes = new ValType[Types.Length + 1];
+            Array.Copy(Types, newTypes, Types.Length);
+            newTypes[^1] = type;
+            return new ResultType(newTypes);
+        }
 
-        public string ToNotation() => $"[{string.Join(" ",Types.Select(t=>t.ToNotation()))}]";
+        public string ToNotation() => $"[{string.Join(" ",Types.Select(t=>t.ToWrappedNotation()))}]";
         public string ToTypes() => string.Join("", Types.Select(t => $" {t.ToNotation()}"));
         public string ToParameters() => Types.Length == 0 ? "" : $" (param{ToTypes()})";
         public string ToResults() => Types.Length == 0 ? "" : $" (result{ToTypes()})";
@@ -88,6 +96,20 @@ namespace Wacs.Core.Types
             for (int i = 0, l = Types.Length; i < l; ++i)
             {
                 if (!Types[i].Matches(other.Types[i], types))
+                    return false;
+            }
+
+            return true;
+        }
+        
+        public bool Equals(ResultType other)
+        {
+            if (Types.Length != other.Types.Length)
+                return false;
+            
+            for (int i = 0, l = Types.Length; i < l; ++i)
+            {
+                if (Types[i] != other.Types[i])
                     return false;
             }
 

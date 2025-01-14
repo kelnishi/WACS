@@ -16,6 +16,7 @@
 
 using System.IO;
 using FluentValidation;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
@@ -30,7 +31,7 @@ namespace Wacs.Core.Types
         /// The limits specifying the minimum and optional maximum number of memory pages.
         /// </summary>
         public readonly Limits Limits;
-
+        
         /// <summary>
         /// Initializes a new instance of the <see cref="MemoryType"/> class with the specified limits.
         /// </summary>
@@ -43,9 +44,10 @@ namespace Wacs.Core.Types
         /// </summary>
         /// <param name="minimum"></param>
         /// <param name="maximum"></param>
-        public MemoryType(uint minimum, uint? maximum = null)
+        /// <param name="type"></param>
+        public MemoryType(uint minimum, uint? maximum = null, AddrType type = AddrType.I32)
         {
-            Limits = new Limits(minimum, maximum);
+            Limits = new Limits(type, minimum, maximum);
         }
 
         public string Id { get; set; } = "";
@@ -63,6 +65,8 @@ namespace Wacs.Core.Types
 
         public bool IsCompatibleWith(MemoryType imported)
         {
+            if (imported.Limits.AddressType != Limits.AddressType)
+                return false;
             if (imported.Limits.Minimum < Limits.Minimum)
                 return false;
             if (!Limits.Maximum.HasValue)

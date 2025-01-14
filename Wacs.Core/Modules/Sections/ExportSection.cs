@@ -49,6 +49,7 @@ namespace Wacs.Core
                     ExportDesc.TableDesc td => $" (table {td.TableIndex.Value})",
                     ExportDesc.MemDesc md => $" (memory {md.MemoryIndex.Value})",
                     ExportDesc.GlobalDesc gd => $" (global {gd.GlobalIndex.Value})",
+                    ExportDesc.TagDesc td => $" (tag {td.TagIndex.Value})",
                     _ => throw new InvalidDataException($"Unknown Export type:{Desc}")
                 };
                 var tableText = $"{indent}(export{nameText}{expText})";
@@ -69,6 +70,7 @@ namespace Wacs.Core
                         v.Add(new ExportDesc.TableDesc.Validator());
                         v.Add(new ExportDesc.MemDesc.Validator());
                         v.Add(new ExportDesc.GlobalDesc.Validator());
+                        v.Add(new ExportDesc.TagDesc.Validator());
                     });
                 }
             }
@@ -145,6 +147,20 @@ namespace Wacs.Core
                     }
                 }
             }
+            
+            public class TagDesc : ExportDesc
+            {
+                public TagIdx TagIndex { get; internal set; }
+                public class Validator : AbstractValidator<TagDesc>
+                {
+                    public Validator()
+                    {
+                        RuleFor(td => td.TagIndex)
+                            .Must((_, index, ctx) => ctx.GetValidationContext().Tags.Contains(index))
+                            .WithMessage(td => $"Validation context did not contain TagDesc Index {td.TagIndex.Value}");
+                    }
+                }
+            }
         }
     }
 
@@ -160,6 +176,8 @@ namespace Wacs.Core
                 ExternalKind.Memory => new Module.ExportDesc.MemDesc { MemoryIndex = (MemIdx)reader.ReadLeb128_u32() },
                 ExternalKind.Global => new Module.ExportDesc.GlobalDesc
                     { GlobalIndex = (GlobalIdx)reader.ReadLeb128_u32() },
+                ExternalKind.Tag => new Module.ExportDesc.TagDesc
+                    { TagIndex = (TagIdx)reader.ReadLeb128_u32() },
                 var kind => throw new FormatException(
                     $"Malformed Module Export section {kind} at {reader.BaseStream.Position - 1}")
             };

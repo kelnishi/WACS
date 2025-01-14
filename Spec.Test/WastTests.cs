@@ -41,9 +41,6 @@ namespace Spec.Test
             SpecTestEnv env = new SpecTestEnv();
             WasmRuntime runtime = new();
             env.BindToRuntime(runtime);
-
-            //Make multiple memories fail validation
-            ModuleValidator.ValidateMultipleMemories = false;
             runtime.TranspileModules = false;
             
             Module? module = null;
@@ -70,16 +67,11 @@ namespace Spec.Test
         [ClassData(typeof(WastJsonTestData))]
         public void RunWastTranspiled(WastJson.WastJson file)
         {
-            if (!WastJsonTestData.RunTranspilerTests)
-                throw SkipException.ForSkip("Skipping transpiled test");
-            
             _output.WriteLine($"Running test:{file.TestName}");
             SpecTestEnv env = new SpecTestEnv();
             WasmRuntime runtime = new();
             env.BindToRuntime(runtime);
 
-            //Make multiple memories fail validation
-            ModuleValidator.ValidateMultipleMemories = false;
             runtime.TranspileModules = true;
             
             Module? module = null;
