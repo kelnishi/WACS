@@ -278,7 +278,8 @@ namespace Wacs.Core
                                         $"Table index {mode.TableIndex.Value} exceeds table size {validationContext.Tables.Count}");
                                 
                                 var tableType = validationContext.Tables[mode.TableIndex];
-                                var exprValidator = new Expression.Validator(new ResultType(ValType.I32), isConstant: true);
+                                var at = tableType.Limits.AddressType.ToValType();
+                                var exprValidator = new Expression.Validator(new ResultType(at), isConstant: true);
                                 var subContext = validationContext.PushSubContext(mode.Offset);
                                 var result = exprValidator.Validate(subContext);
                                 foreach (var error in result.Errors)

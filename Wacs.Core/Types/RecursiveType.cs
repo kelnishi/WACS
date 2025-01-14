@@ -136,7 +136,7 @@ namespace Wacs.Core.Types
                             {
                                 foreach (var failure in validationResult.Errors)
                                 {
-                                    var propertyName = $"{ctx.PropertyPath}.{failure.PropertyName}";
+                                    var propertyName = $"{failure.PropertyName}";
                                     ctx.AddFailure(propertyName, failure.ErrorMessage);
                                 }
                             }

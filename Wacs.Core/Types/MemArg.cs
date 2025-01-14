@@ -23,9 +23,9 @@ namespace Wacs.Core.Types
     {
         public Alignment Align;
         public MemIdx M;
-        public uint Offset;
+        public long Offset;
         
-        public MemArg(Alignment align, uint offset, MemIdx idx)
+        public MemArg(Alignment align, long offset, MemIdx idx)
         {
             Align = align;
             M = idx;
@@ -35,7 +35,7 @@ namespace Wacs.Core.Types
         public static MemArg Parse(BinaryReader reader)
         {
             uint bits = reader.ReadLeb128_u32();
-            if (bits > 16)
+            if ((bits & (uint)Alignment.LogBits) > 16)
                 throw new InvalidDataException($"Invalid memory alignment");
             
             Alignment align = (Alignment)bits;
@@ -49,7 +49,7 @@ namespace Wacs.Core.Types
                 idx = (MemIdx)reader.ReadLeb128_s32();
             }
 
-            uint offset = reader.ReadLeb128_u32();
+            long offset = (long)reader.ReadLeb128_u64();
             return new MemArg(align, offset, idx);
         }
 

@@ -53,12 +53,10 @@ namespace Wacs.Core.OpCodes
         [OpCode("call_ref")]      CallRef      = 0x14,
         [OpCode("return_call_ref")] ReturnCallRef = 0x15,
         
-        // Exception Handling (Proposal)
-        [OpCode("try")]           Try          = 0x06,
-        [OpCode("catch")]         Catch        = 0x07,
+        // Exception Handling
+        [OpCode("try_table")]     TryTable     = 0x1F,
         [OpCode("throw")]         Throw        = 0x08,
-        [OpCode("rethrow")]       Rethrow      = 0x09,
-        [OpCode("br_on_exn")]     BrOnExn      = 0x0A,
+        [OpCode("throw_ref")]     ThrowRef     = 0x0A,
         
         // =========================
         // Reference Types

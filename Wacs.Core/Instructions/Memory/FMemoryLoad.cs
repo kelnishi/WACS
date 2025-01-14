@@ -25,23 +25,23 @@ using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Instructions.Memory
 {
-    public class InstF32Load : InstMemoryLoad, INodeComputer<uint, float>
+    public class InstF32Load : InstMemoryLoad, INodeComputer<long, float>
     {
         public InstF32Load() : base(ValType.F32, BitWidth.U32, OpCode.F32Load) {}
 
-        public Func<ExecContext, uint, float> GetFunc => FetchFromMemory;
+        public Func<ExecContext, long, float> GetFunc => FetchFromMemory;
 
         public override void Execute(ExecContext context)
         {
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            uint offset = context.OpStack.PopU32();
+            long offset = context.OpStack.PopAddr();
             float value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
 
         //@Spec 4.4.7.1. t.load and t.loadN_sx
-        public float FetchFromMemory(ExecContext context, uint offset)
+        public float FetchFromMemory(ExecContext context, long offset)
         {
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
@@ -49,8 +49,9 @@ namespace Wacs.Core.Instructions.Memory
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             var mem = context.Store[a];
-            long i = offset;
-            long ea = (long)i + (long)M.Offset;
+            long ea = offset + M.Offset;
+            if (ea < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
             var bs = new ReadOnlySpan<byte>(mem.Data, (int)ea, WidthTByteSize);
@@ -60,23 +61,23 @@ namespace Wacs.Core.Instructions.Memory
     }
     
     
-    public class InstF64Load : InstMemoryLoad, INodeComputer<uint, double>
+    public class InstF64Load : InstMemoryLoad, INodeComputer<long, double>
     {
         public InstF64Load() : base(ValType.F64, BitWidth.U64, OpCode.F64Load) {}
 
-        public Func<ExecContext, uint, double> GetFunc => FetchFromMemory;
+        public Func<ExecContext, long, double> GetFunc => FetchFromMemory;
 
         public override void Execute(ExecContext context)
         {
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            uint offset = context.OpStack.PopU32();
+            long offset = context.OpStack.PopAddr();
             double value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
 
         //@Spec 4.4.7.1. t.load and t.loadN_sx
-        public double FetchFromMemory(ExecContext context, uint offset)
+        public double FetchFromMemory(ExecContext context, long offset)
         {
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
@@ -84,8 +85,9 @@ namespace Wacs.Core.Instructions.Memory
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             var mem = context.Store[a];
-            long i = offset;
-            long ea = (long)i + (long)M.Offset;
+            long ea = offset + M.Offset;
+            if (ea < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
             var bs = new ReadOnlySpan<byte>(mem.Data, (int)ea, WidthTByteSize);

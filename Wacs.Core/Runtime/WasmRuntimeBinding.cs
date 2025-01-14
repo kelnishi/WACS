@@ -42,6 +42,7 @@ namespace Wacs.Core.Runtime
                     ExternalValue.Table table => table.Address,
                     ExternalValue.Memory mem => mem.Address,
                     ExternalValue.Global global => global.Address,
+                    ExternalValue.Tag tag => tag.Address,
                     _ => throw new InvalidDataException($"Corrupted Export Instance in {moduleName} ({export.Name})"),
                 };
             }
@@ -69,7 +70,7 @@ namespace Wacs.Core.Runtime
             var exports = _moduleInstances.SelectMany(modInst => modInst.Exports)
                 .Where(export => export.Name == entity)
                 .Select(export => export.Value)
-                .Cast<ExternalValue.Function>()
+                .OfType<ExternalValue.Function>()
                 .Select(func => func.Address);
             addr = exports.LastOrDefault();
             return addr != null;
@@ -89,7 +90,7 @@ namespace Wacs.Core.Runtime
                     .SelectMany(modInst => modInst.Exports)
                     .Where(export => export.Name == id.entity)
                     .Select(export => export.Value)
-                    .Cast<ExternalValue.Function>()
+                    .OfType<ExternalValue.Function>()
                     .Select(func => func.Address)
                     .ToList();
 
@@ -218,6 +219,15 @@ namespace Wacs.Core.Runtime
             _entityBindings[id] = globAddr;
             Store.CommitTransaction();
             return Store[globAddr];
+        }
+        
+        public TagInstance BindHostTag((string module, string entity) id, DefType tagType)
+        {
+            Store.OpenTransaction();
+            var tagAddr = AllocateTag(Store, tagType);
+            _entityBindings[id] = tagAddr;
+            Store.CommitTransaction();
+            return Store[tagAddr];
         }
 
         public TableInstance BindHostTable((string module, string entity) id, TableType tableType, Value val)

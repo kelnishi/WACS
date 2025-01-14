@@ -64,29 +64,23 @@ namespace Wacs.Core.Types.Defs
         [WatToken("nullfuncref")]   NoFunc   = (int)((uint)HeapType.NoFunc | NullableRef | SignBit),          // -0x0d
         [WatToken("nullexternref")] NoExtern = (int)((uint)HeapType.NoExtern | NullableRef | SignBit),        // -0x0e
         [WatToken("nullref")]       None     = (int)((uint)HeapType.None | NullableRef | SignBit),            // -0x0f
-        [WatToken("funcref")]       FuncRef     = (int)((uint)HeapType.Func | NullableRef | SignBit),            // -0x10
-        [WatToken("externref")]     ExternRef   = (int)((uint)HeapType.Extern | NullableRef | SignBit),          // -0x11
+        [WatToken("funcref")]       FuncRef     = (int)((uint)HeapType.Func | NullableRef | SignBit),         // -0x10
+        [WatToken("externref")]     ExternRef   = (int)((uint)HeapType.Extern | NullableRef | SignBit),       // -0x11
         [WatToken("anyref")]        Any      = (int)((uint)HeapType.Any | NullableRef | SignBit),             // -0x12
         [WatToken("eqref")]         Eq       = (int)((uint)HeapType.Eq | NullableRef | SignBit),              // -0x13
         [WatToken("i31ref")]        I31      = (int)((uint)HeapType.I31 | NullableRef | SignBit),             // -0x14
         [WatToken("structref")]     Struct   = (int)((uint)HeapType.Struct | NullableRef | SignBit),          // -0x15
         [WatToken("arrayref")]      Array    = (int)((uint)HeapType.Array | NullableRef | SignBit),           // -0x16
-           
+        
+        //Exception Types
+        [WatToken("exnref")]        Exn      = (int)((uint)HeapType.Exn | NullableRef | SignBit),             // -0x17
+        [WatToken("nullexnref")]    NoExn    = (int)((uint)HeapType.NoExn | NullableRef | SignBit),           // -0x0c
+        
+        //Naked HeapTypes
         [WatToken("ref ht")]        RefHt    = (int)((uint)TypePrefix.RefHt | SignBit),         // -0x1c
         [WatToken("ref null ht")]   RefNullHt= (int)((uint)TypePrefix.RefNullHt | SignBit),     // -0x1d
         
         Empty                                = (int)((uint)TypePrefix.EmptyBlock | SignBit),   // -0xc0
-        
-        //Recursive Types
-        RecSt                                = (int)((uint)RecType.RecSt | SignBit),            // -0xce
-        SubXCt                               = (int)((uint)RecType.SubXCt | SignBit),           // -0xcf
-        SubFinalXCt                          = (int)((uint)RecType.SubFinalXCt | SignBit),      // -0xd0
-        
-        //Composite Types
-        ArrayAt                              = (int)((uint)CompType.ArrayAt | SignBit),         // -0xde
-        Structst                             = (int)((uint)CompType.StructSt | SignBit),        // -0xdf
-        FuncFt                               = (int)((uint)CompType.FuncFt | SignBit),          // -0xe0
-        
         
         //NonNullable (unset null bit)
         [WatToken("ref nofunc")]   NoFuncNN   = (int)((uint)HeapType.NoFunc | Ref | SignBit),  
@@ -98,7 +92,7 @@ namespace Wacs.Core.Types.Defs
         [WatToken("ref eq")]       EqNN       = (int)((uint)HeapType.Eq | Ref | SignBit),      
         [WatToken("ref i31")]      I31NN      = (int)((uint)HeapType.I31 | Ref | SignBit),     
         [WatToken("ref struct")]   StructNN   = (int)((uint)HeapType.Struct | Ref | SignBit),  
-        [WatToken("ref array")]    ArrayNN    = (int)((uint)HeapType.Array | Ref | SignBit),   
+        [WatToken("ref array")]    ArrayNN    = (int)((uint)HeapType.Array | Ref | SignBit),
         
         //for validation
         [WatToken("Bot")] Bot         = (int)((uint)HeapType.Bot | Ref | SignBit), 
@@ -151,6 +145,7 @@ namespace Wacs.Core.Types.Defs
             ValType.None => true,
             ValType.NoFunc => true,
             ValType.NoExtern => true,
+            ValType.NoExn => true,
             ValType.Bot => true,
             _ => false,
         };
@@ -199,6 +194,8 @@ namespace Wacs.Core.Types.Defs
                 ValType.I31NN => HeapType.I31,
                 ValType.StructNN => HeapType.Struct,
                 ValType.ArrayNN => HeapType.Array,
+                ValType.Exn => HeapType.Exn,
+                ValType.NoExn => HeapType.NoExn,
                 _ => (HeapType)0
             };
         }
@@ -217,6 +214,8 @@ namespace Wacs.Core.Types.Defs
                     ValType.FuncRef,
                 ValType.ExternRef or ValType.NoExtern =>
                     ValType.ExternRef,
+                ValType.Exn =>
+                    ValType.Exn,
                 ValType.AnyNN or ValType.EqNN or ValType.I31NN or ValType.StructNN or ValType.ArrayNN or ValType.NoneNN =>
                     ValType.AnyNN,
                 _ when heapType.Index().Value >= 0 => types[heapType.Index()].Expansion switch {
@@ -244,6 +243,8 @@ namespace Wacs.Core.Types.Defs
                     ValType.Eq or 
                     ValType.I31 or 
                     ValType.Struct or 
+                    ValType.Exn or
+                    ValType.NoExn or
                     ValType.Array => true,
                 ValType.NoFuncNN or  
                     ValType.NoExternNN or
@@ -300,6 +301,7 @@ namespace Wacs.Core.Types.Defs
                 HeapType.None => ofType.IsSubType(ValType.Any, types),
                 HeapType.NoFunc => ofType.IsSubType(ValType.FuncRef, types),
                 HeapType.NoExtern => ofType.IsSubType(ValType.ExternRef, types),
+                HeapType.NoExn => ofType.IsSubType(ValType.Exn, types),
                 HeapType.Bot => true,
                 _ => false
             };
@@ -414,6 +416,7 @@ namespace Wacs.Core.Types.Defs
         public static ValType UnpackRef(Type type) => 
             type.IsByRef ? type.GetElementType()?.ToValType() ?? ValType.Nil : type.ToValType();
 
+        public static string ToWrappedNotation(this ValType type) => $"({type.ToNotation()})";
 
         public static string ToNotation(this ValType type) =>
             Enum.IsDefined(typeof(ValType), type)
@@ -441,9 +444,16 @@ namespace Wacs.Core.Types.Defs
                 (byte)HeapType.I31 => ValType.I31,
                 (byte)HeapType.Struct => ValType.Struct,
                 (byte)HeapType.Array => ValType.Array,
+                
+                (byte)HeapType.Exn => ValType.Exn,
+                (byte)HeapType.NoExn => ValType.NoExn,
                 //Index
                 _ => (ValType)reader.ContinueReading_s33(token), 
             };
+            //Exceptions are always nullable
+            if (type == ValType.Exn)
+                return ValType.Exn;
+            
             return nullable
                 ? type | ValType.Ref | ValType.Nullable
                 : (type | ValType.Ref) & ~ValType.Nullable;
@@ -487,6 +497,9 @@ namespace Wacs.Core.Types.Defs
                 (byte)HeapType.I31 => ValType.I31,
                 (byte)HeapType.Struct => ValType.Struct,
                 (byte)HeapType.Array => ValType.Array,
+                //Exception Types
+                (byte)HeapType.Exn => ValType.Exn,
+                (byte)HeapType.NoExn => ValType.NoExn,
                 //Abstract or Index (set ref bit)
                 (byte)TypePrefix.RefHt => ParseHeapType(reader, false),   //non-nullable
                 (byte)TypePrefix.RefNullHt => ParseHeapType(reader, true),  //nullable

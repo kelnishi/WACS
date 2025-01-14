@@ -28,32 +28,33 @@ using LaneIdx = System.Byte;
 
 namespace Wacs.Core.Instructions.SIMD
 {
-    public class InstV128Load : InstMemoryLoad, INodeComputer<uint, V128>
+    public class InstV128Load : InstMemoryLoad, INodeComputer<long, V128>
     {
         public InstV128Load() : base(ValType.V128, BitWidth.V128, SimdCode.V128Load) {}
 
-        public Func<ExecContext, uint, V128> GetFunc => FetchFromMemory;
+        public Func<ExecContext, long, V128> GetFunc => FetchFromMemory;
 
         public override void Execute(ExecContext context)
         {
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            uint offset = context.OpStack.PopU32();
+            long offset = context.OpStack.PopAddr();
             V128 value = FetchFromMemory(context, offset);
             context.OpStack.PushValue(value);
         }
 
         //@Spec 4.4.7.1. t.load and t.loadN_sx
-        public V128 FetchFromMemory(ExecContext context, uint offset)
+        public V128 FetchFromMemory(ExecContext context, long offset)
         {
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} did not exist in the context.");
             var a = context.Frame.Module.MemAddrs[M.M];
             context.Assert( context.Store.Contains(a),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} was not in the Store.");
             var mem = context.Store[a];
-            long i = offset;
-            long ea = (long)i + (long)M.Offset;
+            long ea = offset + M.Offset;
+            if (ea < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
             var bs = new ReadOnlySpan<byte>(mem.Data, (int)ea, WidthTByteSize);
@@ -67,11 +68,11 @@ namespace Wacs.Core.Instructions.SIMD
         }
     }
     
-    public class InstV128Store : InstMemoryStore, INodeConsumer<uint, V128>
+    public class InstV128Store : InstMemoryStore, INodeConsumer<long, V128>
     {
         public InstV128Store() : base(ValType.V128, BitWidth.V128, SimdCode.V128Store) { }
 
-        public Action<ExecContext, uint, V128> GetFunc => SetMemoryValue;
+        public Action<ExecContext, long, V128> GetFunc => SetMemoryValue;
 
         // @Spec 4.4.7.6. t.store
         // @Spec 4.4.7.6. t.storeN
@@ -80,24 +81,25 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert( context.OpStack.Peek().Type == Type,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             V128 c = context.OpStack.PopV128();
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-            uint offset = context.OpStack.PopU32();
+            long offset = context.OpStack.PopAddr();
             
             SetMemoryValue(context, offset, c);
         }
 
-        public void SetMemoryValue(ExecContext context, uint offset, V128 cV128)
+        public void SetMemoryValue(ExecContext context, long offset, V128 cV128)
         {
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} did not exist in the context.");
             var a = context.Frame.Module.MemAddrs[M.M];
             context.Assert( context.Store.Contains(a),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} was not in the Store.");
             var mem = context.Store[a];
-            
-            long i = offset;
-            long ea = i + M.Offset;
+
+            long ea = offset + M.Offset;
+            if (ea < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
@@ -155,11 +157,11 @@ namespace Wacs.Core.Instructions.SIMD
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M.M),
-                "Instruction {0} failed with invalid context memory 0.",Op.GetMnemonic());
+                "Instruction {0} failed with invalid context memory {1}.", Op.GetMnemonic(), M.M.Value);
             context.Assert(M.Align.LinearSize() <= WidthTByteSize * CountN,
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),WidthT);
 
-            context.OpStack.PopI32();
+            context.OpStack.PopInt();
             context.OpStack.PushV128();
         }
 
@@ -168,23 +170,25 @@ namespace Wacs.Core.Instructions.SIMD
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} did not exist in the context.");
             //3.
             var a = context.Frame.Module.MemAddrs[M.M];
             //4.
             context.Assert( context.Store.Contains(a),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory  was not in the Store.");
             //5.
             var mem = context.Store[a];
             //6.
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopU32();
+            long i = context.OpStack.PopAddr();
             //8.
-            long ea = (long)i + (long)M.Offset;
+            long ea = i + M.Offset;
             //9.
             int mn = WidthTByteSize * CountN;
+            if (ea < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
             if (ea + mn > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{mn} out of bounds ({mem.Data.Length}).");
             //10.
@@ -259,11 +263,11 @@ namespace Wacs.Core.Instructions.SIMD
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M.M),
-                "Instruction {0} failed with invalid context memory 0.",Op.GetMnemonic());
+                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),M.M.Value);
             context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align,BitWidth.V128);
 
-            context.OpStack.PopI32();
+            context.OpStack.PopInt();
             context.OpStack.PushV128();
         }
 
@@ -272,22 +276,24 @@ namespace Wacs.Core.Instructions.SIMD
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} did not exist in the context.");
             //3.
             var a = context.Frame.Module.MemAddrs[M.M];
             //4.
             context.Assert( context.Store.Contains(a),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} was not in the Store.");
             //5.
             var mem = context.Store[a];
             //6.
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopU32();
+            long i = context.OpStack.PopAddr();
             //8.
-            long ea = (long)i + (long)M.Offset;
+            long ea = i + M.Offset;
             //9.
+            if (ea < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
             if (ea + WidthN.ByteSize() > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthN.ByteSize()} out of bounds ({mem.Data.Length}).");
             //10.
@@ -363,11 +369,11 @@ namespace Wacs.Core.Instructions.SIMD
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Mems.Contains(M.M),
-                "Instruction {0} failed with invalid context memory 0.",Op.GetMnemonic());
+                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),M.M.Value);
             context.Assert(M.Align.LinearSize() <= BitWidth.V128.ByteSize(),
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),BitWidth.V128);
 
-            context.OpStack.PopI32();
+            context.OpStack.PopInt();
             context.OpStack.PushV128();
         }
 
@@ -376,22 +382,24 @@ namespace Wacs.Core.Instructions.SIMD
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} did not exist in the context.");
             //3.
             var a = context.Frame.Module.MemAddrs[M.M];
             //4.
             context.Assert( context.Store.Contains(a),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} was not in the Store.");
             //5.
             var mem = context.Store[a];
             //6.
             context.Assert( context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //7.
-            long i = context.OpStack.PopU32();
+            long i = context.OpStack.PopAddr();
             //8.
-            long ea = (long)i + (long)M.Offset;
+            long ea = i + M.Offset;
             //9.
+            if (ea < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
             if (ea + WidthN.ByteSize() > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthN.ByteSize()} out of bounds ({mem.Data.Length}).");
             //10.
@@ -463,12 +471,12 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert(X < 128 / WidthN.BitSize(),
                 "Instruction {0} failed with invalid laneidx {1} <= {2}", Op.GetMnemonic(), X, 128 / WidthN.BitSize());
             context.Assert(context.Mems.Contains(M.M),
-                "Instruction {0} failed with invalid context memory 0.", Op.GetMnemonic());
+                "Instruction {0} failed with invalid context memory {1}.", Op.GetMnemonic(), M.M.Value);
             context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8", Op.GetMnemonic(), M.Align.LinearSize(), WidthN);
             
             context.OpStack.PopV128();
-            context.OpStack.PopI32();
+            context.OpStack.PopInt();
             context.OpStack.PushV128();
         }
 
@@ -478,12 +486,12 @@ namespace Wacs.Core.Instructions.SIMD
             
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} did not exist in the context.");
             //3.
             var a = context.Frame.Module.MemAddrs[M.M];
             //4.
             context.Assert( context.Store.Contains(a),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} was not in the Store.");
             //5.
             var mem = context.Store[a];
             //6.
@@ -492,13 +500,15 @@ namespace Wacs.Core.Instructions.SIMD
             //7.
             MV128 value = (V128)context.OpStack.PopV128();
             //8.
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            long i = context.OpStack.PopU32();
+            long i = context.OpStack.PopAddr();
             //10.
-            long ea = (long)i + (long)M.Offset;
+            long ea = i + M.Offset;
             //11.
+            if (ea < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
             if (ea + WidthN.ByteSize() > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthN.ByteSize()} out of bounds ({mem.Data.Length}).");
             //12.
@@ -575,11 +585,11 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert(X < 128 / WidthN.BitSize(),
                 "Instruction {0} failed with invalid laneidx {1} <= {2}", Op.GetMnemonic(), X, 128 / WidthN.BitSize());
             context.Assert(context.Mems.Contains(M.M),
-                "Instruction {0} failed with invalid context memory 0.", Op.GetMnemonic());
+                "Instruction {0} failed with invalid context memory {1}.", Op.GetMnemonic(), M.M.Value);
             context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8", Op.GetMnemonic(), M.Align.LinearSize(), WidthN);
             context.OpStack.PopV128();
-            context.OpStack.PopI32();
+            context.OpStack.PopInt();
         }
 
         // @Spec 4.4.7.7. v128.storeN_lane memarg x
@@ -587,12 +597,12 @@ namespace Wacs.Core.Instructions.SIMD
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} did not exist in the context.");
             //3.
             var a = context.Frame.Module.MemAddrs[M.M];
             //4.
             context.Assert( context.Store.Contains(a),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} was not in the Store.");
             //5.
             var mem = context.Store[a];
             //6.
@@ -601,13 +611,15 @@ namespace Wacs.Core.Instructions.SIMD
             //7.
             V128 c = context.OpStack.PopV128();
             //8.
-            context.Assert( context.OpStack.Peek().IsI32,
+            context.Assert( context.OpStack.Peek().IsInt,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //9.
-            long i = context.OpStack.PopU32();
+            long i = context.OpStack.PopAddr();
             //10.
             long ea = i + M.Offset;
             //11.
+            if (ea < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
             if (ea + WidthN.ByteSize() > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             
