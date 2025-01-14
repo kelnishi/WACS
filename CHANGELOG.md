@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.0]
+- wasm-3.0 spec support
+- exnref/tag support
+- memory64 support
+- multi-memory support (enabled)
+
 ## [0.6.0]
 - wasm-gc extension
 - function-references extension
