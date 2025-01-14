@@ -84,7 +84,7 @@ namespace Wacs.Core.Instructions.Memory
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} did not exist in the context.");
             var a = context.Frame.Module.MemAddrs[M.M];
             context.Assert( context.Store.Contains(a),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {M.M.Value} was not in the Store.");
             var mem = context.Store[a];
             long ea = offset + M.Offset;
             if (ea + WidthTByteSize > mem.Data.Length)
