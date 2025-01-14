@@ -55,6 +55,8 @@ namespace Wacs.Core.Instructions.Memory
             var mem = context.Store[a];
 
             long ea = offset + M.Offset;
+            if (ea < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
@@ -98,6 +100,8 @@ namespace Wacs.Core.Instructions.Memory
             var mem = context.Store[a];
 
             long ea = offset + M.Offset;
+            if (ea < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
@@ -136,6 +140,8 @@ namespace Wacs.Core.Instructions.Memory
             var mem = context.Store[a];
 
             long ea = offset + M.Offset;
+            if (ea < 0)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
             if (ea + WidthTByteSize > mem.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
