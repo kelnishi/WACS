@@ -14,17 +14,18 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using Wacs.Core.Runtime;
 
 namespace Wacs.WASIp1
 {
-    public class Wasi
+    public class Wasi : IDisposable
     {
         private readonly Clock _clock;
         private readonly WasiConfiguration _config;
 
         private readonly Env _env;
-        private readonly Filesystem _fs;
+        private readonly FileSystem _fs;
         private readonly Poll _poll;
         private readonly Proc _proc;
         private readonly Random _random;
@@ -41,7 +42,7 @@ namespace Wacs.WASIp1
             _clock = new Clock(config);
             _random = new Random();
             _sock = new Sock(_state);
-            _fs = new Filesystem(config, _state);
+            _fs = new FileSystem(config, _state);
         }
 
         public void BindToRuntime(WasmRuntime runtime)
@@ -53,6 +54,11 @@ namespace Wacs.WASIp1
             _random.BindToRuntime(runtime);
             _sock.BindToRuntime(runtime);
             _fs.BindToRuntime(runtime);
+        }
+
+        public void Dispose()
+        {
+            _fs.Dispose();
         }
     }
 }

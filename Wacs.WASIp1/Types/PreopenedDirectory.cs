@@ -14,6 +14,7 @@
 //  * limitations under the License.
 //  */
 
+using System;
 using System.IO;
 
 namespace Wacs.WASIp1.Types
@@ -23,7 +24,6 @@ namespace Wacs.WASIp1.Types
         public PreopenedDirectory(WasiConfiguration config, string path)
         {
             HostPath = Path.GetFullPath(Path.Combine(config.HostRootDirectory, path));
-            
             if (!Directory.Exists(HostPath))
             {
                 throw new DirectoryNotFoundException($"The directory '{Path.Combine(config.HostRootDirectory, path)}' does not exist.");
