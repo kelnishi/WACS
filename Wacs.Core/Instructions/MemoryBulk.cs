@@ -151,6 +151,9 @@ namespace Wacs.Core.Instructions
     {
         private DataIdx X;
         private MemIdx Y;
+        
+        private InstMemoryStore _store;
+        
         public override ByteCode Op => ExtCode.MemoryInit;
 
         /// <summary>
@@ -233,8 +236,7 @@ namespace Wacs.Core.Instructions
                 //20.
                 context.OpStack.PushI32(b);
                 //21.
-                context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, Y))
-                    .Execute(context);
+                _store.Execute(context);
                 //22.
                 long check = d + 1L;
                 context.Assert( check < Constants.TwoTo32,
@@ -255,7 +257,8 @@ namespace Wacs.Core.Instructions
         {
             X = (DataIdx)reader.ReadLeb128_u32();
             Y = (MemIdx)reader.ReadByte();
-            
+            _store = BinaryModuleParser.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8);
+            _store.Immediate(new MemArg(0, 0, Y));
             return this;
         }
 
@@ -263,6 +266,8 @@ namespace Wacs.Core.Instructions
         {
             X = x;
             Y = y;
+            _store = BinaryModuleParser.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8);
+            _store.Immediate(new MemArg(0, 0, Y));
             return this;
         }
 
@@ -319,6 +324,9 @@ namespace Wacs.Core.Instructions
     {
         private MemIdx SrcY;
         private MemIdx DstX;
+        private InstMemoryLoad _load;
+        private InstMemoryStore _store;
+        
         public override ByteCode Op => ExtCode.MemoryCopy;
 
         /// <summary>
@@ -406,10 +414,8 @@ namespace Wacs.Core.Instructions
                 {
                     context.OpStack.PushValue(new Value(atD, d));
                     context.OpStack.PushValue(new Value(atS, s));
-                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, DstX))
-                        .Execute(context);
-                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, SrcY))
-                        .Execute(context);
+                    _load.Execute(context);
+                    _store.Execute(context);
                     check = d + 1L;
                     context.Assert( check < Constants.TwoTo32,
                         $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
@@ -430,10 +436,8 @@ namespace Wacs.Core.Instructions
                     context.Assert( check < Constants.TwoTo32,
                         $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
                     context.OpStack.PushValue(new Value(atS, s + n - 1));
-                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, DstX))
-                        .Execute(context);
-                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, SrcY))
-                        .Execute(context);
+                    _load.Execute(context);
+                    _store.Execute(context);
                     context.OpStack.PushValue(new Value(atD, d));
                     context.OpStack.PushValue(new Value(atS, s));
                 }
@@ -448,6 +452,12 @@ namespace Wacs.Core.Instructions
         {
             SrcY = (MemIdx)reader.ReadByte();
             DstX = (MemIdx)reader.ReadByte();
+            
+            _load = BinaryModuleParser.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U);
+            _load.Immediate(new MemArg(0, 0, DstX));
+            _store = BinaryModuleParser.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8);
+            _store.Immediate(new MemArg(0, 0, SrcY));
+            
             return this;
         }
     }
@@ -456,6 +466,8 @@ namespace Wacs.Core.Instructions
     public class InstMemoryFill : InstructionBase
     {
         private MemIdx X;
+        private InstMemoryStore _store;
+        
         public override ByteCode Op => ExtCode.MemoryFill;
 
         /// <summary>
@@ -515,9 +527,7 @@ namespace Wacs.Core.Instructions
                 //15.
                 context.OpStack.PushValue(val);
                 //16.
-                
-                context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, X))
-                    .Execute(context);
+                _store.Execute(context);
                 //17.
                 long check = d + 1L;
                 context.Assert( check < Constants.TwoTo32,
@@ -535,6 +545,8 @@ namespace Wacs.Core.Instructions
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (MemIdx)reader.ReadByte();
+            _store = BinaryModuleParser.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8);
+            _store.Immediate(new MemArg(0, 0, X));
             return this;
         }
     }
