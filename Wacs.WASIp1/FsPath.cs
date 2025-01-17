@@ -25,7 +25,7 @@ using size = System.UInt32;
 
 namespace Wacs.WASIp1
 {
-    public partial class Filesystem
+    public partial class FileSystem
     {
         public delegate void PathOpenDelegate(ExecContext ctx,
             fd dirFd,
@@ -53,38 +53,61 @@ namespace Wacs.WASIp1
             var mem = ctx.DefaultMemory;
             if (!mem.Contains((int)pathPtr, (int)pathLen))
                 return ErrNo.Inval;
-            
+
+            // Get the parent directory's FD
             if (!GetFd(fd, out var dirFd))
                 return ErrNo.NoEnt;
-            if (!dirFd.Rights.HasFlag(Rights.PATH_CREATE_DIRECTORY) || (dirFd.Access & FileAccess.Write) == 0)
+
+            // Must have PATH_CREATE_DIRECTORY + write permission
+            if (!dirFd.Rights.HasFlag(Rights.PATH_CREATE_DIRECTORY) ||
+                (dirFd.Access & FileAccess.Write) == 0)
+            {
                 return ErrNo.Acces;
-            
+            }
+
             try
             {
                 var pathToCreate = mem.ReadString(pathPtr, pathLen);
+
+                // Combine the (guest) path with the FD's guest path
                 var guestDirPath = dirFd.Path;
                 var hostDirPath = _state.PathMapper.MapToHostPath(guestDirPath);
-                var newHostPath = Path.Combine(hostDirPath, pathToCreate);
+
                 var newGuestPath = Path.Combine(guestDirPath, pathToCreate);
-                Directory.CreateDirectory(pathToCreate);
+                var newHostPath = Path.Combine(hostDirPath, pathToCreate);
+
+                Directory.CreateDirectory(newHostPath);
+
+                // Compute rights for newly created directory
+                // We treat it as a directory, so we might use DirectoryInfo
                 var rights = FileDescriptor.ComputeFileRights(
-                    new FileInfo(newHostPath),
+                    new DirectoryInfo(newHostPath),
                     Filetype.Directory,
-                    dirFd.Rights.ToFileAccess(),
+                    dirFd.Rights.ToFileAccess(), // Convert from existing rights
                     Stream.Null,
                     dirFd.Rights.HasFlag(Rights.PATH_CREATE_FILE),
                     dirFd.Rights.HasFlag(Rights.PATH_UNLINK_FILE)
                 ) & dirFd.Rights;
-                
-                fd newFd = BindDir(newHostPath, newGuestPath, dirFd.Access, true, rights, dirFd.Rights);
+
+                // Bind this new directory into our FD table.
+                fd newFd = BindDir(
+                    newHostPath,      // hostDir
+                    newGuestPath,     // guestDir
+                    dirFd.Access,
+                    true,             // isPreopened?
+                    rights,
+                    dirFd.Rights
+                );
             }
-            //TODO fix these exception results
             catch (IOException ex) when (ex is DirectoryNotFoundException)
             {
+                // Could not find the parent directory
                 return ErrNo.NoSys;
             }
             catch (IOException)
             {
+                // In typical POSIX semantics, if the directory already exists, we'd do EEXIST.
+                // But here you may return a more general code or do a file-exists check first.
                 return ErrNo.Exist;
             }
 
@@ -108,7 +131,7 @@ namespace Wacs.WASIp1
         {
             if (!_config.AllowHardLinks)
                 return ErrNo.NotSup;
-            
+
             return ErrNo.NotSup;
             // var mem = ctx.DefaultMemory;
             // if (!mem.Contains((int)oldPathPtr, (int)oldPathLen) || !mem.Contains((int)newPathPtr, (int)newPathLen))
@@ -145,24 +168,24 @@ namespace Wacs.WASIp1
         }
 
         /// <summary>
-        /// Open a file or directory.
-        /// This method is analogous to the POSIX <c>openat</c> function.
+        /// Open a file or directory (similar to POSIX openat).
         /// </summary>
-        /// <param name="ctx">The execution context.</param>
-        /// <param name="dirFd">File descriptor of the directory where the file is located.</param>
-        /// <param name="dirFlags">Flags that determine how the path is resolved.</param>
-        /// <param name="pathPtr">Pointer to the path of the file or directory to open.</param>
-        /// <param name="pathLen">Length of the path.</param>
-        /// <param name="oFlags">Flags determining how to open the file.</param>
-        /// <param name="fsRightsBase">Initial rights for the newly created file descriptor.</param>
-        /// <param name="fsRightsInheriting">Rights that apply to file descriptors derived from this one.</param>
-        /// <param name="fsFlags">Desired values of the file descriptor flags.</param>
-        /// <param name="fdPtr">Pointer to store the newly created file descriptor.</param>
-        /// <returns>An error code indicating the result of the operation.</returns>
-        public void PathOpen(ExecContext ctx,
-            fd dirFd, 
+        /// <param name="ctx">Execution context, gives us memory and other environment.</param>
+        /// <param name="dirFd">File descriptor representing the directory in which we should look for <paramref name="pathPtr"/>.</param>
+        /// <param name="dirFlags">Lookup flags for path resolution (e.g. symlink policy).</param>
+        /// <param name="pathPtr">Pointer to the UTF-8 path string in guest memory.</param>
+        /// <param name="pathLen">Length of the path string.</param>
+        /// <param name="oFlags">WASI open flags (e.g. O_CREAT, O_DIRECTORY, etc.).</param>
+        /// <param name="fsRightsBase">Rights for the newly created file descriptor.</param>
+        /// <param name="fsRightsInheriting">Rights inherited by descriptors created from this one.</param>
+        /// <param name="fsFlags">File-descriptor flags (e.g. non-blocking, sync, etc.).</param>
+        /// <param name="fdPtr">Pointer where we store the newly allocated file descriptor.</param>
+        /// <param name="result">Output: <see cref="ErrNo"/> code for success/failure.</param>
+        public void PathOpen(
+            ExecContext ctx,
+            fd dirFd,
             LookupFlags dirFlags,
-            ptr pathPtr, 
+            ptr pathPtr,
             size pathLen,
             OFlags oFlags,
             Rights fsRightsBase,
@@ -171,135 +194,198 @@ namespace Wacs.WASIp1
             ptr fdPtr,
             out ErrNo result)
         {
-            ctx.OpStack.PushI32((int)ErrNo.Success);
-            
             var mem = ctx.DefaultMemory;
+            result = ErrNo.Success;
+
+            // Validate memory bounds
             if (!mem.Contains((int)pathPtr, (int)pathLen))
             {
-                // ctx.OpStack.PushI32((int)ErrNo.Inval);
                 result = ErrNo.Inval;
                 return;
-                // return ErrNo.Inval;
             }
 
+            // Get directory file descriptor
             if (!GetFd(dirFd, out var dirFileDescriptor))
             {
-                // ctx.OpStack.PushI32((int)ErrNo.NoEnt);
-                result = ErrNo.NoEnt;
+                result = ErrNo.Badf;
                 return;
-                // return ErrNo.NoEnt;
             }
-            
+
+            // Directory must have read permission
             if ((dirFileDescriptor.Access & FileAccess.Read) == 0)
             {
-                // ctx.OpStack.PushI32((int)ErrNo.Acces);
                 result = ErrNo.Acces;
                 return;
-                // return ErrNo.Acces;
             }
 
             try
             {
                 var pathToOpen = mem.ReadString(pathPtr, pathLen);
-                var guestPath = Path.Combine(dirFileDescriptor.Path, pathToOpen);
-                var hostPath = _state.PathMapper.MapToHostPath(guestPath);
-                
-                if (File.Exists(hostPath))
-                {
-                    //File
-                    if (GetFd(guestPath, out var existing))
-                    {
-                        mem.WriteInt32(fdPtr, existing.Fd);
-                        // ctx.OpStack.PushI32((int)ErrNo.Success);
-                        result = ErrNo.Success;
-                        return;
-                        // return ErrNo.Success;
-                    }
-                    
-                    var fileAccess = fsRightsBase.ToFileAccess();
+                var guestDirPath = dirFileDescriptor.Path;
+                var hostDirPath = _state.PathMapper.MapToHostPath(guestDirPath);
+                var guestPath = Path.Combine(guestDirPath, pathToOpen);
+                var hostPath = Path.Combine(hostDirPath, pathToOpen);
 
-                    var fileInfo = new FileInfo(hostPath);
-                    var fileStream = new FileStream(hostPath, oFlags.ToFileMode(), fileAccess, FileShare.None);
-                    var rights = FileDescriptor.ComputeFileRights(fileInfo,
-                                     Filetype.RegularFile,
-                                     fileAccess,
-                                     fileStream,
-                                     dirFileDescriptor.Rights.HasFlag(Rights.PATH_CREATE_FILE),
-                                     dirFileDescriptor.Rights.HasFlag(Rights.PATH_UNLINK_FILE))
-                                 & fsRightsBase & dirFileDescriptor.Rights;
-                    var inheritedRights = fsRightsInheriting & dirFileDescriptor.Rights;
-                    
-                    if (!inheritedRights.HasFlag(Rights.PATH_OPEN))
+                // Check file attributes to determine if path exists and its type
+                FileAttributes attr;
+                try
+                {
+                    attr = File.GetAttributes(hostPath);
+                }
+                catch (FileNotFoundException)
+                {
+                    // Handle non-existent path with creation flag
+                    if (oFlags.HasFlag(OFlags.Creat))
                     {
-                        // ctx.OpStack.PushI32((int)ErrNo.Acces);
-                        result = ErrNo.Acces;
-                        return;
-                        // return ErrNo.Acces;
-                    }
+                        try
+                        {
+                            // Inherit access from parent directory for new files
+                            var fileStream = new FileStream(
+                                hostPath,
+                                FileMode.CreateNew,
+                                dirFileDescriptor.Access,
+                                FileShare.Read);
 
-                    fileAccess = rights.ToFileAccess();
-                    if (fileAccess == 0)
-                    {
-                        // ctx.OpStack.PushI32((int)ErrNo.Acces);
-                        result = ErrNo.Acces;
-                        return;
-                        // return ErrNo.Acces;
+                            fd newFd = BindFile(
+                                guestPath,
+                                fileStream,
+                                dirFileDescriptor.Access,
+                                dirFileDescriptor.Rights,
+                                fsRightsInheriting);
+
+                            mem.WriteInt32(fdPtr, (int)newFd);
+
+                            // Handle truncation if requested
+                            if (oFlags.HasFlag(OFlags.Trunc) && (dirFileDescriptor.Access & FileAccess.Write) != 0)
+                            {
+                                fileStream.SetLength(0);
+                            }
+                            return;
+                        }
+                        catch (UnauthorizedAccessException)
+                        {
+                            result = ErrNo.Acces;
+                            return;
+                        }
+                        catch (IOException)
+                        {
+                            result = ErrNo.IO;
+                            return;
+                        }
                     }
-                        
-                    fd newFd = BindFile(guestPath, fileStream, dirFileDescriptor.Access, rights, inheritedRights);
-                    
-                    mem.WriteInt32(fdPtr, newFd);
-                }
-                else if (Directory.Exists(hostPath))
-                {
-                    //Directory
-                    if (GetFd(guestPath, out var existing))
-                    {
-                        mem.WriteInt32(fdPtr, existing.Fd);
-                        // ctx.OpStack.PushI32((int)ErrNo.Success);
-                        result = ErrNo.Success;
-                        return;
-                        // return ErrNo.Success;
-                    }
-                    
-                    fd newFd = BindDir(guestPath, hostPath, dirFileDescriptor.Access, false, fsRightsBase, dirFileDescriptor.Rights & fsRightsInheriting);
-                    
-                    mem.WriteInt32(fdPtr, newFd);
-                }
-                else
-                {
-                    // ctx.OpStack.PushI32((int)ErrNo.NoEnt);
                     result = ErrNo.NoEnt;
                     return;
-                    // return ErrNo.NoEnt;
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    result = ErrNo.NoEnt;
+                    return;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    result = ErrNo.Acces;
+                    return;
+                }
+                catch (IOException)
+                {
+                    result = ErrNo.IO;
+                    return;
+                }
+
+                bool isDirectory = attr.HasFlag(FileAttributes.Directory);
+                bool isReadOnly = attr.HasFlag(FileAttributes.ReadOnly);
+
+                // Handle existing path based on whether it's a file or directory
+                if (isDirectory)
+                {
+                    // Fail if trying to create exclusively
+                    if (oFlags.HasFlag(OFlags.Creat) && oFlags.HasFlag(OFlags.Excl))
+                    {
+                        result = ErrNo.Exist;
+                        return;
+                    }
+
+                    // Check for existing FD
+                    if (GetFd(guestPath, out var existingFd))
+                    {
+                        mem.WriteInt32(fdPtr, (int)existingFd.Fd);
+                        return;
+                    }
+
+                    fd newFd = BindDir(
+                        hostPath,
+                        guestPath,
+                        dirFileDescriptor.Access,
+                        false,
+                        dirFileDescriptor.Rights,
+                        fsRightsInheriting);
+
+                    mem.WriteInt32(fdPtr, (int)newFd);
+                }
+                else // Regular file
+                {
+                    // Fail if trying to create exclusively
+                    if (oFlags.HasFlag(OFlags.Creat) && oFlags.HasFlag(OFlags.Excl))
+                    {
+                        result = ErrNo.Exist;
+                        return;
+                    }
+
+                    // Check for existing FD
+                    if (GetFd(guestPath, out var existingFd))
+                    {
+                        mem.WriteInt32(fdPtr, (int)existingFd.Fd);
+                        return;
+                    }
+
+                    // Inherit access from parent, but remove write access if file is read-only
+                    var fileAccess = dirFileDescriptor.Access;
+                    if (isReadOnly)
+                    {
+                        fileAccess &= ~FileAccess.Write;
+                    }
+
+                    try
+                    {
+                        var fileMode = oFlags.HasFlag(OFlags.Creat)
+                            ? FileMode.OpenOrCreate
+                            : FileMode.Open;
+
+                        var fileStream = new FileStream(
+                            hostPath,
+                            fileMode,
+                            fileAccess,
+                            FileShare.Read);
+
+                        fd newFd = BindFile(
+                            guestPath,
+                            fileStream,
+                            fileAccess,
+                            dirFileDescriptor.Rights,
+                            fsRightsInheriting);
+
+                        mem.WriteInt32(fdPtr, (int)newFd);
+
+                        // Handle truncation if requested and we have write access
+                        if (oFlags.HasFlag(OFlags.Trunc) && (fileAccess & FileAccess.Write) != 0)
+                        {
+                            fileStream.SetLength(0);
+                        }
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        result = ErrNo.Acces;
+                    }
+                    catch (IOException)
+                    {
+                        result = ErrNo.IO;
+                    }
                 }
             }
-            catch (IOException ex) when (ex is FileNotFoundException)
+            catch (Exception)
             {
-                // ctx.OpStack.PushI32((int)ErrNo.NoEnt);
-                result = ErrNo.NoEnt;
-                return;
-                // return ErrNo.NoEnt;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // ctx.OpStack.PushI32((int)ErrNo.Acces);
-                result = ErrNo.Acces;
-                return;
-                // return ErrNo.Acces;
-            }
-            catch (IOException)
-            {
-                // ctx.OpStack.PushI32((int)ErrNo.NoSys);
                 result = ErrNo.NoSys;
-                return;
-                // return ErrNo.NoSys;
             }
-
-            // ctx.OpStack.PushI32((int)ErrNo.Success);
-            result = ErrNo.Success;
-            return;
-            // return ErrNo.Success;
         }
 
         /// <summary>
@@ -314,29 +400,71 @@ namespace Wacs.WASIp1
         /// <param name="bufLen">Length of the buffer.</param>
         /// <param name="bufUsedPtr">Pointer to store the number of bytes used in the buffer.</param>
         /// <returns>An error code indicating the result of the operation.</returns>
-        public ErrNo PathReadlink(ExecContext ctx, fd dirFd, ptr pathPtr, size pathLen, ptr bufPtr, size bufLen, ptr bufUsedPtr)
+        public ErrNo PathReadlink(
+            ExecContext ctx,
+            fd dirFd,
+            ptr pathPtr,
+            size pathLen,
+            ptr bufPtr,
+            size bufLen,
+            ptr bufUsedPtr)
         {
             var mem = ctx.DefaultMemory;
-            if (!mem.Contains((int)pathPtr, (int)pathLen) || !mem.Contains((int)bufPtr, (int)bufLen))
+            if (!mem.Contains((int)pathPtr, (int)pathLen) ||
+                !mem.Contains((int)bufPtr, (int)bufLen))
+            {
                 return ErrNo.Inval;
+            }
 
             if (!GetFd(dirFd, out var dirFileDescriptor))
                 return ErrNo.NoEnt;
+
             if ((dirFileDescriptor.Access & FileAccess.Read) == 0)
                 return ErrNo.Acces;
 
             try
             {
                 var pathToRead = mem.ReadString(pathPtr, pathLen);
-                var guestPath = Path.Combine(dirFileDescriptor.Path, pathToRead);
-                var hostPath = _state.PathMapper.MapToHostPath(guestPath);
-                
-                var linkTarget = File.ReadAllText(hostPath);
-                if (linkTarget.Length > bufLen)
-                    return ErrNo.MsgSize;
+                var guestDirPath = dirFileDescriptor.Path;
+                var hostDirPath = _state.PathMapper.MapToHostPath(guestDirPath);
+                var guestPath = Path.Combine(guestDirPath, pathToRead);
+                var hostPath = Path.Combine(hostDirPath, pathToRead);
 
-                int strLen = mem.WriteUtf8String(bufPtr, linkTarget, true);
-                mem.WriteInt32(bufUsedPtr, strLen);
+#if NET6_0_OR_GREATER
+                var fileInfo = new FileInfo(hostPath);
+                if (fileInfo.LinkTarget == null)
+                {
+                    return ErrNo.Inval; // Not a symlink
+                }
+
+                var linkTarget = fileInfo.LinkTarget;
+                if (string.IsNullOrEmpty(linkTarget))
+                {
+                    return ErrNo.Inval;
+                }
+
+                // Check if the target would be within sandbox
+                try
+                {
+                    var dirPart = Path.GetDirectoryName(hostPath) ?? throw new IOException("Invalid path");
+                    var newPath = Path.Combine(dirPart, linkTarget);
+                    var resolvedPath = VirtualPathMapper.ResolveSymbolicLinks(newPath, hostDirPath);
+
+                    // If we get here, the path is valid and within sandbox
+                    if (linkTarget.Length > bufLen)
+                        return ErrNo.MsgSize;
+
+                    int strLen = mem.WriteUtf8String(bufPtr, linkTarget, true);
+                    mem.WriteInt32(bufUsedPtr, strLen);
+                }
+                catch (SandboxError sandboxError)
+                {
+                    return sandboxError.ErrorNumber;
+                }
+#else
+        // Pre-.NET 8 - return unsupported operation
+        return ErrNo.NoSys;
+#endif
             }
             catch (FileNotFoundException)
             {
@@ -350,7 +478,7 @@ namespace Wacs.WASIp1
             {
                 return ErrNo.NoSys;
             }
-            
+
             return ErrNo.Success;
         }
 
@@ -372,14 +500,23 @@ namespace Wacs.WASIp1
 
             if (!GetFd(fd, out var dirFileDescriptor))
                 return ErrNo.NoEnt;
-            if ((dirFileDescriptor.Access & FileAccess.Read) == 0)
+
+            // Typically need FD read+write to remove
+            if ((dirFileDescriptor.Access & FileAccess.Read) == 0 ||
+                (dirFileDescriptor.Access & FileAccess.Write) == 0)
+            {
                 return ErrNo.Acces;
+            }
 
             try
             {
                 var pathToRemove = mem.ReadString(pathPtr, pathLen);
-                var guestPath = Path.Combine(dirFileDescriptor.Path, pathToRemove);
-                var hostPath = _state.PathMapper.MapToHostPath(guestPath);
+                var guestDirPath = dirFileDescriptor.Path;
+                var hostDirPath = _state.PathMapper.MapToHostPath(guestDirPath);
+
+                var guestPath = Path.Combine(guestDirPath, pathToRemove);
+                var hostPath = Path.Combine(hostDirPath, pathToRemove);
+
 
                 Directory.Delete(hostPath, false);
                 UnbindDir(guestPath);
@@ -396,12 +533,12 @@ namespace Wacs.WASIp1
             {
                 return ErrNo.Acces;
             }
-            
+
             return ErrNo.Success;
         }
 
         /// <summary>
-        /// Renames a file or directory.
+        /// /// Renames a file or directory.
         /// </summary>
         /// <param name="ctx">Execution context of the calling process.</param>
         /// <param name="oldFd">File descriptor of the source directory.</param>
@@ -411,11 +548,22 @@ namespace Wacs.WASIp1
         /// <param name="newPathPtr">Pointer to the destination path for the renamed file or directory.</param>
         /// <param name="newPathLen">Length of the destination path.</param>
         /// <returns>Returns an error code. Successful rename returns <c>ErrNo.Success</c>.</returns>
-        public ErrNo PathRename(ExecContext ctx, fd oldFd, ptr oldPathPtr, size oldPathLen, fd newFd, ptr newPathPtr, size newPathLen)
+        public ErrNo PathRename(
+            ExecContext ctx,
+            fd oldFd,
+            ptr oldPathPtr,
+            size oldPathLen,
+            fd newFd,
+            ptr newPathPtr,
+            size newPathLen
+        )
         {
             var mem = ctx.DefaultMemory;
-            if (!mem.Contains((int)oldPathPtr, (int)oldPathLen) || !mem.Contains((int)newPathPtr, (int)newPathLen))
+            if (!mem.Contains((int)oldPathPtr, (int)oldPathLen) ||
+                !mem.Contains((int)newPathPtr, (int)newPathLen))
+            {
                 return ErrNo.Inval;
+            }
 
             try
             {
@@ -423,42 +571,58 @@ namespace Wacs.WASIp1
                     return ErrNo.NoEnt;
                 if (!GetFd(newFd, out var newDirFileDescriptor))
                     return ErrNo.NoEnt;
-                
+
                 var oldPathToRename = mem.ReadString(oldPathPtr, oldPathLen);
                 var newPathForRename = mem.ReadString(newPathPtr, newPathLen);
+
                 var oldGuestPath = Path.Combine(oldDirFileDescriptor.Path, oldPathToRename);
                 var newGuestPath = Path.Combine(newDirFileDescriptor.Path, newPathForRename);
-                var oldHostPath = _state.PathMapper.MapToHostPath(oldGuestPath);
-                var newHostPath = _state.PathMapper.MapToHostPath(newGuestPath);
-                
+
+                var oldHostDirPath = _state.PathMapper.MapToHostPath(oldDirFileDescriptor.Path);
+                var newHostDirPath = _state.PathMapper.MapToHostPath(newDirFileDescriptor.Path);
+
+                var oldHostPath = Path.Combine(oldHostDirPath, oldPathToRename);
+                var newHostPath = Path.Combine(newHostDirPath, newPathForRename);
+
+                // Check if it's a file
                 if (File.Exists(oldHostPath))
                 {
-                    // It is a file
+                    // Need PATH_UNLINK_FILE + read in old
                     if (!oldDirFileDescriptor.Rights.HasFlag(Rights.PATH_UNLINK_FILE) ||
                         (oldDirFileDescriptor.Access & FileAccess.Read) == 0)
                         return ErrNo.Acces;
-                    if (!newDirFileDescriptor.Rights.HasFlag(Rights.PATH_CREATE_FILE) || 
+                    // Need PATH_CREATE_FILE + write in new
+                    if (!newDirFileDescriptor.Rights.HasFlag(Rights.PATH_CREATE_FILE) ||
                         (newDirFileDescriptor.Access & FileAccess.Write) == 0)
                         return ErrNo.Acces;
+
+                    // Rename the file
+                    File.Move(oldHostPath, newHostPath);
                 }
                 else if (Directory.Exists(oldHostPath))
                 {
-                    // It is a directory
+                    // Need PATH_REMOVE_DIRECTORY + read in old
                     if (!oldDirFileDescriptor.Rights.HasFlag(Rights.PATH_REMOVE_DIRECTORY) ||
                         (oldDirFileDescriptor.Access & FileAccess.Read) == 0)
                         return ErrNo.Acces;
-                    if (!newDirFileDescriptor.Rights.HasFlag(Rights.PATH_CREATE_DIRECTORY) || 
+                    // Need PATH_CREATE_DIRECTORY + write in new
+                    if (!newDirFileDescriptor.Rights.HasFlag(Rights.PATH_CREATE_DIRECTORY) ||
                         (newDirFileDescriptor.Access & FileAccess.Write) == 0)
                         return ErrNo.Acces;
+
+                    Directory.Move(oldHostPath, newHostPath);
                 }
                 else
                 {
-                    return ErrNo.NoEnt; // The file or directory does not exist
+                    // The source does not exist
+                    return ErrNo.NoEnt;
                 }
 
-                // Rename the file or directory
-                File.Move(oldHostPath, newHostPath);
+                // Update path mapper for the rename if needed
                 _state.PathMapper.MoveHostPath(oldHostPath, newHostPath);
+
+                // If you want to update FDs that currently reference the old path,
+                // you'd do that logic here (optional or required by your design).
             }
             catch (FileNotFoundException)
             {
@@ -466,6 +630,8 @@ namespace Wacs.WASIp1
             }
             catch (IOException)
             {
+                // In POSIX rename can fail for many reasons: EACCES, EISDIR, etc.
+                // Return a catchall for now
                 return ErrNo.NoSys;
             }
             catch (UnauthorizedAccessException)
@@ -490,7 +656,7 @@ namespace Wacs.WASIp1
         {
             if (!_config.AllowSymbolicLinks)
                 return ErrNo.NotSup;
-            
+
             return ErrNo.NotSup;
             // var mem = ctx.DefaultMemory;
             // if (!mem.Contains((int)oldPathPtr, (int)oldPathLen) || !mem.Contains((int)newPathPtr, (int)newPathLen))
@@ -545,15 +711,24 @@ namespace Wacs.WASIp1
 
             if (!GetFd(fd, out var dirFileDescriptor))
                 return ErrNo.NoEnt;
-            if ((dirFileDescriptor.Access & FileAccess.Read) == 0)
+
+            // Typically need read + write to unlink
+            if ((dirFileDescriptor.Access & FileAccess.Read) == 0 ||
+                (dirFileDescriptor.Access & FileAccess.Write) == 0)
+            {
                 return ErrNo.Acces;
+            }
 
             try
             {
                 var pathToUnlink = mem.ReadString(pathPtr, pathLen);
-                var guestPath = Path.Combine(dirFileDescriptor.Path, pathToUnlink);
-                var hostPath = _state.PathMapper.MapToHostPath(guestPath);
+                var guestDirPath = dirFileDescriptor.Path;
+                var hostDirPath = _state.PathMapper.MapToHostPath(guestDirPath);
 
+                var guestPath = Path.Combine(guestDirPath, pathToUnlink);
+                var hostPath = Path.Combine(hostDirPath, pathToUnlink);
+
+                // If it's a directory, user should call PathRemoveDirectory
                 if (Directory.Exists(hostPath))
                     return ErrNo.IsDir;
 
@@ -572,7 +747,7 @@ namespace Wacs.WASIp1
             {
                 return ErrNo.NoSys;
             }
-            
+
             return ErrNo.Success;
         }
     }
