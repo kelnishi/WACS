@@ -26,7 +26,7 @@ namespace Wacs.WASIp1.Types
     public enum Rights : ulong
     {
         None = 0,
-        
+
         FD_DATASYNC = 1 << 0,
         FD_READ = 1 << 1,
         FD_SEEK = 1 << 2,
@@ -57,20 +57,29 @@ namespace Wacs.WASIp1.Types
         POLL_FD_READWRITE = 1 << 27,
         SOCK_SHUTDOWN = 1 << 28,
         SOCK_ACCEPT = 1 << 29,
-        
-        All = UInt64.MaxValue, 
+
+        All = UInt64.MaxValue,
     }
 
     public static class RightsExtension
     {
+        /// <summary>
+        /// Convert a set of WASI rights into .NET FileAccess flags.
+        /// - FD_READ => FileAccess.Read
+        /// - FD_WRITE => FileAccess.Write
+        /// - If both => FileAccess.ReadWrite
+        /// - FD_DATASYNC => here mapped to Read, purely for demonstration
+        /// </summary>
         public static FileAccess ToFileAccess(this Rights rights)
         {
-            FileAccess access = 0;
-            if ((rights & Rights.FD_READ) != 0) access |= FileAccess.Read;
-            if ((rights & Rights.FD_WRITE) != 0) access |= FileAccess.Write;
-            if ((rights & Rights.FD_DATASYNC) != 0) access |= FileAccess.Read; // Mapping as Read for DATASYNC
-            return access;
+            bool canRead = (rights & Rights.FD_READ) != 0 || (rights & Rights.FD_DATASYNC) != 0;
+            bool canWrite = (rights & Rights.FD_WRITE) != 0;
+
+            if (canRead && canWrite) return FileAccess.ReadWrite;
+            if (canRead) return FileAccess.Read;
+            if (canWrite) return FileAccess.Write;
+            return 0;
         }
     }
-        
+
 }

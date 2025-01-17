@@ -29,7 +29,7 @@ using timestamp = System.Int64;
 
 namespace Wacs.WASIp1
 {
-    public partial class Filesystem
+    public partial class FileSystem
     {
         private static readonly int FdStatSize = Marshal.SizeOf<FdStat>();
         private static readonly int FileStatSize = Marshal.SizeOf<FileStat>();
@@ -47,32 +47,53 @@ namespace Wacs.WASIp1
             var mem = ctx.DefaultMemory;
             if (!mem.Contains((int)bufPtr, FdStatSize))
                 return ErrNo.Inval;
-            
+
             if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.NoEnt;
 
-            //TODO: I really don't know if these flags are correct...
             FdFlags flags = FdFlags.None;
-            
+
             var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
-            var fileInfo = new FileInfo(hostPath);
-            
-            if (!fileDescriptor.Stream.CanTimeout)
+
+            FileAttributes attr;
+            try
             {
-                flags |= FdFlags.NonBlock;
+                attr = File.GetAttributes(hostPath);
             }
-            
-            if (fileDescriptor.Stream is FileStream fileStream)
+            catch (FileNotFoundException)
             {
-                if ((fileInfo.Attributes & FileAttributes.Archive) == FileAttributes.Archive)
-                    flags |= FdFlags.Append; 
-                
-                if (!fileStream.IsAsync)
-                {
+                return ErrNo.NoEnt;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return ErrNo.NoEnt;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return ErrNo.Acces;
+            }
+            catch (IOException)
+            {
+                return ErrNo.IO;
+            }
+
+            // If it's a regular file with a FileStream, we can attempt to deduce some flags
+            if (fileDescriptor.Type == Filetype.RegularFile &&
+                fileDescriptor.Stream is FileStream fs)
+            {
+                // For this minimal approach, interpret "can't timeout" as NonBlock
+                if (!fs.CanTimeout)
+                    flags |= FdFlags.NonBlock;
+
+                // If "Archive" attribute is set, interpret that as 'Append'
+                if ((attr & FileAttributes.Archive) == FileAttributes.Archive)
+                    flags |= FdFlags.Append;
+
+                // If the file is not async, interpret as "sync"
+                if (!fs.IsAsync)
                     flags |= FdFlags.Sync;
-                }
             }
-            
+
             var fdStat = new FdStat
             {
                 Filetype = fileDescriptor.Type,
@@ -80,7 +101,7 @@ namespace Wacs.WASIp1
                 RightsBase = fileDescriptor.Rights,
                 RightsInheriting = fileDescriptor.InheritedRights,
             };
-            
+
             mem.WriteStruct(bufPtr, ref fdStat);
             return ErrNo.Success;
         }
@@ -122,46 +143,76 @@ namespace Wacs.WASIp1
         public ErrNo FdFilestatGet(ExecContext ctx, fd fd, ptr bufPtr)
         {
             var mem = ctx.DefaultMemory;
-            if (!mem.Contains((int)bufPtr, FdStatSize))
+            if (!mem.Contains((int)bufPtr, FileStatSize))
                 return ErrNo.Inval;
-            
+
             if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.NoEnt;
 
+            // For stdio (fd < 3), we usually provide dummy stats
             if (fd < 3)
             {
-                var fileStat = new FileStat
+                var dummyStat = new FileStat
                 {
-                    Device = 0, // Device ID - can be set later if available
-                    Ino = fd,
+                    Device = 0,
+                    Ino = fd, // treat FD number as inode
                     Mode = fileDescriptor.Type,
-                    NLink = 1, // Number of hard links - can be adjusted as needed
+                    NLink = 1,
                     Size = 0,
                     ATim = 0,
                     MTim = 0,
                     CTim = 0,
                 };
-                
+
+                mem.WriteStruct(bufPtr, ref dummyStat);
+                return ErrNo.Success;
+            }
+
+            // Otherwise, check if it's a file or directory
+            var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
+
+            FileAttributes attr;
+            try
+            {
+                attr = File.GetAttributes(hostPath);
+            }
+            catch (FileNotFoundException)
+            {
+                return ErrNo.NoEnt;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return ErrNo.NoEnt;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return ErrNo.Acces;
+            }
+            catch (IOException)
+            {
+                return ErrNo.IO;
+            }
+
+            bool isDir = attr.HasFlag(FileAttributes.Directory);
+            // If it's not a directory, we assume it's a file. In Windows, FileAttributes.Normal can indicate a standard file.
+            bool isFile = !isDir;
+
+            if (!isDir && !isFile)
+                return ErrNo.NoEnt;
+
+            if (isDir)
+            {
+                var dirInfo = new DirectoryInfo(hostPath);
+                var fileStat = BuildFileStatForDirectory(fileDescriptor, dirInfo);
                 mem.WriteStruct(bufPtr, ref fileStat);
             }
             else
             {
-                var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
                 var fileInfo = new FileInfo(hostPath);
-                var fileStat = new FileStat
-                {
-                    Device = 0, // Device ID - can be set later if available
-                    Ino = FileUtil.GenerateInode(fileInfo),
-                    Mode = fileDescriptor.Type,
-                    NLink = 1, // Number of hard links - can be adjusted as needed
-                    Size = (filesize)fileInfo.Length,
-                    ATim = Clock.ToTimestamp(fileInfo.LastAccessTimeUtc),
-                    MTim = Clock.ToTimestamp(fileInfo.LastWriteTimeUtc),
-                    CTim = Clock.ToTimestamp(fileInfo.CreationTimeUtc)
-                };
-                
+                var fileStat = BuildFileStatForFile(fileDescriptor, fileInfo);
                 mem.WriteStruct(bufPtr, ref fileStat);
-            } 
+            }
+
             return ErrNo.Success;
         }
 
@@ -177,9 +228,24 @@ namespace Wacs.WASIp1
         {
             if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.NoEnt;
-            
-            fileDescriptor.Stream.SetLength((long)stSize);
-            
+
+            // If directory => EISDIR
+            if (fileDescriptor.Type == Filetype.Directory)
+                return ErrNo.IsDir;
+
+            try
+            {
+                fileDescriptor.Stream.SetLength((long)stSize);
+            }
+            catch (NotSupportedException)
+            {
+                return ErrNo.Inval;
+            }
+            catch (IOException)
+            {
+                return ErrNo.IO;
+            }
+
             return ErrNo.Success;
         }
 
@@ -197,31 +263,78 @@ namespace Wacs.WASIp1
         {
             if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.NoEnt;
-                
+
             var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
-            var fileInfo = new FileInfo(hostPath);
 
+            FileAttributes attr;
+            try
+            {
+                attr = File.GetAttributes(hostPath);
+            }
+            catch (FileNotFoundException)
+            {
+                return ErrNo.NoEnt;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return ErrNo.NoEnt;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return ErrNo.Acces;
+            }
+            catch (IOException)
+            {
+                return ErrNo.IO;
+            }
+
+            bool isDir = attr.HasFlag(FileAttributes.Directory);
+            bool isFile = !isDir;
+
+            if (!isDir && !isFile)
+                return ErrNo.NoEnt;
+
+            DateTime newAtime = DateTime.UtcNow;
+            DateTime newMtime = DateTime.UtcNow;
+
+            // If user provided explicit atime
             if ((flags & FstFlags.ATim) != 0)
-            {
-                fileInfo.LastAccessTimeUtc = Clock.ToDateTimeUtc(atim);
-            }
-            if ((flags & FstFlags.MTim) != 0)
-            {
-                fileInfo.LastWriteTimeUtc = Clock.ToDateTimeUtc(mtim);
-            }
+                newAtime = Clock.ToDateTimeUtc(atim);
+
+            // If user said "ATimNow", override with "now"
             if ((flags & FstFlags.ATimNow) != 0)
-            {
-                fileInfo.LastAccessTimeUtc = DateTime.Now.ToUniversalTime();
-            }
+                newAtime = DateTime.UtcNow;
+
+            // If user provided explicit mtime
+            if ((flags & FstFlags.MTim) != 0)
+                newMtime = Clock.ToDateTimeUtc(mtim);
+
+            // If user said "MTimNow", override with "now"
             if ((flags & FstFlags.MTimNow) != 0)
+                newMtime = DateTime.UtcNow;
+
+            try
             {
-                fileInfo.LastWriteTimeUtc = DateTime.Now.ToUniversalTime();
+                if (isDir)
+                {
+                    Directory.SetLastWriteTimeUtc(hostPath, newMtime);
+                    Directory.SetLastAccessTimeUtc(hostPath, newAtime);
+                }
+                else
+                {
+                    File.SetLastWriteTimeUtc(hostPath, newMtime);
+                    File.SetLastAccessTimeUtc(hostPath, newAtime);
+                }
+            }
+            catch (IOException)
+            {
+                return ErrNo.IO;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return ErrNo.Acces;
             }
 
-            // FileInfo does not directly support updating timestamps, so we need to use the File.SetLastWriteTimeUtc
-            File.SetLastWriteTimeUtc(hostPath, fileInfo.LastWriteTimeUtc);
-            File.SetLastAccessTimeUtc(hostPath, fileInfo.LastAccessTimeUtc);
-            
             return ErrNo.Success;
         }
 
@@ -235,31 +348,41 @@ namespace Wacs.WASIp1
         public ErrNo FdPrestatGet(ExecContext ctx, fd fd, ptr bufPtr)
         {
             var mem = ctx.DefaultMemory;
-            if (!mem.Contains((int)bufPtr, sizeof(ptr)))
+            if (!mem.Contains((int)bufPtr, Marshal.SizeOf<Prestat>()))
                 return ErrNo.Inval;
 
             if (!GetFd(fd, out var fileDescriptor))
-            {
-                //Signal that there are no more FDs
                 return ErrNo.Badf;
-            }
-            
+
             var name = fileDescriptor.Path;
             var utf8Name = Encoding.UTF8.GetBytes(name);
-            
-            Prestat prestat = new Prestat
+
+            // Typically, for WASI, only directories are truly "preopened"
+            Prestat prestat;
+            if (fileDescriptor.Type == Filetype.Directory)
             {
-                Tag = fileDescriptor.Type == Filetype.Directory
-                    ? PrestatTag.Dir
-                    : PrestatTag.NotDir,
-                Dir = new PrestatDir
+                prestat = new Prestat
                 {
-                    NameLen = (uint)utf8Name.Length+1
-                }
-            };
+                    Tag = PrestatTag.Dir,
+                    Dir = new PrestatDir
+                    {
+                        NameLen = (uint)(utf8Name.Length + 1)
+                    }
+                };
+            }
+            else
+            {
+                prestat = new Prestat
+                {
+                    Tag = PrestatTag.NotDir,
+                    Dir = new PrestatDir
+                    {
+                        NameLen = 0
+                    }
+                };
+            }
 
             mem.WriteStruct(bufPtr, ref prestat);
-
             return ErrNo.Success;
         }
 
@@ -285,9 +408,9 @@ namespace Wacs.WASIp1
 
             var name = fileDescriptor.Path;
             var utf8Name = Encoding.UTF8.GetBytes(name);
-            if (utf8Name.Length+1 > pathLen)
+            if (utf8Name.Length + 1 > pathLen)
                 return ErrNo.TooBig;
-            
+
             mem.WriteUtf8String(pathPtr, name, true);
             return ErrNo.Success;
         }
@@ -309,26 +432,67 @@ namespace Wacs.WASIp1
             if (!mem.Contains((int)buf, FileStatSize))
                 return ErrNo.Inval;
 
-            if (!GetFd(fd, out var fileDescriptor))
+            if (!mem.Contains((int)pathPtr, (int)pathLen))
+                return ErrNo.Inval;
+
+            if (!GetFd(fd, out var dirFileDescriptor))
                 return ErrNo.NoEnt;
 
-            var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
-            var fileInfo = new FileInfo(hostPath);
+            // If dirFileDescriptor is not a directory (and not FD < 3?), we can't interpret paths from it
+            if (dirFileDescriptor.Type != Filetype.Directory && fd >= 3)
+                return ErrNo.NotDir;
 
-            var fileStat = new FileStat
+            var pathStr = mem.ReadString(pathPtr, pathLen);
+            var guestPath = Path.Combine(dirFileDescriptor.Path, pathStr);
+            var hostPath = _state.PathMapper.MapToHostPath(guestPath);
+
+            FileAttributes attr;
+            try
             {
-                Device = 0, // Device ID - can be set later if available
-                Ino = FileUtil.GenerateInode(fileInfo),
-                Mode = fileDescriptor.Type,
-                NLink = 1, // Number of hard links - can be adjusted as needed
-                Size = (filesize)fileInfo.Length,
-                ATim = Clock.ToTimestamp(fileInfo.LastAccessTimeUtc),
-                MTim = Clock.ToTimestamp(fileInfo.LastWriteTimeUtc),
-                CTim = Clock.ToTimestamp(fileInfo.CreationTimeUtc)
-            };
+                attr = File.GetAttributes(hostPath);
+            }
+            catch (FileNotFoundException)
+            {
+                return ErrNo.NoEnt;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return ErrNo.NoEnt;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return ErrNo.Acces;
+            }
+            catch (IOException)
+            {
+                return ErrNo.IO;
+            }
+
+            bool isDir = attr.HasFlag(FileAttributes.Directory);
+            bool isFile = !isDir;
+
+            if (!isDir && !isFile)
+                return ErrNo.NoEnt;
+
+            FileStat fileStat;
+            if (isDir)
+            {
+                var dirInfo = new DirectoryInfo(hostPath);
+                fileStat = BuildFileStatForDirectory(
+                    new FileDescriptor { Type = Filetype.Directory },
+                    dirInfo
+                );
+            }
+            else
+            {
+                var fileInfo = new FileInfo(hostPath);
+                fileStat = BuildFileStatForFile(
+                    new FileDescriptor { Type = Filetype.RegularFile },
+                    fileInfo
+                );
+            }
 
             mem.WriteStruct(buf, ref fileStat);
-
             return ErrNo.Success;
         }
 
@@ -345,41 +509,137 @@ namespace Wacs.WASIp1
         /// <param name="stMtim">The desired value of the data modification timestamp.</param>
         /// <param name="fstFlags">A bitmask indicating which timestamps to adjust.</param>
         /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo PathFilestatSetTimes(ExecContext ctx, fd fd, LookupFlags flags, ptr pathPtr, size pathLen, timestamp stAtim, timestamp stMtim,
-            FstFlags fstFlags)
+        public ErrNo PathFilestatSetTimes(
+            ExecContext ctx,
+            fd fd,
+            LookupFlags flags,
+            ptr pathPtr,
+            size pathLen,
+            timestamp stAtim,
+            timestamp stMtim,
+            FstFlags fstFlags
+        )
         {
             var mem = ctx.DefaultMemory;
             if (!mem.Contains((int)pathPtr, (int)pathLen))
                 return ErrNo.Inval;
 
-            if (!GetFd(fd, out var fileDescriptor))
+            if (!GetFd(fd, out var dirFileDescriptor))
                 return ErrNo.NoEnt;
-            
-            var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
-            var fileInfo = new FileInfo(hostPath);
-            
+
+            // If not a directory and fd>=3, can't interpret the path
+            if (dirFileDescriptor.Type != Filetype.Directory && fd >= 3)
+                return ErrNo.NotDir;
+
+            var pathStr = mem.ReadString(pathPtr, pathLen);
+            var guestPath = Path.Combine(dirFileDescriptor.Path, pathStr);
+            var hostPath = _state.PathMapper.MapToHostPath(guestPath);
+
+            FileAttributes attr;
+            try
+            {
+                attr = File.GetAttributes(hostPath);
+            }
+            catch (FileNotFoundException)
+            {
+                return ErrNo.NoEnt;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return ErrNo.NoEnt;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return ErrNo.Acces;
+            }
+            catch (IOException)
+            {
+                return ErrNo.IO;
+            }
+
+            bool isDir = attr.HasFlag(FileAttributes.Directory);
+            bool isFile = !isDir;
+            if (!isDir && !isFile)
+                return ErrNo.NoEnt;
+
+            DateTime newAtime = DateTime.UtcNow;
+            DateTime newMtime = DateTime.UtcNow;
 
             if ((fstFlags & FstFlags.ATim) != 0)
-            {
-                fileInfo.LastAccessTimeUtc = Clock.ToDateTimeUtc(stAtim);
-            }
-            if ((fstFlags & FstFlags.MTim) != 0)
-            {
-                fileInfo.LastWriteTimeUtc = Clock.ToDateTimeUtc(stMtim);
-            }
+                newAtime = Clock.ToDateTimeUtc(stAtim);
             if ((fstFlags & FstFlags.ATimNow) != 0)
-            {
-                fileInfo.LastAccessTimeUtc = DateTime.UtcNow;
-            }
+                newAtime = DateTime.UtcNow;
+
+            if ((fstFlags & FstFlags.MTim) != 0)
+                newMtime = Clock.ToDateTimeUtc(stMtim);
             if ((fstFlags & FstFlags.MTimNow) != 0)
+                newMtime = DateTime.UtcNow;
+
+            try
             {
-                fileInfo.LastWriteTimeUtc = DateTime.UtcNow;
+                if (isDir)
+                {
+                    Directory.SetLastWriteTimeUtc(hostPath, newMtime);
+                    Directory.SetLastAccessTimeUtc(hostPath, newAtime);
+                }
+                else
+                {
+                    File.SetLastWriteTimeUtc(hostPath, newMtime);
+                    File.SetLastAccessTimeUtc(hostPath, newAtime);
+                }
+            }
+            catch (IOException)
+            {
+                return ErrNo.IO;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return ErrNo.Acces;
             }
 
-            File.SetLastWriteTimeUtc(hostPath, fileInfo.LastWriteTimeUtc);
-            File.SetLastAccessTimeUtc(hostPath, fileInfo.LastAccessTimeUtc);
-            
             return ErrNo.Success;
         }
+
+        #region Helper Methods to Build FileStat
+
+        /// <summary>
+        /// Builds a <see cref="FileStat"/> for a file using its FileInfo.
+        /// </summary>
+        private FileStat BuildFileStatForFile(FileDescriptor fd, FileInfo fileInfo)
+        {
+            var inode = FileUtil.GenerateInode(fileInfo);
+            return new FileStat
+            {
+                Device = 0,
+                Ino = inode,
+                Mode = Filetype.RegularFile,
+                NLink = 1,
+                Size = (filesize)fileInfo.Length,
+                ATim = Clock.ToTimestamp(fileInfo.LastAccessTimeUtc),
+                MTim = Clock.ToTimestamp(fileInfo.LastWriteTimeUtc),
+                CTim = Clock.ToTimestamp(fileInfo.CreationTimeUtc)
+            };
+        }
+
+        /// <summary>
+        /// Builds a <see cref="FileStat"/> for a directory using its DirectoryInfo.
+        /// </summary>
+        private FileStat BuildFileStatForDirectory(FileDescriptor fd, DirectoryInfo dirInfo)
+        {
+            var inode = FileUtil.GenerateInode(dirInfo);
+            return new FileStat
+            {
+                Device = 0,
+                Ino = inode,
+                Mode = Filetype.Directory,
+                NLink = 1,
+                Size = 0, // Directories typically show 0 size in WASI
+                ATim = Clock.ToTimestamp(dirInfo.LastAccessTimeUtc),
+                MTim = Clock.ToTimestamp(dirInfo.LastWriteTimeUtc),
+                CTim = Clock.ToTimestamp(dirInfo.CreationTimeUtc)
+            };
+        }
+
+        #endregion
     }
 }

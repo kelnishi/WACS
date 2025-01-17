@@ -22,62 +22,104 @@ using Wacs.WASIp1.Types;
 
 namespace Wacs.WASIp1
 {
+    /// <summary>
+    /// Utility class for working with files and directories in a WASI-like environment.
+    /// </summary>
     public static class FileUtil
     {
-        public static ulong GenerateInode(FileInfo fileInfo)
+        /// <summary>
+        /// Generates a pseudo-inode for a directory by hashing its
+        /// full path and creation time (in UTC). Directories do not
+        /// have a meaningful length, so we omit that.
+        /// </summary>
+        /// <param name="dirInfo">The DirectoryInfo describing the directory.</param>
+        /// <returns>A 64-bit hash that serves as a pseudo-inode.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if <paramref name="dirInfo"/> is null.</exception>
+        public static ulong GenerateInode(DirectoryInfo dirInfo)
         {
+            if (dirInfo == null)
+                throw new ArgumentNullException(nameof(dirInfo));
+
             using (var sha256 = SHA256.Create())
             {
-                // Combine file attributes
-                string data = $"{fileInfo.FullName}|{fileInfo.CreationTimeUtc.Ticks}|{(fileInfo.Exists ? fileInfo.Length : 0L)}";
+                // Combine directory attributes (FullName + CreationTimeUtc)
+                string data = $"{dirInfo.FullName}|{dirInfo.CreationTimeUtc.Ticks}";
                 byte[] hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(data));
-                // Use the first 8 bytes of the hash as the inode
+                // Use the first 8 bytes of the hash as the pseudo-inode
                 ulong inode = BitConverter.ToUInt64(hashBytes, 0);
                 return inode;
             }
         }
 
+        /// <summary>
+        /// Generates a pseudo-inode for a file by hashing its
+        /// full path, creation time (in UTC), and length (if it exists).
+        /// </summary>
+        /// <param name="fileInfo">The FileInfo describing the file.</param>
+        /// <returns>A 64-bit hash that serves as a pseudo-inode.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if <paramref name="fileInfo"/> is null.</exception>
+        public static ulong GenerateInode(FileInfo fileInfo)
+        {
+            if (fileInfo == null)
+                throw new ArgumentNullException(nameof(fileInfo));
+
+            using (var sha256 = SHA256.Create())
+            {
+                // Include file length only if it actually exists on disk
+                long length = fileInfo.Exists ? fileInfo.Length : 0L;
+                string data = $"{fileInfo.FullName}|{fileInfo.CreationTimeUtc.Ticks}|{length}";
+                byte[] hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(data));
+                // Use the first 8 bytes of the hash as the pseudo-inode
+                ulong inode = BitConverter.ToUInt64(hashBytes, 0);
+                return inode;
+            }
+        }
+
+        /// <summary>
+        /// Determines the WASI file type from a <see cref="FileInfo"/> object.
+        /// This checks attributes such as Directory, ReparsePoint (symlinks), etc.
+        /// </summary>
+        /// <param name="info">The FileInfo object to examine.</param>
+        /// <returns>A <see cref="Filetype"/> enum that best describes the item.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if <paramref name="info"/> is null.</exception>
         public static Filetype FiletypeFromInfo(FileInfo info)
         {
             if (info == null)
-            {
                 throw new ArgumentNullException(nameof(info));
-            }
 
-            // Check if the file exists
+            // If it doesn't exist at all
             if (!info.Exists)
             {
                 return Filetype.Unknown;
             }
-        
-            // Determine the type of file and return the corresponding Filetype enum value
+
+            // If it's actually a directory
             if ((info.Attributes & FileAttributes.Directory) == FileAttributes.Directory)
             {
                 return Filetype.Directory;
             }
-            else if ((info.Attributes & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint)
+
+            // If it's a reparse point (commonly a symbolic link on Windows)
+            if ((info.Attributes & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint)
             {
                 return Filetype.SymbolicLink;
             }
-            else if ((info.Attributes & FileAttributes.Device) == FileAttributes.Device)
+
+            // If it's flagged as a device
+            if ((info.Attributes & FileAttributes.Device) == FileAttributes.Device)
             {
-                // Command to differentiate between BlockDevice and CharacterDevice would go here
-                // For now, we'll assume it's a character device
+                // Typically we’d need additional logic to differentiate Block vs. Character device
                 return Filetype.CharacterDevice;
             }
-            else if (info.Extension.Equals(".sock", StringComparison.OrdinalIgnoreCase))
+
+            // If it has a ".sock" extension, we consider it a socket file
+            if (info.Extension.Equals(".sock", StringComparison.OrdinalIgnoreCase))
             {
-                return Filetype.SocketStream; // Assuming socket files might have this extension (for example)
+                return Filetype.SocketStream;
             }
-            else if (info.Length == 0)
-            {
-                // No content to determine regular file vs. socket
-                return Filetype.RegularFile;
-            }
-            else
-            {
-                return Filetype.RegularFile;
-            }
+
+            // Default: it's a regular file
+            return Filetype.RegularFile;
         }
     }
 }

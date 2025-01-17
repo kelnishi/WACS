@@ -19,7 +19,7 @@ using System.IO;
 
 namespace Wacs.WASIp1.Types
 {
-    public class FileDescriptor
+    public class FileDescriptor : IDisposable
     {
         public static readonly FileDescriptor BadFd = new() { Fd = uint.MaxValue };
 
@@ -38,28 +38,93 @@ namespace Wacs.WASIp1.Types
 
         public Rights InheritedRights { get; set; }
 
-        public static Rights ComputeFileRights(FileInfo fileInfo, Filetype type, FileAccess access, Stream stream, bool allowFileCreation, bool allowFileDeletion)
+        /// <summary>
+        /// Computes the WASI <see cref="Rights"/> for a directory.
+        /// </summary>
+        public static Rights ComputeFileRights(
+            DirectoryInfo dirInfo,
+            Filetype type,
+            FileAccess access,
+            Stream stream,
+            bool allowFileCreation,
+            bool allowFileDeletion)
         {
-            // Set rights based on the modified Access value
-            Rights rights = new Rights();
-            
-            // Set rights based on the modified Access enum
+            // Start by setting rights based on requested FileAccess and Filetype
+            Rights rights = ComputeCommonRights(type, access, stream, allowFileCreation, allowFileDeletion);
+
+            // If directory is marked ReadOnly (especially on Windows),
+            // remove FD_WRITE because we can't write or delete in that directory.
+            if (dirInfo.Attributes.HasFlag(FileAttributes.ReadOnly) &&
+                (access & FileAccess.Write) != 0)
+            {
+                rights &= ~Rights.FD_WRITE;
+                // Also remove creation/deletion rights if the directory is read-only
+                rights &= ~Rights.PATH_CREATE_DIRECTORY;
+                rights &= ~Rights.PATH_CREATE_FILE;
+                rights &= ~Rights.PATH_REMOVE_DIRECTORY;
+                rights &= ~Rights.PATH_UNLINK_FILE;
+            }
+
+            return rights;
+        }
+
+        /// <summary>
+        /// Computes the WASI <see cref="Rights"/> for a regular file.
+        /// </summary>
+        public static Rights ComputeFileRights(
+            FileInfo fileInfo,
+            Filetype type,
+            FileAccess access,
+            Stream stream,
+            bool allowFileCreation,
+            bool allowFileDeletion)
+        {
+            // Start by setting rights based on requested FileAccess and Filetype
+            Rights rights = ComputeCommonRights(type, access, stream, allowFileCreation, allowFileDeletion);
+
+            // If file is read-only (and the user is requesting write access), strip out FD_WRITE
+            if (fileInfo.Attributes.HasFlag(FileAttributes.ReadOnly) &&
+                (access & FileAccess.Write) != 0)
+            {
+                rights &= ~Rights.FD_WRITE;
+            }
+
+            return rights;
+        }
+
+
+
+        /// <summary>
+        /// Shared logic that sets basic rights flags depending on Filetype,
+        /// FileAccess, and other parameters like allowFileCreation/Deletion.
+        /// Used by both file and directory overloads.
+        /// </summary>
+        private static Rights ComputeCommonRights(
+            Filetype type,
+            FileAccess access,
+            Stream stream,
+            bool allowFileCreation,
+            bool allowFileDeletion)
+        {
+            Rights rights = new();
+
+            // From requested FileAccess
             if ((access & FileAccess.Read) != 0)
             {
                 rights |= Rights.FD_READ;
-                rights |= Rights.PATH_READLINK; // Allow reading symlinks
+                rights |= Rights.PATH_READLINK;       // e.g., reading symlinks
                 rights |= Rights.FD_FILESTAT_GET;
                 if (type == Filetype.Directory)
                     rights |= Rights.FD_READDIR;
             }
-
             if ((access & FileAccess.Write) != 0)
             {
                 rights |= Rights.FD_WRITE;
                 rights |= Rights.FD_FILESTAT_SET_SIZE;
             }
-
-            if ((access & FileAccess.ReadWrite) != 0)
+            // If explicitly ReadWrite, set both read + write bits
+            // Note: (access & FileAccess.ReadWrite) means bitwise combination is present.
+            if ((access & FileAccess.ReadWrite) == FileAccess.ReadWrite)
             {
                 rights |= Rights.FD_READ;
                 rights |= Rights.FD_WRITE;
@@ -67,50 +132,46 @@ namespace Wacs.WASIp1.Types
                 rights |= Rights.FD_TELL;
             }
 
-            // Set additional rights based on the type of Stream
-            if (stream is FileStream fileStream)
+            // If the underlying stream can read or write or seek, set those rights
+            if (stream is FileStream fs)
             {
-                if (fileStream.CanRead)
-                {
-                    rights |= Rights.FD_READ;
-                }
-
-                if (fileStream.CanWrite)
-                {
-                    rights |= Rights.FD_WRITE;
-                }
-
-                if (fileStream.CanSeek) // Check if the stream supports seeking
+                if (fs.CanRead) rights |= Rights.FD_READ;
+                if (fs.CanWrite) rights |= Rights.FD_WRITE;
+                if (fs.CanSeek)
                 {
                     rights |= Rights.FD_SEEK;
-                    rights |= Rights.FD_TELL; // Tell is implied if we can seek
+                    rights |= Rights.FD_TELL;
                 }
             }
 
-            // Handle directory-specific rights
+            // Directory-specific rights
             if (type == Filetype.Directory)
             {
+                // If the user config says they can create or delete
                 if (allowFileCreation)
+                {
                     rights |= Rights.PATH_CREATE_DIRECTORY | Rights.PATH_CREATE_FILE;
+                }
                 if (allowFileDeletion)
+                {
                     rights |= Rights.PATH_REMOVE_DIRECTORY | Rights.PATH_UNLINK_FILE;
+                }
 
-                rights |= Rights.PATH_OPEN;
-                rights |= Rights.FD_READDIR;
+                rights |= Rights.PATH_OPEN;     // Opening files within the directory
+                rights |= Rights.FD_READDIR;    // Reading directory entries
             }
 
-            // Optionally add any additional rights that might be universally applicable
-            rights |= Rights.FD_SYNC; // or make conditional based on context
-            rights |= Rights.FD_DATASYNC; // or make conditional based on context
-            
-            // Determine the appropriate access rights based on FileInfo attributes
-            if (fileInfo.Attributes.HasFlag(FileAttributes.ReadOnly) && access.HasFlag(FileAccess.Read))
-            {
-                // If the file is read-only, override Access to only allow read
-                rights &= ~Rights.FD_WRITE;
-            }
-            
+            // Optionally always allow data syncing
+            rights |= Rights.FD_SYNC;
+            rights |= Rights.FD_DATASYNC;
+
             return rights;
+        }
+
+        public void Dispose()
+        {
+            Stream.Dispose();
+
         }
     }
 }

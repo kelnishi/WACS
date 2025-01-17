@@ -15,7 +15,7 @@
 //  */
 
 using System.Runtime.InteropServices;
-using dircookie = System.UInt64;
+using dircookie = System.Int64;
 using inode = System.UInt64;
 using dirnamlen = System.UInt32;
 

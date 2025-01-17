@@ -20,23 +20,26 @@ using System.Linq;
 using Wacs.Core.Runtime;
 using Wacs.Core.WASIp1;
 using Wacs.WASIp1.Types;
-//Interop should use plain numeric types, functions are responsible for marshaling.
+// Interop should use plain numeric types; functions are responsible for marshaling.
 using ptr = System.UInt32;
 using fd = System.UInt32;
 using filesize = System.UInt64;
 using size = System.UInt32;
 using timestamp = System.Int64;
-using dircookie = System.UInt64;
+using dircookie = System.Int64;
 using filedelta = System.Int64;
 
 namespace Wacs.WASIp1
 {
-    public partial class Filesystem : IBindable
+    public partial class FileSystem : IBindable, IDisposable
     {
         private readonly WasiConfiguration _config;
         private readonly State _state;
 
-        public Filesystem(WasiConfiguration config ,State state)
+        // Track whether Dispose() has been called.
+        private bool _disposed;
+
+        public FileSystem(WasiConfiguration config, State state)
         {
             _config = config;
             _state = state;
@@ -46,6 +49,8 @@ namespace Wacs.WASIp1
 
         public void BindToRuntime(WasmRuntime runtime)
         {
+            ThrowIfDisposed();
+
             string module = "wasi_snapshot_preview1";
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ErrNo>>(
                 (module, "path_create_directory"), PathCreateDirectory);
@@ -55,11 +60,12 @@ namespace Wacs.WASIp1
                 (module, "path_filestat_set_times"), PathFilestatSetTimes);
             runtime.BindHostFunction<Func<ExecContext, fd, LookupFlags, ptr, size, fd, ptr, size, ErrNo>>(
                 (module, "path_link"), PathLink);
-            //HACK: 10 parameters + return -> dotnet SEGFAULT!, so we're using outvars to return
+
+            // HACK: 10 parameters + return -> dotnet SEGFAULT!, so we're using outvars to return
             // *outvars require defining our own delegate (can't use Action<T>).
             runtime.BindHostFunction<PathOpenDelegate>(
                 (module, "path_open"), PathOpen);
-            
+
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ptr, size, ptr, ErrNo>>(
                 (module, "path_readlink"), PathReadlink);
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ErrNo>>(
@@ -70,6 +76,7 @@ namespace Wacs.WASIp1
                 (module, "path_symlink"), PathSymlink);
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ErrNo>>(
                 (module, "path_unlink_file"), PathUnlinkFile);
+
             runtime.BindHostFunction<Func<ExecContext, fd, filesize, filesize, Advice, ErrNo>>(
                 (module, "fd_advise"), FdAdvise);
             runtime.BindHostFunction<Func<ExecContext, fd, filesize, filesize, ErrNo>>(
@@ -116,55 +123,86 @@ namespace Wacs.WASIp1
 
         private void InitializeFs()
         {
+            ThrowIfDisposed();
             BindStdio();
             BindPreopenedDirs();
         }
 
         private void BindPreopenedDirs()
         {
+            ThrowIfDisposed();
+
+            // First, check that HostRootDirectory is not empty and actually exists.
             if (string.IsNullOrWhiteSpace(_config.HostRootDirectory))
-                throw new DirectoryNotFoundException($"The host path '{_config.HostRootDirectory}' does not exist.");
-            
+            {
+                throw new ArgumentException(
+                    "No root directory was specified in HostRootDirectory (null/whitespace).",
+                    nameof(_config.HostRootDirectory));
+            }
+
+            if (!Directory.Exists(_config.HostRootDirectory))
+            {
+                throw new DirectoryNotFoundException(
+                    $"The host path '{_config.HostRootDirectory}' does not exist.");
+            }
+
             _state.PathMapper.SetRootMapping(_config.HostRootDirectory);
-            
-            //Bind the HostRootDir
+
+            // Bind the HostRootDir as "/"
             BindDir(_config.HostRootDirectory, "/", _config.DefaultPermissions, true);
-            
+
             foreach (var pod in _config.PreopenedDirectories)
             {
-                BindDir(pod.HostPath,pod.GuestPath, pod.Permissions, true);
+                BindDir(pod.HostPath, pod.GuestPath, pod.Permissions, true);
             }
         }
 
-        private fd BindDir(string hostDir, string guestDir, FileAccess perm, bool isPreopened, Rights restrictedRights = Rights.All, Rights inheritedRights = Rights.None)
+        private fd BindDir(
+            string hostDir,
+            string guestDir,
+            FileAccess perm,
+            bool isPreopened,
+            Rights restrictedRights = Rights.All,
+            Rights inheritedRights = Rights.None)
         {
+            ThrowIfDisposed();
+
             if (_state.FileDescriptors.Count >= _config.MaxOpenFileDescriptors)
             {
-                throw new InvalidOperationException($"File descriptor count would exceed the maximum limit of {_config.MaxOpenFileDescriptors}.");
+                throw new InvalidOperationException(
+                    $"File descriptor count would exceed the maximum limit of {_config.MaxOpenFileDescriptors}.");
             }
-            fd fd = _state.GetNextFd;
-            
+
             if (!Directory.Exists(hostDir))
             {
-                throw new DirectoryNotFoundException($"The host path '{hostDir}' does not exist.");
+                throw new DirectoryNotFoundException(
+                    $"The host path '{hostDir}' does not exist.");
             }
+
             if (string.IsNullOrWhiteSpace(guestDir))
             {
-                throw new DirectoryNotFoundException($"The guest path '{guestDir}' cannot be created.");
+                throw new DirectoryNotFoundException(
+                    $"The guest path '{guestDir}' cannot be created.");
             }
+
             if (!guestDir.StartsWith("/"))
             {
                 guestDir = "/" + guestDir;
             }
+
             if (guestDir.StartsWith("/dev"))
             {
-                throw new UnauthorizedAccessException($"The guest path '{guestDir}' is not allowed.");
+                // We disallow binding anything under /dev except special cases handled internally.
+                throw new UnauthorizedAccessException(
+                    $"The guest path '{guestDir}' is not allowed.");
             }
-            
+
             _state.PathMapper.AddDirectoryMapping(guestDir, hostDir);
+
+            fd newFd = _state.GetNextFd;
             var fileDescriptor = new FileDescriptor
             {
-                Fd = fd,
+                Fd = newFd,
                 Stream = Stream.Null,
                 Path = guestDir,
                 Access = perm,
@@ -172,11 +210,12 @@ namespace Wacs.WASIp1
                 Type = Filetype.Directory,
             };
 
-            var fileInfo = new FileInfo(hostDir);
+            // More semantically correct to use DirectoryInfo here.
+            var dirInfo = new DirectoryInfo(hostDir);
             var rights = FileDescriptor.ComputeFileRights(
-                fileInfo, 
+                dirInfo,
                 Filetype.Directory,
-                perm, 
+                perm,
                 Stream.Null,
                 _config.AllowFileCreation,
                 _config.AllowFileDeletion) & restrictedRights;
@@ -191,72 +230,100 @@ namespace Wacs.WASIp1
                 fileDescriptor.Rights = inheritedRights & rights;
                 fileDescriptor.InheritedRights = inheritedRights;
             }
-            
-            _state.FileDescriptors[fd] = fileDescriptor;
-            return fd;
+
+            _state.FileDescriptors[newFd] = fileDescriptor;
+            return newFd;
         }
 
         private void UnbindDir(string guestDir)
         {
+            ThrowIfDisposed();
+
             if (!_state.PathMapper.TryRemoveMapping(guestDir))
             {
-                throw new DirectoryNotFoundException($"The guest path '{guestDir}' cannot be unbound because it does not exist.");
+                throw new DirectoryNotFoundException(
+                    $"The guest path '{guestDir}' cannot be unbound because it does not exist.");
             }
 
             var entry = _state.FileDescriptors.Values
-                .FirstOrDefault(fd => fd.Path == guestDir);
+                .FirstOrDefault(descriptor => descriptor.Path == guestDir);
 
-            if (entry == null)
-                return;
+            if (entry == null) return;
 
-            if (!_state.FileDescriptors.TryRemove(entry.Fd, out var _))
+            if (!_state.FileDescriptors.TryRemove(entry.Fd, out _))
             {
-                //Complain?
+                // Optionally log or handle
             }
         }
 
-        private fd BindFile(string guestPath, Stream filestream, FileAccess perm, Rights rights, Rights inheritedRights)
+        private fd BindFile(
+            string guestPath,
+            Stream filestream,
+            FileAccess perm,
+            Rights rights,
+            Rights inheritedRights,
+            Rights restrictedRights = Rights.All)
         {
+            ThrowIfDisposed();
+
+            // If it's "/dev/null", bind that specially
             if (guestPath == "/dev/null")
             {
                 return BindDevNull(perm);
             }
-            
+
             var hostpath = _state.PathMapper.MapToHostPath(guestPath);
             if (!File.Exists(hostpath))
             {
                 throw new FileNotFoundException($"The host file '{hostpath}' does not exist.");
             }
 
-            fd fd = _state.GetNextFd; 
-            _state.FileDescriptors[fd] = new FileDescriptor
+            // Apply the same logic as BindDir: combine 'rights' with restrictedRights
+            // and also adjust inherited rights.
+            rights &= restrictedRights;
+            if (inheritedRights == Rights.None)
             {
-                Fd = fd,
+                inheritedRights = rights;
+            }
+            else
+            {
+                rights = inheritedRights & rights;
+            }
+
+            fd newFd = _state.GetNextFd;
+            var fileDescriptor = new FileDescriptor
+            {
+                Fd = newFd,
                 Stream = filestream,
                 Path = guestPath,
                 Access = perm,
                 IsPreopened = false,
                 Type = Filetype.RegularFile,
                 Rights = rights,
-                InheritedRights = inheritedRights,
+                InheritedRights = inheritedRights
             };
-            return fd;
+
+            _state.FileDescriptors[newFd] = fileDescriptor;
+            return newFd;
         }
 
         private fd BindDevNull(FileAccess perm)
         {
+            ThrowIfDisposed();
+
             var devNull = new NullStream();
-            fd fd = _state.GetNextFd;
-            _state.FileDescriptors[fd] = new FileDescriptor
+            fd newFd = _state.GetNextFd;
+            _state.FileDescriptors[newFd] = new FileDescriptor
             {
-                Fd = fd,
+                Fd = newFd,
                 Stream = devNull,
                 Path = "/dev/null",
                 Access = perm,
                 IsPreopened = true,
                 Type = Filetype.CharacterDevice
             };
-            return fd;
+
+            return newFd;
         }
 
         /// <summary>
@@ -265,76 +332,96 @@ namespace Wacs.WASIp1
         /// <param name="fd"></param>
         private void RemoveFd(fd fd)
         {
+            ThrowIfDisposed();
+
             if (_state.FileDescriptors.TryRemove(fd, out var fileDescriptor))
             {
+                // Only close the stream for real files (not directories or special devices).
                 if (fileDescriptor.Type == Filetype.RegularFile)
-                    fileDescriptor.Stream.Close();
+                {
+                    fileDescriptor.Dispose();
+                }
             }
         }
 
         private void MoveFd(fd from, fd to)
         {
+            ThrowIfDisposed();
+
             if (_state.FileDescriptors.ContainsKey(to))
-                throw new IOException($"Cannot overwrite existing file descriptor {to}");
-            
+            {
+                throw new IOException($"Cannot overwrite existing file descriptor {to}.");
+            }
+
             if (_state.FileDescriptors.TryRemove(from, out var fileDescriptor))
             {
                 fileDescriptor.Fd = to;
-                _state.FileDescriptors[to] = fileDescriptor;
+                if (_state.FileDescriptors.TryAdd(to, fileDescriptor))
+                {
+                    // Optionally log or handle
+                }
             }
         }
 
         private void UnbindFile(string guestPath)
         {
-            var entry = _state.FileDescriptors.Values
-                .FirstOrDefault(fd => fd.Path == guestPath);
-            
-            if (entry == null)
-                return;
+            ThrowIfDisposed();
 
-            if (!_state.FileDescriptors.TryRemove(entry.Fd, out var _))
+            var entry = _state.FileDescriptors.Values
+                .FirstOrDefault(descriptor => descriptor.Path == guestPath);
+
+            if (entry == null) return;
+
+            if (_state.FileDescriptors.TryRemove(entry.Fd, out _))
             {
-                //Complain?
+                // Optionally log or handle
             }
         }
 
         private void BindStdio()
         {
-            fd fd = _state.GetNextFd;
-            if (fd != 0)
-                throw new InvalidDataException($"Stdio should be bound first.");
-            
-            _state.FileDescriptors[fd] = new FileDescriptor
+            ThrowIfDisposed();
+
+            fd newFd = _state.GetNextFd;
+            if (newFd != 0)
             {
-                Fd = fd,
+                // In a typical WASI environment, fd=0 is stdin, so we expect that to be the first.
+                throw new InvalidDataException("Stdio should be bound first: fd=0 was not reserved.");
+            }
+
+            _state.FileDescriptors[newFd] = new FileDescriptor
+            {
+                Fd = newFd,
                 Stream = _config.StandardInput,
                 Path = "/dev/stdin",
                 Access = FileAccess.Read,
                 IsPreopened = IsStreamOpen(_config.StandardInput),
                 Type = Filetype.CharacterDevice,
-                Rights = Rights.FD_READ | Rights.PATH_OPEN,
+                Rights = Rights.FD_READ | Rights.PATH_OPEN
             };
-            fd = _state.GetNextFd;
-            _state.FileDescriptors[fd] = new FileDescriptor
+
+            newFd = _state.GetNextFd; // Should become 1
+            _state.FileDescriptors[newFd] = new FileDescriptor
             {
-                Fd = fd,
+                Fd = newFd,
                 Stream = _config.StandardOutput,
                 Path = "/dev/stdout",
                 Access = FileAccess.Write,
                 IsPreopened = IsStreamOpen(_config.StandardOutput),
                 Type = Filetype.CharacterDevice,
-                Rights = Rights.FD_WRITE | Rights.PATH_OPEN,
+                Rights = Rights.FD_WRITE | Rights.PATH_OPEN
             };
-            fd = _state.GetNextFd;
-            _state.FileDescriptors[fd] = new FileDescriptor
+
+            newFd = _state.GetNextFd; // Should become 2
+            _state.FileDescriptors[newFd] = new FileDescriptor
             {
-                Fd = fd,
+                Fd = newFd,
                 Stream = _config.StandardError,
                 Path = "/dev/stderr",
                 Access = FileAccess.Write,
                 IsPreopened = IsStreamOpen(_config.StandardError),
                 Type = Filetype.CharacterDevice,
-                Rights = Rights.FD_WRITE | Rights.PATH_OPEN,
+                Rights = Rights.FD_WRITE | Rights.PATH_OPEN
             };
         }
 
@@ -342,8 +429,7 @@ namespace Wacs.WASIp1
         {
             try
             {
-                // Check read capabilities, which usually imply the stream is open for reading.
-                // Similarly, check for writing capabilities.
+                // If it can read, write, or seek, we treat it as open.
                 return stream != null && (stream.CanRead || stream.CanWrite || stream.CanSeek);
             }
             catch (ObjectDisposedException)
@@ -353,31 +439,37 @@ namespace Wacs.WASIp1
             }
             catch (NotSupportedException)
             {
-                // The operation is not supported, but it doesn't indicate if the Stream is open/closed.
+                // The operation is not supported, but we cannot confirm it is closed.
                 return false;
             }
             catch (Exception)
             {
-                // Handle any other exceptions that may arise.
+                // Catch-all for other errors.
                 return false;
             }
         }
 
         public bool GetFd(fd fd, out FileDescriptor fileDescriptor)
         {
-            
+            ThrowIfDisposed();
+
             if (_state.FileDescriptors.TryGetValue(fd, out var file))
             {
                 fileDescriptor = file;
                 return true;
             }
+
             fileDescriptor = FileDescriptor.BadFd;
             return false;
         }
 
         public bool GetFd(string path, out FileDescriptor fileDescriptor)
         {
-            var file = _state.FileDescriptors.Values.FirstOrDefault(fd => fd.Path == path);
+            ThrowIfDisposed();
+
+            var file = _state.FileDescriptors.Values
+                .FirstOrDefault(descriptor => descriptor.Path == path);
+
             if (file != null)
             {
                 fileDescriptor = file;
@@ -387,6 +479,31 @@ namespace Wacs.WASIp1
             {
                 fileDescriptor = FileDescriptor.BadFd;
                 return false;
+            }
+        }
+
+        public void Dispose()
+        {
+            // If already disposed, do nothing
+            if (_disposed) return;
+
+            foreach (var fileDescriptor in _state.FileDescriptors.Values)
+            {
+                if (fileDescriptor.Type == Filetype.RegularFile)
+                {
+                    fileDescriptor.Dispose();
+                }
+            }
+
+            _state.FileDescriptors.Clear();
+            _disposed = true;
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (_disposed)
+            {
+                throw new InvalidOperationException("This FileSystem instance has been disposed.");
             }
         }
     }
