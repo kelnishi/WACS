@@ -27,15 +27,16 @@ using ptr = System.UInt32;
 using fd = System.UInt32;
 using filesize = System.UInt64;
 using size = System.UInt32;
-using dircookie = System.UInt64;
+using dircookie = System.Int64;
 using filedelta = System.Int64;
+using Wacs.WASIp1.Extensions;
 
 
 namespace Wacs.WASIp1
 {
-    public partial class Filesystem
+    public partial class FileSystem
     {
-        private static readonly ulong DirEntSize = (ulong)Marshal.SizeOf<DirEnt>();
+        private static readonly long DirEntSize = Marshal.SizeOf<DirEnt>();
 
         /// <summary>
         /// Provides advice on file usage for the specified file descriptor.
@@ -56,12 +57,12 @@ namespace Wacs.WASIp1
             {
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
-            
+
             if (offset + len > (filesize)fileDescriptor.Stream.Length)
             {
                 return ErrNo.Inval; // Invalid offset or length.
             }
-            
+
             switch (advice)
             {
                 case Advice.Normal:
@@ -113,7 +114,7 @@ namespace Wacs.WASIp1
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
 
-            long newLen = (long)(offset + len); 
+            long newLen = (long)(offset + len);
 
             if (newLen > _config.MaxFileSize)
             {
@@ -199,7 +200,7 @@ namespace Wacs.WASIp1
                 return ErrNo.IO;
 
             var mem = ctx.DefaultMemory;
-            
+
             var origin = fileDescriptor.Stream.Position;
 
             // Set the position in the file for reading
@@ -208,7 +209,7 @@ namespace Wacs.WASIp1
             IoVec[] iovs = mem.ReadStructs<IoVec>(iovsPtr, iovsLen);
             var largest = iovs.Max(iov => iov.bufLen);
             byte[] buf = new byte[largest];
-            
+
             int totalRead = 0;
             foreach (var iov in iovs)
             {
@@ -225,192 +226,275 @@ namespace Wacs.WASIp1
 
             //Reset the offset
             fileDescriptor.Stream.Seek(origin, SeekOrigin.Begin);
-            
+
             mem.WriteInt32(nreadPtr, totalRead);
-            
+
             return ErrNo.Success;
         }
 
         /// <summary>
-        /// Write to a file descriptor, without using and updating the file descriptor's offset.
-        /// This function is similar to `pwritev` in Linux and other Unix-like systems.
+        /// Writes to a file descriptor at a specified offset without updating the file descriptor's position.
         /// </summary>
-        /// <param name="ctx">The execution context.</param>
+        /// <remarks>
+        /// This function implements functionality similar to the POSIX pwritev system call,
+        /// allowing writing from multiple buffers at a specified offset in a single operation.
+        /// The original file position is preserved after the write operation.
+        /// </remarks>
+        /// <param name="ctx">The execution context for the operation.</param>
         /// <param name="fd">The file descriptor to write to.</param>
-        /// <param name="iovsPtr">Pointer to the scatter/gather array of buffers to write from.</param>
+        /// <param name="iovsPtr">A pointer to the scatter/gather array of buffers to write from.</param>
         /// <param name="iovsLen">The length of the scatter/gather array.</param>
-        /// <param name="nwrittenPtr">Pointer to where the number of bytes written will be stored.</param>
-        /// <returns>An error code indicating success or failure.</returns>
+        /// <param name="offset">The offset in the file where writing should begin.</param>
+        /// <param name="nwrittenPtr">A pointer to store the total number of bytes written.</param>
+        /// <returns>An error code indicating the operation's success or failure.</returns>
         public ErrNo FdPwrite(ExecContext ctx, fd fd, ptr iovsPtr, size iovsLen, filesize offset, ptr nwrittenPtr)
         {
             if (!GetFd(fd, out var fileDescriptor))
             {
-                return ErrNo.NoEnt; // The file descriptor does not exist.
+                return ErrNo.NoEnt;
             }
 
             if (fileDescriptor.Type == Filetype.Directory)
-                return ErrNo.IsDir;
-
-            if (!fileDescriptor.Stream.CanWrite)
-                return ErrNo.IO;
-
-            var mem = ctx.DefaultMemory;
-
-            var origin = fileDescriptor.Stream.Position;
-
-            // Set the position in the file for writing
-            fileDescriptor.Stream.Seek((long)offset, SeekOrigin.Begin);
-
-            IoVec[] iovs = mem.ReadStructs<IoVec>(iovsPtr, iovsLen);
-            int totalWritten = 0;
-
-            foreach (var iov in iovs)
             {
-                var src = mem[(int)iov.bufPtr..(int)(iov.bufPtr + iov.bufLen)];
-                fileDescriptor.Stream.Write(src.ToArray(), 0, src.Length);
-                totalWritten += src.Length;
-
-                // Check for full write
-                if (src.Length < iov.bufLen)
-                    break;
+                return ErrNo.IsDir;
             }
 
-            // Reset the offset
-            fileDescriptor.Stream.Seek(origin, SeekOrigin.Begin);
-            
-            mem.WriteInt32(nwrittenPtr, totalWritten);
-            
-            return ErrNo.Success;
+            if (!fileDescriptor.Stream.CanWrite)
+            {
+                return ErrNo.IO;
+            }
+
+            var mem = ctx.DefaultMemory;
+            var origin = fileDescriptor.Stream.Position;
+
+            try
+            {
+                fileDescriptor.Stream.Seek((long)offset, SeekOrigin.Begin);
+                IoVec[] iovs = mem.ReadStructs<IoVec>(iovsPtr, iovsLen);
+                int totalWritten = 0;
+
+                foreach (var iov in iovs)
+                {
+                    var src = mem[(int)iov.bufPtr..(int)(iov.bufPtr + iov.bufLen)];
+                    if (src.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    var buf = System.Buffers.ArrayPool<byte>.Shared.Rent(src.Length);
+                    try
+                    {
+                        src.CopyTo(buf);
+                        fileDescriptor.Stream.Write(buf, 0, src.Length);
+                        totalWritten += src.Length;
+                    }
+                    finally
+                    {
+                        System.Buffers.ArrayPool<byte>.Shared.Return(buf);
+                    }
+
+                    if (src.Length < iov.bufLen)
+                    {
+                        break;
+                    }
+                }
+
+                mem.WriteInt32(nwrittenPtr, totalWritten);
+                return ErrNo.Success;
+            }
+            finally
+            {
+                fileDescriptor.Stream.Seek(origin, SeekOrigin.Begin);
+            }
         }
 
         /// <summary>
-        /// Read from a file descriptor.
-        /// This function is similar to `readv` in POSIX.
+        /// Reads data from a file descriptor into a scatter/gather array.
         /// </summary>
-        /// <param name="ctx">The execution context.</param>
+        /// <remarks>
+        /// This function implements functionality similar to the POSIX readv system call,
+        /// allowing reading into multiple buffers in a single operation.
+        /// </remarks>
+        /// <param name="ctx">The execution context for the operation.</param>
         /// <param name="fd">The file descriptor to read from.</param>
-        /// <param name="iovsPtr">Pointer to the scatter/gather array where the data will be stored.</param>
+        /// <param name="iovsPtr">A pointer to the scatter/gather array where data will be stored.</param>
         /// <param name="iovsLen">The length of the scatter/gather array.</param>
-        /// <param name="nreadPtr">Pointer to where the number of bytes read will be stored.</param>
-        /// <returns>An error code indicating success or failure.</returns>
+        /// <param name="nreadPtr">A pointer to store the total number of bytes read.</param>
+        /// <returns>An error code indicating the operation's success or failure.</returns>
         public ErrNo FdRead(ExecContext ctx, fd fd, ptr iovsPtr, size iovsLen, ptr nreadPtr)
         {
             if (!GetFd(fd, out var fileDescriptor))
             {
-                return ErrNo.NoEnt; // The file descriptor does not exist.
+                return ErrNo.NoEnt;
             }
 
             if (fileDescriptor.Type == Filetype.Directory)
+            {
                 return ErrNo.IsDir;
+            }
 
             if (!fileDescriptor.Stream.CanRead)
+            {
                 return ErrNo.IO;
+            }
 
             var mem = ctx.DefaultMemory;
-
-            // Read data into the specified buffers
             IoVec[] iovs = mem.ReadStructs<IoVec>(iovsPtr, iovsLen);
             int totalRead = 0;
 
             foreach (var iov in iovs)
             {
                 var dest = mem[(int)iov.bufPtr..(int)(iov.bufPtr + iov.bufLen)];
-                int read = fileDescriptor.Stream.Read(dest.ToArray(), 0, (int)iov.bufLen);
+                if (dest.Length == 0)
+                {
+                    continue;
+                }
+
+#if NET8_0_OR_GREATER
+                int read = fileDescriptor.Stream.Read(dest);
+#else
+        var buf = System.Buffers.ArrayPool<byte>.Shared.Rent(dest.Length);
+        int read;
+        
+        try
+        {
+            read = fileDescriptor.Stream.Read(buf, 0, dest.Length);
+            if (read > 0)
+            {
+                buf.AsSpan(0, read).CopyTo(dest);
+            }
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(buf);
+        }
+#endif
                 totalRead += read;
 
-                // Check if we have read all requested bytes
-                if (read < iov.bufLen)
+                if (read < dest.Length)
+                {
                     break;
+                }
             }
 
             mem.WriteInt32(nreadPtr, totalRead);
-            
             return ErrNo.Success;
         }
 
         /// <summary>
-        /// Read directory entries from a directory.
-        /// When successful, the contents of the output buffer consist of a sequence of directory entries.
-        /// This function fills the output buffer as much as possible, potentially truncating the last directory entry.
+        /// Reads directory entries from a specified directory file descriptor.
         /// </summary>
-        /// <param name="ctx">The execution context.</param>
+        /// <remarks>
+        /// When successful, the contents of the output buffer consist of a sequence of directory entries.
+        /// The function fills the output buffer as much as possible, potentially truncating the last directory entry.
+        /// </remarks>
+        /// <param name="ctx">The execution context for the operation.</param>
         /// <param name="fd">The directory file descriptor to read from.</param>
-        /// <param name="bufPtr">Pointer to the buffer where directory entries are stored.</param>
-        /// <param name="bufLen">The length of the buffer.</param>
-        /// <param name="cookie">The starting location within the directory to start reading.</param>
-        /// <param name="bufUsedPtr">Pointer to where the number of bytes stored in the read buffer will be indicated.</param>
-        /// <returns>An error code indicating success or failure.</returns>
+        /// <param name="bufPtr">A pointer to the buffer where directory entries will be stored.</param>
+        /// <param name="bufLen">The length of the buffer in bytes.</param>
+        /// <param name="cookie">The starting position within the directory from which to begin reading.</param>
+        /// <param name="bufUsedPtr">A pointer to store the number of bytes written to the buffer.</param>
+        /// <returns>An error code indicating the operation's success or failure.</returns>
         public ErrNo FdReaddir(ExecContext ctx, fd fd, ptr bufPtr, size bufLen, dircookie cookie, ptr bufUsedPtr)
         {
             if (!GetFd(fd, out var fileDescriptor))
             {
-                return ErrNo.NoEnt; // The file descriptor does not exist.
+                return ErrNo.NoEnt;
             }
 
             if (fileDescriptor.Type != Filetype.Directory)
+            {
                 return ErrNo.NotDir;
+            }
 
             var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
-            var entries = Directory.EnumerateFileSystemEntries(hostPath);
+            var entries = DirectoryExtensions.EnumerateFileSystemEntriesSafely(hostPath);
 
             List<(dircookie, DirEnt, byte[])> array = new();
             dircookie runningCookie = 0;
+
             foreach (var entry in entries)
             {
-                dircookie mycookie = runningCookie;
-                
-                var entryPath = Path.Combine(hostPath, entry);
-                var entryInfo = new FileInfo(entryPath);
-                byte[] name = Encoding.UTF8.GetBytes(entry);
-                ulong nameLen = (ulong)name.Length;
+                if (entry == "." || entry == "..")
+                {
+                    continue;
+                }
 
-                runningCookie += DirEntSize + nameLen; 
-                
+                dircookie mycookie = runningCookie;
+
+                FileAttributes? attributes = null;
+                try
+                {
+                    attributes = File.GetAttributes(entry);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                var fileType = attributes.Value.HasFlag(FileAttributes.Directory) ? Filetype.Directory : Filetype.RegularFile;
+                var inode = fileType is Filetype.Directory ?
+                    FileUtil.GenerateInode(new DirectoryInfo(entry)) :
+                    FileUtil.GenerateInode(new FileInfo(entry));
+
+                var name = Path.GetFileName(entry);
+
+                if (string.IsNullOrEmpty(name))
+                {
+                    continue;
+                }
+
+                byte[] nameBytes = Encoding.UTF8.GetBytes(name);
+                long nameLen = nameBytes.Length;
+
+                runningCookie += DirEntSize + nameLen;
+
                 DirEnt dirent = new DirEnt
                 {
                     DNext = runningCookie,
-                    DIno = FileUtil.GenerateInode(entryInfo),
+                    DIno = inode,
                     DNamlen = (uint)nameLen,
-                    DType = FileUtil.FiletypeFromInfo(entryInfo),
+                    DType = fileType,
                 };
-                
-                array.Add((mycookie, dirent, name));
+
+                array.Add((mycookie, dirent, nameBytes));
             }
 
-            byte[] buf = new byte[runningCookie];
-            var window = buf.AsSpan();
-            foreach (var (cook, struc, name) in array)
+            byte[] allDirEnts = new byte[runningCookie];
+            var window = allDirEnts.AsSpan();
+
+            foreach (var (startCookie, struc, nameBytes) in array)
             {
-                int start = (int)cook;
-                int delim = (int)(cook + DirEntSize);
-                int end = delim + name.Length;
-                var entryTarget = window[start..delim];
-                var nameTarget = window[delim..end];
                 var dirEnt = struc;
+                int start = (int)startCookie;
+                int delim = (int)(start + DirEntSize);
+                int end = delim + nameBytes.Length;
+
 #if NET8_0_OR_GREATER
-                MemoryMarshal.Write(entryTarget, in dirEnt);
+                MemoryMarshal.Write(window[start..delim], in dirEnt);
 #else
-                MemoryMarshal.Write(entryTarget, ref dirEnt);
+        MemoryMarshal.Write(window[start..delim], ref dirEnt);
 #endif
-                name.CopyTo(nameTarget);
+                nameBytes.CopyTo(window[delim..end]);
             }
 
             var mem = ctx.DefaultMemory;
 
-            //TODO: is this the correct behavior?
-            //We're clamping to available buffer space
-            var requested = window[(int)cookie..(int)(cookie + bufLen)];
-            int available = requested.Length;
-            var bufTarget = mem[(int)bufPtr..(int)(bufPtr + available)];
-            if (available > bufTarget.Length)
+            if (cookie >= allDirEnts.Length)
             {
-                available = bufTarget.Length;
-                requested = window[(int)cookie..((int)cookie + available)];
+                mem.WriteInt32(bufUsedPtr, 0);
+                return ErrNo.Success;
             }
-            
-            requested.CopyTo(bufTarget);
-            
-            mem.WriteInt32(bufUsedPtr, available);
+
+            int startOffset = (int)cookie;
+            int possibleBytes = allDirEnts.Length - startOffset;
+            int bytesToCopy = (int)Math.Min(bufLen, possibleBytes);
+
+            var sourceSlice = window.Slice(startOffset, bytesToCopy);
+            var targetSlice = mem[(int)bufPtr..((int)bufPtr + bytesToCopy)];
+            sourceSlice.CopyTo(targetSlice);
+
+            mem.WriteInt32(bufUsedPtr, bytesToCopy);
 
             return ErrNo.Success;
         }
@@ -434,7 +518,7 @@ namespace Wacs.WASIp1
             {
                 // Close the "to" file descriptor if it is open
                 RemoveFd(to);
-                
+
                 // Assign the "to" file descriptor to the same underlying resources of the "from" fd
                 MoveFd(from, to);
             }
@@ -442,7 +526,7 @@ namespace Wacs.WASIp1
             {
                 return ErrNo.IO; // Return a generic I/O error indicating the operation failed.
             }
-            
+
             return ErrNo.Success;
         }
 
@@ -462,7 +546,7 @@ namespace Wacs.WASIp1
             {
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
-            
+
             if (fileDescriptor.Type == Filetype.Directory)
                 return ErrNo.IsDir;
 
@@ -491,7 +575,7 @@ namespace Wacs.WASIp1
 
             var mem = ctx.DefaultMemory;
             mem.WriteInt32(newoffsetPtr, (int)newPosition);
-            
+
             return ErrNo.Success;
         }
 
@@ -513,7 +597,7 @@ namespace Wacs.WASIp1
                 return ErrNo.IsDir;
 
             fileDescriptor.Stream.Flush();
-            
+
             return ErrNo.Success;
         }
 
@@ -530,7 +614,7 @@ namespace Wacs.WASIp1
             var mem = ctx.DefaultMemory;
             if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.NoEnt;
-            
+
             try
             {
                 if (fileDescriptor.Type == Filetype.Directory)
@@ -543,7 +627,7 @@ namespace Wacs.WASIp1
             {
                 return ErrNo.IO;
             }
-            
+
             return ErrNo.Success;
         }
 
@@ -587,7 +671,7 @@ namespace Wacs.WASIp1
             }
 
             mem.WriteInt32(nwrittenPtr, totalWritten);
-            
+
             return ErrNo.Success;
         }
     }

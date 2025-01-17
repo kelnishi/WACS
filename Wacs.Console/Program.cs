@@ -41,8 +41,9 @@ namespace Wacs.Console
                 subargs.AddRange(args[moduleIndex..]);
                 args = args[0..moduleIndex];
             }
-            
-            var parser = new Parser(with => {
+
+            var parser = new Parser(with =>
+            {
                 with.EnableDashDash = true;
                 with.AutoHelp = true;        // Suppress automatic help
                 with.AutoVersion = true;      // Suppress automatic version
@@ -51,9 +52,9 @@ namespace Wacs.Console
 
             // Map subargs to ExecutableArgs in the options
             var parsedResult = parser.ParseArguments<CommandLineOptions>(args);
-            
+
             return parsedResult.MapResult(
-                opts => 
+                opts =>
                 {
                     opts.ExecutableArgs = subargs; // Assign subargs to ExecutableArgs
                     return RunWithOptions(opts);
@@ -70,7 +71,7 @@ namespace Wacs.Console
                 System.Console.Error.WriteLine($"Error: Wasm file not found: {opts.WasmModule}");
                 return 1;
             }
-            
+
             // Check the file extension
             string fileExtension = Path.GetExtension(opts.WasmModule);
             if (fileExtension != ".wasm")
@@ -78,7 +79,7 @@ namespace Wacs.Console
                 System.Console.Error.WriteLine($"Error: Invalid file extension: {fileExtension}. Expected .wasm");
                 return 1;
             }
-            
+
             var args = new List<string> { opts.WasmModule };
             var moreArgs = opts.ExecutableArgs.ToList();
             for (int a = 0; a < moreArgs.Count; ++a)
@@ -117,9 +118,9 @@ namespace Wacs.Console
                 }
                 envVars[parts[0]] = parts[1];
             }
-            
+
             var runtime = new WasmRuntime();
-            
+
             //Parse the module
             using var fileStream = new FileStream(opts.WasmModule, FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
@@ -130,7 +131,7 @@ namespace Wacs.Console
                 using var outputStream = new FileStream(outputFilePath, FileMode.Create);
                 ModuleRenderer.RenderWatToStream(outputStream, module);
             }
-            
+
             //If you just want to do validation without a runtime, you could do it like this
             var validationResult = module.Validate();
             var funcsToRender = new HashSet<(FuncIdx, string)>();
@@ -141,17 +142,17 @@ namespace Wacs.Console
                 {
                     case Severity.Warning:
                     case Severity.Error:
-                        
+
                         if (error.ErrorMessage.StartsWith("Function["))
                         {
                             var parts = error.ErrorMessage.Split(":");
                             var path = parts[0];
-                            var msg = string.Join(":",parts[1..]);
+                            var msg = string.Join(":", parts[1..]);
 
                             var (line, code) = module.CalculateLine(path);
                             if (!string.IsNullOrWhiteSpace(code)) code = $" ({code})";
                             var (fline, _) = module.CalculateLine(path, functionRelative: true);
-                            
+
                             System.Console.Error.WriteLine($"Validation {error.Severity}.{msg}");
                             System.Console.Error.WriteLine($"    {path}");
                             System.Console.Error.WriteLine($"    at{code} in {opts.WasmModule}:line {line} ({fline})");
@@ -168,7 +169,7 @@ namespace Wacs.Console
                         break;
                 }
             }
-            
+
             foreach (var (fIdx, funcId) in funcsToRender)
             {
                 string funcString = ModuleRenderer.RenderFunctionWat(module, fIdx, "", true);
@@ -177,8 +178,8 @@ namespace Wacs.Console
                 outputStreamWriter.Write(funcString);
                 outputStreamWriter.Close();
             }
-            
-            
+
+
             //Bind module dependencies prior to instantiation
             runtime.BindHostFunction<Action<char>>(("env", "sayc"), c =>
             {
@@ -196,25 +197,26 @@ namespace Wacs.Console
             wasiConfig.PreopenedDirectories = opts.Directories
                     .Select(path => new PreopenedDirectory(wasiConfig, path))
                     .ToList();
-            var wasi = new WASIp1.Wasi(wasiConfig);
+            using var wasi = new WASIp1.Wasi(wasiConfig);
             wasi.BindToRuntime(runtime);
-            
+
             string moduleName = opts.ModuleName;
-            
+
             if (opts.LogProg)
                 System.Console.Error.WriteLine($"Instantiating Module {moduleName}");
 
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing, or you're like super confident.
-            var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true});
+            var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true });
             runtime.RegisterModule(moduleName, modInst);
-            
+
             if (opts.Transpile)
                 runtime.TranspileModule(modInst);
 
-            var callOptions = new InvokerOptions {
+            var callOptions = new InvokerOptions
+            {
                 LogGas = opts.LogGas,
                 GasLimit = opts.LimitGas,
-                LogProgressEvery = opts.LogProgressEvery, 
+                LogProgressEvery = opts.LogProgressEvery,
                 LogInstructionExecution = opts.LogInstructionExecution,
                 CalculateLineNumbers = opts.CalculateLineNumbers,
                 CollectStats = opts.CollectStats,
@@ -228,8 +230,8 @@ namespace Wacs.Console
                 var name = runtime.GetFunctionName(modInst.StartFunc);
                 if (opts.LogProg)
                     System.Console.Error.WriteLine($"Executing wasm function {name}");
-                
-                using (IDisposable _ = opts.Profile? new ProfilingSession(): new NoOpProfilingSession())
+
+                using (IDisposable _ = opts.Profile ? new ProfilingSession() : new NoOpProfilingSession())
                 {
                     try
                     {
@@ -252,10 +254,10 @@ namespace Wacs.Console
             {
                 if (opts.LogProg)
                     System.Console.Error.WriteLine("Calling start");
-                
+
                 var caller = runtime.CreateInvoker<Action>(startAddr, callOptions);
-                
-                using (IDisposable _ = opts.Profile? new ProfilingSession(): new NoOpProfilingSession())
+
+                using (IDisposable _ = opts.Profile ? new ProfilingSession() : new NoOpProfilingSession())
                 {
                     try
                     {
@@ -281,8 +283,8 @@ namespace Wacs.Console
                     System.Console.Error.WriteLine($"Calling {opts.InvokeFunction}");
 
                 var caller = runtime.CreateStackInvoker(invokeAddr, callOptions);
-                
-                using (IDisposable _ = opts.Profile? new ProfilingSession(): new NoOpProfilingSession())
+
+                using (IDisposable _ = opts.Profile ? new ProfilingSession() : new NoOpProfilingSession())
                 {
                     try
                     {
@@ -301,8 +303,8 @@ namespace Wacs.Console
                             pVals[i] = new Value(type.ParameterTypes.Types[i], provided[i]);
                         }
 
-                        Value [] result = caller(pVals);
-                        
+                        Value[] result = caller(pVals);
+
                         System.Console.WriteLine($"Result:[{string.Join(" ", result)}]");
                     }
                     catch (TrapException exc)
