@@ -3,6 +3,10 @@
     (type (;1;) (func (param i32) (result i32)))
     (type (;2;) (func (param f32) (result f32)))
     (type (;3;) (func (param i32) (result i32 i32)))
+    (type (;4;) (func (param i32 i32)))
+    (type (;5;) (func (param i32)))
+    (type (;6;) (func))
+    (type (;7;) (func (param i32 i64 f32 f64) (result i32)))
     (import (;0;) "env" "bound_host" (func (;0;) (type 3)))
     (import (;1;) "env" "bound_async_host" (func (;1;) (type 1)))
     (func (;2;) (type 1)
@@ -44,9 +48,38 @@
         local.get 0
         call 1
     )
+    (func (;7;) (type 4)
+       (param i32 i32)
+       local.get 1
+       call 0
+       drop
+       drop
+    )
+    (func (;8;) (type 5)
+       (param i32)
+       local.get 0
+       call 0
+       drop
+       drop
+    )
+    (func (;9;) (type 6)
+       i32.const 6
+       call 0
+       drop
+       drop
+    )
+    (func (;10;) (type 7)
+        (param i32 i64 f32 f64) (result i32)
+        local.get 0
+        return
+    )
     (export "i32" (func 2))
     (export "f32" (func 3))
     (export "call_host" (func 4))
     (export "4x4" (func 5))
     (export "call_async_host" (func 6))
+    (export "2x0" (func 7))
+    (export "1x0" (func 8))
+    (export "0x0" (func 9))
+    (export "4x1" (func 10))
 )

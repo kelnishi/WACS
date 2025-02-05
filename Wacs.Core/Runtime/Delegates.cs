@@ -16,6 +16,7 @@
 
 using System;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Threading.Tasks;
 using Wacs.Core.Types;
@@ -124,40 +125,33 @@ namespace Wacs.Core.Runtime
 
             return (paramTypes.Length, resultTypes.Length) switch
             {
-                (0, 0) => new Action(() =>func()),
-                (1, 0) => new Action<object>(i1=>func(i1)),
-                (2, 0) => new Action<object,object>((i1,i2)=>func(i1,i2)),
-                (3, 0) => new Action<object,object,object>((i1,i2,i3)=>func(i1,i2,i3)),
-                (4, 0) => new Action<object, object, object, object>((i1,i2,i3,i4)=>func(i1,i2,i3,i4)),
-                (5, 0) => new Action<object, object, object, object, object>((i1,i2,i3,i4,i5)=>func(i1,i2,i3,i4,i5)),
-                (6, 0) => new Action<object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6)=>func(i1,i2,i3,i4,i5,i6)),
-                (7, 0) => new Action<object, object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6,i7)=>func(i1,i2,i3,i4,i5,i6,i7)),
-                (8, 0) => new Action<object, object, object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6,i7,i8)=>func(i1,i2,i3,i4,i5,i6,i7,i8)),
-                (9, 0) => new Action<object, object, object, object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6,i7,i8,i9)=>func(i1,i2,i3,i4,i5,i6,i7,i8,i9)),
+                (0, 0) => new Action<object[]>(p => func()),
+                (1, 0) => new Action<object[]>(p => func(p[0])),
+                (2, 0) => new Action<object[]>(p => func(p[0], p[1])),
+                (3, 0) => new Action<object[]>(p => func(p[0], p[1], p[2])),
+                (4, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3])),
+                (5, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4])),
+                (6, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4], p[5])),
+                (7, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4], p[5], p[6])),
+                (8, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7])),
+                (9, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8])),
                 
-                (0, 1) => new Func<Value>(()=>new Value(func())),
-                (1, 1) => new Func<object, Value>(i1=>new Value(func(i1))),
-                (2, 1) => new Func<object, object, Value>((i1,i2)=> new Value(func(i1,i2))),
-                (3, 1) => new Func<object, object, object, Value>((i1,i2,i3)=> new Value(func(i1,i2,i3))),
-                (4, 1) => new Func<object, object, object, object, Value>((i1,i2,i3,i4)=> new Value(func(i1,i2,i3,i4))),
-                (5, 1) => new Func<object, object, object, object, object, Value>((i1,i2,i3,i4,i5)=> new Value(func(i1,i2,i3,i4,i5))),
-                (6, 1) => new Func<object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6)=> new Value(func(i1,i2,i3,i4,i5,i6))),
-                (7, 1) => new Func<object, object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6,i7)=> new Value(func(i1,i2,i3,i4,i5,i6,i7))),
-                (8, 1) => new Func<object, object, object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6,i7,i8)=> new Value(func(i1,i2,i3,i4,i5,i6,i7,i8))),
-                (9, 1) => new Func<object, object, object, object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6,i7,i8,i9)=> new Value(func(i1,i2,i3,i4,i5,i6,i7,i8,i9))),
+                (0, 1) => new Func<object[], Value>(p => new Value(func())),
+                (1, 1) => new Func<object[], Value>(p => new Value(func(p[0]))),
+                (2, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1]))),
+                (3, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2]))),
+                (4, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3]))),
+                (5, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4]))),
+                (6, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4], p[5]))),
+                (7, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4], p[5], p[6]))),
+                (8, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]))),
+                (9, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]))),
                 
                 _ => throw new NotSupportedException($"Cannot auto-bind function signature: ({string.Join(", ", paramTypes)}) -> ({string.Join(", ", resultTypes)})")
             };
         }
 
-        public static Delegate CreateTypedDelegate(Delegate genericDelegate, Type desiredDelegateType)
-        {
-            var genericMethod = typeof(Delegates).GetMethod(nameof(CreateTypedDelegateInternal), BindingFlags.NonPublic | BindingFlags.Static);
-            var typedMethod = genericMethod.MakeGenericMethod(desiredDelegateType);
-            return (Delegate)typedMethod.Invoke(null, new object[] { genericDelegate });
-        }
-
-        private static TDelegate CreateTypedDelegateInternal<TDelegate>(Delegate genericDelegate) where TDelegate : Delegate
+        public static TDelegate CreateTypedDelegate<TDelegate>(Delegate genericDelegate) where TDelegate : Delegate
         {
             // Get the 'Invoke' method of the desired delegate type
             var delegateInvokeMethod = typeof(TDelegate).GetMethod("Invoke");
@@ -165,11 +159,6 @@ namespace Wacs.Core.Runtime
                 throw new ArgumentException($"Delegate type {typeof(TDelegate)} did not have Invoke() method");
             
             var delegateParameters = delegateInvokeMethod.GetParameters();
-
-            if ((delegateParameters?.Length ?? 0) == 0)
-            {
-                return (TDelegate)Delegate.CreateDelegate(typeof(TDelegate), genericDelegate.Target, genericDelegate.Method);
-            }
             
             // Create parameter expressions matching the desired delegate's parameters
             var parameterExpressions = delegateParameters
