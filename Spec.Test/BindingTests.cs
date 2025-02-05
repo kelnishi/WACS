@@ -26,10 +26,13 @@ namespace Spec.Test
 {
     public class BindingTests
     {
+        private static int HostResult;
+        
         static int BoundHost(int a, out int b)
         {
             b = a;
             int c = a * 2;
+            HostResult = c;
             return c;
         }
 
@@ -60,6 +63,25 @@ namespace Spec.Test
             Assert.Equal(1 * 3, (long)result[1]);
             Assert.Equal(1f * 4f, (float)result[2]);
             Assert.Equal(1.0 * 5.0, (double)result[3]);
+        }
+
+        [Fact]
+        public void Bind4x1()
+        {
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<HostInOut>(("env","bound_host"), BoundHost);
+            runtime.BindHostFunction<HostAsyncInRet>(("env","bound_async_host"), BoundAsyncHost);
+            using var fileStream = new FileStream("../../../engine/binding.wasm", FileMode.Open);
+            var module = BinaryModuleParser.ParseWasm(fileStream);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("binding", moduleInst);
+
+            var fa = runtime.GetExportedFunction(("binding", "4x1"));
+            var invoker = runtime.CreateInvoker<Func<int,long,float,double,int>>(fa);
+            
+            var result = invoker(1, 1L, 1.0f, 1.0);
+            
+            Assert.Equal(1, result);
         }
 
         [Fact]
@@ -170,6 +192,64 @@ namespace Spec.Test
             Assert.InRange(stopwatch.ElapsedMilliseconds, 3000, 3500);
             Assert.Equal(10*2, results[0].Data.Int32);
         }
+
+        [Fact]
+        public void Bind0ParameterAction()
+        {
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<HostInOut>(("env","bound_host"), BoundHost);
+            runtime.BindHostFunction<HostAsyncInRet>(("env","bound_async_host"), BoundAsyncHost);
+            using var fileStream = new FileStream("../../../engine/binding.wasm", FileMode.Open);
+            var module = BinaryModuleParser.ParseWasm(fileStream);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("binding", moduleInst);
+
+            var fa = runtime.GetExportedFunction(("binding", "0x0"));
+            var invoker = runtime.CreateInvoker<Action>(fa);
+            
+            HostResult = 0;
+            invoker();
+            Assert.Equal(12, HostResult);
+        }
+        
+        [Fact]
+        public void Bind1ParameterAction()
+        {
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<HostInOut>(("env","bound_host"), BoundHost);
+            runtime.BindHostFunction<HostAsyncInRet>(("env","bound_async_host"), BoundAsyncHost);
+            using var fileStream = new FileStream("../../../engine/binding.wasm", FileMode.Open);
+            var module = BinaryModuleParser.ParseWasm(fileStream);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("binding", moduleInst);
+
+            var fa = runtime.GetExportedFunction(("binding", "1x0"));
+            var invoker = runtime.CreateInvoker<Action<int>>(fa);
+
+            HostResult = 0;
+            invoker(1);
+            Assert.Equal(2, HostResult);
+        }
+        
+        [Fact]
+        public void Bind2ParameterAction()
+        {
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<HostInOut>(("env","bound_host"), BoundHost);
+            runtime.BindHostFunction<HostAsyncInRet>(("env","bound_async_host"), BoundAsyncHost);
+            using var fileStream = new FileStream("../../../engine/binding.wasm", FileMode.Open);
+            var module = BinaryModuleParser.ParseWasm(fileStream);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("binding", moduleInst);
+
+            var fa = runtime.GetExportedFunction(("binding", "2x0"));
+            var invoker = runtime.CreateInvoker<Action<int,int>>(fa);
+
+            HostResult = 0;
+            invoker(1, 2);
+            Assert.Equal(4, HostResult);
+        }
+        
 
         delegate int HostInOut(int a, out int b);
 
