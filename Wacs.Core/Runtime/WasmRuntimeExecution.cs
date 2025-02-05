@@ -52,7 +52,7 @@ namespace Wacs.Core.Runtime
                 {
                     results = funcType.ParameterTypes.Arity == 0
                         ? inner()
-                        : (Value[])GenericFuncsInvoke.Invoke(inner, args);
+                        : (Value[])GenericFuncsInvoke.Invoke(inner, new object[]{args});
                     if (funcType.ResultType.Types.Length == 1)
                         return results[0];
                     return results;
@@ -64,8 +64,8 @@ namespace Wacs.Core.Runtime
                     return results;
                 }
             });
-            
-            return (TDelegate)Delegates.CreateTypedDelegate(genericDelegate, typeof(TDelegate));
+
+            return Delegates.CreateTypedDelegate<TDelegate>(genericDelegate);
         }
 
         //No type checking, but you can get multiple return values
@@ -222,7 +222,7 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        private Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
+        public Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
         {
             return GenericDelegate;
             Value[] GenericDelegate(params object[] args)
