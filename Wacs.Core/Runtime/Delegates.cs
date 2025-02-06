@@ -16,12 +16,10 @@
 
 using System;
 using System.Linq;
-using System.Linq.Expressions;
 using System.Reflection;
 using System.Threading.Tasks;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
-using Expression = System.Linq.Expressions.Expression;
 
 namespace Wacs.Core.Runtime
 {
@@ -34,7 +32,143 @@ namespace Wacs.Core.Runtime
         public delegate Task<Value[]> GenericFuncsAsync(params Value[] args);
 
         public delegate Value[] StackFunc(Value[] parameters);
+        
+        private static readonly Type ClassType = typeof(Delegates);
+        private static readonly MethodInfo M0X0 = ClassType.GetMethod(nameof(CreateInvoker0X0), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M1X0 = ClassType.GetMethod(nameof(CreateInvoker1X0), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M2X0 = ClassType.GetMethod(nameof(CreateInvoker2X0), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M3X0 = ClassType.GetMethod(nameof(CreateInvoker3X0), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M4X0 = ClassType.GetMethod(nameof(CreateInvoker4X0), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M5X0 = ClassType.GetMethod(nameof(CreateInvoker5X0), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M6X0 = ClassType.GetMethod(nameof(CreateInvoker6X0), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M7X0 = ClassType.GetMethod(nameof(CreateInvoker7X0), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M8X0 = ClassType.GetMethod(nameof(CreateInvoker8X0), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M9X0 = ClassType.GetMethod(nameof(CreateInvoker9X0), BindingFlags.Public | BindingFlags.Static)!;
+        
+        private static readonly MethodInfo M0X1 = ClassType.GetMethod(nameof(CreateInvoker0X1), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M1X1 = ClassType.GetMethod(nameof(CreateInvoker1X1), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M2X1 = ClassType.GetMethod(nameof(CreateInvoker2X1), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M3X1 = ClassType.GetMethod(nameof(CreateInvoker3X1), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M4X1 = ClassType.GetMethod(nameof(CreateInvoker4X1), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M5X1 = ClassType.GetMethod(nameof(CreateInvoker5X1), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M6X1 = ClassType.GetMethod(nameof(CreateInvoker6X1), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M7X1 = ClassType.GetMethod(nameof(CreateInvoker7X1), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M8X1 = ClassType.GetMethod(nameof(CreateInvoker8X1), BindingFlags.Public | BindingFlags.Static)!;
+        private static readonly MethodInfo M9X1 = ClassType.GetMethod(nameof(CreateInvoker9X1), BindingFlags.Public | BindingFlags.Static)!;
+        
 
+        public static Action CreateInvoker0X0(Action func) => func;
+        public static Action<T> CreateInvoker1X0<T>(Action<object> func) => arg => func(arg);
+        public static Action<T1, T2> CreateInvoker2X0<T1, T2>(Action<object, object> func) => (arg1, arg2) => func(arg1, arg2);
+        public static Action<T1, T2, T3> CreateInvoker3X0<T1, T2, T3>(Action<object, object, object> func) => (arg1, arg2, arg3) => func(arg1, arg2, arg3);
+        public static Action<T1, T2, T3, T4> CreateInvoker4X0<T1, T2, T3, T4>(Action<object, object, object, object> func) => (arg1, arg2, arg3, arg4) => func(arg1, arg2, arg3, arg4);
+        public static Action<T1, T2, T3, T4, T5> CreateInvoker5X0<T1, T2, T3, T4, T5>(Action<object, object, object, object, object> func) => (arg1, arg2, arg3, arg4, arg5) => func(arg1, arg2, arg3, arg4, arg5);
+        public static Action<T1, T2, T3, T4, T5, T6> CreateInvoker6X0<T1, T2, T3, T4, T5, T6>(Action<object, object, object, object, object, object> func) => (arg1, arg2, arg3, arg4, arg5, arg6) => func(arg1, arg2, arg3, arg4, arg5, arg6);
+        public static Action<T1, T2, T3, T4, T5, T6, T7> CreateInvoker7X0<T1, T2, T3, T4, T5, T6, T7>(Action<object, object, object, object, object, object, object> func) => (arg1, arg2, arg3, arg4, arg5, arg6, arg7) => func(arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+        public static Action<T1, T2, T3, T4, T5, T6, T7, T8> CreateInvoker8X0<T1, T2, T3, T4, T5, T6, T7, T8>(Action<object, object, object, object, object, object, object, object> func) => (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) => func(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+        public static Action<T1, T2, T3, T4, T5, T6, T7, T8, T9> CreateInvoker9X0<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Action<object, object, object, object, object, object, object, object, object> func) => (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) => func(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
+        
+        
+        public static Func<TResult> CreateInvoker0X1<TResult>(Func<TResult> func) => () => func();
+        public static Func<T, TResult> CreateInvoker1X1<T, TResult>(Func<object, TResult> func) => arg => func(arg);
+        public static Func<T1, T2, TResult> CreateInvoker2X1<T1, T2, TResult>(Func<object, object, TResult> func) => (arg1, arg2) => func(arg1, arg2);
+        public static Func<T1, T2, T3, TResult> CreateInvoker3X1<T1, T2, T3, TResult>(Func<object,object,object, TResult> func) => (arg1, arg2, arg3) => func(arg1, arg2, arg3 );
+        public static Func<T1, T2, T3, T4, TResult> CreateInvoker4X1<T1, T2, T3, T4, TResult>(Func<object, object, object, object, TResult> func) => (arg1, arg2, arg3, arg4) => func(arg1, arg2, arg3, arg4);
+        public static Func<T1, T2, T3, T4, T5, TResult> CreateInvoker5X1<T1, T2, T3, T4, T5, TResult>(Func<object, object, object, object, object, TResult> func) => (arg1, arg2, arg3, arg4, arg5) => func(arg1, arg2, arg3, arg4, arg5);
+        public static Func<T1, T2, T3, T4, T5, T6, TResult> CreateInvoker6X1<T1, T2, T3, T4, T5, T6, TResult>(Func<object, object, object, object, object, object, TResult> func) => (arg1, arg2, arg3, arg4, arg5, arg6) => func(arg1, arg2, arg3, arg4, arg5, arg6);
+        public static Func<T1, T2, T3, T4, T5, T6, T7, TResult> CreateInvoker7X1<T1, T2, T3, T4, T5, T6, T7, TResult>(Func<object, object, object, object, object, object, object, TResult> func) => (arg1, arg2, arg3, arg4, arg5, arg6, arg7) => func(arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+        public static Func<T1, T2, T3, T4, T5, T6, T7, T8, TResult> CreateInvoker8X1<T1, T2, T3, T4, T5, T6, T7, T8, TResult>(Func<object, object, object, object, object, object, object, object, TResult> func) => (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) => func(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+        public static Func<T1, T2, T3, T4, T5, T6, T7, T8, T9, TResult> CreateInvoker9X1<T1, T2, T3, T4, T5, T6, T7, T8, T9, TResult>(Func<object, object, object, object, object, object, object, object, object, TResult> func) => (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) => func(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
+        
+        
+        public static MethodInfo WrapGenericMethod(MethodInfo invokeMethod)
+        {
+            ParameterInfo[] parameters = invokeMethod.GetParameters();
+            bool isAction = invokeMethod.ReturnType == typeof(void);
+
+            int p = parameters.Length;
+            int r = isAction ? 0 : 1;
+            
+            MethodInfo mi = (p, r) switch
+            {
+                (0, 0) => M0X0,
+                (1, 0) => M1X0,
+                (2, 0) => M2X0,
+                (3, 0) => M3X0,
+                (4, 0) => M4X0,
+                (5, 0) => M5X0,
+                (6, 0) => M6X0,
+                (7, 0) => M7X0,
+                (8, 0) => M8X0,
+                (9, 0) => M9X0,
+                
+                (0, 1) => M0X1,
+                (1, 1) => M1X1,
+                (2, 1) => M2X1,
+                (3, 1) => M3X1,
+                (4, 1) => M4X1,
+                (5, 1) => M5X1,
+                (6, 1) => M6X1,
+                (7, 1) => M7X1,
+                (8, 1) => M8X1,
+                (9, 1) => M9X1,
+                _ => throw new ArgumentException($"No DelegateWrapper for {p}x{r}")
+            };
+
+            if ((p, r) == (0, 0))
+                return mi;
+            
+            MethodInfo mgm = typeof(MethodInfo).GetMethod("MakeGenericMethod");
+            var mgmargs = parameters.Select(p => p.ParameterType).ToList();
+            if (!isAction)
+                mgmargs.Add(invokeMethod.ReturnType);
+            
+            MethodInfo? genMi = (MethodInfo)mgm.Invoke(mi, new object[]{mgmargs.ToArray()});
+            if (genMi is null)
+                throw new ArgumentException($"Could not wrap generic method {invokeMethod.Name}");
+            
+            return genMi;
+        }
+        
+        public static Delegate AnonymousFunctionFromType(FunctionType functionType, GenericFuncs func)
+        {
+            var paramTypes = functionType.ParameterTypes.Types;
+            var resultTypes = functionType.ResultType.Types;
+        
+            if (resultTypes.Length > 1)
+            {
+                throw new NotSupportedException("Multiple return values are not supported in C# delegates.");
+            }
+        
+            return (paramTypes.Length, resultTypes.Length) switch
+            {
+                (0, 0) => new Action(() =>func()),
+                (1, 0) => new Action<object>(i1=>func(i1)),
+                (2, 0) => new Action<object, object>((i1,i2)=>func(i1,i2)),
+                (3, 0) => new Action<object, object, object>((i1,i2,i3)=>func(i1,i2,i3)),
+                (4, 0) => new Action<object, object, object, object>((i1,i2,i3,i4)=>func(i1,i2,i3,i4)),
+                (5, 0) => new Action<object, object, object, object, object>((i1,i2,i3,i4,i5)=>func(i1,i2,i3,i4,i5)),
+                (6, 0) => new Action<object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6)=>func(i1,i2,i3,i4,i5,i6)),
+                (7, 0) => new Action<object, object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6,i7)=>func(i1,i2,i3,i4,i5,i6,i7)),
+                (8, 0) => new Action<object, object, object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6,i7,i8)=>func(i1,i2,i3,i4,i5,i6,i7,i8)),
+                (9, 0) => new Action<object, object, object, object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6,i7,i8,i9)=>func(i1,i2,i3,i4,i5,i6,i7,i8,i9)),
+                
+                (0, 1) => new Func<Value>(()=>new Value(func())),
+                (1, 1) => new Func<object, Value>(i1=>new Value(func(i1))),
+                (2, 1) => new Func<object, object, Value>((i1,i2)=> new Value(func(i1,i2))),
+                (3, 1) => new Func<object, object, object, Value>((i1,i2,i3)=> new Value(func(i1,i2,i3))),
+                (4, 1) => new Func<object, object, object, object, Value>((i1,i2,i3,i4)=> new Value(func(i1,i2,i3,i4))),
+                (5, 1) => new Func<object, object, object, object, object, Value>((i1,i2,i3,i4,i5)=> new Value(func(i1,i2,i3,i4,i5))),
+                (6, 1) => new Func<object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6)=> new Value(func(i1,i2,i3,i4,i5,i6))),
+                (7, 1) => new Func<object, object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6,i7)=> new Value(func(i1,i2,i3,i4,i5,i6,i7))),
+                (8, 1) => new Func<object, object, object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6,i7,i8)=> new Value(func(i1,i2,i3,i4,i5,i6,i7,i8))),
+                (9, 1) => new Func<object, object, object, object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6,i7,i8,i9)=> new Value(func(i1,i2,i3,i4,i5,i6,i7,i8,i9))),
+                
+                _ => throw new NotSupportedException($"Cannot auto-bind function signature: ({string.Join(", ", paramTypes)}) -> ({string.Join(", ", resultTypes)})")
+            };
+        }
+        
+        
         public static void ValidateFunctionTypeCompatibility(FunctionType functionType, Type delegateType)
         {
             if (!typeof(Delegate).IsAssignableFrom(delegateType))
@@ -113,98 +247,6 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public static Delegate AnonymousFunctionFromType(FunctionType functionType, GenericFunc func)
-        {
-            var paramTypes = functionType.ParameterTypes.Types;
-            var resultTypes = functionType.ResultType.Types;
-
-            if (resultTypes.Length > 1)
-            {
-                throw new NotSupportedException("Multiple return values are not supported in C# delegates.");
-            }
-
-            return (paramTypes.Length, resultTypes.Length) switch
-            {
-                (0, 0) => new Action<object[]>(p => func()),
-                (1, 0) => new Action<object[]>(p => func(p[0])),
-                (2, 0) => new Action<object[]>(p => func(p[0], p[1])),
-                (3, 0) => new Action<object[]>(p => func(p[0], p[1], p[2])),
-                (4, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3])),
-                (5, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4])),
-                (6, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4], p[5])),
-                (7, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4], p[5], p[6])),
-                (8, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7])),
-                (9, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8])),
-                
-                (0, 1) => new Func<object[], Value>(p => new Value(func())),
-                (1, 1) => new Func<object[], Value>(p => new Value(func(p[0]))),
-                (2, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1]))),
-                (3, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2]))),
-                (4, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3]))),
-                (5, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4]))),
-                (6, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4], p[5]))),
-                (7, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4], p[5], p[6]))),
-                (8, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]))),
-                (9, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]))),
-                
-                _ => throw new NotSupportedException($"Cannot auto-bind function signature: ({string.Join(", ", paramTypes)}) -> ({string.Join(", ", resultTypes)})")
-            };
-        }
-
-        public static TDelegate CreateTypedDelegate<TDelegate>(Delegate genericDelegate) where TDelegate : Delegate
-        {
-            // Get the 'Invoke' method of the desired delegate type
-            var delegateInvokeMethod = typeof(TDelegate).GetMethod("Invoke");
-            if (delegateInvokeMethod == null)
-                throw new ArgumentException($"Delegate type {typeof(TDelegate)} did not have Invoke() method");
-            
-            var delegateParameters = delegateInvokeMethod.GetParameters();
-            
-            // Create parameter expressions matching the desired delegate's parameters
-            var parameterExpressions = delegateParameters
-                .Select(p => Expression.Parameter(p.ParameterType, p.Name))
-                .ToArray();
-
-            // Convert the parameters to 'object' type for the generic delegate
-            var convertedParameters = parameterExpressions
-                .Select(p => Expression.Convert(p, typeof(object)))
-                .ToArray();
-
-            // Create an array of 'object' to pass to the generic delegate
-            var parametersArray = Expression.NewArrayInit(typeof(object), convertedParameters);
-
-            // Create the method call expression to invoke the generic delegate
-            var callExpression = Expression.Invoke(
-                Expression.Constant(genericDelegate),
-                parametersArray
-            );
-
-            // Handle the return type if necessary
-            Expression body;
-            if (delegateInvokeMethod.ReturnType == typeof(void))
-            {
-                body = callExpression;
-            }
-            else
-            {
-                body = Expression.Convert(callExpression, delegateInvokeMethod.ReturnType);
-            }
-
-            // Create the lambda expression
-            var lambda = Expression.Lambda<TDelegate>(body, parameterExpressions);
-
-            // Compile and return the delegate
-            return lambda.Compile();
-        }
-
-        private static FunctionType GetFunctionTypeFromDelegate(Delegate del)
-        {
-            var method = del.Method;
-            var parameters = method.GetParameters().Select(p => GetValTypeFromSystemType(p.ParameterType)).ToArray();
-            var returnType = method.ReturnType == typeof(void) ? Array.Empty<ValType>() : new[] { GetValTypeFromSystemType(method.ReturnType) };
-            return new FunctionType(new ResultType(parameters), new ResultType(returnType));
-        }
-
         private static ValType GetValTypeFromSystemType(Type type)
         {
             if (type == typeof(int)) return ValType.I32;
@@ -230,5 +272,7 @@ namespace Wacs.Core.Runtime
                 _ => throw new ArgumentException($"Unsupported ValType: {valType}")
             };
         }
+        
+        
     }
 }
