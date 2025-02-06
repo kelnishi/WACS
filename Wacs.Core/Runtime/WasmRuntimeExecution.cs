@@ -24,6 +24,7 @@ using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 using Wacs.Core.WASIp1;
 
@@ -33,40 +34,76 @@ namespace Wacs.Core.Runtime
     {
         private InstructionBase? lastInstruction = null;
 
-        public TDelegate CreateInvoker<TDelegate>(FuncAddr funcAddr, InvokerOptions? options = default)
-            where TDelegate : Delegate
+        private Delegate CreateInvokerInternal(FuncAddr funcAddr, Type delegateType, bool returnsResult, InvokerOptions? options = default)
         {
             options ??= new InvokerOptions();
             var funcInst = Context.Store[funcAddr];
             var funcType = funcInst.Type;
-
-            if (funcType.ResultType.Types.Length > 1)
-                throw new WasmRuntimeException("Binding multiple return values from wasm are not yet supported.");
             
-            Delegates.ValidateFunctionTypeCompatibility(funcType, typeof(TDelegate));
-            var inner = CreateInvoker(funcAddr, options);
-            var genericDelegate = Delegates.AnonymousFunctionFromType(funcType, args =>
+            Delegates.ValidateFunctionTypeCompatibility(funcType, delegateType);
+            
+            int arity = funcType.ResultType.Types.Length;
+            
+            if (returnsResult)
             {
-                Value[] results = null!;
-                try
-                {
-                    results = funcType.ParameterTypes.Arity == 0
-                        ? inner()
-                        : (Value[])GenericFuncsInvoke.Invoke(inner, new object[]{args});
-                    if (funcType.ResultType.Types.Length == 1)
-                        return results[0];
-                    return results;
-                }
-                catch (TargetInvocationException exc)
-                { //Propagate out any exceptions
-                    ExceptionDispatchInfo.Throw(exc.InnerException);
-                    //This won't happen
-                    return results;
-                }
-            });
-
-            return Delegates.CreateTypedDelegate<TDelegate>(genericDelegate);
+                if (arity != 1)
+                    throw new WasmRuntimeException($"Delegate type requires 1 return value, found {arity}");
+            }
+            else
+            {
+                if (arity != 0)
+                    throw new WasmRuntimeException($"Delegate type has no return value, found {arity}");
+            }
+            
+            var invoker = CreateInvoker(funcAddr, options);
+            return Delegates.AnonymousFunctionFromType(funcInst.Type, invoker);
         }
+        
+        /// <summary>
+        /// Bind a wasm Func to C# via dynamic invocation (AOT compatible)
+        /// </summary>
+        public Func<TResult> CreateInvokerFunc<TResult>(FuncAddr funcAddr, InvokerOptions? options = default) => 
+            () => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<TResult>), true, options).DynamicInvoke()!;
+        public Func<T1,TResult> CreateInvokerFunc<T1,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) => 
+            (arg1) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,TResult>), true, options).DynamicInvoke(arg1)!;
+        public Func<T1,T2,TResult> CreateInvokerFunc<T1,T2,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) => 
+            (arg1, arg2) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,TResult>), true, options).DynamicInvoke(arg1, arg2)!;
+        public Func<T1,T2,T3,TResult> CreateInvokerFunc<T1,T2,T3,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) => 
+            (arg1, arg2, arg3) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3)!;
+        public Func<T1,T2,T3,T4,TResult> CreateInvokerFunc<T1,T2,T3,T4,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) => 
+            (arg1, arg2, arg3, arg4) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4)!;
+        public Func<T1,T2,T3,T4,T5,TResult> CreateInvokerFunc<T1,T2,T3,T4,T5,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3, arg4, arg5) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5)!;
+        public Func<T1,T2,T3,T4,T5,T6,TResult> CreateInvokerFunc<T1,T2,T3,T4,T5,T6,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3, arg4, arg5, arg6) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,T6,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6)!;
+        public Func<T1,T2,T3,T4,T5,T6,T7,TResult> CreateInvokerFunc<T1,T2,T3,T4,T5,T6,T7,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3, arg4, arg5, arg6, arg7) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,T6,T7,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6, arg7)!;
+        public Func<T1,T2,T3,T4,T5,T6,T7,T8,TResult> CreateInvokerFunc<T1,T2,T3,T4,T5,T6,T7,T8,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,T6,T7,T8,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)!;
+        public Func<T1,T2,T3,T4,T5,T6,T7,T8,T9,TResult> CreateInvokerFunc<T1,T2,T3,T4,T5,T6,T7,T8,T9,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,T6,T7,T8,T9,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9)!;
+        
+        
+        public Action CreateInvokerAction(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            () => { CreateInvokerInternal(funcAddr, typeof(Action), false, options).DynamicInvoke(); };
+        public Action<T1> CreateInvokerAction<T1>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1) => { CreateInvokerInternal(funcAddr, typeof(Action<T1>), false, options).DynamicInvoke(arg1); };
+        public Action<T1,T2> CreateInvokerAction<T1,T2>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2) => { CreateInvokerInternal(funcAddr, typeof(Action<T1,T2>), false, options).DynamicInvoke(arg1, arg2); };
+        public Action<T1,T2,T3> CreateInvokerAction<T1,T2,T3>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3) => { CreateInvokerInternal(funcAddr, typeof(Action<T1,T2,T3>), false, options).DynamicInvoke(arg1, arg2, arg3); };
+        public Action<T1,T2,T3,T4> CreateInvokerAction<T1,T2,T3,T4>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3, arg4) => { CreateInvokerInternal(funcAddr, typeof(Action<T1,T2,T3,T4>), false, options).DynamicInvoke(arg1, arg2, arg3, arg4); };
+        public Action<T1,T2,T3,T4,T5> CreateInvokerAction<T1,T2,T3,T4,T5>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3, arg4, arg5) => { CreateInvokerInternal(funcAddr, typeof(Action<T1,T2,T3,T4,T5>), false, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5); };
+        public Action<T1,T2,T3,T4,T5,T6> CreateInvokerAction<T1,T2,T3,T4,T5,T6>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3, arg4, arg5, arg6) => { CreateInvokerInternal(funcAddr, typeof(Action<T1,T2,T3,T4,T5,T6>), false, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6); };
+        public Action<T1,T2,T3,T4,T5,T6,T7> CreateInvokerAction<T1,T2,T3,T4,T5,T6,T7>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3, arg4, arg5, arg6, arg7) => { CreateInvokerInternal(funcAddr, typeof(Action<T1,T2,T3,T4,T5,T6,T7>), false, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6, arg7); };
+        public Action<T1,T2,T3,T4,T5,T6,T7,T8> CreateInvokerAction<T1,T2,T3,T4,T5,T6,T7,T8>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) => { CreateInvokerInternal(funcAddr, typeof(Action<T1,T2,T3,T4,T5,T6,T7,T8>), false, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8); };
+        public Action<T1,T2,T3,T4,T5,T6,T7,T8,T9> CreateInvokerAction<T1,T2,T3,T4,T5,T6,T7,T8,T9>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) => { CreateInvokerInternal(funcAddr, typeof(Action<T1,T2,T3,T4,T5,T6,T7,T8,T9>), false, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9); };
 
         //No type checking, but you can get multiple return values
         public Delegates.StackFunc CreateStackInvoker(FuncAddr funcAddr, InvokerOptions? options = default)

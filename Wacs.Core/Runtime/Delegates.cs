@@ -16,12 +16,10 @@
 
 using System;
 using System.Linq;
-using System.Linq.Expressions;
 using System.Reflection;
 using System.Threading.Tasks;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
-using Expression = System.Linq.Expressions.Expression;
 
 namespace Wacs.Core.Runtime
 {
@@ -34,7 +32,46 @@ namespace Wacs.Core.Runtime
         public delegate Task<Value[]> GenericFuncsAsync(params Value[] args);
 
         public delegate Value[] StackFunc(Value[] parameters);
-
+        
+        public static Delegate AnonymousFunctionFromType(FunctionType functionType, GenericFuncs func)
+        {
+            var paramTypes = functionType.ParameterTypes.Types;
+            var resultTypes = functionType.ResultType.Types;
+        
+            if (resultTypes.Length > 1)
+            {
+                throw new NotSupportedException("Multiple return values are not supported in C# delegates.");
+            }
+        
+            return (paramTypes.Length, resultTypes.Length) switch
+            {
+                (0, 0) => new Action(() =>func()),
+                (1, 0) => new Action<object>(i1=>func(i1)),
+                (2, 0) => new Action<object, object>((i1,i2)=>func(i1,i2)),
+                (3, 0) => new Action<object, object, object>((i1,i2,i3)=>func(i1,i2,i3)),
+                (4, 0) => new Action<object, object, object, object>((i1,i2,i3,i4)=>func(i1,i2,i3,i4)),
+                (5, 0) => new Action<object, object, object, object, object>((i1,i2,i3,i4,i5)=>func(i1,i2,i3,i4,i5)),
+                (6, 0) => new Action<object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6)=>func(i1,i2,i3,i4,i5,i6)),
+                (7, 0) => new Action<object, object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6,i7)=>func(i1,i2,i3,i4,i5,i6,i7)),
+                (8, 0) => new Action<object, object, object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6,i7,i8)=>func(i1,i2,i3,i4,i5,i6,i7,i8)),
+                (9, 0) => new Action<object, object, object, object, object, object, object, object, object>((i1,i2,i3,i4,i5,i6,i7,i8,i9)=>func(i1,i2,i3,i4,i5,i6,i7,i8,i9)),
+                
+                (0, 1) => new Func<Value>(()=>new Value(func())),
+                (1, 1) => new Func<object, Value>(i1=>new Value(func(i1))),
+                (2, 1) => new Func<object, object, Value>((i1,i2)=> new Value(func(i1,i2))),
+                (3, 1) => new Func<object, object, object, Value>((i1,i2,i3)=> new Value(func(i1,i2,i3))),
+                (4, 1) => new Func<object, object, object, object, Value>((i1,i2,i3,i4)=> new Value(func(i1,i2,i3,i4))),
+                (5, 1) => new Func<object, object, object, object, object, Value>((i1,i2,i3,i4,i5)=> new Value(func(i1,i2,i3,i4,i5))),
+                (6, 1) => new Func<object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6)=> new Value(func(i1,i2,i3,i4,i5,i6))),
+                (7, 1) => new Func<object, object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6,i7)=> new Value(func(i1,i2,i3,i4,i5,i6,i7))),
+                (8, 1) => new Func<object, object, object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6,i7,i8)=> new Value(func(i1,i2,i3,i4,i5,i6,i7,i8))),
+                (9, 1) => new Func<object, object, object, object, object, object, object, object, object, Value>((i1,i2,i3,i4,i5,i6,i7,i8,i9)=> new Value(func(i1,i2,i3,i4,i5,i6,i7,i8,i9))),
+                
+                _ => throw new NotSupportedException($"Cannot auto-bind function signature: ({string.Join(", ", paramTypes)}) -> ({string.Join(", ", resultTypes)})")
+            };
+        }
+        
+        
         public static void ValidateFunctionTypeCompatibility(FunctionType functionType, Type delegateType)
         {
             if (!typeof(Delegate).IsAssignableFrom(delegateType))
@@ -113,98 +150,6 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public static Delegate AnonymousFunctionFromType(FunctionType functionType, GenericFunc func)
-        {
-            var paramTypes = functionType.ParameterTypes.Types;
-            var resultTypes = functionType.ResultType.Types;
-
-            if (resultTypes.Length > 1)
-            {
-                throw new NotSupportedException("Multiple return values are not supported in C# delegates.");
-            }
-
-            return (paramTypes.Length, resultTypes.Length) switch
-            {
-                (0, 0) => new Action<object[]>(p => func()),
-                (1, 0) => new Action<object[]>(p => func(p[0])),
-                (2, 0) => new Action<object[]>(p => func(p[0], p[1])),
-                (3, 0) => new Action<object[]>(p => func(p[0], p[1], p[2])),
-                (4, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3])),
-                (5, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4])),
-                (6, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4], p[5])),
-                (7, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4], p[5], p[6])),
-                (8, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7])),
-                (9, 0) => new Action<object[]>(p => func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8])),
-                
-                (0, 1) => new Func<object[], Value>(p => new Value(func())),
-                (1, 1) => new Func<object[], Value>(p => new Value(func(p[0]))),
-                (2, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1]))),
-                (3, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2]))),
-                (4, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3]))),
-                (5, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4]))),
-                (6, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4], p[5]))),
-                (7, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4], p[5], p[6]))),
-                (8, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]))),
-                (9, 1) => new Func<object[], Value>(p => new Value(func(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]))),
-                
-                _ => throw new NotSupportedException($"Cannot auto-bind function signature: ({string.Join(", ", paramTypes)}) -> ({string.Join(", ", resultTypes)})")
-            };
-        }
-
-        public static TDelegate CreateTypedDelegate<TDelegate>(Delegate genericDelegate) where TDelegate : Delegate
-        {
-            // Get the 'Invoke' method of the desired delegate type
-            var delegateInvokeMethod = typeof(TDelegate).GetMethod("Invoke");
-            if (delegateInvokeMethod == null)
-                throw new ArgumentException($"Delegate type {typeof(TDelegate)} did not have Invoke() method");
-            
-            var delegateParameters = delegateInvokeMethod.GetParameters();
-            
-            // Create parameter expressions matching the desired delegate's parameters
-            var parameterExpressions = delegateParameters
-                .Select(p => Expression.Parameter(p.ParameterType, p.Name))
-                .ToArray();
-
-            // Convert the parameters to 'object' type for the generic delegate
-            var convertedParameters = parameterExpressions
-                .Select(p => Expression.Convert(p, typeof(object)))
-                .ToArray();
-
-            // Create an array of 'object' to pass to the generic delegate
-            var parametersArray = Expression.NewArrayInit(typeof(object), convertedParameters);
-
-            // Create the method call expression to invoke the generic delegate
-            var callExpression = Expression.Invoke(
-                Expression.Constant(genericDelegate),
-                parametersArray
-            );
-
-            // Handle the return type if necessary
-            Expression body;
-            if (delegateInvokeMethod.ReturnType == typeof(void))
-            {
-                body = callExpression;
-            }
-            else
-            {
-                body = Expression.Convert(callExpression, delegateInvokeMethod.ReturnType);
-            }
-
-            // Create the lambda expression
-            var lambda = Expression.Lambda<TDelegate>(body, parameterExpressions);
-
-            // Compile and return the delegate
-            return lambda.Compile();
-        }
-
-        private static FunctionType GetFunctionTypeFromDelegate(Delegate del)
-        {
-            var method = del.Method;
-            var parameters = method.GetParameters().Select(p => GetValTypeFromSystemType(p.ParameterType)).ToArray();
-            var returnType = method.ReturnType == typeof(void) ? Array.Empty<ValType>() : new[] { GetValTypeFromSystemType(method.ReturnType) };
-            return new FunctionType(new ResultType(parameters), new ResultType(returnType));
-        }
-
         private static ValType GetValTypeFromSystemType(Type type)
         {
             if (type == typeof(int)) return ValType.I32;
@@ -230,5 +175,7 @@ namespace Wacs.Core.Runtime
                 _ => throw new ArgumentException($"Unsupported ValType: {valType}")
             };
         }
+        
+        
     }
 }

@@ -77,9 +77,9 @@ namespace Spec.Test
             runtime.RegisterModule("binding", moduleInst);
 
             var fa = runtime.GetExportedFunction(("binding", "4x1"));
-            var invoker = runtime.CreateInvoker<Func<int,long,float,double,int>>(fa);
+            var invoker = runtime.CreateInvokerFunc<int,long,float,double,Value>(fa);
             
-            var result = invoker(1, 1L, 1.0f, 1.0);
+            int result = invoker(1, 1L, 1.0f, 1.0);
             
             Assert.Equal(1, result);
         }
@@ -96,11 +96,11 @@ namespace Spec.Test
             runtime.RegisterModule("binding", moduleInst);
 
             var fa = runtime.GetExportedFunction(("binding", "i32"));
-            var invoker = runtime.CreateInvoker<Func<int, int>>(fa);
+            var invoker = runtime.CreateInvokerFunc<int, Value>(fa);
             
-            Assert.Equal(1 * 2, invoker(1));
-            Assert.Equal(2 * 2, invoker(2));
-            Assert.Equal(3 * 2, invoker(3));
+            Assert.Equal(1 * 2, (int)invoker(1));
+            Assert.Equal(2 * 2, (int)invoker(2));
+            Assert.Equal(3 * 2, (int)invoker(3));
         }
 
         [Fact]
@@ -115,11 +115,11 @@ namespace Spec.Test
             runtime.RegisterModule("binding", moduleInst);
 
             var fa = runtime.GetExportedFunction(("binding", "f32"));
-            var invoker = runtime.CreateInvoker<Func<float, float>>(fa);
+            var invoker = runtime.CreateInvokerFunc<float, Value>(fa);
             
-            Assert.Equal(1f * 2f, invoker(1f));
-            Assert.Equal(2f * 2f, invoker(2f));
-            Assert.Equal(3f * 2f, invoker(3f));
+            Assert.Equal(1f * 2f, (float)invoker(1f));
+            Assert.Equal(2f * 2f, (float)invoker(2f));
+            Assert.Equal(3f * 2f, (float)invoker(3f));
         }
 
         [Fact]
@@ -135,9 +135,9 @@ namespace Spec.Test
             runtime.RegisterModule("binding", moduleInst);
 
             var fa = runtime.GetExportedFunction(("binding", "call_host"));
-            var invoker = runtime.CreateInvoker<Func<int, int>>(fa);
+            var invoker = runtime.CreateInvokerFunc<int, Value>(fa);
             
-            Assert.Equal(10 + 20, invoker(10));
+            Assert.Equal(10 + 20, (int)invoker(10));
         }
 
 
@@ -156,9 +156,9 @@ namespace Spec.Test
             var fa = runtime.GetExportedFunction(("binding", "call_async_host"));
             
             //Host function is async, Wasm function is called synchronously
-            var invoker = runtime.CreateInvoker<Func<int, int>>(fa);
+            var invoker = runtime.CreateInvokerFunc<int, Value>(fa);
             
-            Assert.Equal(10*2, invoker(10));
+            Assert.Equal(10*2, (int)invoker(10));
         }
 
         [Fact]
@@ -205,7 +205,7 @@ namespace Spec.Test
             runtime.RegisterModule("binding", moduleInst);
 
             var fa = runtime.GetExportedFunction(("binding", "0x0"));
-            var invoker = runtime.CreateInvoker<Action>(fa);
+            var invoker = runtime.CreateInvokerAction(fa);
             
             HostResult = 0;
             invoker();
@@ -224,7 +224,7 @@ namespace Spec.Test
             runtime.RegisterModule("binding", moduleInst);
 
             var fa = runtime.GetExportedFunction(("binding", "1x0"));
-            var invoker = runtime.CreateInvoker<Action<int>>(fa);
+            var invoker = runtime.CreateInvokerAction<int>(fa);
 
             HostResult = 0;
             invoker(1);
@@ -243,7 +243,7 @@ namespace Spec.Test
             runtime.RegisterModule("binding", moduleInst);
 
             var fa = runtime.GetExportedFunction(("binding", "2x0"));
-            var invoker = runtime.CreateInvoker<Action<int,int>>(fa);
+            var invoker = runtime.CreateInvokerAction<int,int>(fa);
 
             HostResult = 0;
             invoker(1, 2);

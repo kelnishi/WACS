@@ -391,8 +391,8 @@ namespace Wacs.Core.Runtime
                     {
                         try
                         {
-                            var startInvoker = CreateInvoker<Action>(startAddr);
-                            startInvoker();
+                            var startInvoker = CreateStackInvoker(startAddr);
+                            startInvoker(Array.Empty<Value>());
                         }
                         catch (TrapException)
                         {
