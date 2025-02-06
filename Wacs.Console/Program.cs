@@ -225,7 +225,7 @@ namespace Wacs.Console
             //Wasm/WASI entry points
             if (modInst.StartFunc != null)
             {
-                var caller = runtime.CreateInvoker<Action>(modInst.StartFunc, callOptions);
+                var caller = runtime.CreateInvokerAction(modInst.StartFunc, callOptions);
 
                 var name = runtime.GetFunctionName(modInst.StartFunc);
                 if (opts.LogProg)
@@ -255,7 +255,7 @@ namespace Wacs.Console
                 if (opts.LogProg)
                     System.Console.Error.WriteLine("Calling start");
 
-                var caller = runtime.CreateInvoker<Action>(startAddr, callOptions);
+                var caller = runtime.CreateInvokerAction(startAddr, callOptions);
 
                 using (IDisposable _ = opts.Profile ? new ProfilingSession() : new NoOpProfilingSession())
                 {

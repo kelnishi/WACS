@@ -36,7 +36,7 @@ namespace Spec.Test
             runtime.RegisterModule("tailcalls", moduleInst);
 
             var fa = runtime.GetExportedFunction(("tailcalls", "factorial"));
-            var invoker = runtime.CreateInvoker<Func<long, Value>>(fa);
+            var invoker = runtime.CreateInvokerFunc<long, Value>(fa);
 
             Assert.Equal(479_001_600, (long)invoker(12));
             Assert.Equal(2_432_902_008_176_640_000 , (long)invoker(20));
@@ -54,7 +54,7 @@ namespace Spec.Test
             runtime.RegisterModule("tailcalls", moduleInst);
 
             var fa = runtime.GetExportedFunction(("tailcalls", "factorial"));
-            var invoker = runtime.CreateInvoker<Func<long, Value>>(fa);
+            var invoker = runtime.CreateInvokerFunc<long, Value>(fa);
 
             Assert.Equal(479_001_600, (long)invoker(12));
             Assert.Equal(2_432_902_008_176_640_000 , (long)invoker(20));
