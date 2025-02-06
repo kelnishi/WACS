@@ -6,7 +6,7 @@
 [![Downloads](https://img.shields.io/nuget/dt/WACS)](https://www.nuget.org/packages/WACS)
 ## Overview
 
-**WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including AOT environments like Unity's IL2CPP.
+**WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including Godot and AOT environments like Unity's IL2CPP.
 
 WACS supports the latest standardized webassembly feature extensions including **Garbage Collection** and **JSPI**-like async execution. 
 
@@ -20,6 +20,7 @@ WACS supports the latest standardized webassembly feature extensions including *
 - [Installation](#installation)
 - [Usage](#usage)
 - [Integration with Unity](#integration-with-unity)
+- [Integration with Godot](#integration-with-godot)
 - [Interop Bindings](#interop-bindings)
 - [Customization](#customization)
 - [Performance](#performance)
@@ -29,6 +30,7 @@ WACS supports the latest standardized webassembly feature extensions including *
 ## Features
 
 - **Unity Compatibility**: Compatible with **Unity 2021.3+** including AOT/IL2CPP modes for iOS.
+- **Godot Compatibility**: Compatible with **Godot Engine - [.NET](https://docs.godotengine.org/en/stable/tutorials/scripting/c_sharp/c_sharp_basics.html)**. 
 - **Pure C# Implementation**: Written in C# 9.0/.NET Standard 2.1. (No unsafe code)
 - **No Complex Dependencies**: Uses [FluentValidation](https://github.com/FluentValidation/FluentValidation) and [Microsoft.Extensions.ObjectPool](https://www.nuget.org/packages/Microsoft.Extensions.ObjectPool) as its only dependencies.
 - **WebAssembly 3.0 Spec Compliance**: Passes the [WebAssembly 3.0](https://webassembly.github.io/spec/versions/core/WebAssembly-3.0-draft.pdf) spec [test suite](https://github.com/WebAssembly/spec/tree/wasm-3.0).
@@ -165,6 +167,11 @@ To manually add WACS to a Unity project, you'll need to add the following DLLs t
 - Microsoft.Extensions.ObjectPool.dll
 
 Set **Player Settings>Other Settings>Api Compatibility Level** to **.NET Standard 2.1**.
+
+## Integration with Godot
+WACS is compatible with **[Godot Engine -.NET](https://docs.godotengine.org/en/stable/tutorials/scripting/c_sharp/c_sharp_basics.html)** in C# projects.
+- Add WACS via [NuGet](https://www.nuget.org/packages/WACS) with the commandline or your IDE's NuGet tool.
+- See [samples/GodotSample.cs](https://github.com/kelnishi/WACS/tree/main/samples/GodotSample.cs) for loading wasm files.
 
 ## Interop Bindings
 
