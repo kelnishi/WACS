@@ -430,9 +430,17 @@ namespace Wacs.Core.Runtime
                     if (value.Type == ValType.V128)
                         GcRef = new VecRef((value.GcRef as VecRef)!);
                     break;
+                case Value[] { Length: 1 } stackResults:
+                    Type = stackResults[0].Type;
+                    Data = stackResults[0].Data;
+                    if (stackResults[0].Type.IsRefType())
+                        GcRef = stackResults[0].GcRef;
+                    if (stackResults[0].Type == ValType.V128)
+                        GcRef = new VecRef((stackResults[0].GcRef as VecRef)!);
+                    break;
                 default:
                     throw new InvalidDataException(
-                        $"Cannot convert object to stack value of type {typeof(ExternalValue)}");
+                        $"Cannot convert object to stack value of type {externalValue.GetType()}");
             }
         }
 

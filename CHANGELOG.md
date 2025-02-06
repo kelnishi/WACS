@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.7.2]
+- removing Linq.Expression for AOT compatibility
+
 ## [0.7.1]
 - fixes to CreateInvoker binding
 
