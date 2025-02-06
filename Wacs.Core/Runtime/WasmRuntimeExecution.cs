@@ -39,33 +39,32 @@ namespace Wacs.Core.Runtime
             options ??= new InvokerOptions();
             var funcInst = Context.Store[funcAddr];
             var funcType = funcInst.Type;
+            int arity = funcType.ResultType.Types.Length;
 
-            if (funcType.ResultType.Types.Length > 1)
+            if (arity > 1)
                 throw new WasmRuntimeException("Binding multiple return values from wasm are not yet supported.");
             
             Delegates.ValidateFunctionTypeCompatibility(funcType, typeof(TDelegate));
-            var inner = CreateInvoker(funcAddr, options);
-            var genericDelegate = Delegates.AnonymousFunctionFromType(funcType, args =>
-            {
-                Value[] results = null!;
-                try
-                {
-                    results = funcType.ParameterTypes.Arity == 0
-                        ? inner()
-                        : (Value[])GenericFuncsInvoke.Invoke(inner, new object[]{args});
-                    if (funcType.ResultType.Types.Length == 1)
-                        return results[0];
-                    return results;
-                }
-                catch (TargetInvocationException exc)
-                { //Propagate out any exceptions
-                    ExceptionDispatchInfo.Throw(exc.InnerException);
-                    //This won't happen
-                    return results;
-                }
-            });
+            
+            var invoker = CreateInvoker(funcAddr, options);
+            var func = Delegates.AnonymousFunctionFromType(funcInst.Type, invoker);
+            
+            Type delegateType = typeof(TDelegate);
+            MethodInfo invokeMethod = delegateType.GetMethod("Invoke");
+            if (invokeMethod == null)
+                throw new ArgumentException("TDelegate must be a delegate type", nameof(TDelegate));
 
-            return Delegates.CreateTypedDelegate<TDelegate>(genericDelegate);
+            bool isAction = invokeMethod.ReturnType == typeof(void);
+            if (isAction && arity != 0)
+                throw new WasmRuntimeException("Bound Action to function with return type");
+
+            ParameterInfo[] parameters = invokeMethod.GetParameters();
+            if (parameters.Length != funcType.ParameterTypes.Arity)
+                throw new WasmRuntimeException("Bound wrong number of parameters");
+
+            var genMi = Delegates.WrapGenericMethod(invokeMethod);
+            
+            return (TDelegate)genMi.Invoke(null, new object[] { func });
         }
 
         //No type checking, but you can get multiple return values
