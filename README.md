@@ -136,7 +136,7 @@ if (runtime.TryGetExportedFunction(("hello", "main"), out var mainAddr))
 {
     //For wasm functions you can expect return types as Wacs.Core.Runtime.Value
     //  Value has implicit conversion to many useful primitive types
-    var mainInvoker = runtime.CreateInvoker<Func<Value>>(mainAddr);
+    var mainInvoker = runtime.CreateInvokerFunc<Value>(mainAddr);
     
     //Call the wasm function and get the result
     //  Implicit conversion from Value to int
