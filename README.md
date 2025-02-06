@@ -171,7 +171,7 @@ Set **Player Settings>Other Settings>Api Compatibility Level** to **.NET Standar
 ## Integration with Godot
 WACS is compatible with **[Godot Engine -.NET](https://docs.godotengine.org/en/stable/tutorials/scripting/c_sharp/c_sharp_basics.html)** in C# projects.
 - Add WACS via [NuGet](https://www.nuget.org/packages/WACS) with the commandline or your IDE's NuGet tool.
-- See [samples/GodotSample.cs](https://github.com/kelnishi/WACS/tree/main/samples/GodotSample.cs) for loading wasm files.
+- See [sample/GodotSample.cs](https://github.com/kelnishi/WACS/tree/main/sample/GodotSample.cs) for loading wasm files.
 
 ## Interop Bindings
 
