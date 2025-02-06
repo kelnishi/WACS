@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.7.1]
+- fixes to CreateInvoker binding
+
 ## [0.7.0]
 - wasm-3.0 spec support
 - exnref/tag support
