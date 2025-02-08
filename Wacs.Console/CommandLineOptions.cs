@@ -38,6 +38,9 @@ namespace Wacs.Console
 
         [Option('m', "module", HelpText = "The name of the instantiated module")]
         public string ModuleName { get; set; } = "_";
+        
+        [Option('c', "skip_validation", HelpText = "Skip module validation", Default = false)]
+        public bool SkipValidation { get; set; }
 
         [Option('v', "verbose", HelpText = "Log the program.")]
         public bool LogProg { get; set; }
