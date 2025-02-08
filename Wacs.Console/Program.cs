@@ -132,51 +132,56 @@ namespace Wacs.Console
                 ModuleRenderer.RenderWatToStream(outputStream, module);
             }
 
-            //If you just want to do validation without a runtime, you could do it like this
-            var validationResult = module.Validate();
-            var funcsToRender = new HashSet<(FuncIdx, string)>();
-            foreach (var error in validationResult.Errors)
+            if (!opts.SkipValidation)
             {
-                if (funcsToRender.Count > 100) break;
-                switch (error.Severity)
+                //If you just want to do validation without a runtime, you could do it like this
+                var validationResult = module.Validate();
+                var funcsToRender = new HashSet<(FuncIdx, string)>();
+                foreach (var error in validationResult.Errors)
                 {
-                    case Severity.Warning:
-                    case Severity.Error:
+                    if (funcsToRender.Count > 100) break;
+                    switch (error.Severity)
+                    {
+                        case Severity.Warning:
+                        case Severity.Error:
 
-                        if (error.ErrorMessage.StartsWith("Function["))
-                        {
-                            var parts = error.ErrorMessage.Split(":");
-                            var path = parts[0];
-                            var msg = string.Join(":", parts[1..]);
+                            if (error.ErrorMessage.StartsWith("Function["))
+                            {
+                                var parts = error.ErrorMessage.Split(":");
+                                var path = parts[0];
+                                var msg = string.Join(":", parts[1..]);
 
-                            var (line, code) = module.CalculateLine(path);
-                            if (!string.IsNullOrWhiteSpace(code)) code = $" ({code})";
-                            var (fline, _) = module.CalculateLine(path, functionRelative: true);
+                                var (line, code) = module.CalculateLine(path);
+                                if (!string.IsNullOrWhiteSpace(code)) code = $" ({code})";
+                                var (fline, _) = module.CalculateLine(path, functionRelative: true);
 
-                            System.Console.Error.WriteLine($"Validation {error.Severity}.{msg}");
-                            System.Console.Error.WriteLine($"    {path}");
-                            System.Console.Error.WriteLine($"    at{code} in {opts.WasmModule}:line {line} ({fline})");
-                            System.Console.Error.WriteLine();
+                                System.Console.Error.WriteLine($"Validation {error.Severity}.{msg}");
+                                System.Console.Error.WriteLine($"    {path}");
+                                System.Console.Error.WriteLine(
+                                    $"    at{code} in {opts.WasmModule}:line {line} ({fline})");
+                                System.Console.Error.WriteLine();
 
-                            FuncIdx fIdx = ModuleRenderer.GetFuncIdx(path);
-                            string funcId = ModuleRenderer.ChopFunctionId(path);
-                            funcsToRender.Add((fIdx, funcId));
-                        }
-                        else
-                        {
-                            System.Console.Error.WriteLine($"Validation {error.Severity}: {error.ErrorMessage}");
-                        }
-                        break;
+                                FuncIdx fIdx = ModuleRenderer.GetFuncIdx(path);
+                                string funcId = ModuleRenderer.ChopFunctionId(path);
+                                funcsToRender.Add((fIdx, funcId));
+                            }
+                            else
+                            {
+                                System.Console.Error.WriteLine($"Validation {error.Severity}: {error.ErrorMessage}");
+                            }
+
+                            break;
+                    }
                 }
-            }
 
-            foreach (var (fIdx, funcId) in funcsToRender)
-            {
-                string funcString = ModuleRenderer.RenderFunctionWat(module, fIdx, "", true);
-                using var outputFileStream = new FileStream($"{funcId}.part.wat", FileMode.Create);
-                using var outputStreamWriter = new StreamWriter(outputFileStream);
-                outputStreamWriter.Write(funcString);
-                outputStreamWriter.Close();
+                foreach (var (fIdx, funcId) in funcsToRender)
+                {
+                    string funcString = ModuleRenderer.RenderFunctionWat(module, fIdx, "", true);
+                    using var outputFileStream = new FileStream($"{funcId}.part.wat", FileMode.Create);
+                    using var outputStreamWriter = new StreamWriter(outputFileStream);
+                    outputStreamWriter.Write(funcString);
+                    outputStreamWriter.Close();
+                }
             }
 
 
