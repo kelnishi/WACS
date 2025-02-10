@@ -91,9 +91,9 @@ namespace Wacs.Core.Runtime.Types
         {
             Body = body;
             Body.LabelTarget.Label.Arity = Type.ResultType.Arity;
-
-            var vContext = new StackCalculator(Module, Definition);
-            Body.PrecomputeLabels(vContext);
+            var stackCalc = Module.StackCalculator.HydrateFunction(Definition);
+            Body.PrecomputeLabels(stackCalc);
+            stackCalc.Dehydrate();
         }
 
         public void Invoke(ExecContext context)

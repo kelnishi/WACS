@@ -122,10 +122,10 @@ namespace Wacs.Core
         private static readonly object NonNull = new();
 
         private static Stack<Value> _aside = new();
-
+        
         internal int stackHeight = 0;
 
-        public StackCalculator(ModuleInstance moduleInst, Module.Function func)
+        public StackCalculator(ModuleInstance moduleInst)
         {
             Types = new TypesSpace(moduleInst.Repr);
 
@@ -143,6 +143,13 @@ namespace Wacs.Core
 
             OpStack = new CalculatorOpStack(this);
             
+            Dehydrate();
+            
+            Attributes = new RuntimeAttributes();
+        }
+
+        public StackCalculator HydrateFunction(Module.Function func)
+        {
             var funcType = Types[func.TypeIndex].Expansion as FunctionType;
             var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
 
@@ -152,13 +159,24 @@ namespace Wacs.Core
             
             ReturnType = funcType.ResultType;
             PushControlFrame(OpCode.Block, fakeType);
-            Attributes = new RuntimeAttributes();
+
+            return this;
+        }
+
+        public void Dehydrate()
+        {
+            while (ControlStack.Count != 0)
+                ControlStack.Pop();
+            stackHeight = 0;
+            OpStack.Clear();
+            Locals = LocalsSpace.Empty;
+            ReturnType = ResultType.Empty;
         }
 
         public RuntimeAttributes Attributes { get; }
         public IValidationOpStack OpStack { get; }
         public FuncIdx FunctionIndex => FuncIdx.Default;
-        public ResultType ReturnType { get; }
+        public ResultType ReturnType { get; set; }
         public bool Unreachable { get; set; }
         public TypesSpace Types { get; }
         public FunctionsSpace Funcs { get; }
@@ -166,7 +184,7 @@ namespace Wacs.Core
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
         public TagsSpace Tags { get; }
-        public LocalsSpace Locals { get; }
+        public LocalsSpace Locals { get; set; }
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
 
