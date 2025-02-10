@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -45,7 +46,6 @@ namespace Wacs.Core.Runtime
         private readonly ExecContext Context;
 
         private readonly Store Store;
-
 
         public WasmRuntime(RuntimeAttributes? attributes = null)
         {
@@ -286,6 +286,14 @@ namespace Wacs.Core.Runtime
         public ModuleInstance InstantiateModule(Module module, RuntimeOptions? options = default)
         {
             options ??= new RuntimeOptions();
+            
+            Stopwatch instantiationTimer = new();
+            if (options.TimeInstantiation)
+            {
+                instantiationTimer.Reset();
+                instantiationTimer.Start();
+            }
+            
             try
             {
                 //1
@@ -450,6 +458,13 @@ namespace Wacs.Core.Runtime
             {
                 Store.CommitTransaction();
             }
+
+            if (options.TimeInstantiation)
+            {
+                instantiationTimer.Stop();
+                Console.Error.WriteLine($"Instantiating module took {instantiationTimer.ElapsedMilliseconds:#0.###}ms");
+            }
+            
             return moduleInstance;
         }
 
