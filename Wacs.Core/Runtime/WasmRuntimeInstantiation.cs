@@ -47,10 +47,24 @@ namespace Wacs.Core.Runtime
 
         private readonly Store Store;
 
+        //Cached instructions for module initialization
+        private readonly InstElemDrop _dropInst;
+        private readonly InstI32Const _i32ConstInst;
+        private readonly InstTableInit _tableInitInst;
+        private readonly InstMemoryInit _memoryInitInst;
+        private readonly InstDataDrop _dataDropInst;
+
         public WasmRuntime(RuntimeAttributes? attributes = null)
         {
             Store = new Store();
             Context = new ExecContext(Store, attributes);
+            
+            //Cached instructions for module initialization
+            _dropInst = SpecFactory.Factory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop);
+            _i32ConstInst = SpecFactory.Factory.CreateInstruction<InstI32Const>(OpCode.I32Const);
+            _tableInitInst = SpecFactory.Factory.CreateInstruction<InstTableInit>(ExtCode.TableInit);
+            _memoryInitInst = SpecFactory.Factory.CreateInstruction<InstMemoryInit>(ExtCode.MemoryInit);
+            _dataDropInst = SpecFactory.Factory.CreateInstruction<InstDataDrop>(ExtCode.DataDrop);
         }
 
         /// <summary>
@@ -328,25 +342,15 @@ namespace Wacs.Core.Runtime
                     switch (elem.Mode)
                     {
                         case Module.ElementMode.ActiveMode activeMode:
-                            var n = elem.Initializers.Length;
-                            activeMode.Offset
-                                .ExecuteInitializer(Context);
-                            Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(0)
-                                .Execute(Context);
-                            Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(n)
-                                .Execute(Context);
-                            Context.InstructionFactory.CreateInstruction<InstTableInit>(ExtCode.TableInit)
-                                .Immediate(activeMode.TableIndex, (ElemIdx)i)
-                                .Execute(Context);
-                            Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)
-                                .Immediate((ElemIdx)i)
-                                .Execute(Context);
+                            activeMode.Offset.ExecuteInitializer(Context);
+                            _i32ConstInst.Immediate(0).Execute(Context);
+                            _i32ConstInst.Immediate(elem.Initializers.Length).Execute(Context);
+                            _tableInitInst.Immediate(activeMode.TableIndex, (ElemIdx)i).Execute(Context);
+                            _dropInst.Immediate((ElemIdx)i).Execute(Context);
                             break;
                         case Module.ElementMode.DeclarativeMode declarativeMode:
                             _ = declarativeMode;
-                            Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)
-                                .Immediate((ElemIdx)i)
-                                .Execute(Context);
+                            _dropInst.Immediate((ElemIdx)i).Execute(Context);
                             break;
                     }
                 }
@@ -358,19 +362,11 @@ namespace Wacs.Core.Runtime
                     switch (data.Mode)
                     {
                         case Module.DataMode.ActiveMode activeMode:
-                            var n = data.Init.Length;
-                            activeMode.Offset
-                                .ExecuteInitializer(Context);
-                            Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(0)
-                                .Execute(Context);
-                            Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(n)
-                                .Execute(Context);
-                            Context.InstructionFactory.CreateInstruction<InstMemoryInit>(ExtCode.MemoryInit)
-                                .Immediate((DataIdx)i, activeMode.MemoryIndex)
-                                .Execute(Context);
-                            Context.InstructionFactory.CreateInstruction<InstDataDrop>(ExtCode.DataDrop)
-                                .Immediate((DataIdx)i)
-                                .Execute(Context);
+                            activeMode.Offset.ExecuteInitializer(Context);
+                            _i32ConstInst.Immediate(0).Execute(Context);
+                            _i32ConstInst.Immediate(data.Init.Length).Execute(Context);
+                            _memoryInitInst.Immediate((DataIdx)i, activeMode.MemoryIndex).Execute(Context);
+                            _dataDropInst.Immediate((DataIdx)i).Execute(Context);
                             break;
                         case Module.DataMode.PassiveMode: //Do nothing
                             break;
