@@ -42,10 +42,13 @@ namespace Wacs.Core.Runtime.Types
 
         public readonly TypesSpace Types;
 
+        public readonly StackCalculator StackCalculator;
+
         public ModuleInstance(Module module)
         {
             Types = new TypesSpace(module);
             Repr = module;
+            StackCalculator = new StackCalculator(this);
         }
 
         public string Name { get; set; } = "_";
