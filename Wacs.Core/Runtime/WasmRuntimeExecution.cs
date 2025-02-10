@@ -85,7 +85,12 @@ namespace Wacs.Core.Runtime
         
         
         public Action CreateInvokerAction(FuncAddr funcAddr, InvokerOptions? options = default) =>
-            () => { CreateInvokerInternal(funcAddr, typeof(Action), false, options).DynamicInvoke(); };
+            () =>
+            {
+                var funcInst = Context.Store[funcAddr];
+                var invoker = CreateInvokerInternal(funcAddr, typeof(Action), false, options);
+                invoker.DynamicInvoke();
+            };
         public Action<T1> CreateInvokerAction<T1>(FuncAddr funcAddr, InvokerOptions? options = default) =>
             (arg1) => { CreateInvokerInternal(funcAddr, typeof(Action<T1>), false, options).DynamicInvoke(arg1); };
         public Action<T1,T2> CreateInvokerAction<T1,T2>(FuncAddr funcAddr, InvokerOptions? options = default) =>
@@ -131,6 +136,9 @@ namespace Wacs.Core.Runtime
 
         private Delegates.GenericFuncsAsync CreateInvokerAsync(FuncAddr funcAddr, InvokerOptions options)
         {
+            if (options.SynchronousExecution)
+                throw new NotSupportedException("Synchronous execution is not supported for async invokers.");
+            
             return GenericDelegateAsync;
             async Task<Value[]> GenericDelegateAsync(params Value[] args)
             {
@@ -280,10 +288,16 @@ namespace Wacs.Core.Runtime
 
                 Context.ProcessTimer.Restart();
                 Context.InstructionTimer.Restart();
-                
-                var task = Context.InvokeAsync(funcAddr);
-                task.Wait();
-                
+
+                if (options.SynchronousExecution)
+                {
+                    Context.Invoke(funcAddr);
+                }
+                else
+                {
+                    var task = Context.InvokeAsync(funcAddr);
+                    task.Wait();
+                }
                 Context.steps = 0;
                 bool fastPath = options.UseFastPath();
                 try
