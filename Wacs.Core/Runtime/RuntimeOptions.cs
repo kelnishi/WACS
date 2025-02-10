@@ -20,5 +20,6 @@ namespace Wacs.Core.Runtime
     {
         public bool SkipModuleValidation = false;
         public bool SkipStartFunction = false;
+        public bool TimeInstantiation = false;
     }
 }

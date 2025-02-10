@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using CommandLine;
@@ -121,10 +122,22 @@ namespace Wacs.Console
 
             var runtime = new WasmRuntime();
 
+            var parseTimer = new Stopwatch();
+            if (opts.LogProg)
+            {
+                parseTimer.Start();
+            }
+            
             //Parse the module
             using var fileStream = new FileStream(opts.WasmModule, FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
 
+            if (opts.LogProg)
+            {
+                parseTimer.Stop();
+                System.Console.Error.WriteLine($"Parsing module took {parseTimer.ElapsedMilliseconds:#0.###}ms");
+            }
+            
             if (opts.Render)
             {
                 string outputFilePath = Path.ChangeExtension(opts.WasmModule, ".wat");
@@ -211,7 +224,7 @@ namespace Wacs.Console
                 System.Console.Error.WriteLine($"Instantiating Module {moduleName}");
 
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing, or you're like super confident.
-            var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true });
+            var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true, TimeInstantiation = opts.LogProg});
             runtime.RegisterModule(moduleName, modInst);
 
             if (opts.Transpile)
