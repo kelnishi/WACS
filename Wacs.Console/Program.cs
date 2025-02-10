@@ -225,6 +225,7 @@ namespace Wacs.Console
                 LogInstructionExecution = opts.LogInstructionExecution,
                 CalculateLineNumbers = opts.CalculateLineNumbers,
                 CollectStats = opts.CollectStats,
+                SynchronousExecution = true,
             };
 
             //Wasm/WASI entry points
