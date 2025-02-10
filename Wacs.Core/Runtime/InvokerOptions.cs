@@ -49,6 +49,7 @@ namespace Wacs.Core.Runtime
         public InstructionLogging LogInstructionExecution = InstructionLogging.None;
         public long LogProgressEvery = -1;
         public bool ShowPath = false;
+        public bool SynchronousExecution = false;
 
         public bool UseFastPath()
         {

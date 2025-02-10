@@ -476,8 +476,12 @@ namespace Wacs.Core.Runtime
                     case InstCall instCall:
                         var addr = moduleInstance.FuncAddrs[instCall.X];
                         var funcInst = Store[addr];
-                        if (funcInst is FunctionInstance)
-                            instCall.IsAsync = false;
+                        instCall.IsAsync = funcInst switch
+                        {
+                            FunctionInstance => false,
+                            HostFunction hostFunction => hostFunction.IsAsync,
+                            _ => instCall.IsAsync
+                        };
                         break;
                     case InstBlock instBlock:
                         SynchronizeInstructions(moduleInstance, instBlock.GetBlock(0).Instructions);
