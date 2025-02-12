@@ -16,6 +16,7 @@
 
 using System;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Instructions.Transpiler
@@ -181,7 +182,13 @@ namespace Wacs.Core.Instructions.Transpiler
         public UnwrapValueI64(ITypedValueProducer<Value> inA) : base(inA)
         {
             var func = InA.GetFunc;
-            GetFunc = context => func(context).Data.Int64;
+            GetFunc = context => func(context) switch
+            {
+                { Type: ValType.I64 } val64 => val64.Data.Int64,
+                //We need to accommodate 32-bit integers for mem64 pointers
+                { Type: ValType.I32 } val32 => (long)val32.Data.UInt32,
+                var val => throw new WasmRuntimeException($"Unable to unwrap integer value of type {val.Type}")
+            };
         }
 
         public override Func<ExecContext, long> GetFunc { get; }
