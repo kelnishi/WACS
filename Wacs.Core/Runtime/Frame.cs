@@ -33,7 +33,11 @@ namespace Wacs.Core.Runtime
 
         public FuncIdx Index;
 
-        public Label Label;
+        public Label Label => 
+            LabelCount > 1
+                ? TopLabel.Label 
+                : ReturnLabel;
+        
         public int LabelCount = 0;
         public LocalsSpace Locals;
 
@@ -102,7 +106,7 @@ namespace Wacs.Core.Runtime
         {
             TopLabel = baselabel;
             LabelCount = 1;
-            Label = ReturnLabel;
+            // Label = ReturnLabel;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -110,7 +114,7 @@ namespace Wacs.Core.Runtime
         {
             TopLabel = target;
             LabelCount++;
-            Label = TopLabel.Label;
+            // Label = TopLabel.Label;
         }
 
         public InstructionPointer PopLabels(int idx)
@@ -126,9 +130,9 @@ namespace Wacs.Core.Runtime
                 TopLabel = TopLabel.EnclosingBlock;
             } while (--LabelCount > idx);
 
-            Label = LabelCount > 1
-                ? TopLabel.Label 
-                : ReturnLabel;
+            // Label = LabelCount > 1
+            //     ? TopLabel.Label 
+            //     : ReturnLabel;
 
             return oldLabel.Label.ContinuationAddress;
         }
