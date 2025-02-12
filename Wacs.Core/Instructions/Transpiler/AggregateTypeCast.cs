@@ -186,7 +186,7 @@ namespace Wacs.Core.Instructions.Transpiler
             {
                 { Type: ValType.I64 } val64 => val64.Data.Int64,
                 //We need to accommodate 32-bit integers for mem64 pointers
-                { Type: ValType.I32 } val32 => (long)val32.Data.Int32,
+                { Type: ValType.I32 } val32 => (long)val32.Data.UInt32,
                 var val => throw new WasmRuntimeException($"Unable to unwrap integer value of type {val.Type}")
             };
         }
