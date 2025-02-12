@@ -346,14 +346,14 @@ namespace Wacs.Core
                 .SelectMany(global => global.Initializer.Instructions)
                 .OfType<InstRefFunc>();
             foreach (var refFunc in globalIni) fullyDeclared.Add(refFunc.FunctionIndex);
-            
+
+            bool lacksMemoryInit = module.DataCount == uint.MaxValue;
             foreach (var func in module.Funcs)
             {
-                if (func.Body.ContainsInstructions(MemoryInstructions))
-                {
-                    if (module.DataCount == uint.MaxValue)
+                if (lacksMemoryInit)
+                    if (func.Body.ContainsInstructions(MemoryInstructions))
                         throw new FormatException($"memory.init instruction requires Data Count section");
-                }
+                
                 if (fullyDeclared.Contains(func.Index))
                     func.ElementDeclared = true;
             }
