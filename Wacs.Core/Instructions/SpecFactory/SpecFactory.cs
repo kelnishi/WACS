@@ -43,8 +43,8 @@ namespace Wacs.Core.Instructions
             OpCode.Block             => new InstBlock(),
             OpCode.Loop              => new InstLoop(),
             OpCode.If                => new InstIf(),
-            OpCode.Else              => InstElse.Inst,
-            OpCode.End               => InstEnd.Inst,
+            OpCode.Else              => new InstElse(),
+            OpCode.End               => new InstEnd(),
             
             OpCode.TryTable          => new InstTryTable(),
             OpCode.Throw             => new InstThrow(),
@@ -54,7 +54,7 @@ namespace Wacs.Core.Instructions
             OpCode.BrIf              => new InstBranchIf(),
             OpCode.BrTable           => new InstBranchTable(),
                  
-            OpCode.Return            => InstReturn.Inst,
+            OpCode.Return            => new InstReturn(),
             OpCode.Call              => new InstCall(),
             OpCode.CallIndirect      => new InstCallIndirect(),
             OpCode.CallRef           => new InstCallRef(),

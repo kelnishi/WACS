@@ -33,14 +33,19 @@ namespace Wacs.Core
         public static readonly InstructionSequence Empty = new(new List<InstructionBase>());
 
         //public for direct array access on critical path
-        public readonly InstructionBase[] _instructions;
+        public readonly List<InstructionBase> _instructions;
 
-        public readonly int Count;
+        public int Count;
+
+        public InstructionSequence()
+        {
+            _instructions = new();
+        }
 
         public InstructionSequence(IList<InstructionBase> list)
         {
-            _instructions = list.Cast<InstructionBase>().ToArray();
-            Count = _instructions.Length;
+            _instructions = list.ToList();
+            Count = _instructions.Count;
         }
 
         public InstructionBase? this[int index]
@@ -105,6 +110,12 @@ namespace Wacs.Core
             }
 
             return false;
+        }
+
+        public void Append(IEnumerable<InstructionBase> seq)
+        {
+            _instructions.AddRange(seq);
+            Count = _instructions.Count;
         }
     }
 }

@@ -24,11 +24,13 @@ using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
+using InstructionPointer = System.Int32;
+
 namespace Wacs.Core.Runtime
 {
     public sealed class Frame : IPoolable
     {
-        public InstructionPointer ContinuationAddress = InstructionPointer.Nil;
+        public InstructionPointer ContinuationAddress = -1;
         public string FuncId = "";
 
         public FuncIdx Index;
@@ -82,7 +84,7 @@ namespace Wacs.Core.Runtime
                 var fakeLabel = new InstExpressionProxy(new Label
                 {
                     Arity = 0,
-                    ContinuationAddress = InstructionPointer.Nil,
+                    ContinuationAddress = -1,
                     Instruction = OpCode.Nop,
                     StackHeight = 0
                 });
@@ -134,7 +136,7 @@ namespace Wacs.Core.Runtime
             //     ? TopLabel.Label 
             //     : ReturnLabel;
 
-            return oldLabel.Label.ContinuationAddress;
+            return oldLabel.End;
         }
 
         public IEnumerable<BlockTarget> EnumerateLabels()

@@ -18,6 +18,8 @@ using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 
+using InstructionPointer = System.Int32;
+
 namespace Wacs.Core.Instructions
 {
     /// <summary>
@@ -39,5 +41,15 @@ namespace Wacs.Core.Instructions
     {
         public BlockTarget EnclosingBlock;
         public Label Label;
+        public InstructionPointer Head;
+        public InstructionPointer End;
+        
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            Head = pointer;
+            //Push this onto a stack in the context so we can address the End instructions
+            context.PushBlockInstruction(this);
+            return this;
+        }
     }
 }

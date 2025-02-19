@@ -23,6 +23,8 @@ using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Validation;
 
+using InstructionPointer = System.Int32;
+
 namespace Wacs.Core.Instructions
 {
     /// <summary>
@@ -40,7 +42,8 @@ namespace Wacs.Core.Instructions
         public abstract ByteCode Op { get; }
 
         public abstract void Validate(IWasmValidationContext context);
-
+        public virtual InstructionBase Link(ExecContext context, InstructionPointer pointer) => this;
+        
         /// <summary>
         /// Synchronously executes the instruction within the given execution context.
         /// </summary>
@@ -76,7 +79,7 @@ namespace Wacs.Core.Instructions
 
         public static bool IsEnd(InstructionBase inst) => inst.Op.x00 == OpCode.End;
 
-        public static bool IsElseOrEnd(InstructionBase inst) => inst is InstEnd;
+        public static bool IsElseOrEnd(InstructionBase inst) => inst is InstEnd or InstElse;
 
         public static bool IsBranch(InstructionBase? inst) => inst is IBranchInstruction;
 

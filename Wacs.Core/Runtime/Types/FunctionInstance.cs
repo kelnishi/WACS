@@ -21,6 +21,8 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 
+using InstructionPointer = System.Int32;
+
 namespace Wacs.Core.Runtime.Types
 {
     /// <summary>
@@ -41,6 +43,9 @@ namespace Wacs.Core.Runtime.Types
         public readonly FuncIdx Index;
 
         public readonly ModuleInstance Module;
+
+        public InstructionPointer LinkedOffset;
+        public int Length;
 
         //Copied from the static Definition
         //Can be processed with optimization passes
@@ -136,7 +141,7 @@ namespace Wacs.Core.Runtime.Types
             
             frame.SetLabel(Body.LabelTarget); 
             
-            context.EnterSequence(Body.Instructions);
+            context.EnterSequence(LinkedOffset);
         }
 
         public override string ToString() => $"FunctionInstance[{Id}] (Type: {Type}, IsExport: {IsExport})";

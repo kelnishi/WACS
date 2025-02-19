@@ -20,6 +20,10 @@
     <PackageId>Wacs.Console</PackageId>
     <Product>Wacs.Console</Product>
   </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <DefineConstants>TRACE;STRICT_EXECUTION</DefineConstants>
+  </PropertyGroup>
   
   <ItemGroup>
     <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />

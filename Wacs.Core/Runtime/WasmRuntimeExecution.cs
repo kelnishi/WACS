@@ -155,6 +155,7 @@ namespace Wacs.Core.Runtime
 
                 Context.ProcessTimer.Restart();
                 Context.InstructionTimer.Restart();
+                Context._sequenceIndex = ExecContext.AbortSequence;
                 
                 await Context.InvokeAsync(funcAddr);
                 
@@ -288,6 +289,7 @@ namespace Wacs.Core.Runtime
 
                 Context.ProcessTimer.Restart();
                 Context.InstructionTimer.Restart();
+                Context._sequenceIndex = ExecContext.AbortSequence;
 
                 if (options.SynchronousExecution)
                 {
@@ -421,11 +423,11 @@ namespace Wacs.Core.Runtime
             InstructionBase inst;
             if (gasLimit <= 0)
             {
-                //Manually inline Next()
                 // while (Context.Next() is { } inst)
-                while (++Context._sequenceIndex < Context._sequenceCount)
+                //Manually inline Next()
+                while (++Context._sequenceIndex >= 0)
                 {
-                    inst = Context._sequenceInstructions[Context._sequenceIndex];
+                    inst = Context._currentSequence[Context._sequenceIndex];
                     if (inst.IsAsync)
                     {
                         await inst.ExecuteAsync(Context);
@@ -438,11 +440,11 @@ namespace Wacs.Core.Runtime
             }
             else
             {
-                //Manually inline Next()
                 // while (Context.Next() is { } inst)
-                while (++Context._sequenceIndex < Context._sequenceCount)
+                //Manually inline Next()
+                while (++Context._sequenceIndex >= 0)
                 {
-                    inst = Context._sequenceInstructions[Context._sequenceIndex];
+                    inst = Context._currentSequence[Context._sequenceIndex];
                     if (inst.IsAsync)
                     {
                         await inst.ExecuteAsync(Context);

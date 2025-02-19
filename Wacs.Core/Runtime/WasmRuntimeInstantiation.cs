@@ -36,8 +36,6 @@ namespace Wacs.Core.Runtime
 {
     public partial class WasmRuntime
     {
-        private static readonly MethodInfo GenericFuncsInvoke = typeof(Delegates.GenericFuncs).GetMethod("Invoke")!;
-        private static readonly MethodInfo GenericFuncsAsyncInvoke = typeof(Delegates.GenericFuncsAsync).GetMethod("Invoke")!;
         private readonly Dictionary<(string module, string entity), IAddress?> _entityBindings = new();
 
         private readonly List<ModuleInstance> _moduleInstances = new();
@@ -334,50 +332,64 @@ namespace Wacs.Core.Runtime
                 var auxFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.ElementInitialization);
                 //13.
                 Context.PushFrame(auxFrame);
-                
-                //14, 15
-                for (int i = 0, l = module.Elements.Length; i < l; ++i)
+                try
                 {
-                    var elem = module.Elements[i];
-                    switch (elem.Mode)
+                    //14, 15
+                    for (int i = 0, l = module.Elements.Length; i < l; ++i)
                     {
-                        case Module.ElementMode.ActiveMode activeMode:
-                            activeMode.Offset.ExecuteInitializer(Context);
-                            _i32ConstInst.Immediate(0).Execute(Context);
-                            _i32ConstInst.Immediate(elem.Initializers.Length).Execute(Context);
-                            _tableInitInst.Immediate(activeMode.TableIndex, (ElemIdx)i).Execute(Context);
-                            _dropInst.Immediate((ElemIdx)i).Execute(Context);
-                            break;
-                        case Module.ElementMode.DeclarativeMode declarativeMode:
-                            _ = declarativeMode;
-                            _dropInst.Immediate((ElemIdx)i).Execute(Context);
-                            break;
+                        var elem = module.Elements[i];
+                        switch (elem.Mode)
+                        {
+                            case Module.ElementMode.ActiveMode activeMode:
+                                activeMode.Offset.ExecuteInitializer(Context);
+                                _i32ConstInst.Immediate(0).Execute(Context);
+                                _i32ConstInst.Immediate(elem.Initializers.Length).Execute(Context);
+                                _tableInitInst.Immediate(activeMode.TableIndex, (ElemIdx)i).Execute(Context);
+                                _dropInst.Immediate((ElemIdx)i).Execute(Context);
+                                break;
+                            case Module.ElementMode.DeclarativeMode declarativeMode:
+                                _ = declarativeMode;
+                                _dropInst.Immediate((ElemIdx)i).Execute(Context);
+                                break;
+                        }
+                    }
+
+                    //16.
+                    for (int i = 0, l = module.Datas.Length; i < l; ++i)
+                    {
+                        var data = module.Datas[i];
+                        switch (data.Mode)
+                        {
+                            case Module.DataMode.ActiveMode activeMode:
+                                activeMode.Offset.ExecuteInitializer(Context);
+                                _i32ConstInst.Immediate(0).Execute(Context);
+                                _i32ConstInst.Immediate(data.Init.Length).Execute(Context);
+                                _memoryInitInst.Immediate((DataIdx)i, activeMode.MemoryIndex).Execute(Context);
+                                _dataDropInst.Immediate((DataIdx)i).Execute(Context);
+                                break;
+                            case Module.DataMode.PassiveMode: //Do nothing
+                                break;
+                        }
                     }
                 }
-
-                //16.
-                for (int i = 0, l = module.Datas.Length; i < l; ++i)
+                catch (TrapException exc)
                 {
-                    var data = module.Datas[i];
-                    switch (data.Mode)
-                    {
-                        case Module.DataMode.ActiveMode activeMode:
-                            activeMode.Offset.ExecuteInitializer(Context);
-                            _i32ConstInst.Immediate(0).Execute(Context);
-                            _i32ConstInst.Immediate(data.Init.Length).Execute(Context);
-                            _memoryInitInst.Immediate((DataIdx)i, activeMode.MemoryIndex).Execute(Context);
-                            _dataDropInst.Immediate((DataIdx)i).Execute(Context);
-                            break;
-                        case Module.DataMode.PassiveMode: //Do nothing
-                            break;
-                    }
+                    //Linking may succeed, so we commit the transaction
+                    Store.CommitTransaction();
+                    Store.OpenTransaction();
+                    Context.FlushCallStack();
+                    ExceptionDispatchInfo.Throw(exc);
+                }
+                finally
+                {
+                    if (TranspileModules)
+                        TranspileModule(moduleInstance);
+
+                    LinkModule(moduleInstance);
+
+                    Context.CacheInstructions();
                 }
                 
-                if (TranspileModules)
-                    TranspileModule(moduleInstance);
-                
-                SynchronizeFunctionCalls(moduleInstance);
-
                 //17. 
                 if (module.StartIndex != FuncIdx.Default)
                 {
@@ -462,6 +474,25 @@ namespace Wacs.Core.Runtime
             }
             
             return moduleInstance;
+        }
+
+        /// <summary>
+        /// Serialize all function instructions into the context
+        /// </summary>
+        /// <param name="moduleInstance"></param>
+        private void LinkModule(ModuleInstance moduleInstance)
+        {
+            foreach (var funcAddr in moduleInstance.FuncAddrs)
+            {
+                var instance = Store[funcAddr];
+                if (instance is FunctionInstance functionInstance)
+                {
+                    if (functionInstance.Module != moduleInstance) continue;
+                    
+                    Context.LinkFunction(functionInstance);
+                }
+            }
+            
         }
 
         public void SynchronizeFunctionCalls(ModuleInstance moduleInstance)

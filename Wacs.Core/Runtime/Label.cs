@@ -15,6 +15,8 @@
 //  */
 
 using Wacs.Core.OpCodes;
+using InstructionPointer = System.Int32;
+
 
 namespace Wacs.Core.Runtime
 {
