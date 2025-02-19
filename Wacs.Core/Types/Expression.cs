@@ -44,15 +44,15 @@ namespace Wacs.Core.Types
         /// </summary>
         /// <param name="seq"></param>
         /// <param name="isStatic"></param>
-        private Expression(InstructionSequence seq, bool isStatic)
+        private Expression(InstructionSequence seq, bool isStatic, OpCode inst = OpCode.Expr)
         {
             Instructions = seq;
             IsStatic = isStatic;
             LabelTarget = new(new Label
             {
                 //Compute Arity in PrecomputeLabels
-                ContinuationAddress = new InstructionPointer(Instructions, 1),
-                Instruction = OpCode.Expr,
+                ContinuationAddress = 1,
+                Instruction = inst,
                 StackHeight = -1,
             });
         }
@@ -70,7 +70,7 @@ namespace Wacs.Core.Types
             LabelTarget = new(new Label
             {
                 Arity = arity,
-                ContinuationAddress = new InstructionPointer(Instructions, 1),
+                ContinuationAddress = 1,
                 Instruction = OpCode.Expr,
                 StackHeight = 0,
             });
@@ -84,7 +84,7 @@ namespace Wacs.Core.Types
             LabelTarget = new (new Label
             {
                 Arity = arity,
-                ContinuationAddress = new InstructionPointer(Instructions, 1),
+                ContinuationAddress = 1,
                 Instruction = OpCode.Expr,
                 StackHeight = 0,
             });
@@ -103,40 +103,47 @@ namespace Wacs.Core.Types
             {
                 var inst = seq._instructions[i];
                 inst.Validate(vContext);
-                
-                if (inst is BlockTarget target)
+
+                switch (inst)
                 {
-                    target.EnclosingBlock = enclosingTarget;
-                    var blockInst = target as IBlockInstruction;
-
-                    var block = blockInst!.GetBlock(0);
-                    int arity = 0;
-                    try
+                    case InstElse instElse:
+                        //The enclosingTarget is the InstIf, InstElse should have the same parent.
+                        instElse.EnclosingBlock = enclosingTarget.EnclosingBlock; break;
+                    case BlockTarget target:
                     {
-                        var funcType = vContext.Types.ResolveBlockType(block.BlockType);
-                        if (funcType == null)
-                            throw new IndexOutOfRangeException();
+                        target.EnclosingBlock = enclosingTarget;
+                        var blockInst = target as IBlockInstruction;
 
-                        arity = inst is InstLoop ? funcType.ParameterTypes.Arity : funcType.ResultType.Arity;
-                    }
-                    catch (IndexOutOfRangeException)
-                    {
-                        throw new InvalidDataException($"Failure computing Labels. BlockType:{block.BlockType} did not exist in the Module");
-                    }
+                        var block = blockInst!.GetBlock(0);
+                        int arity = 0;
+                        try
+                        {
+                            var funcType = vContext.Types.ResolveBlockType(block.BlockType);
+                            if (funcType == null)
+                                throw new IndexOutOfRangeException();
 
-                    var label = target.Label ?? new Label();
-                    label.Arity = arity;
-                    label.ContinuationAddress = new InstructionPointer(seq, i);
-                    label.Instruction = inst.Op;
-                    //HACK: Use any existing precomputed StackHeight (assume optimization has not changed this value)
-                    label.StackHeight = (target.Label?.StackHeight ?? -1) >= 0
-                        ? target.Label!.StackHeight
-                        : vContext.OpStack.Height;
+                            arity = inst is InstLoop ? funcType.ParameterTypes.Arity : funcType.ResultType.Arity;
+                        }
+                        catch (IndexOutOfRangeException)
+                        {
+                            throw new InvalidDataException($"Failure computing Labels. BlockType:{block.BlockType} did not exist in the Module");
+                        }
+
+                        var label = target.Label ?? new Label();
+                        label.Arity = arity;
+                        label.ContinuationAddress = i;
+                        label.Instruction = inst.Op;
+                        //HACK: Use any existing precomputed StackHeight (assume optimization has not changed this value)
+                        label.StackHeight = (target.Label?.StackHeight ?? -1) >= 0
+                            ? target.Label!.StackHeight
+                            : vContext.OpStack.Height;
                     
-                    for (int b = 0; b < blockInst!.Count; ++b)
-                        LinkLabelTarget(vContext,blockInst.GetBlock(b).Instructions, target);
+                        for (int b = 0; b < blockInst!.Count; ++b)
+                            LinkLabelTarget(vContext,blockInst.GetBlock(b).Instructions, target);
                     
-                    target.Label = label;
+                        target.Label = label;
+                        break;
+                    }
                 }
             }
         }
@@ -165,6 +172,9 @@ namespace Wacs.Core.Types
         /// </summary>
         public static Expression Parse(BinaryReader reader) =>
             new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd)), true);
+        
+        public static Expression ParseFunc(BinaryReader reader) =>
+            new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd)), true, OpCode.Func);
 
         public static Expression ParseInitializer(BinaryReader reader) =>
             new(1, new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd)), true);
@@ -243,6 +253,32 @@ namespace Wacs.Core.Types
                         ctx.AddFailure($"{exc.Message}");
                     }
                 });
+            }
+        }
+
+        public IEnumerable<InstructionBase> Flatten()
+        {
+            Queue<InstructionBase> seq = new();
+            Enqueue(seq, Instructions);
+            return seq;
+        }
+
+        private static void Enqueue(Queue<InstructionBase> queue, IEnumerable<InstructionBase> instructions)
+        {
+            foreach (var inst in instructions)
+            {
+                queue.Enqueue(inst);
+                switch (inst)
+                {
+                    case IBlockInstruction node:
+                        for (int i = 0; i < node.Count; i++)
+                        {
+                            var block = node.GetBlock(i);
+                            Enqueue(queue, block.Instructions);
+                        }
+                        break;
+                    default: break;
+                }
             }
         }
     }

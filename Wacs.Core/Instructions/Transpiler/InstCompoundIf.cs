@@ -27,10 +27,10 @@ namespace Wacs.Core.Instructions.Transpiler
     public class InstCompoundIf : BlockTarget, IBlockInstruction
     {
         private static readonly ByteCode IfOp = OpCode.If;
-        private static readonly ByteCode ElseOp = OpCode.Else;
-        private readonly Block ElseBlock = Block.Empty;
-        private readonly int ElseCount;
         private readonly Block IfBlock = Block.Empty;
+        private readonly Block ElseBlock = Block.Empty;
+
+        public int Else = -1;
 
         private readonly Func<ExecContext, int> valueFunc;
 
@@ -48,8 +48,6 @@ namespace Wacs.Core.Instructions.Transpiler
                 blockType: blockType,
                 seq: elseSeq
             );
-            ElseCount = ElseBlock.Instructions.Count;
-
             valueFunc = valueProducer.GetFunc;
         }
 
@@ -108,14 +106,11 @@ namespace Wacs.Core.Instructions.Transpiler
         public override void Execute(ExecContext context)
         {
             int c = valueFunc(context);
-            if (c != 0)
+            // context.EnterBlock(this);
+            context.Frame.PushLabel(this);
+            if (c == 0)
             {
-                context.EnterBlock(this, IfBlock);
-            }
-            else
-            {
-                if (ElseCount != 0)
-                    context.EnterBlock(this, ElseBlock);
+                context.EnterSequence(Else);
             }
         }
     }

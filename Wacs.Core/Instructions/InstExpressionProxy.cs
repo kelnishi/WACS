@@ -28,6 +28,8 @@ namespace Wacs.Core.Instructions
         {
             EnclosingBlock = this;
             Label = label;
+            //Ensure that we jump out of invocations
+            End = -1;
         }
 
         public override ByteCode Op => _op;
