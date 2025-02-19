@@ -103,7 +103,8 @@ namespace Wacs.Core.Instructions
 
         public override void Execute(ExecContext context)
         {
-            context.EnterBlock(this, Block);
+            // context.EnterBlock(this);
+            context.Frame.PushLabel(this);
         }
         
         public override InstructionBase Parse(BinaryReader reader)

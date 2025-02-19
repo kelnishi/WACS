@@ -53,7 +53,7 @@ namespace Wacs.Core
             }
 
             public static FuncLocalsBody Parse(BinaryReader reader) =>
-                new(reader.ParseVector(ParseCompressedLocal), Expression.Parse(reader));
+                new(reader.ParseVector(ParseCompressedLocal), Expression.ParseFunc(reader));
         }
 
         public class CodeDesc

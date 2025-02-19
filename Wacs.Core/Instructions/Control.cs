@@ -24,11 +24,14 @@ using FluentValidation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
+
+using InstructionPointer = System.Int32;
 
 // @Spec 2.4.8. Control Instructions
 // @Spec 5.4.1 Control Instructions
@@ -109,7 +112,8 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.3. block
         public override void Execute(ExecContext context)
         {
-            context.EnterBlock(this, Block);
+            // context.EnterBlock(this);
+            context.Frame.PushLabel(this);
         }
 
         /// <summary>
@@ -184,7 +188,8 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             if (Block.Instructions.Count != 0)
-                context.EnterBlock(this, Block);
+                context.Frame.PushLabel(this);
+                // context.EnterBlock(this);
         }
 
         /// <summary>
@@ -219,10 +224,12 @@ namespace Wacs.Core.Instructions
     public class InstIf : BlockTarget, IBlockInstruction
     {
         private static readonly ByteCode IfOp = OpCode.If;
-        private static readonly ByteCode ElseOp = OpCode.Else;
-        private Block ElseBlock = Block.Empty;
-        private int ElseCount;
+        
         private Block IfBlock = Block.Empty;
+        private Block ElseBlock = Block.Empty;
+
+        public InstructionPointer Else = -1;
+        
         public override ByteCode Op => IfOp;
 
 
@@ -257,7 +264,8 @@ namespace Wacs.Core.Instructions
                 
                 var elseType = context.Types.ResolveBlockType(ElseBlock.BlockType);
                 if (!ifType.Equivalent(elseType))
-                    throw new ValidationException($"If block returned type {ifType} without matching else block");
+                    throw new ValidationException($"If block returned type {ifType}" +
+                                                  $" without matching else ({elseType}) block");
                 
                 if (ElseBlock.Length == 0)
                     return;
@@ -279,17 +287,14 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             int c = context.OpStack.PopI32();
-            if (c != 0)
+            // context.EnterBlock(this);
+            context.Frame.PushLabel(this);
+            if (c == 0)
             {
-                context.EnterBlock(this, IfBlock);
-            }
-            else
-            {
-                if (ElseCount != 0)
-                    context.EnterBlock(this, ElseBlock);
+                context.EnterSequence(Else);
             }
         }
-
+        
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
@@ -313,8 +318,6 @@ namespace Wacs.Core.Instructions
             {
                 throw new FormatException($"If block did not terminate correctly.");
             }
-            
-            ElseCount = ElseBlock.Instructions.Count;
             return this;
         }
 
@@ -328,15 +331,14 @@ namespace Wacs.Core.Instructions
                 blockType: blockType,
                 seq: elseSeq
             );
-            ElseCount = ElseBlock.Instructions.Count;
             return this;
         }
     }
 
     //0x05
-    public class InstElse : InstEnd
+    public class InstElse : BlockTarget
     {
-        public new static readonly InstElse Inst = new();
+        // public new static readonly InstElse Inst = new();
         private static readonly ByteCode ElseOp = OpCode.Else;
         public override ByteCode Op => ElseOp;
 
@@ -346,18 +348,73 @@ namespace Wacs.Core.Instructions
             context.Assert(frame.Opcode == OpCode.If, "Else terminated a non-If block");
             context.PushControlFrame(ElseOp, frame.Types);
         }
+        
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            var target = context.PopBlockInstruction();
+            switch (target)
+            {
+                case InstCompoundIf instCompoundIf:
+                    instCompoundIf.Else = pointer + 1;
+                    break;
+                case InstIf instIf:
+                    instIf.Else = pointer + 1;
+                    break;
+                default:
+                    throw new InstantiationException($"Else block instruction mismatched to {target}");
+            }
+            context.PushBlockInstruction(target);
+            context.PushBlockInstruction(this);
+            return this;
+        }
+        
+        public override void Execute(ExecContext context)
+        {
+            //Just jump out of the If block
+            context.EnterSequence(End);
+        }
+
+        public override InstructionBase Parse(BinaryReader reader)
+        {
+            Label = new Label {
+                Instruction = OpCode.Else
+            };
+            return this;
+            
+        }
     }
 
     //0x0B
     public class InstEnd : InstructionBase
     {
-        public static readonly InstEnd Inst = new();
+        // public static readonly InstEnd Inst = new();
         public override ByteCode Op => OpCode.End;
 
         public override void Validate(IWasmValidationContext context)
         {
             var frame = context.PopControlFrame();
             context.OpStack.ReturnResults(frame.EndTypes);
+        }
+
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            var target = context.PopBlockInstruction();
+            target.End = pointer;
+            switch (target)
+            {
+                case InstIf instIf:
+                    instIf.Else = pointer; 
+                    break;
+                case InstCompoundIf instCompoundIf:
+                    instCompoundIf.Else = pointer;
+                    break;
+                case InstElse:
+                    target = context.PopBlockInstruction();
+                    target.End = pointer;
+                    break;
+            }
+
+            return this;
         }
 
         public override void Execute(ExecContext context)
@@ -465,6 +522,9 @@ namespace Wacs.Core.Instructions
                 context.ResumeSequence(topAddr);
             }
 
+            if (context.Frame.TopLabel is null)
+                throw new WasmRuntimeException("WTF");
+            
             var label = context.Frame.Label;
             //3,4.
             context.Assert( context.OpStack.Count >= label.Arity,
@@ -724,8 +784,9 @@ namespace Wacs.Core.Instructions
             int resultsHeight = context.Frame.StackHeight + resultCount;
             if (resultsHeight < context.OpStack.Count)
                 context.OpStack.ShiftResults(resultCount, resultsHeight);
-            var address = context.PopFrame();
-            context.ResumeSequence(address);
+            // var address = context.PopFrame();
+            // context.ResumeSequence(address);
+            context.FunctionReturn();
         }
     }
 
@@ -733,6 +794,7 @@ namespace Wacs.Core.Instructions
     public sealed class InstCall : InstructionBase, ICallInstruction
     {
         public FuncIdx X;
+        private FuncAddr linkedX;
 
         public InstCall()
         {
@@ -766,21 +828,39 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushResult(funcType.ResultType);
         }
 
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
+                $"Instruction call failed. Function address for {X} was not in the Context.");
+            linkedX = context.Frame.Module.FuncAddrs[X];
+            var inst = context.Store[linkedX];
+            IsAsync = inst switch
+            {
+                FunctionInstance => false,
+                HostFunction hostFunction => hostFunction.IsAsync,
+                _ => IsAsync
+            };
+            
+            return this;
+        }
+
         // @Spec 4.4.8.10. call
         public override void Execute(ExecContext context)
         {
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
                 $"Instruction call failed. Function address for {X} was not in the Context.");
-            var a = context.Frame.Module.FuncAddrs[X];
-            context.Invoke(a);
+            // var a = context.Frame.Module.FuncAddrs[X];
+            // context.Invoke(a);
+            context.Invoke(linkedX);
         }
 
         public override async ValueTask ExecuteAsync(ExecContext context)
         {
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
                 $"Instruction call failed. Function address for {X} was not in the Context.");
-            var a = context.Frame.Module.FuncAddrs[X];
-            await context.InvokeAsync(a);
+            // var a = context.Frame.Module.FuncAddrs[X];
+            // await context.InvokeAsync(a);
+            await context.InvokeAsync(linkedX);
         }
 
         /// <summary>
