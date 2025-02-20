@@ -20,7 +20,6 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
-using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
@@ -38,17 +37,17 @@ namespace Wacs.Core.Runtime
 
         public Label Label => 
             LabelCount > 1
-                ? TopLabel.Label 
+                ? TopLabel!.Label 
                 : ReturnLabel;
         
-        public int LabelCount = 0;
+        private int LabelCount => TopLabel?.LabelHeight ?? 0;
         public LocalsSpace Locals;
 
         public ModuleInstance Module = null!;
 
         public Label ReturnLabel = new();
         public int StackHeight;
-        public BlockTarget TopLabel;
+        public BlockTarget? TopLabel;
         public FunctionType Type = null!;
 
         public int Arity => Type.ResultType.Arity;
@@ -100,38 +99,29 @@ namespace Wacs.Core.Runtime
 
         public void ClearLabels()
         {
-            TopLabel = default!;
-            LabelCount = 0;
+            TopLabel = null;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetLabel(BlockTarget baselabel)
         {
             TopLabel = baselabel;
-            LabelCount = 1;
-            // Label = ReturnLabel;
         }
         
         public void PushLabel(BlockTarget target)
         {
             TopLabel = target;
-            LabelCount++;
-            // Label = TopLabel.Label;
         }
 
         public void PopLabels(int idx)
         {
-            if (LabelCount <= idx + 1)
+            if ((TopLabel?.LabelHeight ?? 0) <= idx + 1)
                 throw new InvalidDataException("Label Stack underflow");
 
-            idx = LabelCount - (idx + 1);
-            do
+            for (int i = 0; i <= idx && TopLabel != null; i++)
             {
-                if (TopLabel.LabelHeight != LabelCount)
-                    throw new WasmRuntimeException($"LabelHeight mismatch: toplabel {TopLabel.LabelHeight} vs count {LabelCount}");
-                
-                TopLabel = TopLabel.EnclosingBlock;
-            } while (--LabelCount > idx);
+                TopLabel = TopLabel?.EnclosingBlock ?? null;
+            }
         }
 
         public IEnumerable<BlockTarget> EnumerateLabels()

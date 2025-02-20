@@ -213,10 +213,9 @@ namespace Wacs.Core.Instructions
             while (context.StackHeight > 0)
             {
                 //Enumerate all the blocks to find catch clauses
-                while (context.Frame.LabelCount > 1)
+                while (context.Frame.TopLabel.LabelHeight > 1)
                 {
                     var blockTarget = context.Frame.TopLabel;
-                    // context.ExitBlock();
                     context.Frame.PopLabels(0);
                     
                     if (blockTarget is InstTryTable tryTable)
