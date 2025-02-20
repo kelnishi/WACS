@@ -115,8 +115,8 @@ namespace Wacs.Core.Runtime
 
         public void PopLabels(int idx)
         {
-            if ((TopLabel?.LabelHeight ?? 0) <= idx + 1)
-                throw new InvalidDataException("Label Stack underflow");
+            // if ((TopLabel?.LabelHeight ?? 0) <= idx + 1)
+            //     throw new InvalidDataException("Label Stack underflow");
 
             for (int i = 0; i <= idx && TopLabel != null; i++)
             {

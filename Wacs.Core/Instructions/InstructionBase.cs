@@ -34,6 +34,9 @@ namespace Wacs.Core.Instructions
     {
         public readonly Action<ExecContext> Executor;
         public bool IsAsync = false;
+
+        public int PointerAdvance = 0;
+        
         public int Size = 1;
 
         /// <summary>

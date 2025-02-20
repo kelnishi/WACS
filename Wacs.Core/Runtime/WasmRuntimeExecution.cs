@@ -428,6 +428,12 @@ namespace Wacs.Core.Runtime
                 while (++Context.InstructionPointer >= 0)
                 {
                     inst = Context._currentSequence[Context.InstructionPointer];
+                    if (inst.PointerAdvance > 0)
+                    {
+                        Context.InstructionPointer += inst.PointerAdvance - 1;
+                        continue;
+                    }
+                    
                     if (inst.IsAsync)
                     {
                         await inst.ExecuteAsync(Context);
@@ -445,6 +451,15 @@ namespace Wacs.Core.Runtime
                 while (++Context.InstructionPointer >= 0)
                 {
                     inst = Context._currentSequence[Context.InstructionPointer];
+                    //Counting gas costs about 18% throughput!
+                    Context.steps += inst.Size;
+                    
+                    if (inst.PointerAdvance > 0)
+                    {
+                        Context.InstructionPointer += inst.PointerAdvance - 1;
+                        continue;
+                    }
+                    
                     if (inst.IsAsync)
                     {
                         await inst.ExecuteAsync(Context);
@@ -453,8 +468,7 @@ namespace Wacs.Core.Runtime
                     {
                         inst.Execute(Context);
                     }
-                    //Counting gas costs about 18% throughput!
-                    Context.steps += inst.Size;
+                    
                     if (Context.steps >= gasLimit)
                     {
                         throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
@@ -479,8 +493,10 @@ namespace Wacs.Core.Runtime
                 if (options.CollectStats == StatsDetail.Instruction)
                 {
                     Context.InstructionTimer.Restart();
-                    
-                    if (inst.IsAsync)
+
+                    if (inst.PointerAdvance > 0)
+                        Context.InstructionPointer += inst.PointerAdvance - 1;
+                    else if (inst.IsAsync)
                         await inst.ExecuteAsync(Context);
                     else
                         inst.Execute(Context);
@@ -496,7 +512,9 @@ namespace Wacs.Core.Runtime
                 else
                 {
                     Context.InstructionTimer.Start();
-                    if (inst.IsAsync)
+                    if (inst.PointerAdvance > 0)
+                        Context.InstructionPointer += inst.PointerAdvance - 1;
+                    else if (inst.IsAsync)
                         await inst.ExecuteAsync(Context);
                     else
                         inst.Execute(Context);
