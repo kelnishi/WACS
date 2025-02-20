@@ -38,16 +38,16 @@ namespace Wacs.Core.Instructions.Reference
             context.Assert(context.ContainsLabel(L.Value),
                 "Instruction {0} invalid. Could not branch to label {1}",Op.GetMnemonic(), L);
 
-            var refType = context.OpStack.PopRefType();
+            var refType = context.OpStack.PopRefType();       // -1
             
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
             //Pop values like we branch
-            context.OpStack.DiscardValues(nthFrame.LabelTypes);
+            context.OpStack.DiscardValues(nthFrame.LabelTypes);     // -(N+1)
             //But actually, we don't, so push them back on.
-            context.OpStack.PushResult(nthFrame.LabelTypes);
+            context.OpStack.PushResult(nthFrame.LabelTypes);        // -1
             
             //Push the non-null ref back for the else case.
-            context.OpStack.PushRef(refType.ToConcrete());
+            context.OpStack.PushRef(refType.ToConcrete());          // +0
         }
 
         /// <summary>
@@ -83,19 +83,20 @@ namespace Wacs.Core.Instructions.Reference
             context.Assert(context.ContainsLabel(L.Value),
                 "Instruction {0} invalid. Could not branch to label {1}",Op.GetMnemonic(), L);
 
-            var refType = context.OpStack.PopRefType();
+            var refType = context.OpStack.PopRefType();         // -1
             //Push the ref for the branch case.
-            context.OpStack.PushRef(refType.ToConcrete());
+            context.OpStack.PushRef(refType.ToConcrete());            // +0
             
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
             //Pop values like we branch
-            context.OpStack.DiscardValues(nthFrame.LabelTypes);
+            context.OpStack.DiscardValues(nthFrame.LabelTypes);       // -N
             //But actually, we don't, so push them back on.
-            context.OpStack.PushResult(nthFrame.LabelTypes);
+            context.OpStack.PushResult(nthFrame.LabelTypes);          // +0
             
             //Unpush the ref we pushed for the branch
-            context.OpStack.PopRefType();
+            context.OpStack.PopRefType();                             // -1
         }
+        protected override int StackDiff => -1;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/#-hrefsyntax-instr-controlmathsfbr_on_non_nulll①
@@ -143,15 +144,24 @@ namespace Wacs.Core.Instructions.Reference
             context.Assert(funcType,
                 "Instruction call_ref was invalid. Not a FuncType. {0}", type);
             
-            var refVal = context.OpStack.PopRefType();
+            var refVal = context.OpStack.PopRefType();          // -1
             context.Assert(refVal.IsRefType,
                 "Instruction call_ref was invalid. Not a RefType. {0}", refVal);
             context.Assert(refVal.Type.IsNull() || refVal.Type.Index() == X,
                 "Instruction call_ref was invalid. type mismatch: expected (ref null {0}), found {1}", X.Value, refVal.Type);
-            context.OpStack.DiscardValues(funcType.ParameterTypes);
-            context.OpStack.PushResult(funcType.ResultType);
+            context.OpStack.DiscardValues(funcType.ParameterTypes);   // -(N+1)
+            context.OpStack.PushResult(funcType.ResultType);          // -N
         }
-
+        
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
+            context.LinkOpStackHeight -= 1;
+            context.LinkOpStackHeight -= funcType!.ParameterTypes.Arity;
+            context.LinkOpStackHeight += funcType.ResultType.Arity;
+            return this;
+        }
+        
         public override void Execute(ExecContext context)
         {
             context.Assert(context.StackTopTopType() == ValType.FuncRef,

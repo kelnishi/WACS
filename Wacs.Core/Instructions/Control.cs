@@ -49,6 +49,12 @@ namespace Wacs.Core.Instructions
             context.SetUnreachable();
         }
 
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            context.LinkUnreachable = true;
+            return this;
+        }
+
         // @Spec 4.4.8.2. unreachable
         public override void Execute(ExecContext context) =>
             throw new TrapException("unreachable");
@@ -277,7 +283,9 @@ namespace Wacs.Core.Instructions
                     "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.BlockType);
             }
         }
-
+        //Consume the predicate
+        protected override int StackDiff => -1;
+        
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
@@ -345,14 +353,17 @@ namespace Wacs.Core.Instructions
         
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
-            var target = context.PeekBlockInstruction();
+            var target = context.PeekLabel();
             target.Suboridinate = this;
             
             if (target is not IIfInstruction)
                 throw new InstantiationException($"Else block instruction mismatched to {target}");
 
+            EnclosingBlock = target.EnclosingBlock;
             target.Else = pointer + 1;
-            
+
+            //Reset and re-consume the predicate
+            context.LinkOpStackHeight = target.Label.StackHeight;
             return this;
         }
         
@@ -387,13 +398,18 @@ namespace Wacs.Core.Instructions
 
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
-            var target = context.PopBlockInstruction();
+            var target = context.PopLabel();
             target.End = pointer;
             if (target.Suboridinate != null)
                 target.Suboridinate.End = pointer;
 
             if (target is IIfInstruction && target.Else < 0)
                 target.Else = pointer;
+
+            context.LinkUnreachable = false;
+            context.LinkOpStackHeight = target.Label.StackHeight;
+            context.LinkOpStackHeight -= target.Label.Parameters;
+            context.LinkOpStackHeight += target.Label.Results;
             
             return this;
         }
@@ -485,10 +501,29 @@ namespace Wacs.Core.Instructions
             context.SetUnreachable();
         }
 
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            PrecomputeStack(context, L);
+            context.LinkUnreachable = true;
+            return this;
+        }
+
         // @Spec 4.4.8.6. br l
         public override void Execute(ExecContext context)
         {
             ExecuteInstruction(context, L);
+        }
+
+        public static BlockTarget PrecomputeStack(ExecContext context, LabelIdx labelIndex)
+        {
+            var label = context.PeekLabel();
+            if (labelIndex.Value > 0)
+            {
+                for (int l = 0; l < labelIndex.Value; l++) 
+                    label = label.EnclosingBlock;
+            }
+            context.LinkOpStackHeight = label.Label.StackHeight + label.Label.Arity;
+            return label;
         }
 
         public static void ExecuteInstruction(ExecContext context, LabelIdx labelIndex)
@@ -572,15 +607,16 @@ namespace Wacs.Core.Instructions
                 "Instruction br_if invalid. Could not branch to label {0}",L);
             
             //Pop the predicate
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();   // -1
             
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
             
             //Pop values like we branch
-            context.OpStack.DiscardValues(nthFrame.LabelTypes);
+            context.OpStack.DiscardValues(nthFrame.LabelTypes); // -(N+1)
             //But actually, we don't, so push them back on.
-            context.OpStack.PushResult(nthFrame.LabelTypes);
+            context.OpStack.PushResult(nthFrame.LabelTypes);    // -1
         }
+        protected override int StackDiff => -1;
 
         // @Spec 4.4.8.7. br_if
         public override void Execute(ExecContext context)
@@ -659,6 +695,13 @@ namespace Wacs.Core.Instructions
             context.SetUnreachable();
         }
 
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            InstBranch.PrecomputeStack(context, Ln);
+            context.LinkUnreachable = true;
+            return this;
+        }
+        
         /// <summary>
         /// @Spec 4.4.8.8. br_table
         /// </summary>
@@ -753,6 +796,12 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushValues(aside);
             context.SetUnreachable();
         }
+        
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            context.LinkUnreachable = true;
+            return this;
+        }
 
         // @Spec 4.4.8.9. return
         public override void Execute(ExecContext context)
@@ -819,6 +868,10 @@ namespace Wacs.Core.Instructions
                 HostFunction hostFunction => hostFunction.IsAsync,
                 _ => IsAsync
             };
+
+            var funcType = inst.Type;
+            context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
+            context.LinkOpStackHeight += funcType.ResultType.Arity;
             
             return this;
         }
@@ -949,6 +1002,27 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopType(at.ToValType());
             context.OpStack.DiscardValues(funcType.ParameterTypes);
             context.OpStack.PushResult(funcType.ResultType);
+        }
+        
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            context.Assert( context.Frame.Module.TableAddrs.Contains(X),
+                $"Instruction call_indirect failed. Table {X} was not in the Context.");
+            var ta = context.Frame.Module.TableAddrs[X];
+            context.Assert( context.Store.Contains(ta),
+                $"Instruction call_indirect failed. TableInstance {ta} was not in the Store.");
+            var tab = context.Store[ta];
+            context.Assert( context.Frame.Module.Types.Contains(Y),
+                $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
+            var ftExpect = context.Frame.Module.Types[Y];
+            var funcType = ftExpect.Expansion as FunctionType;
+            context.Assert(funcType,
+                $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
+            
+            context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
+            context.LinkOpStackHeight += funcType.ResultType.Arity;
+            
+            return this;
         }
 
         // @Spec 4.4.8.11. call_indirect

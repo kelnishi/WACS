@@ -23,16 +23,16 @@ namespace Wacs.Core.Instructions.Numeric
     public partial class NumericInst
     {
         public static readonly NumericInst I8x16AllTrue = new(SimdCode.I8x16AllTrue, ExecuteI8x16AllTrue,
-            ValidateOperands(pop: ValType.V128, push: ValType.I32));
+            ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
 
         public static readonly NumericInst I16x8AllTrue = new(SimdCode.I16x8AllTrue, ExecuteI16x8AllTrue,
-            ValidateOperands(pop: ValType.V128, push: ValType.I32));
+            ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
 
         public static readonly NumericInst I32x4AllTrue = new(SimdCode.I32x4AllTrue, ExecuteI32x4AllTrue,
-            ValidateOperands(pop: ValType.V128, push: ValType.I32));
+            ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
 
         public static readonly NumericInst I64x2AllTrue = new(SimdCode.I64x2AllTrue, ExecuteI64x2AllTrue,
-            ValidateOperands(pop: ValType.V128, push: ValType.I32));
+            ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
 
         private static void ExecuteI8x16AllTrue(ExecContext context)
         {

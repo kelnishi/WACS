@@ -40,8 +40,8 @@ namespace Wacs.Core.Instructions
                 "Instruction table.get failed to get table {0} from context",X);
             var type = context.Tables[X];
             var at = type.Limits.AddressType;
-            context.OpStack.PopType(at.ToValType());
-            context.OpStack.PushType(type.ElementType);
+            context.OpStack.PopType(at.ToValType());    // -1
+            context.OpStack.PushType(type.ElementType); // +0
         }
 
         // @Spec 4.4.6.1. table.get 
@@ -100,9 +100,10 @@ namespace Wacs.Core.Instructions
                 "Instruction table.set failed to get table {0} from context", X);
             var type = context.Tables[X];
             var at = type.Limits.AddressType;
-            context.OpStack.PopType(type.ElementType);
-            context.OpStack.PopType(at.ToValType());
+            context.OpStack.PopType(type.ElementType);  // -1
+            context.OpStack.PopType(at.ToValType());    // -2
         }
+        protected override int StackDiff => -2;
 
         // @Spec 4.4.6.2. table.set
         public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
@@ -168,12 +169,13 @@ namespace Wacs.Core.Instructions
             var t2 = context.Elements[Y];
             context.Assert(t2.Type.Matches(t1.ElementType, context.Types),
                 "Instruction table.init is invalid. Type mismatch {0} != {1}",t1.ElementType,t2.Type);
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();   // -1
+            context.OpStack.PopI32();   // -2
 
             var at = t1.Limits.AddressType;
-            context.OpStack.PopType(at.ToValType());
+            context.OpStack.PopType(at.ToValType()); // -3
         }
+        protected override int StackDiff => -3;
 
         // @Spec 4.4.6.7. table.init x y
         public override void Execute(ExecContext context)
@@ -320,10 +322,11 @@ namespace Wacs.Core.Instructions
             var at2 = t2.Limits.AddressType;
             var at = at1.Min(at2);
             
-            context.OpStack.PopType(at.ToValType());
-            context.OpStack.PopType(at2.ToValType());
-            context.OpStack.PopType(at1.ToValType());
+            context.OpStack.PopType(at.ToValType());    // -1
+            context.OpStack.PopType(at2.ToValType());   // -2
+            context.OpStack.PopType(at1.ToValType());   // -3
         }
+        protected override int StackDiff => -3;
 
         // @Spec 4.4.6.6. table.copy
         public override void Execute(ExecContext context)
@@ -446,10 +449,11 @@ namespace Wacs.Core.Instructions
             var type = context.Tables[X];
             var at = type.Limits.AddressType;
             
-            context.OpStack.PopType(at.ToValType());
-            context.OpStack.PopType(type.ElementType);
-            context.OpStack.PushType(at.ToValType());
+            context.OpStack.PopType(at.ToValType());    // -1
+            context.OpStack.PopType(type.ElementType);  // -2
+            context.OpStack.PushType(at.ToValType());   // -1
         }
+        protected override int StackDiff => -1;
 
         // @Spec 4.4.6.4. table.grow x
         public override void Execute(ExecContext context)
@@ -514,8 +518,9 @@ namespace Wacs.Core.Instructions
                 "Instruction table.set failed to get table {0} from context",X);
             var table = context.Tables[X];
             var at = table.Limits.AddressType;
-            context.OpStack.PushType(at.ToValType());
+            context.OpStack.PushType(at.ToValType());   // +1
         }
+        protected override int StackDiff => +1;
 
         // @Spec 4.4.6.3. table.size x
         public override void Execute(ExecContext context)
@@ -561,10 +566,11 @@ namespace Wacs.Core.Instructions
                 "Instruction table.set failed to get table {0} from context",X);
             var type = context.Tables[X];
             var at = type.Limits.AddressType;
-            context.OpStack.PopType(at.ToValType());
-            context.OpStack.PopType(type.ElementType);
-            context.OpStack.PopType(at.ToValType());
+            context.OpStack.PopType(at.ToValType());    // -1
+            context.OpStack.PopType(type.ElementType);  // -2
+            context.OpStack.PopType(at.ToValType());    // -3
         }
+        protected override int StackDiff => -3;
 
         // @Spec 4.4.6.5. table.fill
         public override void Execute(ExecContext context)

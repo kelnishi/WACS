@@ -68,8 +68,8 @@ namespace Wacs.Core.Runtime.Types
             Module = module;
             DefType = type;
             Definition = definition;
-            SetBody(definition.Body);
-            
+            Body = definition.Body;
+            Body.LabelTarget.Label.Arity = Type.ResultType.Arity;
             Locals = definition.Locals;
             Index = definition.Index;
             
@@ -96,9 +96,6 @@ namespace Wacs.Core.Runtime.Types
         {
             Body = body;
             Body.LabelTarget.Label.Arity = Type.ResultType.Arity;
-            var stackCalc = Module.StackCalculator.HydrateFunction(Definition);
-            Body.PrecomputeLabels(stackCalc);
-            stackCalc.Dehydrate();
         }
 
         public void Invoke(ExecContext context)

@@ -23,7 +23,7 @@ namespace Wacs.Core.Instructions.Numeric
     public partial class NumericInst
     {
         public static readonly NumericInst V128AnyTrue = new(SimdCode.V128AnyTrue, ExecuteV128AnyTrue,
-            ValidateOperands(pop: ValType.V128, push: ValType.I32));
+            ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
 
         private static void ExecuteV128AnyTrue(ExecContext context)
         {

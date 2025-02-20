@@ -23,17 +23,17 @@ namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst
     {
-        public static readonly NumericInst I8x16Abs     = new (SimdCode.I8x16Abs     , ExecuteI8x16Abs    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8Abs     = new (SimdCode.I16x8Abs     , ExecuteI16x8Abs    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4Abs     = new (SimdCode.I32x4Abs     , ExecuteI32x4Abs    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I64x2Abs     = new (SimdCode.I64x2Abs     , ExecuteI64x2Abs    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I8x16Abs     = new (SimdCode.I8x16Abs     , ExecuteI8x16Abs    , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I16x8Abs     = new (SimdCode.I16x8Abs     , ExecuteI16x8Abs    , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I32x4Abs     = new (SimdCode.I32x4Abs     , ExecuteI32x4Abs    , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I64x2Abs     = new (SimdCode.I64x2Abs     , ExecuteI64x2Abs    , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        public static readonly NumericInst I8x16Neg     = new (SimdCode.I8x16Neg     , ExecuteI8x16Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8Neg     = new (SimdCode.I16x8Neg     , ExecuteI16x8Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4Neg     = new (SimdCode.I32x4Neg     , ExecuteI32x4Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I64x2Neg     = new (SimdCode.I64x2Neg     , ExecuteI64x2Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I8x16Neg     = new (SimdCode.I8x16Neg     , ExecuteI8x16Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I16x8Neg     = new (SimdCode.I16x8Neg     , ExecuteI16x8Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I32x4Neg     = new (SimdCode.I32x4Neg     , ExecuteI32x4Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I64x2Neg     = new (SimdCode.I64x2Neg     , ExecuteI64x2Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        public static readonly NumericInst I8x16Popcnt  = new (SimdCode.I8x16Popcnt  , ExecuteI8x16Popcnt , ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I8x16Popcnt  = new (SimdCode.I8x16Popcnt  , ExecuteI8x16Popcnt , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
         private static void ExecuteI8x16Abs(ExecContext context)
         {

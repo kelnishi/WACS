@@ -102,13 +102,16 @@ namespace Wacs.Core.Types
             for (int i = 0; i < seq.Count; ++i)
             {
                 var inst = seq._instructions[i];
+
                 inst.Validate(vContext);
+                int stackHeight = vContext.OpStack.Height;
 
                 switch (inst)
                 {
                     case InstElse instElse:
                         //The enclosingTarget is the InstIf, InstElse should have the same parent.
-                        instElse.EnclosingBlock = enclosingTarget.EnclosingBlock; break;
+                        instElse.EnclosingBlock = enclosingTarget.EnclosingBlock; 
+                        break;
                     case BlockTarget target:
                     {
                         target.EnclosingBlock = enclosingTarget;
@@ -128,11 +131,12 @@ namespace Wacs.Core.Types
                         {
                             throw new InvalidDataException($"Failure computing Labels. BlockType:{block.BlockType} did not exist in the Module");
                         }
-
+                        
                         var label = target.Label ?? new Label();
                         label.Arity = arity;
                         label.ContinuationAddress = i;
                         label.Instruction = inst.Op;
+                        // label.StackHeight = stackHeight;
                         //HACK: Use any existing precomputed StackHeight (assume optimization has not changed this value)
                         label.StackHeight = (target.Label?.StackHeight ?? -1) >= 0
                             ? target.Label!.StackHeight

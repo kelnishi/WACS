@@ -93,8 +93,9 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Globals.Contains(Index),
                 "Instruction global.get was invalid. Context Globals did not contain {0}",Index);
             var globalType = context.Globals[Index].Type;
-            context.OpStack.PushType(globalType.ContentType);
+            context.OpStack.PushType(globalType.ContentType); // +1
         }
+        protected override int StackDiff => +1;
 
         // @Spec 4.4.5.4. global.get
         public override void Execute(ExecContext context)
@@ -165,9 +166,9 @@ namespace Wacs.Core.Instructions
             var mut = global.Type.Mutability;
             context.Assert(mut == Mutability.Mutable,
                 "Instruction global.set was invalid. Trying to set immutable global {0}",Index);
-            context.OpStack.PopType(global.Type.ContentType);
-
+            context.OpStack.PopType(global.Type.ContentType); // -1
         }
+        protected override int StackDiff => -1;
 
         // @Spec 4.4.5.5. global.set
         public override void Execute(ExecContext context)

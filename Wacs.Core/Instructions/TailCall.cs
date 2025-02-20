@@ -73,6 +73,27 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushValues(aside);
             context.SetUnreachable();
         }
+        
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
+                $"Instruction call failed. Function address for {X} was not in the Context.");
+            var linkedX = context.Frame.Module.FuncAddrs[X];
+            var inst = context.Store[linkedX];
+            IsAsync = inst switch
+            {
+                FunctionInstance => false,
+                HostFunction hostFunction => hostFunction.IsAsync,
+                _ => IsAsync
+            };
+
+            var funcType = inst.Type;
+            context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
+            context.LinkOpStackHeight += funcType.ResultType.Arity;
+            
+            context.LinkUnreachable = true;
+            return this;
+        }
 
         // @Spec 4.4.8.10. call
         public override void Execute(ExecContext context)
@@ -239,6 +260,27 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopValues(context.ReturnType, ref aside);
             context.OpStack.PushValues(aside);
             context.SetUnreachable();
+        }
+        
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            context.Assert( context.Frame.Module.TableAddrs.Contains(X),
+                $"Instruction call_indirect failed. Table {X} was not in the Context.");
+            var ta = context.Frame.Module.TableAddrs[X];
+            context.Assert( context.Store.Contains(ta),
+                $"Instruction call_indirect failed. TableInstance {ta} was not in the Store.");
+            var tab = context.Store[ta];
+            context.Assert( context.Frame.Module.Types.Contains(Y),
+                $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
+            var ftExpect = context.Frame.Module.Types[Y];
+            var funcType = ftExpect.Expansion as FunctionType;
+            context.Assert(funcType,
+                $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
+            
+            context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
+            context.LinkOpStackHeight += funcType.ResultType.Arity;
+            
+            return this;
         }
 
         // @Spec 4.4.8.11. call_indirect
@@ -490,6 +532,15 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopValues(context.ReturnType, ref aside);
             context.OpStack.PushValues(aside);
             context.SetUnreachable();
+        }
+        
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
+            context.LinkOpStackHeight -= 1;
+            context.LinkOpStackHeight -= funcType!.ParameterTypes.Arity;
+            context.LinkOpStackHeight += funcType.ResultType.Arity;
+            return this;
         }
 
         public override void Execute(ExecContext context)

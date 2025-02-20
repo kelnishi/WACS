@@ -33,7 +33,8 @@ namespace Wacs.Core.Instructions.Simd
         /// <param name="context"></param>
         public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushV128(V128);
-
+        protected override int StackDiff => +1;
+        
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>

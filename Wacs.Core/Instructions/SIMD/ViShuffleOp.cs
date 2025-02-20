@@ -35,10 +35,11 @@ namespace Wacs.Core.Instructions
                     "Instruction {0} was invalid. Lane {1} ({2}) was >= 32.",Op.GetMnemonic(),i,X[(byte)i]);
             }
 
-            context.OpStack.PopV128();
-            context.OpStack.PopV128();
-            context.OpStack.PushV128();
+            context.OpStack.PopV128();  // -1
+            context.OpStack.PopV128();  // -2
+            context.OpStack.PushV128(); // -1
         }
+        protected override int StackDiff => -1;
 
         /// <summary>
         /// @Spec 4.4.3.7. i8x16.shuffle x

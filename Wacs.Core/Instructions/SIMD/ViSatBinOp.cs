@@ -23,15 +23,15 @@ namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst
     {
-        public static readonly NumericInst I8x16AddSatS = new(SimdCode.I8x16AddSatS, ExecuteI8x16AddSatS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I8x16AddSatU = new(SimdCode.I8x16AddSatU, ExecuteI8x16AddSatU, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8AddSatS = new(SimdCode.I16x8AddSatS, ExecuteI16x8AddSatS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8AddSatU = new(SimdCode.I16x8AddSatU, ExecuteI16x8AddSatU, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-
-        public static readonly NumericInst I8x16SubSatS = new(SimdCode.I8x16SubSatS, ExecuteI8x16SubSatS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I8x16SubSatU = new(SimdCode.I8x16SubSatU, ExecuteI8x16SubSatU, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8SubSatS = new(SimdCode.I16x8SubSatS, ExecuteI16x8SubSatS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8SubSatU = new(SimdCode.I16x8SubSatU, ExecuteI16x8SubSatU, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I8x16AddSatS = new(SimdCode.I8x16AddSatS, ExecuteI8x16AddSatS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst I8x16AddSatU = new(SimdCode.I8x16AddSatU, ExecuteI8x16AddSatU, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst I16x8AddSatS = new(SimdCode.I16x8AddSatS, ExecuteI16x8AddSatS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst I16x8AddSatU = new(SimdCode.I16x8AddSatU, ExecuteI16x8AddSatU, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        
+        public static readonly NumericInst I8x16SubSatS = new(SimdCode.I8x16SubSatS, ExecuteI8x16SubSatS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst I8x16SubSatU = new(SimdCode.I8x16SubSatU, ExecuteI8x16SubSatU, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst I16x8SubSatS = new(SimdCode.I16x8SubSatS, ExecuteI16x8SubSatS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst I16x8SubSatU = new(SimdCode.I16x8SubSatU, ExecuteI16x8SubSatU, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         //q15mulr_sat_s
 
