@@ -141,7 +141,8 @@ namespace Wacs.Core.Runtime.Types
             
             frame.SetLabel(Body.LabelTarget); 
             
-            context.EnterSequence(LinkedOffset);
+            // context.EnterSequence(LinkedOffset);
+            context.InstructionPointer = LinkedOffset - 1;
         }
 
         public override string ToString() => $"FunctionInstance[{Id}] (Type: {Type}, IsExport: {IsExport})";
