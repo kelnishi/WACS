@@ -57,7 +57,7 @@ namespace Wacs.Core.Instructions.Transpiler
 
         public int Count => ElseBlock.Length == 0 ? 1 : 2;
 
-        public int Size => 1 + IfBlock.Size + ElseBlock.Size;
+        public int BlockSize => 1 + IfBlock.Size + ElseBlock.Size;
         public Block GetBlock(int idx) => idx == 0 ? IfBlock : ElseBlock;
 
         // @Spec 3.3.8.5 if

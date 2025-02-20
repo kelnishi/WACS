@@ -36,7 +36,7 @@ namespace Wacs.Core.Instructions
         public override ByteCode Op => TryTableOp;
         public ValType BlockType => Block.BlockType;
         public int Count => 1;
-        public int Size => 1 + Block.Size;
+        public int BlockSize => 1 + Block.Size;
         public Block GetBlock(int idx) => Block;
         
         private static readonly ByteCode CatchOp = WacsCode.Catch;

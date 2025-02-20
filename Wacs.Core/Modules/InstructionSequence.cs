@@ -72,7 +72,7 @@ namespace Wacs.Core
                 for (int index = 0; index < Count; index++)
                 {
                     var inst = _instructions[index];
-                    sum += inst is IBlockInstruction blockInst ? blockInst.Size : 1;
+                    sum += inst is IBlockInstruction blockInst ? blockInst.BlockSize : 1;
                 }
                 return sum;
             }

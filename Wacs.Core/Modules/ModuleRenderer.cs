@@ -118,7 +118,7 @@ namespace Wacs.Core
                                     var inst = seq[i];
                                     if (inst is IBlockInstruction blockInstruction)
                                     {
-                                        line += blockInstruction.Size;
+                                        line += blockInstruction.BlockSize;
                                     }
                                     else
                                     {
