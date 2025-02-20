@@ -112,7 +112,6 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.3. block
         public override void Execute(ExecContext context)
         {
-            // context.EnterBlock(this);
             context.Frame.PushLabel(this);
         }
 
@@ -187,9 +186,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.4. loop
         public override void Execute(ExecContext context)
         {
-            if (Block.Instructions.Count != 0)
-                context.Frame.PushLabel(this);
-                // context.EnterBlock(this);
+            context.Frame.PushLabel(this);
         }
 
         /// <summary>
@@ -221,14 +218,12 @@ namespace Wacs.Core.Instructions
     }
 
     //0x04
-    public class InstIf : BlockTarget, IBlockInstruction
+    public class InstIf : BlockTarget, IBlockInstruction, IIfInstruction
     {
         private static readonly ByteCode IfOp = OpCode.If;
         
         private Block IfBlock = Block.Empty;
         private Block ElseBlock = Block.Empty;
-
-        public InstructionPointer Else = -1;
         
         public override ByteCode Op => IfOp;
 
@@ -286,12 +281,11 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
-            int c = context.OpStack.PopI32();
-            // context.EnterBlock(this);
             context.Frame.PushLabel(this);
+            int c = context.OpStack.PopI32();
             if (c == 0)
             {
-                context.EnterSequence(Else);
+                context.InstructionPointer = Else - 1;
             }
         }
         
@@ -351,27 +345,22 @@ namespace Wacs.Core.Instructions
         
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
-            var target = context.PopBlockInstruction();
-            switch (target)
-            {
-                case InstCompoundIf instCompoundIf:
-                    instCompoundIf.Else = pointer + 1;
-                    break;
-                case InstIf instIf:
-                    instIf.Else = pointer + 1;
-                    break;
-                default:
-                    throw new InstantiationException($"Else block instruction mismatched to {target}");
-            }
-            context.PushBlockInstruction(target);
-            context.PushBlockInstruction(this);
+            var target = context.PeekBlockInstruction();
+            target.Suboridinate = this;
+            
+            if (target is not IIfInstruction)
+                throw new InstantiationException($"Else block instruction mismatched to {target}");
+
+            target.Else = pointer + 1;
+            
             return this;
         }
         
         public override void Execute(ExecContext context)
         {
             //Just jump out of the If block
-            context.EnterSequence(End);
+            // context.EnterSequence(End);
+            context.InstructionPointer = End - 1;
         }
 
         public override InstructionBase Parse(BinaryReader reader)
@@ -400,20 +389,12 @@ namespace Wacs.Core.Instructions
         {
             var target = context.PopBlockInstruction();
             target.End = pointer;
-            switch (target)
-            {
-                case InstIf instIf:
-                    instIf.Else = pointer; 
-                    break;
-                case InstCompoundIf instCompoundIf:
-                    instCompoundIf.Else = pointer;
-                    break;
-                case InstElse:
-                    target = context.PopBlockInstruction();
-                    target.End = pointer;
-                    break;
-            }
+            if (target.Suboridinate != null)
+                target.Suboridinate.End = pointer;
 
+            if (target is IIfInstruction && target.Else < 0)
+                target.Else = pointer;
+            
             return this;
         }
 
@@ -427,7 +408,8 @@ namespace Wacs.Core.Instructions
                 case OpCode.Else:
                 case OpCode.Loop:
                 case OpCode.TryTable:
-                    context.ExitBlock();
+                    // context.ExitBlock();
+                    context.Frame.PopLabels(0);
                     break;
                 case OpCode.Func:
                 case OpCode.Call:
@@ -518,12 +500,10 @@ namespace Wacs.Core.Instructions
             //2.
             if (labelIndex.Value > 0)
             {
-                var topAddr = context.Frame.PopLabels((int)(labelIndex.Value - 1));
-                context.ResumeSequence(topAddr);
+                // var topAddr = 
+                context.Frame.PopLabels((int)(labelIndex.Value - 1));
+                // context.ResumeSequence(topAddr);
             }
-
-            if (context.Frame.TopLabel is null)
-                throw new WasmRuntimeException("WTF");
             
             var label = context.Frame.Label;
             //3,4.
@@ -552,12 +532,16 @@ namespace Wacs.Core.Instructions
             if (label.Instruction.x00 == OpCode.Loop)
             {
                 //loop targets the loop head
-                context.RewindSequence();
+                // context.RewindSequence();
+                // context.ResumeSequence(context.Frame.TopLabel.Head);
+                context.InstructionPointer = context.Frame.TopLabel.Head;
             }
             else
             {
                 //let InstEnd handle the continuation address and popping of the label
-                context.FastForwardSequence();
+                // context.FastForwardSequence();
+                // context.EnterSequence(context.Frame.TopLabel.End);
+                context.InstructionPointer = context.Frame.TopLabel.End - 1;
             }
         }
 

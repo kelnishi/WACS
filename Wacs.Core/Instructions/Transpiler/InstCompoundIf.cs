@@ -24,13 +24,11 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Transpiler
 {
-    public class InstCompoundIf : BlockTarget, IBlockInstruction
+    public class InstCompoundIf : BlockTarget, IBlockInstruction, IIfInstruction
     {
         private static readonly ByteCode IfOp = OpCode.If;
         private readonly Block IfBlock = Block.Empty;
         private readonly Block ElseBlock = Block.Empty;
-
-        public int Else = -1;
 
         private readonly Func<ExecContext, int> valueFunc;
 
@@ -105,12 +103,11 @@ namespace Wacs.Core.Instructions.Transpiler
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
-            int c = valueFunc(context);
-            // context.EnterBlock(this);
             context.Frame.PushLabel(this);
+            int c = valueFunc(context);
             if (c == 0)
             {
-                context.EnterSequence(Else);
+                context.InstructionPointer = Else - 1;
             }
         }
     }

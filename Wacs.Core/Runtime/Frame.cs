@@ -20,6 +20,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
@@ -110,8 +111,7 @@ namespace Wacs.Core.Runtime
             LabelCount = 1;
             // Label = ReturnLabel;
         }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        
         public void PushLabel(BlockTarget target)
         {
             TopLabel = target;
@@ -119,24 +119,19 @@ namespace Wacs.Core.Runtime
             // Label = TopLabel.Label;
         }
 
-        public InstructionPointer PopLabels(int idx)
+        public void PopLabels(int idx)
         {
             if (LabelCount <= idx + 1)
                 throw new InvalidDataException("Label Stack underflow");
 
             idx = LabelCount - (idx + 1);
-            BlockTarget oldLabel;
             do
             {
-                oldLabel = TopLabel;
+                if (TopLabel.LabelHeight != LabelCount)
+                    throw new WasmRuntimeException($"LabelHeight mismatch: toplabel {TopLabel.LabelHeight} vs count {LabelCount}");
+                
                 TopLabel = TopLabel.EnclosingBlock;
             } while (--LabelCount > idx);
-
-            // Label = LabelCount > 1
-            //     ? TopLabel.Label 
-            //     : ReturnLabel;
-
-            return oldLabel.End;
         }
 
         public IEnumerable<BlockTarget> EnumerateLabels()

@@ -103,7 +103,6 @@ namespace Wacs.Core.Instructions
 
         public override void Execute(ExecContext context)
         {
-            // context.EnterBlock(this);
             context.Frame.PushLabel(this);
         }
         
@@ -217,7 +216,9 @@ namespace Wacs.Core.Instructions
                 while (context.Frame.LabelCount > 1)
                 {
                     var blockTarget = context.Frame.TopLabel;
-                    context.ExitBlock();
+                    // context.ExitBlock();
+                    context.Frame.PopLabels(0);
+                    
                     if (blockTarget is InstTryTable tryTable)
                     {
                         foreach (var handler in tryTable.Catches)
