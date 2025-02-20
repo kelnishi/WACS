@@ -23,26 +23,26 @@ namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst 
     {
-        public static readonly NumericInst F32x4Abs     = new (SimdCode.F32x4Abs     , ExecuteF32x4Abs    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2Abs     = new (SimdCode.F64x2Abs     , ExecuteF64x2Abs    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst F32x4Abs     = new (SimdCode.F32x4Abs     , ExecuteF32x4Abs    , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst F64x2Abs     = new (SimdCode.F64x2Abs     , ExecuteF64x2Abs    , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        public static readonly NumericInst F32x4Neg     = new (SimdCode.F32x4Neg     , ExecuteF32x4Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2Neg     = new (SimdCode.F64x2Neg     , ExecuteF64x2Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst F32x4Neg     = new (SimdCode.F32x4Neg     , ExecuteF32x4Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst F64x2Neg     = new (SimdCode.F64x2Neg     , ExecuteF64x2Neg    , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        public static readonly NumericInst F32x4Sqrt    = new (SimdCode.F32x4Sqrt    , ExecuteF32x4Sqrt   , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2Sqrt    = new (SimdCode.F64x2Sqrt    , ExecuteF64x2Sqrt   , ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst F32x4Sqrt    = new (SimdCode.F32x4Sqrt    , ExecuteF32x4Sqrt   , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst F64x2Sqrt    = new (SimdCode.F64x2Sqrt    , ExecuteF64x2Sqrt   , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        public static readonly NumericInst F32x4Ceil    = new (SimdCode.F32x4Ceil    , ExecuteF32x4Ceil   , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2Ceil    = new (SimdCode.F64x2Ceil    , ExecuteF64x2Ceil   , ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst F32x4Ceil    = new (SimdCode.F32x4Ceil    , ExecuteF32x4Ceil   , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst F64x2Ceil    = new (SimdCode.F64x2Ceil    , ExecuteF64x2Ceil   , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        public static readonly NumericInst F32x4Floor   = new (SimdCode.F32x4Floor   , ExecuteF32x4Floor  , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2Floor   = new (SimdCode.F64x2Floor   , ExecuteF64x2Floor  , ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst F32x4Floor   = new (SimdCode.F32x4Floor   , ExecuteF32x4Floor  , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst F64x2Floor   = new (SimdCode.F64x2Floor   , ExecuteF64x2Floor  , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        public static readonly NumericInst F32x4Trunc   = new (SimdCode.F32x4Trunc   , ExecuteF32x4Trunc  , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2Trunc   = new (SimdCode.F64x2Trunc   , ExecuteF64x2Trunc  , ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst F32x4Trunc   = new (SimdCode.F32x4Trunc   , ExecuteF32x4Trunc  , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst F64x2Trunc   = new (SimdCode.F64x2Trunc   , ExecuteF64x2Trunc  , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        public static readonly NumericInst F32x4Nearest = new (SimdCode.F32x4Nearest , ExecuteF32x4Nearest, ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2Nearest = new (SimdCode.F64x2Nearest , ExecuteF64x2Nearest, ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst F32x4Nearest = new (SimdCode.F32x4Nearest , ExecuteF32x4Nearest, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst F64x2Nearest = new (SimdCode.F64x2Nearest , ExecuteF64x2Nearest, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
 
         private static void ExecuteF32x4Abs(ExecContext context)

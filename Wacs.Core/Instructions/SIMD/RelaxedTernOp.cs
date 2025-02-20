@@ -22,17 +22,17 @@ namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst
     {
-        public static readonly NumericInst I8x16RelaxedLaneselect = new(SimdCode.I8x16RelaxedLaneselect, ExecuteI8x16RelaxedLaneselect, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8RelaxedLaneselect = new(SimdCode.I16x8RelaxedLaneselect, ExecuteI16x8RelaxedLaneselect, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4RelaxedLaneselect = new(SimdCode.I32x4RelaxedLaneselect, ExecuteI32x4RelaxedLaneselect, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I64x2RelaxedLaneselect = new(SimdCode.I64x2RelaxedLaneselect, ExecuteI64x2RelaxedLaneselect, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I8x16RelaxedLaneselect = new(SimdCode.I8x16RelaxedLaneselect, ExecuteI8x16RelaxedLaneselect, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128), -2);
+        public static readonly NumericInst I16x8RelaxedLaneselect = new(SimdCode.I16x8RelaxedLaneselect, ExecuteI16x8RelaxedLaneselect, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128), -2);
+        public static readonly NumericInst I32x4RelaxedLaneselect = new(SimdCode.I32x4RelaxedLaneselect, ExecuteI32x4RelaxedLaneselect, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128), -2);
+        public static readonly NumericInst I64x2RelaxedLaneselect = new(SimdCode.I64x2RelaxedLaneselect, ExecuteI64x2RelaxedLaneselect, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128), -2);
 
-        public static readonly NumericInst F32x4RelaxedMAdd  = new(SimdCode.F32x4RelaxedMAdd , ExecuteF32x4RelaxedMAdd , ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F32x4RelaxedNMAdd = new(SimdCode.F32x4RelaxedNMAdd, ExecuteF32x4RelaxedNMAdd, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2RelaxedMAdd  = new(SimdCode.F64x2RelaxedMAdd , ExecuteF64x2RelaxedMAdd , ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2RelaxedNMAdd = new(SimdCode.F64x2RelaxedNMAdd, ExecuteF64x2RelaxedNMAdd, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst F32x4RelaxedMAdd  = new(SimdCode.F32x4RelaxedMAdd , ExecuteF32x4RelaxedMAdd , ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128), -2);
+        public static readonly NumericInst F32x4RelaxedNMAdd = new(SimdCode.F32x4RelaxedNMAdd, ExecuteF32x4RelaxedNMAdd, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128), -2);
+        public static readonly NumericInst F64x2RelaxedMAdd  = new(SimdCode.F64x2RelaxedMAdd , ExecuteF64x2RelaxedMAdd , ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128), -2);
+        public static readonly NumericInst F64x2RelaxedNMAdd = new(SimdCode.F64x2RelaxedNMAdd, ExecuteF64x2RelaxedNMAdd, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128), -2);
 
-        public static readonly NumericInst I32x4RelaxedDotI8x16I7x16AddS = new (SimdCode.I32x4RelaxedDotI8x16I7x16AddS, ExecuteI32x4RelaxedDotI8x16I7x16AddS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I32x4RelaxedDotI8x16I7x16AddS = new (SimdCode.I32x4RelaxedDotI8x16I7x16AddS, ExecuteI32x4RelaxedDotI8x16I7x16AddS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128), -2);
 
         private static byte BitSelect(byte i1, byte i2, byte i3)
         {

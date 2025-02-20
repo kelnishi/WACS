@@ -26,6 +26,8 @@ namespace Wacs.Core.Runtime
         public InstructionPointer ContinuationAddress;
         public ByteCode Instruction;
         public int StackHeight;
+        public int Parameters;
+        public int Results;
 
         public Label()
         {

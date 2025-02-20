@@ -24,7 +24,7 @@ namespace Wacs.Core.Instructions.Numeric
     public partial class NumericInst
     {
         public static readonly NumericInst V128Not = new(SimdCode.V128Not, ExecuteV128Not,
-            ValidateOperands(pop: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
         private static void ExecuteV128Not(ExecContext context)
         {

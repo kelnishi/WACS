@@ -138,6 +138,21 @@ namespace Wacs.Core.Instructions
             context.OpStack.DiscardValues(functionType.ParameterTypes);
             context.SetUnreachable();
         }
+        
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            var ta = context.Frame.Module.TagAddrs[X];
+            var ti = context.Store[ta];
+            var tagType = ti.Type;
+            var compType = tagType.Expansion;
+            var funcType = compType as FunctionType;
+            
+            context.LinkOpStackHeight -= funcType!.ParameterTypes.Arity;
+            context.LinkOpStackHeight += 1;
+            
+            context.LinkUnreachable = true;
+            return this;
+        }
 
         public override void Execute(ExecContext context)
         {
@@ -185,6 +200,12 @@ namespace Wacs.Core.Instructions
         {
             context.OpStack.PopType(ValType.Exn);
             context.SetUnreachable();
+        }
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            context.LinkOpStackHeight -= 1;
+            context.LinkUnreachable = true;
+            return this;
         }
 
         public override void Execute(ExecContext context)

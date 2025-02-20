@@ -66,7 +66,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         public override ByteCode Op { get; }
 
-        public override void Validate(IWasmValidationContext context) => _validate(context);
+        public override void Validate(IWasmValidationContext context) => _validate(context); // -1
+        protected override int StackDiff => -1;
 
         private static int ExecuteI32Eq(int i1, int i2) => i1 == i2 ? 1 : 0;
         private static int ExecuteI32Ne(int i1, int i2) => i1 != i2 ? 1 : 0;

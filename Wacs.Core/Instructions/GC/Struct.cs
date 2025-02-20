@@ -51,11 +51,22 @@ namespace Wacs.Core.Instructions.GC
 
             foreach (var ft in structType.FieldTypes.Reverse())
             {
-                context.OpStack.PopType(ft.UnpackType());
+                context.OpStack.PopType(ft.UnpackType());           // -N
             }
 
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);                   // -(N-1)
+        }
+        
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            //calculate N
+            var defType = context.Frame.Module.Types[X];
+            var compositeType = defType.Expansion;
+            var structType = compositeType as StructType;
+            
+            context.LinkOpStackHeight -= (structType.FieldTypes.Length-1);
+            return this;
         }
 
         public override void Execute(ExecContext context)
@@ -123,8 +134,9 @@ namespace Wacs.Core.Instructions.GC
                     "Instruction {0} was invalid. FieldType was not defaultable:{1}",Op.GetMnemonic(),ft);
             }
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);       // +1
         }
+        protected override int StackDiff => +1;
 
         public override void Execute(ExecContext context)
         {
@@ -201,8 +213,8 @@ namespace Wacs.Core.Instructions.GC
                 "Instruction {0} was invalid. Bad packing extension:{1}",Op.GetMnemonic(), Sx);
             
             var refType = ValType.NullableRef | (ValType)X;
-            context.OpStack.PopType(refType);
-            context.OpStack.PushType(t);
+            context.OpStack.PopType(refType);   // -1
+            context.OpStack.PushType(t);        // +0
         }
 
         public override void Execute(ExecContext context)
@@ -291,9 +303,10 @@ namespace Wacs.Core.Instructions.GC
             var t = fieldtype.UnpackType();
             var refType = ValType.NullableRef | (ValType)X;
 
-            context.OpStack.PopType(t);
-            context.OpStack.PopType(refType);
+            context.OpStack.PopType(t);         // -1
+            context.OpStack.PopType(refType);   // -2
         }
+        protected override int StackDiff => -2;
 
         public override void Execute(ExecContext context)
         {

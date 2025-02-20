@@ -50,18 +50,18 @@ namespace Wacs.Core.Instructions.GC
                 "Instruction {0} invalid. Cast type {1} did not match {2}.",Op.GetMnemonic(), Rt2, Rt1);
             context.Assert(Rt2.Matches(rtp, context.Types),
                 "Instruction {0} invalid. Cast type {1} did not match {2}.",Op.GetMnemonic(), Rt2, rtp);
-            context.OpStack.PopType(Rt1);
-            context.OpStack.PushType(Rt2);
+            context.OpStack.PopType(Rt1);                       // -1
+            context.OpStack.PushType(Rt2);                      // +0
             
             //Pop values like we branch
-            context.OpStack.DiscardValues(nthFrame.LabelTypes);
+            context.OpStack.DiscardValues(nthFrame.LabelTypes); // -N
             //But actually, we don't, so push them back on.
-            context.OpStack.PushResult(nthFrame.LabelTypes);
+            context.OpStack.PushResult(nthFrame.LabelTypes);    // +0
 
-            var rt2 = context.OpStack.PopAny();
+            var rt2 = context.OpStack.PopAny();           // -1
             var diffType = rt2.Type.AsDiff(Rt1, context.Types);
             
-            context.OpStack.PushType(diffType);
+            context.OpStack.PushType(diffType);                 // +0
         }
 
         public override void Execute(ExecContext context)
@@ -112,18 +112,18 @@ namespace Wacs.Core.Instructions.GC
                 "Instruction {0} invalid. Cast type {1} did not match {2}.",Op.GetMnemonic(), Rt2, Rt1);
             context.Assert(Rt2.Matches(rtp, context.Types),
                 "Instruction {0} invalid. Cast type {1} did not match {2}.",Op.GetMnemonic(), Rt2, rtp);
-            context.OpStack.PopType(Rt1);
+            context.OpStack.PopType(Rt1);                           // -1
             
             var diffType = Rt2.AsDiff(Rt1, context.Types);
-            context.OpStack.PushType(diffType);
+            context.OpStack.PushType(diffType);                     // +0
             
             //Pop values like we branch
-            context.OpStack.DiscardValues(nthFrame.LabelTypes);
+            context.OpStack.DiscardValues(nthFrame.LabelTypes);     // -N
             //But actually, we don't, so push them back on.
-            context.OpStack.PushResult(nthFrame.LabelTypes);
+            context.OpStack.PushResult(nthFrame.LabelTypes);        // +0
             
-            context.OpStack.PopAny();
-            context.OpStack.PushType(Rt2);
+            context.OpStack.PopAny();                               // -1
+            context.OpStack.PushType(Rt2);                          // +0
         }
 
         public override void Execute(ExecContext context)

@@ -44,7 +44,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         public Func<ExecContext, uint, uint> GetFunc => (_, i1) => _execute(i1);
 
-        public override void Validate(IWasmValidationContext context) => _validate(context);
+        public override void Validate(IWasmValidationContext context) => _validate(context); // +0
 
         public override void Execute(ExecContext context)
         {

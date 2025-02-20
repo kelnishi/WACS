@@ -24,16 +24,16 @@ namespace Wacs.Core.Instructions.Numeric
     public partial class NumericInst
     {
         public static readonly NumericInst V128And = new(SimdCode.V128And, ExecuteV128And,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst V128AndNot = new(SimdCode.V128AndNot, ExecuteV128AndNot,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst V128Or = new(SimdCode.V128Or, ExecuteV128Or,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst V128Xor = new(SimdCode.V128Xor, ExecuteV128Xor,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         private static void ExecuteV128And(ExecContext context)
         {

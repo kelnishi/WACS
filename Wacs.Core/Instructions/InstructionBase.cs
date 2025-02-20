@@ -36,7 +36,9 @@ namespace Wacs.Core.Instructions
         public bool IsAsync = false;
 
         public int PointerAdvance = 0;
-        
+
+        protected virtual int StackDiff { get; set; }
+
         public int Size = 1;
 
         /// <summary>
@@ -45,8 +47,12 @@ namespace Wacs.Core.Instructions
         public abstract ByteCode Op { get; }
 
         public abstract void Validate(IWasmValidationContext context);
-        public virtual InstructionBase Link(ExecContext context, InstructionPointer pointer) => this;
-        
+        public virtual InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            context.LinkOpStackHeight += StackDiff;
+            return this;
+        }
+
         /// <summary>
         /// Synchronously executes the instruction within the given execution context.
         /// </summary>

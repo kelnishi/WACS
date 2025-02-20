@@ -39,6 +39,7 @@ namespace Wacs.Core.Instructions.Numeric
         /// <param name="context"></param>
         public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushI32(Value);
+        protected override int StackDiff => +1;
 
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
@@ -77,6 +78,7 @@ namespace Wacs.Core.Instructions.Numeric
         /// <param name="context"></param>
         public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushI64(Value);
+        protected override int StackDiff => +1;
 
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
@@ -110,6 +112,7 @@ namespace Wacs.Core.Instructions.Numeric
         /// <param name="context"></param>
         public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushF32(Value);
+        protected override int StackDiff => +1;
 
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
@@ -151,7 +154,8 @@ namespace Wacs.Core.Instructions.Numeric
         /// <param name="context"></param>
         public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushF64(Value);
-
+        protected override int StackDiff => +1;
+        
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>

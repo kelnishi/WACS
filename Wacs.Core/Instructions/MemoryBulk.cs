@@ -42,8 +42,9 @@ namespace Wacs.Core.Instructions
                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),M);
             var mem = context.Mems[M];
             var at = mem.Limits.AddressType;
-            context.OpStack.PushType(at.ToValType());
+            context.OpStack.PushType(at.ToValType());   // +1
         }
+        protected override int StackDiff => +1;
 
         // @Spec 4.4.7.8. memory.size
         public override void Execute(ExecContext context)
@@ -85,8 +86,8 @@ namespace Wacs.Core.Instructions
                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),M);
             var mem = context.Mems[M];
             var at = mem.Limits.AddressType.ToValType();
-            context.OpStack.PopType(at);;
-            context.OpStack.PushType(at);
+            context.OpStack.PopType(at);    // -1
+            context.OpStack.PushType(at);   // +0
         }
 
         // @Spec 4.4.7.9. memory.grow
@@ -169,10 +170,12 @@ namespace Wacs.Core.Instructions
             var mem = context.Mems[Y];
             var at = mem.Limits.AddressType.ToValType();
             
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
-            context.OpStack.PopType(at);
+            context.OpStack.PopI32();       // -1
+            context.OpStack.PopI32();       // -2
+            context.OpStack.PopType(at);    // -3
         }
+        
+        protected override int StackDiff => -3;
 
         // @Spec 4.4.7.12. memory.init x
         public override void Execute(ExecContext context)
@@ -322,10 +325,11 @@ namespace Wacs.Core.Instructions
             var atD = memDstX.Limits.AddressType;
             var atN = atS.Min(atD);
             
-            context.OpStack.PopType(atN.ToValType());
-            context.OpStack.PopType(atD.ToValType());
-            context.OpStack.PopType(atS.ToValType());
+            context.OpStack.PopType(atN.ToValType());   // -1
+            context.OpStack.PopType(atD.ToValType());   // -2
+            context.OpStack.PopType(atS.ToValType());   // -3
         }
+        protected override int StackDiff => -3;
 
         // @Spec 4.4.7.11. memory.copy
         public override void Execute(ExecContext context)
@@ -417,10 +421,12 @@ namespace Wacs.Core.Instructions
             
             var mem = context.Mems[X];
             var at = mem.Limits.AddressType;
-            context.OpStack.PopType(at.ToValType());
-            context.OpStack.PopI32();
-            context.OpStack.PopType(at.ToValType());
+            context.OpStack.PopType(at.ToValType());    // -1
+            context.OpStack.PopI32();                   // -2  
+            context.OpStack.PopType(at.ToValType());    // -3
         }
+        
+        protected override int StackDiff => -3;
 
         // @Spec 4.4.7.10. memory.fill
         public override void Execute(ExecContext context)

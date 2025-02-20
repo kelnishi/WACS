@@ -74,8 +74,9 @@ namespace Wacs.Core.Instructions
             context.Assert(value.Data.Set,
                 "Instruction local.get was invalid. The non-defaultable local variable at index {0} was unset", Index.Value);
             
-            context.OpStack.PushType(value.Type);
+            context.OpStack.PushType(value.Type);   // +1
         }
+        protected override int StackDiff => +1;
 
         public override void Execute(ExecContext context)
         {
@@ -130,8 +131,9 @@ namespace Wacs.Core.Instructions
                 "Instruction local.set was invalid. Context Locals did not contain {0}",Index);
             context.Locals.Data[Index.Value].Data.Set = true;
             var value = context.Locals.Get(Index);
-            context.OpStack.PopType(value.Type);
+            context.OpStack.PopType(value.Type);    // -1
         }
+        protected override int StackDiff => -1;
 
         // @Spec 4.4.5.2. local.set
         public override void Execute(ExecContext context)
@@ -199,10 +201,10 @@ namespace Wacs.Core.Instructions
                 "Instruction local.tee was invalid. Context Locals did not contain {0}",Index);
             context.Locals.Data[Index.Value].Data.Set = true;
             var value = context.Locals.Get(Index);
-            context.OpStack.PopType(value.Type);
-            context.OpStack.PushType(value.Type);
-            context.OpStack.PushType(value.Type);
-            context.OpStack.PopType(value.Type);
+            context.OpStack.PopType(value.Type);    // -1
+            context.OpStack.PushType(value.Type);   // +0
+            context.OpStack.PushType(value.Type);   // +1
+            context.OpStack.PopType(value.Type);    // +0
         }
 
         // @Spec 4.4.5.3. local.tee

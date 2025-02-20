@@ -31,11 +31,11 @@ namespace Wacs.Core.Instructions.Numeric
 
         private readonly ValidationDelegate _validate;
 
-        private NumericInst(ByteCode op, ExecuteDelegate execute, ValidationDelegate validate, bool isConst = false) =>
-            (Op, _execute, _validate, IsConstant) = (op, execute, validate, isConst);
+        private NumericInst(ByteCode op, ExecuteDelegate execute, ValidationDelegate validate, int stackDiff, bool isConst = false) =>
+            (Op, _execute, _validate, StackDiff, IsConstant) = (op, execute, validate, stackDiff, isConst);
 
         public override ByteCode Op { get; }
-
+        
         public bool IsConstant { get; }
 
         public override void Validate(IWasmValidationContext context) => _validate(context);

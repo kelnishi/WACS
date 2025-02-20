@@ -25,13 +25,13 @@ namespace Wacs.Core.Instructions.Numeric
     // @Spec https://github.com/WebAssembly/relaxed-simd/blob/main/proposals/relaxed-simd/Overview.md
     public partial class NumericInst
     {
-        public static readonly NumericInst I8x16RelaxedSwizzle = new(SimdCode.I8x16RelaxedSwizzle, ExecuteI8x16RelaxedSwizzle, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F32x4RelaxedMin = new(SimdCode.F32x4RelaxedMin, ExecuteF32x4RelaxedMin, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F32x4RelaxedMax = new(SimdCode.F32x4RelaxedMax, ExecuteF32x4RelaxedMax, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2RelaxedMin = new(SimdCode.F64x2RelaxedMin, ExecuteF64x2RelaxedMin, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2RelaxedMax = new(SimdCode.F64x2RelaxedMax, ExecuteF64x2RelaxedMax, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8RelaxedQ15MulrS = new(SimdCode.I16x8RelaxedQ15MulrS, ExecuteI16x8RelaxedQ15MulrS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8RelaxedDotI8x16I7x16S = new (SimdCode.I16x8RelaxedDotI8x16I7x16S, ExecuteI16x8RelaxedDotI8x16I7x16S, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I8x16RelaxedSwizzle = new(SimdCode.I8x16RelaxedSwizzle, ExecuteI8x16RelaxedSwizzle, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F32x4RelaxedMin = new(SimdCode.F32x4RelaxedMin, ExecuteF32x4RelaxedMin, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F32x4RelaxedMax = new(SimdCode.F32x4RelaxedMax, ExecuteF32x4RelaxedMax, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F64x2RelaxedMin = new(SimdCode.F64x2RelaxedMin, ExecuteF64x2RelaxedMin, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F64x2RelaxedMax = new(SimdCode.F64x2RelaxedMax, ExecuteF64x2RelaxedMax, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst I16x8RelaxedQ15MulrS = new(SimdCode.I16x8RelaxedQ15MulrS, ExecuteI16x8RelaxedQ15MulrS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst I16x8RelaxedDotI8x16I7x16S = new (SimdCode.I16x8RelaxedDotI8x16I7x16S, ExecuteI16x8RelaxedDotI8x16I7x16S, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         private static void ExecuteI8x16RelaxedSwizzle(ExecContext context)
         {

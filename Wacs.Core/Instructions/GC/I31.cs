@@ -34,8 +34,8 @@ namespace Wacs.Core.Instructions.GC
         /// <param name="context"></param>
         public override void Validate(IWasmValidationContext context)
         {
-            context.OpStack.PopI32();
-            context.OpStack.PushType(ValType.I31NN);
+            context.OpStack.PopI32();                   // -1
+            context.OpStack.PushType(ValType.I31NN);    // +0
         }
         
         private const int SignBit31 = 0x4000_0000;
@@ -72,8 +72,8 @@ namespace Wacs.Core.Instructions.GC
         public override ByteCode Op => GcCode.I31GetS;
         public override void Validate(IWasmValidationContext context)
         {
-            context.OpStack.PopType(ValType.I31);
-            context.OpStack.PushI32();
+            context.OpStack.PopType(ValType.I31);   // -1
+            context.OpStack.PushI32();              // +0
         }
 
         public override void Execute(ExecContext context)
@@ -105,8 +105,8 @@ namespace Wacs.Core.Instructions.GC
         public override ByteCode Op => GcCode.I31GetU;
         public override void Validate(IWasmValidationContext context)
         {
-            context.OpStack.PopType(ValType.I31);
-            context.OpStack.PushI32();
+            context.OpStack.PopType(ValType.I31);   // -1
+            context.OpStack.PushI32();              // +0
         }
 
         public override void Execute(ExecContext context)

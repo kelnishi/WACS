@@ -23,10 +23,10 @@ namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst
     {
-        public static readonly NumericInst I32x4RelaxedTruncF32x4S = new(SimdCode.I32x4RelaxedTruncF32x4S, ExecuteI32x4RelaxedTruncF32x4S, ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4RelaxedTruncF32x4U = new(SimdCode.I32x4RelaxedTruncF32x4U, ExecuteI32x4RelaxedTruncF32x4S, ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4RelaxedTruncF64x2SZero = new (SimdCode.I32x4RelaxedTruncF64x2SZero, ExecuteI32x4RelaxedTruncF64x2SZero, ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4RelaxedTruncF64x2UZero = new (SimdCode.I32x4RelaxedTruncF64x2UZero, ExecuteI32x4RelaxedTruncF64x2UZero, ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I32x4RelaxedTruncF32x4S = new(SimdCode.I32x4RelaxedTruncF32x4S, ExecuteI32x4RelaxedTruncF32x4S, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I32x4RelaxedTruncF32x4U = new(SimdCode.I32x4RelaxedTruncF32x4U, ExecuteI32x4RelaxedTruncF32x4S, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I32x4RelaxedTruncF64x2SZero = new (SimdCode.I32x4RelaxedTruncF64x2SZero, ExecuteI32x4RelaxedTruncF64x2SZero, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I32x4RelaxedTruncF64x2UZero = new (SimdCode.I32x4RelaxedTruncF64x2UZero, ExecuteI32x4RelaxedTruncF64x2UZero, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
         private static void ExecuteI32x4RelaxedTruncF32x4S(ExecContext context)
         {
