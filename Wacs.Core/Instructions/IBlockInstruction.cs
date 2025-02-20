@@ -27,7 +27,7 @@ namespace Wacs.Core.Instructions
     /// </summary>
     public interface IBlockInstruction
     {
-        public int Size { get; }
+        public int BlockSize { get; }
 
         public ValType BlockType { get; }
 

@@ -80,7 +80,7 @@ namespace Wacs.Core.Instructions
 
         public int Count => 1;
 
-        public int Size => 1 + Block.Size;
+        public int BlockSize => 1 + Block.Size;
         public Block GetBlock(int idx) => Block;
 
         // @Spec 3.3.8.3 block
@@ -155,7 +155,7 @@ namespace Wacs.Core.Instructions
 
         public int Count => 1;
 
-        public int Size => 1 + Block.Size;
+        public int BlockSize => 1 + Block.Size;
         public Block GetBlock(int idx) => Block;
 
         // @Spec 3.3.8.4. loop
@@ -237,7 +237,7 @@ namespace Wacs.Core.Instructions
 
         public int Count => ElseBlock.Length == 0 ? 1 : 2;
 
-        public int Size => 1 + IfBlock.Size + ElseBlock.Size;
+        public int BlockSize => 1 + IfBlock.Size + ElseBlock.Size;
         public Block GetBlock(int idx) => idx == 0 ? IfBlock : ElseBlock;
 
         // @Spec 3.3.8.5 if
