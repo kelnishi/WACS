@@ -59,7 +59,10 @@ namespace Wacs.Core.Runtime
 
         public readonly Store Store;
 
-        private Stack<BlockTarget> linkStack = new();
+        private readonly Stack<BlockTarget> _linkLabelStack = new();
+        public int LinkOpStackHeight;
+        public bool LinkUnreachable;
+        
         private InstructionSequence linkedInstructions = new();
         public InstructionBase[] _currentSequence;
         // public int _sequenceCount;
@@ -228,13 +231,15 @@ namespace Wacs.Core.Runtime
         //     ResumeSequence(Frame.TopLabel.Head);
         // }
 
-        public int BlockInstructionHeight => linkStack.Count;
+        public int LabelHeight => _linkLabelStack.Count;
 
-        public void PushBlockInstruction(BlockTarget inst) => linkStack.Push(inst);
+        public void ClearLinkLabels() => _linkLabelStack.Clear();
+        
+        public void PushLabel(BlockTarget inst) => _linkLabelStack.Push(inst);
 
-        public BlockTarget PopBlockInstruction() => linkStack.Pop();
+        public BlockTarget PopLabel() => _linkLabelStack.Pop();
 
-        public BlockTarget PeekBlockInstruction() => linkStack.Peek();
+        public BlockTarget PeekLabel() => _linkLabelStack.Peek();
 
         // // @Spec 4.4.9.1. Enter Block
         // public void EnterBlock(BlockTarget target)
@@ -442,12 +447,14 @@ namespace Wacs.Core.Runtime
         {
             InstructionPointer offset = linkedInstructions.Count;
             instance.LinkedOffset = offset;
-            var exprHead = new InstExpressionProxy(new Label
+
+            LinkOpStackHeight = 0;
+            ClearLinkLabels();
+            PushLabel(new InstExpressionProxy(new Label
             {
                 Instruction = OpCode.Func,
                 StackHeight = 0,
-            });
-            linkStack.Push(exprHead);
+            }));
             
             linkedInstructions.Append(
                 instance.Body

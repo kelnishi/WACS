@@ -23,23 +23,23 @@ namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst
     {
-        public static readonly NumericInst F32x4Add = new (SimdCode.F32x4Add, ExecuteF32x4Add, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F32x4Sub = new (SimdCode.F32x4Sub, ExecuteF32x4Sub, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F32x4Mul = new (SimdCode.F32x4Mul, ExecuteF32x4Mul, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F32x4Div = new (SimdCode.F32x4Div, ExecuteF32x4Div, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F32x4Min = new (SimdCode.F32x4Min, ExecuteF32x4Min, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F32x4Max = new (SimdCode.F32x4Max, ExecuteF32x4Max, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F32x4PMin = new (SimdCode.F32x4PMin, ExecuteF32x4PMin, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F32x4PMax = new (SimdCode.F32x4PMax, ExecuteF32x4PMax, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst F32x4Add = new (SimdCode.F32x4Add, ExecuteF32x4Add, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F32x4Sub = new (SimdCode.F32x4Sub, ExecuteF32x4Sub, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F32x4Mul = new (SimdCode.F32x4Mul, ExecuteF32x4Mul, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F32x4Div = new (SimdCode.F32x4Div, ExecuteF32x4Div, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F32x4Min = new (SimdCode.F32x4Min, ExecuteF32x4Min, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F32x4Max = new (SimdCode.F32x4Max, ExecuteF32x4Max, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F32x4PMin = new (SimdCode.F32x4PMin, ExecuteF32x4PMin, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F32x4PMax = new (SimdCode.F32x4PMax, ExecuteF32x4PMax, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
-        public static readonly NumericInst F64x2Add = new (SimdCode.F64x2Add, ExecuteF64x2Add, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2Sub = new (SimdCode.F64x2Sub, ExecuteF64x2Sub, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2Mul = new (SimdCode.F64x2Mul, ExecuteF64x2Mul, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2Div = new (SimdCode.F64x2Div, ExecuteF64x2Div, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2Min = new (SimdCode.F64x2Min, ExecuteF64x2Min, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2Max = new (SimdCode.F64x2Max, ExecuteF64x2Max, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2PMin = new (SimdCode.F64x2PMin, ExecuteF64x2PMin, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst F64x2PMax = new (SimdCode.F64x2PMax, ExecuteF64x2PMax, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst F64x2Add = new (SimdCode.F64x2Add, ExecuteF64x2Add, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F64x2Sub = new (SimdCode.F64x2Sub, ExecuteF64x2Sub, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F64x2Mul = new (SimdCode.F64x2Mul, ExecuteF64x2Mul, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F64x2Div = new (SimdCode.F64x2Div, ExecuteF64x2Div, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F64x2Min = new (SimdCode.F64x2Min, ExecuteF64x2Min, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F64x2Max = new (SimdCode.F64x2Max, ExecuteF64x2Max, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F64x2PMin = new (SimdCode.F64x2PMin, ExecuteF64x2PMin, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst F64x2PMax = new (SimdCode.F64x2PMax, ExecuteF64x2PMax, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         private static void ExecuteF32x4Add(ExecContext context)
         {

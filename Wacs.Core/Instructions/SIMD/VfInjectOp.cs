@@ -23,8 +23,8 @@ namespace Wacs.Core.Instructions.Numeric
     // VvBinOps - Bit-wise Logical Operators
     public partial class NumericInst
     {
-        public static readonly NumericInst F32x4Splat = new(SimdCode.F32x4Splat, ExecuteF32x4Splat, ValidateOperands(pop: ValType.F32, push: ValType.V128));
-        public static readonly NumericInst F64x2Splat = new(SimdCode.F64x2Splat, ExecuteF64x2Splat, ValidateOperands(pop: ValType.F64, push: ValType.V128));
+        public static readonly NumericInst F32x4Splat = new(SimdCode.F32x4Splat, ExecuteF32x4Splat, ValidateOperands(pop: ValType.F32, push: ValType.V128), 0);
+        public static readonly NumericInst F64x2Splat = new(SimdCode.F64x2Splat, ExecuteF64x2Splat, ValidateOperands(pop: ValType.F64, push: ValType.V128), 0);
 
         private static void ExecuteF32x4Splat(ExecContext context)
         {

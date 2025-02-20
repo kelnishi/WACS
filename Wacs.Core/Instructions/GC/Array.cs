@@ -45,13 +45,14 @@ namespace Wacs.Core.Instructions.GC
 
             var t = arrayType.ElementType.UnpackType();
 
-            context.OpStack.PopI32();
-            context.OpStack.PopType(t);
+            context.OpStack.PopI32();               // -1
+            context.OpStack.PopType(t);             // -2
             
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);   // -1
         }
-
+        protected override int StackDiff => -1;
+        
         public override void Execute(ExecContext context)
         {
             //1
@@ -117,11 +118,11 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(ft.StorageType.IsDefaultable(),
                 "Instruction {0} was invalid. FieldType was not defaultable:{1}",Op.GetMnemonic(),ft);
             
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();                   // -1
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);       // +0
         }
-
+        
         public override void Execute(ExecContext context)
         {
             //2
@@ -174,13 +175,14 @@ namespace Wacs.Core.Instructions.GC
 
             for (int i = 0; i < N; ++i)
             {
-                context.OpStack.PopType(t);
+                context.OpStack.PopType(t);         // -N
             }
             
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);   // -(N-1)
         }
-
+        protected override int StackDiff => -((int)N-1);
+        
         public override void Execute(ExecContext context)
         {
             //2
@@ -245,12 +247,13 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(context.Datas.Contains(Y),
                 "Instruction {0} was invalid. Data {1} was not in the Context.",Op.GetMnemonic(), Y);
             
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();               // -1
+            context.OpStack.PopI32();               // -2
             
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);   // -1
         }
+        protected override int StackDiff => -1;
 
         public override void Execute(ExecContext context)
         {
@@ -356,12 +359,13 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(rtp.Matches(rt, context.Types),
                 "Instruction {0} was invalid. ElementType {1} does not match FieldType {2}",Op.GetMnemonic(), rtp, rt);
             
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();               // -1
+            context.OpStack.PopI32();               // -2
             
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);   // -1
         }
+        protected override int StackDiff => -1;
 
         public override void Execute(ExecContext context)
         {
@@ -451,11 +455,12 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(fieldType.ValidExtension(Sx),
                 "Instruction {0} was invalid. Bad packing extension:{1}",Op.GetMnemonic(), Sx);
             
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();                           // -1
             var refType = ValType.NullableRef | (ValType)X;
-            context.OpStack.PopType(refType);
-            context.OpStack.PushType(t);
+            context.OpStack.PopType(refType);                   // -2
+            context.OpStack.PushType(t);                        // -1
         }
+        protected override int StackDiff => -1;
 
         public override void Execute(ExecContext context)
         {
@@ -544,10 +549,11 @@ namespace Wacs.Core.Instructions.GC
             var t = fieldType.UnpackType();
             var refType = ValType.NullableRef | (ValType)X;
 
-            context.OpStack.PopType(t);
-            context.OpStack.PopI32();
-            context.OpStack.PopType(refType);
+            context.OpStack.PopType(t);         // -1
+            context.OpStack.PopI32();           // -2
+            context.OpStack.PopType(refType);   // -3
         }
+        protected override int StackDiff => -3;
 
         public override void Execute(ExecContext context)
         {
@@ -609,12 +615,12 @@ namespace Wacs.Core.Instructions.GC
         public override ByteCode Op => GcCode.ArrayLen;
         public override void Validate(IWasmValidationContext context)
         {
-            var rt = context.OpStack.PopRefType();
+            var rt = context.OpStack.PopRefType();  // -1
             context.Assert(rt.Type.Matches(ValType.Array, context.Types),
                 "Instruction {0} was invalid. Wrong operand type at top of stack:{1}", Op.GetMnemonic(), rt.Type);
-            context.OpStack.PushI32();
+            context.OpStack.PushI32();                    // +0  
         }
-
+        
         public override void Execute(ExecContext context)
         {
             //1
@@ -661,12 +667,13 @@ namespace Wacs.Core.Instructions.GC
             var t = fieldType.UnpackType();
             var refType = ValType.NullableRef | (ValType)X;
 
-            context.OpStack.PopI32();
-            context.OpStack.PopType(t);
-            context.OpStack.PopI32();
-            context.OpStack.PopType(refType);
+            context.OpStack.PopI32();           // -1
+            context.OpStack.PopType(t);         // -2
+            context.OpStack.PopI32();           // -3
+            context.OpStack.PopType(refType);   // -4
             
         }
+        protected override int StackDiff => -4;
 
         public override void Execute(ExecContext context)
         {
@@ -754,12 +761,13 @@ namespace Wacs.Core.Instructions.GC
             var refTypeX = ValType.NullableRef | (ValType)X;
             var refTypeY = ValType.NullableRef | (ValType)Y;
 
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
-            context.OpStack.PopType(refTypeY);
-            context.OpStack.PopI32();
-            context.OpStack.PopType(refTypeX);
+            context.OpStack.PopI32();           // -1
+            context.OpStack.PopI32();           // -2
+            context.OpStack.PopType(refTypeY);  // -3
+            context.OpStack.PopI32();           // -4
+            context.OpStack.PopType(refTypeX);  // -5
         }
+        protected override int StackDiff => -5;
 
         public override void Execute(ExecContext context)
         {
@@ -876,12 +884,13 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(context.Datas.Contains(Y),
                 "Instruction {0} was invalid. Data {1} was not in the Context.",Op.GetMnemonic(), Y);
             
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();               // -1
+            context.OpStack.PopI32();               // -2
+            context.OpStack.PopI32();               // -3
             var resultType = ValType.NullableRef | (ValType)X;
-            context.OpStack.PopType(resultType);
+            context.OpStack.PopType(resultType);    // -4
         }
+        protected override int StackDiff => -4;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_dataxy①
@@ -1010,13 +1019,14 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(rtp.Matches(rt, context.Types),
                 "Instruction {0} was invalid. ElementType {1} does not match FieldType {2}",Op.GetMnemonic(), rtp, rt);
             
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();               // -1
+            context.OpStack.PopI32();               // -2
+            context.OpStack.PopI32();               // -3
             
             var resultType = ValType.NullableRef | (ValType)X;
-            context.OpStack.PopType(resultType);
+            context.OpStack.PopType(resultType);    // -4
         }
+        protected override int StackDiff => -4;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_elemxy①

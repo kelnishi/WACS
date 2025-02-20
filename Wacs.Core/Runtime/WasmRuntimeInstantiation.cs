@@ -487,8 +487,8 @@ namespace Wacs.Core.Runtime
                 var instance = Store[funcAddr];
                 if (instance is FunctionInstance functionInstance)
                 {
-                    if (functionInstance.Module != moduleInstance) continue;
-                    
+                    if (functionInstance.Module != moduleInstance) 
+                        continue;
                     Context.LinkFunction(functionInstance);
                 }
             }

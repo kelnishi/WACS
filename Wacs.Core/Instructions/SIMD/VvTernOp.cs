@@ -24,7 +24,7 @@ namespace Wacs.Core.Instructions.Numeric
     {
         // New entry for the V128BitSelect operation
         public static readonly NumericInst V128BitSelect = new(SimdCode.V128BitSelect, ExecuteV128BitSelect,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, pop3: ValType.V128, push: ValType.V128), -2);
 
         /// <summary>
         /// @Spec 4.3.2.35. ibitselect

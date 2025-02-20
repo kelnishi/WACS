@@ -14,8 +14,11 @@
 //  * limitations under the License.
 //  */
 
+using System;
+using System.IO;
 using System.Net.Mime;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 
@@ -53,10 +56,57 @@ namespace Wacs.Core.Instructions
         
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
+            base.Link(context, pointer);
+            
             Head = pointer;
+            EnclosingBlock = context.PeekLabel();
+            
+            var blockInst = this as IBlockInstruction;
+            var block = blockInst!.GetBlock(0);
+            
+            if (!context.LinkUnreachable && context.LinkOpStackHeight < 0)
+                throw new WasmRuntimeException($"bad stack calculation:{context.LinkOpStackHeight}");
+            
+            var label = new Label
+            {
+                ContinuationAddress = pointer,
+                Instruction = Op,
+                StackHeight = context.LinkOpStackHeight
+            };
+            
+            try
+            {
+                var funcType = context.Frame.Module.Types.ResolveBlockType(block.BlockType);
+                if (funcType == null)
+                    throw new IndexOutOfRangeException($"Could not resolve type for block instruction {this}");
+                
+                label.Arity = this is InstLoop ? funcType.ParameterTypes.Arity : funcType.ResultType.Arity;
+                label.Parameters = funcType.ParameterTypes.Arity;
+                label.Results = funcType.ResultType.Arity;
+            }
+            catch (IndexOutOfRangeException)
+            {
+                throw new InvalidDataException($"Failure computing Labels. BlockType:{block.BlockType} did not exist in the Module");
+            }
+            
+            Label = label;
+            
             //Push this onto a stack in the context so we can address the End instructions
-            context.PushBlockInstruction(this);
-            LabelHeight = context.BlockInstructionHeight;
+            context.PushLabel(this);
+            LabelHeight = context.LabelHeight;
+
+            switch (this)
+            {
+                case InstBlock:
+                    //TODO: Set this when we remove the labelstack entirely.
+                    // We'll need to:
+                    //  1) compute branch targets
+                    //  2) implement block traversal for exception handling 
+                    //
+                    // PointerAdvance = 1;
+                    break;
+            }
+            
             return this;
         }
     }
