@@ -420,7 +420,7 @@ namespace Wacs.Core.Runtime
 
         public OpCode GetEndFor()
         {
-            if (Frame.LabelCount == 1 && Frame.Label.Instruction.x00 == OpCode.Func)
+            if (Frame.TopLabel.Label.Instruction.x00 == OpCode.Func)
                 return OpCode.Func;    
             return OpCode.Block;
         }

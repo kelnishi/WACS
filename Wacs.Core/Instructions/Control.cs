@@ -139,7 +139,7 @@ namespace Wacs.Core.Instructions
         public override string RenderText(ExecContext? context)
         {
             if (context == null || !context.Attributes.Live) return base.RenderText(context);
-            return $"{base.RenderText(context)}  ;; label = @{context.Frame.LabelCount}";
+            return $"{base.RenderText(context)}  ;; label = @{context.Frame.TopLabel.LabelHeight}";
         }
     }
 
@@ -213,7 +213,7 @@ namespace Wacs.Core.Instructions
         public override string RenderText(ExecContext? context)
         {
             if (context == null || !context.Attributes.Live) return base.RenderText(context);
-            return $"{base.RenderText(context)}  ;; label = @{context.Frame.LabelCount}";
+            return $"{base.RenderText(context)}  ;; label = @{context.Frame.TopLabel.LabelHeight}";
         }
     }
 
@@ -408,7 +408,6 @@ namespace Wacs.Core.Instructions
                 case OpCode.Else:
                 case OpCode.Loop:
                 case OpCode.TryTable:
-                    // context.ExitBlock();
                     context.Frame.PopLabels(0);
                     break;
                 case OpCode.Func:
@@ -433,9 +432,9 @@ namespace Wacs.Core.Instructions
                 case OpCode.Block:
                 case OpCode.If:
                 case OpCode.Else:
-                    return $"{base.RenderText(context)} (;B/@{context.Frame.LabelCount-1};)";
+                    return $"{base.RenderText(context)} (;B/@{context.Frame.TopLabel.LabelHeight-1};)";
                 case OpCode.Loop:
-                    return $"{base.RenderText(context)} (;L/@{context.Frame.LabelCount-1};)";
+                    return $"{base.RenderText(context)} (;L/@{context.Frame.TopLabel.LabelHeight-1};)";
                 case OpCode.Func:
                 case OpCode.Call:
                     var funcAddr = context.Frame.Module.FuncAddrs[context.Frame.Index];
@@ -457,7 +456,7 @@ namespace Wacs.Core.Instructions
                         }
                         sb.Append("]");
                     }
-                    return $"{base.RenderText(context)} (;f/@{context.Frame.LabelCount-1} <- {funcName}{sb};)";
+                    return $"{base.RenderText(context)} (;f/@{context.Frame.TopLabel.LabelHeight-1} <- {funcName}{sb};)";
                 default:
                     return $"{base.RenderText(context)}";
             }
@@ -495,7 +494,7 @@ namespace Wacs.Core.Instructions
         public static void ExecuteInstruction(ExecContext context, LabelIdx labelIndex)
         {
             //1.
-            context.Assert( context.Frame.LabelCount > (int)labelIndex.Value,
+            context.Assert( context.Frame.TopLabel.LabelHeight > (int)labelIndex.Value,
                 $"Instruction br failed. Context did not contain Label {labelIndex}");
             //2.
             if (labelIndex.Value > 0)
@@ -532,15 +531,11 @@ namespace Wacs.Core.Instructions
             if (label.Instruction.x00 == OpCode.Loop)
             {
                 //loop targets the loop head
-                // context.RewindSequence();
-                // context.ResumeSequence(context.Frame.TopLabel.Head);
                 context.InstructionPointer = context.Frame.TopLabel.Head;
             }
             else
             {
-                //let InstEnd handle the continuation address and popping of the label
-                // context.FastForwardSequence();
-                // context.EnterSequence(context.Frame.TopLabel.End);
+                //otherwise, go to the end
                 context.InstructionPointer = context.Frame.TopLabel.End - 1;
             }
         }
@@ -557,7 +552,7 @@ namespace Wacs.Core.Instructions
         public override string RenderText(ExecContext? context)
         {
             if (context == null) return $"{base.RenderText(context)} {L.Value}";
-            int depth = context.Frame.LabelCount - 1;
+            int depth = context.Frame.TopLabel.LabelHeight - 1;
             return $"{base.RenderText(context)} {L.Value} (;@{depth - L.Value};)";
         }
     }
@@ -615,7 +610,7 @@ namespace Wacs.Core.Instructions
         {
             if (context == null) return $"{base.RenderText(context)} {L.Value}";
             
-            int depth = context.Frame.LabelCount - 1;
+            int depth = context.Frame.TopLabel.LabelHeight - 1;
             string taken = "";
             if (context.Attributes.Live)
             {
@@ -708,7 +703,7 @@ namespace Wacs.Core.Instructions
         {
             if (context==null)
                 return $"{base.RenderText(context)} {string.Join(" ", Ls.Select(idx => idx.Value).Select(v => $"{v}"))} {Ln.Value}";
-            int depth = context.Frame.LabelCount-1;
+            int depth = context.Frame.TopLabel.LabelHeight-1;
 
             int index = -2;
             if (context.Attributes.Live)
