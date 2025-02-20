@@ -33,8 +33,7 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             //Notify the runtime?
-            // context.RewindSequence();
-            context.ResumeSequence(context.Frame.TopLabel.Head);
+            // context.ResumeSequence(context.Frame.TopLabel.Head);
         }
     }
 }
