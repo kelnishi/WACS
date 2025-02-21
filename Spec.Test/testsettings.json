@@ -1,6 +1,7 @@
 {
   "JsonDirectory": "../../../generated-json",
   "RunTranspilerTests": true,
+  "TraceExecution": false,
   "Single": null,
   "SkipWasts": [
     "comments.wast",
