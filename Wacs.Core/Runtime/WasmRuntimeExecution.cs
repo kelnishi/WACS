@@ -33,6 +33,7 @@ namespace Wacs.Core.Runtime
     public partial class WasmRuntime
     {
         private InstructionBase? lastInstruction = null;
+        public bool TraceExecution = false;
 
         private Delegate CreateInvokerInternal(FuncAddr funcAddr, Type delegateType, bool returnsResult, InvokerOptions? options = default)
         {
@@ -602,7 +603,7 @@ namespace Wacs.Core.Runtime
                     }
                     else
                     {
-                        var log = $"Instruction: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
+                        var log = $"Inst[0x{Context.InstructionPointer:x8}]: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
                         Console.Error.WriteLine(log);
                     }
                     break; 
@@ -634,7 +635,7 @@ namespace Wacs.Core.Runtime
                     }
                     else
                     {
-                        var log = $"Instruction: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
+                        var log = $"Inst[0x{Context.InstructionPointer:x8}]: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
                         Console.Error.WriteLine(log);
                     }
                     break; 

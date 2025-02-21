@@ -454,12 +454,8 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public OpCode GetEndFor()
-        {
-            if (Frame.TopLabel.Label.Instruction.x00 == OpCode.Func)
-                return OpCode.Func;    
-            return OpCode.Block;
-        }
+        public OpCode GetEndFor() => 
+            FindLabel(0) is { } label ? label.Op : OpCode.Func;
 
         public ModuleInstance? GetModule(FuncAddr funcAddr)
         {
