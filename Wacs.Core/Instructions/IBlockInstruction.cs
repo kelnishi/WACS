@@ -94,18 +94,6 @@ namespace Wacs.Core.Instructions
             //Push this onto a stack in the context so we can address the End instructions
             context.PushLabel(this);
             LabelHeight = context.LabelHeight;
-
-            switch (this)
-            {
-                case InstBlock:
-                    //TODO: Set this when we remove the labelstack entirely.
-                    // We'll need to:
-                    //  1) compute branch targets
-                    //  2) implement block traversal for exception handling 
-                    //
-                    // PointerAdvance = 1;
-                    break;
-            }
             
             return this;
         }

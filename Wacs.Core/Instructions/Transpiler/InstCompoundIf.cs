@@ -103,7 +103,7 @@ namespace Wacs.Core.Instructions.Transpiler
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
-            context.Frame.PushLabel(this);
+            // context.Frame.PushLabel(this);
             int c = valueFunc(context);
             if (c == 0)
             {
