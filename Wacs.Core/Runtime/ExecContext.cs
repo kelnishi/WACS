@@ -177,6 +177,37 @@ namespace Wacs.Core.Runtime
             _framePool.Return(frame);
             return address;
         }
+        
+        public BlockTarget? FindLabel(int depth)
+        {
+            var instructions = _currentSequence;
+            int ptr = InstructionPointer;
+            BlockTarget? label = null;
+            
+            while (ptr > Frame.Head && label == null)
+            {
+                var inst = instructions[--ptr];
+                switch (inst)
+                {
+                    case BlockTarget target: 
+                        label = target;
+                        break;
+                    case InstEnd:
+                        depth += 1;
+                        break;
+                }
+            }
+
+            if (label is null && ptr == Frame.Head)
+                return null;
+            
+            for (int i = 0; i < depth && label != null; i++)
+            {
+                label = label?.EnclosingBlock ?? null;
+            }
+
+            return label;
+        }
 
         public void ResetStack(Label label)
         {
@@ -449,13 +480,15 @@ namespace Wacs.Core.Runtime
             instance.LinkedOffset = offset;
 
             LinkOpStackHeight = 0;
+            LinkUnreachable = false;
             ClearLinkLabels();
             PushLabel(new InstExpressionProxy(new Label
             {
                 Instruction = OpCode.Func,
                 StackHeight = 0,
+                Arity = instance.Type.ResultType.Arity
             }));
-            
+
             linkedInstructions.Append(
                 instance.Body
                     .Flatten()

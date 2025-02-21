@@ -101,9 +101,16 @@ namespace Wacs.Core.Instructions
             }
         }
 
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            base.Link(context, pointer);
+            PointerAdvance = 1;
+            return this;
+        }
+        
         public override void Execute(ExecContext context)
         {
-            context.Frame.PushLabel(this);
+            // context.Frame.PushLabel(this);
         }
         
         public override InstructionBase Parse(BinaryReader reader)
@@ -233,14 +240,15 @@ namespace Wacs.Core.Instructions
             //Traverse the control stack
             while (context.StackHeight > 0)
             {
+                var blockTarget = context.FindLabel(0);
                 //Enumerate all the blocks to find catch clauses
-                while (context.Frame.TopLabel.LabelHeight > 1)
+                while ((blockTarget?.LabelHeight??0) > 1)
                 {
-                    var blockTarget = context.Frame.TopLabel;
-                    context.Frame.PopLabels(0);
-                    
                     if (blockTarget is InstTryTable tryTable)
                     {
+                        //TODO: When we have precomuted branch targets, don't bother moving the pointer here.
+                        //Move the head for FindLabel to branch.
+                        context.InstructionPointer = tryTable.Head;
                         foreach (var handler in tryTable.Catches)
                         {
                             switch (handler.Mode)
@@ -272,6 +280,7 @@ namespace Wacs.Core.Instructions
                             }
                         }
                     }
+                    blockTarget = blockTarget.EnclosingBlock;
                 }
                 context.FunctionReturn();
             }

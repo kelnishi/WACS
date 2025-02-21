@@ -50,7 +50,7 @@ namespace Wacs.Core.Types
             IsStatic = isStatic;
             LabelTarget = new(new Label
             {
-                //Compute Arity in PrecomputeLabels
+                //Compute Arity in during link
                 ContinuationAddress = 1,
                 Instruction = inst,
                 StackHeight = -1,
@@ -158,6 +158,7 @@ namespace Wacs.Core.Types
         /// <param name="context"></param>
         public void ExecuteInitializer(ExecContext context)
         {
+            int callStackHeight = context.StackHeight;
             var frame = context.ReserveFrame(context.Frame.Module, FunctionType.Empty, FuncIdx.ExpressionEvaluation);
             if (context.OpStack.Count != 0)
                 throw new InvalidDataException("OpStack should be empty");
@@ -168,17 +169,20 @@ namespace Wacs.Core.Types
             {
                 inst.Execute(context);
             }
-            context.PopFrame();
+            
+            //Our expression may have popped the callstack for us,
+            // but if it hasn't we should clean up.
+            while (context.StackHeight > callStackHeight)
+            {
+                context.PopFrame();
+            }
         }
 
         /// <summary>
         /// @Spec 5.4.9 Expressions
         /// </summary>
-        public static Expression Parse(BinaryReader reader) =>
-            new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd)), true);
-        
         public static Expression ParseFunc(BinaryReader reader) =>
-            new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd)), true, OpCode.Func);
+            new(new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd), true), true, OpCode.Func);
 
         public static Expression ParseInitializer(BinaryReader reader) =>
             new(1, new InstructionSequence(reader.ParseUntil(BinaryModuleParser.ParseInstruction, InstructionBase.IsEnd)), true);
