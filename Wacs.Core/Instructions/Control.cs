@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -115,10 +116,17 @@ namespace Wacs.Core.Instructions
             }
         }
 
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            base.Link(context, pointer);
+            PointerAdvance = 1;
+            return this;
+        }
+
         // @Spec 4.4.8.3. block
         public override void Execute(ExecContext context)
         {
-            context.Frame.PushLabel(this);
+            // context.Frame.PushLabel(this);
         }
 
         /// <summary>
@@ -142,11 +150,11 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context)
-        {
-            if (context == null || !context.Attributes.Live) return base.RenderText(context);
-            return $"{base.RenderText(context)}  ;; label = @{context.Frame.TopLabel.LabelHeight}";
-        }
+        // public override string RenderText(ExecContext? context)
+        // {
+        //     if (context == null || !context.Attributes.Live) return base.RenderText(context);
+        //     return $"{base.RenderText(context)}  ;; label = @{context.Frame.TopLabel.LabelHeight}";
+        // }
     }
 
     //0x03
@@ -188,11 +196,18 @@ namespace Wacs.Core.Instructions
                     "Instruction loop invalid. BlockType {0} did not exist in the Context.",Block.BlockType);
             }
         }
-
+        
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            base.Link(context, pointer);
+            PointerAdvance = 1;
+            return this;
+        }
+        
         // @Spec 4.4.8.4. loop
         public override void Execute(ExecContext context)
         {
-            context.Frame.PushLabel(this);
+            // context.Frame.PushLabel(this);
         }
 
         /// <summary>
@@ -216,11 +231,11 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context)
-        {
-            if (context == null || !context.Attributes.Live) return base.RenderText(context);
-            return $"{base.RenderText(context)}  ;; label = @{context.Frame.TopLabel.LabelHeight}";
-        }
+        // public override string RenderText(ExecContext? context)
+        // {
+        //     if (context == null || !context.Attributes.Live) return base.RenderText(context);
+        //     return $"{base.RenderText(context)}  ;; label = @{context.Frame.TopLabel.LabelHeight}";
+        // }
     }
 
     //0x04
@@ -289,7 +304,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
-            context.Frame.PushLabel(this);
+            // context.Frame.PushLabel(this);
             int c = context.OpStack.PopI32();
             if (c == 0)
             {
@@ -360,6 +375,7 @@ namespace Wacs.Core.Instructions
                 throw new InstantiationException($"Else block instruction mismatched to {target}");
 
             EnclosingBlock = target.EnclosingBlock;
+            Label = target.Label;
             target.Else = pointer + 1;
 
             //Reset and re-consume the predicate
@@ -373,15 +389,6 @@ namespace Wacs.Core.Instructions
             // context.EnterSequence(End);
             context.InstructionPointer = End - 1;
         }
-
-        public override InstructionBase Parse(BinaryReader reader)
-        {
-            Label = new Label {
-                Instruction = OpCode.Else
-            };
-            return this;
-            
-        }
     }
 
     //0x0B
@@ -389,6 +396,8 @@ namespace Wacs.Core.Instructions
     {
         // public static readonly InstEnd Inst = new();
         public override ByteCode Op => OpCode.End;
+
+        public bool FunctionEnd;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -410,73 +419,60 @@ namespace Wacs.Core.Instructions
             context.LinkOpStackHeight = target.Label.StackHeight;
             context.LinkOpStackHeight -= target.Label.Parameters;
             context.LinkOpStackHeight += target.Label.Results;
+
+            if (!FunctionEnd)
+                PointerAdvance = 1;
             
             return this;
         }
 
+        //Skipped unless FunctionEnd is true
         public override void Execute(ExecContext context)
         {
-            var label = context.Frame.Label;
-            switch (label.Instruction.x00)
-            {
-                case OpCode.Block:
-                case OpCode.If:
-                case OpCode.Else:
-                case OpCode.Loop:
-                case OpCode.TryTable:
-                    context.Frame.PopLabels(0);
-                    break;
-                case OpCode.Func:
-                case OpCode.Call:
-                    context.FunctionReturn();
-                    break;
-                default:
-                    //Do nothing
-                    break;
-            }
+            context.FunctionReturn();
         }
 
-        public override string RenderText(ExecContext? context)
-        {
-            if (context == null)
-            {
-                return $"{base.RenderText(context)}";
-            }
-            var label = context.Frame.Label;
-            switch (label.Instruction.x00)
-            {
-                case OpCode.Block:
-                case OpCode.If:
-                case OpCode.Else:
-                    return $"{base.RenderText(context)} (;B/@{context.Frame.TopLabel.LabelHeight-1};)";
-                case OpCode.Loop:
-                    return $"{base.RenderText(context)} (;L/@{context.Frame.TopLabel.LabelHeight-1};)";
-                case OpCode.Func:
-                case OpCode.Call:
-                    var funcAddr = context.Frame.Module.FuncAddrs[context.Frame.Index];
-                    var func = context.Store[funcAddr];
-                    var funcName = func.Id;
-                    StringBuilder sb = new();
-                    if (context.Attributes.Live)
-                    {
-                        sb.Append(" ");
-                        var values = new Stack<Value>();
-                        context.OpStack.PopResults(func.Type.ResultType, ref values);
-                        sb.Append("[");
-                        while (values.Count > 0)
-                        {
-                            sb.Append(values.Peek().ToString());
-                            if (values.Count > 1)
-                                sb.Append(" ");
-                            context.OpStack.PushValue(values.Pop());
-                        }
-                        sb.Append("]");
-                    }
-                    return $"{base.RenderText(context)} (;f/@{context.Frame.TopLabel.LabelHeight-1} <- {funcName}{sb};)";
-                default:
-                    return $"{base.RenderText(context)}";
-            }
-        }
+        // public override string RenderText(ExecContext? context)
+        // {
+        //     if (context == null)
+        //     {
+        //         return $"{base.RenderText(context)}";
+        //     }
+        //     var label = context.Frame.Label;
+        //     switch (label.Instruction.x00)
+        //     {
+        //         case OpCode.Block:
+        //         case OpCode.If:
+        //         case OpCode.Else:
+        //             return $"{base.RenderText(context)} (;B/@{context.Frame.TopLabel.LabelHeight-1};)";
+        //         case OpCode.Loop:
+        //             return $"{base.RenderText(context)} (;L/@{context.Frame.TopLabel.LabelHeight-1};)";
+        //         case OpCode.Func:
+        //         case OpCode.Call:
+        //             var funcAddr = context.Frame.Module.FuncAddrs[context.Frame.Index];
+        //             var func = context.Store[funcAddr];
+        //             var funcName = func.Id;
+        //             StringBuilder sb = new();
+        //             if (context.Attributes.Live)
+        //             {
+        //                 sb.Append(" ");
+        //                 var values = new Stack<Value>();
+        //                 context.OpStack.PopResults(func.Type.ResultType, ref values);
+        //                 sb.Append("[");
+        //                 while (values.Count > 0)
+        //                 {
+        //                     sb.Append(values.Peek().ToString());
+        //                     if (values.Count > 1)
+        //                         sb.Append(" ");
+        //                     context.OpStack.PushValue(values.Pop());
+        //                 }
+        //                 sb.Append("]");
+        //             }
+        //             return $"{base.RenderText(context)} (;f/@{context.Frame.TopLabel.LabelHeight-1} <- {funcName}{sb};)";
+        //         default:
+        //             return $"{base.RenderText(context)}";
+        //     }
+        // }
     }
 
     //0x0C
@@ -528,18 +524,25 @@ namespace Wacs.Core.Instructions
 
         public static void ExecuteInstruction(ExecContext context, LabelIdx labelIndex)
         {
+            var target = context.FindLabel((int)labelIndex.Value);
             //1.
-            context.Assert( context.Frame.TopLabel.LabelHeight > (int)labelIndex.Value,
+            context.Assert( (target?.LabelHeight??0) > (int)labelIndex.Value,
                 $"Instruction br failed. Context did not contain Label {labelIndex}");
             //2.
-            if (labelIndex.Value > 0)
-            {
-                // var topAddr = 
-                context.Frame.PopLabels((int)(labelIndex.Value - 1));
-                // context.ResumeSequence(topAddr);
-            }
+            // if (labelIndex.Value > 0)
+            // {
+            //     // var topAddr = 
+            //     context.Frame.PopLabels((int)(labelIndex.Value - 1));
+            //     // context.ResumeSequence(topAddr);
+            // }
             
-            var label = context.Frame.Label;
+            var label = target?.Label switch
+            {
+                null => context.Frame.ReturnLabel,
+                { Instruction: { x00: OpCode.Func} } => context.Frame.ReturnLabel,
+                var l => l
+            };
+            
             //3,4.
             context.Assert( context.OpStack.Count >= label.Arity,
                 $"Instruction br failed. Not enough values on the stack.");
@@ -561,17 +564,23 @@ namespace Wacs.Core.Instructions
                 //7.
                 context.OpStack.PushResults(_asideVals);
             }
-            
-            //8. 
-            if (label.Instruction.x00 == OpCode.Loop)
+
+            switch (label.Instruction.x00)
             {
-                //loop targets the loop head
-                context.InstructionPointer = context.Frame.TopLabel.Head;
-            }
-            else
-            {
-                //otherwise, go to the end
-                context.InstructionPointer = context.Frame.TopLabel.End - 1;
+                //8. 
+                case OpCode.Func:
+                    context.InstructionPointer = label.ContinuationAddress;
+                    break;
+                case OpCode.Loop:
+                    //loop targets the loop head
+                    // context.InstructionPointer = context.Frame.TopLabel.Head;
+                    context.InstructionPointer = target.Head; 
+                    break;
+                default:
+                    //otherwise, go to the end
+                    // context.InstructionPointer = context.Frame.TopLabel.End - 1;
+                    context.InstructionPointer = target.End - 1; 
+                    break;
             }
         }
 
@@ -584,12 +593,12 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context)
-        {
-            if (context == null) return $"{base.RenderText(context)} {L.Value}";
-            int depth = context.Frame.TopLabel.LabelHeight - 1;
-            return $"{base.RenderText(context)} {L.Value} (;@{depth - L.Value};)";
-        }
+        // public override string RenderText(ExecContext? context)
+        // {
+        //     if (context == null) return $"{base.RenderText(context)} {L.Value}";
+        //     int depth = context.Frame.TopLabel.LabelHeight - 1;
+        //     return $"{base.RenderText(context)} {L.Value} (;@{depth - L.Value};)";
+        // }
     }
 
     //0x0D
@@ -642,18 +651,18 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context)
-        {
-            if (context == null) return $"{base.RenderText(context)} {L.Value}";
-            
-            int depth = context.Frame.TopLabel.LabelHeight - 1;
-            string taken = "";
-            if (context.Attributes.Live)
-            {
-                taken = context.OpStack.Peek().Data.Int32 != 0 ? "-> " : "X: ";
-            }
-            return $"{base.RenderText(context)} {L.Value} (;{taken}@{depth - L.Value};)";
-        }
+        // public override string RenderText(ExecContext? context)
+        // {
+        //     if (context == null) return $"{base.RenderText(context)} {L.Value}";
+        //     
+        //     int depth = context.Frame.TopLabel.LabelHeight - 1;
+        //     string taken = "";
+        //     if (context.Attributes.Live)
+        //     {
+        //         taken = context.OpStack.Peek().Data.Int32 != 0 ? "-> " : "X: ";
+        //     }
+        //     return $"{base.RenderText(context)} {L.Value} (;{taken}@{depth - L.Value};)";
+        // }
     }
 
     //0x0E
@@ -742,43 +751,43 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context)
-        {
-            if (context==null)
-                return $"{base.RenderText(context)} {string.Join(" ", Ls.Select(idx => idx.Value).Select(v => $"{v}"))} {Ln.Value}";
-            int depth = context.Frame.TopLabel.LabelHeight-1;
-
-            int index = -2;
-            if (context.Attributes.Live)
-            {
-                int c = context.OpStack.Peek().Data.Int32;
-                if (c < Ls.Length)
-                {
-                    index = c;
-                }
-                else
-                {
-                    index = -1;
-                }
-            }
-
-            StringBuilder sb = new();
-            int i = 0;
-            foreach (var idx in Ls)
-            {
-                sb.Append(" ");
-                sb.Append(i == index
-                    ? $"{idx.Value} (;-> @{depth - idx.Value};)"
-                    : $"{idx.Value} (;@{depth - idx.Value};)");
-                i += 1;
-            }
-            sb.Append(index == -1
-                ? $"{(i > 0 ? " " : "")}{Ln.Value} (;-> @{depth - Ln.Value};)"
-                : $"{(i > 0 ? " " : "")}{Ln.Value} (;@{depth - Ln.Value};)");
-
-            return
-                $"{base.RenderText(context)} {sb}";
-        }
+        // public override string RenderText(ExecContext? context)
+        // {
+        //     if (context==null)
+        //         return $"{base.RenderText(context)} {string.Join(" ", Ls.Select(idx => idx.Value).Select(v => $"{v}"))} {Ln.Value}";
+        //     int depth = context.Frame.TopLabel.LabelHeight-1;
+        //
+        //     int index = -2;
+        //     if (context.Attributes.Live)
+        //     {
+        //         int c = context.OpStack.Peek().Data.Int32;
+        //         if (c < Ls.Length)
+        //         {
+        //             index = c;
+        //         }
+        //         else
+        //         {
+        //             index = -1;
+        //         }
+        //     }
+        //
+        //     StringBuilder sb = new();
+        //     int i = 0;
+        //     foreach (var idx in Ls)
+        //     {
+        //         sb.Append(" ");
+        //         sb.Append(i == index
+        //             ? $"{idx.Value} (;-> @{depth - idx.Value};)"
+        //             : $"{idx.Value} (;@{depth - idx.Value};)");
+        //         i += 1;
+        //     }
+        //     sb.Append(index == -1
+        //         ? $"{(i > 0 ? " " : "")}{Ln.Value} (;-> @{depth - Ln.Value};)"
+        //         : $"{(i > 0 ? " " : "")}{Ln.Value} (;@{depth - Ln.Value};)");
+        //
+        //     return
+        //         $"{base.RenderText(context)} {sb}";
+        // }
     }
 
     //0x0F

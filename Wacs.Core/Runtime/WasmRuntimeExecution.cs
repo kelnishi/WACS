@@ -430,7 +430,8 @@ namespace Wacs.Core.Runtime
                     inst = Context._currentSequence[Context.InstructionPointer];
                     if (inst.PointerAdvance > 0)
                     {
-                        Context.InstructionPointer += inst.PointerAdvance - 1;
+                        if (inst.PointerAdvance > 1)
+                            Context.InstructionPointer += inst.PointerAdvance - 1;
                         continue;
                     }
                     
@@ -456,7 +457,8 @@ namespace Wacs.Core.Runtime
                     
                     if (inst.PointerAdvance > 0)
                     {
-                        Context.InstructionPointer += inst.PointerAdvance - 1;
+                        if (inst.PointerAdvance > 1)
+                            Context.InstructionPointer += inst.PointerAdvance - 1;
                         continue;
                     }
                     
@@ -495,7 +497,11 @@ namespace Wacs.Core.Runtime
                     Context.InstructionTimer.Restart();
 
                     if (inst.PointerAdvance > 0)
-                        Context.InstructionPointer += inst.PointerAdvance - 1;
+                    {
+                        if (inst.PointerAdvance > 1)
+                            Context.InstructionPointer += inst.PointerAdvance - 1;
+                        continue;
+                    }
                     else if (inst.IsAsync)
                         await inst.ExecuteAsync(Context);
                     else
@@ -513,7 +519,11 @@ namespace Wacs.Core.Runtime
                 {
                     Context.InstructionTimer.Start();
                     if (inst.PointerAdvance > 0)
-                        Context.InstructionPointer += inst.PointerAdvance - 1;
+                    {
+                        if (inst.PointerAdvance > 1)
+                            Context.InstructionPointer += inst.PointerAdvance - 1;
+                        continue;
+                    }
                     else if (inst.IsAsync)
                         await inst.ExecuteAsync(Context);
                     else

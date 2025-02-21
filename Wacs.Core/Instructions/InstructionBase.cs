@@ -32,10 +32,9 @@ namespace Wacs.Core.Instructions
     /// </summary>
     public abstract class InstructionBase
     {
-        public readonly Action<ExecContext> Executor;
-        public bool IsAsync = false;
-
         public int PointerAdvance = 0;
+        
+        public bool IsAsync = false;
 
         protected virtual int StackDiff { get; set; }
 

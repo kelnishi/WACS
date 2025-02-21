@@ -135,10 +135,10 @@ namespace Wacs.Core.Runtime.Types
             frame.ReturnLabel.Arity = funcType.ResultType.Arity;
             frame.ReturnLabel.Instruction = LabelInst;
             frame.ReturnLabel.ContinuationAddress = context.GetPointer();
+            frame.Head = LinkedOffset;
             
-            frame.SetLabel(Body.LabelTarget); 
+            // frame.SetLabel(Body.LabelTarget); 
             
-            // context.EnterSequence(LinkedOffset);
             context.InstructionPointer = LinkedOffset - 1;
         }
 

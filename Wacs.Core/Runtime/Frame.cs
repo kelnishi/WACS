@@ -34,12 +34,19 @@ namespace Wacs.Core.Runtime
         public string FuncId = "";
 
         public FuncIdx Index;
+        public int Head;
 
-        public Label Label => 
-            LabelCount > 1
-                ? TopLabel!.Label 
-                : ReturnLabel;
-        
+        public Label Label
+        {
+            get
+            {
+                if (LabelCount > 1)
+                    return TopLabel!.Label;
+                else
+                    return ReturnLabel;
+            }
+        }
+
         private int LabelCount => TopLabel?.LabelHeight ?? 0;
         public LocalsSpace Locals;
 
@@ -48,13 +55,14 @@ namespace Wacs.Core.Runtime
         public Label ReturnLabel = new();
         public int StackHeight;
         public BlockTarget? TopLabel;
+
         public FunctionType Type = null!;
 
         public int Arity => Type.ResultType.Arity;
 
         public void Clear()
         {
-            TopLabel = default!;
+            // TopLabel = default!;
             Module = default!;
             Locals = default;
             ContinuationAddress = default;
@@ -99,18 +107,17 @@ namespace Wacs.Core.Runtime
 
         public void ClearLabels()
         {
-            TopLabel = null;
+            // TopLabel = null;
         }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        
         public void SetLabel(BlockTarget baselabel)
         {
-            TopLabel = baselabel;
+            // TopLabel = baselabel;
         }
         
         public void PushLabel(BlockTarget target)
         {
-            TopLabel = target;
+            // TopLabel = target;
         }
 
         public void PopLabels(int idx)
@@ -118,10 +125,13 @@ namespace Wacs.Core.Runtime
             // if ((TopLabel?.LabelHeight ?? 0) <= idx + 1)
             //     throw new InvalidDataException("Label Stack underflow");
 
-            for (int i = 0; i <= idx && TopLabel != null; i++)
-            {
-                TopLabel = TopLabel?.EnclosingBlock ?? null;
-            }
+            // var Label = TopLabel;
+            // for (int i = 0; i <= idx && Label != null; i++)
+            // {
+            //     Label = Label?.EnclosingBlock ?? null;
+            // }
+            //
+            // Context.InstructionPointer = (Label?.Head ?? 0) + 1;
         }
 
         public IEnumerable<BlockTarget> EnumerateLabels()

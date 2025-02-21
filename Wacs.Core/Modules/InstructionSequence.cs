@@ -16,6 +16,7 @@
 
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
@@ -42,9 +43,18 @@ namespace Wacs.Core
             _instructions = new();
         }
 
-        public InstructionSequence(IList<InstructionBase> list)
+        public InstructionSequence(IList<InstructionBase> list, bool functionEnd = false)
         {
             _instructions = list.ToList();
+
+            if (functionEnd)
+            {
+                var last = _instructions.Last();
+                if (last is not InstEnd instEnd)
+                    throw new InvalidDataException("Instuction Sequence expected an end instruction");
+                instEnd.FunctionEnd = true;
+            }
+            
             Count = _instructions.Count;
         }
 
