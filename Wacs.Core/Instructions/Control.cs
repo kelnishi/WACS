@@ -68,6 +68,12 @@ namespace Wacs.Core.Instructions
         {
         }
 
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            Nop = true;
+            return base.Link(context, pointer);
+        }
+
         // @Spec 4.4.8.1. nop
         public override void Execute(ExecContext context) {}
     }
@@ -115,7 +121,7 @@ namespace Wacs.Core.Instructions
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
             base.Link(context, pointer);
-            PointerAdvance = 1;
+            Nop = true;
             return this;
         }
 
@@ -196,7 +202,7 @@ namespace Wacs.Core.Instructions
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
             base.Link(context, pointer);
-            PointerAdvance = 1;
+            Nop = true;
             return this;
         }
 
@@ -418,7 +424,9 @@ namespace Wacs.Core.Instructions
             context.LinkOpStackHeight += target.Label.Results;
 
             if (!FunctionEnd)
-                PointerAdvance = 1;
+            {
+                Nop = true;
+            }
             
             return this;
         }
@@ -832,8 +840,10 @@ namespace Wacs.Core.Instructions
     //0x10
     public sealed class InstCall : InstructionBase, ICallInstruction
     {
-        private FuncAddr linkedX;
         public FuncIdx X;
+        private bool IsHostFunction = false;
+        private FunctionInstance? linkedFunctionInstance;
+        private HostFunction? linkedHostFunction;
 
         public InstCall()
         {
@@ -871,14 +881,21 @@ namespace Wacs.Core.Instructions
         {
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
                 $"Instruction call failed. Function address for {X} was not in the Context.");
-            linkedX = context.Frame.Module.FuncAddrs[X];
-            var inst = context.Store[linkedX];
-            IsAsync = inst switch
+            var a = context.Frame.Module.FuncAddrs[X];
+            var inst = context.Store[a];
+            switch (inst)
             {
-                FunctionInstance => false,
-                HostFunction hostFunction => hostFunction.IsAsync,
-                _ => IsAsync
-            };
+                case FunctionInstance wasmFunc:
+                    IsAsync = false;
+                    linkedFunctionInstance = wasmFunc;
+                    IsHostFunction = false;
+                    break;
+                case HostFunction hostFunction:
+                    IsAsync = hostFunction.IsAsync;
+                    linkedHostFunction = hostFunction;
+                    IsHostFunction = true;
+                    break;
+            }
 
             var funcType = inst.Type;
             int stack = context.LinkOpStackHeight;
@@ -893,20 +910,23 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.10. call
         public override void Execute(ExecContext context)
         {
-            context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
-                $"Instruction call failed. Function address for {X} was not in the Context.");
-            // var a = context.Frame.Module.FuncAddrs[X];
-            // context.Invoke(a);
-            context.Invoke(linkedX);
+            if (IsHostFunction)
+                context.Invoke(linkedHostFunction!);
+            else
+                linkedFunctionInstance!.Invoke(context);
         }
 
         public override async ValueTask ExecuteAsync(ExecContext context)
         {
-            context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
-                $"Instruction call failed. Function address for {X} was not in the Context.");
-            // var a = context.Frame.Module.FuncAddrs[X];
-            // await context.InvokeAsync(a);
-            await context.InvokeAsync(linkedX);
+            if (IsHostFunction)
+            {
+                if (linkedHostFunction!.IsAsync)
+                    await context.InvokeAsync(linkedHostFunction!);
+                else
+                    context.Invoke(linkedHostFunction!);
+            }
+            else
+                linkedFunctionInstance!.Invoke(context);
         }
 
         /// <summary>

@@ -287,6 +287,18 @@ namespace Wacs.Core.Runtime
                 } return;
             }
         }
+        
+        public async Task InvokeAsync(HostFunction hostFunc)
+        {
+            //Fetch the parameters
+            OpStack.PopScalars(hostFunc.Type.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
+
+            if (hostFunc.PassExecContext)
+            {
+                hostFunc.ParameterBuffer[0] = this;
+            }
+            await hostFunc.InvokeAsync(hostFunc.ParameterBuffer, OpStack);
+        }
 
         public void Invoke(FuncAddr addr)
         {
@@ -318,6 +330,21 @@ namespace Wacs.Core.Runtime
                     hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
                 } return;
             }
+        }
+
+        public void Invoke(HostFunction hostFunc)
+        {
+            if (hostFunc.IsAsync)
+                throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
+
+            //Fetch the parameters
+            OpStack.PopScalars(hostFunc.Type.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
+            if (hostFunc.PassExecContext)
+            {
+                hostFunc.ParameterBuffer[0] = this;
+            }
+            //Pass them
+            hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
         }
 
         // @Spec 4.4.10.2. Returning from a function
