@@ -90,7 +90,7 @@ namespace Wacs.Core.Instructions
     {
         private TableIdx X;
         public override ByteCode Op => OpCode.TableSet;
-        protected override int StackDiff => -2;
+        public override int StackDiff => -2;
 
         // @Spec 3.3.6.2. table.set
         public override void Validate(IWasmValidationContext context)
@@ -155,7 +155,7 @@ namespace Wacs.Core.Instructions
         private TableIdx X;
         private ElemIdx Y;
         public override ByteCode Op => ExtCode.TableInit;
-        protected override int StackDiff => -3;
+        public override int StackDiff => -3;
 
         // @Spec 3.3.6.7. table.init x y
         public override void Validate(IWasmValidationContext context)
@@ -303,7 +303,7 @@ namespace Wacs.Core.Instructions
         private TableIdx DstX;
         private TableIdx SrcY;
         public override ByteCode Op => ExtCode.TableCopy;
-        protected override int StackDiff => -3;
+        public override int StackDiff => -3;
 
         // @Spec 3.3.6.6. table.copy
         public override void Validate(IWasmValidationContext context)
@@ -438,7 +438,7 @@ namespace Wacs.Core.Instructions
     {
         private TableIdx X;
         public override ByteCode Op => ExtCode.TableGrow;
-        protected override int StackDiff => -1;
+        public override int StackDiff => -1;
 
         // @Spec 3.3.6.4. table.grow x
         public override void Validate(IWasmValidationContext context)
@@ -508,7 +508,7 @@ namespace Wacs.Core.Instructions
     {
         private TableIdx X;
         public override ByteCode Op => ExtCode.TableSize;
-        protected override int StackDiff => +1;
+        public override int StackDiff => +1;
 
         // @Spec 3.3.6.3. table.size x
         public override void Validate(IWasmValidationContext context)
@@ -556,7 +556,7 @@ namespace Wacs.Core.Instructions
     {
         private TableIdx X;
         public override ByteCode Op => ExtCode.TableFill;
-        protected override int StackDiff => -3;
+        public override int StackDiff => -3;
 
         // @Spec 3.3.6.5. table.fill
         public override void Validate(IWasmValidationContext context)

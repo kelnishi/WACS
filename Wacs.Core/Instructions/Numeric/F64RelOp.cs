@@ -54,7 +54,7 @@ namespace Wacs.Core.Instructions.Numeric
 
 
         public override ByteCode Op { get; }
-        protected override int StackDiff => -1;
+        public override int StackDiff => -1;
 
         public Func<ExecContext, double,double,int> GetFunc => (_, i1, i2) => _execute(i1, i2);
 

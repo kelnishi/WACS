@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions
             var block = blockInst!.GetBlock(0);
             
             if (!context.LinkUnreachable && context.LinkOpStackHeight < 0)
-                throw new WasmRuntimeException($"bad stack calculation:{context.LinkOpStackHeight}");
+                throw new WasmRuntimeException($"bad stack calculation:{context.LinkOpStackHeight} at {this}[0x{pointer:x8}]");
             
             var label = new Label
             {

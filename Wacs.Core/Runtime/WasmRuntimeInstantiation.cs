@@ -487,6 +487,13 @@ namespace Wacs.Core.Runtime
                     if (functionInstance.Module != moduleInstance) 
                         continue;
                     Context.LinkFunction(functionInstance);
+                    // Console.Error.WriteLine($"===Function {functionInstance.Index.Value}");
+                    // int head = functionInstance.LinkedOffset;
+                    // int end = head + functionInstance.Length;
+                    // for (int i = head; i < end; i++)
+                    // {
+                    //     Context.PrintInstruction(i);
+                    // }
                 }
             }
             

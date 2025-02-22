@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Generic;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
@@ -23,10 +24,18 @@ namespace Wacs.Core.Instructions.Transpiler
     {
         private readonly Action<ExecContext, TIn> _compute;
         private readonly Func<ExecContext, TIn> _inA;
+        public sealed override int StackDiff { get; set; }
 
+        private List<InstructionBase> linkDependents = new();
+        
         public InstAggregate1_0(ITypedValueProducer<TIn> inA, INodeConsumer<TIn> consumer)
         {
             _inA = inA.GetFunc;
+            StackDiff = Math.Min(0, inA.StackDiff);
+
+            if (consumer is IComplexLinkBehavior) 
+                linkDependents.Add((consumer as InstructionBase)!);
+            
             _compute = consumer.GetFunc;
 
             Size = inA.CalculateSize() + 1;
@@ -37,6 +46,18 @@ namespace Wacs.Core.Instructions.Transpiler
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(false, "Validation of transpiled instructions not supported.");
+        }
+
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            base.Link(context, pointer);
+            int stack = context.LinkOpStackHeight;
+            
+            foreach (var dependent in linkDependents)
+                dependent.Link(context, pointer);
+            
+            context.LinkOpStackHeight = stack;
+            return this;
         }
 
         public override void Execute(ExecContext context)

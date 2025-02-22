@@ -157,9 +157,12 @@ namespace Wacs.Core.Instructions
             var tagType = ti.Type;
             var compType = tagType.Expansion;
             var funcType = compType as FunctionType;
-            
+
+            int stack = context.LinkOpStackHeight;
             context.LinkOpStackHeight -= funcType!.ParameterTypes.Arity;
             context.LinkOpStackHeight += 1;
+            //For recordkeeping
+            StackDiff = context.LinkOpStackHeight - stack;
             
             context.LinkUnreachable = true;
             return this;
@@ -214,9 +217,10 @@ namespace Wacs.Core.Instructions
             context.SetUnreachable();
         }
 
+        public override int StackDiff => -1;
         public override InstructionBase Link(ExecContext context, int pointer)
         {
-            context.LinkOpStackHeight -= 1;
+            base.Link(context, pointer);
             context.LinkUnreachable = true;
             return this;
         }

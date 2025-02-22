@@ -110,6 +110,23 @@ namespace Wacs.Core.Runtime
             _currentSequence = linkedInstructions._instructions.ToArray();
         }
 
+        public void PrintInstruction(int i)
+        {
+            var inst = linkedInstructions[i];
+            if (inst is BlockTarget label)
+            {
+                Console.Error.WriteLine($"[0x{i:x8}] {label.Label.StackHeight} ({inst.StackDiff:+####;-####;0}) {inst}");
+            }
+            else if (inst is InstEnd)
+            {
+                Console.Error.WriteLine($"[0x{i:x8}]  {inst.StackDiff:+####;-####;0} {inst}");
+            }
+            else
+            {
+                Console.Error.WriteLine($"[0x{i:x8}]     {inst.StackDiff:+####;-####;0} {inst}");
+            }
+        }
+
         public InstructionPointer GetPointer()
         {
             return InstructionPointer;

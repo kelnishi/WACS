@@ -24,11 +24,14 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly Action<ExecContext, TIn1, TIn2> _compute;
         private readonly Func<ExecContext, TIn1> _in1;
         private readonly Func<ExecContext, TIn2> _in2;
+        public sealed override int StackDiff { get; set; }
 
         public InstAggregate2_0(ITypedValueProducer<TIn1> in1, ITypedValueProducer<TIn2> in2, INodeConsumer<TIn1,TIn2> compute)
         {
             _in1 = in1.GetFunc;
             _in2 = in2.GetFunc;
+            
+            StackDiff = Math.Min(0, in1.StackDiff) + Math.Min(0, in2.StackDiff);
             _compute = compute.GetFunc;
 
             Size = in1.CalculateSize() + in2.CalculateSize() + 1;

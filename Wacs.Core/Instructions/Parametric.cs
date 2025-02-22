@@ -30,7 +30,7 @@ namespace Wacs.Core.Instructions
     {
         public static readonly InstDrop Inst = new();
         public override ByteCode Op => OpCode.Drop;
-        protected override int StackDiff => -1;
+        public override int StackDiff => -1;
 
         public Action<ExecContext, Value> GetFunc => (_, _) => { };
 
@@ -62,7 +62,7 @@ namespace Wacs.Core.Instructions
 
         public InstSelect(bool withTypes = false) => WithTypes = withTypes;
         public override ByteCode Op => OpCode.Select;
-        protected override int StackDiff => -2;
+        public override int StackDiff => -2;
 
         public Func<ExecContext, Value, Value, int, Value> GetFunc => Select;
 

@@ -99,7 +99,7 @@ namespace Wacs.Core.Instructions
         }
 
         public override ByteCode Op { get; }
-        protected override int StackDiff => -2;
+        public override int StackDiff => -2;
 
         /// <summary>
         /// @Spec 3.3.7.3. t.store

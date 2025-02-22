@@ -42,6 +42,7 @@ namespace Wacs.Core.Instructions.Transpiler
         {
             context.OpStack.PopAny();
         }
+        public override int StackDiff => -1;
 
         public override void Execute(ExecContext context) {}
     }
@@ -68,6 +69,7 @@ namespace Wacs.Core.Instructions.Transpiler
         {
             context.OpStack.PopI32();
         }
+        public override int StackDiff => -1;
 
         public override void Execute(ExecContext context) {}
     }
@@ -94,6 +96,7 @@ namespace Wacs.Core.Instructions.Transpiler
         {
             context.OpStack.PopI32();
         }
+        public override int StackDiff => -1;
 
         public override void Execute(ExecContext context) {}
     }

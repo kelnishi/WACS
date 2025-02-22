@@ -33,7 +33,7 @@ namespace Wacs.Core.Instructions
 
         public int Size = 1;
 
-        protected virtual int StackDiff { get; set; }
+        public virtual int StackDiff { get; set; }
 
         /// <summary>
         /// Gets the opcode associated with the instruction.

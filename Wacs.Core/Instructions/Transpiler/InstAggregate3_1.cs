@@ -28,6 +28,7 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly Func<ExecContext, TIn2> _in2;
         private readonly Func<ExecContext, TIn3> _in3;
         private readonly Func<ExecContext, Value> _wrap;
+        public sealed override int StackDiff { get; set; }
 
         public InstAggregate3_1(
             ITypedValueProducer<TIn1> in1,
@@ -38,6 +39,7 @@ namespace Wacs.Core.Instructions.Transpiler
             _in1 = in1.GetFunc;
             _in2 = in2.GetFunc;
             _in3 = in3.GetFunc;
+            StackDiff = Math.Min(0, in1.StackDiff) + Math.Min(0, in2.StackDiff) + Math.Min(0, in3.StackDiff);
             _compute = compute.GetFunc;
             Size = in1.CalculateSize() + in2.CalculateSize() + 1;
 
@@ -64,7 +66,12 @@ namespace Wacs.Core.Instructions.Transpiler
         {
             context.Assert(false, "Validation of transpiled instructions not supported.");
         }
-
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            //Account for our own push to the stack if we're not subordinated
+            context.LinkOpStackHeight += StackDiff + 1;
+            return this;
+        }
         public override void Execute(ExecContext context)
         {
             context.OpStack.PushValue(_wrap(context));
