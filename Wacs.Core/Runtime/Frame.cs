@@ -14,14 +14,11 @@
 
 using System.Buffers;
 using System.Collections.Generic;
-using System.IO;
-using System.Runtime.CompilerServices;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Utilities;
-
 using InstructionPointer = System.Int32;
 
 namespace Wacs.Core.Runtime
@@ -30,9 +27,18 @@ namespace Wacs.Core.Runtime
     {
         public InstructionPointer ContinuationAddress = -1;
         public string FuncId = "";
+        public int Head;
 
         public FuncIdx Index;
-        public int Head;
+        public LocalsSpace Locals;
+
+        public ModuleInstance Module = null!;
+
+        public Label ReturnLabel = new();
+        public int StackHeight;
+        public BlockTarget? TopLabel;
+
+        public FunctionType Type = null!;
 
         public Label Label
         {
@@ -46,15 +52,6 @@ namespace Wacs.Core.Runtime
         }
 
         private int LabelCount => TopLabel?.LabelHeight ?? 0;
-        public LocalsSpace Locals;
-
-        public ModuleInstance Module = null!;
-
-        public Label ReturnLabel = new();
-        public int StackHeight;
-        public BlockTarget? TopLabel;
-
-        public FunctionType Type = null!;
 
         public int Arity => Type.ResultType.Arity;
 
@@ -107,12 +104,12 @@ namespace Wacs.Core.Runtime
         {
             // TopLabel = null;
         }
-        
+
         public void SetLabel(BlockTarget baselabel)
         {
             // TopLabel = baselabel;
         }
-        
+
         public void PushLabel(BlockTarget target)
         {
             // TopLabel = target;

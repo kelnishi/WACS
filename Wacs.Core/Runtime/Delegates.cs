@@ -30,7 +30,7 @@ namespace Wacs.Core.Runtime
         public delegate Task<Value[]> GenericFuncsAsync(params Value[] args);
 
         public delegate Value[] StackFunc(Value[] parameters);
-        
+
         public static Delegate AnonymousFunctionFromType(FunctionType functionType, GenericFuncs func)
         {
             var paramTypes = functionType.ParameterTypes.Types;
@@ -68,8 +68,8 @@ namespace Wacs.Core.Runtime
                 _ => throw new NotSupportedException($"Cannot auto-bind function signature: ({string.Join(", ", paramTypes)}) -> ({string.Join(", ", resultTypes)})")
             };
         }
-        
-        
+
+
         public static void ValidateFunctionTypeCompatibility(FunctionType functionType, Type delegateType)
         {
             if (!typeof(Delegate).IsAssignableFrom(delegateType))
@@ -173,7 +173,5 @@ namespace Wacs.Core.Runtime
                 _ => throw new ArgumentException($"Unsupported ValType: {valType}")
             };
         }
-        
-        
     }
 }

@@ -18,7 +18,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.Instructions;
@@ -28,7 +27,6 @@ using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
-
 using InstructionPointer = System.Int32;
 
 namespace Wacs.Core.Runtime
@@ -41,37 +39,37 @@ namespace Wacs.Core.Runtime
 
     public class ExecContext
     {
+        // public int _sequenceCount;
+
+        public const int AbortSequence = -2;
         public static readonly Frame NullFrame = new();
 
         private static readonly ValType[] EmptyLocals = Array.Empty<ValType>();
         private readonly Stack<Frame> _callStack;
         private readonly ObjectPool<Frame> _framePool;
+
+        private readonly Stack<BlockTarget> _linkLabelStack = new();
         // private readonly InstructionSequence _hostReturnSequence;
 
         private readonly ArrayPool<Value> _localsDataPool;
         public readonly RuntimeAttributes Attributes;
         public readonly Stopwatch InstructionTimer = new();
+
+        private readonly InstructionSequence linkedInstructions = new();
         public readonly OpStack OpStack;
 
         public readonly Stopwatch ProcessTimer = new();
 
         public readonly Store Store;
 
-        private readonly Stack<BlockTarget> _linkLabelStack = new();
-        public int LinkOpStackHeight;
-        public bool LinkUnreachable;
-        
-        private InstructionSequence linkedInstructions = new();
         public InstructionBase[] _currentSequence;
-        // public int _sequenceCount;
-
-        public const int AbortSequence = -2;
-        public int InstructionPointer;
         // public List<InstructionBase> _sequenceInstructions;
 
 
         public Frame Frame = NullFrame;
-        public int StackHeight => _callStack.Count;
+        public int InstructionPointer;
+        public int LinkOpStackHeight;
+        public bool LinkUnreachable;
 
         public Dictionary<ushort, ExecStat> Stats = new();
         public long steps;
@@ -99,14 +97,19 @@ namespace Wacs.Core.Runtime
             OpStack = new(Attributes.MaxOpStack);
         }
 
+        public int StackHeight => _callStack.Count;
+
+        public InstructionBaseFactory InstructionFactory => Attributes.InstructionFactory;
+
+        public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[default]];
+
+        public int LabelHeight => _linkLabelStack.Count;
+
         public void CacheInstructions()
         {
             _currentSequence = linkedInstructions._instructions.ToArray();
         }
 
-        public InstructionBaseFactory InstructionFactory => Attributes.InstructionFactory;
-
-        public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[default]];
         public InstructionPointer GetPointer()
         {
             return InstructionPointer;
@@ -175,7 +178,7 @@ namespace Wacs.Core.Runtime
             _framePool.Return(frame);
             return address;
         }
-        
+
         public BlockTarget? FindLabel(int depth)
         {
             var instructions = _currentSequence;
@@ -223,17 +226,15 @@ namespace Wacs.Core.Runtime
             InstructionPointer = -1;
         }
 
-        public int LabelHeight => _linkLabelStack.Count;
-
         public void ClearLinkLabels() => _linkLabelStack.Clear();
-        
+
         public void PushLabel(BlockTarget inst) => _linkLabelStack.Push(inst);
 
         public BlockTarget PopLabel() => _linkLabelStack.Pop();
 
         public BlockTarget PeekLabel() => _linkLabelStack.Peek();
-        
-        
+
+
         // @Spec 4.4.10.1 Function Invocation
         public async Task InvokeAsync(FuncAddr addr)
         {
@@ -321,8 +322,8 @@ namespace Wacs.Core.Runtime
             
             // ResumeSequence(address);
             InstructionPointer = address;
-        } 
-        
+        }
+
         public InstructionBase? Next()
         {
             return InstructionPointer > AbortSequence ? _currentSequence[++InstructionPointer] : null;

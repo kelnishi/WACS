@@ -28,6 +28,7 @@ namespace Wacs.Core.Instructions
     {
         private LocalIdx Index;
         public override ByteCode Op => OpCode.LocalGet;
+        protected override int StackDiff => +1;
 
         public Func<ExecContext, Value> GetFunc => FetchFromLocals;
 
@@ -74,7 +75,6 @@ namespace Wacs.Core.Instructions
             
             context.OpStack.PushType(value.Type);   // +1
         }
-        protected override int StackDiff => +1;
 
         public override void Execute(ExecContext context)
         {
@@ -97,6 +97,7 @@ namespace Wacs.Core.Instructions
     {
         private LocalIdx Index;
         public override ByteCode Op => OpCode.LocalSet;
+        protected override int StackDiff => -1;
 
         public Action<ExecContext, Value> GetFunc => SetLocal;
 
@@ -131,7 +132,6 @@ namespace Wacs.Core.Instructions
             var value = context.Locals.Get(Index);
             context.OpStack.PopType(value.Type);    // -1
         }
-        protected override int StackDiff => -1;
 
         // @Spec 4.4.5.2. local.set
         public override void Execute(ExecContext context)

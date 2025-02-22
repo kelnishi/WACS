@@ -25,8 +25,8 @@ namespace Wacs.Core.Instructions.Transpiler
     public class InstCompoundIf : BlockTarget, IBlockInstruction, IIfInstruction
     {
         private static readonly ByteCode IfOp = OpCode.If;
-        private readonly Block IfBlock = Block.Empty;
         private readonly Block ElseBlock = Block.Empty;
+        private readonly Block IfBlock = Block.Empty;
 
         private readonly Func<ExecContext, int> valueFunc;
 

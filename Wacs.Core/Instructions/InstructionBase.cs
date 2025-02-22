@@ -1,5 +1,3 @@
-
-using System;
 // Copyright 2024 Kelvin Nishikawa
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,6 +11,7 @@ using System;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 using System.IO;
 using System.Threading.Tasks;
 using Wacs.Core.Instructions.Numeric;
@@ -20,7 +19,6 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Validation;
-
 using InstructionPointer = System.Int32;
 
 namespace Wacs.Core.Instructions
@@ -30,13 +28,12 @@ namespace Wacs.Core.Instructions
     /// </summary>
     public abstract class InstructionBase
     {
-        public int PointerAdvance = 0;
-        
         public bool IsAsync = false;
-
-        protected virtual int StackDiff { get; set; }
+        public int PointerAdvance = 0;
 
         public int Size = 1;
+
+        protected virtual int StackDiff { get; set; }
 
         /// <summary>
         /// Gets the opcode associated with the instruction.
@@ -44,6 +41,7 @@ namespace Wacs.Core.Instructions
         public abstract ByteCode Op { get; }
 
         public abstract void Validate(IWasmValidationContext context);
+
         public virtual InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
             context.LinkOpStackHeight += StackDiff;

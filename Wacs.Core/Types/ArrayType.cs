@@ -21,19 +21,20 @@ namespace Wacs.Core.Types
     public class ArrayType : CompositeType
     {
         public readonly FieldType ElementType;
+
         public ArrayType(FieldType ft)
         {
             ElementType = ft;
         }
-        
+
         public static ArrayType Parse(BinaryReader reader) => 
             new(FieldType.Parse(reader));
-        
+
         public bool Matches(ArrayType other, TypesSpace? types)
         {
             return ElementType.Matches(other.ElementType, types);
         }
-        
+
         public override int ComputeHash(int defIndexValue, List<DefType> defs)
         {
             var hash = new StableHash();

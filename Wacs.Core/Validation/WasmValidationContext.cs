@@ -82,6 +82,7 @@ namespace Wacs.Core.Validation
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
+
         public LocalsSpace Locals =>
             ControlStack.Count == 0
                 ? ExecFrame.Locals 
@@ -89,7 +90,7 @@ namespace Wacs.Core.Validation
 
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
-        
+
         public TagsSpace Tags { get; }
 
         public bool Unreachable { get; set; }
@@ -156,9 +157,6 @@ namespace Wacs.Core.Validation
                 PopValidationContext();
             }
         }
-        
-        public bool ValidateBlockType(ValType type) => 
-            type.Validate(Types) || type == ValType.Empty;
 
         public void PushControlFrame(ByteCode opCode, FunctionType types)
         {
@@ -193,8 +191,10 @@ namespace Wacs.Core.Validation
 
         public bool ContainsLabel(uint label) => ControlStack.Count - 2 >= label;
 
-        
-        
+        public bool ValidateBlockType(ValType type) => 
+            type.Validate(Types) || type == ValType.Empty;
+
+
         public void PopOperandsToHeight(int height)
         {
             if (OpStack.Height < height)

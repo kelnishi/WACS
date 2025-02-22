@@ -218,7 +218,7 @@ namespace Wacs.Core.Runtime
             Store.CommitTransaction();
             return Store[globAddr];
         }
-        
+
         public TagInstance BindHostTag((string module, string entity) id, DefType tagType)
         {
             Store.OpenTransaction();

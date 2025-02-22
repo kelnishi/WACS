@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using System.Transactions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.GC;
@@ -24,8 +23,11 @@ namespace Wacs.Core.Instructions.GC
 {
     public class InstRefI31 : InstructionBase, IConstInstruction
     {
+        private const int SignBit31 = 0x4000_0000;
+        private const int UnsignedMask = 0x3FFF_FFFF;
+        private const ulong SignExtendBits = 0xFFFF_FFFF_C000_0000;
         public override ByteCode Op => GcCode.RefI31;
-        
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-i31mathsfrefi31
         /// </summary>
@@ -35,11 +37,7 @@ namespace Wacs.Core.Instructions.GC
             context.OpStack.PopI32();                   // -1
             context.OpStack.PushType(ValType.I31NN);    // +0
         }
-        
-        private const int SignBit31 = 0x4000_0000;
-        private const int UnsignedMask = 0x3FFF_FFFF;
-        private const ulong SignExtendBits = 0xFFFF_FFFF_C000_0000;
-        
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-i31mathsfrefi31①
         /// </summary>
@@ -68,6 +66,7 @@ namespace Wacs.Core.Instructions.GC
         private const int SignBit31 = 0x4000_0000;
         private const int UnsignedMask = 0x3FFF_FFFF;
         public override ByteCode Op => GcCode.I31GetS;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.OpStack.PopType(ValType.I31);   // -1
@@ -101,6 +100,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private const uint BitMask31 = 0x7FFF_FFFF;
         public override ByteCode Op => GcCode.I31GetU;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.OpStack.PopType(ValType.I31);   // -1

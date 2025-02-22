@@ -15,7 +15,5 @@
 namespace Wacs.Core.Types
 {
     public class StorageType
-    {
-        
-    }
+    {}
 }

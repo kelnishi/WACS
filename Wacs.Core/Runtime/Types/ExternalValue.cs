@@ -50,7 +50,7 @@ namespace Wacs.Core.Runtime.Types
             public override ExternalKind Type => ExternalKind.Global;
             public GlobalAddr Address { get; }
         }
-        
+
         public class Tag : ExternalValue
         {
             public Tag(TagAddr address) => Address = address;

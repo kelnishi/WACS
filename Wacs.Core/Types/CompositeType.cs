@@ -24,6 +24,15 @@ namespace Wacs.Core.Types
 {
     public abstract class CompositeType
     {
+        public ValType HeapType =>
+            this switch
+            {
+                FunctionType ft => ValType.FuncRef,
+                ArrayType at => ValType.Array,
+                StructType st => ValType.Struct,
+                _ => throw new InvalidDataException($"Unknown CompType:{this}"),
+            };
+
         public static CompositeType ParseTagged(BinaryReader reader) =>
             reader.ReadByte() switch
             {
@@ -32,15 +41,6 @@ namespace Wacs.Core.Types
                 (byte)CompType.FuncFt => FunctionType.Parse(reader),
                 var form => throw new FormatException(
                     $"Invalid comptype format {form} at offset {reader.BaseStream.Position - 1}.")
-            };
-        
-        public ValType HeapType =>
-            this switch
-            {
-                FunctionType ft => ValType.FuncRef,
-                ArrayType at => ValType.Array,
-                StructType st => ValType.Struct,
-                _ => throw new InvalidDataException($"Unknown CompType:{this}"),
             };
 
         /// <summary>
@@ -57,6 +57,8 @@ namespace Wacs.Core.Types
                 ArrayType at1 when super is ArrayType at2 => at1.Matches(at2, types),
                 _ => false
             };
+
+        public abstract int ComputeHash(int defIndexValue, List<DefType> defs);
 
         public class Validator : AbstractValidator<CompositeType>
         {
@@ -111,7 +113,5 @@ namespace Wacs.Core.Types
                     });
             }
         }
-
-        public abstract int ComputeHash(int defIndexValue, List<DefType> defs);
     }
 }

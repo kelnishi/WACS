@@ -30,6 +30,8 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         public override ByteCode Op => GcCode.ArrayNew;
+        protected override int StackDiff => -1;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -49,8 +51,7 @@ namespace Wacs.Core.Instructions.GC
             var resultType = ValType.Ref | (ValType)X;
             context.OpStack.PushType(resultType);   // -1
         }
-        protected override int StackDiff => -1;
-        
+
         public override void Execute(ExecContext context)
         {
             //1
@@ -88,7 +89,7 @@ namespace Wacs.Core.Instructions.GC
             var refArray = new Value(ValType.Ref | (ValType)X, ai);
             context.OpStack.PushValue(refArray);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();
@@ -100,6 +101,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         public override ByteCode Op => GcCode.ArrayNewDefault;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -120,7 +122,7 @@ namespace Wacs.Core.Instructions.GC
             var resultType = ValType.Ref | (ValType)X;
             context.OpStack.PushType(resultType);       // +0
         }
-        
+
         public override void Execute(ExecContext context)
         {
             //2
@@ -145,7 +147,7 @@ namespace Wacs.Core.Instructions.GC
             var refArray = new Value(ValType.Ref | (ValType)X, ai);
             context.OpStack.PushValue(refArray);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();
@@ -155,9 +157,11 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstArrayNewFixed : InstructionBase, IConstInstruction
     {
-        private TypeIdx X;
         private uint N;
+        private TypeIdx X;
         public override ByteCode Op => GcCode.ArrayNewFixed;
+        protected override int StackDiff => -((int)N-1);
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -179,8 +183,7 @@ namespace Wacs.Core.Instructions.GC
             var resultType = ValType.Ref | (ValType)X;
             context.OpStack.PushType(resultType);   // -(N-1)
         }
-        protected override int StackDiff => -((int)N-1);
-        
+
         public override void Execute(ExecContext context)
         {
             //2
@@ -208,7 +211,7 @@ namespace Wacs.Core.Instructions.GC
             var refArray = new Value(ValType.Ref | (ValType)X, ai);
             context.OpStack.PushValue(refArray);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();
@@ -221,8 +224,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         private DataIdx Y;
-        
+
         public override ByteCode Op => GcCode.ArrayNewData;
+        protected override int StackDiff => -1;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -251,7 +256,6 @@ namespace Wacs.Core.Instructions.GC
             var resultType = ValType.Ref | (ValType)X;
             context.OpStack.PushType(resultType);   // -1
         }
-        protected override int StackDiff => -1;
 
         public override void Execute(ExecContext context)
         {
@@ -332,8 +336,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         private ElemIdx Y;
-        
+
         public override ByteCode Op => GcCode.ArrayNewElem;
+        protected override int StackDiff => -1;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -363,7 +369,6 @@ namespace Wacs.Core.Instructions.GC
             var resultType = ValType.Ref | (ValType)X;
             context.OpStack.PushType(resultType);   // -1
         }
-        protected override int StackDiff => -1;
 
         public override void Execute(ExecContext context)
         {
@@ -416,8 +421,13 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstArrayGet : InstructionBase
     {
-        private PackedExt Sx;
+        private readonly PackedExt Sx;
         private TypeIdx X;
+
+        public InstArrayGet(PackedExt sx)
+        {
+            Sx = sx;
+        }
 
         public override ByteCode Op => Sx switch
         {
@@ -427,11 +437,8 @@ namespace Wacs.Core.Instructions.GC
             _ => throw new InvalidDataException($"Undefined packedtype: {Sx}")
         };
 
-        public InstArrayGet(PackedExt sx)
-        {
-            Sx = sx;
-        }
-        
+        protected override int StackDiff => -1;
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructgetmathsf_hrefsyntax-sxmathitsxxy
         /// </summary>
@@ -458,7 +465,6 @@ namespace Wacs.Core.Instructions.GC
             context.OpStack.PopType(refType);                   // -2
             context.OpStack.PushType(t);                        // -1
         }
-        protected override int StackDiff => -1;
 
         public override void Execute(ExecContext context)
         {
@@ -516,7 +522,7 @@ namespace Wacs.Core.Instructions.GC
             //17
             context.OpStack.PushValue(fieldVal);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();
@@ -527,8 +533,10 @@ namespace Wacs.Core.Instructions.GC
     public class InstArraySet : InstructionBase
     {
         private TypeIdx X;
-        
+
         public override ByteCode Op => GcCode.ArraySet;
+        protected override int StackDiff => -3;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -551,7 +559,6 @@ namespace Wacs.Core.Instructions.GC
             context.OpStack.PopI32();           // -2
             context.OpStack.PopType(refType);   // -3
         }
-        protected override int StackDiff => -3;
 
         public override void Execute(ExecContext context)
         {
@@ -600,7 +607,7 @@ namespace Wacs.Core.Instructions.GC
             //18
             a[i] = val;
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();
@@ -611,6 +618,7 @@ namespace Wacs.Core.Instructions.GC
     public class InstArrayLen : InstructionBase
     {
         public override ByteCode Op => GcCode.ArrayLen;
+
         public override void Validate(IWasmValidationContext context)
         {
             var rt = context.OpStack.PopRefType();  // -1
@@ -618,7 +626,7 @@ namespace Wacs.Core.Instructions.GC
                 "Instruction {0} was invalid. Wrong operand type at top of stack:{1}", Op.GetMnemonic(), rt.Type);
             context.OpStack.PushI32();                    // +0  
         }
-        
+
         public override void Execute(ExecContext context)
         {
             //1
@@ -647,6 +655,8 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         public override ByteCode Op => GcCode.ArrayFill;
+        protected override int StackDiff => -4;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -671,7 +681,6 @@ namespace Wacs.Core.Instructions.GC
             context.OpStack.PopType(refType);   // -4
             
         }
-        protected override int StackDiff => -4;
 
         public override void Execute(ExecContext context)
         {
@@ -728,6 +737,8 @@ namespace Wacs.Core.Instructions.GC
         private TypeIdx X; //dest
         private TypeIdx Y; //src
         public override ByteCode Op => GcCode.ArrayCopy;
+        protected override int StackDiff => -5;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -765,7 +776,6 @@ namespace Wacs.Core.Instructions.GC
             context.OpStack.PopI32();           // -4
             context.OpStack.PopType(refTypeX);  // -5
         }
-        protected override int StackDiff => -5;
 
         public override void Execute(ExecContext context)
         {
@@ -854,8 +864,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         private DataIdx Y;
-        
+
         public override ByteCode Op => GcCode.ArrayInitData;
+        protected override int StackDiff => -4;
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_dataxy
         /// </summary>
@@ -888,7 +900,6 @@ namespace Wacs.Core.Instructions.GC
             var resultType = ValType.NullableRef | (ValType)X;
             context.OpStack.PopType(resultType);    // -4
         }
-        protected override int StackDiff => -4;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_dataxy①
@@ -984,8 +995,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         private ElemIdx Y;
-        
+
         public override ByteCode Op => GcCode.ArrayInitElem;
+        protected override int StackDiff => -4;
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_elemxy
         /// </summary>
@@ -1024,7 +1037,6 @@ namespace Wacs.Core.Instructions.GC
             var resultType = ValType.NullableRef | (ValType)X;
             context.OpStack.PopType(resultType);    // -4
         }
-        protected override int StackDiff => -4;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_elemxy①

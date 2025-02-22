@@ -14,7 +14,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -29,7 +28,6 @@ using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
-
 using InstructionPointer = System.Int32;
 
 // @Spec 2.4.8. Control Instructions
@@ -194,14 +192,14 @@ namespace Wacs.Core.Instructions
                     "Instruction loop invalid. BlockType {0} did not exist in the Context.",Block.BlockType);
             }
         }
-        
+
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
             base.Link(context, pointer);
             PointerAdvance = 1;
             return this;
         }
-        
+
         // @Spec 4.4.8.4. loop
         public override void Execute(ExecContext context)
         {
@@ -240,11 +238,14 @@ namespace Wacs.Core.Instructions
     public class InstIf : BlockTarget, IBlockInstruction, IIfInstruction
     {
         private static readonly ByteCode IfOp = OpCode.If;
-        
-        private Block IfBlock = Block.Empty;
         private Block ElseBlock = Block.Empty;
-        
+
+        private Block IfBlock = Block.Empty;
+
         public override ByteCode Op => IfOp;
+
+        //Consume the predicate
+        protected override int StackDiff => -1;
 
 
         public ValType BlockType => IfBlock.BlockType;
@@ -296,9 +297,7 @@ namespace Wacs.Core.Instructions
                     "Instruction loop invalid. BlockType {0} did not exist in the Context.",IfBlock.BlockType);
             }
         }
-        //Consume the predicate
-        protected override int StackDiff => -1;
-        
+
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
@@ -309,7 +308,7 @@ namespace Wacs.Core.Instructions
                 context.InstructionPointer = Else - 1;
             }
         }
-        
+
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
@@ -363,7 +362,7 @@ namespace Wacs.Core.Instructions
             context.Assert(frame.Opcode == OpCode.If, "Else terminated a non-If block");
             context.PushControlFrame(ElseOp, frame.Types);
         }
-        
+
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
             var target = context.PeekLabel();
@@ -380,7 +379,7 @@ namespace Wacs.Core.Instructions
             context.LinkOpStackHeight = target.Label.StackHeight;
             return this;
         }
-        
+
         public override void Execute(ExecContext context)
         {
             //Just jump out of the If block
@@ -392,10 +391,10 @@ namespace Wacs.Core.Instructions
     //0x0B
     public class InstEnd : InstructionBase
     {
+        public bool FunctionEnd;
+
         // public static readonly InstEnd Inst = new();
         public override ByteCode Op => OpCode.End;
-
-        public bool FunctionEnd;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -480,7 +479,7 @@ namespace Wacs.Core.Instructions
 
         private LabelIdx L;
         private BlockTarget? LinkedLabel;
-        
+
         public override ByteCode Op => OpCode.Br;
 
         // @Spec 3.3.8.6. br l
@@ -512,7 +511,7 @@ namespace Wacs.Core.Instructions
         {
             context.LinkOpStackHeight = label.Label.StackHeight + label.Label.Arity;
         }
-        
+
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
             LinkedLabel = PrecomputeStack(context, L);
@@ -593,8 +592,9 @@ namespace Wacs.Core.Instructions
     {
         public LabelIdx L;
         private BlockTarget? LinkedLabel;
-        
+
         public override ByteCode Op => OpCode.BrIf;
+        protected override int StackDiff => -1;
 
         public Action<ExecContext, int> GetFunc => BranchIf;
 
@@ -614,7 +614,7 @@ namespace Wacs.Core.Instructions
             //But actually, we don't, so push them back on.
             context.OpStack.PushResult(nthFrame.LabelTypes);    // -1
         }
-        protected override int StackDiff => -1;
+
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             LinkedLabel = InstBranch.PrecomputeStack(context, L);
@@ -662,12 +662,12 @@ namespace Wacs.Core.Instructions
     //0x0E
     public sealed class InstBranchTable : InstructionBase, IBranchInstruction, INodeConsumer<int>
     {
-        private LabelIdx Ln; //Default m
         private BlockTarget? LinkedLabeln;
+        private BlockTarget?[] LinkedLabels;
+        private LabelIdx Ln; //Default m
 
         private LabelIdx[] Ls = null!;
-        private BlockTarget?[] LinkedLabels;
-        
+
         public override ByteCode Op => OpCode.BrTable;
 
         public Action<ExecContext, int> GetFunc => BranchTable;
@@ -709,7 +709,7 @@ namespace Wacs.Core.Instructions
             context.LinkUnreachable = true;
             return this;
         }
-        
+
         /// <summary>
         /// @Spec 4.4.8.8. br_table
         /// </summary>
@@ -804,7 +804,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushValues(aside);
             context.SetUnreachable();
         }
-        
+
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
             context.LinkUnreachable = true;
@@ -829,8 +829,8 @@ namespace Wacs.Core.Instructions
     //0x10
     public sealed class InstCall : InstructionBase, ICallInstruction
     {
-        public FuncIdx X;
         private FuncAddr linkedX;
+        public FuncIdx X;
 
         public InstCall()
         {
@@ -1011,7 +1011,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.DiscardValues(funcType.ParameterTypes);
             context.OpStack.PushResult(funcType.ResultType);
         }
-        
+
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
             context.Assert( context.Frame.Module.TableAddrs.Contains(X),

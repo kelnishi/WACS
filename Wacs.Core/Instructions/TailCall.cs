@@ -71,7 +71,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushValues(aside);
             context.SetUnreachable();
         }
-        
+
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
@@ -259,7 +259,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushValues(aside);
             context.SetUnreachable();
         }
-        
+
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             context.Assert( context.Frame.Module.TableAddrs.Contains(X),
@@ -531,7 +531,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushValues(aside);
             context.SetUnreachable();
         }
-        
+
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;

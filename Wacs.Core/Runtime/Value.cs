@@ -18,8 +18,6 @@ using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Wacs.Core.Attributes;
-using Wacs.Core.Runtime.Exceptions;
-using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;

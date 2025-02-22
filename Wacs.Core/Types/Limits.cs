@@ -27,6 +27,11 @@ namespace Wacs.Core.Types
     public class Limits : ICloneable
     {
         /// <summary>
+        /// The address type of the memory.
+        /// </summary>
+        public AddrType AddressType;
+
+        /// <summary>
         /// The optional maximum number of units. If MaxValue, there is no specified maximum.
         /// </summary>
         public long? Maximum;
@@ -35,11 +40,6 @@ namespace Wacs.Core.Types
         /// The minimum number of units (e.g., pages for memory).
         /// </summary>
         public long Minimum;
-
-        /// <summary>
-        /// The address type of the memory.
-        /// </summary>
-        public AddrType AddressType;
 
         /// <summary>
         /// For threads, indicates whether the memory is shared.

@@ -30,17 +30,20 @@ namespace Wacs.Core.Types
     /// </summary>
     public class TableType : ICloneable, IRenderable
     {
+        private const byte TableTypeExpr = 0x40;
+        private const byte FutureExtByte = 0x00;
+
         /// <summary>
         /// The element type of the table (e.g., funcref or externref).
         /// </summary>
         public readonly ValType ElementType;
 
+        public readonly Expression Init;
+
         /// <summary>
         /// The limits specifying the minimum and optional maximum number of elements.
         /// </summary>
         public Limits Limits = null!;
-
-        public readonly Expression Init;
 
         public TableType(ValType elementType, Limits limits, Expression? init = null)
         {
@@ -75,9 +78,6 @@ namespace Wacs.Core.Types
 
         public override string ToString() => $"TableType({ElementType}[{Limits}])";
 
-        private const byte TableTypeExpr = 0x40;
-        private const byte FutureExtByte = 0x00;
-
         private static TableType ParseTableTypeWithExpr(BinaryReader reader)
         {
             switch (reader.ReadByte())
@@ -91,7 +91,7 @@ namespace Wacs.Core.Types
             var init = Expression.ParseInitializer(reader);
             return new(type, limits, init);
         }
-        
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#table-section①
         /// </summary>

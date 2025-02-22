@@ -13,7 +13,6 @@
 // limitations under the License.
 
 using System.IO;
-using System.Runtime.InteropServices;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -100,6 +99,7 @@ namespace Wacs.Core.Instructions
         }
 
         public override ByteCode Op { get; }
+        protected override int StackDiff => -2;
 
         /// <summary>
         /// @Spec 3.3.7.3. t.store
@@ -116,7 +116,6 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopType(Type);      // -1
             context.OpStack.PopInt();           // -2
         }
-        protected override int StackDiff => -2;
 
         public override InstructionBase Parse(BinaryReader reader)
         {

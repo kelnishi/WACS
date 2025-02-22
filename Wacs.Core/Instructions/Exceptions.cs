@@ -30,18 +30,18 @@ namespace Wacs.Core.Instructions
     public class InstTryTable : BlockTarget, IBlockInstruction, IExnHandler
     {
         private static readonly ByteCode TryTableOp = OpCode.TryTable;
+
+        private static readonly ByteCode CatchOp = WacsCode.Catch;
         private Block Block;
         public CatchType[] Catches;
         public BlockTarget?[] CatchTargets;
-        
+
         public override ByteCode Op => TryTableOp;
         public ValType BlockType => Block.BlockType;
         public int Count => 1;
         public int BlockSize => 1 + Block.Size;
         public Block GetBlock(int idx) => Block;
-        
-        private static readonly ByteCode CatchOp = WacsCode.Catch;
-        
+
         public override void Validate(IWasmValidationContext context)
         {
             try
@@ -110,12 +110,12 @@ namespace Wacs.Core.Instructions
             PointerAdvance = 1;
             return this;
         }
-        
+
         public override void Execute(ExecContext context)
         {
             // context.Frame.PushLabel(this);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             var blockType = ValTypeParser.Parse(reader, parseBlockIndex: true, parseStorageType: false);
@@ -132,6 +132,7 @@ namespace Wacs.Core.Instructions
     {
         private TagIdx X;
         public override ByteCode Op => OpCode.Throw;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tags.Contains(X), 
@@ -148,7 +149,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.DiscardValues(functionType.ParameterTypes);
             context.SetUnreachable();
         }
-        
+
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             var ta = context.Frame.Module.TagAddrs[X];
@@ -195,7 +196,7 @@ namespace Wacs.Core.Instructions
             
             InstThrowRef.ExecuteInstruction(context);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TagIdx)reader.ReadLeb128_u32();
@@ -206,11 +207,13 @@ namespace Wacs.Core.Instructions
     public class InstThrowRef : InstructionBase
     {
         public override ByteCode Op => OpCode.ThrowRef;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.OpStack.PopType(ValType.Exn);
             context.SetUnreachable();
         }
+
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             context.LinkOpStackHeight -= 1;
@@ -222,7 +225,7 @@ namespace Wacs.Core.Instructions
         {
             ExecuteInstruction(context);
         }
-        
+
         public static void ExecuteInstruction(ExecContext context)
         {
             //1.

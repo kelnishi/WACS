@@ -37,12 +37,8 @@ namespace Wacs.Core
         /// </summary>
         public class Function : IRenderable
         {
-            public FuncIdx Index;
-
             public bool ElementDeclared = false;
-
-            public bool IsFullyDeclared(IWasmValidationContext ctx) => 
-                ElementDeclared || Index.Value < ctx.FunctionIndex.Value;
+            public FuncIdx Index;
 
             public bool IsImport = false;
             public string Id { get; set; } = "";
@@ -89,6 +85,9 @@ namespace Wacs.Core
                 fakeContext.PopControlFrame();
                 writer.WriteLine(")");
             }
+
+            public bool IsFullyDeclared(IWasmValidationContext ctx) => 
+                ElementDeclared || Index.Value < ctx.FunctionIndex.Value;
 
             private void RenderInstructions(StreamWriter writer, string indent, int depth, Module module, InstructionSequence seq, StackRenderer stackRenderer)
             {

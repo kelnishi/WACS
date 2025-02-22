@@ -42,10 +42,10 @@ namespace Wacs.Core.Instructions.Numeric
             _validate = validate;
             IsConstant = isConst;
         }
-        
-        public bool IsConstant { get; }
 
         public override ByteCode Op { get; }
+
+        public bool IsConstant { get; }
 
         public Func<ExecContext, float,float> GetFunc => (_, i1) => _execute(i1);
 

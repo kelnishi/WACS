@@ -28,6 +28,7 @@ namespace Wacs.Core.Instructions.Numeric
     {
         public int Value;
         public override ByteCode Op => OpCode.I32Const;
+        protected override int StackDiff => +1;
         public Func<ExecContext, int> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
 
@@ -37,7 +38,6 @@ namespace Wacs.Core.Instructions.Numeric
         /// <param name="context"></param>
         public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushI32(Value);
-        protected override int StackDiff => +1;
 
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
@@ -67,6 +67,7 @@ namespace Wacs.Core.Instructions.Numeric
     {
         private long Value;
         public override ByteCode Op => OpCode.I64Const;
+        protected override int StackDiff => +1;
         public Func<ExecContext, long> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
 
@@ -76,7 +77,6 @@ namespace Wacs.Core.Instructions.Numeric
         /// <param name="context"></param>
         public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushI64(Value);
-        protected override int StackDiff => +1;
 
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
@@ -101,6 +101,7 @@ namespace Wacs.Core.Instructions.Numeric
     {
         private float Value;
         public override ByteCode Op => OpCode.F32Const;
+        protected override int StackDiff => +1;
         public Func<ExecContext, float> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
 
@@ -110,7 +111,6 @@ namespace Wacs.Core.Instructions.Numeric
         /// <param name="context"></param>
         public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushF32(Value);
-        protected override int StackDiff => +1;
 
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
@@ -143,6 +143,7 @@ namespace Wacs.Core.Instructions.Numeric
     {
         private double Value;
         public override ByteCode Op => OpCode.F64Const;
+        protected override int StackDiff => +1;
         public Func<ExecContext, double> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
 
@@ -152,8 +153,7 @@ namespace Wacs.Core.Instructions.Numeric
         /// <param name="context"></param>
         public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushF64(Value);
-        protected override int StackDiff => +1;
-        
+
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>

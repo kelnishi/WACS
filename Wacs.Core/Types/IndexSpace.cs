@@ -17,7 +17,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
-using FluentValidation;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types.Defs;
@@ -104,17 +103,17 @@ namespace Wacs.Core.Types
     public class TagAddrs
     {
         private readonly List<TagAddr> _space = new();
-        
+
         public TagAddr this[TagIdx idx]
         {
             get => _space[(int)idx.Value];
             set => _space[(int)idx.Value] = value;
         }
-        
+
         public bool Contains(TagIdx idx) => idx.Value < _space.Count;
-        
+
         public void Add(TagAddr element) => _space.Add(element);
-        
+
         public IEnumerator<TagAddr> GetEnumerator() => _space.GetEnumerator();
     }
 
@@ -264,8 +263,8 @@ namespace Wacs.Core.Types
 
     public class GlobalValidationSpace : AbstractIndexSpace<GlobalIdx, Module.Global>
     {
-        private readonly ReadOnlyCollection<Module.Global> _imports;
         private readonly ReadOnlyCollection<Module.Global> _globals;
+        private readonly ReadOnlyCollection<Module.Global> _imports;
         public int IncrementalHighWatermark = -1;
 
         public GlobalValidationSpace(Module module)
@@ -387,7 +386,7 @@ namespace Wacs.Core.Types
     {
         private readonly ReadOnlyCollection<TagType> _imports;
         private readonly ReadOnlyCollection<TagType> _tags;
-        
+
         public TagsSpace(Module module)
         {
             _imports = module.ImportedTags;
