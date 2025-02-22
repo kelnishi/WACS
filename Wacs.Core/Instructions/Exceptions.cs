@@ -106,8 +106,7 @@ namespace Wacs.Core.Instructions
         {
             base.Link(context, pointer);
             CatchTargets = Catches.Select(catchType => InstBranch.PrecomputeStack(context, catchType.L + 1)).ToArray();
-            
-            PointerAdvance = 1;
+            Nop = true;
             return this;
         }
 
