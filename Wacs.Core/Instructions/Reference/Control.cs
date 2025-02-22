@@ -32,6 +32,8 @@ namespace Wacs.Core.Instructions.Reference
     public class InstBrOnNull : InstructionBase
     {
         private LabelIdx L;
+        private BlockTarget? LinkedLabel;
+        
         public override ByteCode Op => OpCode.BrOnNull;
         public override void Validate(IWasmValidationContext context)
         {
@@ -49,6 +51,12 @@ namespace Wacs.Core.Instructions.Reference
             //Push the non-null ref back for the else case.
             context.OpStack.PushRef(refType.ToConcrete());          // +0
         }
+        
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            LinkedLabel = InstBranch.PrecomputeStack(context, L);
+            return base.Link(context, pointer);
+        }
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/#-hrefsyntax-instr-controlmathsfbr_on_nulll①
@@ -59,7 +67,7 @@ namespace Wacs.Core.Instructions.Reference
             var refVal = context.OpStack.PopRefType();
             if (refVal.IsNullRef)
             {
-                InstBranch.ExecuteInstruction(context, L);
+                InstBranch.ExecuteInstruction(context, LinkedLabel);
             }
             else
             {
@@ -77,6 +85,8 @@ namespace Wacs.Core.Instructions.Reference
     public class InstBrOnNonNull : InstructionBase
     {
         private LabelIdx L;
+        private BlockTarget? LinkedLabel;
+        
         public override ByteCode Op => OpCode.BrOnNonNull;
         public override void Validate(IWasmValidationContext context)
         {
@@ -97,6 +107,12 @@ namespace Wacs.Core.Instructions.Reference
             context.OpStack.PopRefType();                             // -1
         }
         protected override int StackDiff => -1;
+        
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            LinkedLabel = InstBranch.PrecomputeStack(context, L);
+            return base.Link(context, pointer);
+        }
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/#-hrefsyntax-instr-controlmathsfbr_on_non_nulll①
@@ -108,7 +124,7 @@ namespace Wacs.Core.Instructions.Reference
             if (!refVal.IsNullRef)
             {
                 context.OpStack.PushRef(refVal);
-                InstBranch.ExecuteInstruction(context, L);
+                InstBranch.ExecuteInstruction(context, LinkedLabel);
             }
         }
         
