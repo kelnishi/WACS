@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using Wacs.Core.Instructions.Memory;
@@ -43,8 +41,8 @@ namespace Wacs.Core.Instructions
             OpCode.Block             => new InstBlock(),
             OpCode.Loop              => new InstLoop(),
             OpCode.If                => new InstIf(),
-            OpCode.Else              => InstElse.Inst,
-            OpCode.End               => InstEnd.Inst,
+            OpCode.Else              => new InstElse(),
+            OpCode.End               => new InstEnd(),
             
             OpCode.TryTable          => new InstTryTable(),
             OpCode.Throw             => new InstThrow(),
@@ -54,7 +52,7 @@ namespace Wacs.Core.Instructions
             OpCode.BrIf              => new InstBranchIf(),
             OpCode.BrTable           => new InstBranchTable(),
                  
-            OpCode.Return            => InstReturn.Inst,
+            OpCode.Return            => new InstReturn(),
             OpCode.Call              => new InstCall(),
             OpCode.CallIndirect      => new InstCallIndirect(),
             OpCode.CallRef           => new InstCallRef(),

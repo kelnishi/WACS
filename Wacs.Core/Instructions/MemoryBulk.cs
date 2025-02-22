@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System.IO;
 using Wacs.Core.OpCodes;
@@ -31,6 +29,7 @@ namespace Wacs.Core.Instructions
     {
         private MemIdx M;
         public override ByteCode Op => OpCode.MemorySize;
+        public override int StackDiff => +1;
 
         /// <summary>
         /// @Spec 3.3.7.10. memory.size
@@ -41,7 +40,7 @@ namespace Wacs.Core.Instructions
                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),M);
             var mem = context.Mems[M];
             var at = mem.Limits.AddressType;
-            context.OpStack.PushType(at.ToValType());
+            context.OpStack.PushType(at.ToValType());   // +1
         }
 
         // @Spec 4.4.7.8. memory.size
@@ -84,8 +83,8 @@ namespace Wacs.Core.Instructions
                 "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),M);
             var mem = context.Mems[M];
             var at = mem.Limits.AddressType.ToValType();
-            context.OpStack.PopType(at);;
-            context.OpStack.PushType(at);
+            context.OpStack.PopType(at);    // -1
+            context.OpStack.PushType(at);   // +0
         }
 
         // @Spec 4.4.7.9. memory.grow
@@ -151,7 +150,10 @@ namespace Wacs.Core.Instructions
     {
         private DataIdx X;
         private MemIdx Y;
+
         public override ByteCode Op => ExtCode.MemoryInit;
+
+        public override int StackDiff => -3;
 
         /// <summary>
         /// @Spec 3.3.7.14. memory.init
@@ -167,9 +169,9 @@ namespace Wacs.Core.Instructions
             var mem = context.Mems[Y];
             var at = mem.Limits.AddressType.ToValType();
             
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
-            context.OpStack.PopType(at);
+            context.OpStack.PopI32();       // -1
+            context.OpStack.PopI32();       // -2
+            context.OpStack.PopType(at);    // -3
         }
 
         // @Spec 4.4.7.12. memory.init x
@@ -177,7 +179,6 @@ namespace Wacs.Core.Instructions
         {
             //2.
             context.Assert( context.Frame.Module.MemAddrs.Contains(Y),
-                
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory {Y} did not exist in the context.");
             //3.
             var ma = context.Frame.Module.MemAddrs[Y];
@@ -190,7 +191,6 @@ namespace Wacs.Core.Instructions
             
             //6.
             context.Assert( context.Frame.Module.DataAddrs.Contains(X),
-                
                 $"Instruction {Op.GetMnemonic()} failed. Address for Data {X} did not exist in the context.");
             //7.
             var da = context.Frame.Module.DataAddrs[X];
@@ -199,55 +199,41 @@ namespace Wacs.Core.Instructions
                 $"Instruction {Op.GetMnemonic()} failed. Address for Data {X} was not in the Store.");
             //9.
             var data = context.Store[da];
+            
+            //10.
+            context.Assert( context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //11.
+            long n = (uint)context.OpStack.PopI32();
+            //12.
+            context.Assert( context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //13.
+            long s = (uint)context.OpStack.PopI32();
+            //14.
+            context.Assert( context.OpStack.Peek().IsInt,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //15.
+            long d = context.OpStack.PopAddr();
 
-            //Tail recursive call alternative loop
+            if (s + n > data.Data.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Data underflow.");
+            
+            if (d + n > mem.Data.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory overflow.");
+                
+            //Tail recursive call alternative loop, inline direct memory set
             while (true)
             {
-                //10.
-                context.Assert( context.OpStack.Peek().IsI32,
-                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-                //11.
-                long n = (uint)context.OpStack.PopI32();
-                //12.
-                context.Assert( context.OpStack.Peek().IsI32,
-                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-                //13.
-                long s = (uint)context.OpStack.PopI32();
-                //14.
-                context.Assert( context.OpStack.Peek().IsInt,
-                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-                //15.
-                long d = context.OpStack.PopAddr();
-                //16.
-                if (s + n > data.Data.Length)
-                    throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Data underflow.");
-                if (d + n > mem.Data.Length)
-                    throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory overflow.");
-                //17.
                 if (n == 0)
                     return;
-                //18.
-                byte b = data.Data[s];
-                //19.
-                context.OpStack.PushValue(new Value(at, d));
-                //20.
-                context.OpStack.PushI32(b);
-                //21.
-                context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, Y))
-                    .Execute(context);
-                //22.
-                long check = d + 1L;
-                context.Assert( check < Constants.TwoTo32,
-                    $"Instruction {Op.GetMnemonic()} failed. Memory overflow.");
-                //23.
-                context.OpStack.PushValue(new Value(at, d + 1L));
-                //24.
-                check = s + 1L;
-                context.Assert( check < Constants.TwoTo32,
-                    $"Instruction {Op.GetMnemonic()} failed. Data overflow.");
-                //25.
-                context.OpStack.PushU32((uint)(s + 1L));
-                context.OpStack.PushU32((uint)(n - 1L));
+
+                //Set memory direct
+                mem.Data[(int)d] = (byte)(0xFF & data.Data[s]);
+                
+                d += 1L;
+                s += 1L;
+                n -= 1L;
             }
         }
 
@@ -255,7 +241,6 @@ namespace Wacs.Core.Instructions
         {
             X = (DataIdx)reader.ReadLeb128_u32();
             Y = (MemIdx)reader.ReadByte();
-            
             return this;
         }
 
@@ -317,137 +302,102 @@ namespace Wacs.Core.Instructions
     //0xFC_0A
     public class InstMemoryCopy : InstructionBase
     {
-        private MemIdx SrcY;
         private MemIdx DstX;
+        private MemIdx SrcY;
         public override ByteCode Op => ExtCode.MemoryCopy;
+        public override int StackDiff => -3;
 
         /// <summary>
         /// @Spec 3.3.7.13. memory.copy
         /// </summary>
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.Mems.Contains(DstX),
-                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),DstX);
             context.Assert(context.Mems.Contains(SrcY),
-                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(), SrcY);
+                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(),SrcY);
+            context.Assert(context.Mems.Contains(DstX),
+                "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(), DstX);
 
-            var memX = context.Mems[DstX];
-            var memY = context.Mems[SrcY];
-            var atS = memX.Limits.AddressType;
-            var atD = memY.Limits.AddressType;
+            var memSrcY = context.Mems[SrcY];
+            var memDstX = context.Mems[DstX];
+            var atS = memSrcY.Limits.AddressType;
+            var atD = memDstX.Limits.AddressType;
             var atN = atS.Min(atD);
             
-            context.OpStack.PopType(atN.ToValType());
-            context.OpStack.PopType(atD.ToValType());
-            context.OpStack.PopType(atS.ToValType());
+            context.OpStack.PopType(atN.ToValType());   // -1
+            context.OpStack.PopType(atD.ToValType());   // -2
+            context.OpStack.PopType(atS.ToValType());   // -3
         }
 
         // @Spec 4.4.7.11. memory.copy
         public override void Execute(ExecContext context)
         {
             //2.
-            context.Assert( context.Frame.Module.MemAddrs.Contains(DstX),
-                
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {DstX} did not exist in the context.");
-            //3.
             context.Assert( context.Frame.Module.MemAddrs.Contains(SrcY),
                 
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory {SrcY} did not exist in the context.");
+            //3.
+            context.Assert( context.Frame.Module.MemAddrs.Contains(DstX),
+                
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {DstX} did not exist in the context.");
             //4.
-            var da = context.Frame.Module.MemAddrs[DstX];
-            //5.
             var sa = context.Frame.Module.MemAddrs[SrcY];
+            //5.
+            var da = context.Frame.Module.MemAddrs[DstX];
             //6.
             context.Assert( context.Store.Contains(da),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {DstX} was not in the Store.");
-            //7.
-            context.Assert( context.Store.Contains(sa),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory {SrcY} was not in the Store.");
+            //7.
+            context.Assert( context.Store.Contains(da),
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory {DstX} was not in the Store.");
             //8.
-            var memD = context.Store[da];
+            var memSrc = context.Store[sa];
             //9.
-            var memS = context.Store[sa];
+            var memDst = context.Store[da];
             
-            var atD = memD.Type.Limits.AddressType;
-            var atS = memS.Type.Limits.AddressType;
-            var atN = atD.Min(atS);
-
-            //Tail recursive call alternative loop
+            //10.
+            context.Assert( context.OpStack.Peek().IsInt,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //11.
+            long n = context.OpStack.PopAddr();
+            //12.
+            context.Assert( context.OpStack.Peek().IsInt,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //13.
+            long s = context.OpStack.PopAddr();
+            //14.
+            context.Assert( context.OpStack.Peek().IsInt,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //15.
+            long d = context.OpStack.PopAddr();
+            //16.
+            if (s+n > memSrc.Data.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
+            if (d+n > memDst.Data.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
+            
+            //Tail recursive call alternative loop, inline load/store
             while (true)
             {
-                //10.
-                context.Assert( context.OpStack.Peek().IsInt,
-                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-                //11.
-                long n = context.OpStack.PopAddr();
-                //12.
-                context.Assert( context.OpStack.Peek().IsInt,
-                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-                //13.
-                long s = context.OpStack.PopAddr();
-                //14.
-                context.Assert( context.OpStack.Peek().IsInt,
-                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-                //15.
-                long d = context.OpStack.PopAddr();
-                //16.
-                long check = s + n;
-                if (check > memD.Data.Length)
-                    throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
-                check = d + n;
-                if (check > memS.Data.Length)
-                    throw new TrapException(
-                        $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
-                //17.
                 if (n == 0)
                     return;
-                //18.
                 if (d <= s)
                 {
-                    context.OpStack.PushValue(new Value(atD, d));
-                    context.OpStack.PushValue(new Value(atS, s));
-                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, DstX))
-                        .Execute(context);
-                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, SrcY))
-                        .Execute(context);
-                    check = d + 1L;
-                    context.Assert( check < Constants.TwoTo32,
-                        $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
-                    context.OpStack.PushValue(new Value(atD, d + 1L));
-                    check = s + 1L;
-                    context.Assert( check < Constants.TwoTo32,
-                        $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
-                    context.OpStack.PushValue(new Value(atS, s + 1L));
+                    memDst.Data[(int)d] = memSrc.Data[(int)s];
+                    d += 1L;
+                    s += 1L;
                 }
-                //19.
                 else
                 {
-                    check = d + n - 1L;
-                    context.Assert( check < Constants.TwoTo32,
-                        $"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
-                    context.OpStack.PushValue(new Value(atD, d + n - 1));
-                    check = s + n - 1L;
-                    context.Assert( check < Constants.TwoTo32,
-                        $"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
-                    context.OpStack.PushValue(new Value(atS, s + n - 1));
-                    context.InstructionFactory.CreateInstruction<InstMemoryLoad>(OpCode.I32Load8U).Immediate(new MemArg(0, 0, DstX))
-                        .Execute(context);
-                    context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, SrcY))
-                        .Execute(context);
-                    context.OpStack.PushValue(new Value(atD, d));
-                    context.OpStack.PushValue(new Value(atS, s));
+                    memDst.Data[(int)(d+n-1L)] = memSrc.Data[(int)(s+n-1L)];
                 }
-
-                //20.
-                context.OpStack.PushValue(new Value(atN, n - 1));
-                //21.
+                n -= 1L;
             }
         }
 
         public override InstructionBase Parse(BinaryReader reader)
         {
-            SrcY = (MemIdx)reader.ReadByte();
             DstX = (MemIdx)reader.ReadByte();
+            SrcY = (MemIdx)reader.ReadByte();
             return this;
         }
     }
@@ -457,6 +407,8 @@ namespace Wacs.Core.Instructions
     {
         private MemIdx X;
         public override ByteCode Op => ExtCode.MemoryFill;
+
+        public override int StackDiff => -3;
 
         /// <summary>
         /// @Spec 3.3.7.12. memory.fill
@@ -468,9 +420,9 @@ namespace Wacs.Core.Instructions
             
             var mem = context.Mems[X];
             var at = mem.Limits.AddressType;
-            context.OpStack.PopType(at.ToValType());
-            context.OpStack.PopI32();
-            context.OpStack.PopType(at.ToValType());
+            context.OpStack.PopType(at.ToValType());    // -1
+            context.OpStack.PopI32();                   // -2  
+            context.OpStack.PopType(at.ToValType());    // -3
         }
 
         // @Spec 4.4.7.10. memory.fill
@@ -489,46 +441,32 @@ namespace Wacs.Core.Instructions
             var mem = context.Store[a];
             var at = mem.Type.Limits.AddressType;
 
-            //Tail recursive call alternative loop
+            //6.
+            context.Assert( context.OpStack.Peek().IsI32,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //7.
+            long n = (uint)context.OpStack.PopI32();
+            //8,9. YOLO
+            var val = context.OpStack.PopAny();
+            uint cU32 = val;
+            //10.
+            context.Assert( context.OpStack.Peek().IsInt,
+                $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
+            //11.
+            long d = context.OpStack.PopAddr();
+            //12.
+            if (d + n > mem.Data.Length)
+                throw new TrapException("Instruction memory.fill failed. Buffer overflow");
+            
+            //Tail recursive call alternative loop, inline store
             while (true)
             {
-                //6.
-                context.Assert( context.OpStack.Peek().IsI32,
-                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-                //7.
-                long n = (uint)context.OpStack.PopI32();
-                //8,9. YOLO
-                var val = context.OpStack.PopAny();
-                //10.
-                context.Assert( context.OpStack.Peek().IsInt,
-                    $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
-                //11.
-                long d = context.OpStack.PopAddr();
-                //12.
-                if (d + n > mem.Data.Length)
-                    throw new TrapException("Instruction memory.fill failed. Buffer overflow");
-                //13.
                 if (n == 0)
                     return;
-                //14.
-                context.OpStack.PushValue(new Value(at, d));
-                //15.
-                context.OpStack.PushValue(val);
-                //16.
                 
-                context.InstructionFactory.CreateInstruction<InstMemoryStore>(OpCode.I32Store8).Immediate(new MemArg(0, 0, X))
-                    .Execute(context);
-                //17.
-                long check = d + 1L;
-                context.Assert( check < Constants.TwoTo32,
-                    $"Instruction {Op.GetMnemonic()} failed. Buffer overflow");
-                //18.
-                context.OpStack.PushValue(new Value(at, d + 1));
-                //19.
-                context.OpStack.PushValue(val);
-                //20.
-                context.OpStack.PushU32((uint)(n - 1));
-                //21.
+                mem.Data[(int)d] = (byte)(0xFF & cU32);
+                d += 1L;
+                n -= 1L;
             }
         }
 

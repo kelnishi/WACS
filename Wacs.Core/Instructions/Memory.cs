@@ -1,21 +1,18 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System.IO;
-using System.Runtime.InteropServices;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -54,8 +51,8 @@ namespace Wacs.Core.Instructions
             context.Assert(M.Align.LinearSize() <= WidthTByteSize,
                     "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),WidthT);
 
-            context.OpStack.PopInt();
-            context.OpStack.PushType(Type);
+            context.OpStack.PopInt();           // -1
+            context.OpStack.PushType(Type);     // +0
         }
 
         public override InstructionBase Parse(BinaryReader reader)
@@ -102,6 +99,7 @@ namespace Wacs.Core.Instructions
         }
 
         public override ByteCode Op { get; }
+        public override int StackDiff => -2;
 
         /// <summary>
         /// @Spec 3.3.7.3. t.store
@@ -115,8 +113,8 @@ namespace Wacs.Core.Instructions
                     "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),WidthT);
 
             //Pop parameters from right to left
-            context.OpStack.PopType(Type);
-            context.OpStack.PopInt();
+            context.OpStack.PopType(Type);      // -1
+            context.OpStack.PopInt();           // -2
         }
 
         public override InstructionBase Parse(BinaryReader reader)

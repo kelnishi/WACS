@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.IO;
@@ -29,6 +27,11 @@ namespace Wacs.Core.Types
     public class Limits : ICloneable
     {
         /// <summary>
+        /// The address type of the memory.
+        /// </summary>
+        public AddrType AddressType;
+
+        /// <summary>
         /// The optional maximum number of units. If MaxValue, there is no specified maximum.
         /// </summary>
         public long? Maximum;
@@ -37,11 +40,6 @@ namespace Wacs.Core.Types
         /// The minimum number of units (e.g., pages for memory).
         /// </summary>
         public long Minimum;
-
-        /// <summary>
-        /// The address type of the memory.
-        /// </summary>
-        public AddrType AddressType;
 
         /// <summary>
         /// For threads, indicates whether the memory is shared.

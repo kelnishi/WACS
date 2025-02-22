@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Collections.Generic;
@@ -37,7 +35,7 @@ namespace Wacs.Core.Types
             Mut = mut;
             StorageType = st;
         }
-        
+
         public static FieldType Parse(BinaryReader reader) => 
             new(
                 ValTypeParser.Parse(reader, parseBlockIndex: false, parseStorageType: true),
@@ -100,13 +98,22 @@ namespace Wacs.Core.Types
             ValType.V128 => Types.BitWidth.V128,
             _ => Types.BitWidth.None,
         };
-        
+
         public bool ValidExtension(PackedExt pt) => pt switch
         {
             PackedExt.NotPacked => StorageType is not (ValType.I8 or ValType.I16),
             PackedExt.Signed or PackedExt.Unsigned => StorageType is ValType.I8 or ValType.I16,
             _ => false
         };
+
+        public int ComputeHash(int defIndexValue, List<DefType> defs)
+        {
+            var hash = new StableHash();
+            hash.Add(nameof(FieldType));
+            hash.Add(Mut);
+            hash.Add(StorageType.ComputeHash(defIndexValue,defs));
+            return hash.ToHashCode();
+        }
 
         public class Validator : AbstractValidator<FieldType>
         {
@@ -125,15 +132,6 @@ namespace Wacs.Core.Types
                 
                 //Spec ignores Mutability for validation
             }
-        }
-
-        public int ComputeHash(int defIndexValue, List<DefType> defs)
-        {
-            var hash = new StableHash();
-            hash.Add(nameof(FieldType));
-            hash.Add(Mut);
-            hash.Add(StorageType.ComputeHash(defIndexValue,defs));
-            return hash.ToHashCode();
         }
     }
 }

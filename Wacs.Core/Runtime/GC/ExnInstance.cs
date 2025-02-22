@@ -19,12 +19,11 @@ namespace Wacs.Core.Runtime.Types
 {
     public class ExnInstance : IGcRef
     {
-        public ExnIdx Index;
-        public RefIdx StoreIndex => Index;
-        
-        public TagAddr Tag;
         public Stack<Value> Fields;
-        
+        public ExnIdx Index;
+
+        public TagAddr Tag;
+
         public ExnInstance(uint idx, TagAddr tag, Stack<Value> fields)
         {
             Index = new ExnIdx(idx);
@@ -32,5 +31,6 @@ namespace Wacs.Core.Runtime.Types
             Fields = fields;
         }
 
+        public RefIdx StoreIndex => Index;
     }
 }

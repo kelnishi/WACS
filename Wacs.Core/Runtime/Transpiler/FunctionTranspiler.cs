@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System.Collections.Generic;
 using System.Linq;
@@ -68,17 +66,11 @@ namespace Wacs.Core.Runtime.Transpiler
                     case InstBlock instBlock:
                         var newBlockSeq = OptimizeSequence(instBlock.GetBlock(0).Instructions);
                         var newBlock = new InstBlock().Immediate(instBlock.BlockType, newBlockSeq);
-                        //HACK: We're copying the StackHeight here. Ideally we would recalculate,
-                        //but InstAggregates would need to report correct stack consumption to Validate
-                        newBlock.Label = new Label(instBlock.Label);
-                        
                         stack.Push(newBlock);
                         break;
                     case InstLoop instLoop:
                         var newLoopSeq = OptimizeSequence(instLoop.GetBlock(0).Instructions);
                         var newLoop = new InstLoop().Immediate(instLoop.BlockType, newLoopSeq);
-                        //copy stackheight
-                        newLoop.Label = new Label(instLoop.Label);
                         stack.Push(newLoop);
                         break;
                     case InstIf instIf:
@@ -106,9 +98,6 @@ namespace Wacs.Core.Runtime.Transpiler
                         }
                         if (newIf == null)
                             newIf = new InstIf().Immediate(instIf.BlockType, newIfSeq, newElseSeq);
-                        
-                        //copy stackheight
-                        newIf.Label = new Label(instIf.Label);
 
                         stack.Push(newIf);
                         break;

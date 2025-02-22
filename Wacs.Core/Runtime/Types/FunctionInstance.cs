@@ -1,25 +1,23 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
+using InstructionPointer = System.Int32;
 
 namespace Wacs.Core.Runtime.Types
 {
@@ -38,6 +36,8 @@ namespace Wacs.Core.Runtime.Types
         /// </summary>
         public readonly Module.Function Definition;
 
+        public readonly DefType DefType;
+
         public readonly FuncIdx Index;
 
         public readonly ModuleInstance Module;
@@ -45,6 +45,9 @@ namespace Wacs.Core.Runtime.Types
         //Copied from the static Definition
         //Can be processed with optimization passes
         public Expression Body;
+        public int Length;
+
+        public InstructionPointer LinkedOffset;
 
         //Copied from the static Definition
         public ValType[] Locals;
@@ -63,8 +66,8 @@ namespace Wacs.Core.Runtime.Types
             Module = module;
             DefType = type;
             Definition = definition;
-            SetBody(definition.Body);
-            
+            Body = definition.Body;
+            Body.LabelTarget.Label.Arity = Type.ResultType.Arity;
             Locals = definition.Locals;
             Index = definition.Index;
             
@@ -72,8 +75,6 @@ namespace Wacs.Core.Runtime.Types
                 Name = Definition.Id;
         }
 
-        public readonly DefType DefType;
-        
         public string ModuleName => Module.Name;
         public string Name { get; set; } = "";
         public FunctionType Type { get; }
@@ -91,9 +92,6 @@ namespace Wacs.Core.Runtime.Types
         {
             Body = body;
             Body.LabelTarget.Label.Arity = Type.ResultType.Arity;
-
-            var vContext = new StackCalculator(Module, Definition);
-            Body.PrecomputeLabels(vContext);
         }
 
         public void Invoke(ExecContext context)
@@ -133,10 +131,11 @@ namespace Wacs.Core.Runtime.Types
             frame.ReturnLabel.Arity = funcType.ResultType.Arity;
             frame.ReturnLabel.Instruction = LabelInst;
             frame.ReturnLabel.ContinuationAddress = context.GetPointer();
+            frame.Head = LinkedOffset;
             
-            frame.SetLabel(Body.LabelTarget); 
+            // frame.SetLabel(Body.LabelTarget); 
             
-            context.EnterSequence(Body.Instructions);
+            context.InstructionPointer = LinkedOffset - 1;
         }
 
         public override string ToString() => $"FunctionInstance[{Id}] (Type: {Type}, IsExport: {IsExport})";

@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using Wacs.Core.Runtime;
@@ -49,10 +47,12 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly ITypedValueProducer<T> _inA;
 
         protected Func<ExecContext, Value> _func = null!;
-
+        public int StackDiff { get; set; }
+        
         protected WrapValue(ITypedValueProducer<T> inA)
         {
             _inA = inA;
+            StackDiff = Math.Min(0, inA.StackDiff);
         }
 
         public int CalculateSize() => _inA.CalculateSize();
@@ -134,10 +134,11 @@ namespace Wacs.Core.Instructions.Transpiler
     public abstract class UnwrapValue<T> : ITypedValueProducer<T>
     {
         protected ITypedValueProducer<Value> InA;
-
+        public int StackDiff { get; set; }
         protected UnwrapValue(ITypedValueProducer<Value> inA)
         {
             InA = inA;
+            StackDiff = Math.Min(0, inA.StackDiff);
         }
 
         public int CalculateSize() => InA.CalculateSize();
@@ -231,10 +232,12 @@ namespace Wacs.Core.Instructions.Transpiler
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
+        public int StackDiff { get; set; }
 
         public CastToI32(ITypedValueProducer<T> inA)
         {
             _inA = inA;
+            StackDiff = Math.Min(0, inA.StackDiff);
             if (typeof(T) == typeof(int))
             {
                 GetFunc = ((ITypedValueProducer<int>)_inA).GetFunc;
@@ -258,10 +261,12 @@ namespace Wacs.Core.Instructions.Transpiler
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
+        public int StackDiff { get; set; }
 
         public CastToU32(ITypedValueProducer<T> inA)
         {
             _inA = inA;
+            StackDiff = Math.Min(0, inA.StackDiff);
             if (typeof(T) == typeof(uint))
             {
                 GetFunc = ((ITypedValueProducer<uint>)_inA).GetFunc;
@@ -285,10 +290,12 @@ namespace Wacs.Core.Instructions.Transpiler
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
+        public int StackDiff { get; set; }
 
         public CastToI64(ITypedValueProducer<T> inA)
         {
             _inA = inA;
+            StackDiff = Math.Min(0, inA.StackDiff);
             if (typeof(T) == typeof(long))
             {
                 GetFunc = ((ITypedValueProducer<long>)_inA).GetFunc;
@@ -312,10 +319,12 @@ namespace Wacs.Core.Instructions.Transpiler
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
+        public int StackDiff { get; set; }
 
         public CastToU64(ITypedValueProducer<T> inA)
         {
             _inA = inA;
+            StackDiff = Math.Min(0, inA.StackDiff);
             if (typeof(T) == typeof(ulong))
             {
                 GetFunc = ((ITypedValueProducer<ulong>)_inA).GetFunc;

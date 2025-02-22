@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.IO;
@@ -31,25 +29,25 @@ namespace Wacs.Core.Instructions.Numeric
         private readonly ValidationDelegate _validate;
         private LaneIdx X;
 
-        private InstLaneOp(ByteCode op, ExecuteDelegate execute, ValidationDelegate validate) =>
-            (Op, _execute, _validate) = (op, execute, validate);
+        private InstLaneOp(ByteCode op, ExecuteDelegate execute, ValidationDelegate validate, int stackDiff) =>
+            (Op, _execute, _validate, StackDiff) = (op, execute, validate, stackDiff);
 
         public override ByteCode Op { get; }
-        public static InstLaneOp I8x16ExtractLaneS() => new(SimdCode.I8x16ExtractLaneS, ExecuteI8x16ExtractLaneS, ValidateFromLane(V128Shape.I8x16));
-        public static InstLaneOp I8x16ExtractLaneU() => new(SimdCode.I8x16ExtractLaneU, ExecuteI8x16ExtractLaneU, ValidateFromLane(V128Shape.I8x16));
-        public static InstLaneOp I16x8ExtractLaneS() => new(SimdCode.I16x8ExtractLaneS, ExecuteI16x8ExtractLaneS, ValidateFromLane(V128Shape.I16x8));
-        public static InstLaneOp I16x8ExtractLaneU() => new(SimdCode.I16x8ExtractLaneU, ExecuteI16x8ExtractLaneU, ValidateFromLane(V128Shape.I16x8));
-        public static InstLaneOp I32x4ExtractLane()  => new(SimdCode.I32x4ExtractLane, ExecuteI32x4ExtractLane, ValidateFromLane(V128Shape.I32x4));
-        public static InstLaneOp I64x2ExtractLane()  => new(SimdCode.I64x2ExtractLane, ExecuteI64x2ExtractLane, ValidateFromLane(V128Shape.I64x2));
-        public static InstLaneOp F32x4ExtractLane()  => new(SimdCode.F32x4ExtractLane, ExecuteF32x4ExtractLane, ValidateFromLane(V128Shape.F32x4));
-        public static InstLaneOp F64x2ExtractLane()  => new(SimdCode.F64x2ExtractLane, ExecuteF64x2ExtractLane, ValidateFromLane(V128Shape.F64x2));
+        public static InstLaneOp I8x16ExtractLaneS() => new(SimdCode.I8x16ExtractLaneS, ExecuteI8x16ExtractLaneS, ValidateFromLane(V128Shape.I8x16), 0);
+        public static InstLaneOp I8x16ExtractLaneU() => new(SimdCode.I8x16ExtractLaneU, ExecuteI8x16ExtractLaneU, ValidateFromLane(V128Shape.I8x16), 0);
+        public static InstLaneOp I16x8ExtractLaneS() => new(SimdCode.I16x8ExtractLaneS, ExecuteI16x8ExtractLaneS, ValidateFromLane(V128Shape.I16x8), 0);
+        public static InstLaneOp I16x8ExtractLaneU() => new(SimdCode.I16x8ExtractLaneU, ExecuteI16x8ExtractLaneU, ValidateFromLane(V128Shape.I16x8), 0);
+        public static InstLaneOp I32x4ExtractLane()  => new(SimdCode.I32x4ExtractLane, ExecuteI32x4ExtractLane, ValidateFromLane(V128Shape.I32x4), 0);
+        public static InstLaneOp I64x2ExtractLane()  => new(SimdCode.I64x2ExtractLane, ExecuteI64x2ExtractLane, ValidateFromLane(V128Shape.I64x2), 0);
+        public static InstLaneOp F32x4ExtractLane()  => new(SimdCode.F32x4ExtractLane, ExecuteF32x4ExtractLane, ValidateFromLane(V128Shape.F32x4), 0);
+        public static InstLaneOp F64x2ExtractLane()  => new(SimdCode.F64x2ExtractLane, ExecuteF64x2ExtractLane, ValidateFromLane(V128Shape.F64x2), 0);
 
-        public static InstLaneOp I8x16ReplaceLane() => new(SimdCode.I8x16ReplaceLane, ExecuteI8x16ReplaceLane, ValidateToLane(V128Shape.I8x16));
-        public static InstLaneOp I16x8ReplaceLane() => new(SimdCode.I16x8ReplaceLane, ExecuteI16x8ReplaceLane, ValidateToLane(V128Shape.I16x8));
-        public static InstLaneOp I32x4ReplaceLane() => new(SimdCode.I32x4ReplaceLane, ExecuteI32x4ReplaceLane, ValidateToLane(V128Shape.I32x4));
-        public static InstLaneOp I64x2ReplaceLane() => new(SimdCode.I64x2ReplaceLane, ExecuteI64x2ReplaceLane, ValidateToLane(V128Shape.I64x2));
-        public static InstLaneOp F32x4ReplaceLane() => new(SimdCode.F32x4ReplaceLane, ExecuteF32x4ReplaceLane, ValidateToLane(V128Shape.F32x4));
-        public static InstLaneOp F64x2ReplaceLane() => new(SimdCode.F64x2ReplaceLane, ExecuteF64x2ReplaceLane, ValidateToLane(V128Shape.F64x2));
+        public static InstLaneOp I8x16ReplaceLane() => new(SimdCode.I8x16ReplaceLane, ExecuteI8x16ReplaceLane, ValidateToLane(V128Shape.I8x16), -1);
+        public static InstLaneOp I16x8ReplaceLane() => new(SimdCode.I16x8ReplaceLane, ExecuteI16x8ReplaceLane, ValidateToLane(V128Shape.I16x8), -1);
+        public static InstLaneOp I32x4ReplaceLane() => new(SimdCode.I32x4ReplaceLane, ExecuteI32x4ReplaceLane, ValidateToLane(V128Shape.I32x4), -1);
+        public static InstLaneOp I64x2ReplaceLane() => new(SimdCode.I64x2ReplaceLane, ExecuteI64x2ReplaceLane, ValidateToLane(V128Shape.I64x2), -1);
+        public static InstLaneOp F32x4ReplaceLane() => new(SimdCode.F32x4ReplaceLane, ExecuteF32x4ReplaceLane, ValidateToLane(V128Shape.F32x4), -1);
+        public static InstLaneOp F64x2ReplaceLane() => new(SimdCode.F64x2ReplaceLane, ExecuteF64x2ReplaceLane, ValidateToLane(V128Shape.F64x2), -1);
 
         public static void ExecuteI8x16ExtractLaneS(ExecContext context, LaneIdx laneidx)
         {

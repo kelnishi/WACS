@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.IO;
@@ -29,11 +27,13 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly Func<ExecContext, TIn1> _in1;
         private readonly Func<ExecContext, TIn2> _in2;
         private readonly Func<ExecContext, Value> _wrap;
+        public sealed override int StackDiff { get; set; }
 
         public InstAggregate2_1(ITypedValueProducer<TIn1> in1, ITypedValueProducer<TIn2> in2, INodeComputer<TIn1,TIn2,TOut> compute)
         {
             _in1 = in1.GetFunc;
             _in2 = in2.GetFunc;
+            StackDiff = Math.Min(0, in1.StackDiff) + Math.Min(0, in2.StackDiff);
             _compute = compute.GetFunc;
             Size = in1.CalculateSize() + in2.CalculateSize() + 1;
 
@@ -59,6 +59,12 @@ namespace Wacs.Core.Instructions.Transpiler
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(false, "Validation of transpiled instructions not supported.");
+        }
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            //Account for our own push to the stack if we're not subordinated
+            context.LinkOpStackHeight += StackDiff + 1;
+            return this;
         }
 
         public override void Execute(ExecContext context)
