@@ -211,10 +211,6 @@ namespace Wacs.Core.Runtime
 
         public void ResetStack(Label label)
         {
-            // for (int c = OpStack.Count, h = label.StackHeight + Frame.StackHeight; c > h; --c)
-            // {
-            //     OpStack.PopAny();
-            // }
             OpStack.PopTo(label.StackHeight + Frame.StackHeight);
         }
 
@@ -229,39 +225,6 @@ namespace Wacs.Core.Runtime
             InstructionPointer = -1;
         }
 
-        // /// <summary>
-        // /// Go to a sequence, execute the initial instruction
-        // /// </summary>
-        // public void EnterSequence(InstructionPointer pointer)
-        // {
-        //     _sequenceIndex = pointer - 1;
-        // }
-
-        /// <summary>
-        /// Go to a sequence, skip the initial instruction
-        /// </summary>
-        /// <param name="pointer"></param>
-        public void ResumeSequence(InstructionPointer pointer)
-        {
-            InstructionPointer = pointer;
-        }
-
-        // /// <summary>
-        // /// Advance to the end of a sequence, execute the (end) instruction.
-        // /// </summary>
-        // public void FastForwardSequence()
-        // {
-        //     EnterSequence(Frame.TopLabel.End);
-        // }
-
-        // /// <summary>
-        // /// Go back to the beginning of the sequence, skip the initial instruction
-        // /// </summary>
-        // public void RewindSequence()
-        // {
-        //     ResumeSequence(Frame.TopLabel.Head);
-        // }
-
         public int LabelHeight => _linkLabelStack.Count;
 
         public void ClearLinkLabels() => _linkLabelStack.Clear();
@@ -271,28 +234,7 @@ namespace Wacs.Core.Runtime
         public BlockTarget PopLabel() => _linkLabelStack.Pop();
 
         public BlockTarget PeekLabel() => _linkLabelStack.Peek();
-
-        // // @Spec 4.4.9.1. Enter Block
-        // public void EnterBlock(BlockTarget target)
-        // {
-        //     //HACK: Labels are a linked list with each node residing on its respective block instruction.
-        //     Frame.PushLabel(target);
-        //     
-        //     //Sets the Pointer to the start of the block sequence
-        //     // ResumeSequence(target.Head);
-        // }
-
-        // // @Spec 4.4.9.2. Exit Block
-        // public void ExitBlock()
-        // {
-        //     // var addr = 
-        //     Frame.PopLabels(0);
-        //     
-        //     // We manage separate stacks, so we don't need to relocate the operands
-        //     // var vals = OpStack.PopResults(label.Type);
-        //     
-        //     // ResumeSequence(addr);
-        // }
+        
         
         // @Spec 4.4.10.1 Function Invocation
         public async Task InvokeAsync(FuncAddr addr)
@@ -386,12 +328,6 @@ namespace Wacs.Core.Runtime
         public InstructionBase? Next()
         {
             return InstructionPointer > AbortSequence ? _currentSequence[++InstructionPointer] : null;
-
-            //Advance to the next instruction first.
-            // return (++_sequenceIndex < _sequenceCount)
-            //     //Critical path, using direct array access
-            //     ? _sequenceInstructions[_sequenceIndex]
-            //     : null;
         }
 
         public List<(string, int)> ComputePointerPath()
