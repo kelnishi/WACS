@@ -124,7 +124,7 @@ namespace Wacs.Core
                                 stackRenderer.ProcessInstruction(inst);
                                 
                                 var blockSeq = blockInst.GetBlock(b).Instructions;
-                                stackRenderer.FakeContext.DummyContext.Frame.ForceLabels(depth+1);
+                                // stackRenderer.FakeContext.DummyContext.Frame.ForceLabels(depth+1);
                                 RenderInstructions(writer, blockIndent, depth, module, blockSeq, stackRenderer.SubRenderer());
 
                                 var lastInst = blockSeq.LastInstruction;
@@ -132,7 +132,7 @@ namespace Wacs.Core
                                 {
                                     stackRenderer.FakeContext.LastEvent = InstructionBase.IsEnd(lastInst) ? "[" : "][";
                                     stackRenderer.ProcessInstruction(inst);
-                                    stackRenderer.FakeContext.DummyContext.Frame.ForceLabels(depth);
+                                    // stackRenderer.FakeContext.DummyContext.Frame.ForceLabels(depth);
                                     var endLabel = $" (;< @{depth} ;)";
                                     var subText = $"{stackRenderer}{indent}{lastInst.RenderText(stackRenderer.FakeContext.DummyContext)}{endLabel}";
                                     writer.WriteLine();
