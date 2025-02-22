@@ -33,5 +33,7 @@ namespace Spec.Test.WastJson
         public string Path { get; set; } = "";
 
         public override string ToString() => $"{SourceFilename}";
+
+        public bool TraceExecution;
     }
 }

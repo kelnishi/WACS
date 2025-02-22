@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Buffers;
@@ -20,7 +18,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.Instructions;
@@ -30,6 +27,7 @@ using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
+using InstructionPointer = System.Int32;
 
 namespace Wacs.Core.Runtime
 {
@@ -41,29 +39,37 @@ namespace Wacs.Core.Runtime
 
     public class ExecContext
     {
+        // public int _sequenceCount;
+
+        public const int AbortSequence = -2;
         public static readonly Frame NullFrame = new();
 
         private static readonly ValType[] EmptyLocals = Array.Empty<ValType>();
         private readonly Stack<Frame> _callStack;
         private readonly ObjectPool<Frame> _framePool;
-        private readonly InstructionSequence _hostReturnSequence;
+
+        private readonly Stack<BlockTarget> _linkLabelStack = new();
+        // private readonly InstructionSequence _hostReturnSequence;
 
         private readonly ArrayPool<Value> _localsDataPool;
         public readonly RuntimeAttributes Attributes;
         public readonly Stopwatch InstructionTimer = new();
+
+        private readonly InstructionSequence linkedInstructions = new();
         public readonly OpStack OpStack;
 
         public readonly Stopwatch ProcessTimer = new();
 
         public readonly Store Store;
 
-        private InstructionSequence _currentSequence;
-        public int _sequenceCount;
-        public int _sequenceIndex;
-        public InstructionBase[] _sequenceInstructions;
+        public InstructionBase[] _currentSequence;
+        // public List<InstructionBase> _sequenceInstructions;
+
 
         public Frame Frame = NullFrame;
-        public int StackHeight => _callStack.Count;
+        public int InstructionPointer;
+        public int LinkOpStackHeight;
+        public bool LinkUnreachable;
 
         public Dictionary<ushort, ExecStat> Stats = new();
         public long steps;
@@ -80,20 +86,51 @@ namespace Wacs.Core.Runtime
             
             _callStack = new (Attributes.InitialCallStack);
             
-            _hostReturnSequence = InstructionSequence.Empty;
+            // _hostReturnSequence = InstructionSequence.Empty;
             
-            _currentSequence = _hostReturnSequence;
-            _sequenceCount = _currentSequence.Count;
-            _sequenceInstructions = _currentSequence._instructions;
-            _sequenceIndex = -1;
+            // _currentSequence = _hostReturnSequence;
+            
+            // _sequenceCount = _currentSequence.Count;
+            // _sequenceInstructions = _currentSequence._instructions;
+            InstructionPointer = -1;
 
             OpStack = new(Attributes.MaxOpStack);
         }
 
+        public int StackHeight => _callStack.Count;
+
         public InstructionBaseFactory InstructionFactory => Attributes.InstructionFactory;
 
         public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[default]];
-        public InstructionPointer GetPointer() => new(_currentSequence, _sequenceIndex);
+
+        public int LabelHeight => _linkLabelStack.Count;
+
+        public void CacheInstructions()
+        {
+            _currentSequence = linkedInstructions._instructions.ToArray();
+        }
+
+        public void PrintInstruction(int i)
+        {
+            var inst = linkedInstructions[i];
+            if (inst is BlockTarget label)
+            {
+                Console.Error.WriteLine($"[0x{i:x8}] {label.Label.StackHeight} ({inst.StackDiff:+####;-####;0}) {inst}");
+            }
+            else if (inst is InstEnd)
+            {
+                Console.Error.WriteLine($"[0x{i:x8}]  {inst.StackDiff:+####;-####;0} {inst}");
+            }
+            else
+            {
+                Console.Error.WriteLine($"[0x{i:x8}]     {inst.StackDiff:+####;-####;0} {inst}");
+            }
+        }
+
+        public InstructionPointer GetPointer()
+        {
+            return InstructionPointer;
+        }
 
         [Conditional("STRICT_EXECUTION")]
         public void Assert([NotNull] object? objIsNotNull, string message)
@@ -125,7 +162,7 @@ namespace Wacs.Core.Runtime
             frame.Type = type;
             // frame.Labels = _labelStack.GetSubStack();
             frame.Index = index;
-            frame.ContinuationAddress = new InstructionPointer(_currentSequence, _sequenceIndex);
+            frame.ContinuationAddress = InstructionPointer;
             
             frame.ClearLabels();
             int capacity = type.ParameterTypes.Types.Length + locals.Length;
@@ -159,12 +196,39 @@ namespace Wacs.Core.Runtime
             return address;
         }
 
+        public BlockTarget? FindLabel(int depth)
+        {
+            var instructions = _currentSequence;
+            int ptr = InstructionPointer;
+            BlockTarget? label = null;
+            
+            while (ptr > Frame.Head && label == null)
+            {
+                var inst = instructions[--ptr];
+                switch (inst)
+                {
+                    case BlockTarget target: 
+                        label = target;
+                        break;
+                    case InstEnd:
+                        depth += 1;
+                        break;
+                }
+            }
+
+            if (label is null && ptr == Frame.Head)
+                return null;
+            
+            for (int i = 0; i < depth && label != null; i++)
+            {
+                label = label?.EnclosingBlock ?? null;
+            }
+
+            return label;
+        }
+
         public void ResetStack(Label label)
         {
-            // for (int c = OpStack.Count, h = label.StackHeight + Frame.StackHeight; c > h; --c)
-            // {
-            //     OpStack.PopAny();
-            // }
             OpStack.PopTo(label.StackHeight + Frame.StackHeight);
         }
 
@@ -176,77 +240,18 @@ namespace Wacs.Core.Runtime
             OpStack.Clear();
 
             Frame = NullFrame;
-            _currentSequence = _hostReturnSequence;
-            _sequenceCount = _currentSequence.Count;
-            _sequenceInstructions = _currentSequence._instructions;
-            _sequenceIndex = -1;
+            InstructionPointer = -1;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void EnterSequence(InstructionSequence seq)
-        {
-            _currentSequence = seq;
-            _sequenceCount = _currentSequence.Count;
-            _sequenceInstructions = _currentSequence._instructions;
-            _sequenceIndex = -1;
-        }
+        public void ClearLinkLabels() => _linkLabelStack.Clear();
 
-        public void ResumeSequence(InstructionPointer pointer)
-        {
-            _currentSequence = pointer.Sequence;
-            _sequenceCount = _currentSequence.Count;
-            _sequenceInstructions = _currentSequence._instructions;
-            _sequenceIndex = pointer.Index;
-        }
+        public void PushLabel(BlockTarget inst) => _linkLabelStack.Push(inst);
 
-        public void FastForwardSequence()
-        {
-            //Go to penultimate instruction since we pre-increment on pointer advance.
-            _sequenceIndex = _sequenceCount - 2;
-        }
+        public BlockTarget PopLabel() => _linkLabelStack.Pop();
 
-        public void RewindSequence()
-        {
-            //Go back to the first instruction in the sequence
-            _sequenceIndex = -1;
-        }
+        public BlockTarget PeekLabel() => _linkLabelStack.Peek();
 
-        // @Spec 4.4.9.1. Enter Block
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void EnterBlock(BlockTarget target, Block block)
-        {
-            //HACK: Labels are a linked list with each node residing on its respective block instruction.
-            Frame.PushLabel(target);
-            //Manually inline PushLabel
-            // Frame.TopLabel = target;
-            // Frame.LabelCount++;
-            // Frame.Label = target.Label;
-            
-            //Sets the Pointer to the start of the block sequence
-            EnterSequence(block.Instructions);
-            //Manually inline EnterSequence
-            // _currentSequence = block.Instructions;
-            // _sequenceCount = _currentSequence.Count;
-            // _sequenceInstructions = _currentSequence._instructions;
-            // _sequenceIndex = -1;
-        }
 
-        // @Spec 4.4.9.2. Exit Block
-        public void ExitBlock()
-        {
-            var addr = Frame.PopLabels(0);
-            // We manage separate stacks, so we don't need to relocate the operands
-            // var vals = OpStack.PopResults(label.Type);
-            
-            // ResumeSequence(addr);
-            
-            //Manually inline ResumeSequence
-            _currentSequence = addr.Sequence;
-            _sequenceCount = _currentSequence.Count;
-            _sequenceInstructions = _currentSequence._instructions;
-            _sequenceIndex = addr.Index;
-        }
-        
         // @Spec 4.4.10.1 Function Invocation
         public async Task InvokeAsync(FuncAddr addr)
         {
@@ -332,35 +337,26 @@ namespace Wacs.Core.Runtime
             //7. split stack, values left in place 
             //8.
             
-            //ResumeSequence(address);
-            
-            //Manually inline ResumeSequence
-            _currentSequence = address.Sequence;
-            _sequenceCount = _currentSequence.Count;
-            _sequenceInstructions = _currentSequence._instructions;
-            _sequenceIndex = address.Index;
+            // ResumeSequence(address);
+            InstructionPointer = address;
         }
-        
+
         public InstructionBase? Next()
         {
-            //Advance to the next instruction first.
-            return (++_sequenceIndex < _sequenceCount)
-                //Critical path, using direct array access
-                ? _sequenceInstructions[_sequenceIndex]
-                : null;
+            return InstructionPointer > AbortSequence ? _currentSequence[++InstructionPointer] : null;
         }
 
         public List<(string, int)> ComputePointerPath()
         {
             Stack<(string, int)> ascent = new();
-            int idx = _sequenceIndex;
+            int idx = InstructionPointer;
             
             foreach (var label in Frame.EnumerateLabels().Select(target => target.Label))
             {
                 var pointer = (label.Instruction.GetMnemonic(), idx);
                 ascent.Push(pointer);
             
-                idx = label.ContinuationAddress.Index;
+                idx = label.ContinuationAddress;
                 
                 switch ((OpCode)label.Instruction)
                 {
@@ -410,12 +406,8 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public OpCode GetEndFor()
-        {
-            if (Frame.LabelCount == 1 && Frame.Label.Instruction.x00 == OpCode.Func)
-                return OpCode.Func;    
-            return OpCode.Block;
-        }
+        public OpCode GetEndFor() => 
+            FindLabel(0) is { } label ? label.Op : OpCode.Func;
 
         public ModuleInstance? GetModule(FuncAddr funcAddr)
         {
@@ -424,10 +416,33 @@ namespace Wacs.Core.Runtime
             {
                 case FunctionInstance wasmFunc: return wasmFunc.Module;
                 case HostFunction hostFunc:
-                    //TODO: maybe implement ref binding for host functions
+                //TODO: maybe implement ref binding for host functions
                 default:
                     return null;
             }
+        }
+
+        public void LinkFunction(FunctionInstance instance)
+        {
+            InstructionPointer offset = linkedInstructions.Count;
+            instance.LinkedOffset = offset;
+
+            LinkOpStackHeight = 0;
+            LinkUnreachable = false;
+            ClearLinkLabels();
+            PushLabel(new InstExpressionProxy(new Label
+            {
+                Instruction = OpCode.Func,
+                StackHeight = 0,
+                Arity = instance.Type.ResultType.Arity
+            }));
+
+            linkedInstructions.Append(
+                instance.Body
+                    .Flatten()
+                    .Select((inst, idx) => inst.Link(this, offset + idx))
+            );
+            instance.Length = linkedInstructions.Count - instance.LinkedOffset;
         }
     }
 }

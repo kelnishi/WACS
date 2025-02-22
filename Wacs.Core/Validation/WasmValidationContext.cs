@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Collections.Generic;
@@ -84,6 +82,7 @@ namespace Wacs.Core.Validation
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
+
         public LocalsSpace Locals =>
             ControlStack.Count == 0
                 ? ExecFrame.Locals 
@@ -91,7 +90,7 @@ namespace Wacs.Core.Validation
 
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
-        
+
         public TagsSpace Tags { get; }
 
         public bool Unreachable { get; set; }
@@ -158,9 +157,6 @@ namespace Wacs.Core.Validation
                 PopValidationContext();
             }
         }
-        
-        public bool ValidateBlockType(ValType type) => 
-            type.Validate(Types) || type == ValType.Empty;
 
         public void PushControlFrame(ByteCode opCode, FunctionType types)
         {
@@ -195,8 +191,10 @@ namespace Wacs.Core.Validation
 
         public bool ContainsLabel(uint label) => ControlStack.Count - 2 >= label;
 
-        
-        
+        public bool ValidateBlockType(ValType type) => 
+            type.Validate(Types) || type == ValType.Empty;
+
+
         public void PopOperandsToHeight(int height)
         {
             if (OpStack.Height < height)

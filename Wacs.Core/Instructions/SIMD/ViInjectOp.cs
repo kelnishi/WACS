@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -23,15 +21,15 @@ namespace Wacs.Core.Instructions.Numeric
     // VvBinOps - Bit-wise Logical Operators
     public partial class NumericInst
     {
-        public static readonly NumericInst I8x16Splat = new(SimdCode.I8x16Splat, ExecuteI8x16Splat, ValidateOperands(pop: ValType.I32, push: ValType.V128));
-        public static readonly NumericInst I16x8Splat = new(SimdCode.I16x8Splat, ExecuteI16x8Splat, ValidateOperands(pop: ValType.I32, push: ValType.V128));
-        public static readonly NumericInst I32x4Splat = new(SimdCode.I32x4Splat, ExecuteI32x4Splat, ValidateOperands(pop: ValType.I32, push: ValType.V128));
-        public static readonly NumericInst I64x2Splat = new(SimdCode.I64x2Splat, ExecuteI64x2Splat, ValidateOperands(pop: ValType.I64, push: ValType.V128));
+        public static readonly NumericInst I8x16Splat = new(SimdCode.I8x16Splat, ExecuteI8x16Splat, ValidateOperands(pop: ValType.I32, push: ValType.V128), 0);
+        public static readonly NumericInst I16x8Splat = new(SimdCode.I16x8Splat, ExecuteI16x8Splat, ValidateOperands(pop: ValType.I32, push: ValType.V128), 0);
+        public static readonly NumericInst I32x4Splat = new(SimdCode.I32x4Splat, ExecuteI32x4Splat, ValidateOperands(pop: ValType.I32, push: ValType.V128), 0);
+        public static readonly NumericInst I64x2Splat = new(SimdCode.I64x2Splat, ExecuteI64x2Splat, ValidateOperands(pop: ValType.I64, push: ValType.V128), 0);
 
-        public static readonly NumericInst I8x16Bitmask = new(SimdCode.I8x16Bitmask, ExecuteI8x16Bitmask, ValidateOperands(pop: ValType.V128, push: ValType.I32));
-        public static readonly NumericInst I16x8Bitmask = new(SimdCode.I16x8Bitmask, ExecuteI16x8Bitmask, ValidateOperands(pop: ValType.V128, push: ValType.I32));
-        public static readonly NumericInst I32x4Bitmask = new(SimdCode.I32x4Bitmask, ExecuteI32x4Bitmask, ValidateOperands(pop: ValType.V128, push: ValType.I32));
-        public static readonly NumericInst I64x2Bitmask = new(SimdCode.I64x2Bitmask, ExecuteI64x2Bitmask, ValidateOperands(pop: ValType.V128, push: ValType.I32));
+        public static readonly NumericInst I8x16Bitmask = new(SimdCode.I8x16Bitmask, ExecuteI8x16Bitmask, ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
+        public static readonly NumericInst I16x8Bitmask = new(SimdCode.I16x8Bitmask, ExecuteI16x8Bitmask, ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
+        public static readonly NumericInst I32x4Bitmask = new(SimdCode.I32x4Bitmask, ExecuteI32x4Bitmask, ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
+        public static readonly NumericInst I64x2Bitmask = new(SimdCode.I64x2Bitmask, ExecuteI64x2Bitmask, ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
 
         // @Spec 4.4.3.8. shape.splat
         private static void ExecuteI8x16Splat(ExecContext context)

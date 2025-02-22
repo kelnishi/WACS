@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Collections.Generic;
@@ -29,16 +27,18 @@ namespace Wacs.Core.Runtime.Types
     {
         public readonly DataAddrs DataAddrs = new();
         public readonly ElemAddrs ElemAddrs = new();
+        public readonly ExnAddrs ExnAddrs = new();
         public readonly List<ExportInstance> Exports = new();
         public readonly FuncAddrs FuncAddrs = new();
         public readonly GlobalAddrs GlobalAddrs = new();
-        public readonly TagAddrs TagAddrs = new();
-        public readonly ExnAddrs ExnAddrs = new();
         public readonly MemAddrs MemAddrs = new();
 
         public readonly Module Repr;
 
+        public readonly StackCalculator StackCalculator;
+
         public readonly TableAddrs TableAddrs = new();
+        public readonly TagAddrs TagAddrs = new();
 
         public readonly TypesSpace Types;
 
@@ -46,6 +46,7 @@ namespace Wacs.Core.Runtime.Types
         {
             Types = new TypesSpace(module);
             Repr = module;
+            StackCalculator = new StackCalculator(this);
         }
 
         public string Name { get; set; } = "_";

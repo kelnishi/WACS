@@ -49,6 +49,8 @@ namespace Spec.Test
                 .Select(cfg => cfg.Value ?? "")
                 .ToHashSet();
 
+        public static bool TraceExecution => Configuration["TraceExecution"] == "True";
+        
         public IEnumerator<object[]> GetEnumerator()
         {
             var files = Directory.GetFiles(JsonDirectory, "*.json", SearchOption.AllDirectories).OrderBy(path => path);
@@ -88,6 +90,7 @@ namespace Spec.Test
                 throw new JsonException($"Error while parsing {jsonPath}");
 
             testDefinition.Path = Path.GetDirectoryName(jsonPath)!;
+            testDefinition.TraceExecution = TraceExecution;
             return testDefinition;
         }
     }

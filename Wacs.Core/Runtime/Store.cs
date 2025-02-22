@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Collections.Generic;
@@ -28,20 +26,20 @@ namespace Wacs.Core.Runtime
     {
         private readonly List<DataInstance> Datas = new();
         private readonly List<ElementInstance> Elems = new();
+        private readonly List<ExnInstance> Exns = new();
 
         private readonly List<IFunctionInstance> Funcs = new();
         private readonly List<GlobalInstance> Globals = new();
-        private readonly List<TagInstance> Tags = new();
-        private readonly List<ExnInstance> Exns = new();
 
         private readonly List<TableInstance> Tables = new();
-        private StoreTransaction? CurrentTransaction = null;
-
-        private long Structs = 0;
+        private readonly List<TagInstance> Tags = new();
         private long Arrays = 0;
+        private StoreTransaction? CurrentTransaction = null;
 
         private MemoryInstance?[] Mems = new MemoryInstance[32];
         private int MemsCount = 0;
+
+        private long Structs = 0;
 
         public IFunctionInstance this[FuncAddr addr] => 
             CurrentTransaction?.Funcs.GetValueOrDefault(addr)??Funcs[addr.Value];
@@ -54,10 +52,10 @@ namespace Wacs.Core.Runtime
 
         public GlobalInstance this[GlobalAddr addr] =>
             CurrentTransaction?.Globals.GetValueOrDefault(addr)??Globals[addr.Value];
-        
+
         public TagInstance this[TagAddr addr] =>
             CurrentTransaction?.Tags.GetValueOrDefault(addr)??Tags[addr.Value];
-        
+
         public ExnInstance this[ExnAddr addr] =>
             Exns[addr.Value];
 
@@ -78,8 +76,8 @@ namespace Wacs.Core.Runtime
 
         public bool Contains(StructIdx heapIdx) => Structs > heapIdx.Value && heapIdx.Value >= 0;
         public bool Contains(ArrayIdx heapIdx) => Arrays > heapIdx.Value && heapIdx.Value >= 0;
-        
-        
+
+
         public void OpenTransaction()
         {
             if (CurrentTransaction != null)
@@ -207,7 +205,7 @@ namespace Wacs.Core.Runtime
             
             return addr;
         }
-        
+
         public TagAddr AddTag(TagInstance tag)
         {
             var addr = new TagAddr(Tags.Count);
@@ -217,7 +215,7 @@ namespace Wacs.Core.Runtime
             CurrentTransaction.Tags.Add(addr, tag);
             return addr;
         }
-        
+
         public ExnAddr AllocateExn(TagAddr ta, Stack<Value> fields)
         {
             var exnAddr = new ExnAddr(Exns.Count);

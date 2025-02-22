@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System.IO;
 using Wacs.Core.OpCodes;
@@ -26,6 +24,7 @@ namespace Wacs.Core.Instructions
         private V128 X;
 
         public override ByteCode Op => SimdCode.I8x16Shuffle;
+        public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -35,9 +34,9 @@ namespace Wacs.Core.Instructions
                     "Instruction {0} was invalid. Lane {1} ({2}) was >= 32.",Op.GetMnemonic(),i,X[(byte)i]);
             }
 
-            context.OpStack.PopV128();
-            context.OpStack.PopV128();
-            context.OpStack.PushV128();
+            context.OpStack.PopV128();  // -1
+            context.OpStack.PopV128();  // -2
+            context.OpStack.PushV128(); // -1
         }
 
         /// <summary>

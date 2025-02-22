@@ -1,4 +1,4 @@
-// Copyright 2024 Kelvin Nishikawa
+// Copyright 2025 Kelvin Nishikawa
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-namespace Wacs.Core.Runtime
+namespace Wacs.Core.Instructions
 {
-    public class RuntimeOptions
+    //Indicate that the instruction must get linked as an aggregated element
+    public interface IComplexLinkBehavior
     {
-        public bool SkipModuleValidation = false;
-        public bool SkipStartFunction = false;
-        public bool TimeInstantiation = false;
     }
 }

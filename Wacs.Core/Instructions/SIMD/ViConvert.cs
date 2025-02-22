@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using Wacs.Core.OpCodes;
@@ -23,29 +21,29 @@ namespace Wacs.Core.Instructions.Numeric
 {
     public partial class NumericInst
     {
-        public static readonly NumericInst I32x4TruncSatF32x4S = new(SimdCode.I32x4TruncSatF32x4S, ExecuteI32x4TruncSatF32x4S, ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4TruncSatF32x4U = new(SimdCode.I32x4TruncSatF32x4U, ExecuteI32x4TruncSatF32x4U, ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4TruncSatF64x2SZero = new(SimdCode.I32x4TruncSatF64x2SZero, ExecuteI32x4TruncSatF64x2SZero, ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4TruncSatF64x2UZero = new(SimdCode.I32x4TruncSatF64x2UZero, ExecuteI32x4TruncSatF64x2UZero, ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I32x4TruncSatF32x4S = new(SimdCode.I32x4TruncSatF32x4S, ExecuteI32x4TruncSatF32x4S, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I32x4TruncSatF32x4U = new(SimdCode.I32x4TruncSatF32x4U, ExecuteI32x4TruncSatF32x4U, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I32x4TruncSatF64x2SZero = new(SimdCode.I32x4TruncSatF64x2SZero, ExecuteI32x4TruncSatF64x2SZero, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I32x4TruncSatF64x2UZero = new(SimdCode.I32x4TruncSatF64x2UZero, ExecuteI32x4TruncSatF64x2UZero, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        public static readonly NumericInst I8x16NarrowI16x8S = new(SimdCode.I8x16NarrowI16x8S, ExecuteI8x16NarrowI16x8S, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I8x16NarrowI16x8U = new(SimdCode.I8x16NarrowI16x8U, ExecuteI8x16NarrowI16x8U, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8NarrowI32x4S = new(SimdCode.I16x8NarrowI32x4S, ExecuteI16x8NarrowI32x4S, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8NarrowI32x4U = new(SimdCode.I16x8NarrowI32x4U, ExecuteI16x8NarrowI32x4U, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I8x16NarrowI16x8S = new(SimdCode.I8x16NarrowI16x8S, ExecuteI8x16NarrowI16x8S, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst I8x16NarrowI16x8U = new(SimdCode.I8x16NarrowI16x8U, ExecuteI8x16NarrowI16x8U, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst I16x8NarrowI32x4S = new(SimdCode.I16x8NarrowI32x4S, ExecuteI16x8NarrowI32x4S, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
+        public static readonly NumericInst I16x8NarrowI32x4U = new(SimdCode.I16x8NarrowI32x4U, ExecuteI16x8NarrowI32x4U, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
-        public static readonly NumericInst I16x8ExtendLowI8x16S  = new (SimdCode.I16x8ExtendLowI8x16S , ExecuteI16x8ExtendLowI8x16S , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8ExtendHighI8x16S = new (SimdCode.I16x8ExtendHighI8x16S, ExecuteI16x8ExtendHighI8x16S, ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8ExtendLowI8x16U  = new (SimdCode.I16x8ExtendLowI8x16U , ExecuteI16x8ExtendLowI8x16U , ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I16x8ExtendHighI8x16U = new (SimdCode.I16x8ExtendHighI8x16U, ExecuteI16x8ExtendHighI8x16U, ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I16x8ExtendLowI8x16S  = new (SimdCode.I16x8ExtendLowI8x16S , ExecuteI16x8ExtendLowI8x16S , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I16x8ExtendHighI8x16S = new (SimdCode.I16x8ExtendHighI8x16S, ExecuteI16x8ExtendHighI8x16S, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I16x8ExtendLowI8x16U  = new (SimdCode.I16x8ExtendLowI8x16U , ExecuteI16x8ExtendLowI8x16U , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I16x8ExtendHighI8x16U = new (SimdCode.I16x8ExtendHighI8x16U, ExecuteI16x8ExtendHighI8x16U, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        public static readonly NumericInst I32x4ExtendLowI16x8S  = new(SimdCode.I32x4ExtendLowI16x8S,  ExecuteI32x4ExtendLowI16x8S,  ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4ExtendHighI16x8S = new(SimdCode.I32x4ExtendHighI16x8S, ExecuteI32x4ExtendHighI16x8S, ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4ExtendLowI16x8U  = new(SimdCode.I32x4ExtendLowI16x8U,  ExecuteI32x4ExtendLowI16x8U,  ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I32x4ExtendHighI16x8U = new(SimdCode.I32x4ExtendHighI16x8U, ExecuteI32x4ExtendHighI16x8U, ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I64x2ExtendLowI32x4S  = new(SimdCode.I64x2ExtendLowI32x4S,  ExecuteI64x2ExtendLowI32x4S,  ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I64x2ExtendHighI32x4S = new(SimdCode.I64x2ExtendHighI32x4S, ExecuteI64x2ExtendHighI32x4S, ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I64x2ExtendLowI32x4U  = new(SimdCode.I64x2ExtendLowI32x4U,  ExecuteI64x2ExtendLowI32x4U,  ValidateOperands(pop: ValType.V128, push: ValType.V128));
-        public static readonly NumericInst I64x2ExtendHighI32x4U = new(SimdCode.I64x2ExtendHighI32x4U, ExecuteI64x2ExtendHighI32x4U, ValidateOperands(pop: ValType.V128, push: ValType.V128));
+        public static readonly NumericInst I32x4ExtendLowI16x8S  = new(SimdCode.I32x4ExtendLowI16x8S,  ExecuteI32x4ExtendLowI16x8S,  ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I32x4ExtendHighI16x8S = new(SimdCode.I32x4ExtendHighI16x8S, ExecuteI32x4ExtendHighI16x8S, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I32x4ExtendLowI16x8U  = new(SimdCode.I32x4ExtendLowI16x8U,  ExecuteI32x4ExtendLowI16x8U,  ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I32x4ExtendHighI16x8U = new(SimdCode.I32x4ExtendHighI16x8U, ExecuteI32x4ExtendHighI16x8U, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I64x2ExtendLowI32x4S  = new(SimdCode.I64x2ExtendLowI32x4S,  ExecuteI64x2ExtendLowI32x4S,  ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I64x2ExtendHighI32x4S = new(SimdCode.I64x2ExtendHighI32x4S, ExecuteI64x2ExtendHighI32x4S, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I64x2ExtendLowI32x4U  = new(SimdCode.I64x2ExtendLowI32x4U,  ExecuteI64x2ExtendLowI32x4U,  ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
+        public static readonly NumericInst I64x2ExtendHighI32x4U = new(SimdCode.I64x2ExtendHighI32x4U, ExecuteI64x2ExtendHighI32x4U, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
         private static void ExecuteI32x4TruncSatF32x4S(ExecContext context)
         {

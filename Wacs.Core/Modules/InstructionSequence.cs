@@ -1,21 +1,20 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
@@ -33,14 +32,28 @@ namespace Wacs.Core
         public static readonly InstructionSequence Empty = new(new List<InstructionBase>());
 
         //public for direct array access on critical path
-        public readonly InstructionBase[] _instructions;
+        public readonly List<InstructionBase> _instructions;
 
-        public readonly int Count;
+        public int Count;
 
-        public InstructionSequence(IList<InstructionBase> list)
+        public InstructionSequence()
         {
-            _instructions = list.Cast<InstructionBase>().ToArray();
-            Count = _instructions.Length;
+            _instructions = new();
+        }
+
+        public InstructionSequence(IList<InstructionBase> list, bool functionEnd = false)
+        {
+            _instructions = list.ToList();
+
+            if (functionEnd)
+            {
+                var last = _instructions.Last();
+                if (last is not InstEnd instEnd)
+                    throw new InvalidDataException("Instuction Sequence expected an end instruction");
+                instEnd.FunctionEnd = true;
+            }
+            
+            Count = _instructions.Count;
         }
 
         public InstructionBase? this[int index]
@@ -67,7 +80,7 @@ namespace Wacs.Core
                 for (int index = 0; index < Count; index++)
                 {
                     var inst = _instructions[index];
-                    sum += inst is IBlockInstruction blockInst ? blockInst.Size : 1;
+                    sum += inst is IBlockInstruction blockInst ? blockInst.BlockSize : 1;
                 }
                 return sum;
             }
@@ -105,6 +118,12 @@ namespace Wacs.Core
             }
 
             return false;
+        }
+
+        public void Append(IEnumerable<InstructionBase> seq)
+        {
+            _instructions.AddRange(seq);
+            Count = _instructions.Count;
         }
     }
 }

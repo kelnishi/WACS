@@ -42,6 +42,7 @@ namespace Spec.Test
             WasmRuntime runtime = new();
             env.BindToRuntime(runtime);
             runtime.TranspileModules = false;
+            runtime.TraceExecution = file.TraceExecution;
             
             Module? module = null;
             foreach (var command in file.Commands)

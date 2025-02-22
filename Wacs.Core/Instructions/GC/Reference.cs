@@ -48,8 +48,8 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(Ht.Matches(rtp, context.Types),
                 "Instruction {0} is invalid. {1} did not match top type {2}", Op.GetMnemonic(), Ht, rtp);
             
-            context.OpStack.PopType(rtp);
-            context.OpStack.PushType(Ht);
+            context.OpStack.PopType(rtp);   // -1
+            context.OpStack.PushType(Ht);   // +0
         }
 
         /// <summary>
@@ -100,8 +100,8 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(Ht.Matches(rtp, context.Types),
                 "Instruction {0} is invalid. {1} did not match top type {2}", Op.GetMnemonic(), Ht, rtp);
             
-            context.OpStack.PopType(rtp);
-            context.OpStack.PushI32();
+            context.OpStack.PopType(rtp);   // -1
+            context.OpStack.PushI32();      // +0
         }
 
         /// <summary>

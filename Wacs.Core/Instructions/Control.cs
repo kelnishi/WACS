@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Collections.Generic;
@@ -24,11 +22,13 @@ using FluentValidation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 using Wacs.Core.Validation;
+using InstructionPointer = System.Int32;
 
 // @Spec 2.4.8. Control Instructions
 // @Spec 5.4.1 Control Instructions
@@ -44,6 +44,12 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             context.SetUnreachable();
+        }
+
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            context.LinkUnreachable = true;
+            return this;
         }
 
         // @Spec 4.4.8.2. unreachable
@@ -77,7 +83,7 @@ namespace Wacs.Core.Instructions
 
         public int Count => 1;
 
-        public int Size => 1 + Block.Size;
+        public int BlockSize => 1 + Block.Size;
         public Block GetBlock(int idx) => Block;
 
         // @Spec 3.3.8.3 block
@@ -106,10 +112,17 @@ namespace Wacs.Core.Instructions
             }
         }
 
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            base.Link(context, pointer);
+            PointerAdvance = 1;
+            return this;
+        }
+
         // @Spec 4.4.8.3. block
         public override void Execute(ExecContext context)
         {
-            context.EnterBlock(this, Block);
+            // context.Frame.PushLabel(this);
         }
 
         /// <summary>
@@ -133,11 +146,11 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context)
-        {
-            if (context == null || !context.Attributes.Live) return base.RenderText(context);
-            return $"{base.RenderText(context)}  ;; label = @{context.Frame.LabelCount}";
-        }
+        // public override string RenderText(ExecContext? context)
+        // {
+        //     if (context == null || !context.Attributes.Live) return base.RenderText(context);
+        //     return $"{base.RenderText(context)}  ;; label = @{context.Frame.TopLabel.LabelHeight}";
+        // }
     }
 
     //0x03
@@ -151,7 +164,7 @@ namespace Wacs.Core.Instructions
 
         public int Count => 1;
 
-        public int Size => 1 + Block.Size;
+        public int BlockSize => 1 + Block.Size;
         public Block GetBlock(int idx) => Block;
 
         // @Spec 3.3.8.4. loop
@@ -180,11 +193,17 @@ namespace Wacs.Core.Instructions
             }
         }
 
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            base.Link(context, pointer);
+            PointerAdvance = 1;
+            return this;
+        }
+
         // @Spec 4.4.8.4. loop
         public override void Execute(ExecContext context)
         {
-            if (Block.Instructions.Count != 0)
-                context.EnterBlock(this, Block);
+            // context.Frame.PushLabel(this);
         }
 
         /// <summary>
@@ -208,29 +227,32 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context)
-        {
-            if (context == null || !context.Attributes.Live) return base.RenderText(context);
-            return $"{base.RenderText(context)}  ;; label = @{context.Frame.LabelCount}";
-        }
+        // public override string RenderText(ExecContext? context)
+        // {
+        //     if (context == null || !context.Attributes.Live) return base.RenderText(context);
+        //     return $"{base.RenderText(context)}  ;; label = @{context.Frame.TopLabel.LabelHeight}";
+        // }
     }
 
     //0x04
-    public class InstIf : BlockTarget, IBlockInstruction
+    public class InstIf : BlockTarget, IBlockInstruction, IIfInstruction
     {
         private static readonly ByteCode IfOp = OpCode.If;
-        private static readonly ByteCode ElseOp = OpCode.Else;
         private Block ElseBlock = Block.Empty;
-        private int ElseCount;
+
         private Block IfBlock = Block.Empty;
+
         public override ByteCode Op => IfOp;
+
+        //Consume the predicate
+        public override int StackDiff => -1;
 
 
         public ValType BlockType => IfBlock.BlockType;
 
         public int Count => ElseBlock.Length == 0 ? 1 : 2;
 
-        public int Size => 1 + IfBlock.Size + ElseBlock.Size;
+        public int BlockSize => 1 + IfBlock.Size + ElseBlock.Size;
         public Block GetBlock(int idx) => idx == 0 ? IfBlock : ElseBlock;
 
         // @Spec 3.3.8.5 if
@@ -257,7 +279,8 @@ namespace Wacs.Core.Instructions
                 
                 var elseType = context.Types.ResolveBlockType(ElseBlock.BlockType);
                 if (!ifType.Equivalent(elseType))
-                    throw new ValidationException($"If block returned type {ifType} without matching else block");
+                    throw new ValidationException($"If block returned type {ifType}" +
+                                                  $" without matching else ({elseType}) block");
                 
                 if (ElseBlock.Length == 0)
                     return;
@@ -278,15 +301,11 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
+            // context.Frame.PushLabel(this);
             int c = context.OpStack.PopI32();
-            if (c != 0)
+            if (c == 0)
             {
-                context.EnterBlock(this, IfBlock);
-            }
-            else
-            {
-                if (ElseCount != 0)
-                    context.EnterBlock(this, ElseBlock);
+                context.InstructionPointer = Else - 1;
             }
         }
 
@@ -313,8 +332,6 @@ namespace Wacs.Core.Instructions
             {
                 throw new FormatException($"If block did not terminate correctly.");
             }
-            
-            ElseCount = ElseBlock.Instructions.Count;
             return this;
         }
 
@@ -328,15 +345,14 @@ namespace Wacs.Core.Instructions
                 blockType: blockType,
                 seq: elseSeq
             );
-            ElseCount = ElseBlock.Instructions.Count;
             return this;
         }
     }
 
     //0x05
-    public class InstElse : InstEnd
+    public class InstElse : BlockTarget
     {
-        public new static readonly InstElse Inst = new();
+        // public new static readonly InstElse Inst = new();
         private static readonly ByteCode ElseOp = OpCode.Else;
         public override ByteCode Op => ElseOp;
 
@@ -346,12 +362,38 @@ namespace Wacs.Core.Instructions
             context.Assert(frame.Opcode == OpCode.If, "Else terminated a non-If block");
             context.PushControlFrame(ElseOp, frame.Types);
         }
+
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            var target = context.PeekLabel();
+            target.Suboridinate = this;
+            
+            if (target is not IIfInstruction)
+                throw new InstantiationException($"Else block instruction mismatched to {target}");
+
+            EnclosingBlock = target.EnclosingBlock;
+            Label = target.Label;
+            target.Else = pointer + 1;
+
+            //Reset and re-consume the predicate
+            context.LinkOpStackHeight = target.Label.StackHeight;
+            return this;
+        }
+
+        public override void Execute(ExecContext context)
+        {
+            //Just jump out of the If block
+            // context.EnterSequence(End);
+            context.InstructionPointer = End - 1;
+        }
     }
 
     //0x0B
     public class InstEnd : InstructionBase
     {
-        public static readonly InstEnd Inst = new();
+        public bool FunctionEnd;
+
+        // public static readonly InstEnd Inst = new();
         public override ByteCode Op => OpCode.End;
 
         public override void Validate(IWasmValidationContext context)
@@ -360,69 +402,74 @@ namespace Wacs.Core.Instructions
             context.OpStack.ReturnResults(frame.EndTypes);
         }
 
-        public override void Execute(ExecContext context)
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
-            var label = context.Frame.Label;
-            switch (label.Instruction.x00)
-            {
-                case OpCode.Block:
-                case OpCode.If:
-                case OpCode.Else:
-                case OpCode.Loop:
-                case OpCode.TryTable:
-                    context.ExitBlock();
-                    break;
-                case OpCode.Func:
-                case OpCode.Call:
-                    context.FunctionReturn();
-                    break;
-                default:
-                    //Do nothing
-                    break;
-            }
+            var target = context.PopLabel();
+            target.End = pointer;
+            if (target.Suboridinate != null)
+                target.Suboridinate.End = pointer;
+
+            if (target is IIfInstruction && target.Else < 0)
+                target.Else = pointer;
+
+            context.LinkUnreachable = false;
+            context.LinkOpStackHeight = target.Label.StackHeight;
+            context.LinkOpStackHeight -= target.Label.Parameters;
+            context.LinkOpStackHeight += target.Label.Results;
+
+            if (!FunctionEnd)
+                PointerAdvance = 1;
+            
+            return this;
         }
 
-        public override string RenderText(ExecContext? context)
+        //Skipped unless FunctionEnd is true
+        public override void Execute(ExecContext context)
         {
-            if (context == null)
-            {
-                return $"{base.RenderText(context)}";
-            }
-            var label = context.Frame.Label;
-            switch (label.Instruction.x00)
-            {
-                case OpCode.Block:
-                case OpCode.If:
-                case OpCode.Else:
-                    return $"{base.RenderText(context)} (;B/@{context.Frame.LabelCount-1};)";
-                case OpCode.Loop:
-                    return $"{base.RenderText(context)} (;L/@{context.Frame.LabelCount-1};)";
-                case OpCode.Func:
-                case OpCode.Call:
-                    var funcAddr = context.Frame.Module.FuncAddrs[context.Frame.Index];
-                    var func = context.Store[funcAddr];
-                    var funcName = func.Id;
-                    StringBuilder sb = new();
-                    if (context.Attributes.Live)
-                    {
-                        sb.Append(" ");
-                        var values = new Stack<Value>();
-                        context.OpStack.PopResults(func.Type.ResultType, ref values);
-                        sb.Append("[");
-                        while (values.Count > 0)
-                        {
-                            sb.Append(values.Peek().ToString());
-                            if (values.Count > 1)
-                                sb.Append(" ");
-                            context.OpStack.PushValue(values.Pop());
-                        }
-                        sb.Append("]");
-                    }
-                    return $"{base.RenderText(context)} (;f/@{context.Frame.LabelCount-1} <- {funcName}{sb};)";
-                default:
-                    return $"{base.RenderText(context)}";
-            }
+            context.FunctionReturn();
         }
+
+        // public override string RenderText(ExecContext? context)
+        // {
+        //     if (context == null)
+        //     {
+        //         return $"{base.RenderText(context)}";
+        //     }
+        //     var label = context.Frame.Label;
+        //     switch (label.Instruction.x00)
+        //     {
+        //         case OpCode.Block:
+        //         case OpCode.If:
+        //         case OpCode.Else:
+        //             return $"{base.RenderText(context)} (;B/@{context.Frame.TopLabel.LabelHeight-1};)";
+        //         case OpCode.Loop:
+        //             return $"{base.RenderText(context)} (;L/@{context.Frame.TopLabel.LabelHeight-1};)";
+        //         case OpCode.Func:
+        //         case OpCode.Call:
+        //             var funcAddr = context.Frame.Module.FuncAddrs[context.Frame.Index];
+        //             var func = context.Store[funcAddr];
+        //             var funcName = func.Id;
+        //             StringBuilder sb = new();
+        //             if (context.Attributes.Live)
+        //             {
+        //                 sb.Append(" ");
+        //                 var values = new Stack<Value>();
+        //                 context.OpStack.PopResults(func.Type.ResultType, ref values);
+        //                 sb.Append("[");
+        //                 while (values.Count > 0)
+        //                 {
+        //                     sb.Append(values.Peek().ToString());
+        //                     if (values.Count > 1)
+        //                         sb.Append(" ");
+        //                     context.OpStack.PushValue(values.Pop());
+        //                 }
+        //                 sb.Append("]");
+        //             }
+        //             return $"{base.RenderText(context)} (;f/@{context.Frame.TopLabel.LabelHeight-1} <- {funcName}{sb};)";
+        //         default:
+        //             return $"{base.RenderText(context)}";
+        //     }
+        // }
     }
 
     //0x0C
@@ -431,6 +478,8 @@ namespace Wacs.Core.Instructions
         private static Stack<Value> _asideVals = new();
 
         private LabelIdx L;
+        private BlockTarget? LinkedLabel;
+
         public override ByteCode Op => OpCode.Br;
 
         // @Spec 3.3.8.6. br l
@@ -447,29 +496,47 @@ namespace Wacs.Core.Instructions
             context.SetUnreachable();
         }
 
+        public static BlockTarget PrecomputeStack(ExecContext context, LabelIdx labelIndex)
+        {
+            var label = context.PeekLabel();
+            if (labelIndex.Value > 0)
+            {
+                for (int l = 0; l < labelIndex.Value; l++) 
+                    label = label.EnclosingBlock;
+            }
+            return label;
+        }
+
+        public static void SetStackHeight(ExecContext context, BlockTarget label)
+        {
+            context.LinkOpStackHeight = label.Label.StackHeight + label.Label.Arity;
+        }
+
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            LinkedLabel = PrecomputeStack(context, L);
+            SetStackHeight(context, LinkedLabel);
+            context.LinkUnreachable = true;
+            return this;
+        }
+
         // @Spec 4.4.8.6. br l
         public override void Execute(ExecContext context)
         {
-            ExecuteInstruction(context, L);
+            ExecuteInstruction(context, LinkedLabel);
         }
 
-        public static void ExecuteInstruction(ExecContext context, LabelIdx labelIndex)
+        public static void ExecuteInstruction(ExecContext context, BlockTarget? target)
         {
-            //1.
-            context.Assert( context.Frame.LabelCount > (int)labelIndex.Value,
-                $"Instruction br failed. Context did not contain Label {labelIndex}");
-            //2.
-            if (labelIndex.Value > 0)
+            var label = target?.Label switch
             {
-                var topAddr = context.Frame.PopLabels((int)(labelIndex.Value - 1));
-                context.ResumeSequence(topAddr);
-            }
-
-            var label = context.Frame.Label;
-            //3,4.
+                null => context.Frame.ReturnLabel,
+                { Instruction: { x00: OpCode.Func} } => context.Frame.ReturnLabel,
+                var l => l
+            };
+            
             context.Assert( context.OpStack.Count >= label.Arity,
                 $"Instruction br failed. Not enough values on the stack.");
-            //5.
             context.Assert(_asideVals.Count == 0,
                 "Shared temporary stack had values left in it.");
 
@@ -479,27 +546,29 @@ namespace Wacs.Core.Instructions
             {
                 //TODO Move the elements in OpStack's registers array.
                 context.OpStack.PopResults(label.Arity, ref _asideVals);
-                //6.
                 context.ResetStack(label);
-                //We did this in part 2 to avoid stack drilling.
-                // for (uint i = 0, l = labelIndex.Value; i < l; ++i)
-                //     labels.Pop();
-                //7.
                 context.OpStack.PushResults(_asideVals);
             }
-            
-            //8. 
-            if (label.Instruction.x00 == OpCode.Loop)
+
+            switch (label.Instruction.x00)
             {
-                //loop targets the loop head
-                context.RewindSequence();
-            }
-            else
-            {
-                //let InstEnd handle the continuation address and popping of the label
-                context.FastForwardSequence();
+                //8. 
+                case OpCode.Func:
+                    context.InstructionPointer = label.ContinuationAddress;
+                    break;
+                case OpCode.Loop:
+                    //loop targets the loop head
+                    // context.InstructionPointer = context.Frame.TopLabel.Head;
+                    context.InstructionPointer = target.Head; 
+                    break;
+                default:
+                    //otherwise, go to the end
+                    // context.InstructionPointer = context.Frame.TopLabel.End - 1;
+                    context.InstructionPointer = target.End - 1; 
+                    break;
             }
         }
+
 
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
@@ -510,19 +579,22 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context)
-        {
-            if (context == null) return $"{base.RenderText(context)} {L.Value}";
-            int depth = context.Frame.LabelCount - 1;
-            return $"{base.RenderText(context)} {L.Value} (;@{depth - L.Value};)";
-        }
+        // public override string RenderText(ExecContext? context)
+        // {
+        //     if (context == null) return $"{base.RenderText(context)} {L.Value}";
+        //     int depth = context.Frame.TopLabel.LabelHeight - 1;
+        //     return $"{base.RenderText(context)} {L.Value} (;@{depth - L.Value};)";
+        // }
     }
 
     //0x0D
-    public sealed class InstBranchIf : InstructionBase, IBranchInstruction, INodeConsumer<int>
+    public sealed class InstBranchIf : InstructionBase, IBranchInstruction, IComplexLinkBehavior, INodeConsumer<int>
     {
         public LabelIdx L;
+        private BlockTarget? LinkedLabel;
+
         public override ByteCode Op => OpCode.BrIf;
+        public override int StackDiff => -1;
 
         public Action<ExecContext, int> GetFunc => BranchIf;
 
@@ -533,14 +605,20 @@ namespace Wacs.Core.Instructions
                 "Instruction br_if invalid. Could not branch to label {0}",L);
             
             //Pop the predicate
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();   // -1
             
             var nthFrame = context.ControlStack.PeekAt((int)L.Value);
             
             //Pop values like we branch
-            context.OpStack.DiscardValues(nthFrame.LabelTypes);
+            context.OpStack.DiscardValues(nthFrame.LabelTypes); // -(N+1)
             //But actually, we don't, so push them back on.
-            context.OpStack.PushResult(nthFrame.LabelTypes);
+            context.OpStack.PushResult(nthFrame.LabelTypes);    // -1
+        }
+
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            LinkedLabel = InstBranch.PrecomputeStack(context, L);
+            return base.Link(context, pointer);
         }
 
         // @Spec 4.4.8.7. br_if
@@ -554,7 +632,7 @@ namespace Wacs.Core.Instructions
         {
             if (c != 0)
             {
-                InstBranch.ExecuteInstruction(context, L);
+                InstBranch.ExecuteInstruction(context, LinkedLabel);
             }
         }
 
@@ -567,26 +645,29 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context)
-        {
-            if (context == null) return $"{base.RenderText(context)} {L.Value}";
-            
-            int depth = context.Frame.LabelCount - 1;
-            string taken = "";
-            if (context.Attributes.Live)
-            {
-                taken = context.OpStack.Peek().Data.Int32 != 0 ? "-> " : "X: ";
-            }
-            return $"{base.RenderText(context)} {L.Value} (;{taken}@{depth - L.Value};)";
-        }
+        // public override string RenderText(ExecContext? context)
+        // {
+        //     if (context == null) return $"{base.RenderText(context)} {L.Value}";
+        //     
+        //     int depth = context.Frame.TopLabel.LabelHeight - 1;
+        //     string taken = "";
+        //     if (context.Attributes.Live)
+        //     {
+        //         taken = context.OpStack.Peek().Data.Int32 != 0 ? "-> " : "X: ";
+        //     }
+        //     return $"{base.RenderText(context)} {L.Value} (;{taken}@{depth - L.Value};)";
+        // }
     }
 
     //0x0E
-    public sealed class InstBranchTable : InstructionBase, IBranchInstruction, INodeConsumer<int>
+    public sealed class InstBranchTable : InstructionBase, IBranchInstruction, IComplexLinkBehavior, INodeConsumer<int>
     {
+        private BlockTarget? LinkedLabeln;
+        private BlockTarget?[] LinkedLabels;
         private LabelIdx Ln; //Default m
 
         private LabelIdx[] Ls = null!;
+
         public override ByteCode Op => OpCode.BrTable;
 
         public Action<ExecContext, int> GetFunc => BranchTable;
@@ -620,6 +701,18 @@ namespace Wacs.Core.Instructions
             context.SetUnreachable();
         }
 
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            LinkedLabeln = InstBranch.PrecomputeStack(context, Ln);
+            int stack = context.LinkOpStackHeight;
+            InstBranch.SetStackHeight(context, LinkedLabeln);
+            StackDiff = context.LinkOpStackHeight - stack;
+            
+            LinkedLabels = Ls.Select(l => InstBranch.PrecomputeStack(context, l)).ToArray();
+            context.LinkUnreachable = true;
+            return this;
+        }
+
         /// <summary>
         /// @Spec 4.4.8.8. br_table
         /// </summary>
@@ -637,13 +730,13 @@ namespace Wacs.Core.Instructions
             //3.
             if (i >= 0 && i < Ls.Length)
             {
-                var label = Ls[i];
+                var label = LinkedLabels[i];
                 InstBranch.ExecuteInstruction(context, label);
             }
             //4.
             else
             {
-                InstBranch.ExecuteInstruction(context, Ln);
+                InstBranch.ExecuteInstruction(context, LinkedLabeln);
             }
         }
 
@@ -660,43 +753,43 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
-        public override string RenderText(ExecContext? context)
-        {
-            if (context==null)
-                return $"{base.RenderText(context)} {string.Join(" ", Ls.Select(idx => idx.Value).Select(v => $"{v}"))} {Ln.Value}";
-            int depth = context.Frame.LabelCount-1;
-
-            int index = -2;
-            if (context.Attributes.Live)
-            {
-                int c = context.OpStack.Peek().Data.Int32;
-                if (c < Ls.Length)
-                {
-                    index = c;
-                }
-                else
-                {
-                    index = -1;
-                }
-            }
-
-            StringBuilder sb = new();
-            int i = 0;
-            foreach (var idx in Ls)
-            {
-                sb.Append(" ");
-                sb.Append(i == index
-                    ? $"{idx.Value} (;-> @{depth - idx.Value};)"
-                    : $"{idx.Value} (;@{depth - idx.Value};)");
-                i += 1;
-            }
-            sb.Append(index == -1
-                ? $"{(i > 0 ? " " : "")}{Ln.Value} (;-> @{depth - Ln.Value};)"
-                : $"{(i > 0 ? " " : "")}{Ln.Value} (;@{depth - Ln.Value};)");
-
-            return
-                $"{base.RenderText(context)} {sb}";
-        }
+        // public override string RenderText(ExecContext? context)
+        // {
+        //     if (context==null)
+        //         return $"{base.RenderText(context)} {string.Join(" ", Ls.Select(idx => idx.Value).Select(v => $"{v}"))} {Ln.Value}";
+        //     int depth = context.Frame.TopLabel.LabelHeight-1;
+        //
+        //     int index = -2;
+        //     if (context.Attributes.Live)
+        //     {
+        //         int c = context.OpStack.Peek().Data.Int32;
+        //         if (c < Ls.Length)
+        //         {
+        //             index = c;
+        //         }
+        //         else
+        //         {
+        //             index = -1;
+        //         }
+        //     }
+        //
+        //     StringBuilder sb = new();
+        //     int i = 0;
+        //     foreach (var idx in Ls)
+        //     {
+        //         sb.Append(" ");
+        //         sb.Append(i == index
+        //             ? $"{idx.Value} (;-> @{depth - idx.Value};)"
+        //             : $"{idx.Value} (;@{depth - idx.Value};)");
+        //         i += 1;
+        //     }
+        //     sb.Append(index == -1
+        //         ? $"{(i > 0 ? " " : "")}{Ln.Value} (;-> @{depth - Ln.Value};)"
+        //         : $"{(i > 0 ? " " : "")}{Ln.Value} (;@{depth - Ln.Value};)");
+        //
+        //     return
+        //         $"{base.RenderText(context)} {sb}";
+        // }
     }
 
     //0x0F
@@ -715,6 +808,12 @@ namespace Wacs.Core.Instructions
             context.SetUnreachable();
         }
 
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            context.LinkUnreachable = true;
+            return this;
+        }
+
         // @Spec 4.4.8.9. return
         public override void Execute(ExecContext context)
         {
@@ -724,14 +823,16 @@ namespace Wacs.Core.Instructions
             int resultsHeight = context.Frame.StackHeight + resultCount;
             if (resultsHeight < context.OpStack.Count)
                 context.OpStack.ShiftResults(resultCount, resultsHeight);
-            var address = context.PopFrame();
-            context.ResumeSequence(address);
+            // var address = context.PopFrame();
+            // context.ResumeSequence(address);
+            context.FunctionReturn();
         }
     }
 
     //0x10
     public sealed class InstCall : InstructionBase, ICallInstruction
     {
+        private FuncAddr linkedX;
         public FuncIdx X;
 
         public InstCall()
@@ -766,21 +867,46 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushResult(funcType.ResultType);
         }
 
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
+                $"Instruction call failed. Function address for {X} was not in the Context.");
+            linkedX = context.Frame.Module.FuncAddrs[X];
+            var inst = context.Store[linkedX];
+            IsAsync = inst switch
+            {
+                FunctionInstance => false,
+                HostFunction hostFunction => hostFunction.IsAsync,
+                _ => IsAsync
+            };
+
+            var funcType = inst.Type;
+            int stack = context.LinkOpStackHeight;
+            context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
+            context.LinkOpStackHeight += funcType.ResultType.Arity;
+            //For recordkeeping
+            StackDiff = context.LinkOpStackHeight - stack;
+            
+            return this;
+        }
+
         // @Spec 4.4.8.10. call
         public override void Execute(ExecContext context)
         {
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
                 $"Instruction call failed. Function address for {X} was not in the Context.");
-            var a = context.Frame.Module.FuncAddrs[X];
-            context.Invoke(a);
+            // var a = context.Frame.Module.FuncAddrs[X];
+            // context.Invoke(a);
+            context.Invoke(linkedX);
         }
 
         public override async ValueTask ExecuteAsync(ExecContext context)
         {
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
                 $"Instruction call failed. Function address for {X} was not in the Context.");
-            var a = context.Frame.Module.FuncAddrs[X];
-            await context.InvokeAsync(a);
+            // var a = context.Frame.Module.FuncAddrs[X];
+            // await context.InvokeAsync(a);
+            await context.InvokeAsync(linkedX);
         }
 
         /// <summary>
@@ -890,6 +1016,29 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopType(at.ToValType());
             context.OpStack.DiscardValues(funcType.ParameterTypes);
             context.OpStack.PushResult(funcType.ResultType);
+        }
+
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            context.Assert( context.Frame.Module.TableAddrs.Contains(X),
+                $"Instruction call_indirect failed. Table {X} was not in the Context.");
+            var ta = context.Frame.Module.TableAddrs[X];
+            context.Assert( context.Store.Contains(ta),
+                $"Instruction call_indirect failed. TableInstance {ta} was not in the Store.");
+            var tab = context.Store[ta];
+            context.Assert( context.Frame.Module.Types.Contains(Y),
+                $"Instruction call_indirect failed. Function Type {Y} was not in the Context.");
+            var ftExpect = context.Frame.Module.Types[Y];
+            var funcType = ftExpect.Expansion as FunctionType;
+            context.Assert(funcType,
+                $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
+
+            int stack = context.LinkOpStackHeight;
+            context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
+            context.LinkOpStackHeight += funcType.ResultType.Arity;
+            //For recordkeeping
+            StackDiff = context.LinkOpStackHeight - stack;
+            return this;
         }
 
         // @Spec 4.4.8.11. call_indirect

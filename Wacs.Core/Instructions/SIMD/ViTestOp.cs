@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -23,16 +21,16 @@ namespace Wacs.Core.Instructions.Numeric
     public partial class NumericInst
     {
         public static readonly NumericInst I8x16AllTrue = new(SimdCode.I8x16AllTrue, ExecuteI8x16AllTrue,
-            ValidateOperands(pop: ValType.V128, push: ValType.I32));
+            ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
 
         public static readonly NumericInst I16x8AllTrue = new(SimdCode.I16x8AllTrue, ExecuteI16x8AllTrue,
-            ValidateOperands(pop: ValType.V128, push: ValType.I32));
+            ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
 
         public static readonly NumericInst I32x4AllTrue = new(SimdCode.I32x4AllTrue, ExecuteI32x4AllTrue,
-            ValidateOperands(pop: ValType.V128, push: ValType.I32));
+            ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
 
         public static readonly NumericInst I64x2AllTrue = new(SimdCode.I64x2AllTrue, ExecuteI64x2AllTrue,
-            ValidateOperands(pop: ValType.V128, push: ValType.I32));
+            ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
 
         private static void ExecuteI8x16AllTrue(ExecContext context)
         {

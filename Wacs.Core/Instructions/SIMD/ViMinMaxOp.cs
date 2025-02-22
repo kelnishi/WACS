@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using Wacs.Core.OpCodes;
@@ -25,40 +23,40 @@ namespace Wacs.Core.Instructions.Numeric
     public partial class NumericInst
     {
         public static readonly NumericInst I8x16MinS = new(SimdCode.I8x16MinS, ExecuteI8x16MinS,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst I8x16MinU = new(SimdCode.I8x16MinU, ExecuteI8x16MinU,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst I8x16MaxS = new(SimdCode.I8x16MaxS, ExecuteI8x16MaxS,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst I8x16MaxU = new(SimdCode.I8x16MaxU, ExecuteI8x16MaxU,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst I16x8MinS = new(SimdCode.I16x8MinS, ExecuteI16x8MinS,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst I16x8MinU = new(SimdCode.I16x8MinU, ExecuteI16x8MinU,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst I16x8MaxS = new(SimdCode.I16x8MaxS, ExecuteI16x8MaxS,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst I16x8MaxU = new(SimdCode.I16x8MaxU, ExecuteI16x8MaxU,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst I32x4MinS = new(SimdCode.I32x4MinS, ExecuteI32x4MinS,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst I32x4MinU = new(SimdCode.I32x4MinU, ExecuteI32x4MinU,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst I32x4MaxS = new(SimdCode.I32x4MaxS, ExecuteI32x4MaxS,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         public static readonly NumericInst I32x4MaxU = new(SimdCode.I32x4MaxU, ExecuteI32x4MaxU,
-            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128));
+            ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         private static void ExecuteI8x16MinS(ExecContext context)
         {

@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.IO;
@@ -30,6 +28,7 @@ namespace Wacs.Core.Instructions
     {
         private GlobalIdx Index;
         public override ByteCode Op => OpCode.GlobalGet;
+        public override int StackDiff => +1;
 
         public bool IsConstant(IWasmValidationContext? context)
         {
@@ -93,7 +92,7 @@ namespace Wacs.Core.Instructions
             context.Assert(context.Globals.Contains(Index),
                 "Instruction global.get was invalid. Context Globals did not contain {0}",Index);
             var globalType = context.Globals[Index].Type;
-            context.OpStack.PushType(globalType.ContentType);
+            context.OpStack.PushType(globalType.ContentType); // +1
         }
 
         // @Spec 4.4.5.4. global.get
@@ -127,6 +126,7 @@ namespace Wacs.Core.Instructions
         private GlobalIdx Index;
 
         public override ByteCode Op => OpCode.GlobalSet;
+        public override int StackDiff => -1;
 
         public bool IsConstant(IWasmValidationContext? context) => 
             context == null || context.Globals.Contains(Index) && context.Globals[Index].IsImport && context.Globals[Index].Type.Mutability == Mutability.Immutable;
@@ -165,8 +165,7 @@ namespace Wacs.Core.Instructions
             var mut = global.Type.Mutability;
             context.Assert(mut == Mutability.Mutable,
                 "Instruction global.set was invalid. Trying to set immutable global {0}",Index);
-            context.OpStack.PopType(global.Type.ContentType);
-
+            context.OpStack.PopType(global.Type.ContentType); // -1
         }
 
         // @Spec 4.4.5.5. global.set

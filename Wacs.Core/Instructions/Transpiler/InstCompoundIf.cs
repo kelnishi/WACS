@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using FluentValidation;
@@ -24,14 +22,13 @@ using Wacs.Core.Validation;
 
 namespace Wacs.Core.Instructions.Transpiler
 {
-    public class InstCompoundIf : BlockTarget, IBlockInstruction
+    public class InstCompoundIf : BlockTarget, IBlockInstruction, IIfInstruction
     {
         private static readonly ByteCode IfOp = OpCode.If;
-        private static readonly ByteCode ElseOp = OpCode.Else;
         private readonly Block ElseBlock = Block.Empty;
-        private readonly int ElseCount;
         private readonly Block IfBlock = Block.Empty;
-
+        public sealed override int StackDiff { get; set; }
+        
         private readonly Func<ExecContext, int> valueFunc;
 
         public InstCompoundIf(
@@ -40,6 +37,7 @@ namespace Wacs.Core.Instructions.Transpiler
             InstructionSequence elseSeq,
             ITypedValueProducer<int> valueProducer)
         {
+            StackDiff = valueProducer.StackDiff;
             IfBlock = new Block(
                 blockType: blockType,
                 seq: ifSeq
@@ -48,8 +46,6 @@ namespace Wacs.Core.Instructions.Transpiler
                 blockType: blockType,
                 seq: elseSeq
             );
-            ElseCount = ElseBlock.Instructions.Count;
-
             valueFunc = valueProducer.GetFunc;
         }
 
@@ -59,7 +55,7 @@ namespace Wacs.Core.Instructions.Transpiler
 
         public int Count => ElseBlock.Length == 0 ? 1 : 2;
 
-        public int Size => 1 + IfBlock.Size + ElseBlock.Size;
+        public int BlockSize => 1 + IfBlock.Size + ElseBlock.Size;
         public Block GetBlock(int idx) => idx == 0 ? IfBlock : ElseBlock;
 
         // @Spec 3.3.8.5 if
@@ -107,15 +103,11 @@ namespace Wacs.Core.Instructions.Transpiler
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {
+            // context.Frame.PushLabel(this);
             int c = valueFunc(context);
-            if (c != 0)
+            if (c == 0)
             {
-                context.EnterBlock(this, IfBlock);
-            }
-            else
-            {
-                if (ElseCount != 0)
-                    context.EnterBlock(this, ElseBlock);
+                context.InstructionPointer = Else - 1;
             }
         }
     }

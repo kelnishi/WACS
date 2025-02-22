@@ -1,25 +1,22 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
-using FluentValidation;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types.Defs;
@@ -106,17 +103,17 @@ namespace Wacs.Core.Types
     public class TagAddrs
     {
         private readonly List<TagAddr> _space = new();
-        
+
         public TagAddr this[TagIdx idx]
         {
             get => _space[(int)idx.Value];
             set => _space[(int)idx.Value] = value;
         }
-        
+
         public bool Contains(TagIdx idx) => idx.Value < _space.Count;
-        
+
         public void Add(TagAddr element) => _space.Add(element);
-        
+
         public IEnumerator<TagAddr> GetEnumerator() => _space.GetEnumerator();
     }
 
@@ -266,8 +263,8 @@ namespace Wacs.Core.Types
 
     public class GlobalValidationSpace : AbstractIndexSpace<GlobalIdx, Module.Global>
     {
-        private readonly ReadOnlyCollection<Module.Global> _imports;
         private readonly ReadOnlyCollection<Module.Global> _globals;
+        private readonly ReadOnlyCollection<Module.Global> _imports;
         public int IncrementalHighWatermark = -1;
 
         public GlobalValidationSpace(Module module)
@@ -389,7 +386,7 @@ namespace Wacs.Core.Types
     {
         private readonly ReadOnlyCollection<TagType> _imports;
         private readonly ReadOnlyCollection<TagType> _tags;
-        
+
         public TagsSpace(Module module)
         {
             _imports = module.ImportedTags;

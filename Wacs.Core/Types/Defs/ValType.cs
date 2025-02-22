@@ -1,25 +1,21 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Text;
-using System.Text.RegularExpressions;
 using Wacs.Core.Attributes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Utilities;
@@ -103,11 +99,10 @@ namespace Wacs.Core.Types.Defs
 
     public class Wat
     {
+        private readonly ValType _type;
+        private Wat(ValType type) => _type = type;
         public static explicit operator Wat(ValType type) => new Wat(type);
 
-        private ValType _type;
-        private Wat(ValType type) => _type = type;
-                 
         public override string ToString()
         {
             StringBuilder sb = new();
@@ -129,15 +124,14 @@ namespace Wacs.Core.Types.Defs
 
     public static class ValueTypeExtensions
     {
-
         public static string ToString(this ValType type) =>
             Enum.IsDefined(typeof(ValType), type) ? type.ToWat() : $"ValType({type:X})";
-        
+
         public static TypeIdx Index(this ValType type) => 
             (TypeIdx)((int)type & (int)ValType.IndexMask);
 
         public static bool IsDefType(this ValType type) => type.Index().Value >= 0;
-        
+
         public static bool IsNullable(this ValType type) => (type & ValType.Nullable) != 0;
 
         public static bool IsNull(this ValType type) => type switch
@@ -225,7 +219,7 @@ namespace Wacs.Core.Types.Defs
                 },
                 ValType.Bot or _ => throw new Exception($"HeapType {heapType} cannot occur in source"),
             };
-        
+
         public static bool Validate(this ValType type, TypesSpace? types) =>
             type switch
             {
@@ -466,7 +460,7 @@ namespace Wacs.Core.Types.Defs
                 throw new FormatException($"Type is not a Reference Type:{type}");
             return type;
         }
-        
+
         //For parsing unrolled recursive (module-level) type indexes
         public static ValType ParseDefType(BinaryReader reader) => 
             Parse(reader, true, false);

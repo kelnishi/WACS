@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Collections.Generic;
@@ -32,6 +30,8 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         public override ByteCode Op => GcCode.ArrayNew;
+        public override int StackDiff => -1;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -45,11 +45,11 @@ namespace Wacs.Core.Instructions.GC
 
             var t = arrayType.ElementType.UnpackType();
 
-            context.OpStack.PopI32();
-            context.OpStack.PopType(t);
+            context.OpStack.PopI32();               // -1
+            context.OpStack.PopType(t);             // -2
             
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);   // -1
         }
 
         public override void Execute(ExecContext context)
@@ -89,7 +89,7 @@ namespace Wacs.Core.Instructions.GC
             var refArray = new Value(ValType.Ref | (ValType)X, ai);
             context.OpStack.PushValue(refArray);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();
@@ -101,6 +101,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         public override ByteCode Op => GcCode.ArrayNewDefault;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -117,9 +118,9 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(ft.StorageType.IsDefaultable(),
                 "Instruction {0} was invalid. FieldType was not defaultable:{1}",Op.GetMnemonic(),ft);
             
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();                   // -1
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);       // +0
         }
 
         public override void Execute(ExecContext context)
@@ -146,7 +147,7 @@ namespace Wacs.Core.Instructions.GC
             var refArray = new Value(ValType.Ref | (ValType)X, ai);
             context.OpStack.PushValue(refArray);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();
@@ -156,9 +157,11 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstArrayNewFixed : InstructionBase, IConstInstruction
     {
-        private TypeIdx X;
         private uint N;
+        private TypeIdx X;
         public override ByteCode Op => GcCode.ArrayNewFixed;
+        public override int StackDiff => -((int)N-1);
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -174,11 +177,11 @@ namespace Wacs.Core.Instructions.GC
 
             for (int i = 0; i < N; ++i)
             {
-                context.OpStack.PopType(t);
+                context.OpStack.PopType(t);         // -N
             }
             
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);   // -(N-1)
         }
 
         public override void Execute(ExecContext context)
@@ -208,7 +211,7 @@ namespace Wacs.Core.Instructions.GC
             var refArray = new Value(ValType.Ref | (ValType)X, ai);
             context.OpStack.PushValue(refArray);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();
@@ -221,8 +224,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         private DataIdx Y;
-        
+
         public override ByteCode Op => GcCode.ArrayNewData;
+        public override int StackDiff => -1;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -245,11 +250,11 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(context.Datas.Contains(Y),
                 "Instruction {0} was invalid. Data {1} was not in the Context.",Op.GetMnemonic(), Y);
             
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();               // -1
+            context.OpStack.PopI32();               // -2
             
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);   // -1
         }
 
         public override void Execute(ExecContext context)
@@ -331,8 +336,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         private ElemIdx Y;
-        
+
         public override ByteCode Op => GcCode.ArrayNewElem;
+        public override int StackDiff => -1;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -356,11 +363,11 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(rtp.Matches(rt, context.Types),
                 "Instruction {0} was invalid. ElementType {1} does not match FieldType {2}",Op.GetMnemonic(), rtp, rt);
             
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();               // -1
+            context.OpStack.PopI32();               // -2
             
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);   // -1
         }
 
         public override void Execute(ExecContext context)
@@ -414,8 +421,13 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstArrayGet : InstructionBase
     {
-        private PackedExt Sx;
+        private readonly PackedExt Sx;
         private TypeIdx X;
+
+        public InstArrayGet(PackedExt sx)
+        {
+            Sx = sx;
+        }
 
         public override ByteCode Op => Sx switch
         {
@@ -425,11 +437,8 @@ namespace Wacs.Core.Instructions.GC
             _ => throw new InvalidDataException($"Undefined packedtype: {Sx}")
         };
 
-        public InstArrayGet(PackedExt sx)
-        {
-            Sx = sx;
-        }
-        
+        public override int StackDiff => -1;
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructgetmathsf_hrefsyntax-sxmathitsxxy
         /// </summary>
@@ -451,10 +460,10 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(fieldType.ValidExtension(Sx),
                 "Instruction {0} was invalid. Bad packing extension:{1}",Op.GetMnemonic(), Sx);
             
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();                           // -1
             var refType = ValType.NullableRef | (ValType)X;
-            context.OpStack.PopType(refType);
-            context.OpStack.PushType(t);
+            context.OpStack.PopType(refType);                   // -2
+            context.OpStack.PushType(t);                        // -1
         }
 
         public override void Execute(ExecContext context)
@@ -513,7 +522,7 @@ namespace Wacs.Core.Instructions.GC
             //17
             context.OpStack.PushValue(fieldVal);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();
@@ -524,8 +533,10 @@ namespace Wacs.Core.Instructions.GC
     public class InstArraySet : InstructionBase
     {
         private TypeIdx X;
-        
+
         public override ByteCode Op => GcCode.ArraySet;
+        public override int StackDiff => -3;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -544,9 +555,9 @@ namespace Wacs.Core.Instructions.GC
             var t = fieldType.UnpackType();
             var refType = ValType.NullableRef | (ValType)X;
 
-            context.OpStack.PopType(t);
-            context.OpStack.PopI32();
-            context.OpStack.PopType(refType);
+            context.OpStack.PopType(t);         // -1
+            context.OpStack.PopI32();           // -2
+            context.OpStack.PopType(refType);   // -3
         }
 
         public override void Execute(ExecContext context)
@@ -596,7 +607,7 @@ namespace Wacs.Core.Instructions.GC
             //18
             a[i] = val;
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();
@@ -607,12 +618,13 @@ namespace Wacs.Core.Instructions.GC
     public class InstArrayLen : InstructionBase
     {
         public override ByteCode Op => GcCode.ArrayLen;
+
         public override void Validate(IWasmValidationContext context)
         {
-            var rt = context.OpStack.PopRefType();
+            var rt = context.OpStack.PopRefType();  // -1
             context.Assert(rt.Type.Matches(ValType.Array, context.Types),
                 "Instruction {0} was invalid. Wrong operand type at top of stack:{1}", Op.GetMnemonic(), rt.Type);
-            context.OpStack.PushI32();
+            context.OpStack.PushI32();                    // +0  
         }
 
         public override void Execute(ExecContext context)
@@ -643,6 +655,8 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         public override ByteCode Op => GcCode.ArrayFill;
+        public override int StackDiff => -4;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -661,10 +675,10 @@ namespace Wacs.Core.Instructions.GC
             var t = fieldType.UnpackType();
             var refType = ValType.NullableRef | (ValType)X;
 
-            context.OpStack.PopI32();
-            context.OpStack.PopType(t);
-            context.OpStack.PopI32();
-            context.OpStack.PopType(refType);
+            context.OpStack.PopI32();           // -1
+            context.OpStack.PopType(t);         // -2
+            context.OpStack.PopI32();           // -3
+            context.OpStack.PopType(refType);   // -4
             
         }
 
@@ -723,6 +737,8 @@ namespace Wacs.Core.Instructions.GC
         private TypeIdx X; //dest
         private TypeIdx Y; //src
         public override ByteCode Op => GcCode.ArrayCopy;
+        public override int StackDiff => -5;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -754,11 +770,11 @@ namespace Wacs.Core.Instructions.GC
             var refTypeX = ValType.NullableRef | (ValType)X;
             var refTypeY = ValType.NullableRef | (ValType)Y;
 
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
-            context.OpStack.PopType(refTypeY);
-            context.OpStack.PopI32();
-            context.OpStack.PopType(refTypeX);
+            context.OpStack.PopI32();           // -1
+            context.OpStack.PopI32();           // -2
+            context.OpStack.PopType(refTypeY);  // -3
+            context.OpStack.PopI32();           // -4
+            context.OpStack.PopType(refTypeX);  // -5
         }
 
         public override void Execute(ExecContext context)
@@ -848,8 +864,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         private DataIdx Y;
-        
+
         public override ByteCode Op => GcCode.ArrayInitData;
+        public override int StackDiff => -4;
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_dataxy
         /// </summary>
@@ -876,11 +894,11 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(context.Datas.Contains(Y),
                 "Instruction {0} was invalid. Data {1} was not in the Context.",Op.GetMnemonic(), Y);
             
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();               // -1
+            context.OpStack.PopI32();               // -2
+            context.OpStack.PopI32();               // -3
             var resultType = ValType.NullableRef | (ValType)X;
-            context.OpStack.PopType(resultType);
+            context.OpStack.PopType(resultType);    // -4
         }
 
         /// <summary>
@@ -977,8 +995,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         private ElemIdx Y;
-        
+
         public override ByteCode Op => GcCode.ArrayInitElem;
+        public override int StackDiff => -4;
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_elemxy
         /// </summary>
@@ -1010,12 +1030,12 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(rtp.Matches(rt, context.Types),
                 "Instruction {0} was invalid. ElementType {1} does not match FieldType {2}",Op.GetMnemonic(), rtp, rt);
             
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
-            context.OpStack.PopI32();
+            context.OpStack.PopI32();               // -1
+            context.OpStack.PopI32();               // -2
+            context.OpStack.PopI32();               // -3
             
             var resultType = ValType.NullableRef | (ValType)X;
-            context.OpStack.PopType(resultType);
+            context.OpStack.PopType(resultType);    // -4
         }
 
         /// <summary>

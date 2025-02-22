@@ -1,24 +1,22 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.ExceptionServices;
 using FluentValidation;
 using Wacs.Core.Instructions;
@@ -35,8 +33,6 @@ namespace Wacs.Core.Runtime
 {
     public partial class WasmRuntime
     {
-        private static readonly MethodInfo GenericFuncsInvoke = typeof(Delegates.GenericFuncs).GetMethod("Invoke")!;
-        private static readonly MethodInfo GenericFuncsAsyncInvoke = typeof(Delegates.GenericFuncsAsync).GetMethod("Invoke")!;
         private readonly Dictionary<(string module, string entity), IAddress?> _entityBindings = new();
 
         private readonly List<ModuleInstance> _moduleInstances = new();
@@ -46,11 +42,24 @@ namespace Wacs.Core.Runtime
 
         private readonly Store Store;
 
+        //Cached instructions for module initialization
+        private readonly InstElemDrop _dropInst;
+        private readonly InstI32Const _i32ConstInst;
+        private readonly InstTableInit _tableInitInst;
+        private readonly InstMemoryInit _memoryInitInst;
+        private readonly InstDataDrop _dataDropInst;
 
         public WasmRuntime(RuntimeAttributes? attributes = null)
         {
             Store = new Store();
             Context = new ExecContext(Store, attributes);
+            
+            //Cached instructions for module initialization
+            _dropInst = SpecFactory.Factory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop);
+            _i32ConstInst = SpecFactory.Factory.CreateInstruction<InstI32Const>(OpCode.I32Const);
+            _tableInitInst = SpecFactory.Factory.CreateInstruction<InstTableInit>(ExtCode.TableInit);
+            _memoryInitInst = SpecFactory.Factory.CreateInstruction<InstMemoryInit>(ExtCode.MemoryInit);
+            _dataDropInst = SpecFactory.Factory.CreateInstruction<InstDataDrop>(ExtCode.DataDrop);
         }
 
         /// <summary>
@@ -286,6 +295,14 @@ namespace Wacs.Core.Runtime
         public ModuleInstance InstantiateModule(Module module, RuntimeOptions? options = default)
         {
             options ??= new RuntimeOptions();
+            
+            Stopwatch instantiationTimer = new();
+            if (options.TimeInstantiation)
+            {
+                instantiationTimer.Reset();
+                instantiationTimer.Start();
+            }
+            
             try
             {
                 //1
@@ -312,68 +329,64 @@ namespace Wacs.Core.Runtime
                 var auxFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.ElementInitialization);
                 //13.
                 Context.PushFrame(auxFrame);
-                
-                //14, 15
-                for (int i = 0, l = module.Elements.Length; i < l; ++i)
+                try
                 {
-                    var elem = module.Elements[i];
-                    switch (elem.Mode)
+                    //14, 15
+                    for (int i = 0, l = module.Elements.Length; i < l; ++i)
                     {
-                        case Module.ElementMode.ActiveMode activeMode:
-                            var n = elem.Initializers.Length;
-                            activeMode.Offset
-                                .ExecuteInitializer(Context);
-                            Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(0)
-                                .Execute(Context);
-                            Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(n)
-                                .Execute(Context);
-                            Context.InstructionFactory.CreateInstruction<InstTableInit>(ExtCode.TableInit)
-                                .Immediate(activeMode.TableIndex, (ElemIdx)i)
-                                .Execute(Context);
-                            Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)
-                                .Immediate((ElemIdx)i)
-                                .Execute(Context);
-                            break;
-                        case Module.ElementMode.DeclarativeMode declarativeMode:
-                            _ = declarativeMode;
-                            Context.InstructionFactory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop)
-                                .Immediate((ElemIdx)i)
-                                .Execute(Context);
-                            break;
+                        var elem = module.Elements[i];
+                        switch (elem.Mode)
+                        {
+                            case Module.ElementMode.ActiveMode activeMode:
+                                activeMode.Offset.ExecuteInitializer(Context);
+                                _i32ConstInst.Immediate(0).Execute(Context);
+                                _i32ConstInst.Immediate(elem.Initializers.Length).Execute(Context);
+                                _tableInitInst.Immediate(activeMode.TableIndex, (ElemIdx)i).Execute(Context);
+                                _dropInst.Immediate((ElemIdx)i).Execute(Context);
+                                break;
+                            case Module.ElementMode.DeclarativeMode declarativeMode:
+                                _ = declarativeMode;
+                                _dropInst.Immediate((ElemIdx)i).Execute(Context);
+                                break;
+                        }
+                    }
+
+                    //16.
+                    for (int i = 0, l = module.Datas.Length; i < l; ++i)
+                    {
+                        var data = module.Datas[i];
+                        switch (data.Mode)
+                        {
+                            case Module.DataMode.ActiveMode activeMode:
+                                activeMode.Offset.ExecuteInitializer(Context);
+                                _i32ConstInst.Immediate(0).Execute(Context);
+                                _i32ConstInst.Immediate(data.Init.Length).Execute(Context);
+                                _memoryInitInst.Immediate((DataIdx)i, activeMode.MemoryIndex).Execute(Context);
+                                _dataDropInst.Immediate((DataIdx)i).Execute(Context);
+                                break;
+                            case Module.DataMode.PassiveMode: //Do nothing
+                                break;
+                        }
                     }
                 }
-
-                //16.
-                for (int i = 0, l = module.Datas.Length; i < l; ++i)
+                catch (TrapException exc)
                 {
-                    var data = module.Datas[i];
-                    switch (data.Mode)
-                    {
-                        case Module.DataMode.ActiveMode activeMode:
-                            var n = data.Init.Length;
-                            activeMode.Offset
-                                .ExecuteInitializer(Context);
-                            Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(0)
-                                .Execute(Context);
-                            Context.InstructionFactory.CreateInstruction<InstI32Const>(OpCode.I32Const).Immediate(n)
-                                .Execute(Context);
-                            Context.InstructionFactory.CreateInstruction<InstMemoryInit>(ExtCode.MemoryInit)
-                                .Immediate((DataIdx)i, activeMode.MemoryIndex)
-                                .Execute(Context);
-                            Context.InstructionFactory.CreateInstruction<InstDataDrop>(ExtCode.DataDrop)
-                                .Immediate((DataIdx)i)
-                                .Execute(Context);
-                            break;
-                        case Module.DataMode.PassiveMode: //Do nothing
-                            break;
-                    }
+                    //Linking may succeed, so we commit the transaction
+                    Store.CommitTransaction();
+                    Store.OpenTransaction();
+                    Context.FlushCallStack();
+                    ExceptionDispatchInfo.Throw(exc);
+                }
+                finally
+                {
+                    if (TranspileModules)
+                        TranspileModule(moduleInstance);
+
+                    LinkModule(moduleInstance);
+
+                    Context.CacheInstructions();
                 }
                 
-                if (TranspileModules)
-                    TranspileModule(moduleInstance);
-                
-                SynchronizeFunctionCalls(moduleInstance);
-
                 //17. 
                 if (module.StartIndex != FuncIdx.Default)
                 {
@@ -450,7 +463,40 @@ namespace Wacs.Core.Runtime
             {
                 Store.CommitTransaction();
             }
+
+            if (options.TimeInstantiation)
+            {
+                instantiationTimer.Stop();
+                Console.Error.WriteLine($"Instantiating module took {instantiationTimer.ElapsedMilliseconds:#0.###}ms");
+            }
+            
             return moduleInstance;
+        }
+
+        /// <summary>
+        /// Serialize all function instructions into the context
+        /// </summary>
+        /// <param name="moduleInstance"></param>
+        private void LinkModule(ModuleInstance moduleInstance)
+        {
+            foreach (var funcAddr in moduleInstance.FuncAddrs)
+            {
+                var instance = Store[funcAddr];
+                if (instance is FunctionInstance functionInstance)
+                {
+                    if (functionInstance.Module != moduleInstance) 
+                        continue;
+                    Context.LinkFunction(functionInstance);
+                    // Console.Error.WriteLine($"===Function {functionInstance.Index.Value}");
+                    // int head = functionInstance.LinkedOffset;
+                    // int end = head + functionInstance.Length;
+                    // for (int i = head; i < end; i++)
+                    // {
+                    //     Context.PrintInstruction(i);
+                    // }
+                }
+            }
+            
         }
 
         public void SynchronizeFunctionCalls(ModuleInstance moduleInstance)
@@ -476,8 +522,12 @@ namespace Wacs.Core.Runtime
                     case InstCall instCall:
                         var addr = moduleInstance.FuncAddrs[instCall.X];
                         var funcInst = Store[addr];
-                        if (funcInst is FunctionInstance)
-                            instCall.IsAsync = false;
+                        instCall.IsAsync = funcInst switch
+                        {
+                            FunctionInstance => false,
+                            HostFunction hostFunction => hostFunction.IsAsync,
+                            _ => instCall.IsAsync
+                        };
                         break;
                     case InstBlock instBlock:
                         SynchronizeInstructions(moduleInstance, instBlock.GetBlock(0).Instructions);
@@ -538,7 +588,7 @@ namespace Wacs.Core.Runtime
             var globalAddr = store.AddGlobal(globalInst);
             return globalAddr;
         }
-        
+
         private static TagAddr AllocateTag(Store store, DefType tagType)
         {
             var tagInst = new TagInstance(tagType);
