@@ -184,7 +184,7 @@ namespace Wacs.Core.Validation
                     $"Wrong operand type {value.Type} popped from stack. Expected: {ValType.I64}");
             return value;
         }
-        
+
         public Value PopInt()
         {
             if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
@@ -272,7 +272,7 @@ namespace Wacs.Core.Validation
             
             return actual;
         }
-        
+
         public Value PopAny()
         {
             if (_stack.Count == _context.ControlFrame.Height && _context.ControlFrame.Unreachable)
@@ -306,6 +306,5 @@ namespace Wacs.Core.Validation
                 PushType(type);
             }
         }
-
     }
 }

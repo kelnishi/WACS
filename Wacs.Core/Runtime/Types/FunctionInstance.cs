@@ -14,11 +14,9 @@
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
-
 using InstructionPointer = System.Int32;
 
 namespace Wacs.Core.Runtime.Types
@@ -38,16 +36,18 @@ namespace Wacs.Core.Runtime.Types
         /// </summary>
         public readonly Module.Function Definition;
 
+        public readonly DefType DefType;
+
         public readonly FuncIdx Index;
 
         public readonly ModuleInstance Module;
 
-        public InstructionPointer LinkedOffset;
-        public int Length;
-
         //Copied from the static Definition
         //Can be processed with optimization passes
         public Expression Body;
+        public int Length;
+
+        public InstructionPointer LinkedOffset;
 
         //Copied from the static Definition
         public ValType[] Locals;
@@ -75,8 +75,6 @@ namespace Wacs.Core.Runtime.Types
                 Name = Definition.Id;
         }
 
-        public readonly DefType DefType;
-        
         public string ModuleName => Module.Name;
         public string Name { get; set; } = "";
         public FunctionType Type { get; }

@@ -46,7 +46,7 @@ namespace Wacs.Core.Utilities
             
             return result;
         }
-        
+
         public static ulong ReadLeb128_u64(this BinaryReader reader)
         {
             ulong result = 0;

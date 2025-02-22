@@ -68,6 +68,17 @@ namespace Wacs.Core.Types
                 mut: MutabilityParser.Parse(reader)
             );
 
+        public bool Matches(GlobalType other, TypesSpace? types)
+        {
+            if (Mutability != other.Mutability)
+                return false;
+            if (!ContentType.Matches(other.ContentType, types))
+                return false;
+            if (Mutability == Mutability.Mutable && !other.ContentType.Matches(ContentType, types))
+                return false;
+            return true;
+        }
+
         /// <summary>
         /// @Spec 3.2.6. Global Types
         /// </summary>
@@ -80,17 +91,6 @@ namespace Wacs.Core.Types
                     .Must((gtype, vtype, ctx) => vtype.Validate(ctx.GetValidationContext().Types))
                     .WithMessage(gt => $"GlobalType had invalid ContentType {gt.ContentType}");
             }
-        }
-
-        public bool Matches(GlobalType other, TypesSpace? types)
-        {
-            if (Mutability != other.Mutability)
-                return false;
-            if (!ContentType.Matches(other.ContentType, types))
-                return false;
-            if (Mutability == Mutability.Mutable && !other.ContentType.Matches(ContentType, types))
-                return false;
-            return true;
         }
     }
 

@@ -18,8 +18,9 @@ namespace Wacs.Core.Runtime
 {
     public class VecRef : IGcRef
     {
-        private static VecIdx _index = (VecIdx)0;
-        public RefIdx StoreIndex => _index;
+        private static readonly VecIdx _index = (VecIdx)0;
+
+        public MV128 V128;
 
         public VecRef(V128 val)
         {
@@ -30,7 +31,7 @@ namespace Wacs.Core.Runtime
         {
             V128 = other.V128;
         }
-        
-        public MV128 V128;
+
+        public RefIdx StoreIndex => _index;
     }
 }

@@ -20,13 +20,15 @@ namespace Wacs.Core.Types
 {
     public class DefType
     {
-        public readonly RecursiveType RecType;
         public readonly TypeIdx DefIndex;
-        private int Projection;
+        private readonly int Projection;
+        public readonly RecursiveType RecType;
 
-        public List<DefType> SuperTypes;
+        private int _computedHash;
 
         public CompositeType Expansion;
+
+        public List<DefType> SuperTypes;
 
         public DefType(RecursiveType recType, int proj, TypeIdx def)
         {
@@ -41,8 +43,6 @@ namespace Wacs.Core.Types
         }
 
         public SubType Unroll => RecType.SubTypes[Projection];
-
-        private int _computedHash;
 
         public void ComputeHash()
         {

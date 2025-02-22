@@ -27,11 +27,12 @@ namespace Wacs.Core.Instructions.GC
         public CastFlags Flags;
         public LabelIdx L;
         private BlockTarget? LinkedLabel;
-        
+
         private ValType Rt1;
         private ValType Rt2;
-        
+
         public override ByteCode Op => GcCode.BrOnCast;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.ContainsLabel(L.Value),
@@ -63,7 +64,7 @@ namespace Wacs.Core.Instructions.GC
             
             context.OpStack.PushType(diffType);                 // +0
         }
-        
+
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             LinkedLabel = InstBranch.PrecomputeStack(context, L);
@@ -97,11 +98,12 @@ namespace Wacs.Core.Instructions.GC
         public CastFlags Flags;
         public LabelIdx L;
         private BlockTarget? LinkedLabel;
-        
+
         private ValType Rt1;
         private ValType Rt2;
-        
+
         public override ByteCode Op => GcCode.BrOnCastFail;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.ContainsLabel(L.Value),
@@ -133,7 +135,7 @@ namespace Wacs.Core.Instructions.GC
             context.OpStack.PopAny();                               // -1
             context.OpStack.PushType(Rt2);                          // +0
         }
-        
+
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             LinkedLabel = InstBranch.PrecomputeStack(context, L);

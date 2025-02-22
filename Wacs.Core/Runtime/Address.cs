@@ -13,7 +13,6 @@
 // limitations under the License.
 
 using System;
-using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Runtime
 {

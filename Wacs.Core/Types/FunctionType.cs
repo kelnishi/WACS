@@ -113,7 +113,7 @@ namespace Wacs.Core.Types
             hash.Add(ResultType.ComputeHash(defIndexValue,defs));
             return hash.ToHashCode();
         }
-        
+
         /// <summary>
         /// 3.2.3. Function Types
         /// Always valid

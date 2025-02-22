@@ -23,9 +23,9 @@ namespace Wacs.Core.Runtime
         public int Arity;
         public InstructionPointer ContinuationAddress;
         public ByteCode Instruction;
-        public int StackHeight;
         public int Parameters;
         public int Results;
+        public int StackHeight;
 
         public Label()
         {

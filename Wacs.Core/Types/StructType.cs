@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using FluentValidation;
-using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Types
@@ -25,17 +22,18 @@ namespace Wacs.Core.Types
     public class StructType : CompositeType
     {
         public readonly FieldType[] FieldTypes;
-        public int Arity => FieldTypes.Length;
 
         public StructType(FieldType[] types)
         {
             FieldTypes = types;
         }
 
-        public static StructType Parse(BinaryReader reader) => 
-            new(reader.ParseVector(FieldType.Parse));
+        public int Arity => FieldTypes.Length;
 
         public FieldType this[FieldIdx y] => FieldTypes[y.Value];
+
+        public static StructType Parse(BinaryReader reader) => 
+            new(reader.ParseVector(FieldType.Parse));
 
         public bool Matches(StructType other, TypesSpace? types)
         {
@@ -48,7 +46,7 @@ namespace Wacs.Core.Types
             }
             return true;
         }
-        
+
         public override int ComputeHash(int defIndexValue, List<DefType> defs)
         {
             var hash = new StableHash();

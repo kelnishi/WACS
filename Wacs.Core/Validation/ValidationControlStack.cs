@@ -19,6 +19,7 @@ namespace Wacs.Core.Validation
 {
     public class ValidationControlFrame
     {
+        public LocalsSpace Locals;
         public ByteCode Opcode { get; set; }
         public FunctionType Types { get; set; } = null!;
 
@@ -26,8 +27,6 @@ namespace Wacs.Core.Validation
         public ResultType EndTypes => Types.ResultType;
         public ResultType LabelTypes => Opcode == OpCode.Loop ? StartTypes : EndTypes;
         public int Height { get; set; }
-
-        public LocalsSpace Locals;
         public bool Unreachable { get; set; }
     }
 }

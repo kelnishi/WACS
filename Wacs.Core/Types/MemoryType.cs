@@ -29,7 +29,7 @@ namespace Wacs.Core.Types
         /// The limits specifying the minimum and optional maximum number of memory pages.
         /// </summary>
         public readonly Limits Limits;
-        
+
         /// <summary>
         /// Initializes a new instance of the <see cref="MemoryType"/> class with the specified limits.
         /// </summary>

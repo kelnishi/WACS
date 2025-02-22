@@ -24,13 +24,13 @@ namespace Wacs.Core.Types
     {
         public TagTypeAttribute Attribute;
         public TypeIdx TypeIndex;
-        
+
         public TagType(TagTypeAttribute attribute, TypeIdx typeIndex)
         {
             Attribute = attribute;
             TypeIndex = typeIndex;
         }
-        
+
         public static TagType Parse(BinaryReader reader)
         {
             return new TagType(
@@ -38,7 +38,7 @@ namespace Wacs.Core.Types
                 (TypeIdx)reader.ReadLeb128_u32()
             );
         }
-        
+
         public class Validator : AbstractValidator<TagType>
         {
             public Validator()

@@ -17,7 +17,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.ExceptionServices;
 using FluentValidation;
 using Wacs.Core.Instructions;
@@ -582,7 +581,7 @@ namespace Wacs.Core.Runtime
             var globalAddr = store.AddGlobal(globalInst);
             return globalAddr;
         }
-        
+
         private static TagAddr AllocateTag(Store store, DefType tagType)
         {
             var tagInst = new TagInstance(tagType);

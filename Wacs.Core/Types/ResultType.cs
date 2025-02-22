@@ -16,7 +16,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Wacs.Core.Attributes;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 
@@ -66,7 +65,7 @@ namespace Wacs.Core.Types
             Types = reader.ParseVector(ValTypeParser.Parse);
             Arity = Types.Length;
         }
-        
+
         public ResultType Append(ValType type)
         {
             var newTypes = new ValType[Types.Length + 1];
@@ -99,7 +98,7 @@ namespace Wacs.Core.Types
 
             return true;
         }
-        
+
         public bool Equals(ResultType other)
         {
             if (Types.Length != other.Types.Length)

@@ -62,14 +62,14 @@ namespace Wacs.Core.Instructions.Numeric
             IsConstant = isConst;
         }
 
-        public bool IsConstant { get; }
-        
         public override ByteCode Op { get; }
+        protected override int StackDiff => -1;
+
+        public bool IsConstant { get; }
 
         public Func<ExecContext, float, float, float> GetFunc => (_, i1, i2) => _execute(i1, i2);
 
         public override void Validate(IWasmValidationContext context) => _validate(context); //-1
-        protected override int StackDiff => -1;
 
         public override void Execute(ExecContext context)
         {

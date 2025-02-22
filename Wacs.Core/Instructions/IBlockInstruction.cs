@@ -14,12 +14,10 @@
 
 using System;
 using System.IO;
-using System.Net.Mime;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
-
 using InstructionPointer = System.Int32;
 
 namespace Wacs.Core.Instructions
@@ -42,16 +40,16 @@ namespace Wacs.Core.Instructions
 
     public abstract class BlockTarget : InstructionBase
     {
+        public InstructionPointer Else = -1;
         public BlockTarget EnclosingBlock;
+        public InstructionPointer End;
+        public InstructionPointer Head;
         public Label Label;
         public int LabelHeight;
-        public InstructionPointer Head;
-        public InstructionPointer Else = -1;
-        public InstructionPointer End;
 
         //Elses
         public BlockTarget? Suboridinate;
-        
+
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
             base.Link(context, pointer);

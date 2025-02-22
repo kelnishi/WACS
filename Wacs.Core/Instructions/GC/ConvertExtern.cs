@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using FluentValidation;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.GC;
@@ -24,6 +23,7 @@ namespace Wacs.Core.Instructions.GC
     public class InstAnyConvertExtern : InstructionBase, IConstInstruction
     {
         public override ByteCode Op => GcCode.AnyConvertExtern;
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-externmathsfanyconvert_extern
         /// </summary>
@@ -63,6 +63,7 @@ namespace Wacs.Core.Instructions.GC
     public class InstExternConvertAny : InstructionBase, IConstInstruction
     {
         public override ByteCode Op => GcCode.AnyConvertExtern;
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-externmathsfexternconvert_any
         /// </summary>

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System;
+
 namespace Wacs.Core.Types.Defs
 {
     public enum AddrType : byte
@@ -23,12 +25,12 @@ namespace Wacs.Core.Types.Defs
     public static class AddrTypeExtensions
     {
         public static AddrType Min(this AddrType type, AddrType other) => type <= other ? type : other;
-        
+
         public static ValType ToValType(this AddrType type) => type switch
         {
             AddrType.I32 => ValType.I32,
             AddrType.I64 => ValType.I64,
-            _ => throw new System.NotImplementedException()
+            _ => throw new NotImplementedException()
         };
     }
 }

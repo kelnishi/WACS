@@ -19,7 +19,6 @@ namespace Wacs.Core.Runtime.GC
     public class I31Ref : IGcRef
     {
         public PtrIdx _index;
-        public RefIdx StoreIndex => _index;
 
         public I31Ref(long i)
         {
@@ -27,5 +26,6 @@ namespace Wacs.Core.Runtime.GC
         }
 
         public int Value => (int)_index.Value;
+        public RefIdx StoreIndex => _index;
     }
 }

@@ -33,7 +33,7 @@ namespace Wacs.Core.Instructions.Numeric
             (Op, _execute, _validate, StackDiff, IsConstant) = (op, execute, validate, stackDiff, isConst);
 
         public override ByteCode Op { get; }
-        
+
         public bool IsConstant { get; }
 
         public override void Validate(IWasmValidationContext context) => _validate(context);

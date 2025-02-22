@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using System.Threading.Tasks;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -31,8 +28,9 @@ namespace Wacs.Core.Instructions.Reference
     {
         private LabelIdx L;
         private BlockTarget? LinkedLabel;
-        
+
         public override ByteCode Op => OpCode.BrOnNull;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.ContainsLabel(L.Value),
@@ -49,7 +47,7 @@ namespace Wacs.Core.Instructions.Reference
             //Push the non-null ref back for the else case.
             context.OpStack.PushRef(refType.ToConcrete());          // +0
         }
-        
+
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             LinkedLabel = InstBranch.PrecomputeStack(context, L);
@@ -72,7 +70,7 @@ namespace Wacs.Core.Instructions.Reference
                 context.OpStack.PushRef(refVal);
             }
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             L = (LabelIdx)reader.ReadLeb128_u32();
@@ -84,8 +82,10 @@ namespace Wacs.Core.Instructions.Reference
     {
         private LabelIdx L;
         private BlockTarget? LinkedLabel;
-        
+
         public override ByteCode Op => OpCode.BrOnNonNull;
+        protected override int StackDiff => -1;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.ContainsLabel(L.Value),
@@ -104,8 +104,7 @@ namespace Wacs.Core.Instructions.Reference
             //Unpush the ref we pushed for the branch
             context.OpStack.PopRefType();                             // -1
         }
-        protected override int StackDiff => -1;
-        
+
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             LinkedLabel = InstBranch.PrecomputeStack(context, L);
@@ -125,7 +124,7 @@ namespace Wacs.Core.Instructions.Reference
                 InstBranch.ExecuteInstruction(context, LinkedLabel);
             }
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             L = (LabelIdx)reader.ReadLeb128_u32();
@@ -166,7 +165,7 @@ namespace Wacs.Core.Instructions.Reference
             context.OpStack.DiscardValues(funcType.ParameterTypes);   // -(N+1)
             context.OpStack.PushResult(funcType.ResultType);          // -N
         }
-        
+
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
@@ -175,7 +174,7 @@ namespace Wacs.Core.Instructions.Reference
             context.LinkOpStackHeight += funcType.ResultType.Arity;
             return this;
         }
-        
+
         public override void Execute(ExecContext context)
         {
             context.Assert(context.StackTopTopType() == ValType.FuncRef,

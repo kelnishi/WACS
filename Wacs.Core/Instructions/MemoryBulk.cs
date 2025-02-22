@@ -13,7 +13,6 @@
 // limitations under the License.
 
 using System.IO;
-using Wacs.Core.Instructions.Memory;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -30,6 +29,7 @@ namespace Wacs.Core.Instructions
     {
         private MemIdx M;
         public override ByteCode Op => OpCode.MemorySize;
+        protected override int StackDiff => +1;
 
         /// <summary>
         /// @Spec 3.3.7.10. memory.size
@@ -42,7 +42,6 @@ namespace Wacs.Core.Instructions
             var at = mem.Limits.AddressType;
             context.OpStack.PushType(at.ToValType());   // +1
         }
-        protected override int StackDiff => +1;
 
         // @Spec 4.4.7.8. memory.size
         public override void Execute(ExecContext context)
@@ -151,8 +150,10 @@ namespace Wacs.Core.Instructions
     {
         private DataIdx X;
         private MemIdx Y;
-        
+
         public override ByteCode Op => ExtCode.MemoryInit;
+
+        protected override int StackDiff => -3;
 
         /// <summary>
         /// @Spec 3.3.7.14. memory.init
@@ -172,8 +173,6 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopI32();       // -2
             context.OpStack.PopType(at);    // -3
         }
-        
-        protected override int StackDiff => -3;
 
         // @Spec 4.4.7.12. memory.init x
         public override void Execute(ExecContext context)
@@ -306,6 +305,7 @@ namespace Wacs.Core.Instructions
         private MemIdx DstX;
         private MemIdx SrcY;
         public override ByteCode Op => ExtCode.MemoryCopy;
+        protected override int StackDiff => -3;
 
         /// <summary>
         /// @Spec 3.3.7.13. memory.copy
@@ -327,7 +327,6 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopType(atD.ToValType());   // -2
             context.OpStack.PopType(atS.ToValType());   // -3
         }
-        protected override int StackDiff => -3;
 
         // @Spec 4.4.7.11. memory.copy
         public override void Execute(ExecContext context)
@@ -409,6 +408,8 @@ namespace Wacs.Core.Instructions
         private MemIdx X;
         public override ByteCode Op => ExtCode.MemoryFill;
 
+        protected override int StackDiff => -3;
+
         /// <summary>
         /// @Spec 3.3.7.12. memory.fill
         /// </summary>
@@ -423,8 +424,6 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopI32();                   // -2  
             context.OpStack.PopType(at.ToValType());    // -3
         }
-        
-        protected override int StackDiff => -3;
 
         // @Spec 4.4.7.10. memory.fill
         public override void Execute(ExecContext context)

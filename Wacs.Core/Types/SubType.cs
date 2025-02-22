@@ -14,7 +14,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Data;
 using System.IO;
 using FluentValidation;
 using Wacs.Core.Types.Defs;
@@ -25,9 +24,9 @@ namespace Wacs.Core.Types
 {
     public class SubType
     {
+        public readonly CompositeType Body;
         public readonly bool Final;
         public readonly TypeIdx[] SuperTypeIndexes;
-        public readonly CompositeType Body;
 
         public SubType(TypeIdx[] idxs, CompositeType body, bool final)
         {
@@ -35,7 +34,7 @@ namespace Wacs.Core.Types
             Body = body;
             Final = final;
         }
-        
+
         public SubType(CompositeType body, bool final)
         {
             SuperTypeIndexes = Array.Empty<TypeIdx>();
@@ -46,10 +45,12 @@ namespace Wacs.Core.Types
             hash.Add(nameof(SubType));
             ComputedHash = hash.ToHashCode();
         }
-        
+
+        private int ComputedHash { get; set; }
+
         public static TypeIdx ParseTypeIndexes(BinaryReader reader) => 
             (TypeIdx)reader.ReadLeb128_u32();
-        
+
         public static SubType Parse(BinaryReader reader)
         {
             return reader.ReadByte() switch
@@ -73,8 +74,6 @@ namespace Wacs.Core.Types
             };
         }
 
-        private int ComputedHash { get; set; }
-        
         public void ComputeHash(int defIndexValue, List<DefType> defs)
         {
             var hash = new StableHash();

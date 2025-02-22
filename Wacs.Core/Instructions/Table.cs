@@ -90,6 +90,7 @@ namespace Wacs.Core.Instructions
     {
         private TableIdx X;
         public override ByteCode Op => OpCode.TableSet;
+        protected override int StackDiff => -2;
 
         // @Spec 3.3.6.2. table.set
         public override void Validate(IWasmValidationContext context)
@@ -101,7 +102,6 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopType(type.ElementType);  // -1
             context.OpStack.PopType(at.ToValType());    // -2
         }
-        protected override int StackDiff => -2;
 
         // @Spec 4.4.6.2. table.set
         public override void Execute(ExecContext context) => ExecuteInstruction(context, X);
@@ -155,6 +155,7 @@ namespace Wacs.Core.Instructions
         private TableIdx X;
         private ElemIdx Y;
         public override ByteCode Op => ExtCode.TableInit;
+        protected override int StackDiff => -3;
 
         // @Spec 3.3.6.7. table.init x y
         public override void Validate(IWasmValidationContext context)
@@ -173,7 +174,6 @@ namespace Wacs.Core.Instructions
             var at = t1.Limits.AddressType;
             context.OpStack.PopType(at.ToValType()); // -3
         }
-        protected override int StackDiff => -3;
 
         // @Spec 4.4.6.7. table.init x y
         public override void Execute(ExecContext context)
@@ -303,6 +303,7 @@ namespace Wacs.Core.Instructions
         private TableIdx DstX;
         private TableIdx SrcY;
         public override ByteCode Op => ExtCode.TableCopy;
+        protected override int StackDiff => -3;
 
         // @Spec 3.3.6.6. table.copy
         public override void Validate(IWasmValidationContext context)
@@ -324,7 +325,6 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopType(at2.ToValType());   // -2
             context.OpStack.PopType(at1.ToValType());   // -3
         }
-        protected override int StackDiff => -3;
 
         // @Spec 4.4.6.6. table.copy
         public override void Execute(ExecContext context)
@@ -438,6 +438,7 @@ namespace Wacs.Core.Instructions
     {
         private TableIdx X;
         public override ByteCode Op => ExtCode.TableGrow;
+        protected override int StackDiff => -1;
 
         // @Spec 3.3.6.4. table.grow x
         public override void Validate(IWasmValidationContext context)
@@ -451,7 +452,6 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopType(type.ElementType);  // -2
             context.OpStack.PushType(at.ToValType());   // -1
         }
-        protected override int StackDiff => -1;
 
         // @Spec 4.4.6.4. table.grow x
         public override void Execute(ExecContext context)
@@ -508,6 +508,7 @@ namespace Wacs.Core.Instructions
     {
         private TableIdx X;
         public override ByteCode Op => ExtCode.TableSize;
+        protected override int StackDiff => +1;
 
         // @Spec 3.3.6.3. table.size x
         public override void Validate(IWasmValidationContext context)
@@ -518,7 +519,6 @@ namespace Wacs.Core.Instructions
             var at = table.Limits.AddressType;
             context.OpStack.PushType(at.ToValType());   // +1
         }
-        protected override int StackDiff => +1;
 
         // @Spec 4.4.6.3. table.size x
         public override void Execute(ExecContext context)
@@ -556,6 +556,7 @@ namespace Wacs.Core.Instructions
     {
         private TableIdx X;
         public override ByteCode Op => ExtCode.TableFill;
+        protected override int StackDiff => -3;
 
         // @Spec 3.3.6.5. table.fill
         public override void Validate(IWasmValidationContext context)
@@ -568,7 +569,6 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopType(type.ElementType);  // -2
             context.OpStack.PopType(at.ToValType());    // -3
         }
-        protected override int StackDiff => -3;
 
         // @Spec 4.4.6.5. table.fill
         public override void Execute(ExecContext context)

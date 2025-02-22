@@ -145,7 +145,7 @@ namespace Wacs.Core.Runtime
             --Count;
             return _registers[Count].Data.UInt64;
         }
-        
+
         public long PopAddr()
         {
             --Count;

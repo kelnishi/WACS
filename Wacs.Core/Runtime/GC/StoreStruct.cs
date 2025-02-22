@@ -19,16 +19,12 @@ namespace Wacs.Core.Runtime.GC
 {
     public class StoreStruct : IGcRef
     {
-        private StructType _definition;
-        private Value[] _data;
-
-        private StructIdx _index;
-        public RefIdx StoreIndex => _index;
-        public StructIdx StructIndex => _index;
+        private readonly Value[] _data;
+        private readonly StructType _definition;
 
         public StoreStruct(StructIdx storeIndex, StructType def, Stack<Value> fieldVals)
         {
-            _index = storeIndex;
+            StructIndex = storeIndex;
             _definition = def;
 
             _data = new Value[fieldVals.Count];
@@ -37,11 +33,11 @@ namespace Wacs.Core.Runtime.GC
                 _data[i] = fieldVals.Pop();
             }
         }
-        
+
         //Defaults
         public StoreStruct(StructIdx storeIndex, StructType def)
         {
-            _index = storeIndex;
+            StructIndex = storeIndex;
             _definition = def;
             var fieldTypes = _definition.FieldTypes;
 
@@ -52,10 +48,14 @@ namespace Wacs.Core.Runtime.GC
             }
         }
 
+        public StructIdx StructIndex { get; }
+
         public Value this[FieldIdx y]
         {
             get => _data[y.Value];
             set => _data[y.Value] = value;
         }
+
+        public RefIdx StoreIndex => StructIndex;
     }
 }

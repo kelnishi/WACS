@@ -145,10 +145,11 @@ namespace Wacs.Core
                     }
                 }
             }
-            
+
             public class TagDesc : ExportDesc
             {
                 public TagIdx TagIndex { get; internal set; }
+
                 public class Validator : AbstractValidator<TagDesc>
                 {
                     public Validator()
