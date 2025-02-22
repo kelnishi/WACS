@@ -32,6 +32,7 @@ namespace Wacs.Core.Instructions
         private static readonly ByteCode TryTableOp = OpCode.TryTable;
         private Block Block;
         public CatchType[] Catches;
+        public BlockTarget?[] CatchTargets;
         
         public override ByteCode Op => TryTableOp;
         public ValType BlockType => Block.BlockType;
@@ -104,6 +105,8 @@ namespace Wacs.Core.Instructions
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             base.Link(context, pointer);
+            CatchTargets = Catches.Select(catchType => InstBranch.PrecomputeStack(context, catchType.L + 1)).ToArray();
+            
             PointerAdvance = 1;
             return this;
         }
@@ -246,10 +249,7 @@ namespace Wacs.Core.Instructions
                 {
                     if (blockTarget is InstTryTable tryTable)
                     {
-                        //TODO: When we have precomuted branch targets, don't bother moving the pointer here.
-                        //Move the head for FindLabel to branch.
-                        context.InstructionPointer = tryTable.Head;
-                        foreach (var handler in tryTable.Catches)
+                        foreach (var (handler,idx) in tryTable.Catches.Select((c,i)=>(c,i)))
                         {
                             switch (handler.Mode)
                             {
@@ -257,7 +257,7 @@ namespace Wacs.Core.Instructions
                                     if (a.Equals(context.Frame.Module.TagAddrs[handler.X]))
                                     {
                                         context.OpStack.PushResults(exn.Fields);
-                                        InstBranch.ExecuteInstruction(context, handler.L);
+                                        InstBranch.ExecuteInstruction(context, tryTable.CatchTargets[idx]);
                                         return;
                                     }
                                     break;
@@ -266,16 +266,16 @@ namespace Wacs.Core.Instructions
                                     {
                                         context.OpStack.PushResults(exn.Fields);
                                         context.OpStack.PushValue(exnref);
-                                        InstBranch.ExecuteInstruction(context, handler.L);
+                                        InstBranch.ExecuteInstruction(context, tryTable.CatchTargets[idx]);
                                         return;
                                     }
                                     break;
                                 case CatchFlags.CatchAll:
-                                    InstBranch.ExecuteInstruction(context, handler.L);
+                                    InstBranch.ExecuteInstruction(context, tryTable.CatchTargets[idx]);
                                     return;
                                 case CatchFlags.CatchAllRef:
                                     context.OpStack.PushValue(exnref);
-                                    InstBranch.ExecuteInstruction(context, handler.L);
+                                    InstBranch.ExecuteInstruction(context, tryTable.CatchTargets[idx]);
                                     return;
                             }
                         }

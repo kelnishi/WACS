@@ -481,6 +481,8 @@ namespace Wacs.Core.Instructions
         private static Stack<Value> _asideVals = new();
 
         private LabelIdx L;
+        private BlockTarget? LinkedLabel;
+        
         public override ByteCode Op => OpCode.Br;
 
         // @Spec 3.3.8.6. br l
@@ -497,19 +499,6 @@ namespace Wacs.Core.Instructions
             context.SetUnreachable();
         }
 
-        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
-        {
-            PrecomputeStack(context, L);
-            context.LinkUnreachable = true;
-            return this;
-        }
-
-        // @Spec 4.4.8.6. br l
-        public override void Execute(ExecContext context)
-        {
-            ExecuteInstruction(context, L);
-        }
-
         public static BlockTarget PrecomputeStack(ExecContext context, LabelIdx labelIndex)
         {
             var label = context.PeekLabel();
@@ -518,24 +507,30 @@ namespace Wacs.Core.Instructions
                 for (int l = 0; l < labelIndex.Value; l++) 
                     label = label.EnclosingBlock;
             }
-            context.LinkOpStackHeight = label.Label.StackHeight + label.Label.Arity;
             return label;
         }
 
-        public static void ExecuteInstruction(ExecContext context, LabelIdx labelIndex)
+        public static void SetStackHeight(ExecContext context, BlockTarget label)
         {
-            var target = context.FindLabel((int)labelIndex.Value);
-            //1.
-            context.Assert( (target?.LabelHeight??0) > (int)labelIndex.Value,
-                $"Instruction br failed. Context did not contain Label {labelIndex}");
-            //2.
-            // if (labelIndex.Value > 0)
-            // {
-            //     // var topAddr = 
-            //     context.Frame.PopLabels((int)(labelIndex.Value - 1));
-            //     // context.ResumeSequence(topAddr);
-            // }
-            
+            context.LinkOpStackHeight = label.Label.StackHeight + label.Label.Arity;
+        }
+        
+        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            LinkedLabel = PrecomputeStack(context, L);
+            SetStackHeight(context, LinkedLabel);
+            context.LinkUnreachable = true;
+            return this;
+        }
+
+        // @Spec 4.4.8.6. br l
+        public override void Execute(ExecContext context)
+        {
+            ExecuteInstruction(context, LinkedLabel);
+        }
+
+        public static void ExecuteInstruction(ExecContext context, BlockTarget? target)
+        {
             var label = target?.Label switch
             {
                 null => context.Frame.ReturnLabel,
@@ -543,10 +538,8 @@ namespace Wacs.Core.Instructions
                 var l => l
             };
             
-            //3,4.
             context.Assert( context.OpStack.Count >= label.Arity,
                 $"Instruction br failed. Not enough values on the stack.");
-            //5.
             context.Assert(_asideVals.Count == 0,
                 "Shared temporary stack had values left in it.");
 
@@ -556,12 +549,7 @@ namespace Wacs.Core.Instructions
             {
                 //TODO Move the elements in OpStack's registers array.
                 context.OpStack.PopResults(label.Arity, ref _asideVals);
-                //6.
                 context.ResetStack(label);
-                //We did this in part 2 to avoid stack drilling.
-                // for (uint i = 0, l = labelIndex.Value; i < l; ++i)
-                //     labels.Pop();
-                //7.
                 context.OpStack.PushResults(_asideVals);
             }
 
@@ -584,6 +572,7 @@ namespace Wacs.Core.Instructions
             }
         }
 
+
         /// <summary>
         /// @Spec 5.4.1 Control Instructions
         /// </summary>
@@ -605,6 +594,8 @@ namespace Wacs.Core.Instructions
     public sealed class InstBranchIf : InstructionBase, IBranchInstruction, INodeConsumer<int>
     {
         public LabelIdx L;
+        private BlockTarget? LinkedLabel;
+        
         public override ByteCode Op => OpCode.BrIf;
 
         public Action<ExecContext, int> GetFunc => BranchIf;
@@ -626,6 +617,11 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushResult(nthFrame.LabelTypes);    // -1
         }
         protected override int StackDiff => -1;
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            LinkedLabel = InstBranch.PrecomputeStack(context, L);
+            return base.Link(context, pointer);
+        }
 
         // @Spec 4.4.8.7. br_if
         public override void Execute(ExecContext context)
@@ -638,7 +634,7 @@ namespace Wacs.Core.Instructions
         {
             if (c != 0)
             {
-                InstBranch.ExecuteInstruction(context, L);
+                InstBranch.ExecuteInstruction(context, LinkedLabel);
             }
         }
 
@@ -669,8 +665,11 @@ namespace Wacs.Core.Instructions
     public sealed class InstBranchTable : InstructionBase, IBranchInstruction, INodeConsumer<int>
     {
         private LabelIdx Ln; //Default m
+        private BlockTarget? LinkedLabeln;
 
         private LabelIdx[] Ls = null!;
+        private BlockTarget?[] LinkedLabels;
+        
         public override ByteCode Op => OpCode.BrTable;
 
         public Action<ExecContext, int> GetFunc => BranchTable;
@@ -706,7 +705,9 @@ namespace Wacs.Core.Instructions
 
         public override InstructionBase Link(ExecContext context, int pointer)
         {
-            InstBranch.PrecomputeStack(context, Ln);
+            LinkedLabeln = InstBranch.PrecomputeStack(context, Ln);
+            InstBranch.SetStackHeight(context, LinkedLabeln);
+            LinkedLabels = Ls.Select(l => InstBranch.PrecomputeStack(context, l)).ToArray();
             context.LinkUnreachable = true;
             return this;
         }
@@ -728,13 +729,13 @@ namespace Wacs.Core.Instructions
             //3.
             if (i >= 0 && i < Ls.Length)
             {
-                var label = Ls[i];
+                var label = LinkedLabels[i];
                 InstBranch.ExecuteInstruction(context, label);
             }
             //4.
             else
             {
-                InstBranch.ExecuteInstruction(context, Ln);
+                InstBranch.ExecuteInstruction(context, LinkedLabeln);
             }
         }
 

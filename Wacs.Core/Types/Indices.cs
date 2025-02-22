@@ -189,6 +189,9 @@ namespace Wacs.Core.Types
         public static explicit operator Index(LabelIdx labelIdx) => new((int)labelIdx.Value);
         public static explicit operator LabelIdx(int value) => new((uint)value);
         public static explicit operator LabelIdx(uint value) => new(value);
+        
+        public static LabelIdx operator +(LabelIdx left, int right) => new((uint)(left.Value + right));
+        public static LabelIdx operator -(LabelIdx left, int right) => new((uint)(left.Value - right));
     }
     
     public readonly struct FieldIdx : IEquatable<Index>
