@@ -57,6 +57,23 @@ namespace Wacs.Core.Instructions
             Head = pointer;
             EnclosingBlock = context.PeekLabel();
             
+            //Merge adjacent PointerAdvances
+            if (this is InstBlock or InstLoop or InstTryTable)
+            {
+                var parent = EnclosingBlock;
+                int skips = 1;
+                int address = pointer;
+                while (parent.Head == address - 1)
+                {
+                    if (parent is not (InstBlock or InstLoop or InstTryTable)) 
+                        break;
+                    address--;
+                    skips++;
+                    parent.PointerAdvance = skips;
+                    parent = parent.EnclosingBlock;
+                }
+            }
+            
             var blockInst = this as IBlockInstruction;
             var block = blockInst!.GetBlock(0);
             
