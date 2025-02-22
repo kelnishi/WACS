@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.IO;
@@ -161,8 +159,8 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert(M.Align.LinearSize() <= WidthTByteSize * CountN,
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),WidthT);
 
-            context.OpStack.PopInt();
-            context.OpStack.PushV128();
+            context.OpStack.PopInt();       // -1
+            context.OpStack.PushV128();     // +0
         }
 
         // @Spec 4.4.7.2. v128.loadMxN_sx memarg
@@ -267,8 +265,8 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align,BitWidth.V128);
 
-            context.OpStack.PopInt();
-            context.OpStack.PushV128();
+            context.OpStack.PopInt();       // -1
+            context.OpStack.PushV128();     // +0
         }
 
         // @Spec 4.4.7.3. v128.loadN_splat
@@ -373,8 +371,8 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert(M.Align.LinearSize() <= BitWidth.V128.ByteSize(),
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),BitWidth.V128);
 
-            context.OpStack.PopInt();
-            context.OpStack.PushV128();
+            context.OpStack.PopInt();       // -1
+            context.OpStack.PushV128();     // +0
         }
 
         // @Spec 4.4.7.7. v128.loadN_zero memarg
@@ -463,6 +461,8 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
+        public override int StackDiff => -1;
+
         /// <summary>
         /// @Spec 3.3.7.8. v128.loadN_lane memarge laneidx
         /// </summary>
@@ -475,9 +475,9 @@ namespace Wacs.Core.Instructions.SIMD
             context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8", Op.GetMnemonic(), M.Align.LinearSize(), WidthN);
             
-            context.OpStack.PopV128();
-            context.OpStack.PopInt();
-            context.OpStack.PushV128();
+            context.OpStack.PopV128();      // -1
+            context.OpStack.PopInt();       // -2
+            context.OpStack.PushV128();     // -1
         }
 
         // @Spec 4.4.7.5. v128.loadN_lane memarg x
@@ -571,6 +571,8 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
+        public override int StackDiff => -2;
+
         public InstructionBase Immediate(MemArg m)
         {
             M = m;
@@ -588,8 +590,8 @@ namespace Wacs.Core.Instructions.SIMD
                 "Instruction {0} failed with invalid context memory {1}.", Op.GetMnemonic(), M.M.Value);
             context.Assert(M.Align.LinearSize() <= WidthN.ByteSize(),
                 "Instruction {0} failed with invalid alignment {1} <= {2}/8", Op.GetMnemonic(), M.Align.LinearSize(), WidthN);
-            context.OpStack.PopV128();
-            context.OpStack.PopInt();
+            context.OpStack.PopV128();      // -1
+            context.OpStack.PopInt();       // -2
         }
 
         // @Spec 4.4.7.7. v128.storeN_lane memarg x

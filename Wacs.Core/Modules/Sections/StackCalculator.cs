@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
@@ -67,7 +65,7 @@ namespace Wacs.Core
         public Value PopI32() => _context.Pop(ValType.I32);
         public Value PopI64() => _context.Pop(ValType.I64);
         public Value PopInt() => _context.Pop(ValType.I64);
-        
+
         public Value PopF32() => _context.Pop(ValType.F32);
         public Value PopF64() => _context.Pop(ValType.F64);
         public Value PopV128() => _context.Pop(ValType.V128);
@@ -125,7 +123,7 @@ namespace Wacs.Core
 
         internal int stackHeight = 0;
 
-        public StackCalculator(ModuleInstance moduleInst, Module.Function func)
+        public StackCalculator(ModuleInstance moduleInst)
         {
             Types = new TypesSpace(moduleInst.Repr);
 
@@ -143,22 +141,15 @@ namespace Wacs.Core
 
             OpStack = new CalculatorOpStack(this);
             
-            var funcType = Types[func.TypeIndex].Expansion as FunctionType;
-            var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
-
-            int capacity = funcType.ParameterTypes.Types.Length + func.Locals.Length;
-            var localData = new Value[capacity];
-            Locals = new LocalsSpace(localData, funcType.ParameterTypes.Types, func.Locals);
+            Dehydrate();
             
-            ReturnType = funcType.ResultType;
-            PushControlFrame(OpCode.Block, fakeType);
             Attributes = new RuntimeAttributes();
         }
 
         public RuntimeAttributes Attributes { get; }
         public IValidationOpStack OpStack { get; }
         public FuncIdx FunctionIndex => FuncIdx.Default;
-        public ResultType ReturnType { get; }
+        public ResultType ReturnType { get; set; }
         public bool Unreachable { get; set; }
         public TypesSpace Types { get; }
         public FunctionsSpace Funcs { get; }
@@ -166,7 +157,7 @@ namespace Wacs.Core
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
         public TagsSpace Tags { get; }
-        public LocalsSpace Locals { get; }
+        public LocalsSpace Locals { get; set; }
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
 
@@ -217,6 +208,31 @@ namespace Wacs.Core
 
         public void ValidateBlock(Block instructionBlock, int index = 0) {}
         public void ValidateCatches(CatchType[] catches) { }
+
+        public StackCalculator HydrateFunction(Module.Function func)
+        {
+            var funcType = Types[func.TypeIndex].Expansion as FunctionType;
+            var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
+
+            int capacity = funcType.ParameterTypes.Types.Length + func.Locals.Length;
+            var localData = new Value[capacity];
+            Locals = new LocalsSpace(localData, funcType.ParameterTypes.Types, func.Locals);
+            
+            ReturnType = funcType.ResultType;
+            PushControlFrame(OpCode.Block, fakeType);
+
+            return this;
+        }
+
+        public void Dehydrate()
+        {
+            while (ControlStack.Count != 0)
+                ControlStack.Pop();
+            stackHeight = 0;
+            OpStack.Clear();
+            Locals = LocalsSpace.Empty;
+            ReturnType = ResultType.Empty;
+        }
 
         public void Clear()
         {

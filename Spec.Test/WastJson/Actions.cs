@@ -51,10 +51,17 @@ namespace Spec.Test.WastJson
             }
             if (addr == null)
                 throw new InvalidDataException(
-                    $"Could not get exported function {moduleName}.{Field}");    
-                    
+                    $"Could not get exported function {moduleName}.{Field}");
+
+            var options = new InvokerOptions();
+            if (runtime.TraceExecution)
+            {
+                Console.Error.WriteLine($"\nInvoking wasm function {Field}");
+                options.LogInstructionExecution = InstructionLogging.All;
+            }
+            
             //Compute type from action.Args and action.Expected
-            var invoker = runtime.CreateStackInvoker(addr.Value);
+            var invoker = runtime.CreateStackInvoker(addr.Value, options);
 
             var pVals = Args.Select(arg => arg.AsValue).ToArray();
             return invoker(pVals);

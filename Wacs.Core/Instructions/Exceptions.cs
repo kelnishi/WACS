@@ -30,17 +30,18 @@ namespace Wacs.Core.Instructions
     public class InstTryTable : BlockTarget, IBlockInstruction, IExnHandler
     {
         private static readonly ByteCode TryTableOp = OpCode.TryTable;
+
+        private static readonly ByteCode CatchOp = WacsCode.Catch;
         private Block Block;
         public CatchType[] Catches;
-        
+        public BlockTarget?[] CatchTargets;
+
         public override ByteCode Op => TryTableOp;
         public ValType BlockType => Block.BlockType;
         public int Count => 1;
-        public int Size => 1 + Block.Size;
+        public int BlockSize => 1 + Block.Size;
         public Block GetBlock(int idx) => Block;
-        
-        private static readonly ByteCode CatchOp = WacsCode.Catch;
-        
+
         public override void Validate(IWasmValidationContext context)
         {
             try
@@ -101,11 +102,20 @@ namespace Wacs.Core.Instructions
             }
         }
 
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            base.Link(context, pointer);
+            CatchTargets = Catches.Select(catchType => InstBranch.PrecomputeStack(context, catchType.L + 1)).ToArray();
+            
+            PointerAdvance = 1;
+            return this;
+        }
+
         public override void Execute(ExecContext context)
         {
-            context.EnterBlock(this, Block);
+            // context.Frame.PushLabel(this);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             var blockType = ValTypeParser.Parse(reader, parseBlockIndex: true, parseStorageType: false);
@@ -122,6 +132,7 @@ namespace Wacs.Core.Instructions
     {
         private TagIdx X;
         public override ByteCode Op => OpCode.Throw;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Tags.Contains(X), 
@@ -137,6 +148,24 @@ namespace Wacs.Core.Instructions
             
             context.OpStack.DiscardValues(functionType.ParameterTypes);
             context.SetUnreachable();
+        }
+
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            var ta = context.Frame.Module.TagAddrs[X];
+            var ti = context.Store[ta];
+            var tagType = ti.Type;
+            var compType = tagType.Expansion;
+            var funcType = compType as FunctionType;
+
+            int stack = context.LinkOpStackHeight;
+            context.LinkOpStackHeight -= funcType!.ParameterTypes.Arity;
+            context.LinkOpStackHeight += 1;
+            //For recordkeeping
+            StackDiff = context.LinkOpStackHeight - stack;
+            
+            context.LinkUnreachable = true;
+            return this;
         }
 
         public override void Execute(ExecContext context)
@@ -170,7 +199,7 @@ namespace Wacs.Core.Instructions
             
             InstThrowRef.ExecuteInstruction(context);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TagIdx)reader.ReadLeb128_u32();
@@ -181,17 +210,26 @@ namespace Wacs.Core.Instructions
     public class InstThrowRef : InstructionBase
     {
         public override ByteCode Op => OpCode.ThrowRef;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.OpStack.PopType(ValType.Exn);
             context.SetUnreachable();
         }
 
+        public override int StackDiff => -1;
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            base.Link(context, pointer);
+            context.LinkUnreachable = true;
+            return this;
+        }
+
         public override void Execute(ExecContext context)
         {
             ExecuteInstruction(context);
         }
-        
+
         public static void ExecuteInstruction(ExecContext context)
         {
             //1.
@@ -212,14 +250,13 @@ namespace Wacs.Core.Instructions
             //Traverse the control stack
             while (context.StackHeight > 0)
             {
+                var blockTarget = context.FindLabel(0);
                 //Enumerate all the blocks to find catch clauses
-                while (context.Frame.LabelCount > 1)
+                while ((blockTarget?.LabelHeight??0) > 1)
                 {
-                    var blockTarget = context.Frame.TopLabel;
-                    context.ExitBlock();
                     if (blockTarget is InstTryTable tryTable)
                     {
-                        foreach (var handler in tryTable.Catches)
+                        foreach (var (handler,idx) in tryTable.Catches.Select((c,i)=>(c,i)))
                         {
                             switch (handler.Mode)
                             {
@@ -227,7 +264,7 @@ namespace Wacs.Core.Instructions
                                     if (a.Equals(context.Frame.Module.TagAddrs[handler.X]))
                                     {
                                         context.OpStack.PushResults(exn.Fields);
-                                        InstBranch.ExecuteInstruction(context, handler.L);
+                                        InstBranch.ExecuteInstruction(context, tryTable.CatchTargets[idx]);
                                         return;
                                     }
                                     break;
@@ -236,20 +273,21 @@ namespace Wacs.Core.Instructions
                                     {
                                         context.OpStack.PushResults(exn.Fields);
                                         context.OpStack.PushValue(exnref);
-                                        InstBranch.ExecuteInstruction(context, handler.L);
+                                        InstBranch.ExecuteInstruction(context, tryTable.CatchTargets[idx]);
                                         return;
                                     }
                                     break;
                                 case CatchFlags.CatchAll:
-                                    InstBranch.ExecuteInstruction(context, handler.L);
+                                    InstBranch.ExecuteInstruction(context, tryTable.CatchTargets[idx]);
                                     return;
                                 case CatchFlags.CatchAllRef:
                                     context.OpStack.PushValue(exnref);
-                                    InstBranch.ExecuteInstruction(context, handler.L);
+                                    InstBranch.ExecuteInstruction(context, tryTable.CatchTargets[idx]);
                                     return;
                             }
                         }
                     }
+                    blockTarget = blockTarget.EnclosingBlock;
                 }
                 context.FunctionReturn();
             }

@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.IO;
@@ -30,6 +28,7 @@ namespace Wacs.Core.Instructions
     {
         private LocalIdx Index;
         public override ByteCode Op => OpCode.LocalGet;
+        public override int StackDiff => +1;
 
         public Func<ExecContext, Value> GetFunc => FetchFromLocals;
 
@@ -74,7 +73,7 @@ namespace Wacs.Core.Instructions
             context.Assert(value.Data.Set,
                 "Instruction local.get was invalid. The non-defaultable local variable at index {0} was unset", Index.Value);
             
-            context.OpStack.PushType(value.Type);
+            context.OpStack.PushType(value.Type);   // +1
         }
 
         public override void Execute(ExecContext context)
@@ -98,6 +97,7 @@ namespace Wacs.Core.Instructions
     {
         private LocalIdx Index;
         public override ByteCode Op => OpCode.LocalSet;
+        public override int StackDiff => -1;
 
         public Action<ExecContext, Value> GetFunc => SetLocal;
 
@@ -130,7 +130,7 @@ namespace Wacs.Core.Instructions
                 "Instruction local.set was invalid. Context Locals did not contain {0}",Index);
             context.Locals.Data[Index.Value].Data.Set = true;
             var value = context.Locals.Get(Index);
-            context.OpStack.PopType(value.Type);
+            context.OpStack.PopType(value.Type);    // -1
         }
 
         // @Spec 4.4.5.2. local.set
@@ -199,10 +199,10 @@ namespace Wacs.Core.Instructions
                 "Instruction local.tee was invalid. Context Locals did not contain {0}",Index);
             context.Locals.Data[Index.Value].Data.Set = true;
             var value = context.Locals.Get(Index);
-            context.OpStack.PopType(value.Type);
-            context.OpStack.PushType(value.Type);
-            context.OpStack.PushType(value.Type);
-            context.OpStack.PopType(value.Type);
+            context.OpStack.PopType(value.Type);    // -1
+            context.OpStack.PushType(value.Type);   // +0
+            context.OpStack.PushType(value.Type);   // +1
+            context.OpStack.PopType(value.Type);    // +0
         }
 
         // @Spec 4.4.5.3. local.tee

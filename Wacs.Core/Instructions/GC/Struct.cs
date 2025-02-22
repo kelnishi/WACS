@@ -1,20 +1,17 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -51,11 +48,22 @@ namespace Wacs.Core.Instructions.GC
 
             foreach (var ft in structType.FieldTypes.Reverse())
             {
-                context.OpStack.PopType(ft.UnpackType());
+                context.OpStack.PopType(ft.UnpackType());           // -N
             }
 
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);                   // -(N-1)
+        }
+
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            //calculate N
+            var defType = context.Frame.Module.Types[X];
+            var compositeType = defType.Expansion;
+            var structType = compositeType as StructType;
+            
+            context.LinkOpStackHeight -= (structType.FieldTypes.Length-1);
+            return this;
         }
 
         public override void Execute(ExecContext context)
@@ -101,6 +109,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         public override ByteCode Op => GcCode.StructNewDefault;
+        public override int StackDiff => +1;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructnewx
@@ -123,7 +132,7 @@ namespace Wacs.Core.Instructions.GC
                     "Instruction {0} was invalid. FieldType was not defaultable:{1}",Op.GetMnemonic(),ft);
             }
             var resultType = ValType.Ref | (ValType)X;
-            context.OpStack.PushType(resultType);
+            context.OpStack.PushType(resultType);       // +1
         }
 
         public override void Execute(ExecContext context)
@@ -160,9 +169,14 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstStructGet : InstructionBase
     {
-        private PackedExt Sx;
+        private readonly PackedExt Sx;
         private TypeIdx X;
         private FieldIdx Y;
+
+        public InstStructGet(PackedExt sx)
+        {
+            Sx = sx;
+        }
 
         public override ByteCode Op => Sx switch
         {
@@ -172,11 +186,6 @@ namespace Wacs.Core.Instructions.GC
             _ => throw new InvalidDataException($"Undefined packedtype: {Sx}")
         };
 
-        public InstStructGet(PackedExt sx)
-        {
-            Sx = sx;
-        }
-        
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructgetmathsf_hrefsyntax-sxmathitsxxy
         /// </summary>
@@ -201,8 +210,8 @@ namespace Wacs.Core.Instructions.GC
                 "Instruction {0} was invalid. Bad packing extension:{1}",Op.GetMnemonic(), Sx);
             
             var refType = ValType.NullableRef | (ValType)X;
-            context.OpStack.PopType(refType);
-            context.OpStack.PushType(t);
+            context.OpStack.PopType(refType);   // -1
+            context.OpStack.PushType(t);        // +0
         }
 
         public override void Execute(ExecContext context)
@@ -256,7 +265,7 @@ namespace Wacs.Core.Instructions.GC
             //15
             context.OpStack.PushValue(fieldVal);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();
@@ -269,8 +278,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         private FieldIdx Y;
-        
+
         public override ByteCode Op => GcCode.StructSet;
+        public override int StackDiff => -2;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -291,8 +302,8 @@ namespace Wacs.Core.Instructions.GC
             var t = fieldtype.UnpackType();
             var refType = ValType.NullableRef | (ValType)X;
 
-            context.OpStack.PopType(t);
-            context.OpStack.PopType(refType);
+            context.OpStack.PopType(t);         // -1
+            context.OpStack.PopType(refType);   // -2
         }
 
         public override void Execute(ExecContext context)
@@ -337,7 +348,7 @@ namespace Wacs.Core.Instructions.GC
             //16
             refStruct[Y] = val;
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();

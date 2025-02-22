@@ -1,20 +1,17 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-using System;
 using System.IO;
 using System.Threading.Tasks;
 using Wacs.Core.Instructions.Numeric;
@@ -22,6 +19,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Validation;
+using InstructionPointer = System.Int32;
 
 namespace Wacs.Core.Instructions
 {
@@ -30,9 +28,12 @@ namespace Wacs.Core.Instructions
     /// </summary>
     public abstract class InstructionBase
     {
-        public readonly Action<ExecContext> Executor;
         public bool IsAsync = false;
+        public int PointerAdvance = 0;
+
         public int Size = 1;
+
+        public virtual int StackDiff { get; set; }
 
         /// <summary>
         /// Gets the opcode associated with the instruction.
@@ -40,6 +41,12 @@ namespace Wacs.Core.Instructions
         public abstract ByteCode Op { get; }
 
         public abstract void Validate(IWasmValidationContext context);
+
+        public virtual InstructionBase Link(ExecContext context, InstructionPointer pointer)
+        {
+            context.LinkOpStackHeight += StackDiff;
+            return this;
+        }
 
         /// <summary>
         /// Synchronously executes the instruction within the given execution context.
@@ -76,7 +83,7 @@ namespace Wacs.Core.Instructions
 
         public static bool IsEnd(InstructionBase inst) => inst.Op.x00 == OpCode.End;
 
-        public static bool IsElseOrEnd(InstructionBase inst) => inst is InstEnd;
+        public static bool IsElseOrEnd(InstructionBase inst) => inst is InstEnd or InstElse;
 
         public static bool IsBranch(InstructionBase? inst) => inst is IBranchInstruction;
 

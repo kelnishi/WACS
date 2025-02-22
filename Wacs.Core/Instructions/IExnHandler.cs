@@ -14,5 +14,5 @@
 
 namespace Wacs.Core.Instructions
 {
-    public interface IExnHandler { }
+    public interface IExnHandler {}
 }

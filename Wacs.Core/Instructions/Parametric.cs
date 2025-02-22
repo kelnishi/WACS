@@ -1,22 +1,19 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.IO;
-using FluentValidation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -33,6 +30,7 @@ namespace Wacs.Core.Instructions
     {
         public static readonly InstDrop Inst = new();
         public override ByteCode Op => OpCode.Drop;
+        public override int StackDiff => -1;
 
         public Action<ExecContext, Value> GetFunc => (_, _) => { };
 
@@ -42,7 +40,7 @@ namespace Wacs.Core.Instructions
         public override void Validate(IWasmValidationContext context)
         {
             //* Value Polymorphic ignores type
-            context.OpStack.PopAny();
+            context.OpStack.PopAny();   // -1
         }
 
         /// <summary>
@@ -64,6 +62,7 @@ namespace Wacs.Core.Instructions
 
         public InstSelect(bool withTypes = false) => WithTypes = withTypes;
         public override ByteCode Op => OpCode.Select;
+        public override int StackDiff => -2;
 
         public Func<ExecContext, Value, Value, int, Value> GetFunc => Select;
 
@@ -80,20 +79,20 @@ namespace Wacs.Core.Instructions
                 context.Assert(type.Validate(context.Types),
                     "Select instruction had invalid type:{0}", type);
                 
-                context.OpStack.PopI32();
-                context.OpStack.PopType(type);
-                context.OpStack.PopType(type);
-                context.OpStack.PushType(type);
+                context.OpStack.PopI32();       // -1
+                context.OpStack.PopType(type);  // -2
+                context.OpStack.PopType(type);  // -3
+                context.OpStack.PushType(type); // -2
             }
             else
             {
-                context.OpStack.PopI32();
-                Value val2 = context.OpStack.PopAny();
-                Value val1 = context.OpStack.PopAny();
+                context.OpStack.PopI32();               // -1
+                Value val2 = context.OpStack.PopAny();  // -2
+                Value val1 = context.OpStack.PopAny();  // -3
                 context.Assert(val1.Type.Matches(val2.Type, context.Types) && val1.Type.IsVal() && val2.Type.IsVal(),
                     "Select instruction expected matching non-ref types on the stack: {0} == {1}",val1.Type,val2.Type);
                 
-                context.OpStack.PushType(val1.Type == ValType.Bot ? val2.Type : val1.Type);
+                context.OpStack.PushType(val1.Type == ValType.Bot ? val2.Type : val1.Type); // -2
             }
         }
 

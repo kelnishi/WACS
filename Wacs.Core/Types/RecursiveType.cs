@@ -1,18 +1,16 @@
-// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Collections.Generic;
@@ -28,6 +26,9 @@ namespace Wacs.Core.Types
     public class RecursiveType : IRenderable
     {
         public readonly SubType[] SubTypes;
+
+        private int _computedHash;
+
         //The defType index of the first subtype
         public TypeIdx DefIndex = TypeIdx.Default;
 
@@ -41,8 +42,22 @@ namespace Wacs.Core.Types
             SubTypes = subTypes;
         }
 
-        private int _computedHash;
-        
+        /// <summary>
+        /// For rendering/debugging
+        /// </summary>
+        public string Id { get; set; } = "";
+
+        public void RenderText(StreamWriter writer, Module module, string indent)
+        {
+            var symbol = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
+            // var parameters = ParameterTypes.ToParameters();
+            // var results = ResultType.ToResults();
+            // var func = $" (func{parameters}{results})";
+            var func = "";
+            
+            writer.WriteLine($"{indent}(type{symbol}{func})");
+        }
+
         public void ComputeHash(List<DefType> defs)
         {
             var hash = new StableHash();
@@ -64,22 +79,6 @@ namespace Wacs.Core.Types
             if (func is null)
                 throw new InvalidDataException($"RecursiveType ({recursiveType}) was not a FunctionType");
             return func;
-        }
-        
-        /// <summary>
-        /// For rendering/debugging
-        /// </summary>
-        public string Id { get; set; } = "";
-
-        public void RenderText(StreamWriter writer, Module module, string indent)
-        {
-            var symbol = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
-            // var parameters = ParameterTypes.ToParameters();
-            // var results = ResultType.ToResults();
-            // var func = $" (func{parameters}{results})";
-            var func = "";
-            
-            writer.WriteLine($"{indent}(type{symbol}{func})");
         }
 
         private static TypeIdx ParseTypeIndexes(BinaryReader reader) => 
@@ -117,7 +116,7 @@ namespace Wacs.Core.Types
                 var form => throw new FormatException(
                     $"Invalid type format {form} at offset {reader.BaseStream.Position-1}.")
             };
-        
+
         public class Validator : AbstractValidator<RecursiveType>
         {
             /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-rectypemathsfrechrefsyntax-subtypemathitsubtypeast
@@ -144,6 +143,5 @@ namespace Wacs.Core.Types
                     });
             }
         }
-
     }
 }
