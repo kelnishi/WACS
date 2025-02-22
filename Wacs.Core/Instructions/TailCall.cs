@@ -86,8 +86,11 @@ namespace Wacs.Core.Instructions
             };
 
             var funcType = inst.Type;
+            int stack = context.LinkOpStackHeight;
             context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
             context.LinkOpStackHeight += funcType.ResultType.Arity;
+            //For recordkeeping
+            StackDiff = context.LinkOpStackHeight - stack;
             
             context.LinkUnreachable = true;
             return this;
@@ -274,9 +277,13 @@ namespace Wacs.Core.Instructions
             var funcType = ftExpect.Expansion as FunctionType;
             context.Assert(funcType,
                 $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
-            
+
+            int stack = context.LinkOpStackHeight;
             context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
             context.LinkOpStackHeight += funcType.ResultType.Arity;
+            
+            //For recordkeeping
+            StackDiff = context.LinkOpStackHeight - stack;
             
             return this;
         }
@@ -535,9 +542,14 @@ namespace Wacs.Core.Instructions
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
+            int stack = context.LinkOpStackHeight;
             context.LinkOpStackHeight -= 1;
             context.LinkOpStackHeight -= funcType!.ParameterTypes.Arity;
             context.LinkOpStackHeight += funcType.ResultType.Arity;
+            
+            //For recordkeeping
+            StackDiff = context.LinkOpStackHeight - stack;
+            
             return this;
         }
 

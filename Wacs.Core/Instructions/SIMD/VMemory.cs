@@ -461,7 +461,7 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
-        protected override int StackDiff => -1;
+        public override int StackDiff => -1;
 
         /// <summary>
         /// @Spec 3.3.7.8. v128.loadN_lane memarge laneidx
@@ -571,7 +571,7 @@ namespace Wacs.Core.Instructions.SIMD
             _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
         };
 
-        protected override int StackDiff => -2;
+        public override int StackDiff => -2;
 
         public InstructionBase Immediate(MemArg m)
         {

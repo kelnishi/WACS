@@ -29,7 +29,7 @@ namespace Wacs.Core.Instructions
     {
         private MemIdx M;
         public override ByteCode Op => OpCode.MemorySize;
-        protected override int StackDiff => +1;
+        public override int StackDiff => +1;
 
         /// <summary>
         /// @Spec 3.3.7.10. memory.size
@@ -153,7 +153,7 @@ namespace Wacs.Core.Instructions
 
         public override ByteCode Op => ExtCode.MemoryInit;
 
-        protected override int StackDiff => -3;
+        public override int StackDiff => -3;
 
         /// <summary>
         /// @Spec 3.3.7.14. memory.init
@@ -305,7 +305,7 @@ namespace Wacs.Core.Instructions
         private MemIdx DstX;
         private MemIdx SrcY;
         public override ByteCode Op => ExtCode.MemoryCopy;
-        protected override int StackDiff => -3;
+        public override int StackDiff => -3;
 
         /// <summary>
         /// @Spec 3.3.7.13. memory.copy
@@ -408,7 +408,7 @@ namespace Wacs.Core.Instructions
         private MemIdx X;
         public override ByteCode Op => ExtCode.MemoryFill;
 
-        protected override int StackDiff => -3;
+        public override int StackDiff => -3;
 
         /// <summary>
         /// @Spec 3.3.7.12. memory.fill

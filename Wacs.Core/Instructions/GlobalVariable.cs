@@ -28,7 +28,7 @@ namespace Wacs.Core.Instructions
     {
         private GlobalIdx Index;
         public override ByteCode Op => OpCode.GlobalGet;
-        protected override int StackDiff => +1;
+        public override int StackDiff => +1;
 
         public bool IsConstant(IWasmValidationContext? context)
         {
@@ -126,7 +126,7 @@ namespace Wacs.Core.Instructions
         private GlobalIdx Index;
 
         public override ByteCode Op => OpCode.GlobalSet;
-        protected override int StackDiff => -1;
+        public override int StackDiff => -1;
 
         public bool IsConstant(IWasmValidationContext? context) => 
             context == null || context.Globals.Contains(Index) && context.Globals[Index].IsImport && context.Globals[Index].Type.Mutability == Mutability.Immutable;

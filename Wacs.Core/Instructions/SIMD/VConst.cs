@@ -24,7 +24,7 @@ namespace Wacs.Core.Instructions.Simd
     {
         private V128 V128;
         public override ByteCode Op => SimdCode.V128Const;
-        protected override int StackDiff => +1;
+        public override int StackDiff => +1;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const

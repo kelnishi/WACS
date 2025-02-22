@@ -30,7 +30,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         public override ByteCode Op => GcCode.ArrayNew;
-        protected override int StackDiff => -1;
+        public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -160,7 +160,7 @@ namespace Wacs.Core.Instructions.GC
         private uint N;
         private TypeIdx X;
         public override ByteCode Op => GcCode.ArrayNewFixed;
-        protected override int StackDiff => -((int)N-1);
+        public override int StackDiff => -((int)N-1);
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -226,7 +226,7 @@ namespace Wacs.Core.Instructions.GC
         private DataIdx Y;
 
         public override ByteCode Op => GcCode.ArrayNewData;
-        protected override int StackDiff => -1;
+        public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -338,7 +338,7 @@ namespace Wacs.Core.Instructions.GC
         private ElemIdx Y;
 
         public override ByteCode Op => GcCode.ArrayNewElem;
-        protected override int StackDiff => -1;
+        public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -437,7 +437,7 @@ namespace Wacs.Core.Instructions.GC
             _ => throw new InvalidDataException($"Undefined packedtype: {Sx}")
         };
 
-        protected override int StackDiff => -1;
+        public override int StackDiff => -1;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructgetmathsf_hrefsyntax-sxmathitsxxy
@@ -535,7 +535,7 @@ namespace Wacs.Core.Instructions.GC
         private TypeIdx X;
 
         public override ByteCode Op => GcCode.ArraySet;
-        protected override int StackDiff => -3;
+        public override int StackDiff => -3;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -655,7 +655,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         public override ByteCode Op => GcCode.ArrayFill;
-        protected override int StackDiff => -4;
+        public override int StackDiff => -4;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -737,7 +737,7 @@ namespace Wacs.Core.Instructions.GC
         private TypeIdx X; //dest
         private TypeIdx Y; //src
         public override ByteCode Op => GcCode.ArrayCopy;
-        protected override int StackDiff => -5;
+        public override int StackDiff => -5;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -866,7 +866,7 @@ namespace Wacs.Core.Instructions.GC
         private DataIdx Y;
 
         public override ByteCode Op => GcCode.ArrayInitData;
-        protected override int StackDiff => -4;
+        public override int StackDiff => -4;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_dataxy
@@ -997,7 +997,7 @@ namespace Wacs.Core.Instructions.GC
         private ElemIdx Y;
 
         public override ByteCode Op => GcCode.ArrayInitElem;
-        protected override int StackDiff => -4;
+        public override int StackDiff => -4;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_elemxy
