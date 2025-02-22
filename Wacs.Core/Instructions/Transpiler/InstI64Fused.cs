@@ -39,6 +39,7 @@ namespace Wacs.Core.Instructions.Numeric
         public Func<ExecContext, long> GetFunc => _execute;
 
         public override void Validate(IWasmValidationContext context) => _validate(context);
+        public sealed override int StackDiff => +1;
 
         public override void Execute(ExecContext context)
         {
@@ -88,6 +89,7 @@ namespace Wacs.Core.Instructions.Numeric
         public Func<ExecContext, ulong> GetFunc => _execute;
 
         public override void Validate(IWasmValidationContext context) => _validate(context);
+        public sealed override int StackDiff => +1;
 
         public override void Execute(ExecContext context)
         {

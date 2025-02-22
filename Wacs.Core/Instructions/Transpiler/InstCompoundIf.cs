@@ -27,7 +27,8 @@ namespace Wacs.Core.Instructions.Transpiler
         private static readonly ByteCode IfOp = OpCode.If;
         private readonly Block ElseBlock = Block.Empty;
         private readonly Block IfBlock = Block.Empty;
-
+        public sealed override int StackDiff { get; set; }
+        
         private readonly Func<ExecContext, int> valueFunc;
 
         public InstCompoundIf(
@@ -36,6 +37,7 @@ namespace Wacs.Core.Instructions.Transpiler
             InstructionSequence elseSeq,
             ITypedValueProducer<int> valueProducer)
         {
+            StackDiff = valueProducer.StackDiff;
             IfBlock = new Block(
                 blockType: blockType,
                 seq: ifSeq

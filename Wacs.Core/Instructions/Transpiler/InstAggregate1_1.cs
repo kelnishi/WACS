@@ -26,10 +26,12 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly Func<ExecContext, TIn, TOut> _compute;
         private readonly Func<ExecContext, TIn> _in1;
         private readonly Func<ExecContext, Value> _wrap;
-
+        public sealed override int StackDiff { get; set; }
+        
         public InstAggregate1_1(ITypedValueProducer<TIn> in1, INodeComputer<TIn, TOut> compute)
         {
             _in1 = in1.GetFunc;
+            StackDiff = Math.Min(0, in1.StackDiff);
             _compute = compute.GetFunc;
             Size = in1.CalculateSize() + 1;
 
@@ -55,6 +57,13 @@ namespace Wacs.Core.Instructions.Transpiler
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(false, "Validation of transpiled instructions not supported.");
+        }
+
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            //Account for our own push to the stack if we're not subordinated
+            context.LinkOpStackHeight += StackDiff + 1;
+            return this;
         }
 
         public override void Execute(ExecContext context)

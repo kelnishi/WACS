@@ -109,7 +109,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         public override ByteCode Op => GcCode.StructNewDefault;
-        protected override int StackDiff => +1;
+        public override int StackDiff => +1;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructnewx
@@ -280,7 +280,7 @@ namespace Wacs.Core.Instructions.GC
         private FieldIdx Y;
 
         public override ByteCode Op => GcCode.StructSet;
-        protected override int StackDiff => -2;
+        public override int StackDiff => -2;
 
         public override void Validate(IWasmValidationContext context)
         {

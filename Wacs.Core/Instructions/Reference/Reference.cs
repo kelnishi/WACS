@@ -25,7 +25,8 @@ namespace Wacs.Core.Instructions.Reference
             context.Assert(Type.IsRefType(), $"Type was not a RefType:{Type}");
             context.OpStack.PushRef(Value.Null(Type));  // +1
         }
-        protected override int StackDiff => +1;
+
+        public override int StackDiff => +1;
 
         // @Spec 4.4.2.1. ref.null t
         public override void Execute(ExecContext context) {
@@ -94,7 +95,8 @@ namespace Wacs.Core.Instructions.Reference
             var val = new Value(ValType.Ref | (ValType)func.TypeIndex);
             context.OpStack.PushFuncref(val);   // +1
         }
-        protected override int StackDiff => +1;
+
+        public override int StackDiff => +1;
 
         // @Spec 4.4.2.3. ref.func x
         public override void Execute(ExecContext context)
@@ -133,7 +135,8 @@ namespace Wacs.Core.Instructions.Reference
             context.OpStack.PopType(ValType.Eq);    // -2
             context.OpStack.PushI32();              // -1
         }
-        protected override int StackDiff => -1;
+
+        public override int StackDiff => -1;
 
         public override void Execute(ExecContext context)
         {

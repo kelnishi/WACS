@@ -28,6 +28,7 @@ namespace Wacs.Core.Instructions.Numeric
         protected int _constant;
         protected Func<ExecContext, int> _execute = null!;
 
+
         protected InstFusedI32Const(ITypedValueProducer<int> prev, int constant)
         {
             _previous = prev.GetFunc;
@@ -39,6 +40,7 @@ namespace Wacs.Core.Instructions.Numeric
         public Func<ExecContext, int> GetFunc => _execute;
 
         public override void Validate(IWasmValidationContext context) => _validate(context);
+        public sealed override int StackDiff => +1;
 
         public override void Execute(ExecContext context)
         {
@@ -88,7 +90,8 @@ namespace Wacs.Core.Instructions.Numeric
         public Func<ExecContext, uint> GetFunc => _execute;
 
         public override void Validate(IWasmValidationContext context) => _validate(context);
-
+        public sealed override int StackDiff => +1;
+        
         public override void Execute(ExecContext context)
         {
             context.OpStack.PushU32(_execute(context));

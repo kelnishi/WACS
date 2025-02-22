@@ -245,7 +245,7 @@ namespace Wacs.Core.Instructions
         public override ByteCode Op => IfOp;
 
         //Consume the predicate
-        protected override int StackDiff => -1;
+        public override int StackDiff => -1;
 
 
         public ValType BlockType => IfBlock.BlockType;
@@ -588,13 +588,13 @@ namespace Wacs.Core.Instructions
     }
 
     //0x0D
-    public sealed class InstBranchIf : InstructionBase, IBranchInstruction, INodeConsumer<int>
+    public sealed class InstBranchIf : InstructionBase, IBranchInstruction, IComplexLinkBehavior, INodeConsumer<int>
     {
         public LabelIdx L;
         private BlockTarget? LinkedLabel;
 
         public override ByteCode Op => OpCode.BrIf;
-        protected override int StackDiff => -1;
+        public override int StackDiff => -1;
 
         public Action<ExecContext, int> GetFunc => BranchIf;
 
@@ -660,7 +660,7 @@ namespace Wacs.Core.Instructions
     }
 
     //0x0E
-    public sealed class InstBranchTable : InstructionBase, IBranchInstruction, INodeConsumer<int>
+    public sealed class InstBranchTable : InstructionBase, IBranchInstruction, IComplexLinkBehavior, INodeConsumer<int>
     {
         private BlockTarget? LinkedLabeln;
         private BlockTarget?[] LinkedLabels;
@@ -704,7 +704,10 @@ namespace Wacs.Core.Instructions
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             LinkedLabeln = InstBranch.PrecomputeStack(context, Ln);
+            int stack = context.LinkOpStackHeight;
             InstBranch.SetStackHeight(context, LinkedLabeln);
+            StackDiff = context.LinkOpStackHeight - stack;
+            
             LinkedLabels = Ls.Select(l => InstBranch.PrecomputeStack(context, l)).ToArray();
             context.LinkUnreachable = true;
             return this;
@@ -878,8 +881,11 @@ namespace Wacs.Core.Instructions
             };
 
             var funcType = inst.Type;
+            int stack = context.LinkOpStackHeight;
             context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
             context.LinkOpStackHeight += funcType.ResultType.Arity;
+            //For recordkeeping
+            StackDiff = context.LinkOpStackHeight - stack;
             
             return this;
         }
@@ -1026,10 +1032,12 @@ namespace Wacs.Core.Instructions
             var funcType = ftExpect.Expansion as FunctionType;
             context.Assert(funcType,
                 $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
-            
+
+            int stack = context.LinkOpStackHeight;
             context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
             context.LinkOpStackHeight += funcType.ResultType.Arity;
-            
+            //For recordkeeping
+            StackDiff = context.LinkOpStackHeight - stack;
             return this;
         }
 

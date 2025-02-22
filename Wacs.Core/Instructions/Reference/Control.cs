@@ -84,7 +84,7 @@ namespace Wacs.Core.Instructions.Reference
         private BlockTarget? LinkedLabel;
 
         public override ByteCode Op => OpCode.BrOnNonNull;
-        protected override int StackDiff => -1;
+        public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
         {
