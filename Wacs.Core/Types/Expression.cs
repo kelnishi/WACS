@@ -161,7 +161,6 @@ namespace Wacs.Core.Types
             if (context.OpStack.Count != 0)
                 throw new InvalidDataException("OpStack should be empty");
             frame.ReturnLabel = LabelTarget.Label;
-            frame.SetLabel(LabelTarget);
             context.PushFrame(frame);
             foreach (var inst in Instructions)
             {
