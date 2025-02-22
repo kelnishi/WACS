@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions
             if (this is InstBlock or InstLoop or InstTryTable)
             {
                 var parent = EnclosingBlock;
-                int skips = 1;
+                int skips = 0;
                 int address = pointer;
                 while (parent.Head == address - 1)
                 {
@@ -70,6 +70,7 @@ namespace Wacs.Core.Instructions
                     address--;
                     skips++;
                     parent.PointerAdvance = skips;
+                    parent.Nop = true;
                     parent = parent.EnclosingBlock;
                 }
             }
