@@ -24,6 +24,7 @@ namespace Wacs.Core.Instructions
         private V128 X;
 
         public override ByteCode Op => SimdCode.I8x16Shuffle;
+        protected override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -37,7 +38,6 @@ namespace Wacs.Core.Instructions
             context.OpStack.PopV128();  // -2
             context.OpStack.PushV128(); // -1
         }
-        protected override int StackDiff => -1;
 
         /// <summary>
         /// @Spec 4.4.3.7. i8x16.shuffle x

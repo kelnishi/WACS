@@ -18,8 +18,8 @@ namespace Wacs.Core.Runtime.Types
 {
     public class TagInstance
     {
-        public readonly DefType Type; 
-        
+        public readonly DefType Type;
+
         public TagInstance(DefType type)
         {
             Type = type;

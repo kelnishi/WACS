@@ -65,7 +65,7 @@ namespace Wacs.Core
         public Value PopI32() => _context.Pop(ValType.I32);
         public Value PopI64() => _context.Pop(ValType.I64);
         public Value PopInt() => _context.Pop(ValType.I64);
-        
+
         public Value PopF32() => _context.Pop(ValType.F32);
         public Value PopF64() => _context.Pop(ValType.F64);
         public Value PopV128() => _context.Pop(ValType.V128);
@@ -120,7 +120,7 @@ namespace Wacs.Core
         private static readonly object NonNull = new();
 
         private static Stack<Value> _aside = new();
-        
+
         internal int stackHeight = 0;
 
         public StackCalculator(ModuleInstance moduleInst)
@@ -144,31 +144,6 @@ namespace Wacs.Core
             Dehydrate();
             
             Attributes = new RuntimeAttributes();
-        }
-
-        public StackCalculator HydrateFunction(Module.Function func)
-        {
-            var funcType = Types[func.TypeIndex].Expansion as FunctionType;
-            var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
-
-            int capacity = funcType.ParameterTypes.Types.Length + func.Locals.Length;
-            var localData = new Value[capacity];
-            Locals = new LocalsSpace(localData, funcType.ParameterTypes.Types, func.Locals);
-            
-            ReturnType = funcType.ResultType;
-            PushControlFrame(OpCode.Block, fakeType);
-
-            return this;
-        }
-
-        public void Dehydrate()
-        {
-            while (ControlStack.Count != 0)
-                ControlStack.Pop();
-            stackHeight = 0;
-            OpStack.Clear();
-            Locals = LocalsSpace.Empty;
-            ReturnType = ResultType.Empty;
         }
 
         public RuntimeAttributes Attributes { get; }
@@ -233,6 +208,31 @@ namespace Wacs.Core
 
         public void ValidateBlock(Block instructionBlock, int index = 0) {}
         public void ValidateCatches(CatchType[] catches) { }
+
+        public StackCalculator HydrateFunction(Module.Function func)
+        {
+            var funcType = Types[func.TypeIndex].Expansion as FunctionType;
+            var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
+
+            int capacity = funcType.ParameterTypes.Types.Length + func.Locals.Length;
+            var localData = new Value[capacity];
+            Locals = new LocalsSpace(localData, funcType.ParameterTypes.Types, func.Locals);
+            
+            ReturnType = funcType.ResultType;
+            PushControlFrame(OpCode.Block, fakeType);
+
+            return this;
+        }
+
+        public void Dehydrate()
+        {
+            while (ControlStack.Count != 0)
+                ControlStack.Pop();
+            stackHeight = 0;
+            OpStack.Clear();
+            Locals = LocalsSpace.Empty;
+            ReturnType = ResultType.Empty;
+        }
 
         public void Clear()
         {

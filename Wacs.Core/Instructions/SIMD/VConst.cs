@@ -24,6 +24,7 @@ namespace Wacs.Core.Instructions.Simd
     {
         private V128 V128;
         public override ByteCode Op => SimdCode.V128Const;
+        protected override int StackDiff => +1;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -31,8 +32,7 @@ namespace Wacs.Core.Instructions.Simd
         /// <param name="context"></param>
         public override void Validate(IWasmValidationContext context) =>
             context.OpStack.PushV128(V128);
-        protected override int StackDiff => +1;
-        
+
         /// <summary>
         /// @Spec 4.4.1.1. t.const c
         /// </summary>

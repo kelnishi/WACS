@@ -26,6 +26,9 @@ namespace Wacs.Core.Types
     public class RecursiveType : IRenderable
     {
         public readonly SubType[] SubTypes;
+
+        private int _computedHash;
+
         //The defType index of the first subtype
         public TypeIdx DefIndex = TypeIdx.Default;
 
@@ -39,8 +42,22 @@ namespace Wacs.Core.Types
             SubTypes = subTypes;
         }
 
-        private int _computedHash;
-        
+        /// <summary>
+        /// For rendering/debugging
+        /// </summary>
+        public string Id { get; set; } = "";
+
+        public void RenderText(StreamWriter writer, Module module, string indent)
+        {
+            var symbol = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
+            // var parameters = ParameterTypes.ToParameters();
+            // var results = ResultType.ToResults();
+            // var func = $" (func{parameters}{results})";
+            var func = "";
+            
+            writer.WriteLine($"{indent}(type{symbol}{func})");
+        }
+
         public void ComputeHash(List<DefType> defs)
         {
             var hash = new StableHash();
@@ -62,22 +79,6 @@ namespace Wacs.Core.Types
             if (func is null)
                 throw new InvalidDataException($"RecursiveType ({recursiveType}) was not a FunctionType");
             return func;
-        }
-        
-        /// <summary>
-        /// For rendering/debugging
-        /// </summary>
-        public string Id { get; set; } = "";
-
-        public void RenderText(StreamWriter writer, Module module, string indent)
-        {
-            var symbol = string.IsNullOrWhiteSpace(Id) ? "" : $" (;{Id};)";
-            // var parameters = ParameterTypes.ToParameters();
-            // var results = ResultType.ToResults();
-            // var func = $" (func{parameters}{results})";
-            var func = "";
-            
-            writer.WriteLine($"{indent}(type{symbol}{func})");
         }
 
         private static TypeIdx ParseTypeIndexes(BinaryReader reader) => 
@@ -115,7 +116,7 @@ namespace Wacs.Core.Types
                 var form => throw new FormatException(
                     $"Invalid type format {form} at offset {reader.BaseStream.Position-1}.")
             };
-        
+
         public class Validator : AbstractValidator<RecursiveType>
         {
             /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-rectypemathsfrechrefsyntax-subtypemathitsubtypeast
@@ -142,6 +143,5 @@ namespace Wacs.Core.Types
                     });
             }
         }
-
     }
 }

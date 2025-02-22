@@ -20,26 +20,14 @@ namespace Wacs.Core.Runtime
 {
     public class StoreArray : IGcRef
     {
+        private readonly Value[] _data;
 
-        private ArrayType _definition;
-        private Value[] _data;
-        
-        private ArrayIdx _index;
-        public RefIdx StoreIndex => _index;
-        public ArrayIdx ArrayIndex => _index;
-
-        public int Length => _data.Length;
-
-        public Value this[int index]
-        {
-            get => _data[index];
-            set => _data[index] = value;
-        }
+        private readonly ArrayType _definition;
 
         //Fill values
         public StoreArray(ArrayIdx storeIndex, ArrayType def, Value elementVals, int n)
         {
-            _index = storeIndex;
+            ArrayIndex = storeIndex;
             _definition = def;
             _data = new Value[n];
             Array.Fill(_data, elementVals);
@@ -48,11 +36,11 @@ namespace Wacs.Core.Runtime
             //     _data[i] = elementVals;
             // }
         }
-        
+
         //Default values
         public StoreArray(ArrayIdx storeIndex, ArrayType def, int n)
         {
-            _index = storeIndex;
+            ArrayIndex = storeIndex;
             _definition = def;
             _data = new Value[n];
             var fieldType = _definition.ElementType;
@@ -63,11 +51,11 @@ namespace Wacs.Core.Runtime
             //     _data[i] = new Value(fieldType.UnpackType());
             // }
         }
-        
+
         //Fixed values
         public StoreArray(ArrayIdx storeIndex, ArrayType def, ref Stack<Value> values)
         {
-            _index = storeIndex;
+            ArrayIndex = storeIndex;
             _definition = def;
             int n = values.Count;
             _data = new Value[n];
@@ -82,7 +70,7 @@ namespace Wacs.Core.Runtime
         //Data values
         public StoreArray(ArrayIdx storeIndex, ArrayType def, ReadOnlySpan<byte> data, int n, int stride)
         {
-            _index = storeIndex;
+            ArrayIndex = storeIndex;
             _definition = def;
 
             var ft = def.ElementType;
@@ -95,11 +83,11 @@ namespace Wacs.Core.Runtime
                 _data[i] = ft.UnpackValue(source);
             }
         }
-        
+
         //Element values
         public StoreArray(ArrayIdx storeIndex, ArrayType def, List<Value> values)
         {
-            _index = storeIndex;
+            ArrayIndex = storeIndex;
             _definition = def;
             int n = values.Count;
             _data = new Value[n];
@@ -110,6 +98,18 @@ namespace Wacs.Core.Runtime
             //     _data[i] = values[i];
             // }
         }
+
+        public ArrayIdx ArrayIndex { get; }
+
+        public int Length => _data.Length;
+
+        public Value this[int index]
+        {
+            get => _data[index];
+            set => _data[index] = value;
+        }
+
+        public RefIdx StoreIndex => ArrayIndex;
 
         public void Fill(Value val, int offset, int count)
         {
@@ -164,7 +164,7 @@ namespace Wacs.Core.Runtime
                 dest[i] = ft.UnpackValue(source);
             }
         }
-        
+
         public void Init(int offset, List<Value> elems, int n)
         {
             var src = elems.ToArray();

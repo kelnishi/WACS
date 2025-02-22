@@ -154,7 +154,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         public override void Validate(IWasmValidationContext context) => _validate(context, Op, X);
-        
+
         public override void Execute(ExecContext context)
         {
             _execute(context, X);

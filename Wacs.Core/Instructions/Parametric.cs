@@ -14,7 +14,6 @@
 
 using System;
 using System.IO;
-using FluentValidation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -31,6 +30,7 @@ namespace Wacs.Core.Instructions
     {
         public static readonly InstDrop Inst = new();
         public override ByteCode Op => OpCode.Drop;
+        protected override int StackDiff => -1;
 
         public Action<ExecContext, Value> GetFunc => (_, _) => { };
 
@@ -42,7 +42,6 @@ namespace Wacs.Core.Instructions
             //* Value Polymorphic ignores type
             context.OpStack.PopAny();   // -1
         }
-        protected override int StackDiff => -1;
 
         /// <summary>
         /// @Spec 4.4.4.1. drop
@@ -63,6 +62,7 @@ namespace Wacs.Core.Instructions
 
         public InstSelect(bool withTypes = false) => WithTypes = withTypes;
         public override ByteCode Op => OpCode.Select;
+        protected override int StackDiff => -2;
 
         public Func<ExecContext, Value, Value, int, Value> GetFunc => Select;
 
@@ -95,7 +95,6 @@ namespace Wacs.Core.Instructions
                 context.OpStack.PushType(val1.Type == ValType.Bot ? val2.Type : val1.Type); // -2
             }
         }
-        protected override int StackDiff => -2;
 
         /// <summary>
         /// @Spec 4.4.4.2. select

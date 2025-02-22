@@ -21,23 +21,23 @@ namespace Wacs.Core.Types.Defs
 {
     public class CatchType
     {
+        public LabelIdx L;
         public CatchFlags Mode;
         public TagIdx X;
-        public LabelIdx L;
-        
+
         public CatchType(CatchFlags mode, TagIdx x, LabelIdx l)
         {
             Mode = mode;
             X = x;
             L = l;
         }
-        
+
         public CatchType(CatchFlags mode, LabelIdx l)
         {
             Mode = mode;
             L = l;
         }
-        
+
         public static CatchType Parse(BinaryReader reader)
         {
             return (CatchFlags)reader.ReadByte() switch
@@ -49,8 +49,8 @@ namespace Wacs.Core.Types.Defs
                 _ => throw new InvalidDataException($"Invalid catch type")                
             };
         }
-        
-                
+
+
         public class Validator : AbstractValidator<CatchType>
         {
             public Validator()

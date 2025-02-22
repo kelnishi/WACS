@@ -35,7 +35,7 @@ namespace Wacs.Core.Types
             Mut = mut;
             StorageType = st;
         }
-        
+
         public static FieldType Parse(BinaryReader reader) => 
             new(
                 ValTypeParser.Parse(reader, parseBlockIndex: false, parseStorageType: true),
@@ -98,13 +98,22 @@ namespace Wacs.Core.Types
             ValType.V128 => Types.BitWidth.V128,
             _ => Types.BitWidth.None,
         };
-        
+
         public bool ValidExtension(PackedExt pt) => pt switch
         {
             PackedExt.NotPacked => StorageType is not (ValType.I8 or ValType.I16),
             PackedExt.Signed or PackedExt.Unsigned => StorageType is ValType.I8 or ValType.I16,
             _ => false
         };
+
+        public int ComputeHash(int defIndexValue, List<DefType> defs)
+        {
+            var hash = new StableHash();
+            hash.Add(nameof(FieldType));
+            hash.Add(Mut);
+            hash.Add(StorageType.ComputeHash(defIndexValue,defs));
+            return hash.ToHashCode();
+        }
 
         public class Validator : AbstractValidator<FieldType>
         {
@@ -123,15 +132,6 @@ namespace Wacs.Core.Types
                 
                 //Spec ignores Mutability for validation
             }
-        }
-
-        public int ComputeHash(int defIndexValue, List<DefType> defs)
-        {
-            var hash = new StableHash();
-            hash.Add(nameof(FieldType));
-            hash.Add(Mut);
-            hash.Add(StorageType.ComputeHash(defIndexValue,defs));
-            return hash.ToHashCode();
         }
     }
 }

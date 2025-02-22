@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -55,7 +54,7 @@ namespace Wacs.Core.Instructions.GC
             var resultType = ValType.Ref | (ValType)X;
             context.OpStack.PushType(resultType);                   // -(N-1)
         }
-        
+
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             //calculate N
@@ -110,6 +109,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         public override ByteCode Op => GcCode.StructNewDefault;
+        protected override int StackDiff => +1;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructnewx
@@ -134,7 +134,6 @@ namespace Wacs.Core.Instructions.GC
             var resultType = ValType.Ref | (ValType)X;
             context.OpStack.PushType(resultType);       // +1
         }
-        protected override int StackDiff => +1;
 
         public override void Execute(ExecContext context)
         {
@@ -170,9 +169,14 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstStructGet : InstructionBase
     {
-        private PackedExt Sx;
+        private readonly PackedExt Sx;
         private TypeIdx X;
         private FieldIdx Y;
+
+        public InstStructGet(PackedExt sx)
+        {
+            Sx = sx;
+        }
 
         public override ByteCode Op => Sx switch
         {
@@ -182,11 +186,6 @@ namespace Wacs.Core.Instructions.GC
             _ => throw new InvalidDataException($"Undefined packedtype: {Sx}")
         };
 
-        public InstStructGet(PackedExt sx)
-        {
-            Sx = sx;
-        }
-        
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructgetmathsf_hrefsyntax-sxmathitsxxy
         /// </summary>
@@ -266,7 +265,7 @@ namespace Wacs.Core.Instructions.GC
             //15
             context.OpStack.PushValue(fieldVal);
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();
@@ -279,8 +278,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
         private FieldIdx Y;
-        
+
         public override ByteCode Op => GcCode.StructSet;
+        protected override int StackDiff => -2;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -304,7 +305,6 @@ namespace Wacs.Core.Instructions.GC
             context.OpStack.PopType(t);         // -1
             context.OpStack.PopType(refType);   // -2
         }
-        protected override int StackDiff => -2;
 
         public override void Execute(ExecContext context)
         {
@@ -348,7 +348,7 @@ namespace Wacs.Core.Instructions.GC
             //16
             refStruct[Y] = val;
         }
-        
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             X = (TypeIdx)reader.ReadLeb128_u32();

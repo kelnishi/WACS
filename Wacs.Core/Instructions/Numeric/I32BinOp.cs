@@ -81,10 +81,10 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         public override ByteCode Op { get; }
+        protected override int StackDiff => -1;
         public bool IsConstant { get; }
 
         public override void Validate(IWasmValidationContext context) => _validate(context); // -1
-        protected override int StackDiff => -1;
 
         // @Spec 4.3.2.3. iadd
         private static int ExecuteI32Add(int i1, int i2) => i1 + i2;

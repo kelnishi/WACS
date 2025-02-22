@@ -66,7 +66,7 @@ namespace Wacs.Core
                 .OfType<ImportDesc.TagDesc>()
                 .Select(tagDesc => tagDesc.TagDef)
                 .ToList().AsReadOnly();
-        
+
         /// <summary>
         /// @Spec 2.5.11. Imports
         /// </summary>
@@ -188,7 +188,7 @@ namespace Wacs.Core
             public class TagDesc : ImportDesc
             {
                 public TagType TagDef { get; internal set; } = null!;
-                
+
                 public class Validator : AbstractValidator<TagDesc>
                 {
                     public Validator()

@@ -207,6 +207,5 @@ namespace Wacs.Core.Utilities
             combined._hash = combined._hash * Multiplier + second._hash;
             return combined;
         }
-
     }
 }
