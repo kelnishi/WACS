@@ -26,7 +26,6 @@ namespace Wacs.Core.Runtime
     public sealed class Frame : IPoolable
     {
         public InstructionPointer ContinuationAddress = -1;
-        public string FuncId = "";
         public int Head;
 
         public FuncIdx Index;
@@ -36,22 +35,8 @@ namespace Wacs.Core.Runtime
 
         public Label ReturnLabel = new();
         public int StackHeight;
-        public BlockTarget? TopLabel;
 
         public FunctionType Type = null!;
-
-        public Label Label
-        {
-            get
-            {
-                if (LabelCount > 1)
-                    return TopLabel!.Label;
-                else
-                    return ReturnLabel;
-            }
-        }
-
-        private int LabelCount => TopLabel?.LabelHeight ?? 0;
 
         public int Arity => Type.ResultType.Arity;
 
@@ -63,82 +48,12 @@ namespace Wacs.Core.Runtime
             ContinuationAddress = default;
             Type = default!;
             Index = default!;
-            FuncId = string.Empty;
         }
 
         public void ReturnLocals(ArrayPool<Value> dataPool)
         {
             dataPool.Return(Locals.Data);
             Locals = default!;
-        }
-
-        public bool Equals(Frame other)
-        {
-            return ReferenceEquals(this, other);
-        }
-
-        public bool Contains(LabelIdx index) =>
-            index.Value < LabelCount;
-
-        public void ForceLabels(int depth)
-        {
-            while (LabelCount < depth)
-            {
-                var fakeLabel = new InstExpressionProxy(new Label
-                {
-                    Arity = 0,
-                    ContinuationAddress = -1,
-                    Instruction = OpCode.Nop,
-                    StackHeight = 0
-                });
-                PushLabel(fakeLabel);
-            }
-
-            while (LabelCount > depth)
-            {
-                PopLabels(0);
-            }
-        }
-
-        public void ClearLabels()
-        {
-            // TopLabel = null;
-        }
-
-        public void SetLabel(BlockTarget baselabel)
-        {
-            // TopLabel = baselabel;
-        }
-
-        public void PushLabel(BlockTarget target)
-        {
-            // TopLabel = target;
-        }
-
-        public void PopLabels(int idx)
-        {
-            // if ((TopLabel?.LabelHeight ?? 0) <= idx + 1)
-            //     throw new InvalidDataException("Label Stack underflow");
-
-            // var Label = TopLabel;
-            // for (int i = 0; i <= idx && Label != null; i++)
-            // {
-            //     Label = Label?.EnclosingBlock ?? null;
-            // }
-            //
-            // Context.InstructionPointer = (Label?.Head ?? 0) + 1;
-        }
-
-        public IEnumerable<BlockTarget> EnumerateLabels()
-        {
-            int height = LabelCount;
-            var current = TopLabel;
-            while (height > 0)
-            {
-                yield return current;
-                height -= 1;
-                current = current.EnclosingBlock;
-            }
         }
     }
 }
