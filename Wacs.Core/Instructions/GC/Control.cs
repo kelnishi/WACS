@@ -28,6 +28,8 @@ namespace Wacs.Core.Instructions.GC
     {
         public CastFlags Flags;
         public LabelIdx L;
+        private BlockTarget? LinkedLabel;
+        
         private ValType Rt1;
         private ValType Rt2;
         
@@ -63,6 +65,12 @@ namespace Wacs.Core.Instructions.GC
             
             context.OpStack.PushType(diffType);                 // +0
         }
+        
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            LinkedLabel = InstBranch.PrecomputeStack(context, L);
+            return base.Link(context, pointer);
+        }
 
         public override void Execute(ExecContext context)
         {
@@ -73,7 +81,7 @@ namespace Wacs.Core.Instructions.GC
             context.OpStack.PushRef(refVal);
 
             if (Rt2.Matches(refVal, context.Frame.Module.Types))
-                InstBranch.ExecuteInstruction(context, L);
+                InstBranch.ExecuteInstruction(context, LinkedLabel);
         }
 
         public override InstructionBase Parse(BinaryReader reader)
@@ -90,6 +98,8 @@ namespace Wacs.Core.Instructions.GC
     {
         public CastFlags Flags;
         public LabelIdx L;
+        private BlockTarget? LinkedLabel;
+        
         private ValType Rt1;
         private ValType Rt2;
         
@@ -125,6 +135,12 @@ namespace Wacs.Core.Instructions.GC
             context.OpStack.PopAny();                               // -1
             context.OpStack.PushType(Rt2);                          // +0
         }
+        
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            LinkedLabel = InstBranch.PrecomputeStack(context, L);
+            return base.Link(context, pointer);
+        }
 
         public override void Execute(ExecContext context)
         {
@@ -133,7 +149,7 @@ namespace Wacs.Core.Instructions.GC
             var refVal = context.OpStack.PopRefType();
             context.OpStack.PushRef(refVal);
             if (!Rt2.Matches(refVal, context.Frame.Module.Types))
-                InstBranch.ExecuteInstruction(context, L);
+                InstBranch.ExecuteInstruction(context, LinkedLabel);
         }
 
         public override InstructionBase Parse(BinaryReader reader)
