@@ -26,7 +26,7 @@ namespace Wacs.Core.Instructions
 {
     public class InstLocalGet : InstructionBase, IVarInstruction, ITypedValueProducer<Value>
     {
-        private LocalIdx Index;
+        private int Index;
         public override ByteCode Op => OpCode.LocalGet;
         public override int StackDiff => +1;
 
@@ -34,62 +34,63 @@ namespace Wacs.Core.Instructions
 
         public int CalculateSize() => 1;
 
-        public LocalIdx GetIndex() => Index;
+        public LocalIdx GetIndex() => (LocalIdx)Index;
 
         public override InstructionBase Parse(BinaryReader reader)
         {
-            Index = (LocalIdx)reader.ReadLeb128_u32();
+            Index = (int)reader.ReadLeb128_u32();
             return this;
         }
 
         public InstructionBase Immediate(LocalIdx index)
         {
-            Index = index;
+            Index = index.Value;
             return this;
         }
 
         public override string RenderText(ExecContext? context)
         {
             if (context == null)
-                return $"{base.RenderText(context)} {Index.Value}";
+                return $"{base.RenderText(context)} {Index}";
             if (!context.Attributes.Live)
-                return $"{base.RenderText(context)} {Index.Value}";
-            if (!context.Frame.Locals.Contains(Index))
-                return $"{base.RenderText(context)} {Index.Value}";
+                return $"{base.RenderText(context)} {Index}";
+            if (!context.Frame.Locals.Contains((LocalIdx)Index))
+                return $"{base.RenderText(context)} {Index}";
             
-            var value = context.Frame.Locals.Get(Index);
+            var value = context.Frame.Locals.Get((LocalIdx)Index);
             string valStr = $" (;>{value}<;)";
-            return $"{base.RenderText(context)} {Index.Value}{valStr}";
+            return $"{base.RenderText(context)} {Index}{valStr}";
         }
 
         //0x20
         // @Spec 3.3.5.1. local.get
         public override void Validate(IWasmValidationContext context)
         {
-            context.Assert(context.Locals.Contains(Index),
-                "Instruction local.get was invalid. Context Locals did not contain variable at index {0}", Index.Value);
-            var value = context.Locals.Get(Index);
+            context.Assert(context.Locals.Contains((LocalIdx)Index),
+                "Instruction local.get was invalid. Context Locals did not contain variable at index {0}", Index);
+            var value = context.Locals.Get((LocalIdx)Index);
             
             context.Assert(value.Data.Set,
-                "Instruction local.get was invalid. The non-defaultable local variable at index {0} was unset", Index.Value);
+                "Instruction local.get was invalid. The non-defaultable local variable at index {0} was unset", Index);
             
             context.OpStack.PushType(value.Type);   // +1
         }
 
         public override void Execute(ExecContext context)
         {
-            context.OpStack.PushValue(FetchFromLocals(context));
+            // context.OpStack.PushValue(FetchFromLocals(context));
+            context.OpStack.PushValue(context.Frame.Locals.Data[Index]);
         }
 
         // @Spec 4.4.5.1. local.get 
         public Value FetchFromLocals(ExecContext context)
         {
             //2.
-            context.Assert( context.Frame.Locals.Contains(Index),
-                $"Instruction local.get could not get Local {Index}");
+            // context.Assert( context.Frame.Locals.Contains(Index),
+            //     $"Instruction local.get could not get Local {Index}");
             //3.
             // var value = context.Frame.Locals.Get(Index);
-            return context.Frame.Locals.Data[Index.Value];
+            return context.Frame.Locals.Data[Index];
         }
     }
     
