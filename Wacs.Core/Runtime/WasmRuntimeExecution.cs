@@ -438,8 +438,6 @@ namespace Wacs.Core.Runtime
             InstructionBase inst;
             if (gasLimit <= 0)
             {
-                // while (Context.Next() is { } inst)
-                //Manually inline Next()
                 while (++Context.InstructionPointer >= 0)
                 {
                     inst = Context._currentSequence[Context.InstructionPointer];
@@ -460,8 +458,6 @@ namespace Wacs.Core.Runtime
             }
             else
             {
-                // while (Context.Next() is { } inst)
-                //Manually inline Next()
                 while (++Context.InstructionPointer >= 0)
                 {
                     inst = Context._currentSequence[Context.InstructionPointer];
@@ -493,9 +489,12 @@ namespace Wacs.Core.Runtime
         {
             long highwatermark = 0;
             long gasLimit = options.GasLimit > 0 ? options.GasLimit : long.MaxValue;
+            InstructionBase inst;
             
-            while (Context.Next() is { } inst)
+            while (++Context.InstructionPointer >= 0)
             {
+                inst = Context._currentSequence[Context.InstructionPointer];
+            
                 //Trace execution
                 if (options.LogInstructionExecution != InstructionLogging.None)
                 {

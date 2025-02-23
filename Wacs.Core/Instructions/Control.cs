@@ -911,7 +911,7 @@ namespace Wacs.Core.Instructions
         public override void Execute(ExecContext context)
         {
             if (IsHostFunction)
-                context.Invoke(linkedHostFunction!);
+                linkedHostFunction!.Invoke(context);
             else
                 linkedFunctionInstance!.Invoke(context);
         }
@@ -921,9 +921,9 @@ namespace Wacs.Core.Instructions
             if (IsHostFunction)
             {
                 if (linkedHostFunction!.IsAsync)
-                    await context.InvokeAsync(linkedHostFunction!);
+                    await linkedHostFunction!.InvokeAsync(context);
                 else
-                    context.Invoke(linkedHostFunction!);
+                    linkedHostFunction!.Invoke(context);
             }
             else
                 linkedFunctionInstance!.Invoke(context);
@@ -1058,6 +1058,9 @@ namespace Wacs.Core.Instructions
             context.LinkOpStackHeight += funcType.ResultType.Arity;
             //For recordkeeping
             StackDiff = context.LinkOpStackHeight - stack;
+            
+            //TODO Precompute call targets, cache the whole table
+            
             return this;
         }
 
