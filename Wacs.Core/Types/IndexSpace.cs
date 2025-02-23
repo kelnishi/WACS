@@ -303,7 +303,7 @@ namespace Wacs.Core.Types
         
         public Value[] Data;
 
-        public int Capacity { get; }
+        public readonly int Capacity;
 
         public Value Get(LocalIdx idx)
         {

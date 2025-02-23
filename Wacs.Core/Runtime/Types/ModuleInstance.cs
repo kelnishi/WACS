@@ -35,8 +35,6 @@ namespace Wacs.Core.Runtime.Types
 
         public readonly Module Repr;
 
-        public readonly StackCalculator StackCalculator;
-
         public readonly TableAddrs TableAddrs = new();
         public readonly TagAddrs TagAddrs = new();
 
@@ -46,7 +44,6 @@ namespace Wacs.Core.Runtime.Types
         {
             Types = new TypesSpace(module);
             Repr = module;
-            StackCalculator = new StackCalculator(this);
         }
 
         public string Name { get; set; } = "_";
