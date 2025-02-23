@@ -239,20 +239,26 @@ namespace Wacs.Core.Runtime.Types
         /// Invokes the host function with the given arguments.
         /// Pushes any results onto the passed OpStack.
         /// </summary>
-        /// <param name="args">The arguments to pass to the function.</param>
-        /// <param name="opStack">The Operand Stack to push results onto.</param>
-        public void Invoke(object[] args, OpStack opStack)
+        public void Invoke(ExecContext context)
         {
+            if (IsAsync)
+                throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
+
+            //Fetch the parameters
+            context.OpStack.PopScalars(Type.ParameterTypes, ParameterBuffer, PassExecContext?1:0);
+            if (PassExecContext) 
+                ParameterBuffer[0] = context;
+            
             for (int i = 0; i < _parameterConversions.Length; ++i)
             {
-                args[i] = _parameterConversions[i]?.Invoke(args[i]) ?? args[i];
+                ParameterBuffer[i] = _parameterConversions[i]?.Invoke(ParameterBuffer[i]) ?? ParameterBuffer[i];
             }
 
             if (IsAsync)
                 throw new WasmRuntimeException("Cannot synchronously execute Async Function");
             try
             {
-                var returnValue = _invoker.Invoke(_hostFunction, args);
+                var returnValue = _invoker.Invoke(_hostFunction, ParameterBuffer);
                 int outArgs = Type.ResultType.Types.Length;
                 int j = 0;
                 if (_captureReturn)
@@ -260,17 +266,17 @@ namespace Wacs.Core.Runtime.Types
                     outArgs -= 1;
                     if (_resultConversions[j] != null)
                         returnValue = _resultConversions[j]?.Invoke(returnValue) ?? returnValue;
-                    opStack.PushValue(new Value(returnValue));
+                    context.OpStack.PushValue(new Value(returnValue));
                     ++j;
                 }
                 
-                int idx = args.Length - outArgs;
-                for (; idx < args.Length; ++idx, ++j)
+                int idx = ParameterBuffer.Length - outArgs;
+                for (; idx < ParameterBuffer.Length; ++idx, ++j)
                 {
-                    var returnVal = args[idx];
+                    var returnVal = ParameterBuffer[idx];
                     if (_resultConversions[j] != null)
                         returnVal = _resultConversions[j]?.Invoke(returnVal) ?? returnVal;
-                    opStack.PushValue(new Value(returnVal));
+                    context.OpStack.PushValue(new Value(returnVal));
                 }
             }
             catch (TargetInvocationException ex)
@@ -279,11 +285,16 @@ namespace Wacs.Core.Runtime.Types
             }   
         }
 
-        public async ValueTask InvokeAsync(object[] args, OpStack opStack)
+        public async ValueTask InvokeAsync(ExecContext context)
         {
+            //Fetch the parameters
+            context.OpStack.PopScalars(Type.ParameterTypes, ParameterBuffer, PassExecContext?1:0);
+            if (PassExecContext) 
+                ParameterBuffer[0] = context;
+            
             for (int i = 0; i < _parameterConversions.Length; ++i)
             {
-                args[i] = _parameterConversions[i]?.Invoke(args[i]) ?? args[i];
+                ParameterBuffer[i] = _parameterConversions[i]?.Invoke(ParameterBuffer[i]) ?? ParameterBuffer[i];
             }
             
             if (!IsAsync)
@@ -291,7 +302,7 @@ namespace Wacs.Core.Runtime.Types
 
             try
             {
-                var task = _invoker.Invoke(_hostFunction, args) as Task;
+                var task = _invoker.Invoke(_hostFunction, ParameterBuffer) as Task;
                 await task;
 
                 int outArgs = Type.ResultType.Types.Length;
@@ -305,17 +316,17 @@ namespace Wacs.Core.Runtime.Types
                         
                     if (_resultConversions[j] != null)
                         returnValue = _resultConversions[j]?.Invoke(returnValue) ?? returnValue;
-                    opStack.PushValue(new Value(returnValue));
+                    context.OpStack.PushValue(new Value(returnValue));
                     ++j;
                 }
                 
-                int idx = args.Length - outArgs;
-                for (; idx < args.Length; ++idx, ++j)
+                int idx = ParameterBuffer.Length - outArgs;
+                for (; idx < ParameterBuffer.Length; ++idx, ++j)
                 {
-                    var returnVal = args[idx];
+                    var returnVal = ParameterBuffer[idx];
                     if (_resultConversions[j] != null)
                         returnVal = _resultConversions[j]?.Invoke(returnVal) ?? returnVal;
-                    opStack.PushValue(new Value(returnVal));
+                    context.OpStack.PushValue(new Value(returnVal));
                 }
             }
             catch (TargetInvocationException ex)
