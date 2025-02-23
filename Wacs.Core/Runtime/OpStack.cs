@@ -207,8 +207,6 @@ namespace Wacs.Core.Runtime
         public Value PopType(ValType type)
         {
             --Count;
-            if (Count < 0)
-                throw new InvalidDataException($"Stackunderflow");
             
             var val = _registers[Count];
             // if (val.Type != type && !val.Type.Matches(type))

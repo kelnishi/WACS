@@ -20,10 +20,7 @@ namespace Wacs.Core.Runtime
     {
         public int GrowCallStack = 512;
 
-        public int GrowLabelsStack = 512;
-
         public int InitialCallStack = 512;
-        public int InitialLabelsStack = 2048;
         public bool Live = true;
         public int LocalPoolSize = 64;
         public int MaxCallStack = 2048;

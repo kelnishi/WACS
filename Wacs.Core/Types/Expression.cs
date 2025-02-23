@@ -90,66 +90,6 @@ namespace Wacs.Core.Types
 
         public int Size => Instructions.Size;
 
-        public void PrecomputeLabels(IWasmValidationContext vContext)
-        {
-            LinkLabelTarget(vContext, Instructions, LabelTarget);
-        }
-
-        private void LinkLabelTarget(IWasmValidationContext vContext, InstructionSequence seq, BlockTarget enclosingTarget)
-        {
-            for (int i = 0; i < seq.Count; ++i)
-            {
-                var inst = seq._instructions[i];
-
-                inst.Validate(vContext);
-                int stackHeight = vContext.OpStack.Height;
-
-                switch (inst)
-                {
-                    case InstElse instElse:
-                        //The enclosingTarget is the InstIf, InstElse should have the same parent.
-                        instElse.EnclosingBlock = enclosingTarget.EnclosingBlock; 
-                        break;
-                    case BlockTarget target:
-                    {
-                        target.EnclosingBlock = enclosingTarget;
-                        var blockInst = target as IBlockInstruction;
-
-                        var block = blockInst!.GetBlock(0);
-                        int arity = 0;
-                        try
-                        {
-                            var funcType = vContext.Types.ResolveBlockType(block.BlockType);
-                            if (funcType == null)
-                                throw new IndexOutOfRangeException();
-
-                            arity = inst is InstLoop ? funcType.ParameterTypes.Arity : funcType.ResultType.Arity;
-                        }
-                        catch (IndexOutOfRangeException)
-                        {
-                            throw new InvalidDataException($"Failure computing Labels. BlockType:{block.BlockType} did not exist in the Module");
-                        }
-                        
-                        var label = target.Label ?? new Label();
-                        label.Arity = arity;
-                        label.ContinuationAddress = i;
-                        label.Instruction = inst.Op;
-                        // label.StackHeight = stackHeight;
-                        //HACK: Use any existing precomputed StackHeight (assume optimization has not changed this value)
-                        label.StackHeight = (target.Label?.StackHeight ?? -1) >= 0
-                            ? target.Label!.StackHeight
-                            : vContext.OpStack.Height;
-                    
-                        for (int b = 0; b < blockInst!.Count; ++b)
-                            LinkLabelTarget(vContext,blockInst.GetBlock(b).Instructions, target);
-                    
-                        target.Label = label;
-                        break;
-                    }
-                }
-            }
-        }
-
         /// <summary>
         /// Leaves the result on the OpStack
         /// </summary>
