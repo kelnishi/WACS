@@ -265,39 +265,12 @@ namespace Wacs.Core.Runtime
                     return;
                 case HostFunction hostFunc:
                 {
-                    var funcType = hostFunc.Type;
-            
-                    //Fetch the parameters
-                    OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
-
-                    if (hostFunc.PassExecContext)
-                    {
-                        hostFunc.ParameterBuffer[0] = this;
-                    }
                     if (hostFunc.IsAsync)
-                    {
-                        //Pass them
-                        await hostFunc.InvokeAsync(hostFunc.ParameterBuffer, OpStack);
-                    }
+                        await hostFunc.InvokeAsync(this);
                     else
-                    {
-                        //Pass them
-                        hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
-                    }
+                        hostFunc.Invoke(this);
                 } return;
             }
-        }
-        
-        public async Task InvokeAsync(HostFunction hostFunc)
-        {
-            //Fetch the parameters
-            OpStack.PopScalars(hostFunc.Type.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
-
-            if (hostFunc.PassExecContext)
-            {
-                hostFunc.ParameterBuffer[0] = this;
-            }
-            await hostFunc.InvokeAsync(hostFunc.ParameterBuffer, OpStack);
         }
 
         public void Invoke(FuncAddr addr)
@@ -319,55 +292,18 @@ namespace Wacs.Core.Runtime
                     if (funcInst.IsAsync)
                         throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
                     
-                    var funcType = hostFunc.Type;
-                    //Fetch the parameters
-                    OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
-                    if (hostFunc.PassExecContext)
-                    {
-                        hostFunc.ParameterBuffer[0] = this;
-                    }
-                    //Pass them
-                    hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
+                    hostFunc.Invoke(this);
                 } return;
             }
-        }
-
-        public void Invoke(HostFunction hostFunc)
-        {
-            if (hostFunc.IsAsync)
-                throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
-
-            //Fetch the parameters
-            OpStack.PopScalars(hostFunc.Type.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
-            if (hostFunc.PassExecContext)
-            {
-                hostFunc.ParameterBuffer[0] = this;
-            }
-            //Pass them
-            hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
         }
 
         // @Spec 4.4.10.2. Returning from a function
         public void FunctionReturn()
         {
-            //3.
             Assert( OpStack.Count >= Frame.Arity,
                 $"Function Return failed. Stack did not contain return values");
-            //4. Since we have a split stack, we can leave the results in place.
-            // var vals = OpStack.PopResults(Frame.Type.ResultType);
-            //5.
-            //6.
             var address = PopFrame();
-            //7. split stack, values left in place 
-            //8.
-            
-            // ResumeSequence(address);
             InstructionPointer = address;
-        }
-
-        public InstructionBase? Next()
-        {
-            return InstructionPointer > AbortSequence ? _currentSequence[++InstructionPointer] : null;
         }
 
         public List<(string, int)> ComputePointerPath()
