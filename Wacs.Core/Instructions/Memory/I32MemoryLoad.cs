@@ -23,8 +23,10 @@ using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Instructions.Memory
 {
-    public class InstI32Load : InstMemoryLoad, INodeComputer<long, uint>
+    public class InstI32Load : InstMemoryLoad, IComplexLinkBehavior, INodeComputer<long, uint>
     {
+        private MemoryInstance cachedInstance;
+        
         public InstI32Load() : base(ValType.I32, BitWidth.U32, OpCode.I32Load) {}
 
         public Func<ExecContext, long, uint> GetFunc => FetchFromMemory;
@@ -41,24 +43,29 @@ namespace Wacs.Core.Instructions.Memory
         //@Spec 4.4.7.1. t.load and t.loadN_sx
         public uint FetchFromMemory(ExecContext context, long offset)
         {
-            context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
-            var a = context.Frame.Module.MemAddrs[M.M];
-            context.Assert( context.Store.Contains(a),
-                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
-            var mem = context.Store[a];
             long ea = offset + M.Offset;
             if (ea < 0)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
-            if (ea + WidthTByteSize > mem.Data.Length)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({mem.Data.Length}).");
-            var bs = new ReadOnlySpan<byte>(mem.Data, (int)ea, WidthTByteSize);
+            if (ea + WidthTByteSize > cachedInstance.Data.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({cachedInstance.Data.Length}).");
+            var bs = new ReadOnlySpan<byte>(cachedInstance.Data, (int)ea, WidthTByteSize);
             
             #if NET8_0_OR_GREATER
             return MemoryMarshal.AsRef<uint>(bs);
             #else
             return MemoryMarshal.Read<uint>(bs);
             #endif
+        }
+
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            context.Assert( context.Frame.Module.MemAddrs.Contains(M.M),
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 did not exist in the context.");
+            var a = context.Frame.Module.MemAddrs[M.M];
+            context.Assert( context.Store.Contains(a),
+                $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
+            cachedInstance = context.Store[a];
+            return this;
         }
     }
     

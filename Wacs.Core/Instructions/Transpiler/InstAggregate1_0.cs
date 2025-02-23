@@ -25,7 +25,6 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly Action<ExecContext, TIn> _compute;
         private readonly Func<ExecContext, TIn> _inA;
         public sealed override int StackDiff { get; set; }
-
         private List<InstructionBase> linkDependents = new();
         
         public InstAggregate1_0(ITypedValueProducer<TIn> inA, INodeConsumer<TIn> consumer)
