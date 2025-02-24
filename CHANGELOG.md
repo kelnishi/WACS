@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.4] Performance
+### Link-time optimization
+- Instantiated functions are now flattened into a tape at link time
+- Labels, branches, and function call targets are now computed during link
+- Addressable store elements can now be precomputed and cached during link
+- block, loop, trytable, and end instructions are now flagged as nops and will not incur a dispatch function call
+### OpStack resident locals
+- Local variables are now allocated on the stack
+- Local variable operations now have improved cache locality 
+- This refactor is prep for link-time register computation
+
 ## [0.7.3]
 - Reimplemented AOT compatible invoker bindings
 
