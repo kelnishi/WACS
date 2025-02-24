@@ -83,7 +83,7 @@ namespace Wacs.Core.Validation
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
 
-        public LocalsSpace Locals =>
+        public Memory<Value> Locals =>
             ControlStack.Count == 0
                 ? ExecFrame.Locals 
                 : ControlFrame.Locals;
@@ -165,7 +165,9 @@ namespace Wacs.Core.Validation
                 Opcode = opCode,
                 Types = types,
                 Height = OpStack.Height,
-                Locals = new LocalsSpace(Locals),
+                //Local refs are only valid if initialized in the same block.
+                //Copy locals state so child blocks won't propagate initialization.
+                Locals = Locals.ToArray(),
             };
             
             ControlStack.Push(frame);
@@ -219,17 +221,29 @@ namespace Wacs.Core.Validation
         public void SetExecFrame(FunctionType funcType, ValType[] localTypes)
         {
             ControlStack.Clear();
-            
-            int capacity = funcType.ParameterTypes.Types.Length + localTypes.Length;
-            var data = new Value[capacity];
-            
-            var locals = new LocalsSpace(data, funcType.ParameterTypes.Types, localTypes);
             ExecFrame = new Frame
             {
                 Module = ValidationModule,
                 Type = funcType,
-                Locals = locals
+                Locals = CreateLocalsSpace(funcType.ParameterTypes.Types, localTypes)
             };
+        }
+
+        private static Memory<Value> CreateLocalsSpace(ValType[] parameters, ValType[] locals)
+        {
+            int parameterCount = parameters.Length;
+            int localCount = locals.Length;
+            int capacity = parameterCount + localCount;
+            var data = new Value[capacity];
+            for (int i = 0; i < parameterCount; i++)
+            {
+                data[i] = new Value(parameters[i]).MakeSet();
+            }
+            for (int i = parameterCount, t = 0; i < data.Length; i++, t++)
+            {
+                data[i] = new Value(locals[t]);
+            }
+            return new Memory<Value>(data);
         }
 
         public class InstructionValidator : AbstractValidator<InstructionBase>

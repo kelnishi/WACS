@@ -169,16 +169,11 @@ namespace Wacs.Core.Runtime
             }
 
             //@Spec 4.5.4 Step 7
-            Frame initFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.TableInitializers);
-            Context.PushFrame(initFrame);
-            
             //3. Allocate Tables and capture their addresses in the Store
             //9. index ordered table addresses
             foreach (var table in module.Tables)
             {
-                var refVal = EvaluateInitializer(table.Init);
-                if (Context.Frame != initFrame)
-                    throw new TrapException($"Call stack was manipulated while initializing tables");
+                var refVal = EvaluateInitializer(moduleInstance, table.Init);
                 moduleInstance.TableAddrs.Add(AllocateTable(Store, table, refVal));
             }
 
@@ -191,7 +186,6 @@ namespace Wacs.Core.Runtime
             //Make the address space permanent
             moduleInstance.MemAddrs.Finalize();
 
-            Context.PopFrame();
             
             foreach (var tag in module.Tags)
             {
@@ -206,33 +200,23 @@ namespace Wacs.Core.Runtime
                 moduleInstance.TagAddrs.Add(AllocateTag(Store, tagType));
             }
             
-            Frame initFrame2 = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.GlobalInitializers);
-            Context.PushFrame(initFrame2);
-
             //5. Allocate Globals and capture their addresses in the Store
             //11. index ordered global addresses
             foreach (var global in module.Globals)
             {
-                var val = EvaluateInitializer(global.Initializer);
-                if (Context.Frame != initFrame2)
-                    throw new TrapException($"Call stack was manipulated while initializing globals");
+                var val = EvaluateInitializer(moduleInstance, global.Initializer);
                 moduleInstance.GlobalAddrs.Add(AllocateGlobal(Store, global.Type, val));
             }
-
-            Context.PopFrame();
-            Frame initFrame3 = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.ElementInitializers);
-            Context.PushFrame(initFrame3);
 
             //6. Allocate Elements
             //12. index ordered element addresses
             foreach (var elem in module.Elements)
             {
-                var refs = EvaluateInitializers(elem.Initializers);
+                var refs = EvaluateInitializers(moduleInstance, elem.Initializers);
                 moduleInstance.ElemAddrs.Add(AllocateElement(Store, elem.Type, refs));
             }
 
             // @Spec 4.5.4 Step 10
-            Context.PopFrame();
 
             //7. Allocate Datas
             //13. index ordered data addresses
@@ -621,23 +605,23 @@ namespace Wacs.Core.Runtime
         /// Step 8.1
         /// Execute instructions without gas
         /// </summary>
-        private Value EvaluateInitializer(Expression ini)
+        private Value EvaluateInitializer(ModuleInstance module, Expression ini)
         {
-            if (ini.LabelTarget.Label.Arity != 1)
-                throw new InvalidDataException("Initializers must have arity of 1");
-            
+            Frame initFrame = Context.ReserveFrame(module, FunctionType.SingleI32, FuncIdx.TableInitializers);
+            Context.PushFrame(initFrame);
+
             ini.ExecuteInitializer(Context);
-            
             var value = Context.OpStack.PopAny();
             if (Context.OpStack.Count > 0)
                 throw new WasmRuntimeException("Values left on stack");
             
+            Context.FlushCallStack();
             return value;
         }
 
-        private List<Value> EvaluateInitializers(Expression[] inis)
+        private List<Value> EvaluateInitializers(ModuleInstance moduleInstance, Expression[] inis)
         {
-            return inis.Select(EvaluateInitializer).ToList();
+            return inis.Select(i => EvaluateInitializer(moduleInstance, i)).ToList();
         }
     }
 
