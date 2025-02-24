@@ -1028,9 +1028,9 @@ namespace Wacs.Core.Instructions
                 "Instruction call_indirect was invalid. Not a FuncType. {0}", type);
 
             var at = tableType.Limits.AddressType;
-            context.OpStack.PopType(at.ToValType());
-            context.OpStack.DiscardValues(funcType.ParameterTypes);
-            context.OpStack.PushResult(funcType.ResultType);
+            context.OpStack.PopType(at.ToValType());                // -1
+            context.OpStack.DiscardValues(funcType.ParameterTypes); // -(N+1)
+            context.OpStack.PushResult(funcType.ResultType);        // -(N+1)+M
         }
 
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
@@ -1049,6 +1049,7 @@ namespace Wacs.Core.Instructions
                 $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
 
             int stack = context.LinkOpStackHeight;
+            context.LinkOpStackHeight -= 1;
             context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
             context.LinkOpStackHeight += funcType.ResultType.Arity;
             //For recordkeeping
