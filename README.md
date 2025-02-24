@@ -4,7 +4,9 @@
 [![License](https://img.shields.io/github/license/kelnishi/WACS)](LICENSE)
 [![NuGet](https://img.shields.io/nuget/v/WACS)](https://www.nuget.org/packages/WACS)
 [![Downloads](https://img.shields.io/nuget/dt/WACS)](https://www.nuget.org/packages/WACS)
+
 ## Overview
+Latest changes: [0.7.4](https://github.com/kelnishi/WACS/tree/main/CHANGELOG.md)
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including Godot and AOT environments like Unity's IL2CPP.
 
@@ -244,6 +246,13 @@ instructions consume them by popping them from the stack. WACS uses a pre-alloca
 However, even a virtualized stack is costly to manage as the CLR will still need to manage memory and objects at its boundaries.
 To optimize further, we'll need to opportunistically use register-machine semantics by swapping out equivalent operations. 
 
+### Link-time optimization
+The design of the WASM VM includes block labelling for branch instructions and a heterogeneous operand/control stack.
+WACS uses a split stack that separates operands and control. This enables us to make some key optimizations:
+- Non-flushing branch jumps. We can leave operands on the stack if intermediate states don't interfere.
+- Precomputed block labels. We can ditch the control frame's label stack entirely!
+- Modern C# ObjectPools and ArrayPools minimize unavoidable allocation
+
 ### In-Memory Transpiling
 Here's where we break WASM semantics and go off-road to claw back some performance.
 A linear list of WASM instructions can be inverted into an expression tree. The WAT text format supports both the linear
@@ -280,19 +289,7 @@ In my testing, this leads to roughly 60% higher instruction processing throughpu
 Linking of the instructions into a tree cannot 100% be determined across block boundaries. So in these cases, the transpiler just passes
 the sequence through unaltered. So WASM code with lots of function calls or branches will see less benefit.
 
-### Prebaked Block Labels
-The design of the WASM VM includes block labelling for branch instructions and a heterogeneous operand/control stack.
-WACS uses a split stack that separates operands and control. This enables us to make some key optimizations:
-- Non-flushing branch jumps. We can leave operands on the stack if intermediate states don't interfere.
-- Precomputed block labels. We can ditch the control frame's label stack entirely!
-- Modern C# ObjectPools and ArrayPools minimize unavoidable allocation
-
 Optimization is an ongoing process and I have a few other strategies yet to implement.
-
-My plan for 1.0 includes:
-- Prebaked super-instructions for memory operations
-- Implement the above transpiling for SIMD instructions (currently only i32/i64/f32/f64 instructions are optimized)
-- Provide an API for 3rd party super-instruction optimization
 
 ### Expected Runtime Performance
 When built in AOT or Release mode, my benchmarks show WACS runs between 2~10% native throughput for benchmark programs
