@@ -160,7 +160,6 @@ namespace Wacs.Core.Runtime.Types
             int parameterCount = funcType.ParameterTypes.Arity;
             
             int lastLocalsCount = frame.Locals.Length;
-            int resultCount = frame.Type.ResultType.Arity;
             int resultsHeight = frame.StackHeight - lastLocalsCount + parameterCount;
             context.OpStack.ShiftResults(parameterCount, resultsHeight);
             
