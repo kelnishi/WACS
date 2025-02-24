@@ -120,7 +120,7 @@ namespace Wacs.Core.Instructions
 
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
-            base.Link(context, pointer);
+            _ = base.Link(context, pointer);
             Nop = true;
             return this;
         }
@@ -201,7 +201,7 @@ namespace Wacs.Core.Instructions
 
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
-            base.Link(context, pointer);
+            _ = base.Link(context, pointer);
             Nop = true;
             return this;
         }
@@ -825,12 +825,7 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.9. return
         public override void Execute(ExecContext context)
         {
-            context.Assert( context.OpStack.Count >= context.Frame.Arity,
-                $"Instruction return failed. Operand stack underflow");
-            int resultCount = context.Frame.Type.ResultType.Arity;
-            int resultsHeight = context.Frame.StackHeight + resultCount;
-            if (resultsHeight < context.OpStack.Count)
-                context.OpStack.ShiftResults(resultCount, resultsHeight);
+            
             // var address = context.PopFrame();
             // context.ResumeSequence(address);
             context.FunctionReturn();

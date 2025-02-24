@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System;
 using System.Buffers;
 using System.Collections.Generic;
 using Wacs.Core.Instructions;
@@ -29,8 +30,7 @@ namespace Wacs.Core.Runtime
         public int Head;
 
         public FuncIdx Index;
-        public LocalsSpace Locals;
-
+        public Memory<Value> Locals;
         public ModuleInstance Module = null!;
 
         public Label ReturnLabel = new();
@@ -52,7 +52,7 @@ namespace Wacs.Core.Runtime
 
         public void ReturnLocals(ArrayPool<Value> dataPool)
         {
-            dataPool.Return(Locals.Data);
+            // dataPool.Return(Locals.Data);
             Locals = default!;
         }
     }

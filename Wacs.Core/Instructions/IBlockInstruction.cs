@@ -52,7 +52,7 @@ namespace Wacs.Core.Instructions
 
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
-            base.Link(context, pointer);
+            _ = base.Link(context, pointer);
             
             Head = pointer;
             EnclosingBlock = context.PeekLabel();

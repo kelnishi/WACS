@@ -293,62 +293,6 @@ namespace Wacs.Core.Types
             idx.Value < _imports.Count + _globals.Count && idx.Value <= IncrementalHighWatermark;
     }
 
-    public struct LocalsSpace
-    {
-        public static readonly LocalsSpace Empty = new LocalsSpace(
-            Array.Empty<Value>(),
-            Array.Empty<ValType>(),
-            Array.Empty<ValType>(),
-            true);
-        
-        public Value[] Data;
-
-        public readonly int Capacity;
-
-        public Value Get(LocalIdx idx)
-        {
-            if (Data == null)
-                throw new InvalidOperationException("LocalSpace was used uninitialized.");
-                
-            return Data[idx.Value];
-        }
-
-        public void Set(LocalIdx idx, Value value)
-        {
-            if (Data == null)
-                throw new InvalidOperationException("LocalSpace was used uninitialized.");
-                
-            Data[idx.Value] = value;
-        }
-
-        public LocalsSpace(Value[] data, ValType[] parameters, ValType[] locals, bool skipInit = false)
-        {
-            Capacity = parameters.Length + locals.Length;
-            Data = data;
-            if (skipInit)
-                return;
-            
-            int idx = 0;
-            foreach (var t in parameters)
-            {
-                Data[idx++] = new Value(t).MakeSet();
-            }
-            foreach (var t in locals)
-            {
-                Data[idx++] = new Value(t);
-            }
-        }
-
-        public LocalsSpace(LocalsSpace copy)
-        {
-            Capacity = copy.Capacity;
-            Data = new Value[copy.Data.Length];
-            copy.Data.CopyTo(Data,0);
-        }
-
-        public bool Contains(LocalIdx idx) => idx.Value < Capacity;
-    }
-
     public class ElementsSpace : AbstractIndexSpace<ElemIdx, Module.ElementSegment>
     {
         private readonly List<Module.ElementSegment> _segments;

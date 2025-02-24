@@ -47,65 +47,72 @@ namespace Wacs.Core.Runtime
 
         public void PushI32(int value)
         {
-            if (++Count > _stackLimit)
+            if (Count >= _stackLimit)
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
-            _registers[Count - 1].Type = ValType.I32;
-            _registers[Count - 1].Data.Int32 = value;
+            _registers[Count].Type = ValType.I32;
+            _registers[Count].Data.Int32 = value;
+            Count++;
         }
 
         public void PushU32(uint value)
         {
-            if (++Count > _stackLimit)
+            if (Count >= _stackLimit)
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
-            _registers[Count - 1].Type = ValType.I32;
-            _registers[Count - 1].Data.UInt32 = value;
+            _registers[Count].Type = ValType.I32;
+            _registers[Count].Data.UInt32 = value;
+            Count++;
         }
 
         public void PushI64(long value)
         {
-            if (++Count > _stackLimit)
+            if (Count >= _stackLimit)
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
-            _registers[Count - 1].Type = ValType.I64;
-            _registers[Count - 1].Data.Int64 = value;
+            _registers[Count].Type = ValType.I64;
+            _registers[Count].Data.Int64 = value;
+            Count++;
         }
 
         public void PushU64(ulong value)
         {
-            if (++Count > _stackLimit)
+            if (Count >= _stackLimit)
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
-            _registers[Count - 1].Type = ValType.I64;
-            _registers[Count - 1].Data.UInt64 = value;
+            _registers[Count].Type = ValType.I64;
+            _registers[Count].Data.UInt64 = value;
+            Count++;
         }
 
         public void PushF32(float value)
         {
-            if (++Count > _stackLimit)
+            if (Count >= _stackLimit)
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
-            _registers[Count - 1].Type = ValType.F32;
-            _registers[Count - 1].Data.Float32 = value;
+            _registers[Count].Type = ValType.F32;
+            _registers[Count].Data.Float32 = value;
+            Count++;
         }
 
         public void PushF64(double value)
         {
-            if (++Count > _stackLimit)
+            if (Count >= _stackLimit)
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
-            _registers[Count - 1].Type = ValType.F64;
-            _registers[Count - 1].Data.Float64 = value;
+            _registers[Count].Type = ValType.F64;
+            _registers[Count].Data.Float64 = value;
+            Count++;
         }
 
         public void PushV128(V128 value)
         {
-            if (++Count > _stackLimit)
+            if (Count >= _stackLimit)
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
 
-            _registers[Count - 1].Type = ValType.V128;
-            _registers[Count - 1].GcRef = new VecRef(value);
+            _registers[Count].Type = ValType.V128;
+            _registers[Count].GcRef = new VecRef(value);
+            Count++;
         }
 
         public void PushRef(Value value)
@@ -117,9 +124,10 @@ namespace Wacs.Core.Runtime
 
         public void PushValue(Value value)
         {
-            if (++Count > _stackLimit)
+            if (Count >= _stackLimit)
                 throw new WasmRuntimeException($"Operand stack exhausted {Count}");
-            _registers[Count - 1] = value;
+            _registers[Count] = value;
+            Count++;
         }
 
         public int PopI32()
@@ -217,6 +225,9 @@ namespace Wacs.Core.Runtime
 
         public void Clear()
         {
+            for (int i = 0; i < Count; i++) 
+                _registers[i].GcRef = null;
+            
             Count = 0;
         }
 
@@ -293,6 +304,24 @@ namespace Wacs.Core.Runtime
                     PushValue(v);
                 else
                     PushValue(new Value(type.Types[i], scalar));
+            }
+        }
+
+        public Memory<Value> ReserveLocals(int parameters, int total)
+        {
+            if (Count + total - parameters >= _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {Count + total - parameters}");
+            
+            int first = Count - parameters;
+            Count += total - parameters;
+            try
+            {
+                return new Memory<Value>(_registers, first, total);
+            }
+            catch (ArgumentOutOfRangeException e)
+            {
+                Console.WriteLine(e);
+                throw;
             }
         }
 
