@@ -104,10 +104,9 @@ namespace Wacs.Core.Instructions
 
         public override InstructionBase Link(ExecContext context, int pointer)
         {
-            base.Link(context, pointer);
+            _ = base.Link(context, pointer);
             CatchTargets = Catches.Select(catchType => InstBranch.PrecomputeStack(context, catchType.L + 1)).ToArray();
-            
-            PointerAdvance = 1;
+            Nop = true;
             return this;
         }
 
@@ -220,7 +219,7 @@ namespace Wacs.Core.Instructions
         public override int StackDiff => -1;
         public override InstructionBase Link(ExecContext context, int pointer)
         {
-            base.Link(context, pointer);
+            _ = base.Link(context, pointer);
             context.LinkUnreachable = true;
             return this;
         }
