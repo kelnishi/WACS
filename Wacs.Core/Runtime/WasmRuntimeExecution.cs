@@ -425,9 +425,10 @@ namespace Wacs.Core.Runtime
 
                 Context.GetModule(funcAddr)?.DerefTypes(span);
                 
-                
-                if (Context.OpStack.Count > 0)
-                    throw new WasmRuntimeException("Values left on operand stack");
+                // if (Context.OpStack.Count > 0)
+                //     throw new WasmRuntimeException("Values left on operand stack");
+                while (Context.OpStack.HasValue)
+                    Context.OpStack.PopAny();
                 
                 return results;
             }
@@ -438,17 +439,13 @@ namespace Wacs.Core.Runtime
             InstructionBase inst;
             if (gasLimit <= 0)
             {
-                // while (Context.Next() is { } inst)
-                //Manually inline Next()
                 while (++Context.InstructionPointer >= 0)
                 {
                     inst = Context._currentSequence[Context.InstructionPointer];
                     if (inst.PointerAdvance > 0)
-                    {
-                        if (inst.PointerAdvance > 1)
-                            Context.InstructionPointer += inst.PointerAdvance - 1;
+                        Context.InstructionPointer += inst.PointerAdvance;
+                    if (inst.Nop)
                         continue;
-                    }
                     
                     if (inst.IsAsync)
                     {
@@ -462,20 +459,15 @@ namespace Wacs.Core.Runtime
             }
             else
             {
-                // while (Context.Next() is { } inst)
-                //Manually inline Next()
                 while (++Context.InstructionPointer >= 0)
                 {
                     inst = Context._currentSequence[Context.InstructionPointer];
                     //Counting gas costs about 18% throughput!
                     Context.steps += inst.Size;
-                    
                     if (inst.PointerAdvance > 0)
-                    {
-                        if (inst.PointerAdvance > 1)
-                            Context.InstructionPointer += inst.PointerAdvance - 1;
+                        Context.InstructionPointer += inst.PointerAdvance;
+                    if (inst.Nop)
                         continue;
-                    }
                     
                     if (inst.IsAsync)
                     {
@@ -498,9 +490,12 @@ namespace Wacs.Core.Runtime
         {
             long highwatermark = 0;
             long gasLimit = options.GasLimit > 0 ? options.GasLimit : long.MaxValue;
+            InstructionBase inst;
             
-            while (Context.Next() is { } inst)
+            while (++Context.InstructionPointer >= 0)
             {
+                inst = Context._currentSequence[Context.InstructionPointer];
+            
                 //Trace execution
                 if (options.LogInstructionExecution != InstructionLogging.None)
                 {
@@ -510,14 +505,12 @@ namespace Wacs.Core.Runtime
                 if (options.CollectStats == StatsDetail.Instruction)
                 {
                     Context.InstructionTimer.Restart();
-
                     if (inst.PointerAdvance > 0)
-                    {
-                        if (inst.PointerAdvance > 1)
-                            Context.InstructionPointer += inst.PointerAdvance - 1;
+                        Context.InstructionPointer += inst.PointerAdvance;
+                    if (inst.Nop)
                         continue;
-                    }
-                    else if (inst.IsAsync)
+                    
+                    if (inst.IsAsync)
                         await inst.ExecuteAsync(Context);
                     else
                         inst.Execute(Context);
@@ -534,12 +527,11 @@ namespace Wacs.Core.Runtime
                 {
                     Context.InstructionTimer.Start();
                     if (inst.PointerAdvance > 0)
-                    {
-                        if (inst.PointerAdvance > 1)
-                            Context.InstructionPointer += inst.PointerAdvance - 1;
+                        Context.InstructionPointer += inst.PointerAdvance;
+                    if (inst.Nop)
                         continue;
-                    }
-                    else if (inst.IsAsync)
+                    
+                    if (inst.IsAsync)
                         await inst.ExecuteAsync(Context);
                     else
                         inst.Execute(Context);

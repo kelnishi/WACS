@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using Wacs.Core.OpCodes;
@@ -41,7 +42,7 @@ namespace Wacs.Core.Validation
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
-        public LocalsSpace Locals { get; }
+        public Memory<Value> Locals { get; }
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
         public TagsSpace Tags { get; }

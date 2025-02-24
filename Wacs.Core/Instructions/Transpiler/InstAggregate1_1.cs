@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -27,12 +28,17 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly Func<ExecContext, TIn> _in1;
         private readonly Func<ExecContext, Value> _wrap;
         public sealed override int StackDiff { get; set; }
+        private List<InstructionBase> linkDependents = new();
         
         public InstAggregate1_1(ITypedValueProducer<TIn> in1, INodeComputer<TIn, TOut> compute)
         {
             _in1 = in1.GetFunc;
             StackDiff = Math.Min(0, in1.StackDiff);
             _compute = compute.GetFunc;
+            
+            if (compute is IComplexLinkBehavior) 
+                linkDependents.Add((compute as InstructionBase)!);
+            
             Size = in1.CalculateSize() + 1;
 
             if (typeof(TOut) == typeof(int)) _wrap = new WrapValueI32((ITypedValueProducer<int>)this).GetFunc;
@@ -63,6 +69,14 @@ namespace Wacs.Core.Instructions.Transpiler
         {
             //Account for our own push to the stack if we're not subordinated
             context.LinkOpStackHeight += StackDiff + 1;
+            
+            int stack = context.LinkOpStackHeight;
+            
+            foreach (var dependent in linkDependents)
+                dependent.Link(context, pointer);
+            
+            context.LinkOpStackHeight = stack;
+            
             return this;
         }
 

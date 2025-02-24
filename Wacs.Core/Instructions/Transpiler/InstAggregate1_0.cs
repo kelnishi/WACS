@@ -25,7 +25,6 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly Action<ExecContext, TIn> _compute;
         private readonly Func<ExecContext, TIn> _inA;
         public sealed override int StackDiff { get; set; }
-
         private List<InstructionBase> linkDependents = new();
         
         public InstAggregate1_0(ITypedValueProducer<TIn> inA, INodeConsumer<TIn> consumer)
@@ -50,7 +49,7 @@ namespace Wacs.Core.Instructions.Transpiler
 
         public override InstructionBase Link(ExecContext context, int pointer)
         {
-            base.Link(context, pointer);
+            _ = base.Link(context, pointer);
             int stack = context.LinkOpStackHeight;
             
             foreach (var dependent in linkDependents)

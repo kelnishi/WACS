@@ -49,8 +49,6 @@ namespace Wacs.Core.Runtime
         private readonly ObjectPool<Frame> _framePool;
 
         private readonly Stack<BlockTarget> _linkLabelStack = new();
-        // private readonly InstructionSequence _hostReturnSequence;
-
         private readonly ArrayPool<Value> _localsDataPool;
         public readonly RuntimeAttributes Attributes;
         public readonly Stopwatch InstructionTimer = new();
@@ -160,14 +158,12 @@ namespace Wacs.Core.Runtime
             var frame = _framePool.Get();
             frame.Module = module;
             frame.Type = type;
-            // frame.Labels = _labelStack.GetSubStack();
             frame.Index = index;
             frame.ContinuationAddress = InstructionPointer;
-            
-            frame.ClearLabels();
-            int capacity = type.ParameterTypes.Types.Length + locals.Length;
-            var localData = _localsDataPool.Rent(capacity);
-            frame.Locals = new(localData, type.ParameterTypes.Types, locals, true);
+            frame.ReturnLabel.Arity = type.ResultType.Arity;
+            // int capacity = type.ParameterTypes.Types.Length + locals.Length;
+            // var localData = _localsDataPool.Rent(capacity);
+            // frame.Locals = new(localData, type.ParameterTypes.Types, locals, true);
             frame.StackHeight = OpStack.Count;
             
             return frame;
@@ -185,15 +181,59 @@ namespace Wacs.Core.Runtime
         public InstructionPointer PopFrame()
         {
             var frame = _callStack.Pop();
+            
+            Assert( OpStack.Count >= frame.Arity + frame.StackHeight,
+                $"Instruction return failed. Operand stack underflow");
+
+            int localsCount = frame.Locals.Length;
+            // int resultCount = frame.Type.ResultType.Arity;
+            int resultCount = frame.ReturnLabel.Arity;
+            int resultsHeight = frame.StackHeight + resultCount - localsCount;
+            OpStack.ShiftResults(resultCount, resultsHeight);
+            frame.Locals = null;
             Frame = _callStack.Count > 0 ? _callStack.Peek() : NullFrame;
             
-            // frame.Labels.Drop();
-            if (frame.Locals.Data != null)
-                frame.ReturnLocals(_localsDataPool);
-
             var address = frame.ContinuationAddress;
             _framePool.Return(frame);
             return address;
+        }
+
+        public void ClearCallStack()
+        {
+            for (int i = _callStack.Count; i > 0; --i)
+            {
+                var frame = _callStack.Pop();
+                frame.Locals = null;
+                _framePool.Return(frame);
+            }
+        }
+
+        public Frame ReuseFrame()
+        {
+            return _callStack.Peek();
+        }
+
+        public void TailCall(FuncAddr addr)
+        {
+            Assert( Store.Contains(addr),
+                $"Failure in Function Invocation. Address does not exist {addr}");
+            var funcInst = Store[addr];
+            
+            switch (funcInst)
+            {
+                case FunctionInstance wasmFunc:
+                    wasmFunc.TailInvoke(this);
+                    return;
+                // case HostFunction hostFunc:
+                // {
+                //     if (funcInst.IsAsync)
+                //         throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
+                //     
+                //     hostFunc.TailInvoke(this);
+                //     return;
+                // }
+            }
+            throw new WasmRuntimeException($"Unexpected function {funcInst} at address {addr}");
         }
 
         public BlockTarget? FindLabel(int depth)
@@ -234,9 +274,7 @@ namespace Wacs.Core.Runtime
 
         public void FlushCallStack()
         {
-            for (int i = _callStack.Count; i > 0; --i)
-                PopFrame();
-            
+            ClearCallStack();
             OpStack.Clear();
 
             Frame = NullFrame;
@@ -268,25 +306,10 @@ namespace Wacs.Core.Runtime
                     return;
                 case HostFunction hostFunc:
                 {
-                    var funcType = hostFunc.Type;
-            
-                    //Fetch the parameters
-                    OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
-
-                    if (hostFunc.PassExecContext)
-                    {
-                        hostFunc.ParameterBuffer[0] = this;
-                    }
                     if (hostFunc.IsAsync)
-                    {
-                        //Pass them
-                        await hostFunc.InvokeAsync(hostFunc.ParameterBuffer, OpStack);
-                    }
+                        await hostFunc.InvokeAsync(this);
                     else
-                    {
-                        //Pass them
-                        hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
-                    }
+                        hostFunc.Invoke(this);
                 } return;
             }
         }
@@ -310,15 +333,7 @@ namespace Wacs.Core.Runtime
                     if (funcInst.IsAsync)
                         throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
                     
-                    var funcType = hostFunc.Type;
-                    //Fetch the parameters
-                    OpStack.PopScalars(funcType.ParameterTypes, hostFunc.ParameterBuffer, hostFunc.PassExecContext?1:0);
-                    if (hostFunc.PassExecContext)
-                    {
-                        hostFunc.ParameterBuffer[0] = this;
-                    }
-                    //Pass them
-                    hostFunc.Invoke(hostFunc.ParameterBuffer, OpStack);
+                    hostFunc.Invoke(this);
                 } return;
             }
         }
@@ -326,24 +341,10 @@ namespace Wacs.Core.Runtime
         // @Spec 4.4.10.2. Returning from a function
         public void FunctionReturn()
         {
-            //3.
             Assert( OpStack.Count >= Frame.Arity,
                 $"Function Return failed. Stack did not contain return values");
-            //4. Since we have a split stack, we can leave the results in place.
-            // var vals = OpStack.PopResults(Frame.Type.ResultType);
-            //5.
-            //6.
             var address = PopFrame();
-            //7. split stack, values left in place 
-            //8.
-            
-            // ResumeSequence(address);
             InstructionPointer = address;
-        }
-
-        public InstructionBase? Next()
-        {
-            return InstructionPointer > AbortSequence ? _currentSequence[++InstructionPointer] : null;
         }
 
         public List<(string, int)> ComputePointerPath()
@@ -351,28 +352,28 @@ namespace Wacs.Core.Runtime
             Stack<(string, int)> ascent = new();
             int idx = InstructionPointer;
             
-            foreach (var label in Frame.EnumerateLabels().Select(target => target.Label))
-            {
-                var pointer = (label.Instruction.GetMnemonic(), idx);
-                ascent.Push(pointer);
-            
-                idx = label.ContinuationAddress;
-                
-                switch ((OpCode)label.Instruction)
-                {
-                    case OpCode.If: ascent.Push(("InstIf", 0));
-                        break;
-                    case OpCode.Else: ascent.Push(("InstElse", 1));
-                        break;
-                    case OpCode.Block: ascent.Push(("InstBlock", 0));
-                        break;
-                    case OpCode.Loop: ascent.Push(("InstLoop", 0));
-                        break;
-                }
-                
-            }
-            
-            ascent.Push(("Function", (int)Frame.Index.Value));
+            // foreach (var label in Frame.EnumerateLabels().Select(target => target.Label))
+            // {
+            //     var pointer = (label.Instruction.GetMnemonic(), idx);
+            //     ascent.Push(pointer);
+            //
+            //     idx = label.ContinuationAddress;
+            //     
+            //     switch ((OpCode)label.Instruction)
+            //     {
+            //         case OpCode.If: ascent.Push(("InstIf", 0));
+            //             break;
+            //         case OpCode.Else: ascent.Push(("InstElse", 1));
+            //             break;
+            //         case OpCode.Block: ascent.Push(("InstBlock", 0));
+            //             break;
+            //         case OpCode.Loop: ascent.Push(("InstLoop", 0));
+            //             break;
+            //     }
+            //     
+            // }
+            //
+            // ascent.Push(("Function", (int)Frame.Index.Value));
 
             return ascent.Select(a => a).ToList();
         }

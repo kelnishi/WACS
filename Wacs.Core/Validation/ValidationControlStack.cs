@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Validation
 {
     public class ValidationControlFrame
     {
-        public LocalsSpace Locals;
+        public Memory<Value> Locals;
         public ByteCode Opcode { get; set; }
         public FunctionType Types { get; set; } = null!;
 

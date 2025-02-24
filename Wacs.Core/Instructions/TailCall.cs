@@ -18,6 +18,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
@@ -29,10 +30,11 @@ namespace Wacs.Core.Instructions
     public class InstReturnCall : InstructionBase, ICallInstruction
     {
         public FuncIdx X;
+        private FunctionInstance _functionInstance;
 
         public InstReturnCall()
         {
-            IsAsync = true;
+            IsAsync = false;
         }
 
         public override ByteCode Op => OpCode.ReturnCall;
@@ -78,12 +80,15 @@ namespace Wacs.Core.Instructions
                 $"Instruction call failed. Function address for {X} was not in the Context.");
             var linkedX = context.Frame.Module.FuncAddrs[X];
             var inst = context.Store[linkedX];
-            IsAsync = inst switch
+
+            switch (inst)
             {
-                FunctionInstance => false,
-                HostFunction hostFunction => hostFunction.IsAsync,
-                _ => IsAsync
-            };
+                case FunctionInstance func:
+                    _functionInstance = func;
+                    break;
+                case HostFunction: 
+                    throw new InvalidDataException($"Host functions are invalid tail-call targets.");
+            }
 
             var funcType = inst.Type;
             int stack = context.LinkOpStackHeight;
@@ -93,52 +98,20 @@ namespace Wacs.Core.Instructions
             StackDiff = context.LinkOpStackHeight - stack;
             
             context.LinkUnreachable = true;
+
+            IsAsync = false;
             return this;
         }
 
         // @Spec 4.4.8.10. call
         public override void Execute(ExecContext context)
         {
-            //Fetch the Module first because we might exhaust the call stack
-            context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
-                $"Instruction call failed. Function address for {X} was not in the Context.");
-            var a = context.Frame.Module.FuncAddrs[X];
-            
-            //Return
-            // Split stack will preserve the operands, don't bother moving them.
-            // Stack<Value> values = new Stack<Value>();
-            // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
-            var address = context.PopFrame();
-            //Push back operands
-            // context.OpStack.Push(values);
-            
-            //Call
-            context.Invoke(a);
-            
-            //Reuse the pointer from the outgoing function
-            context.Frame.ContinuationAddress = address;
+            _functionInstance.TailInvoke(context);
         }
 
         public override async ValueTask ExecuteAsync(ExecContext context)
         {
-            //Fetch the Module first because we might exhaust the call stack
-            context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
-                $"Instruction call failed. Function address for {X} was not in the Context.");
-            var a = context.Frame.Module.FuncAddrs[X];
-            
-            //Return
-            // Split stack will preserve the operands, don't bother moving them.
-            // Stack<Value> values = new Stack<Value>();
-            // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
-            var address = context.PopFrame();
-            //Push back operands
-            // context.OpStack.Push(values);
-            
-            //Call
-            await context.InvokeAsync(a);
-            
-            //Reuse the pointer from the outgoing function
-            context.Frame.ContinuationAddress = address;
+            throw new WasmRuntimeException($"Tail-call optimization targets must be synchronous.");
         }
 
         /// <summary>
@@ -344,19 +317,7 @@ namespace Wacs.Core.Instructions
             if (!funcInst.Type.Matches(ftExpect.Unroll.Body, context.Frame.Module.Types))
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Expected FunctionType differed.");
             
-            //Return
-            // Split stack will preserve the operands, don't bother moving them.
-            // Stack<Value> values = new Stack<Value>();
-            // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
-            var address = context.PopFrame();
-            //Push back operands
-            // context.OpStack.Push(values);
-            
-            //19.
-            context.Invoke(a);
-            
-            //Reuse the pointer from the outgoing function
-            context.Frame.ContinuationAddress = address;
+            context.TailCall(a);
         }
 
         public override async ValueTask ExecuteAsync(ExecContext context)
@@ -412,19 +373,7 @@ namespace Wacs.Core.Instructions
             if (!funcInst.Type.Matches(ftExpect.Unroll.Body, context.Frame.Module.Types))
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Expected FunctionType differed.");
             
-            //Return
-            // Split stack will preserve the operands, don't bother moving them.
-            // Stack<Value> values = new Stack<Value>();
-            // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
-            var address = context.PopFrame();
-            //Push back operands
-            // context.OpStack.Push(values);
-            
-            //19.
-            await context.InvokeAsync(a);
-            
-            //Reuse the pointer from the outgoing function
-            context.Frame.ContinuationAddress = address;
+            context.TailCall(a);
         }
 
         /// <summary>
@@ -572,25 +521,13 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Store.Contains(a),
                 $"Instruction return_call_ref failed. Invalid Function Reference {r}.");
             
-            //Return
-            // Split stack will preserve the operands, don't bother moving them.
-            // Stack<Value> values = new Stack<Value>();
-            // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
-            var address = context.PopFrame();
-            //Push back operands
-            // context.OpStack.Push(values);
-            
             var funcInst = context.Store[a];
             var ftActual = funcInst.Type;
             var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
             if (!funcType!.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction return_call_ref failed. Expected FunctionType differed.");
             
-            //Call
-            context.Invoke(a);
-            
-            //Reuse the pointer from the outgoing function
-            context.Frame.ContinuationAddress = address;
+            context.TailCall(a);
         }
 
         public override async ValueTask ExecuteAsync(ExecContext context)
@@ -618,19 +555,7 @@ namespace Wacs.Core.Instructions
             if (!funcType!.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction return_call_ref failed. Expected FunctionType differed.");
             
-            //Return
-            // Split stack will preserve the operands, don't bother moving them.
-            // Stack<Value> values = new Stack<Value>();
-            // context.OpStack.PopResults(context.Frame.Type.ResultType, ref values);
-            var address = context.PopFrame();
-            //Push back operands
-            // context.OpStack.Push(values);
-            
-            //Call
-            await context.InvokeAsync(a);
-            
-            //Reuse the pointer from the outgoing function
-            context.Frame.ContinuationAddress = address;
+            context.TailCall(a);
         }
 
         public override InstructionBase Parse(BinaryReader reader)
