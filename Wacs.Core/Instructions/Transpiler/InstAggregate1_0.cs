@@ -49,7 +49,7 @@ namespace Wacs.Core.Instructions.Transpiler
 
         public override InstructionBase Link(ExecContext context, int pointer)
         {
-            base.Link(context, pointer);
+            _ = base.Link(context, pointer);
             int stack = context.LinkOpStackHeight;
             
             foreach (var dependent in linkDependents)

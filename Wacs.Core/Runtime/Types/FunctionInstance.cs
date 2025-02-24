@@ -113,15 +113,22 @@ namespace Wacs.Core.Runtime.Types
             //8.
             //Push the frame and operate on the frame on the stack.
             var frame = context.ReserveFrame(Module, funcType, Index, t);
+            int parameterCount = funcType.ParameterTypes.Arity;
+            int localCount = t.Length;
+            int totalCount = parameterCount + localCount;
             //Load parameters
-            int li = context.OpStack.PopResults(funcType.ParameterTypes, ref frame.Locals.Data);
-            frame.StackHeight -= li;
+            // int li = context.OpStack.PopResults(funcType.ParameterTypes, ref frame.Locals.Data);
+            // frame.StackHeight -= li;
+
+            frame.Locals = context.OpStack.ReserveLocals(parameterCount, totalCount);
+            //Return the stack to this height after the function returns
+            frame.StackHeight += localCount;
             
-            int localCount = funcType.ParameterTypes.Arity + t.Length;
             //Set the Locals to default
-            for (int ti = 0; li < localCount; ++li, ++ti)
+            var slice = frame.Locals.Span[parameterCount..totalCount];
+            for (int ti = 0; ti < localCount; ti++)
             {
-                frame.Locals.Data[li] = new Value(t[ti]);
+                slice[ti] = new Value(t[ti]);
             }
 
             //9.
@@ -134,6 +141,47 @@ namespace Wacs.Core.Runtime.Types
             frame.Head = LinkedOffset;
             
             // frame.SetLabel(Body.LabelTarget); 
+            
+            context.InstructionPointer = LinkedOffset - 1;
+        }
+        
+        public void TailInvoke(ExecContext context)
+        {
+            var frame = context.ReuseFrame();
+            //3.
+            var funcType = Type;
+            //4.
+            var t = Locals;
+            
+            frame.Module = Module;
+            frame.Type = funcType;
+            frame.Index = Index;
+            
+            int parameterCount = funcType.ParameterTypes.Arity;
+            
+            int lastLocalsCount = frame.Locals.Length;
+            int resultCount = frame.Type.ResultType.Arity;
+            int resultsHeight = frame.StackHeight - lastLocalsCount + parameterCount;
+            context.OpStack.ShiftResults(parameterCount, resultsHeight);
+            
+            int localsCount = t.Length;
+            int totalCount = parameterCount + localsCount;
+            frame.Locals = context.OpStack.ReserveLocals(parameterCount, totalCount);
+            
+            //Return the stack to this height after the function returns
+            frame.StackHeight = resultsHeight + localsCount;
+            
+            //Set the Locals to default
+            var slice = frame.Locals.Span[parameterCount..totalCount];
+            for (int ti = 0; ti < localsCount; ti++)
+            {
+                slice[ti] = new Value(t[ti]);
+            }
+            
+            //10.
+            frame.ReturnLabel.Arity = funcType.ResultType.Arity;
+            frame.ReturnLabel.Instruction = LabelInst;
+            frame.Head = LinkedOffset;
             
             context.InstructionPointer = LinkedOffset - 1;
         }

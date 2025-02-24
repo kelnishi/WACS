@@ -49,8 +49,6 @@ namespace Wacs.Core.Runtime
         private readonly ObjectPool<Frame> _framePool;
 
         private readonly Stack<BlockTarget> _linkLabelStack = new();
-        // private readonly InstructionSequence _hostReturnSequence;
-
         private readonly ArrayPool<Value> _localsDataPool;
         public readonly RuntimeAttributes Attributes;
         public readonly Stopwatch InstructionTimer = new();
@@ -162,9 +160,10 @@ namespace Wacs.Core.Runtime
             frame.Type = type;
             frame.Index = index;
             frame.ContinuationAddress = InstructionPointer;
-            int capacity = type.ParameterTypes.Types.Length + locals.Length;
-            var localData = _localsDataPool.Rent(capacity);
-            frame.Locals = new(localData, type.ParameterTypes.Types, locals, true);
+            frame.ReturnLabel.Arity = type.ResultType.Arity;
+            // int capacity = type.ParameterTypes.Types.Length + locals.Length;
+            // var localData = _localsDataPool.Rent(capacity);
+            // frame.Locals = new(localData, type.ParameterTypes.Types, locals, true);
             frame.StackHeight = OpStack.Count;
             
             return frame;
@@ -182,15 +181,59 @@ namespace Wacs.Core.Runtime
         public InstructionPointer PopFrame()
         {
             var frame = _callStack.Pop();
+            
+            Assert( OpStack.Count >= frame.Arity + frame.StackHeight,
+                $"Instruction return failed. Operand stack underflow");
+
+            int localsCount = frame.Locals.Length;
+            // int resultCount = frame.Type.ResultType.Arity;
+            int resultCount = frame.ReturnLabel.Arity;
+            int resultsHeight = frame.StackHeight + resultCount - localsCount;
+            OpStack.ShiftResults(resultCount, resultsHeight);
+            frame.Locals = null;
             Frame = _callStack.Count > 0 ? _callStack.Peek() : NullFrame;
             
-            // frame.Labels.Drop();
-            if (frame.Locals.Data != null)
-                frame.ReturnLocals(_localsDataPool);
-
             var address = frame.ContinuationAddress;
             _framePool.Return(frame);
             return address;
+        }
+
+        public void ClearCallStack()
+        {
+            for (int i = _callStack.Count; i > 0; --i)
+            {
+                var frame = _callStack.Pop();
+                frame.Locals = null;
+                _framePool.Return(frame);
+            }
+        }
+
+        public Frame ReuseFrame()
+        {
+            return _callStack.Peek();
+        }
+
+        public void TailCall(FuncAddr addr)
+        {
+            Assert( Store.Contains(addr),
+                $"Failure in Function Invocation. Address does not exist {addr}");
+            var funcInst = Store[addr];
+            
+            switch (funcInst)
+            {
+                case FunctionInstance wasmFunc:
+                    wasmFunc.TailInvoke(this);
+                    return;
+                // case HostFunction hostFunc:
+                // {
+                //     if (funcInst.IsAsync)
+                //         throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
+                //     
+                //     hostFunc.TailInvoke(this);
+                //     return;
+                // }
+            }
+            throw new WasmRuntimeException($"Unexpected function {funcInst} at address {addr}");
         }
 
         public BlockTarget? FindLabel(int depth)
@@ -231,9 +274,7 @@ namespace Wacs.Core.Runtime
 
         public void FlushCallStack()
         {
-            for (int i = _callStack.Count; i > 0; --i)
-                PopFrame();
-            
+            ClearCallStack();
             OpStack.Clear();
 
             Frame = NullFrame;

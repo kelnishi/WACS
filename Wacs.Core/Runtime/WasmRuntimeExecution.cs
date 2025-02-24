@@ -425,9 +425,10 @@ namespace Wacs.Core.Runtime
 
                 Context.GetModule(funcAddr)?.DerefTypes(span);
                 
-                
-                if (Context.OpStack.Count > 0)
-                    throw new WasmRuntimeException("Values left on operand stack");
+                // if (Context.OpStack.Count > 0)
+                //     throw new WasmRuntimeException("Values left on operand stack");
+                while (Context.OpStack.HasValue)
+                    Context.OpStack.PopAny();
                 
                 return results;
             }

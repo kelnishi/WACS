@@ -227,7 +227,7 @@ namespace Wacs.Core
         public TablesSpace Tables { get; }
         public MemSpace Mems { get; }
         public GlobalValidationSpace Globals { get; }
-        public LocalsSpace Locals => DummyContext.Frame.Locals;
+        public Memory<Value> Locals => DummyContext.Frame.Locals;
         public ElementsSpace Elements { get; set; }
         public DataValidationSpace Datas { get; set; }
 

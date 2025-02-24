@@ -14,7 +14,7 @@
 
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types;
+using Wacs.Core.Utilities;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
@@ -27,8 +27,8 @@ namespace Wacs.Core.Instructions.Transpiler
 
         public InstLocalGetSet(InstLocalGet from, InstLocalSet to)
         {
-            _from = from.GetIndex().Value;
-            _to = to.GetIndex().Value;
+            _from = from.GetIndex();
+            _to = to.GetIndex();
             Size = 2;
         }
 
@@ -37,12 +37,12 @@ namespace Wacs.Core.Instructions.Transpiler
 
         public override void Execute(ExecContext context)
         {
-            context.Assert( context.Frame.Locals.Contains((LocalIdx)_from),
+            context.Assert( context.Frame.Locals.ContainsIndex(_from),
                 $"Instruction local.getset could not get Local {_from}");
-            context.Assert( context.Frame.Locals.Contains((LocalIdx)_to),
+            context.Assert( context.Frame.Locals.ContainsIndex(_to),
                 $"Instruction local.getset could not set Local {_to}");
             
-            context.Frame.Locals.Data[_to] = context.Frame.Locals.Data[_from];
+            context.Frame.Locals.Span[_to] = context.Frame.Locals.Span[_from];
         }
     }
 
@@ -54,7 +54,7 @@ namespace Wacs.Core.Instructions.Transpiler
 
         public InstLocalConstSet(T c, InstLocalSet to)
         {
-            _to = to.GetIndex().Value;
+            _to = to.GetIndex();
             _constantValue = new Value(typeof(T).ToValType(), c!);
             Size = 2;
         }
@@ -64,10 +64,10 @@ namespace Wacs.Core.Instructions.Transpiler
 
         public override void Execute(ExecContext context)
         {
-            context.Assert( context.Frame.Locals.Contains((LocalIdx)_to),
+            context.Assert( context.Frame.Locals.ContainsIndex(_to),
                 $"Instruction local.getset could not set Local {_to}");
 
-            context.Frame.Locals.Data[_to] = _constantValue;
+            context.Frame.Locals.Span[_to] = _constantValue;
         }
     }
 }
