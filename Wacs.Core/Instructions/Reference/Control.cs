@@ -135,6 +135,7 @@ namespace Wacs.Core.Instructions.Reference
     public class InstCallRef : InstructionBase, ICallInstruction
     {
         public TypeIdx X;
+        private FunctionType cachedFunctionType;
 
         public InstCallRef()
         {
@@ -168,10 +169,14 @@ namespace Wacs.Core.Instructions.Reference
 
         public override InstructionBase Link(ExecContext context, int pointer)
         {
-            var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
+            context.Assert( context.Frame.Module.Types.Contains(X),
+                $"Instruction call_ref failed to link. Function Type for {X} was not in the Context.");
+            
+            cachedFunctionType = (context.Frame.Module.Types[X].Expansion as FunctionType)!;
+            
             context.LinkOpStackHeight -= 1;
-            context.LinkOpStackHeight -= funcType!.ParameterTypes.Arity;
-            context.LinkOpStackHeight += funcType.ResultType.Arity;
+            context.LinkOpStackHeight -= cachedFunctionType!.ParameterTypes.Arity;
+            context.LinkOpStackHeight += cachedFunctionType.ResultType.Arity;
             return this;
         }
 
@@ -179,13 +184,9 @@ namespace Wacs.Core.Instructions.Reference
         {
             context.Assert(context.StackTopTopType() == ValType.FuncRef,
                 $"Instruction {Op.GetMnemonic()} failed. Expected FuncRef on top of stack.");
-            context.Assert( context.Frame.Module.Types.Contains(X),
-                $"Instruction call_ref failed. Function Type for {X} was not in the Context.");
-
             var r = context.OpStack.PopRefType();
             if (r.IsNullRef)
                 throw new TrapException($"Null reference in call_ref");
-
             context.Assert(r.Type.Matches(ValType.FuncRef, context.Frame.Module.Types),
                 $"Instruction call_indirect failed. Element was not a FuncRef");
             var a = r.GetFuncAddr(context.Frame.Module.Types);
@@ -194,8 +195,7 @@ namespace Wacs.Core.Instructions.Reference
                 $"Instruction call_ref failed. Invalid Function Reference {r}.");
             var funcInst = context.Store[a];
             var ftActual = funcInst.Type;
-            var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
-            if (!funcType!.Matches(ftActual, context.Frame.Module.Types))
+            if (!cachedFunctionType.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction call_ref failed. Expected FunctionType differed.");
             
             context.Invoke(a);
@@ -205,13 +205,9 @@ namespace Wacs.Core.Instructions.Reference
         {
             context.Assert(context.StackTopTopType() == ValType.FuncRef,
                 $"Instruction {Op.GetMnemonic()} failed. Expected FuncRef on top of stack.");
-            context.Assert( context.Frame.Module.Types.Contains(X),
-                $"Instruction call_ref failed. Function Type for {X} was not in the Context.");
-
             var r = context.OpStack.PopRefType();
             if (r.IsNullRef)
                 throw new TrapException($"Null reference in call_ref");
-
             context.Assert(r.Type.Matches(ValType.FuncRef, context.Frame.Module.Types),
                 $"Instruction call_indirect failed. Element was not a FuncRef");
             var a = r.GetFuncAddr(context.Frame.Module.Types);
@@ -220,8 +216,7 @@ namespace Wacs.Core.Instructions.Reference
                 $"Instruction call_ref failed. Invalid Function Reference {r}.");
             var funcInst = context.Store[a];
             var ftActual = funcInst.Type;
-            var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
-            if (!funcType!.Matches(ftActual, context.Frame.Module.Types))
+            if (!cachedFunctionType.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction call_ref failed. Expected FunctionType differed.");
             await context.InvokeAsync(a);
         }

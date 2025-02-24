@@ -30,6 +30,7 @@ namespace Wacs.Core.Instructions
     {
         public bool IsAsync = false;
         public int PointerAdvance = 0;
+        public bool Nop = false;
 
         public int Size = 1;
 

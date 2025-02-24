@@ -1,4 +1,4 @@
-// Copyright 2024 Kelvin Nishikawa
+// Copyright 2025 Kelvin Nishikawa
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,23 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using Wacs.Core.Instructions;
+using System;
 
-namespace Wacs.Core.Runtime
+namespace Wacs.Core.Utilities
 {
-    public class RuntimeAttributes
+    public static class MemoryExtension
     {
-        public int GrowCallStack = 512;
-
-        public int InitialCallStack = 512;
-        public bool Live = true;
-        public int LocalPoolSize = 64;
-        public int MaxCallStack = 2048;
-
-        public int MaxFunctionLocals = 2048;
-
-        public int MaxOpStack = 2048;
-        public InstructionBaseFactory InstructionFactory { get; set; } = SpecFactory.Factory;
+        public static bool ContainsIndex<T>(this Memory<T> mem, int index) => 
+            index >= 0 && index < mem.Length;
     }
-
 }

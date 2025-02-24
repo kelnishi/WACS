@@ -52,10 +52,28 @@ namespace Wacs.Core.Instructions
 
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {
-            base.Link(context, pointer);
+            _ = base.Link(context, pointer);
             
             Head = pointer;
             EnclosingBlock = context.PeekLabel();
+            
+            //Merge adjacent PointerAdvances
+            if (this is InstBlock or InstLoop or InstTryTable)
+            {
+                var parent = EnclosingBlock;
+                int skips = 0;
+                int address = pointer;
+                while (parent.Head == address - 1)
+                {
+                    if (parent is not (InstBlock or InstLoop or InstTryTable)) 
+                        break;
+                    address--;
+                    skips++;
+                    parent.PointerAdvance = skips;
+                    parent.Nop = true;
+                    parent = parent.EnclosingBlock;
+                }
+            }
             
             var blockInst = this as IBlockInstruction;
             var block = blockInst!.GetBlock(0);
