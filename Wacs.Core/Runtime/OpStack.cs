@@ -332,6 +332,8 @@ namespace Wacs.Core.Runtime
         /// <param name="resultsHeight">The OpStack height after shrinking</param>
         public void ShiftResults(int resultCount, int resultsHeight)
         {
+            if (Count == resultsHeight)
+                return;
             int src = Count - resultCount;
             int dest = resultsHeight - resultCount;
             Array.Copy(_registers, src, _registers, dest, resultCount);
