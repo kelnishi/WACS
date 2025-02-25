@@ -53,7 +53,7 @@ namespace Wacs.Core.Runtime
         public readonly RuntimeAttributes Attributes;
         public readonly Stopwatch InstructionTimer = new();
 
-        private readonly InstructionSequence linkedInstructions = new();
+        public readonly InstructionSequence linkedInstructions = new();
         public readonly OpStack OpStack;
 
         public readonly Stopwatch ProcessTimer = new();
@@ -68,6 +68,8 @@ namespace Wacs.Core.Runtime
         public int InstructionPointer;
         public int LinkOpStackHeight;
         public bool LinkUnreachable;
+        public int LinkLocalCount;
+        public readonly Dictionary<Value, int> LinkConstants = new();
 
         public Dictionary<ushort, ExecStat> Stats = new();
         public long steps;
@@ -437,12 +439,9 @@ namespace Wacs.Core.Runtime
                 StackHeight = 0,
                 Arity = instance.Type.ResultType.Arity
             }));
-
-            linkedInstructions.Append(
-                instance.Body
-                    .Flatten()
-                    .Select((inst, idx) => inst.Link(this, offset + idx))
-            );
+            LinkLocalCount = instance.Type.ParameterTypes.Arity + instance.Locals.Length;
+            linkedInstructions.Append(instance.Body.Flatten().Select((inst,idx)=>inst.Link(this, offset+idx)));
+            
             instance.Length = linkedInstructions.Count - instance.LinkedOffset;
         }
     }
