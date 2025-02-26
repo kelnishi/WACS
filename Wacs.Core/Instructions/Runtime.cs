@@ -21,7 +21,7 @@ namespace Wacs.Core.Instructions
 {
     public class InstFuncReturn : InstructionBase
     {
-        public override ByteCode Op => OpCode.Func;
+        public override ByteCode Op => ByteCode.Func;
 
         public override void Validate(IWasmValidationContext context)
         {

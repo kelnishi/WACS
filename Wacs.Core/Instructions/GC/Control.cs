@@ -31,7 +31,7 @@ namespace Wacs.Core.Instructions.GC
         private ValType Rt1;
         private ValType Rt2;
 
-        public override ByteCode Op => GcCode.BrOnCast;
+        public override ByteCode Op => ByteCode.BrOnCast;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -102,7 +102,7 @@ namespace Wacs.Core.Instructions.GC
         private ValType Rt1;
         private ValType Rt2;
 
-        public override ByteCode Op => GcCode.BrOnCastFail;
+        public override ByteCode Op => ByteCode.BrOnCastFail;
 
         public override void Validate(IWasmValidationContext context)
         {

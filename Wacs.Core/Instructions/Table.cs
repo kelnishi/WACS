@@ -29,7 +29,7 @@ namespace Wacs.Core.Instructions
     public class InstTableGet : InstructionBase
     {
         private TableIdx X;
-        public override ByteCode Op => OpCode.TableGet;
+        public override ByteCode Op => ByteCode.TableGet;
 
         // @Spec 3.3.6.1. table.get
         public override void Validate(IWasmValidationContext context)
@@ -89,7 +89,7 @@ namespace Wacs.Core.Instructions
     public class InstTableSet : InstructionBase
     {
         private TableIdx X;
-        public override ByteCode Op => OpCode.TableSet;
+        public override ByteCode Op => ByteCode.TableSet;
         public override int StackDiff => -2;
 
         // @Spec 3.3.6.2. table.set
@@ -154,7 +154,7 @@ namespace Wacs.Core.Instructions
     {
         private TableIdx X;
         private ElemIdx Y;
-        public override ByteCode Op => ExtCode.TableInit;
+        public override ByteCode Op => ByteCode.TableInit;
         public override int StackDiff => -3;
 
         // @Spec 3.3.6.7. table.init x y
@@ -257,7 +257,7 @@ namespace Wacs.Core.Instructions
     public class InstElemDrop : InstructionBase
     {
         private ElemIdx X;
-        public override ByteCode Op => ExtCode.ElemDrop;
+        public override ByteCode Op => ByteCode.ElemDrop;
 
         // @Spec 3.3.6.8. elem.drop x
         public override void Validate(IWasmValidationContext context)
@@ -302,7 +302,7 @@ namespace Wacs.Core.Instructions
     {
         private TableIdx DstX;
         private TableIdx SrcY;
-        public override ByteCode Op => ExtCode.TableCopy;
+        public override ByteCode Op => ByteCode.TableCopy;
         public override int StackDiff => -3;
 
         // @Spec 3.3.6.6. table.copy
@@ -437,7 +437,7 @@ namespace Wacs.Core.Instructions
     public class InstTableGrow : InstructionBase
     {
         private TableIdx X;
-        public override ByteCode Op => ExtCode.TableGrow;
+        public override ByteCode Op => ByteCode.TableGrow;
         public override int StackDiff => -1;
 
         // @Spec 3.3.6.4. table.grow x
@@ -507,7 +507,7 @@ namespace Wacs.Core.Instructions
     public class InstTableSize : InstructionBase
     {
         private TableIdx X;
-        public override ByteCode Op => ExtCode.TableSize;
+        public override ByteCode Op => ByteCode.TableSize;
         public override int StackDiff => +1;
 
         // @Spec 3.3.6.3. table.size x
@@ -555,7 +555,7 @@ namespace Wacs.Core.Instructions
     public class InstTableFill : InstructionBase
     {
         private TableIdx X;
-        public override ByteCode Op => ExtCode.TableFill;
+        public override ByteCode Op => ByteCode.TableFill;
         public override int StackDiff => -3;
 
         // @Spec 3.3.6.5. table.fill

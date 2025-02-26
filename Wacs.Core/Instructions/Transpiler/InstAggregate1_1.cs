@@ -52,7 +52,7 @@ namespace Wacs.Core.Instructions.Transpiler
             else throw new InvalidDataException($"Could not bind aggregate type {typeof(TOut)}");
         }
 
-        public override ByteCode Op => WacsCode.Aggr1_1;
+        public override ByteCode Op => ByteCode.Aggr1_1;
 
         public int CalculateSize() => Size;
 
