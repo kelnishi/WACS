@@ -360,7 +360,9 @@ namespace Wacs.Core.Instructions
             target.Else = pointer + 1;
 
             //Reset and re-consume the predicate
-            context.LinkOpStackHeight = target.Label.StackHeight;
+            int stackDiff = target.Label.StackHeight - context.LinkOpStackHeight;
+            context.DeltaStack(stackDiff, 0);
+            
             return this;
         }
 
@@ -395,10 +397,13 @@ namespace Wacs.Core.Instructions
                 target.Else = pointer;
 
             context.LinkUnreachable = false;
-            context.LinkOpStackHeight = target.Label.StackHeight;
-            context.LinkOpStackHeight -= target.Label.Parameters;
-            context.LinkOpStackHeight += target.Label.Results;
 
+            int stack = target.Label.StackHeight
+                        - target.Label.Parameters
+                        + target.Label.Results;
+            int stackDiff = stack - context.LinkOpStackHeight;
+            context.DeltaStack(stackDiff, 0);
+            
             if (!FunctionEnd)
             {
                 Nop = true;
@@ -493,6 +498,7 @@ namespace Wacs.Core.Instructions
 
         public static void SetStackHeight(ExecContext context, BlockTarget label)
         {
+            //DeltaStack is always negative (discard) so we can skip max stack calculation
             context.LinkOpStackHeight = label.Label.StackHeight + label.Label.Arity;
         }
 
@@ -871,11 +877,13 @@ namespace Wacs.Core.Instructions
             }
 
             var funcType = inst.Type;
-            int stack = context.LinkOpStackHeight;
-            context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
-            context.LinkOpStackHeight += funcType.ResultType.Arity;
-            //For recordkeeping
-            // StackDiff = context.LinkOpStackHeight - stack;
+            
+            int stack = context.LinkOpStackHeight
+                        - funcType.ParameterTypes.Arity
+                        + funcType.ResultType.Arity;
+            int stackDiff = stack - context.LinkOpStackHeight; 
+            
+            context.DeltaStack(stackDiff,0);
             
             return this;
         }
@@ -1024,12 +1032,13 @@ namespace Wacs.Core.Instructions
             context.Assert(funcType,
                 $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
 
-            int stack = context.LinkOpStackHeight;
-            context.LinkOpStackHeight -= 1;
-            context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
-            context.LinkOpStackHeight += funcType.ResultType.Arity;
-            //For recordkeeping
-            // StackDiff = context.LinkOpStackHeight - stack;
+            int stack = context.LinkOpStackHeight
+                        - 1
+                        - funcType.ParameterTypes.Arity
+                        + funcType.ResultType.Arity;
+            int stackDiff = stack - context.LinkOpStackHeight;
+            
+            context.DeltaStack(stackDiff, 0);
             
             //TODO Precompute call targets, cache the whole table
             

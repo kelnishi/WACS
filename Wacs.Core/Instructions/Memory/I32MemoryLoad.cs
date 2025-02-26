@@ -65,7 +65,7 @@ namespace Wacs.Core.Instructions.Memory
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             cachedInstance = context.Store[a];
-            return this;
+            return base.Link(context, pointer);
         }
     }
     

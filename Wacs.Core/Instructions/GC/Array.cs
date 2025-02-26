@@ -187,7 +187,8 @@ namespace Wacs.Core.Instructions.GC
 
         public override InstructionBase Link(ExecContext context, int pointer)
         {
-            context.LinkOpStackHeight += -((int)N-1);
+            int stackDiff = +1 -(int)N;
+            context.DeltaStack(stackDiff);
             return this;
         }
 

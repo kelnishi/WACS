@@ -46,6 +46,7 @@ namespace Wacs.Core.Runtime.Types
         //Can be processed with optimization passes
         public Expression Body;
         public int Length;
+        public int MaxStack;
 
         public InstructionPointer LinkedOffset;
 
@@ -121,6 +122,8 @@ namespace Wacs.Core.Runtime.Types
             // frame.StackHeight -= li;
 
             frame.Locals = context.OpStack.ReserveLocals(parameterCount, totalCount);
+            context.OpStack.GuardExhaust(MaxStack);
+                
             //Return the stack to this height after the function returns
             frame.StackHeight += localCount;
             
@@ -166,6 +169,7 @@ namespace Wacs.Core.Runtime.Types
             int localsCount = t.Length;
             int totalCount = parameterCount + localsCount;
             frame.Locals = context.OpStack.ReserveLocals(parameterCount, totalCount);
+            context.OpStack.GuardExhaust(MaxStack);
             
             //Return the stack to this height after the function returns
             frame.StackHeight = resultsHeight + localsCount;

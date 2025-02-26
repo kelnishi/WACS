@@ -168,10 +168,9 @@ namespace Wacs.Core.Instructions.Reference
                 $"Instruction call_ref failed to link. Function Type for {X} was not in the Context.");
             
             cachedFunctionType = (context.Frame.Module.Types[X].Expansion as FunctionType)!;
-            
-            context.LinkOpStackHeight -= 1;
-            context.LinkOpStackHeight -= cachedFunctionType!.ParameterTypes.Arity;
-            context.LinkOpStackHeight += cachedFunctionType.ResultType.Arity;
+
+            int stackDiff = -1 -cachedFunctionType!.ParameterTypes.Arity +cachedFunctionType.ResultType.Arity;
+            context.DeltaStack(stackDiff);
             return this;
         }
 
