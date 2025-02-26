@@ -29,14 +29,12 @@ namespace Wacs.Core.Instructions
 {
     public class InstTryTable : BlockTarget, IBlockInstruction, IExnHandler
     {
-        private static readonly ByteCode TryTableOp = OpCode.TryTable;
+        public InstTryTable() : base(ByteCode.TryTable) { }
+        
+        private Block Block = null!;
+        public CatchType[] Catches = null!;
+        public BlockTarget?[] CatchTargets = null!;
 
-        private static readonly ByteCode CatchOp = WacsCode.Catch;
-        private Block Block;
-        public CatchType[] Catches;
-        public BlockTarget?[] CatchTargets;
-
-        public override ByteCode Op => TryTableOp;
         public ValType BlockType => Block.BlockType;
         public int Count => 1;
         public int BlockSize => 1 + Block.Size;
@@ -60,7 +58,7 @@ namespace Wacs.Core.Instructions
                         "Catch Label {0} does not exist in the context.", handler.L);
                     var labelFrame = context.ControlStack.PeekAt((int)handler.L.Value);
                     var labelType = new FunctionType(ResultType.Empty, labelFrame.EndTypes);
-                    context.PushControlFrame(CatchOp, labelType);
+                    context.PushControlFrame(ByteCode.Catch, labelType);
                     switch (handler.Mode)
                     {
                         case CatchFlags.None: //catch x
@@ -90,7 +88,7 @@ namespace Wacs.Core.Instructions
                 }
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
-                context.PushControlFrame(TryTableOp, funcType);
+                context.PushControlFrame(ByteCode.TryTable, funcType);
                 context.ValidateBlock(Block);
             }
             catch (IndexOutOfRangeException exc)
@@ -128,8 +126,9 @@ namespace Wacs.Core.Instructions
     
     public class InstThrow : InstructionBase
     {
+        public InstThrow() : base(ByteCode.Throw) { }
+        
         private TagIdx X;
-        public override ByteCode Op => ByteCode.Throw;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -160,7 +159,7 @@ namespace Wacs.Core.Instructions
             context.LinkOpStackHeight -= funcType!.ParameterTypes.Arity;
             context.LinkOpStackHeight += 1;
             //For recordkeeping
-            StackDiff = context.LinkOpStackHeight - stack;
+            // StackDiff = context.LinkOpStackHeight - stack;
             
             context.LinkUnreachable = true;
             return this;
@@ -207,7 +206,7 @@ namespace Wacs.Core.Instructions
     
     public class InstThrowRef : InstructionBase
     {
-        public override ByteCode Op => ByteCode.ThrowRef;
+        public InstThrowRef() : base(ByteCode.ThrowRef, -1) { }
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -215,7 +214,6 @@ namespace Wacs.Core.Instructions
             context.SetUnreachable();
         }
 
-        public override int StackDiff => -1;
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             _ = base.Link(context, pointer);

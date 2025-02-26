@@ -27,7 +27,7 @@ namespace Wacs.Core.Instructions.Transpiler
         private static readonly ByteCode IfOp = OpCode.If;
         private readonly Block ElseBlock = Block.Empty;
         private readonly Block IfBlock = Block.Empty;
-        public sealed override int StackDiff { get; set; }
+        public int LinkStackDiff { get; set; }
         
         private readonly Func<ExecContext, int> valueFunc;
 
@@ -35,9 +35,9 @@ namespace Wacs.Core.Instructions.Transpiler
             ValType blockType,
             InstructionSequence ifSeq,
             InstructionSequence elseSeq,
-            ITypedValueProducer<int> valueProducer)
+            ITypedValueProducer<int> valueProducer) : base(ByteCode.If)
         {
-            StackDiff = valueProducer.StackDiff;
+            LinkStackDiff = valueProducer.LinkStackDiff;
             IfBlock = new Block(
                 blockType: blockType,
                 seq: ifSeq
@@ -48,8 +48,6 @@ namespace Wacs.Core.Instructions.Transpiler
             );
             valueFunc = valueProducer.GetFunc;
         }
-
-        public override ByteCode Op => IfOp;
 
         public ValType BlockType => IfBlock.BlockType;
 
@@ -100,6 +98,13 @@ namespace Wacs.Core.Instructions.Transpiler
             }
         }
 
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            _ = base.Link(context, pointer);
+            context.DeltaStack(LinkStackDiff, 0);
+            return this;
+        }
+        
         // @Spec 4.4.8.5. if
         public override void Execute(ExecContext context)
         {

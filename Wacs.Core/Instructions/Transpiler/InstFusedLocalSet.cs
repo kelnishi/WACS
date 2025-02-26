@@ -25,14 +25,13 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly int _from;
         private readonly int _to;
 
-        public InstLocalGetSet(InstLocalGet from, InstLocalSet to)
+        public InstLocalGetSet(InstLocalGet from, InstLocalSet to) : base(ByteCode.LocalGetSet)
         {
             _from = from.GetIndex();
             _to = to.GetIndex();
             Size = 2;
         }
 
-        public override ByteCode Op => ByteCode.LocalGetSet;
         public override void Validate(IWasmValidationContext context) {}
 
         public override void Execute(ExecContext context)
@@ -52,14 +51,13 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly int _to;
         private ValType type;
 
-        public InstLocalConstSet(T c, InstLocalSet to)
+        public InstLocalConstSet(T c, InstLocalSet to) : base(ByteCode.LocalConstSet)
         {
             _to = to.GetIndex();
             _constantValue = new Value(typeof(T).ToValType(), c!);
             Size = 2;
         }
 
-        public override ByteCode Op => ByteCode.LocalConstSet;
         public override void Validate(IWasmValidationContext context) { }
 
         public override void Execute(ExecContext context)

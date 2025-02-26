@@ -28,9 +28,9 @@ namespace Wacs.Core.Instructions.GC
 {
     public class InstStructNew : InstructionBase, IConstInstruction
     {
+        public InstStructNew() : base(ByteCode.StructNew) { }
         private TypeIdx X;
-        public override ByteCode Op => ByteCode.StructNew;
-
+        
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructnewx
         /// </summary>
@@ -107,10 +107,9 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstStructNewDefault : InstructionBase, IConstInstruction
     {
+        public InstStructNewDefault() : base(ByteCode.StructNewDefault, +1) { }
         private TypeIdx X;
-        public override ByteCode Op => ByteCode.StructNewDefault;
-        public override int StackDiff => +1;
-
+        
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructnewx
         /// </summary>
@@ -173,17 +172,15 @@ namespace Wacs.Core.Instructions.GC
         private TypeIdx X;
         private FieldIdx Y;
 
-        public InstStructGet(PackedExt sx)
-        {
-            Sx = sx;
-        }
+        public InstStructGet(PackedExt sx) : base(GetOp(sx)) 
+            => Sx = sx;
 
-        public override ByteCode Op => Sx switch
+        private static ByteCode GetOp(PackedExt sx) => sx switch
         {
             PackedExt.Signed => GcCode.StructGetS,
             PackedExt.NotPacked => GcCode.StructGet,
             PackedExt.Unsigned => GcCode.StructGetU,
-            _ => throw new InvalidDataException($"Undefined packedtype: {Sx}")
+            _ => throw new InvalidDataException($"Undefined packedtype: {sx}")
         };
 
         /// <summary>
@@ -276,12 +273,11 @@ namespace Wacs.Core.Instructions.GC
 
     public class InstStructSet : InstructionBase
     {
+        public InstStructSet() : base(ByteCode.StructSet, -2) { }
+        
         private TypeIdx X;
         private FieldIdx Y;
-
-        public override ByteCode Op => ByteCode.StructSet;
-        public override int StackDiff => -2;
-
+        
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),

@@ -119,34 +119,34 @@ namespace Wacs.Core.Instructions.SIMD
         private readonly int WidthTByteSize;
         private MemArg M;
 
-        public InstMemoryLoadMxN(BitWidth width, int count)
+        public InstMemoryLoadMxN(BitWidth width, int count) : base(GetOp(count, width))
         {
             WidthT = width;
             WidthTByteSize = WidthT.ByteSize();
             CountN = count;
         }
 
-        public override ByteCode Op => CountN switch
+        private static ByteCode GetOp(int count, BitWidth width) => count switch
         {
-            8 => WidthT switch
+            8 => width switch
             {
                 BitWidth.S8 => SimdCode.V128Load8x8S,
                 BitWidth.U8 => SimdCode.V128Load8x8U,
-                _ => throw new InvalidDataException($"InstMemoryLoadMxN instruction is malformed: {WidthT}x{CountN}"),
+                _ => throw new InvalidDataException($"InstMemoryLoadMxN instruction is malformed: {width}x{count}"),
             },
-            4 => WidthT switch
+            4 => width switch
             {
                 BitWidth.S16 => SimdCode.V128Load16x4S,
                 BitWidth.U16 => SimdCode.V128Load16x4U,
-                _ => throw new InvalidDataException($"InstMemoryLoadMxN instruction is malformed: {WidthT}x{CountN}"),
+                _ => throw new InvalidDataException($"InstMemoryLoadMxN instruction is malformed: {width}x{count}"),
             },
-            2 => WidthT switch
+            2 => width switch
             {
                 BitWidth.S32 => SimdCode.V128Load32x2S,
                 BitWidth.U32 => SimdCode.V128Load32x2U,
-                _ => throw new InvalidDataException($"InstMemoryLoadMxN instruction is malformed: {WidthT}x{CountN}"),
+                _ => throw new InvalidDataException($"InstMemoryLoadMxN instruction is malformed: {width}x{count}"),
             },
-            _ => throw new InvalidDataException($"InstMemoryLoadMxN instruction is malformed: {WidthT}x{CountN}"),
+            _ => throw new InvalidDataException($"InstMemoryLoadMxN instruction is malformed: {width}x{count}"),
         };
 
         /// <summary>
@@ -244,15 +244,16 @@ namespace Wacs.Core.Instructions.SIMD
         private readonly BitWidth WidthN;
 
         private MemArg M;
-        public InstMemoryLoadSplat(BitWidth width) => WidthN = width;
+        public InstMemoryLoadSplat(BitWidth width) : base(GetOp(width))
+            => WidthN = width;
 
-        public override ByteCode Op => WidthN switch
+        private static ByteCode GetOp(BitWidth width) => width switch
         {
             BitWidth.U8 => SimdCode.V128Load8Splat,
             BitWidth.U16 => SimdCode.V128Load16Splat,
             BitWidth.U32 => SimdCode.V128Load32Splat,
             BitWidth.U64 => SimdCode.V128Load64Splat,
-            _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
+            _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {width}"),
         };
 
         /// <summary>
@@ -350,15 +351,16 @@ namespace Wacs.Core.Instructions.SIMD
         private readonly BitWidth WidthN;
 
         private MemArg M;
-        public InstMemoryLoadZero(BitWidth width) => WidthN = width;
+        public InstMemoryLoadZero(BitWidth width) : base(GetOp(width))
+            => WidthN = width;
 
-        public override ByteCode Op => WidthN switch
+        private static ByteCode GetOp(BitWidth width) => width switch
         {
             BitWidth.U8 => SimdCode.V128Load8Lane,
             BitWidth.U16 => SimdCode.V128Load16Lane,
             BitWidth.U32 => SimdCode.V128Load32Lane,
             BitWidth.U64 => SimdCode.V128Load64Lane,
-            _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
+            _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {width}"),
         };
 
         /// <summary>
@@ -450,18 +452,17 @@ namespace Wacs.Core.Instructions.SIMD
         private MemArg M;
 
         private LaneIdx X;
-        public InstMemoryLoadLane(BitWidth width) => WidthN = width;
+        public InstMemoryLoadLane(BitWidth width) : base(GetOp(width),-1) 
+            => WidthN = width;
 
-        public override ByteCode Op => WidthN switch
+        private static ByteCode GetOp(BitWidth width) => width switch
         {
             BitWidth.U8 => SimdCode.V128Load8Lane,
             BitWidth.U16 => SimdCode.V128Load16Lane,
             BitWidth.U32 => SimdCode.V128Load32Lane,
             BitWidth.U64 => SimdCode.V128Load64Lane,
-            _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
+            _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {width}"),
         };
-
-        public override int StackDiff => -1;
 
         /// <summary>
         /// @Spec 3.3.7.8. v128.loadN_lane memarge laneidx
@@ -560,18 +561,17 @@ namespace Wacs.Core.Instructions.SIMD
         private MemArg M;
 
         private LaneIdx X;
-        public InstMemoryStoreLane(BitWidth width) => WidthN = width;
+        public InstMemoryStoreLane(BitWidth width) : base(GetOp(width), -2)
+            => WidthN = width;
 
-        public override ByteCode Op => WidthN switch
+        private static ByteCode GetOp(BitWidth width) => width switch
         {
             BitWidth.U8 =>  SimdCode.V128Store8Lane,
             BitWidth.U16 => SimdCode.V128Store16Lane,
             BitWidth.U32 => SimdCode.V128Store32Lane,
             BitWidth.U64 => SimdCode.V128Store64Lane,
-            _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {WidthN}"),
+            _ => throw new InvalidDataException($"InstMemoryLoad instruction is malformed: {width}"),
         };
-
-        public override int StackDiff => -2;
 
         public InstructionBase Immediate(MemArg m)
         {

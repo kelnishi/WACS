@@ -21,13 +21,11 @@ namespace Wacs.Core.Instructions.Transpiler
 {
     public class InstStackProducerValue : InstructionBase, ITypedValueProducer<Value>
     {
-        public InstStackProducerValue()
-        {
-            Size = 0;
-        }
+        public InstStackProducerValue() : base(ByteCode.StackVal, -1) 
+            => Size = 0;
 
-        public override ByteCode Op => ByteCode.StackVal;
-
+        public int LinkStackDiff => StackDiff;
+        
         public Func<ExecContext, Value> GetFunc => FetchFromStack;
 
         public int CalculateSize() => 0;
@@ -42,19 +40,16 @@ namespace Wacs.Core.Instructions.Transpiler
         {
             context.OpStack.PopAny();
         }
-        public override int StackDiff => -1;
 
         public override void Execute(ExecContext context) {}
     }
     
     public class InstStackProducerU32 : InstructionBase, ITypedValueProducer<uint>
     {
-        public InstStackProducerU32()
-        {
-            Size = 0;
-        }
-
-        public override ByteCode Op => ByteCode.StackU32;
+        public InstStackProducerU32() : base(ByteCode.StackU32, -1) 
+            => Size = 0;
+        
+        public int LinkStackDiff => StackDiff;
 
         public Func<ExecContext, uint> GetFunc => FetchFromStack;
 
@@ -69,20 +64,17 @@ namespace Wacs.Core.Instructions.Transpiler
         {
             context.OpStack.PopI32();
         }
-        public override int StackDiff => -1;
 
         public override void Execute(ExecContext context) {}
     }
     
     public class InstStackProducerI32 : InstructionBase, ITypedValueProducer<int>
     {
-        public InstStackProducerI32()
-        {
-            Size = 0;
-        }
+        public InstStackProducerI32() : base(ByteCode.StackI32, -1) 
+            => Size = 0;
 
-        public override ByteCode Op => ByteCode.StackI32;
-
+        public int LinkStackDiff => StackDiff;
+        
         public Func<ExecContext, int> GetFunc => FetchFromStack;
 
         public int CalculateSize() => 0;
@@ -96,7 +88,6 @@ namespace Wacs.Core.Instructions.Transpiler
         {
             context.OpStack.PopI32();
         }
-        public override int StackDiff => -1;
 
         public override void Execute(ExecContext context) {}
     }

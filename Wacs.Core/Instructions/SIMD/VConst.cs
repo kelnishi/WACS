@@ -22,10 +22,10 @@ namespace Wacs.Core.Instructions.Simd
     //0x41
     public class InstV128Const : InstructionBase, IConstInstruction
     {
+        public InstV128Const() : base(ByteCode.V128Const, +1) { }
+        
         private V128 V128;
-        public override ByteCode Op => ByteCode.V128Const;
-        public override int StackDiff => +1;
-
+        
         /// <summary>
         /// @Spec 3.3.1.1 t.const
         /// </summary>
