@@ -61,9 +61,16 @@ namespace Wacs.Core.Runtime
 
         public void PushI64(long value)
         {
-            _registers[Count].Type = ValType.I64;
-            _registers[Count].Data.Int64 = value;
-            Count++;
+            try
+            {
+                _registers[Count].Type = ValType.I64;
+                _registers[Count].Data.Int64 = value;
+                Count++;
+            }
+            catch (Exception _)
+            {
+                throw;
+            }
         }
 
         public void PushU64(ulong value)
@@ -281,6 +288,12 @@ namespace Wacs.Core.Runtime
                 else
                     PushValue(new Value(type.Types[i], scalar));
             }
+        }
+
+        public void GuardExhaust(int stack)
+        {
+            if (Count + stack > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {Count + stack}");
         }
 
         public Memory<Value> ReserveLocals(int parameters, int total)

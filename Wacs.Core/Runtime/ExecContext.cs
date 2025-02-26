@@ -67,6 +67,7 @@ namespace Wacs.Core.Runtime
         public Frame Frame = NullFrame;
         public int InstructionPointer;
         public int LinkOpStackHeight;
+        public int MaxLinkOpStackHeight;
         public bool LinkUnreachable;
         public int LinkLocalCount;
         public readonly Dictionary<Value, int> LinkConstants = new();
@@ -287,6 +288,14 @@ namespace Wacs.Core.Runtime
 
         public void PushLabel(BlockTarget inst) => _linkLabelStack.Push(inst);
 
+        public void DeltaStack(int stackDiff, int maxPush = 1)
+        {
+            LinkOpStackHeight += stackDiff;
+            int maxStack = LinkOpStackHeight + maxPush;
+            if (maxStack > MaxLinkOpStackHeight)
+                MaxLinkOpStackHeight = maxStack;
+        }
+
         public BlockTarget PopLabel() => _linkLabelStack.Pop();
 
         public BlockTarget PeekLabel() => _linkLabelStack.Peek();
@@ -432,6 +441,7 @@ namespace Wacs.Core.Runtime
 
             LinkOpStackHeight = 0;
             LinkUnreachable = false;
+            MaxLinkOpStackHeight = 0;
             ClearLinkLabels();
             PushLabel(new InstExpressionProxy(new Label
             {
@@ -443,6 +453,7 @@ namespace Wacs.Core.Runtime
             linkedInstructions.Append(instance.Body.Flatten().Select((inst,idx)=>inst.Link(this, offset+idx)));
             
             instance.Length = linkedInstructions.Count - instance.LinkedOffset;
+            instance.MaxStack = MaxLinkOpStackHeight;
         }
     }
 }

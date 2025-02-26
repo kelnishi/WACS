@@ -61,8 +61,9 @@ namespace Wacs.Core.Instructions.GC
             var defType = context.Frame.Module.Types[X];
             var compositeType = defType.Expansion;
             var structType = compositeType as StructType;
-            
-            context.LinkOpStackHeight -= (structType.FieldTypes.Length-1);
+
+            int stackDiff = +1 -structType.FieldTypes.Length;
+            context.DeltaStack(stackDiff);
             return this;
         }
 
