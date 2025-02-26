@@ -20,7 +20,7 @@ namespace Wacs.Core.Instructions.Transpiler
     public interface InstructionBaseAnalog
     {
         public int CalculateSize();
-        public int StackDiff { get; }
+        public int LinkStackDiff { get; }
     }
     
 
@@ -33,7 +33,7 @@ namespace Wacs.Core.Instructions.Transpiler
 
     public interface IOptimizationTarget
     {
-        public int StackDiff { get; }
+        public int LinkStackDiff { get; }
     }
 
     public interface IValueConsumer<TIn1> {}

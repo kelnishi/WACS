@@ -27,10 +27,10 @@ namespace Wacs.Core.Instructions
     //0x3F
     public class InstMemorySize : InstructionBase
     {
+        public InstMemorySize() : base(ByteCode.MemorySize, +1) { }
+        
         private MemIdx M;
-        public override ByteCode Op => ByteCode.MemorySize;
-        public override int StackDiff => +1;
-
+        
         /// <summary>
         /// @Spec 3.3.7.10. memory.size
         /// </summary>
@@ -71,8 +71,9 @@ namespace Wacs.Core.Instructions
     //0x40
     public class InstMemoryGrow : InstructionBase
     {
+        public InstMemoryGrow() : base(ByteCode.MemoryGrow) { }
+        
         private MemIdx M;
-        public override ByteCode Op => ByteCode.MemoryGrow;
 
         /// <summary>
         /// @Spec 3.3.7.11. memory.grow
@@ -148,13 +149,11 @@ namespace Wacs.Core.Instructions
     //0xFC_08
     public class InstMemoryInit : InstructionBase
     {
+        public InstMemoryInit() : base(ByteCode.MemoryInit, -3) { }
+        
         private DataIdx X;
         private MemIdx Y;
-
-        public override ByteCode Op => ByteCode.MemoryInit;
-
-        public override int StackDiff => -3;
-
+        
         /// <summary>
         /// @Spec 3.3.7.14. memory.init
         /// </summary>
@@ -257,9 +256,10 @@ namespace Wacs.Core.Instructions
     //0xFC_09
     public class InstDataDrop : InstructionBase
     {
+        public InstDataDrop() : base(ByteCode.DataDrop) { }
+        
         private DataIdx X;
-        public override ByteCode Op => ByteCode.DataDrop;
-
+        
         /// <summary>
         /// @Spec 3.3.7.15. data.drop
         /// </summary>
@@ -302,11 +302,11 @@ namespace Wacs.Core.Instructions
     //0xFC_0A
     public class InstMemoryCopy : InstructionBase
     {
+        public InstMemoryCopy() : base(ByteCode.MemoryCopy, -3) { }
+        
         private MemIdx DstX;
         private MemIdx SrcY;
-        public override ByteCode Op => ByteCode.MemoryCopy;
-        public override int StackDiff => -3;
-
+        
         /// <summary>
         /// @Spec 3.3.7.13. memory.copy
         /// </summary>
@@ -405,11 +405,10 @@ namespace Wacs.Core.Instructions
     //0xFC_0B
     public class InstMemoryFill : InstructionBase
     {
+        public InstMemoryFill() : base(ByteCode.MemoryFill, -3) { }
+        
         private MemIdx X;
-        public override ByteCode Op => ByteCode.MemoryFill;
-
-        public override int StackDiff => -3;
-
+        
         /// <summary>
         /// @Spec 3.3.7.12. memory.fill
         /// </summary>

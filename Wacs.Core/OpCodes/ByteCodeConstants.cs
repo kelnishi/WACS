@@ -21,6 +21,9 @@ namespace Wacs.Core.OpCodes
         public static readonly ByteCode ArrayNewFixed = GcCode.ArrayNewFixed;
         public static readonly ByteCode ArrayNewData = GcCode.ArrayNewData;
         public static readonly ByteCode ArrayNewElem = GcCode.ArrayNewElem;
+        public static readonly ByteCode ArrayGetS = GcCode.ArrayGetS;
+        public static readonly ByteCode ArrayGet = GcCode.ArrayGet;
+        public static readonly ByteCode ArrayGetU = GcCode.ArrayGetU;
         public static readonly ByteCode ArraySet = GcCode.ArraySet;
         public static readonly ByteCode ArrayLen = GcCode.ArrayLen;
         public static readonly ByteCode ArrayFill = GcCode.ArrayFill;
@@ -30,6 +33,7 @@ namespace Wacs.Core.OpCodes
         public static readonly ByteCode BrOnCast = GcCode.BrOnCast;
         public static readonly ByteCode BrOnCastFail = GcCode.BrOnCastFail;
         public static readonly ByteCode AnyConvertExtern = GcCode.AnyConvertExtern;
+        public static readonly ByteCode ExternConvertAny = GcCode.ExternConvertAny;
         public static readonly ByteCode RefI31 = GcCode.RefI31;
         public static readonly ByteCode I31GetS = GcCode.I31GetS;
         public static readonly ByteCode I31GetU = GcCode.I31GetU;
@@ -47,6 +51,10 @@ namespace Wacs.Core.OpCodes
         public static readonly ByteCode RefFunc = OpCode.RefFunc;
         public static readonly ByteCode RefEq = OpCode.RefEq;
         public static readonly ByteCode RefAsNonNull = OpCode.RefAsNonNull;
+        public static readonly ByteCode RefCastNull = GcCode.RefCastNull;
+        public static readonly ByteCode RefCast = GcCode.RefCast;
+        public static readonly ByteCode RefTestNull = GcCode.RefTestNull;
+        public static readonly ByteCode RefTest = GcCode.RefTest;
         public static readonly ByteCode V128Const = SimdCode.V128Const;
         public static readonly ByteCode I8x16Shuffle = SimdCode.I8x16Shuffle;
         public static readonly ByteCode Aggr1_0 = WacsCode.Aggr1_0;
@@ -81,7 +89,10 @@ namespace Wacs.Core.OpCodes
         public static readonly ByteCode BrTable = OpCode.BrTable;
         public static readonly ByteCode Return = OpCode.Return;
         public static readonly ByteCode Call = OpCode.Call;
+        public static readonly ByteCode CallRef = OpCode.CallRef;
         public static readonly ByteCode CallIndirect = OpCode.CallIndirect;
+        public static readonly ByteCode TryTable = OpCode.TryTable;
+        public static readonly ByteCode Catch = WacsCode.Catch;
         public static readonly ByteCode Throw = OpCode.Throw;
         public static readonly ByteCode ThrowRef = OpCode.ThrowRef;
         public static readonly ByteCode GlobalGet = OpCode.GlobalGet;

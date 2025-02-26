@@ -35,14 +35,12 @@ namespace Wacs.Core.Instructions.Numeric
 
         private readonly NumericInst.ValidationDelegate _validate;
 
-        private InstF64UnOp(ByteCode op, Func<double,double> execute, NumericInst.ValidationDelegate validate)
+        private InstF64UnOp(ByteCode op, Func<double,double> execute, NumericInst.ValidationDelegate validate) : base(op)
         {
-            Op = op;
             _execute = execute;
             _validate = validate;
         }
-
-        public override ByteCode Op { get; }
+        public int LinkStackDiff => StackDiff;
 
         public Func<ExecContext, double,double> GetFunc => (_, i1) => _execute(i1);
 

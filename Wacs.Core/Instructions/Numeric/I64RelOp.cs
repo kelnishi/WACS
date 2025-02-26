@@ -56,15 +56,10 @@ namespace Wacs.Core.Instructions.Numeric
 
         private readonly NumericInst.ValidationDelegate _validate;
 
-        private InstI64RelOp(ByteCode op, NumericInst.ValidationDelegate validate)
-        {
-            Op = op;
-            _validate = validate;
-        }
-
-        public override ByteCode Op { get; }
-        public override int StackDiff => -1;
-
+        private InstI64RelOp(ByteCode op, NumericInst.ValidationDelegate validate) : base(op, -1) 
+            => _validate = validate;
+        
+        public int LinkStackDiff => StackDiff;
         public override void Validate(IWasmValidationContext context) => _validate(context); // -1
 
         private static int ExecuteI64Eq(long i1, long i2) => i1 == i2 ? 1 : 0;

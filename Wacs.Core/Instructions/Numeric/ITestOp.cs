@@ -28,14 +28,13 @@ namespace Wacs.Core.Instructions.Numeric
         private readonly Func<int, int> _execute;
         private readonly NumericInst.ValidationDelegate _validate;
 
-        private InstI32TestOp(ByteCode op, Func<int, int> execute, NumericInst.ValidationDelegate validate)
+        private InstI32TestOp(ByteCode op, Func<int, int> execute, NumericInst.ValidationDelegate validate) : base(op)
         {
-            Op = op;
             _execute = execute;
             _validate = validate;
         }
-
-        public override ByteCode Op { get; }
+        
+        public int LinkStackDiff => StackDiff;
 
         public Func<ExecContext, int, int> GetFunc => (_, i1) => _execute(i1);
 
@@ -59,14 +58,13 @@ namespace Wacs.Core.Instructions.Numeric
 
         private readonly NumericInst.ValidationDelegate _validate;
 
-        private InstI64TestOp(ByteCode op, Func<long, int> execute, NumericInst.ValidationDelegate validate)
+        private InstI64TestOp(ByteCode op, Func<long, int> execute, NumericInst.ValidationDelegate validate) : base(op)
         {
-            Op = op;
             _execute = execute;
             _validate = validate;
         }
 
-        public override ByteCode Op { get; }
+        public int LinkStackDiff => StackDiff;
 
         public Func<ExecContext, long, int> GetFunc => (_, i1) => _execute(i1);
 

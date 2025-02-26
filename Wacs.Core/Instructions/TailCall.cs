@@ -32,12 +32,8 @@ namespace Wacs.Core.Instructions
         public FuncIdx X;
         private FunctionInstance _functionInstance;
 
-        public InstReturnCall()
-        {
-            IsAsync = false;
-        }
-
-        public override ByteCode Op => ByteCode.ReturnCall;
+        public InstReturnCall() : base(ByteCode.ReturnCall) 
+            => IsAsync = false;
 
         public bool IsBound(ExecContext context)
         {
@@ -95,7 +91,7 @@ namespace Wacs.Core.Instructions
             context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
             context.LinkOpStackHeight += funcType.ResultType.Arity;
             //For recordkeeping
-            StackDiff = context.LinkOpStackHeight - stack;
+            // StackDiff = context.LinkOpStackHeight - stack;
             
             context.LinkUnreachable = true;
 
@@ -169,12 +165,8 @@ namespace Wacs.Core.Instructions
 
         private TypeIdx Y;
 
-        public InstReturnCallIndirect()
-        {
-            IsAsync = true;
-        }
-
-        public override ByteCode Op => ByteCode.ReturnCallIndirect;
+        public InstReturnCallIndirect() : base(ByteCode.ReturnCallIndirect) 
+            => IsAsync = true;
 
         public bool IsBound(ExecContext context)
         {
@@ -256,7 +248,7 @@ namespace Wacs.Core.Instructions
             context.LinkOpStackHeight += funcType.ResultType.Arity;
             
             //For recordkeeping
-            StackDiff = context.LinkOpStackHeight - stack;
+            // StackDiff = context.LinkOpStackHeight - stack;
             
             return this;
         }
@@ -443,12 +435,8 @@ namespace Wacs.Core.Instructions
     {
         public TypeIdx X;
 
-        public InstReturnCallRef()
-        {
-            IsAsync = true;
-        }
-
-        public override ByteCode Op => ByteCode.Call;
+        public InstReturnCallRef() : base(ByteCode.CallRef) 
+            => IsAsync = true;
 
         public bool IsBound(ExecContext context)
         {
@@ -497,7 +485,7 @@ namespace Wacs.Core.Instructions
             context.LinkOpStackHeight += funcType.ResultType.Arity;
             
             //For recordkeeping
-            StackDiff = context.LinkOpStackHeight - stack;
+            // StackDiff = context.LinkOpStackHeight - stack;
             
             return this;
         }
