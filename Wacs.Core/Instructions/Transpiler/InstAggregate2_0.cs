@@ -37,7 +37,7 @@ namespace Wacs.Core.Instructions.Transpiler
             Size = in1.CalculateSize() + in2.CalculateSize() + 1;
         }
 
-        public override ByteCode Op => WacsCode.Aggr2_0;
+        public override ByteCode Op => ByteCode.Aggr2_0;
 
         public override void Validate(IWasmValidationContext context)
         {

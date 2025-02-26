@@ -27,7 +27,7 @@ namespace Wacs.Core.Instructions.Numeric
     public sealed class InstI32Const : InstructionBase, IConstInstruction, ITypedValueProducer<int>
     {
         public int Value;
-        public override ByteCode Op => OpCode.I32Const;
+        public override ByteCode Op => ByteCode.I32Const;
         public override int StackDiff => +1;
         public Func<ExecContext, int> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
@@ -66,7 +66,7 @@ namespace Wacs.Core.Instructions.Numeric
     public sealed class InstI64Const : InstructionBase, IConstInstruction, ITypedValueProducer<long>
     {
         private long Value;
-        public override ByteCode Op => OpCode.I64Const;
+        public override ByteCode Op => ByteCode.I64Const;
         public override int StackDiff => +1;
         public Func<ExecContext, long> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
@@ -100,7 +100,7 @@ namespace Wacs.Core.Instructions.Numeric
     public sealed class InstF32Const : InstructionBase, IConstInstruction, ITypedValueProducer<float>
     {
         private float Value;
-        public override ByteCode Op => OpCode.F32Const;
+        public override ByteCode Op => ByteCode.F32Const;
         public override int StackDiff => +1;
         public Func<ExecContext, float> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
@@ -142,7 +142,7 @@ namespace Wacs.Core.Instructions.Numeric
     public sealed class InstF64Const : InstructionBase, IConstInstruction, ITypedValueProducer<double>
     {
         private double Value;
-        public override ByteCode Op => OpCode.F64Const;
+        public override ByteCode Op => ByteCode.F64Const;
         public override int StackDiff => +1;
         public Func<ExecContext, double> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;

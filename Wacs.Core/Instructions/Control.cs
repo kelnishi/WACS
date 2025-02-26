@@ -38,7 +38,7 @@ namespace Wacs.Core.Instructions
     public sealed class InstUnreachable : InstructionBase
     {
         public static readonly InstUnreachable Inst = new();
-        public override ByteCode Op => OpCode.Unreachable;
+        public override ByteCode Op => ByteCode.Unreachable;
 
         // @Spec 3.3.8.2 unreachable
         public override void Validate(IWasmValidationContext context)
@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions
     public sealed class InstNop : InstructionBase
     {
         public static readonly InstNop Inst = new();
-        public override ByteCode Op => OpCode.Nop;
+        public override ByteCode Op => ByteCode.Nop;
 
         // @Spec 3.3.8.1. nop
         public override void Validate(IWasmValidationContext context)
@@ -81,9 +81,8 @@ namespace Wacs.Core.Instructions
     //0x02
     public class InstBlock : BlockTarget, IBlockInstruction
     {
-        private static readonly ByteCode BlockOp = OpCode.Block;
         private Block Block;
-        public override ByteCode Op => BlockOp;
+        public override ByteCode Op => ByteCode.Block;
 
         public ValType BlockType => Block.BlockType;
 
@@ -104,7 +103,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.DiscardValues(funcType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
-                context.PushControlFrame(BlockOp, funcType);
+                context.PushControlFrame(ByteCode.Block, funcType);
                 
                 //Continue on to instructions in sequence
                 context.ValidateBlock(Block);
@@ -155,9 +154,8 @@ namespace Wacs.Core.Instructions
     //0x03
     public class InstLoop : BlockTarget, IBlockInstruction
     {
-        private static readonly ByteCode LoopOp = OpCode.Loop;
         private Block Block = null!;
-        public override ByteCode Op => LoopOp;
+        public override ByteCode Op => ByteCode.Loop;
 
         public ValType BlockType => Block.BlockType;
 
@@ -178,7 +176,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.DiscardValues(funcType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
-                context.PushControlFrame(LoopOp, funcType);
+                context.PushControlFrame(ByteCode.Loop, funcType);
                 
                 //Continue on to instructions in sequence
                 context.ValidateBlock(Block);
@@ -229,12 +227,12 @@ namespace Wacs.Core.Instructions
     //0x04
     public class InstIf : BlockTarget, IBlockInstruction, IIfInstruction
     {
-        private static readonly ByteCode IfOp = OpCode.If;
+        
         private Block ElseBlock = Block.Empty;
 
         private Block IfBlock = Block.Empty;
 
-        public override ByteCode Op => IfOp;
+        public override ByteCode Op => ByteCode.If;
 
         //Consume the predicate
         public override int StackDiff => -1;
@@ -262,7 +260,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.DiscardValues(ifType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
-                context.PushControlFrame(IfOp, ifType);
+                context.PushControlFrame(ByteCode.If, ifType);
 
                 //Continue on to instructions in sequence
                 // *any (end) contained within will pop the control frame and check values
@@ -344,15 +342,13 @@ namespace Wacs.Core.Instructions
     //0x05
     public class InstElse : BlockTarget
     {
-        // public new static readonly InstElse Inst = new();
-        private static readonly ByteCode ElseOp = OpCode.Else;
-        public override ByteCode Op => ElseOp;
+        public override ByteCode Op => ByteCode.Else;
 
         public override void Validate(IWasmValidationContext context)
         {
             var frame = context.PopControlFrame();
             context.Assert(frame.Opcode == OpCode.If, "Else terminated a non-If block");
-            context.PushControlFrame(ElseOp, frame.Types);
+            context.PushControlFrame(ByteCode.Else, frame.Types);
         }
 
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
@@ -386,7 +382,7 @@ namespace Wacs.Core.Instructions
         public bool FunctionEnd;
 
         // public static readonly InstEnd Inst = new();
-        public override ByteCode Op => OpCode.End;
+        public override ByteCode Op => ByteCode.End;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -474,7 +470,7 @@ namespace Wacs.Core.Instructions
         private LabelIdx L;
         private BlockTarget? LinkedLabel;
 
-        public override ByteCode Op => OpCode.Br;
+        public override ByteCode Op => ByteCode.Br;
 
         // @Spec 3.3.8.6. br l
         public override void Validate(IWasmValidationContext context)
@@ -587,7 +583,7 @@ namespace Wacs.Core.Instructions
         public LabelIdx L;
         private BlockTarget? LinkedLabel;
 
-        public override ByteCode Op => OpCode.BrIf;
+        public override ByteCode Op => ByteCode.BrIf;
         public override int StackDiff => -1;
 
         public Action<ExecContext, int> GetFunc => BranchIf;
@@ -662,7 +658,7 @@ namespace Wacs.Core.Instructions
 
         private LabelIdx[] Ls = null!;
 
-        public override ByteCode Op => OpCode.BrTable;
+        public override ByteCode Op => ByteCode.BrTable;
 
         public Action<ExecContext, int> GetFunc => BranchTable;
 
@@ -790,7 +786,7 @@ namespace Wacs.Core.Instructions
     public sealed class InstReturn : InstructionBase
     {
         public static readonly InstReturn Inst = new();
-        public override ByteCode Op => OpCode.Return;
+        public override ByteCode Op => ByteCode.Return;
 
         // @Spec 3.3.8.9. return
         public override void Validate(IWasmValidationContext context)
@@ -831,7 +827,7 @@ namespace Wacs.Core.Instructions
             IsAsync = true;
         }
 
-        public override ByteCode Op => OpCode.Call;
+        public override ByteCode Op => ByteCode.Call;
 
         public bool IsBound(ExecContext context)
         {
@@ -969,7 +965,7 @@ namespace Wacs.Core.Instructions
             IsAsync = true;
         }
 
-        public override ByteCode Op => OpCode.CallIndirect;
+        public override ByteCode Op => ByteCode.CallIndirect;
 
         public bool IsBound(ExecContext context)
         {

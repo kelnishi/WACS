@@ -53,7 +53,7 @@ namespace Wacs.Core.Instructions.Numeric
         public InstFusedI32Add(ITypedValueProducer<int> prev, int constant) : base(prev, constant) => 
             _execute = context => _previous(context) + _constant;
 
-        public override ByteCode Op => WacsCode.I32FusedAdd;
+        public override ByteCode Op => ByteCode.I32FusedAdd;
     }
     
     public class InstFusedI32Sub : InstFusedI32Const
@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions.Numeric
         public InstFusedI32Sub(ITypedValueProducer<int> prev, int constant) : base(prev, constant) => 
             _execute = context => _previous(context) - _constant;
 
-        public override ByteCode Op => WacsCode.I32FusedSub;
+        public override ByteCode Op => ByteCode.I32FusedSub;
     }
     
     public class InstFusedI32Mul : InstFusedI32Const
@@ -69,7 +69,7 @@ namespace Wacs.Core.Instructions.Numeric
         public InstFusedI32Mul(ITypedValueProducer<int> prev, int constant) : base(prev, constant) => 
             _execute = context => _previous(context) * _constant;
 
-        public override ByteCode Op => WacsCode.I32FusedMul;
+        public override ByteCode Op => ByteCode.I32FusedMul;
     }
     
     public abstract class InstFusedU32Const : InstructionBase, ITypedValueProducer<uint>
@@ -103,7 +103,7 @@ namespace Wacs.Core.Instructions.Numeric
         public InstFusedU32And(ITypedValueProducer<uint> prev, uint constant) : base(prev, constant) => 
             _execute = context => _previous(context) & _constant;
 
-        public override ByteCode Op => WacsCode.I32FusedAnd;
+        public override ByteCode Op => ByteCode.I32FusedAnd;
     }
     
     public class InstFusedU32Or : InstFusedU32Const
@@ -111,6 +111,6 @@ namespace Wacs.Core.Instructions.Numeric
         public InstFusedU32Or(ITypedValueProducer<uint> prev, uint constant) : base(prev, constant) => 
             _execute = context => _previous(context) | _constant;
 
-        public override ByteCode Op => WacsCode.I32FusedOr;
+        public override ByteCode Op => ByteCode.I32FusedOr;
     }
 }

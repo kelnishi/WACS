@@ -16,7 +16,7 @@ namespace Wacs.Core.Instructions.Reference
     //0xD0
     public class InstRefNull : InstructionBase, IConstInstruction
     {
-        public override ByteCode Op => OpCode.RefNull;
+        public override ByteCode Op => ByteCode.RefNull;
         private ValType Type;
 
         // @Spec 3.3.2.1. ref.null t
@@ -51,7 +51,7 @@ namespace Wacs.Core.Instructions.Reference
     //0xD1
     public class InstRefIsNull  : InstructionBase
     {
-        public override ByteCode Op => OpCode.RefIsNull;
+        public override ByteCode Op => ByteCode.RefIsNull;
 
         // @Spec 3.3.2.2. ref.is_null
         public override void Validate(IWasmValidationContext context)
@@ -76,7 +76,7 @@ namespace Wacs.Core.Instructions.Reference
     //0xD2
     public class InstRefFunc : InstructionBase, IConstInstruction
     {
-        public override ByteCode Op => OpCode.RefFunc;
+        public override ByteCode Op => ByteCode.RefFunc;
         public FuncIdx FunctionIndex { get; internal set; }
         
         // @Spec 3.3.2.3. ref.func x
@@ -128,7 +128,7 @@ namespace Wacs.Core.Instructions.Reference
     /// </summary>
     public class InstRefEq : InstructionBase
     {
-        public override ByteCode Op => OpCode.RefEq;
+        public override ByteCode Op => ByteCode.RefEq;
         public override void Validate(IWasmValidationContext context)
         {
             context.OpStack.PopType(ValType.Eq);    // -1
@@ -159,7 +159,7 @@ namespace Wacs.Core.Instructions.Reference
     /// </summary>
     public class InstRefAsNonNull : InstructionBase
     {
-        public override ByteCode Op => OpCode.RefAsNonNull;
+        public override ByteCode Op => ByteCode.RefAsNonNull;
         public override void Validate(IWasmValidationContext context)
         {
             var vRef = context.OpStack.PopRefType();    // -1

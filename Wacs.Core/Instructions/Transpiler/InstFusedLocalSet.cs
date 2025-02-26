@@ -32,7 +32,7 @@ namespace Wacs.Core.Instructions.Transpiler
             Size = 2;
         }
 
-        public override ByteCode Op => WacsCode.LocalGetSet;
+        public override ByteCode Op => ByteCode.LocalGetSet;
         public override void Validate(IWasmValidationContext context) {}
 
         public override void Execute(ExecContext context)
@@ -59,7 +59,7 @@ namespace Wacs.Core.Instructions.Transpiler
             Size = 2;
         }
 
-        public override ByteCode Op => WacsCode.LocalConstSet;
+        public override ByteCode Op => ByteCode.LocalConstSet;
         public override void Validate(IWasmValidationContext context) { }
 
         public override void Execute(ExecContext context)
