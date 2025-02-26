@@ -129,7 +129,7 @@ namespace Wacs.Core.Instructions
     public class InstThrow : InstructionBase
     {
         private TagIdx X;
-        public override ByteCode Op => OpCode.Throw;
+        public override ByteCode Op => ByteCode.Throw;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -207,7 +207,7 @@ namespace Wacs.Core.Instructions
     
     public class InstThrowRef : InstructionBase
     {
-        public override ByteCode Op => OpCode.ThrowRef;
+        public override ByteCode Op => ByteCode.ThrowRef;
 
         public override void Validate(IWasmValidationContext context)
         {

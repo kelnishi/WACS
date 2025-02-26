@@ -37,7 +37,7 @@ namespace Wacs.Core.Instructions
             IsAsync = false;
         }
 
-        public override ByteCode Op => OpCode.ReturnCall;
+        public override ByteCode Op => ByteCode.ReturnCall;
 
         public bool IsBound(ExecContext context)
         {
@@ -174,7 +174,7 @@ namespace Wacs.Core.Instructions
             IsAsync = true;
         }
 
-        public override ByteCode Op => OpCode.ReturnCallIndirect;
+        public override ByteCode Op => ByteCode.ReturnCallIndirect;
 
         public bool IsBound(ExecContext context)
         {
@@ -448,7 +448,7 @@ namespace Wacs.Core.Instructions
             IsAsync = true;
         }
 
-        public override ByteCode Op => OpCode.Call;
+        public override ByteCode Op => ByteCode.Call;
 
         public bool IsBound(ExecContext context)
         {

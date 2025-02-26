@@ -27,7 +27,7 @@ namespace Wacs.Core.Instructions
     public class InstGlobalGet : InstructionBase, IContextConstInstruction, IVarInstruction, ITypedValueProducer<Value>
     {
         private GlobalIdx Index;
-        public override ByteCode Op => OpCode.GlobalGet;
+        public override ByteCode Op => ByteCode.GlobalGet;
         public override int StackDiff => +1;
 
         public bool IsConstant(IWasmValidationContext? context)
@@ -125,7 +125,7 @@ namespace Wacs.Core.Instructions
     {
         private GlobalIdx Index;
 
-        public override ByteCode Op => OpCode.GlobalSet;
+        public override ByteCode Op => ByteCode.GlobalSet;
         public override int StackDiff => -1;
 
         public bool IsConstant(IWasmValidationContext? context) => 

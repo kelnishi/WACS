@@ -23,7 +23,7 @@ namespace Wacs.Core.Instructions
     {
         private V128 X;
 
-        public override ByteCode Op => SimdCode.I8x16Shuffle;
+        public override ByteCode Op => ByteCode.I8x16Shuffle;
         public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)

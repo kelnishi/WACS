@@ -52,7 +52,7 @@ namespace Wacs.Core.Instructions.Numeric
         public InstFusedI64Add(ITypedValueProducer<long> prev, long constant) : base(prev, constant) => 
             _execute = context => _previous(context) + _constant;
 
-        public override ByteCode Op => WacsCode.I64FusedAdd;
+        public override ByteCode Op => ByteCode.I64FusedAdd;
     }
     
     public class InstFusedI64Sub : InstFusedI64Const
@@ -60,7 +60,7 @@ namespace Wacs.Core.Instructions.Numeric
         public InstFusedI64Sub(ITypedValueProducer<long> prev, long constant) : base(prev, constant) => 
             _execute = context => _previous(context) - _constant;
 
-        public override ByteCode Op => WacsCode.I64FusedSub;
+        public override ByteCode Op => ByteCode.I64FusedSub;
     }
     
     public class InstFusedI64Mul : InstFusedI64Const
@@ -68,7 +68,7 @@ namespace Wacs.Core.Instructions.Numeric
         public InstFusedI64Mul(ITypedValueProducer<long> prev, long constant) : base(prev, constant) => 
             _execute = context => _previous(context) * _constant;
 
-        public override ByteCode Op => WacsCode.I64FusedMul;
+        public override ByteCode Op => ByteCode.I64FusedMul;
     }
     
     public abstract class InstFusedU64Const : InstructionBase, ITypedValueProducer<ulong>
@@ -102,7 +102,7 @@ namespace Wacs.Core.Instructions.Numeric
         public InstFusedU64And(ITypedValueProducer<ulong> prev, ulong constant) : base(prev, constant) => 
             _execute = context => _previous(context) & _constant;
 
-        public override ByteCode Op => WacsCode.I64FusedAnd;
+        public override ByteCode Op => ByteCode.I64FusedAnd;
     }
     
     public class InstFusedU64Or : InstFusedU64Const
@@ -110,6 +110,6 @@ namespace Wacs.Core.Instructions.Numeric
         public InstFusedU64Or(ITypedValueProducer<ulong> prev, ulong constant) : base(prev, constant) => 
             _execute = context => _previous(context) | _constant;
 
-        public override ByteCode Op => WacsCode.I64FusedOr;
+        public override ByteCode Op => ByteCode.I64FusedOr;
     }
 }

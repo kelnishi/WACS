@@ -23,7 +23,7 @@ namespace Wacs.Core.Instructions.Simd
     public class InstV128Const : InstructionBase, IConstInstruction
     {
         private V128 V128;
-        public override ByteCode Op => SimdCode.V128Const;
+        public override ByteCode Op => ByteCode.V128Const;
         public override int StackDiff => +1;
 
         /// <summary>

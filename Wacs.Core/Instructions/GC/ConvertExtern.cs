@@ -22,7 +22,7 @@ namespace Wacs.Core.Instructions.GC
 {
     public class InstAnyConvertExtern : InstructionBase, IConstInstruction
     {
-        public override ByteCode Op => GcCode.AnyConvertExtern;
+        public override ByteCode Op => ByteCode.AnyConvertExtern;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-externmathsfanyconvert_extern
@@ -62,7 +62,7 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstExternConvertAny : InstructionBase, IConstInstruction
     {
-        public override ByteCode Op => GcCode.AnyConvertExtern;
+        public override ByteCode Op => ByteCode.AnyConvertExtern;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-externmathsfexternconvert_any

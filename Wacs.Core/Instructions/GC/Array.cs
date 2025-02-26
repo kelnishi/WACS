@@ -29,7 +29,7 @@ namespace Wacs.Core.Instructions.GC
     public class InstArrayNew : InstructionBase, IConstInstruction
     {
         private TypeIdx X;
-        public override ByteCode Op => GcCode.ArrayNew;
+        public override ByteCode Op => ByteCode.ArrayNew;
         public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
@@ -100,7 +100,7 @@ namespace Wacs.Core.Instructions.GC
     public class InstArrayNewDefault : InstructionBase, IConstInstruction
     {
         private TypeIdx X;
-        public override ByteCode Op => GcCode.ArrayNewDefault;
+        public override ByteCode Op => ByteCode.ArrayNewDefault;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -159,7 +159,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private uint N;
         private TypeIdx X;
-        public override ByteCode Op => GcCode.ArrayNewFixed;
+        public override ByteCode Op => ByteCode.ArrayNewFixed;
         public override int StackDiff => -((int)N-1);
 
         public override void Validate(IWasmValidationContext context)
@@ -225,7 +225,7 @@ namespace Wacs.Core.Instructions.GC
         private TypeIdx X;
         private DataIdx Y;
 
-        public override ByteCode Op => GcCode.ArrayNewData;
+        public override ByteCode Op => ByteCode.ArrayNewData;
         public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
@@ -337,7 +337,7 @@ namespace Wacs.Core.Instructions.GC
         private TypeIdx X;
         private ElemIdx Y;
 
-        public override ByteCode Op => GcCode.ArrayNewElem;
+        public override ByteCode Op => ByteCode.ArrayNewElem;
         public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
@@ -534,7 +534,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X;
 
-        public override ByteCode Op => GcCode.ArraySet;
+        public override ByteCode Op => ByteCode.ArraySet;
         public override int StackDiff => -3;
 
         public override void Validate(IWasmValidationContext context)
@@ -617,7 +617,7 @@ namespace Wacs.Core.Instructions.GC
 
     public class InstArrayLen : InstructionBase
     {
-        public override ByteCode Op => GcCode.ArrayLen;
+        public override ByteCode Op => ByteCode.ArrayLen;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -654,7 +654,7 @@ namespace Wacs.Core.Instructions.GC
     public class InstArrayFill : InstructionBase
     {
         private TypeIdx X;
-        public override ByteCode Op => GcCode.ArrayFill;
+        public override ByteCode Op => ByteCode.ArrayFill;
         public override int StackDiff => -4;
 
         public override void Validate(IWasmValidationContext context)
@@ -736,7 +736,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private TypeIdx X; //dest
         private TypeIdx Y; //src
-        public override ByteCode Op => GcCode.ArrayCopy;
+        public override ByteCode Op => ByteCode.ArrayCopy;
         public override int StackDiff => -5;
 
         public override void Validate(IWasmValidationContext context)
@@ -865,7 +865,7 @@ namespace Wacs.Core.Instructions.GC
         private TypeIdx X;
         private DataIdx Y;
 
-        public override ByteCode Op => GcCode.ArrayInitData;
+        public override ByteCode Op => ByteCode.ArrayInitData;
         public override int StackDiff => -4;
 
         /// <summary>
@@ -996,7 +996,7 @@ namespace Wacs.Core.Instructions.GC
         private TypeIdx X;
         private ElemIdx Y;
 
-        public override ByteCode Op => GcCode.ArrayInitElem;
+        public override ByteCode Op => ByteCode.ArrayInitElem;
         public override int StackDiff => -4;
 
         /// <summary>

@@ -26,7 +26,7 @@ namespace Wacs.Core.Instructions.GC
         private const int SignBit31 = 0x4000_0000;
         private const int UnsignedMask = 0x3FFF_FFFF;
         private const ulong SignExtendBits = 0xFFFF_FFFF_C000_0000;
-        public override ByteCode Op => GcCode.RefI31;
+        public override ByteCode Op => ByteCode.RefI31;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-i31mathsfrefi31
@@ -65,7 +65,7 @@ namespace Wacs.Core.Instructions.GC
     {
         private const int SignBit31 = 0x4000_0000;
         private const int UnsignedMask = 0x3FFF_FFFF;
-        public override ByteCode Op => GcCode.I31GetS;
+        public override ByteCode Op => ByteCode.I31GetS;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -99,7 +99,7 @@ namespace Wacs.Core.Instructions.GC
     public class InstI32GetU : InstructionBase
     {
         private const uint BitMask31 = 0x7FFF_FFFF;
-        public override ByteCode Op => GcCode.I31GetU;
+        public override ByteCode Op => ByteCode.I31GetU;
 
         public override void Validate(IWasmValidationContext context)
         {

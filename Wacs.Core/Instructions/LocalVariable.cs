@@ -26,7 +26,7 @@ namespace Wacs.Core.Instructions
     public class InstLocalGet : InstructionBase, IVarInstruction, ITypedValueProducer<Value>
     {
         private int Index;
-        public override ByteCode Op => OpCode.LocalGet;
+        public override ByteCode Op => ByteCode.LocalGet;
         public override int StackDiff => +1;
 
         public Func<ExecContext, Value> GetFunc => FetchFromLocals;
@@ -45,20 +45,6 @@ namespace Wacs.Core.Instructions
         {
             Index = index;
             return this;
-        }
-
-        public override string RenderText(ExecContext? context)
-        {
-            if (context == null)
-                return $"{base.RenderText(context)} {Index}";
-            if (!context.Attributes.Live)
-                return $"{base.RenderText(context)} {Index}";
-            if (!context.Frame.Locals.ContainsIndex(Index))
-                return $"{base.RenderText(context)} {Index}";
-            
-            var value = context.Frame.Locals.Span[Index];
-            string valStr = $" (;>{value}<;)";
-            return $"{base.RenderText(context)} {Index}{valStr}";
         }
 
         //0x20
@@ -90,7 +76,7 @@ namespace Wacs.Core.Instructions
     public class InstLocalSet : InstructionBase, IVarInstruction, INodeConsumer<Value>
     {
         private int Index;
-        public override ByteCode Op => OpCode.LocalSet;
+        public override ByteCode Op => ByteCode.LocalSet;
         public override int StackDiff => -1;
 
         public Action<ExecContext, Value> GetFunc => SetLocal;
@@ -161,7 +147,7 @@ namespace Wacs.Core.Instructions
     public class InstLocalTee : InstructionBase, IVarInstruction
     {
         private int Index;
-        public override ByteCode Op => OpCode.LocalTee;
+        public override ByteCode Op => ByteCode.LocalTee;
 
         public int GetIndex() => Index;
 

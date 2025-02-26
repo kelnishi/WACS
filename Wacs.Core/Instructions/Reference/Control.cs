@@ -29,7 +29,7 @@ namespace Wacs.Core.Instructions.Reference
         private LabelIdx L;
         private BlockTarget? LinkedLabel;
 
-        public override ByteCode Op => OpCode.BrOnNull;
+        public override ByteCode Op => ByteCode.BrOnNull;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -83,7 +83,7 @@ namespace Wacs.Core.Instructions.Reference
         private LabelIdx L;
         private BlockTarget? LinkedLabel;
 
-        public override ByteCode Op => OpCode.BrOnNonNull;
+        public override ByteCode Op => ByteCode.BrOnNonNull;
         public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
@@ -142,7 +142,7 @@ namespace Wacs.Core.Instructions.Reference
             IsAsync = true;
         }
 
-        public override ByteCode Op => OpCode.Call;
+        public override ByteCode Op => ByteCode.Call;
 
         public bool IsBound(ExecContext context)
         {

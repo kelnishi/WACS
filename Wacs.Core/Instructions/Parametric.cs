@@ -29,7 +29,7 @@ namespace Wacs.Core.Instructions
     public class InstDrop : InstructionBase, INodeConsumer<Value>
     {
         public static readonly InstDrop Inst = new();
-        public override ByteCode Op => OpCode.Drop;
+        public override ByteCode Op => ByteCode.Drop;
         public override int StackDiff => -1;
 
         public Action<ExecContext, Value> GetFunc => (_, _) => { };
@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions
         private ValType[] Types = Array.Empty<ValType>();
 
         public InstSelect(bool withTypes = false) => WithTypes = withTypes;
-        public override ByteCode Op => OpCode.Select;
+        public override ByteCode Op => ByteCode.Select;
         public override int StackDiff => -2;
 
         public Func<ExecContext, Value, Value, int, Value> GetFunc => Select;
