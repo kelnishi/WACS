@@ -54,8 +54,8 @@ namespace Wacs.Core.Instructions
             GcCode.ExternConvertAny => new InstExternConvertAny(),
             
             GcCode.RefI31           => new InstRefI31(),
-            GcCode.I31GetS          => new InstI32GetS(),
-            GcCode.I31GetU          => new InstI32GetU(),
+            GcCode.I31GetS          => new InstI31GetS(),
+            GcCode.I31GetU          => new InstI31GetU(),
             
             GcCode.BrOnCast         => new InstBrOnCast(),
             GcCode.BrOnCastFail     => new InstBrOnCastFail(),

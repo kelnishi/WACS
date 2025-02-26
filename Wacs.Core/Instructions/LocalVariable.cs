@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
@@ -25,10 +26,12 @@ namespace Wacs.Core.Instructions
 {
     public class InstLocalGet : InstructionBase, IVarInstruction, ITypedValueProducer<Value>
     {
+        public InstLocalGet() : base(ByteCode.LocalGet, +1) { }
+        
         private int Index;
-        public override ByteCode Op => ByteCode.LocalGet;
-        public override int StackDiff => +1;
 
+        public int LinkStackDiff => StackDiff;
+        
         public Func<ExecContext, Value> GetFunc => FetchFromLocals;
 
         public int CalculateSize() => 1;
@@ -75,10 +78,12 @@ namespace Wacs.Core.Instructions
     
     public class InstLocalSet : InstructionBase, IVarInstruction, INodeConsumer<Value>
     {
+        public InstLocalSet() : base(ByteCode.LocalSet, -1) { }
+        
         private int Index;
-        public override ByteCode Op => ByteCode.LocalSet;
-        public override int StackDiff => -1;
 
+        public int LinkStackDiff => StackDiff;
+        
         public Action<ExecContext, Value> GetFunc => SetLocal;
 
         public int GetIndex() => (int)Index;
@@ -146,9 +151,10 @@ namespace Wacs.Core.Instructions
     
     public class InstLocalTee : InstructionBase, IVarInstruction
     {
+        public InstLocalTee() : base(ByteCode.LocalTee) { }
+        
         private int Index;
-        public override ByteCode Op => ByteCode.LocalTee;
-
+        
         public int GetIndex() => Index;
 
         public override InstructionBase Parse(BinaryReader reader)

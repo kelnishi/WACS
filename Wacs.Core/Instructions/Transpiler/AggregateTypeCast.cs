@@ -47,12 +47,13 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly ITypedValueProducer<T> _inA;
 
         protected Func<ExecContext, Value> _func = null!;
-        public int StackDiff { get; set; }
+
+        public int LinkStackDiff { get; set; }
         
         protected WrapValue(ITypedValueProducer<T> inA)
         {
             _inA = inA;
-            StackDiff = Math.Min(0, inA.StackDiff);
+            LinkStackDiff = Math.Min(0, inA.LinkStackDiff);
         }
 
         public int CalculateSize() => _inA.CalculateSize();
@@ -134,11 +135,11 @@ namespace Wacs.Core.Instructions.Transpiler
     public abstract class UnwrapValue<T> : ITypedValueProducer<T>
     {
         protected ITypedValueProducer<Value> InA;
-        public int StackDiff { get; set; }
+        public int LinkStackDiff { get; set; }
         protected UnwrapValue(ITypedValueProducer<Value> inA)
         {
             InA = inA;
-            StackDiff = Math.Min(0, inA.StackDiff);
+            LinkStackDiff = Math.Min(0, inA.LinkStackDiff);
         }
 
         public int CalculateSize() => InA.CalculateSize();
@@ -232,12 +233,12 @@ namespace Wacs.Core.Instructions.Transpiler
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
-        public int StackDiff { get; set; }
+        public int LinkStackDiff { get; set; }
 
         public CastToI32(ITypedValueProducer<T> inA)
         {
             _inA = inA;
-            StackDiff = Math.Min(0, inA.StackDiff);
+            LinkStackDiff = Math.Min(0, inA.LinkStackDiff);
             if (typeof(T) == typeof(int))
             {
                 GetFunc = ((ITypedValueProducer<int>)_inA).GetFunc;
@@ -261,12 +262,12 @@ namespace Wacs.Core.Instructions.Transpiler
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
-        public int StackDiff { get; set; }
+        public int LinkStackDiff { get; set; }
 
         public CastToU32(ITypedValueProducer<T> inA)
         {
             _inA = inA;
-            StackDiff = Math.Min(0, inA.StackDiff);
+            LinkStackDiff = Math.Min(0, inA.LinkStackDiff);
             if (typeof(T) == typeof(uint))
             {
                 GetFunc = ((ITypedValueProducer<uint>)_inA).GetFunc;
@@ -290,12 +291,12 @@ namespace Wacs.Core.Instructions.Transpiler
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
-        public int StackDiff { get; set; }
+        public int LinkStackDiff { get; set; }
 
         public CastToI64(ITypedValueProducer<T> inA)
         {
             _inA = inA;
-            StackDiff = Math.Min(0, inA.StackDiff);
+            LinkStackDiff = Math.Min(0, inA.LinkStackDiff);
             if (typeof(T) == typeof(long))
             {
                 GetFunc = ((ITypedValueProducer<long>)_inA).GetFunc;
@@ -319,12 +320,12 @@ namespace Wacs.Core.Instructions.Transpiler
         where T : struct
     {
         private readonly ITypedValueProducer<T> _inA;
-        public int StackDiff { get; set; }
+        public int LinkStackDiff { get; set; }
 
         public CastToU64(ITypedValueProducer<T> inA)
         {
             _inA = inA;
-            StackDiff = Math.Min(0, inA.StackDiff);
+            LinkStackDiff = Math.Min(0, inA.LinkStackDiff);
             if (typeof(T) == typeof(ulong))
             {
                 GetFunc = ((ITypedValueProducer<ulong>)_inA).GetFunc;

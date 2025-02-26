@@ -28,8 +28,9 @@ namespace Wacs.Core.Instructions.Numeric
         protected int _constant;
         protected Func<ExecContext, int> _execute = null!;
 
-
-        protected InstFusedI32Const(ITypedValueProducer<int> prev, int constant)
+        public int LinkStackDiff => StackDiff;
+        
+        protected InstFusedI32Const(ByteCode op, ITypedValueProducer<int> prev, int constant) : base(op, +1)
         {
             _previous = prev.GetFunc;
             _constant = constant;
@@ -40,7 +41,6 @@ namespace Wacs.Core.Instructions.Numeric
         public Func<ExecContext, int> GetFunc => _execute;
 
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public sealed override int StackDiff => +1;
 
         public override void Execute(ExecContext context)
         {
@@ -50,26 +50,20 @@ namespace Wacs.Core.Instructions.Numeric
 
     public class InstFusedI32Add : InstFusedI32Const
     {
-        public InstFusedI32Add(ITypedValueProducer<int> prev, int constant) : base(prev, constant) => 
+        public InstFusedI32Add(ITypedValueProducer<int> prev, int constant) : base(ByteCode.I32FusedAdd, prev, constant) => 
             _execute = context => _previous(context) + _constant;
-
-        public override ByteCode Op => ByteCode.I32FusedAdd;
     }
     
     public class InstFusedI32Sub : InstFusedI32Const
     {
-        public InstFusedI32Sub(ITypedValueProducer<int> prev, int constant) : base(prev, constant) => 
+        public InstFusedI32Sub(ITypedValueProducer<int> prev, int constant) : base(ByteCode.I32FusedSub, prev, constant) => 
             _execute = context => _previous(context) - _constant;
-
-        public override ByteCode Op => ByteCode.I32FusedSub;
     }
     
     public class InstFusedI32Mul : InstFusedI32Const
     {
-        public InstFusedI32Mul(ITypedValueProducer<int> prev, int constant) : base(prev, constant) => 
+        public InstFusedI32Mul(ITypedValueProducer<int> prev, int constant) : base(ByteCode.I32FusedMul, prev, constant) => 
             _execute = context => _previous(context) * _constant;
-
-        public override ByteCode Op => ByteCode.I32FusedMul;
     }
     
     public abstract class InstFusedU32Const : InstructionBase, ITypedValueProducer<uint>
@@ -79,7 +73,9 @@ namespace Wacs.Core.Instructions.Numeric
         protected uint _constant;
         protected Func<ExecContext, uint> _execute = null!;
 
-        protected InstFusedU32Const(ITypedValueProducer<uint> prev, uint constant)
+        public int LinkStackDiff => StackDiff;
+
+        protected InstFusedU32Const(ByteCode op, ITypedValueProducer<uint> prev, uint constant) : base(op, +1)
         {
             _previous = prev.GetFunc;
             _constant = constant;
@@ -90,7 +86,6 @@ namespace Wacs.Core.Instructions.Numeric
         public Func<ExecContext, uint> GetFunc => _execute;
 
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public sealed override int StackDiff => +1;
         
         public override void Execute(ExecContext context)
         {
@@ -100,17 +95,13 @@ namespace Wacs.Core.Instructions.Numeric
     
     public class InstFusedU32And : InstFusedU32Const
     {
-        public InstFusedU32And(ITypedValueProducer<uint> prev, uint constant) : base(prev, constant) => 
+        public InstFusedU32And(ITypedValueProducer<uint> prev, uint constant) : base(ByteCode.I32FusedAnd, prev, constant) => 
             _execute = context => _previous(context) & _constant;
-
-        public override ByteCode Op => ByteCode.I32FusedAnd;
     }
     
     public class InstFusedU32Or : InstFusedU32Const
     {
-        public InstFusedU32Or(ITypedValueProducer<uint> prev, uint constant) : base(prev, constant) => 
+        public InstFusedU32Or(ITypedValueProducer<uint> prev, uint constant) : base(ByteCode.I32FusedOr, prev, constant) => 
             _execute = context => _previous(context) | _constant;
-
-        public override ByteCode Op => ByteCode.I32FusedOr;
     }
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
@@ -26,10 +27,12 @@ namespace Wacs.Core.Instructions
 {
     public class InstGlobalGet : InstructionBase, IContextConstInstruction, IVarInstruction, ITypedValueProducer<Value>
     {
+        public InstGlobalGet() : base(ByteCode.GlobalGet, +1) { }
+        
         private GlobalIdx Index;
-        public override ByteCode Op => ByteCode.GlobalGet;
-        public override int StackDiff => +1;
 
+        public int LinkStackDiff => StackDiff;
+        
         public bool IsConstant(IWasmValidationContext? context)
         {
             if (context == null)
@@ -123,11 +126,12 @@ namespace Wacs.Core.Instructions
     
     public class InstGlobalSet : InstructionBase, IContextConstInstruction, IVarInstruction, INodeConsumer<Value>
     {
+        public InstGlobalSet() : base(ByteCode.GlobalSet, -1) { }
+        
         private GlobalIdx Index;
 
-        public override ByteCode Op => ByteCode.GlobalSet;
-        public override int StackDiff => -1;
-
+        public int LinkStackDiff => StackDiff;
+        
         public bool IsConstant(IWasmValidationContext? context) => 
             context == null || context.Globals.Contains(Index) && context.Globals[Index].IsImport && context.Globals[Index].Type.Mutability == Mutability.Immutable;
 

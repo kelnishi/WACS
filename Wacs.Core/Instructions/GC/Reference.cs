@@ -28,13 +28,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private ValType Ht;
         private bool Nullable = false;
-        public override ByteCode Op => Nullable ? GcCode.RefCastNull : GcCode.RefCast;
-
-        public InstRefCast(bool nullable)
-        {
-            Nullable = nullable;
-        }
         
+        public InstRefCast(bool nullable) : base(nullable?ByteCode.RefCastNull:ByteCode.RefCast) 
+            => Nullable = nullable;
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-refmathsfrefcastmathitrt
         /// </summary>
@@ -80,13 +77,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private ValType Ht;
         private bool Nullable = false;
-        public override ByteCode Op => Nullable ? GcCode.RefTestNull : GcCode.RefTest;
-
-        public InstRefTest(bool nullable)
-        {
-            Nullable = nullable;
-        }
         
+        public InstRefTest(bool nullable) : base(nullable?ByteCode.RefTestNull: ByteCode.RefTest) 
+            => Nullable = nullable;
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-refmathsfreftestmathitrt
         /// </summary>

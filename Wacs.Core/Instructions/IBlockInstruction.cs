@@ -14,6 +14,7 @@
 
 using System;
 using System.IO;
+using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types;
@@ -49,6 +50,9 @@ namespace Wacs.Core.Instructions
 
         //Elses
         public BlockTarget? Suboridinate;
+
+        protected BlockTarget(ByteCode block) : base(block, 0) { }
+        protected BlockTarget(ByteCode block, int stack) : base(block, stack) { }
 
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
         {

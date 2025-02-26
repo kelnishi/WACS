@@ -31,14 +31,13 @@ namespace Wacs.Core.Instructions.Numeric
 
         private readonly NumericInst.ValidationDelegate _validate;
 
-        private InstI64UnOp(ByteCode op, Func<ulong, ulong> execute, NumericInst.ValidationDelegate validate)
+        private InstI64UnOp(ByteCode op, Func<ulong, ulong> execute, NumericInst.ValidationDelegate validate) : base(op)
         {
-            Op = op;
             _execute = execute;
             _validate = validate;
         }
-
-        public override ByteCode Op { get; }
+        
+        public int LinkStackDiff => StackDiff;
 
         public Func<ExecContext, ulong, ulong> GetFunc => (_, i1) => _execute(i1);
 

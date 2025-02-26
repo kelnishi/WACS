@@ -26,10 +26,10 @@ namespace Wacs.Core.Instructions.Reference
 {
     public class InstBrOnNull : InstructionBase
     {
+        public InstBrOnNull() : base(ByteCode.BrOnNull) { }
+        
         private LabelIdx L;
         private BlockTarget? LinkedLabel;
-
-        public override ByteCode Op => ByteCode.BrOnNull;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -80,11 +80,10 @@ namespace Wacs.Core.Instructions.Reference
     
     public class InstBrOnNonNull : InstructionBase
     {
+        public InstBrOnNonNull() : base(ByteCode.BrOnNonNull, -1) { }
+        
         private LabelIdx L;
         private BlockTarget? LinkedLabel;
-
-        public override ByteCode Op => ByteCode.BrOnNonNull;
-        public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -137,13 +136,9 @@ namespace Wacs.Core.Instructions.Reference
         public TypeIdx X;
         private FunctionType cachedFunctionType;
 
-        public InstCallRef()
-        {
-            IsAsync = true;
-        }
-
-        public override ByteCode Op => ByteCode.Call;
-
+        public InstCallRef() : base(ByteCode.CallRef) 
+            => IsAsync = true;
+        
         public bool IsBound(ExecContext context)
         {
             return false;

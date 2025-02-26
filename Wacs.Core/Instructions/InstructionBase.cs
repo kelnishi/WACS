@@ -34,13 +34,22 @@ namespace Wacs.Core.Instructions
 
         public int Size = 1;
 
-        public virtual int StackDiff { get; set; }
-
         /// <summary>
-        /// Gets the opcode associated with the instruction.
+        /// The opcode associated with the instruction.
         /// </summary>
-        public abstract ByteCode Op { get; }
-
+        public readonly ByteCode Op;
+        
+        /// <summary>
+        /// Used in Link() to determine the operand stack height
+        /// </summary>
+        public readonly int StackDiff;
+        
+        public InstructionBase(ByteCode op, int stack) =>
+            (Op, StackDiff) = (op, stack);
+        
+        public InstructionBase(ByteCode op) =>
+            (Op, StackDiff) = (op, 0);
+        
         public abstract void Validate(IWasmValidationContext context);
 
         public virtual InstructionBase Link(ExecContext context, InstructionPointer pointer)

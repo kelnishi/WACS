@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Generic;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
@@ -24,24 +25,40 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly Action<ExecContext, TIn1, TIn2> _compute;
         private readonly Func<ExecContext, TIn1> _in1;
         private readonly Func<ExecContext, TIn2> _in2;
-        public sealed override int StackDiff { get; set; }
+        public int LinkStackDiff { get; set; }
+        private List<InstructionBase> linkDependents = new();
 
-        public InstAggregate2_0(ITypedValueProducer<TIn1> in1, ITypedValueProducer<TIn2> in2, INodeConsumer<TIn1,TIn2> compute)
+        public InstAggregate2_0(ITypedValueProducer<TIn1> in1, ITypedValueProducer<TIn2> in2, INodeConsumer<TIn1,TIn2> compute) : base(ByteCode.Aggr2_0)
         {
             _in1 = in1.GetFunc;
             _in2 = in2.GetFunc;
             
-            StackDiff = Math.Min(0, in1.StackDiff) + Math.Min(0, in2.StackDiff);
+            LinkStackDiff = Math.Min(0, in1.LinkStackDiff) + Math.Min(0, in2.LinkStackDiff);
+            
+            if (compute is IComplexLinkBehavior) 
+                linkDependents.Add((compute as InstructionBase)!);
+            
             _compute = compute.GetFunc;
 
             Size = in1.CalculateSize() + in2.CalculateSize() + 1;
         }
 
-        public override ByteCode Op => ByteCode.Aggr2_0;
-
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(false, "Validation of transpiled instructions not supported.");
+        }
+        
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            context.LinkOpStackHeight += LinkStackDiff;
+            
+            int stack = context.LinkOpStackHeight;
+            
+            foreach (var dependent in linkDependents)
+                dependent.Link(context, pointer);
+            
+            context.LinkOpStackHeight = stack;
+            return this;
         }
 
         public override void Execute(ExecContext context)

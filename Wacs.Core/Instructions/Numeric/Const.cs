@@ -26,11 +26,13 @@ namespace Wacs.Core.Instructions.Numeric
     //0x41
     public sealed class InstI32Const : InstructionBase, IConstInstruction, ITypedValueProducer<int>
     {
+        public InstI32Const() : base(ByteCode.I32Const, +1) { }
+        
         public int Value;
-        public override ByteCode Op => ByteCode.I32Const;
-        public override int StackDiff => +1;
         public Func<ExecContext, int> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
+
+        public int LinkStackDiff => StackDiff;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -65,9 +67,10 @@ namespace Wacs.Core.Instructions.Numeric
     //0x42
     public sealed class InstI64Const : InstructionBase, IConstInstruction, ITypedValueProducer<long>
     {
+        public InstI64Const() : base(ByteCode.I64Const, +1) { }
+        public int LinkStackDiff => StackDiff;
+        
         private long Value;
-        public override ByteCode Op => ByteCode.I64Const;
-        public override int StackDiff => +1;
         public Func<ExecContext, long> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
 
@@ -99,9 +102,10 @@ namespace Wacs.Core.Instructions.Numeric
     //0x43
     public sealed class InstF32Const : InstructionBase, IConstInstruction, ITypedValueProducer<float>
     {
+        public InstF32Const() : base(ByteCode.F32Const, +1) { }
+        public int LinkStackDiff => StackDiff;
+        
         private float Value;
-        public override ByteCode Op => ByteCode.F32Const;
-        public override int StackDiff => +1;
         public Func<ExecContext, float> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
 
@@ -141,9 +145,10 @@ namespace Wacs.Core.Instructions.Numeric
     //0x44
     public sealed class InstF64Const : InstructionBase, IConstInstruction, ITypedValueProducer<double>
     {
+        public InstF64Const() : base(ByteCode.F64Const, +1) { }
+        public int LinkStackDiff => StackDiff;
+        
         private double Value;
-        public override ByteCode Op => ByteCode.F64Const;
-        public override int StackDiff => +1;
         public Func<ExecContext, double> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
 
