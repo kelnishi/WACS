@@ -118,13 +118,6 @@ namespace Wacs.Core.Instructions
             }
         }
 
-        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
-        {
-            _ = base.Link(context, pointer);
-            Nop = true;
-            return this;
-        }
-
         // @Spec 4.4.8.3. block
         public override void Execute(ExecContext context)
         {
@@ -197,13 +190,6 @@ namespace Wacs.Core.Instructions
                 context.Assert(false,
                     "Instruction loop invalid. BlockType {0} did not exist in the Context.",Block.BlockType);
             }
-        }
-
-        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
-        {
-            _ = base.Link(context, pointer);
-            Nop = true;
-            return this;
         }
 
         // @Spec 4.4.8.4. loop
