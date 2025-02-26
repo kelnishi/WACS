@@ -60,6 +60,7 @@ namespace Wacs.Core.Instructions
             //Merge adjacent PointerAdvances
             if (this is InstBlock or InstLoop or InstTryTable)
             {
+                Nop = true;
                 var parent = EnclosingBlock;
                 int skips = 0;
                 int address = pointer;
