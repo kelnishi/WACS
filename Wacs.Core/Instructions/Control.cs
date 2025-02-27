@@ -518,26 +518,21 @@ namespace Wacs.Core.Instructions
 
         public static void ExecuteInstruction(ExecContext context, BlockTarget? target)
         {
-            var label = target?.Label switch
-            {
-                null => context.Frame.ReturnLabel,
-                { Instruction: { x00: OpCode.Func} } => context.Frame.ReturnLabel,
-                var l => l
-            };
+            var label = target!.Label;
+            if (label.Instruction.x00 == OpCode.Func)
+                label = context.Frame.ReturnLabel;
             
             context.Assert( context.OpStack.Count >= label.Arity,
                 $"Instruction br failed. Not enough values on the stack.");
             context.Assert(_asideVals.Count == 0,
                 "Shared temporary stack had values left in it.");
-
-            //Only reset the stack if there blocks containing extra values.
-            // An ideal solution would be to slice the OpStack array, but we don't have access.
-            if (context.OpStack.Count > context.Frame.StackHeight + label.StackHeight + label.Arity)
+            
+            int targetStackHeight = label.StackHeight + label.Arity;
+            if (label != context.Frame.ReturnLabel)
+                targetStackHeight += context.Frame.ReturnLabel.StackHeight;
+            if (context.OpStack.Count > targetStackHeight)
             {
-                //TODO Move the elements in OpStack's registers array.
-                context.OpStack.PopResults(label.Arity, ref _asideVals);
-                context.ResetStack(label);
-                context.OpStack.PushResults(_asideVals);
+                context.OpStack.ShiftResults(label.Arity, targetStackHeight);
             }
 
             switch (label.Instruction.x00)

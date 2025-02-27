@@ -282,11 +282,7 @@ namespace Wacs.Core
                 throw new InvalidDataException("Function had invalid type:{ftype}");
             
             var dummyContext = new ExecContext(store, new RuntimeAttributes { Live = false } );
-            var execFrame = dummyContext.ReserveFrame(
-                ModuleInst, 
-                new FunctionType(ResultType.Empty, funcType.ResultType), 
-                modFunc.Index,
-                modFunc.Locals);
+            var execFrame = dummyContext.ReserveFrame(ModuleInst, funcType.ResultType.Arity);
             
             dummyContext.PushFrame(execFrame);
             return dummyContext;

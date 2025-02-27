@@ -61,6 +61,7 @@ namespace Wacs.Core.Validation
         }
 
         private Frame ExecFrame { get; set; } = null!;
+        public ResultType ReturnType { get; set; }
         private ValidationOpStack Stack { get; }
 
         public ValidationContext<Module> RootContext { get; }
@@ -72,7 +73,6 @@ namespace Wacs.Core.Validation
         public FuncIdx FunctionIndex { get; set; } = FuncIdx.Default;
         public IValidationOpStack OpStack => Stack;
 
-        public ResultType ReturnType => ExecFrame.Type.ResultType;
 
 
         public Stack<ValidationControlFrame> ControlStack { get; } = new();
@@ -221,12 +221,14 @@ namespace Wacs.Core.Validation
         public void SetExecFrame(FunctionType funcType, ValType[] localTypes)
         {
             ControlStack.Clear();
+            var locals = CreateLocalsSpace(funcType.ParameterTypes.Types, localTypes);
             ExecFrame = new Frame
             {
                 Module = ValidationModule,
-                Type = funcType,
-                Locals = CreateLocalsSpace(funcType.ParameterTypes.Types, localTypes)
+                // Type = funcType,
+                Locals = locals,
             };
+            ReturnType = funcType.ResultType;
         }
 
         private static Memory<Value> CreateLocalsSpace(ValType[] parameters, ValType[] locals)
