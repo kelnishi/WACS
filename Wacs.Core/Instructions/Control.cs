@@ -377,7 +377,13 @@ namespace Wacs.Core.Instructions
     //0x0B
     public class InstEnd : InstructionBase
     {
-        public InstEnd() : base(ByteCode.End) { }
+        public static InstEnd Inst = new();
+        
+        public InstEnd() : base(ByteCode.End)
+        {
+            Nop = true;
+        }
+        
         public bool FunctionEnd;
 
         public override void Validate(IWasmValidationContext context)
@@ -404,18 +410,14 @@ namespace Wacs.Core.Instructions
             int stackDiff = stack - context.LinkOpStackHeight;
             context.DeltaStack(stackDiff, 0);
             
-            if (!FunctionEnd)
-            {
-                Nop = true;
-            }
+            if (FunctionEnd)
+                return InstFuncReturn.Inst;
             
             return this;
         }
-
-        //Skipped unless FunctionEnd is true
+        
         public override void Execute(ExecContext context)
         {
-            context.FunctionReturn();
         }
 
         // public override string RenderText(ExecContext? context)
@@ -806,9 +808,6 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.9. return
         public override void Execute(ExecContext context)
         {
-            
-            // var address = context.PopFrame();
-            // context.ResumeSequence(address);
             context.FunctionReturn();
         }
     }
