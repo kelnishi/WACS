@@ -131,7 +131,7 @@ namespace Wacs.Core.Runtime.Types
             var slice = frame.Locals.Span[parameterCount..totalCount];
             for (int ti = 0; ti < localCount; ti++)
             {
-                slice[ti] = new Value(t[ti]);
+                slice[ti].ResetToDefault(t[ti]);
             }
 
             //9.
