@@ -52,7 +52,7 @@ namespace Wacs.Core.Instructions
             OpCode.BrIf              => new InstBranchIf(),
             OpCode.BrTable           => new InstBranchTable(),
                  
-            OpCode.Return            => new InstReturn(),
+            OpCode.Return            => InstReturn.Inst,
             OpCode.Call              => new InstCall(),
             OpCode.CallIndirect      => new InstCallIndirect(),
             OpCode.CallRef           => new InstCallRef(),
@@ -60,9 +60,6 @@ namespace Wacs.Core.Instructions
             OpCode.ReturnCall         => new InstReturnCall(),
             OpCode.ReturnCallIndirect => new InstReturnCallIndirect(),
             OpCode.ReturnCallRef      => new InstReturnCallRef(),
-            
-            //When invoking externally
-            OpCode.Func              => new InstFuncReturn(),
                  
             // Reference Types 
             OpCode.RefNull           => new InstRefNull(),
