@@ -471,58 +471,6 @@ namespace Wacs.Core.Runtime
                     if (functionInstance.Module != moduleInstance) 
                         continue;
                     Context.LinkFunction(functionInstance);
-                    // Console.Error.WriteLine($"===Function {functionInstance.Index.Value}");
-                    // int head = functionInstance.LinkedOffset;
-                    // int end = head + functionInstance.Length;
-                    // for (int i = head; i < end; i++)
-                    // {
-                    //     Context.PrintInstruction(i);
-                    // }
-                }
-            }
-            
-        }
-
-        public void SynchronizeFunctionCalls(ModuleInstance moduleInstance)
-        {
-            foreach (var funcAddr in moduleInstance.FuncAddrs)
-            {
-                var instance = Store[funcAddr];
-                if (instance is FunctionInstance { Definition: { IsImport: false } } functionInstance)
-                    if (functionInstance.Module == moduleInstance)
-                    {
-                        var expr = functionInstance.Body;
-                        SynchronizeInstructions(moduleInstance, expr.Instructions);
-                    }
-            }
-        }
-
-        private void SynchronizeInstructions(ModuleInstance moduleInstance, InstructionSequence seq)
-        {
-            foreach (var inst in seq)
-            {
-                switch (inst)
-                {
-                    case InstCall instCall:
-                        var addr = moduleInstance.FuncAddrs[instCall.X];
-                        var funcInst = Store[addr];
-                        instCall.IsAsync = funcInst switch
-                        {
-                            FunctionInstance => false,
-                            HostFunction hostFunction => hostFunction.IsAsync,
-                            _ => instCall.IsAsync
-                        };
-                        break;
-                    case InstBlock instBlock:
-                        SynchronizeInstructions(moduleInstance, instBlock.GetBlock(0).Instructions);
-                        break;
-                    case InstLoop instLoop:
-                        SynchronizeInstructions(moduleInstance, instLoop.GetBlock(0).Instructions);
-                        break;
-                    case InstIf instIf:
-                        SynchronizeInstructions(moduleInstance, instIf.GetBlock(0).Instructions);
-                        SynchronizeInstructions(moduleInstance, instIf.GetBlock(1).Instructions);
-                        break;
                 }
             }
         }
