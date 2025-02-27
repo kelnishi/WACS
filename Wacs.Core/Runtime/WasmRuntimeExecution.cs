@@ -523,6 +523,27 @@ namespace Wacs.Core.Runtime
                     st.duration += Context.InstructionTimer.ElapsedTicks;
                     Context.Stats[(ushort)inst.Op] = st;
                 }
+                else if (options.CollectStats == StatsDetail.Function)
+                {
+                    Context.InstructionTimer.Restart();
+                    if (inst.PointerAdvance > 0)
+                        Context.InstructionPointer += inst.PointerAdvance;
+                    if (inst.Nop)
+                        continue;
+                    
+                    if (inst.IsAsync)
+                        await inst.ExecuteAsync(Context);
+                    else
+                        inst.Execute(Context);
+
+                    Context.InstructionTimer.Stop();
+                    Context.steps += inst.Size;
+
+                    var st = Context.Stats[Context.Frame.FuncAddr];
+                    st.count += inst.Size;
+                    st.duration += Context.InstructionTimer.ElapsedTicks;
+                    Context.Stats[Context.Frame.FuncAddr] = st;
+                }
                 else
                 {
                     Context.InstructionTimer.Start();
@@ -652,10 +673,10 @@ namespace Wacs.Core.Runtime
         private void PrintStats(InvokerOptions options)
         {
             long procTicks = Context.ProcessTimer.ElapsedTicks;
-            long totalExecs = options.CollectStats == StatsDetail.Instruction
+            long totalExecs = options.CollectStats is StatsDetail.Instruction or StatsDetail.Function
                 ? Context.Stats.Values.Sum(dc => dc.count)
                 : Context.steps;
-            long execTicks = options.CollectStats == StatsDetail.Instruction
+            long execTicks = options.CollectStats is StatsDetail.Instruction or StatsDetail.Function
                 ? Context.Stats.Values.Sum(dc => dc.duration)
                 : Context.InstructionTimer.ElapsedTicks;
             long overheadTicks = procTicks - execTicks;
@@ -690,12 +711,32 @@ namespace Wacs.Core.Runtime
             
             foreach (var (opcode, st) in orderedStats)
             {
-                string label = $"{((ByteCode)opcode).GetMnemonic()}".PadLeft(totalLabel.Length, ' ');
                 TimeSpan instTime = new TimeSpan(st.duration/100); //100ns
                 double percent = 100.0 * st.duration / execTicks;
-                string execsLabel = $"{st.count}".PadLeft(totalInst.Length, ' ');
+                int count = (int)st.count;
+                
                 string percentLabel = $"{percent:#0.###}%e".PadLeft(8,' ');
-                string instAve = $"{instTime.TotalMilliseconds * 1000000.0/st.count:#0.#}ns/i";
+                string label;
+                string instAve;
+                if (options.CollectStats == StatsDetail.Function)
+                {
+                    if (Context.Store[new FuncAddr(opcode)] is FunctionInstance func)
+                    {
+                        count = func.CallCount;
+                        label = $"{func.ModuleName}[{func.Index.Value}]".PadLeft(totalLabel.Length, ' ');
+                        instAve = $"{instTime.TotalMilliseconds * 1000000.0/count:#0.#}ns/call";
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    label = $"{((ByteCode)opcode).GetMnemonic()}".PadLeft(totalLabel.Length, ' ');
+                    instAve = $"{instTime.TotalMilliseconds * 1000000.0/count:#0.#}ns/i";
+                }
+                string execsLabel = $"{count}".PadLeft(totalInst.Length, ' ');
                 Console.Error.WriteLine($"{label}: {execsLabel}| ({percentLabel}) {instTime.TotalMilliseconds:#0.000}ms {instAve}");
             }
         }

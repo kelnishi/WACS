@@ -26,6 +26,7 @@ namespace Wacs.Core.Runtime
 {
     public sealed class Frame : IPoolable
     {
+        public ushort FuncAddr;
         public ModuleInstance Module = null!;
         public Memory<Value> Locals;
         public Label ReturnLabel = new();

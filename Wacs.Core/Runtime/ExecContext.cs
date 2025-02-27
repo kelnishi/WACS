@@ -399,6 +399,19 @@ namespace Wacs.Core.Runtime
             { 
                 Stats[(ushort)(ByteCode)opcode] = new ExecStat();
             }
+
+            for (int i = 0, l = Store.FunctionCount(); i < l; i++)
+            {
+
+                if (Store[new FuncAddr(i)] is FunctionInstance inst)
+                {
+                    inst.CallCount = 0;
+                }
+                if (!Stats.TryGetValue((ushort)i, out var stat))
+                {
+                    Stats[(ushort)i] = new ExecStat();
+                }
+            }
         }
 
         public OpCode GetEndFor() => 

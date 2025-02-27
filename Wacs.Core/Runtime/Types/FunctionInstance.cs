@@ -40,6 +40,9 @@ namespace Wacs.Core.Runtime.Types
 
         public readonly FuncIdx Index;
 
+        public FuncAddr Address;
+        public int CallCount;
+
         public readonly ModuleInstance Module;
 
         //Copied from the static Definition
@@ -120,6 +123,7 @@ namespace Wacs.Core.Runtime.Types
             //8.
             //Push the frame and operate on the frame on the stack.
             var frame = context.ReserveFrame(Module, funcType.ResultType.Arity);
+            frame.FuncAddr = (ushort)Address.Value;
             frame.Locals = context.OpStack.ReserveLocals(ParameterCount, TotalCount);
             context.OpStack.GuardExhaust(MaxStack);
                 
@@ -143,6 +147,7 @@ namespace Wacs.Core.Runtime.Types
             frame.Head = LinkedOffset;
             
             context.InstructionPointer = LinkedOffset - 1;
+            CallCount++;
         }
         
         public void TailInvoke(ExecContext context)
@@ -178,6 +183,8 @@ namespace Wacs.Core.Runtime.Types
             frame.Head = LinkedOffset;
             
             context.InstructionPointer = LinkedOffset - 1;
+            
+            CallCount++;
         }
 
         public override string ToString() => $"FunctionInstance[{Id}] (Type: {Type}, IsExport: {IsExport})";
