@@ -78,7 +78,7 @@ namespace Wacs.Core.Instructions
             OpCode.SelectT           => new InstSelect(true),
                 
             //Variable Instructions
-            OpCode.LocalGet         => new InstLocalGet(),
+            OpCode.LocalGet         => InstLocalGet.Inst,
             OpCode.LocalSet         => new InstLocalSet(),
             OpCode.LocalTee         => new InstLocalTee(),
             OpCode.GlobalGet        => new InstGlobalGet(),
@@ -118,7 +118,7 @@ namespace Wacs.Core.Instructions
             OpCode.MemoryGrow        => new InstMemoryGrow(),
                  
             // Numeric Instructions 
-            OpCode.I32Const          => new InstI32Const(),
+            OpCode.I32Const          => InstI32Const.Inst,
             OpCode.I64Const          => new InstI64Const(),
             OpCode.F32Const          => new InstF32Const(),
             OpCode.F64Const          => new InstF64Const(),
