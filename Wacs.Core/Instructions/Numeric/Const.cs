@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using Wacs.Core.Instructions.Transpiler;
@@ -26,6 +27,8 @@ namespace Wacs.Core.Instructions.Numeric
     //0x41
     public sealed class InstI32Const : InstructionBase, IConstInstruction, ITypedValueProducer<int>
     {
+        public static InstI32Const Inst = new();
+        
         public InstI32Const() : base(ByteCode.I32Const, +1) { }
         
         public int Value;
@@ -49,15 +52,22 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(Value);
         }
 
+        private static readonly Dictionary<int, InstI32Const> LookupCache = new();
+        
         public override InstructionBase Parse(BinaryReader reader) {
-            Value = reader.ReadLeb128_s32();
-            return this;
+            return Immediate(reader.ReadLeb128_s32());
         }
 
         public InstructionBase Immediate(int value)
         {
-            Value = value;
-            return this;
+            if (LookupCache.TryGetValue(value, out var get))
+                return get;
+
+            var inst = new InstI32Const {
+                Value = value
+            };
+            LookupCache.Add(value, inst);
+            return inst;
         }
 
         public int FetchImmediate(ExecContext _) => Value;
