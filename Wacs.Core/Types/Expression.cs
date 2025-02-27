@@ -138,32 +138,6 @@ namespace Wacs.Core.Types
         public bool ContainsInstructions(HashSet<ByteCode> opcodes) => 
             Instructions.ContainsInstruction(opcodes);
 
-        public IEnumerable<InstructionBase> Flatten()
-        {
-            Queue<InstructionBase> seq = new();
-            Enqueue(seq, Instructions);
-            return seq;
-        }
-
-        private static void Enqueue(Queue<InstructionBase> queue, IEnumerable<InstructionBase> instructions)
-        {
-            foreach (var inst in instructions)
-            {
-                queue.Enqueue(inst);
-                switch (inst)
-                {
-                    case IBlockInstruction node:
-                        for (int i = 0; i < node.Count; i++)
-                        {
-                            var block = node.GetBlock(i);
-                            Enqueue(queue, block.Instructions);
-                        }
-                        break;
-                    default: break;
-                }
-            }
-        }
-
         /// <summary>
         /// @Spec 3.3.10. Expressions
         /// </summary>
