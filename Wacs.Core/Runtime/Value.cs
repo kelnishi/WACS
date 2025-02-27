@@ -364,6 +364,70 @@ namespace Wacs.Core.Runtime
                     throw new InvalidDataException($"Cannot define StackValue of type {type}");
             }
         }
+
+        public void ResetToDefault(ValType type)
+        {
+            Type = type;
+            if ((type & ValType.Ref) != 0)
+            {
+                if ((type & ValType.Nullable) != 0)
+                {
+                    Data.Ptr = long.MinValue;
+                }
+                return;
+            }
+            switch (Type)
+            {
+                case ValType.I32:
+                    Data.Int32 = 0;
+                    break;
+                case ValType.I64:
+                    Data.Int64 = 0;
+                    break;
+                case ValType.F32:
+                    Data.Float32 = 0.0f;
+                    break;
+                case ValType.F64:
+                    Data.Float64 = 0.0d;
+                    break;
+                case ValType.V128:
+                    GcRef = new VecRef((V128)(0L, 0L));
+                    break;
+                case ValType.FuncRef:
+                    Data.Ptr = long.MinValue;
+                    break;
+                case ValType.Func:
+                    Data.Ptr = 0;
+                    break;
+                case ValType.ExternRef:
+                    Data.Ptr = long.MinValue;
+                    break;
+                case ValType.Extern:
+                    Data.Ptr = 0;
+                    break;
+                case ValType.Nil:
+                    Data.Ptr = long.MinValue;
+                    break;
+                case ValType.Bot:
+                    Data.Ptr = long.MinValue;
+                    break;
+                case ValType.None:
+                    Data.Ptr = long.MinValue;
+                    break;
+                case ValType.NoFunc:
+                    Data.Ptr = long.MinValue;
+                    break;
+                case ValType.NoExtern:
+                    Data.Ptr = long.MinValue;
+                    break;
+                case ValType.Any:
+                    Data.Ptr = long.MinValue;
+                    break;
+                case ValType.Undefined:
+                default:
+                    throw new InvalidDataException($"Cannot define StackValue of type {type}");
+            }
+        }
         
         public Value(object externalValue)
         {
@@ -567,7 +631,7 @@ namespace Wacs.Core.Runtime
         public FuncAddr GetFuncAddr(TypesSpace types)
         {
             if (!Type.Matches(ValType.FuncRef, types))
-                 throw new ArgumentException($"Cannot convert non-funcref ({Type}) Value to FuncAddr");
+                throw new ArgumentException($"Cannot convert non-funcref ({Type}) Value to FuncAddr");
             return new FuncAddr((int)Data.Ptr);
         }
 
