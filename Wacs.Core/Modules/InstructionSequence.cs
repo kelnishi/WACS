@@ -34,7 +34,7 @@ namespace Wacs.Core
         //public for direct array access on critical path
         public readonly List<InstructionBase> _instructions;
 
-        public int Count;
+        public int Count => _instructions.Count;
 
         public InstructionSequence()
         {
@@ -52,8 +52,6 @@ namespace Wacs.Core
                     throw new InvalidDataException("Instuction Sequence expected an end instruction");
                 instEnd.FunctionEnd = true;
             }
-            
-            Count = _instructions.Count;
         }
 
         public InstructionBase? this[int index]
@@ -72,21 +70,28 @@ namespace Wacs.Core
         /// <summary>
         /// The total number of instructions in this sequence and subsequences (blocks)
         /// </summary>
-        public int Size
-        {
-            get
-            {
-                int sum = 0;
-                for (int index = 0; index < Count; index++)
-                {
-                    var inst = _instructions[index];
-                    sum += inst is IBlockInstruction blockInst ? blockInst.BlockSize : 1;
-                }
-                return sum;
-            }
-        }
-
+        public int Size => Flatten().Count();
         public InstructionBase LastInstruction => _instructions[^1];
+        public IEnumerable<InstructionBase> Flatten() => Enqueue(new(), _instructions);
+        private static Queue<InstructionBase> Enqueue(Queue<InstructionBase> queue, IEnumerable<InstructionBase> instructions)
+        {
+            foreach (var inst in instructions)
+            {
+                queue.Enqueue(inst);
+                switch (inst)
+                {
+                    case IBlockInstruction node:
+                        for (int i = 0; i < node.Count; i++)
+                        {
+                            var block = node.GetBlock(i);
+                            Enqueue(queue, block.Instructions);
+                        }
+                        break;
+                    default: break;
+                }
+            }
+            return queue;
+        }
 
         public IEnumerator<InstructionBase> GetEnumerator() => ((IEnumerable<InstructionBase>)_instructions).GetEnumerator();
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
@@ -123,7 +128,6 @@ namespace Wacs.Core
         public void Append(IEnumerable<InstructionBase> seq)
         {
             _instructions.AddRange(seq);
-            Count = _instructions.Count;
         }
     }
 }

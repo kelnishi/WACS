@@ -433,7 +433,7 @@ namespace Wacs.Core.Runtime
                 Arity = instance.Type.ResultType.Arity
             }));
             LinkLocalCount = instance.Type.ParameterTypes.Arity + instance.Locals.Length;
-            linkedInstructions.Append(instance.Body.Flatten().Select((inst,idx)=>inst.Link(this, offset+idx)));
+            linkedInstructions.Append(instance.Body.Instructions.Flatten().Select((inst,idx)=>inst.Link(this, offset+idx)));
             
             instance.Length = linkedInstructions.Count - instance.LinkedOffset;
             instance.MaxStack = MaxLinkOpStackHeight;
