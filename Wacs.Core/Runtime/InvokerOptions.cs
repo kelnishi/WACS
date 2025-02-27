@@ -35,6 +35,7 @@ namespace Wacs.Core.Runtime
         None = 0,
         Total = 1,
         Instruction = 2,
+        Function = 4,
     }
     
     public class InvokerOptions
@@ -59,7 +60,7 @@ namespace Wacs.Core.Runtime
                 return false;
             if (ShowPath)
                 return false;
-            if (CollectStats == StatsDetail.Instruction)
+            if (CollectStats is StatsDetail.Instruction or StatsDetail.Function)
                 return false;
             return true;
         }
