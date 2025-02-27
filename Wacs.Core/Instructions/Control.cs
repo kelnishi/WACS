@@ -377,8 +377,6 @@ namespace Wacs.Core.Instructions
     //0x0B
     public class InstEnd : InstructionBase
     {
-        public static InstEnd Inst = new();
-        
         public InstEnd() : base(ByteCode.End)
         {
             Nop = true;
