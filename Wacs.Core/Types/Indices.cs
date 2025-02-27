@@ -63,14 +63,8 @@ namespace Wacs.Core.Types
         public override bool Equals(object? obj) => obj is FuncIdx other && this == other;
         public override int GetHashCode() => Value.GetHashCode();
         
-        
         public static readonly FuncIdx Default = new(uint.MaxValue);
-        public static readonly FuncIdx TableInitializers = new(uint.MaxValue - 1);
-        public static readonly FuncIdx GlobalInitializers = new(uint.MaxValue - 2);
-        public static readonly FuncIdx ElementInitializers = new(uint.MaxValue - 3);
-        public static readonly FuncIdx ElementInitialization = new(uint.MaxValue - 4);
-        public static readonly FuncIdx ExpressionEvaluation = new(uint.MaxValue - 5);
-
+        
         public override string ToString() => Value switch
         {
             uint.MaxValue => "Default",

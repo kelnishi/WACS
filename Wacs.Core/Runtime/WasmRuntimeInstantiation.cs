@@ -310,7 +310,7 @@ namespace Wacs.Core.Runtime
                 moduleInstance = AllocateModule(module);
 
                 //12.
-                var auxFrame = Context.ReserveFrame(moduleInstance, FunctionType.Empty, FuncIdx.ElementInitialization);
+                var auxFrame = Context.ReserveFrame(moduleInstance, 0);
                 //13.
                 Context.PushFrame(auxFrame);
                 try
@@ -607,7 +607,7 @@ namespace Wacs.Core.Runtime
         /// </summary>
         private Value EvaluateInitializer(ModuleInstance module, Expression ini)
         {
-            Frame initFrame = Context.ReserveFrame(module, FunctionType.SingleI32, FuncIdx.TableInitializers);
+            Frame initFrame = Context.ReserveFrame(module, 1);
             Context.PushFrame(initFrame);
 
             ini.ExecuteInitializer(Context);
