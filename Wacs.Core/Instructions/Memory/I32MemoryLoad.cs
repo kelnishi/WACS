@@ -37,7 +37,7 @@ namespace Wacs.Core.Instructions.Memory
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             long offset = context.OpStack.PopAddr();
             uint value = FetchFromMemory(context, offset);
-            context.OpStack.PushValue(value);
+            context.OpStack.PushU32(value);
         }
 
         //@Spec 4.4.7.1. t.load and t.loadN_sx

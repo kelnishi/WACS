@@ -150,25 +150,13 @@ namespace Wacs.Core.Runtime
         public ValType StackTopTopType() => 
             OpStack.Peek().Type.TopHeapType(Frame.Module.Types);
 
-        public Frame ReserveFrame(
-            ModuleInstance module,
-            FunctionType type,
-            FuncIdx index,
-            ValType[]? locals = default)
+        public Frame ReserveFrame(ModuleInstance module, int arity)
         {
-            locals ??= EmptyLocals;
-            
             var frame = _framePool.Get();
             frame.Module = module;
-            frame.Type = type;
-            frame.Index = index;
-            frame.ContinuationAddress = InstructionPointer;
-            frame.ReturnLabel.Arity = type.ResultType.Arity;
-            // int capacity = type.ParameterTypes.Types.Length + locals.Length;
-            // var localData = _localsDataPool.Rent(capacity);
-            // frame.Locals = new(localData, type.ParameterTypes.Types, locals, true);
-            frame.StackHeight = OpStack.Count;
-            
+            frame.ReturnLabel.ContinuationAddress = InstructionPointer;
+            frame.ReturnLabel.Arity = arity;
+            frame.ReturnLabel.StackHeight = OpStack.Count;
             return frame;
         }
 
@@ -184,19 +172,17 @@ namespace Wacs.Core.Runtime
         public InstructionPointer PopFrame()
         {
             var frame = _callStack.Pop();
-            
+#if STRICT_EXECUTION
             Assert( OpStack.Count >= frame.Arity + frame.StackHeight,
                 $"Instruction return failed. Operand stack underflow");
-
-            int localsCount = frame.Locals.Length;
-            // int resultCount = frame.Type.ResultType.Arity;
+#endif
             int resultCount = frame.ReturnLabel.Arity;
-            int resultsHeight = frame.StackHeight + resultCount - localsCount;
+            int resultsHeight = frame.ReturnLabel.StackHeight + resultCount - frame.Locals.Length;
             OpStack.ShiftResults(resultCount, resultsHeight);
             frame.Locals = null;
             Frame = _callStack.Count > 0 ? _callStack.Peek() : NullFrame;
             
-            var address = frame.ContinuationAddress;
+            var address = frame.ReturnLabel.ContinuationAddress;
             _framePool.Return(frame);
             return address;
         }
@@ -268,11 +254,6 @@ namespace Wacs.Core.Runtime
             }
 
             return label;
-        }
-
-        public void ResetStack(Label label)
-        {
-            OpStack.PopTo(label.StackHeight + Frame.StackHeight);
         }
 
         public void FlushCallStack()
@@ -352,8 +333,10 @@ namespace Wacs.Core.Runtime
         // @Spec 4.4.10.2. Returning from a function
         public void FunctionReturn()
         {
-            Assert( OpStack.Count >= Frame.Arity,
+#if STRICT_EXECUTION
+            Assert( OpStack.Count >= Frame.ReturnLabel.Arity,
                 $"Function Return failed. Stack did not contain return values");
+#endif
             var address = PopFrame();
             InstructionPointer = address;
         }
