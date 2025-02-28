@@ -27,13 +27,13 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly Func<ExecContext, TIn, TOut> _compute;
         private readonly Func<ExecContext, TIn> _in1;
         private readonly Func<ExecContext, Value> _wrap;
-        public sealed override int StackDiff { get; set; }
+        public int LinkStackDiff { get; set; }
         private List<InstructionBase> linkDependents = new();
         
-        public InstAggregate1_1(ITypedValueProducer<TIn> in1, INodeComputer<TIn, TOut> compute)
+        public InstAggregate1_1(ITypedValueProducer<TIn> in1, INodeComputer<TIn, TOut> compute) : base(ByteCode.Aggr1_1)
         {
             _in1 = in1.GetFunc;
-            StackDiff = Math.Min(0, in1.StackDiff);
+            LinkStackDiff = Math.Min(0, in1.LinkStackDiff);
             _compute = compute.GetFunc;
             
             if (compute is IComplexLinkBehavior) 
@@ -52,8 +52,6 @@ namespace Wacs.Core.Instructions.Transpiler
             else throw new InvalidDataException($"Could not bind aggregate type {typeof(TOut)}");
         }
 
-        public override ByteCode Op => WacsCode.Aggr1_1;
-
         public int CalculateSize() => Size;
 
         public Func<ExecContext, TOut> GetFunc => Run;
@@ -68,7 +66,7 @@ namespace Wacs.Core.Instructions.Transpiler
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             //Account for our own push to the stack if we're not subordinated
-            context.LinkOpStackHeight += StackDiff + 1;
+            context.LinkOpStackHeight += LinkStackDiff + 1;
             
             int stack = context.LinkOpStackHeight;
             

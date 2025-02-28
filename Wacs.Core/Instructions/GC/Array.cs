@@ -28,10 +28,10 @@ namespace Wacs.Core.Instructions.GC
 {
     public class InstArrayNew : InstructionBase, IConstInstruction
     {
+        public InstArrayNew() : base(ByteCode.ArrayNew, -1) { }
+        
         private TypeIdx X;
-        public override ByteCode Op => GcCode.ArrayNew;
-        public override int StackDiff => -1;
-
+        
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -99,8 +99,9 @@ namespace Wacs.Core.Instructions.GC
 
     public class InstArrayNewDefault : InstructionBase, IConstInstruction
     {
+        public InstArrayNewDefault() : base(ByteCode.ArrayNewDefault) { }
+        
         private TypeIdx X;
-        public override ByteCode Op => GcCode.ArrayNewDefault;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -157,10 +158,10 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstArrayNewFixed : InstructionBase, IConstInstruction
     {
+        public InstArrayNewFixed() : base(ByteCode.ArrayNewFixed) { }
+        
         private uint N;
         private TypeIdx X;
-        public override ByteCode Op => GcCode.ArrayNewFixed;
-        public override int StackDiff => -((int)N-1);
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -182,6 +183,13 @@ namespace Wacs.Core.Instructions.GC
             
             var resultType = ValType.Ref | (ValType)X;
             context.OpStack.PushType(resultType);   // -(N-1)
+        }
+
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            int stackDiff = +1 -(int)N;
+            context.DeltaStack(stackDiff);
+            return this;
         }
 
         public override void Execute(ExecContext context)
@@ -222,11 +230,10 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstArrayNewData : InstructionBase
     {
+        public InstArrayNewData() : base(ByteCode.ArrayNewData, -1) { }
+        
         private TypeIdx X;
         private DataIdx Y;
-
-        public override ByteCode Op => GcCode.ArrayNewData;
-        public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -334,11 +341,10 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstArrayNewElem : InstructionBase
     {
+        public InstArrayNewElem() : base(ByteCode.ArrayNewElem, -1) { }
+        
         private TypeIdx X;
         private ElemIdx Y;
-
-        public override ByteCode Op => GcCode.ArrayNewElem;
-        public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -424,20 +430,16 @@ namespace Wacs.Core.Instructions.GC
         private readonly PackedExt Sx;
         private TypeIdx X;
 
-        public InstArrayGet(PackedExt sx)
-        {
-            Sx = sx;
-        }
+        public InstArrayGet(PackedExt sx) : base(GetOp(sx), -1) 
+            => Sx = sx;
 
-        public override ByteCode Op => Sx switch
+        private static ByteCode GetOp(PackedExt sx) => sx switch
         {
-            PackedExt.Signed => GcCode.ArrayGetS,
-            PackedExt.NotPacked => GcCode.ArrayGet,
-            PackedExt.Unsigned => GcCode.ArrayGetU,
-            _ => throw new InvalidDataException($"Undefined packedtype: {Sx}")
+            PackedExt.Signed => ByteCode.ArrayGetS,
+            PackedExt.NotPacked => ByteCode.ArrayGet,
+            PackedExt.Unsigned => ByteCode.ArrayGetU,
+            _ => throw new InvalidDataException($"Undefined packedtype: {sx}")
         };
-
-        public override int StackDiff => -1;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructgetmathsf_hrefsyntax-sxmathitsxxy
@@ -532,11 +534,10 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstArraySet : InstructionBase
     {
+        public InstArraySet() : base(ByteCode.ArraySet, -3) { }
+        
         private TypeIdx X;
-
-        public override ByteCode Op => GcCode.ArraySet;
-        public override int StackDiff => -3;
-
+        
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -617,7 +618,7 @@ namespace Wacs.Core.Instructions.GC
 
     public class InstArrayLen : InstructionBase
     {
-        public override ByteCode Op => GcCode.ArrayLen;
+        public InstArrayLen() : base(ByteCode.ArrayLen) { }
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -653,10 +654,10 @@ namespace Wacs.Core.Instructions.GC
 
     public class InstArrayFill : InstructionBase
     {
+        public InstArrayFill() : base(ByteCode.ArrayFill, -4) { }
+        
         private TypeIdx X;
-        public override ByteCode Op => GcCode.ArrayFill;
-        public override int StackDiff => -4;
-
+        
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -734,11 +735,11 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstArrayCopy : InstructionBase
     {
+        public InstArrayCopy() : base(ByteCode.ArrayCopy, -5) { }
+        
         private TypeIdx X; //dest
         private TypeIdx Y; //src
-        public override ByteCode Op => GcCode.ArrayCopy;
-        public override int StackDiff => -5;
-
+        
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -862,12 +863,11 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstArrayInitData : InstructionBase
     {
+        public InstArrayInitData() : base(ByteCode.ArrayInitData, -4) { }
+        
         private TypeIdx X;
         private DataIdx Y;
-
-        public override ByteCode Op => GcCode.ArrayInitData;
-        public override int StackDiff => -4;
-
+        
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_dataxy
         /// </summary>
@@ -993,11 +993,10 @@ namespace Wacs.Core.Instructions.GC
     
     public class InstArrayInitElem : InstructionBase
     {
+        public InstArrayInitElem() : base(ByteCode.ArrayInitElem, -4) { }
+        
         private TypeIdx X;
         private ElemIdx Y;
-
-        public override ByteCode Op => GcCode.ArrayInitElem;
-        public override int StackDiff => -4;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_elemxy

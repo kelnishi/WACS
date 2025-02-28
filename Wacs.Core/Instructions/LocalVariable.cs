@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
@@ -25,40 +26,37 @@ namespace Wacs.Core.Instructions
 {
     public class InstLocalGet : InstructionBase, IVarInstruction, ITypedValueProducer<Value>
     {
+        public static InstLocalGet Inst = new();
+        
+        public InstLocalGet() : base(ByteCode.LocalGet, +1) { }
+        
         private int Index;
-        public override ByteCode Op => OpCode.LocalGet;
-        public override int StackDiff => +1;
 
+        public int LinkStackDiff => StackDiff;
+        
         public Func<ExecContext, Value> GetFunc => FetchFromLocals;
 
         public int CalculateSize() => 1;
 
         public int GetIndex() => Index;
 
+        private static readonly Dictionary<int, InstLocalGet> LookupCache = new();
+        
         public override InstructionBase Parse(BinaryReader reader)
         {
-            Index = (int)reader.ReadLeb128_u32();
-            return this;
+            return Immediate((int)reader.ReadLeb128_u32());
         }
 
         public InstructionBase Immediate(int index)
         {
-            Index = index;
-            return this;
-        }
+            if (LookupCache.TryGetValue(index, out var get))
+                return get;
 
-        public override string RenderText(ExecContext? context)
-        {
-            if (context == null)
-                return $"{base.RenderText(context)} {Index}";
-            if (!context.Attributes.Live)
-                return $"{base.RenderText(context)} {Index}";
-            if (!context.Frame.Locals.ContainsIndex(Index))
-                return $"{base.RenderText(context)} {Index}";
-            
-            var value = context.Frame.Locals.Span[Index];
-            string valStr = $" (;>{value}<;)";
-            return $"{base.RenderText(context)} {Index}{valStr}";
+            var inst = new InstLocalGet {
+                Index = index
+            };
+            LookupCache.Add(index, inst);
+            return inst;
         }
 
         //0x20
@@ -89,13 +87,15 @@ namespace Wacs.Core.Instructions
     
     public class InstLocalSet : InstructionBase, IVarInstruction, INodeConsumer<Value>
     {
+        public InstLocalSet() : base(ByteCode.LocalSet, -1) { }
+        
         private int Index;
-        public override ByteCode Op => OpCode.LocalSet;
-        public override int StackDiff => -1;
 
+        public int LinkStackDiff => StackDiff;
+        
         public Action<ExecContext, Value> GetFunc => SetLocal;
 
-        public int GetIndex() => (int)Index;
+        public int GetIndex() => Index;
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -160,9 +160,10 @@ namespace Wacs.Core.Instructions
     
     public class InstLocalTee : InstructionBase, IVarInstruction
     {
+        public InstLocalTee() : base(ByteCode.LocalTee) { }
+        
         private int Index;
-        public override ByteCode Op => OpCode.LocalTee;
-
+        
         public int GetIndex() => Index;
 
         public override InstructionBase Parse(BinaryReader reader)

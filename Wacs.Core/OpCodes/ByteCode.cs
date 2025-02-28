@@ -18,7 +18,7 @@ using System.Runtime.InteropServices;
 namespace Wacs.Core.OpCodes
 {
     [StructLayout(LayoutKind.Explicit)]
-    public struct ByteCode : IComparable<ByteCode>
+    public partial struct ByteCode : IComparable<ByteCode>
     {
         [FieldOffset(0)] public readonly OpCode       x00;
         [FieldOffset(1)] public readonly GcCode       xFB;

@@ -52,7 +52,7 @@ namespace Wacs.Core.Instructions
             OpCode.BrIf              => new InstBranchIf(),
             OpCode.BrTable           => new InstBranchTable(),
                  
-            OpCode.Return            => new InstReturn(),
+            OpCode.Return            => InstReturn.Inst,
             OpCode.Call              => new InstCall(),
             OpCode.CallIndirect      => new InstCallIndirect(),
             OpCode.CallRef           => new InstCallRef(),
@@ -60,9 +60,6 @@ namespace Wacs.Core.Instructions
             OpCode.ReturnCall         => new InstReturnCall(),
             OpCode.ReturnCallIndirect => new InstReturnCallIndirect(),
             OpCode.ReturnCallRef      => new InstReturnCallRef(),
-            
-            //When invoking externally
-            OpCode.Func              => new InstFuncReturn(),
                  
             // Reference Types 
             OpCode.RefNull           => new InstRefNull(),
@@ -81,7 +78,7 @@ namespace Wacs.Core.Instructions
             OpCode.SelectT           => new InstSelect(true),
                 
             //Variable Instructions
-            OpCode.LocalGet         => new InstLocalGet(),
+            OpCode.LocalGet         => InstLocalGet.Inst,
             OpCode.LocalSet         => new InstLocalSet(),
             OpCode.LocalTee         => new InstLocalTee(),
             OpCode.GlobalGet        => new InstGlobalGet(),
@@ -121,7 +118,7 @@ namespace Wacs.Core.Instructions
             OpCode.MemoryGrow        => new InstMemoryGrow(),
                  
             // Numeric Instructions 
-            OpCode.I32Const          => new InstI32Const(),
+            OpCode.I32Const          => InstI32Const.Inst,
             OpCode.I64Const          => new InstI64Const(),
             OpCode.F32Const          => new InstF32Const(),
             OpCode.F64Const          => new InstF64Const(),

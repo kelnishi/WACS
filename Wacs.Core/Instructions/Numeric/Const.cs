@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using Wacs.Core.Instructions.Transpiler;
@@ -26,11 +27,15 @@ namespace Wacs.Core.Instructions.Numeric
     //0x41
     public sealed class InstI32Const : InstructionBase, IConstInstruction, ITypedValueProducer<int>
     {
+        public static InstI32Const Inst = new();
+        
+        public InstI32Const() : base(ByteCode.I32Const, +1) { }
+        
         public int Value;
-        public override ByteCode Op => OpCode.I32Const;
-        public override int StackDiff => +1;
         public Func<ExecContext, int> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
+
+        public int LinkStackDiff => StackDiff;
 
         /// <summary>
         /// @Spec 3.3.1.1 t.const
@@ -47,15 +52,22 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(Value);
         }
 
+        private static readonly Dictionary<int, InstI32Const> LookupCache = new();
+        
         public override InstructionBase Parse(BinaryReader reader) {
-            Value = reader.ReadLeb128_s32();
-            return this;
+            return Immediate(reader.ReadLeb128_s32());
         }
 
         public InstructionBase Immediate(int value)
         {
-            Value = value;
-            return this;
+            if (LookupCache.TryGetValue(value, out var get))
+                return get;
+
+            var inst = new InstI32Const {
+                Value = value
+            };
+            LookupCache.Add(value, inst);
+            return inst;
         }
 
         public int FetchImmediate(ExecContext _) => Value;
@@ -65,9 +77,10 @@ namespace Wacs.Core.Instructions.Numeric
     //0x42
     public sealed class InstI64Const : InstructionBase, IConstInstruction, ITypedValueProducer<long>
     {
+        public InstI64Const() : base(ByteCode.I64Const, +1) { }
+        public int LinkStackDiff => StackDiff;
+        
         private long Value;
-        public override ByteCode Op => OpCode.I64Const;
-        public override int StackDiff => +1;
         public Func<ExecContext, long> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
 
@@ -99,9 +112,10 @@ namespace Wacs.Core.Instructions.Numeric
     //0x43
     public sealed class InstF32Const : InstructionBase, IConstInstruction, ITypedValueProducer<float>
     {
+        public InstF32Const() : base(ByteCode.F32Const, +1) { }
+        public int LinkStackDiff => StackDiff;
+        
         private float Value;
-        public override ByteCode Op => OpCode.F32Const;
-        public override int StackDiff => +1;
         public Func<ExecContext, float> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
 
@@ -141,9 +155,10 @@ namespace Wacs.Core.Instructions.Numeric
     //0x44
     public sealed class InstF64Const : InstructionBase, IConstInstruction, ITypedValueProducer<double>
     {
+        public InstF64Const() : base(ByteCode.F64Const, +1) { }
+        public int LinkStackDiff => StackDiff;
+        
         private double Value;
-        public override ByteCode Op => OpCode.F64Const;
-        public override int StackDiff => +1;
         public Func<ExecContext, double> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
 

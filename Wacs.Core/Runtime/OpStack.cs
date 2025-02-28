@@ -47,9 +47,6 @@ namespace Wacs.Core.Runtime
 
         public void PushI32(int value)
         {
-            if (Count >= _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
-
             _registers[Count].Type = ValType.I32;
             _registers[Count].Data.Int32 = value;
             Count++;
@@ -57,9 +54,6 @@ namespace Wacs.Core.Runtime
 
         public void PushU32(uint value)
         {
-            if (Count >= _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
-
             _registers[Count].Type = ValType.I32;
             _registers[Count].Data.UInt32 = value;
             Count++;
@@ -67,19 +61,20 @@ namespace Wacs.Core.Runtime
 
         public void PushI64(long value)
         {
-            if (Count >= _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
-
-            _registers[Count].Type = ValType.I64;
-            _registers[Count].Data.Int64 = value;
-            Count++;
+            try
+            {
+                _registers[Count].Type = ValType.I64;
+                _registers[Count].Data.Int64 = value;
+                Count++;
+            }
+            catch (Exception _)
+            {
+                throw;
+            }
         }
 
         public void PushU64(ulong value)
         {
-            if (Count >= _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
-
             _registers[Count].Type = ValType.I64;
             _registers[Count].Data.UInt64 = value;
             Count++;
@@ -87,9 +82,6 @@ namespace Wacs.Core.Runtime
 
         public void PushF32(float value)
         {
-            if (Count >= _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
-
             _registers[Count].Type = ValType.F32;
             _registers[Count].Data.Float32 = value;
             Count++;
@@ -97,9 +89,6 @@ namespace Wacs.Core.Runtime
 
         public void PushF64(double value)
         {
-            if (Count >= _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
-
             _registers[Count].Type = ValType.F64;
             _registers[Count].Data.Float64 = value;
             Count++;
@@ -107,9 +96,6 @@ namespace Wacs.Core.Runtime
 
         public void PushV128(V128 value)
         {
-            if (Count >= _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
-
             _registers[Count].Type = ValType.V128;
             _registers[Count].GcRef = new VecRef(value);
             Count++;
@@ -124,12 +110,9 @@ namespace Wacs.Core.Runtime
 
         public void PushValue(Value value)
         {
-            if (Count >= _stackLimit)
-                throw new WasmRuntimeException($"Operand stack exhausted {Count}");
-            _registers[Count] = value;
-            Count++;
+            _registers[Count++] = value;
         }
-
+        
         public int PopI32()
         {
             --Count;
@@ -307,8 +290,15 @@ namespace Wacs.Core.Runtime
             }
         }
 
+        public void GuardExhaust(int stack)
+        {
+            if (Count + stack > _stackLimit)
+                throw new WasmRuntimeException($"Operand stack exhausted {Count + stack}");
+        }
+
         public Memory<Value> ReserveLocals(int parameters, int total)
         {
+            //TODO: We need to account for stack use here.
             if (Count + total - parameters >= _stackLimit)
                 throw new WasmRuntimeException($"Operand stack exhausted {Count + total - parameters}");
             
@@ -332,6 +322,8 @@ namespace Wacs.Core.Runtime
         /// <param name="resultsHeight">The OpStack height after shrinking</param>
         public void ShiftResults(int resultCount, int resultsHeight)
         {
+            if (Count == resultsHeight)
+                return;
             int src = Count - resultCount;
             int dest = resultsHeight - resultCount;
             Array.Copy(_registers, src, _registers, dest, resultCount);
