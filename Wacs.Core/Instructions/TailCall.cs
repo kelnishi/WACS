@@ -32,12 +32,8 @@ namespace Wacs.Core.Instructions
         public FuncIdx X;
         private FunctionInstance _functionInstance;
 
-        public InstReturnCall()
-        {
-            IsAsync = false;
-        }
-
-        public override ByteCode Op => OpCode.ReturnCall;
+        public InstReturnCall() : base(ByteCode.ReturnCall) 
+            => IsAsync = false;
 
         public bool IsBound(ExecContext context)
         {
@@ -91,11 +87,9 @@ namespace Wacs.Core.Instructions
             }
 
             var funcType = inst.Type;
-            int stack = context.LinkOpStackHeight;
-            context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
-            context.LinkOpStackHeight += funcType.ResultType.Arity;
-            //For recordkeeping
-            StackDiff = context.LinkOpStackHeight - stack;
+
+            int stackDiff = -funcType.ParameterTypes.Arity +funcType.ResultType.Arity;
+            context.DeltaStack(stackDiff, 0);
             
             context.LinkUnreachable = true;
 
@@ -169,12 +163,8 @@ namespace Wacs.Core.Instructions
 
         private TypeIdx Y;
 
-        public InstReturnCallIndirect()
-        {
-            IsAsync = true;
-        }
-
-        public override ByteCode Op => OpCode.ReturnCallIndirect;
+        public InstReturnCallIndirect() : base(ByteCode.ReturnCallIndirect) 
+            => IsAsync = true;
 
         public bool IsBound(ExecContext context)
         {
@@ -251,12 +241,8 @@ namespace Wacs.Core.Instructions
             context.Assert(funcType,
                 $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
 
-            int stack = context.LinkOpStackHeight;
-            context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
-            context.LinkOpStackHeight += funcType.ResultType.Arity;
-            
-            //For recordkeeping
-            StackDiff = context.LinkOpStackHeight - stack;
+            int stackDiff = -funcType.ParameterTypes.Arity +funcType.ResultType.Arity;
+            context.DeltaStack(stackDiff, 0);
             
             return this;
         }
@@ -443,12 +429,8 @@ namespace Wacs.Core.Instructions
     {
         public TypeIdx X;
 
-        public InstReturnCallRef()
-        {
-            IsAsync = true;
-        }
-
-        public override ByteCode Op => OpCode.Call;
+        public InstReturnCallRef() : base(ByteCode.CallRef) 
+            => IsAsync = true;
 
         public bool IsBound(ExecContext context)
         {
@@ -491,14 +473,9 @@ namespace Wacs.Core.Instructions
         public override InstructionBase Link(ExecContext context, int pointer)
         {
             var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
-            int stack = context.LinkOpStackHeight;
-            context.LinkOpStackHeight -= 1;
-            context.LinkOpStackHeight -= funcType!.ParameterTypes.Arity;
-            context.LinkOpStackHeight += funcType.ResultType.Arity;
-            
-            //For recordkeeping
-            StackDiff = context.LinkOpStackHeight - stack;
-            
+
+            int stackDiff = -1 -funcType!.ParameterTypes.Arity +funcType.ResultType.Arity;
+            context.DeltaStack(stackDiff, 0);
             return this;
         }
 

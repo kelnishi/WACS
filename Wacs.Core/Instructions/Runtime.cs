@@ -21,17 +21,19 @@ namespace Wacs.Core.Instructions
 {
     public class InstFuncReturn : InstructionBase
     {
-        public override ByteCode Op => OpCode.Func;
+        public static InstFuncReturn Inst = new();
+        
+        public InstFuncReturn() : base(ByteCode.End) { }
 
         public override void Validate(IWasmValidationContext context)
         {
-            throw new ValidationException($"This instruction should never be present in modules.");
+            var frame = context.PopControlFrame();
+            context.OpStack.ReturnResults(frame.EndTypes);
         }
 
         public override void Execute(ExecContext context)
         {
-            //Notify the runtime?
-            // context.ResumeSequence(context.Frame.TopLabel.Head);
+            context.FunctionReturn();
         }
     }
 }

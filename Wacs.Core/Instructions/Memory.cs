@@ -30,15 +30,14 @@ namespace Wacs.Core.Instructions
 
         protected MemArg M;
 
-        protected InstMemoryLoad(ValType type, BitWidth width, ByteCode opcode)
+        protected InstMemoryLoad(ValType type, BitWidth width, ByteCode opcode) : base(opcode)
         {
             Type = type;
             WidthT = width;
             WidthTByteSize = WidthT.ByteSize();
-            Op = opcode;
         }
-
-        public override ByteCode Op { get; }
+        
+        public int LinkStackDiff => StackDiff;
 
         /// <summary>
         /// @Spec 3.3.7.1. t.load
@@ -90,16 +89,14 @@ namespace Wacs.Core.Instructions
         protected readonly int WidthTByteSize;
         protected MemArg M;
 
-        public InstMemoryStore(ValType type, BitWidth widthT, ByteCode opcode)
+        public InstMemoryStore(ValType type, BitWidth widthT, ByteCode opcode) : base(opcode, -2)
         {
             Type = type;
             WidthT = widthT;
             WidthTByteSize = WidthT.ByteSize();
-            Op = opcode;
         }
-
-        public override ByteCode Op { get; }
-        public override int StackDiff => -2;
+        
+        public int LinkStackDiff => StackDiff;
 
         /// <summary>
         /// @Spec 3.3.7.3. t.store

@@ -26,34 +26,16 @@ namespace Wacs.Core.Runtime
 {
     public sealed class Frame : IPoolable
     {
-        public InstructionPointer ContinuationAddress = -1;
-        public int Head;
-
-        public FuncIdx Index;
-        public Memory<Value> Locals;
+        public ushort FuncAddr;
         public ModuleInstance Module = null!;
-
+        public Memory<Value> Locals;
         public Label ReturnLabel = new();
-        public int StackHeight;
-
-        public FunctionType Type = null!;
-
-        public int Arity => Type.ResultType.Arity;
-
+        public int Head;
+        
         public void Clear()
         {
-            // TopLabel = default!;
             Module = default!;
             Locals = default;
-            ContinuationAddress = default;
-            Type = default!;
-            Index = default!;
-        }
-
-        public void ReturnLocals(ArrayPool<Value> dataPool)
-        {
-            // dataPool.Return(Locals.Data);
-            Locals = default!;
         }
     }
 }

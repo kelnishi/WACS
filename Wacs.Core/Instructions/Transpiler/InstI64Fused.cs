@@ -27,8 +27,9 @@ namespace Wacs.Core.Instructions.Numeric
         protected readonly Func<ExecContext, long> _previous;
         protected long _constant;
         protected Func<ExecContext, long> _execute = null!;
-
-        protected InstFusedI64Const(ITypedValueProducer<long> prev, long constant)
+        public int LinkStackDiff => StackDiff;
+        
+        protected InstFusedI64Const(ByteCode op, ITypedValueProducer<long> prev, long constant) : base(op, +1)
         {
             _previous = prev.GetFunc;
             _constant = constant;
@@ -39,7 +40,6 @@ namespace Wacs.Core.Instructions.Numeric
         public Func<ExecContext, long> GetFunc => _execute;
 
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public sealed override int StackDiff => +1;
 
         public override void Execute(ExecContext context)
         {
@@ -49,26 +49,20 @@ namespace Wacs.Core.Instructions.Numeric
 
     public class InstFusedI64Add : InstFusedI64Const
     {
-        public InstFusedI64Add(ITypedValueProducer<long> prev, long constant) : base(prev, constant) => 
+        public InstFusedI64Add(ITypedValueProducer<long> prev, long constant) : base(ByteCode.I64FusedAdd, prev, constant) => 
             _execute = context => _previous(context) + _constant;
-
-        public override ByteCode Op => WacsCode.I64FusedAdd;
     }
     
     public class InstFusedI64Sub : InstFusedI64Const
     {
-        public InstFusedI64Sub(ITypedValueProducer<long> prev, long constant) : base(prev, constant) => 
+        public InstFusedI64Sub(ITypedValueProducer<long> prev, long constant) : base(ByteCode.I64FusedSub, prev, constant) => 
             _execute = context => _previous(context) - _constant;
-
-        public override ByteCode Op => WacsCode.I64FusedSub;
     }
     
     public class InstFusedI64Mul : InstFusedI64Const
     {
-        public InstFusedI64Mul(ITypedValueProducer<long> prev, long constant) : base(prev, constant) => 
+        public InstFusedI64Mul(ITypedValueProducer<long> prev, long constant) : base(ByteCode.I64FusedMul, prev, constant) => 
             _execute = context => _previous(context) * _constant;
-
-        public override ByteCode Op => WacsCode.I64FusedMul;
     }
     
     public abstract class InstFusedU64Const : InstructionBase, ITypedValueProducer<ulong>
@@ -77,8 +71,8 @@ namespace Wacs.Core.Instructions.Numeric
         protected readonly Func<ExecContext, ulong> _previous;
         protected ulong _constant;
         protected Func<ExecContext, ulong> _execute = null!;
-
-        protected InstFusedU64Const(ITypedValueProducer<ulong> prev, ulong constant)
+        public int LinkStackDiff => StackDiff;
+        protected InstFusedU64Const(ByteCode op, ITypedValueProducer<ulong> prev, ulong constant) : base(op, +1)
         {
             _previous = prev.GetFunc;
             _constant = constant;
@@ -89,7 +83,6 @@ namespace Wacs.Core.Instructions.Numeric
         public Func<ExecContext, ulong> GetFunc => _execute;
 
         public override void Validate(IWasmValidationContext context) => _validate(context);
-        public sealed override int StackDiff => +1;
 
         public override void Execute(ExecContext context)
         {
@@ -99,17 +92,13 @@ namespace Wacs.Core.Instructions.Numeric
     
     public class InstFusedU64And : InstFusedU64Const
     {
-        public InstFusedU64And(ITypedValueProducer<ulong> prev, ulong constant) : base(prev, constant) => 
+        public InstFusedU64And(ITypedValueProducer<ulong> prev, ulong constant) : base(ByteCode.I64FusedAnd, prev, constant) => 
             _execute = context => _previous(context) & _constant;
-
-        public override ByteCode Op => WacsCode.I64FusedAnd;
     }
     
     public class InstFusedU64Or : InstFusedU64Const
     {
-        public InstFusedU64Or(ITypedValueProducer<ulong> prev, ulong constant) : base(prev, constant) => 
+        public InstFusedU64Or(ITypedValueProducer<ulong> prev, ulong constant) : base(ByteCode.I64FusedOr, prev, constant) => 
             _execute = context => _previous(context) | _constant;
-
-        public override ByteCode Op => WacsCode.I64FusedOr;
     }
 }

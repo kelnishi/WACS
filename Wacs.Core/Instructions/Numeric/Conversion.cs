@@ -59,14 +59,11 @@ namespace Wacs.Core.Instructions.Numeric
 
         private readonly NumericInst.ValidationDelegate _validate;
 
-        private InstConvert(ByteCode op, Delegate execute, NumericInst.ValidationDelegate validate)
+        private InstConvert(ByteCode op, Delegate execute, NumericInst.ValidationDelegate validate) : base(op)
         {
-            Op = op;
             _executor = CreateExecutor(execute);
             _validate = validate;
         }
-
-        public override ByteCode Op { get; }
 
         public override void Validate(IWasmValidationContext context) => _validate(context); // +0
 

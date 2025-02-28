@@ -45,17 +45,13 @@ namespace Wacs.Core.Instructions.Numeric
 
         private readonly NumericInst.ValidationDelegate _validate;
 
-        private InstF64RelOp(ByteCode op, Func<double,double,int> execute, NumericInst.ValidationDelegate validate)
+        private InstF64RelOp(ByteCode op, Func<double,double,int> execute, NumericInst.ValidationDelegate validate) : base(op, -1)
         {
-            Op = op;
             _execute = execute;
             _validate = validate;
         }
 
-
-        public override ByteCode Op { get; }
-        public override int StackDiff => -1;
-
+        public int LinkStackDiff => StackDiff;
         public Func<ExecContext, double,double,int> GetFunc => (_, i1, i2) => _execute(i1, i2);
 
         public override void Validate(IWasmValidationContext context) => _validate(context); // -1

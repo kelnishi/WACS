@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 
@@ -122,6 +123,7 @@ namespace Wacs.Core.Runtime
         {
             var funcInst = new FunctionInstance(moduleInst, func);
             var funcAddr = AddFunction(funcInst);
+            funcInst.Address = funcAddr;
             return funcAddr;
         }
 
@@ -270,5 +272,7 @@ namespace Wacs.Core.Runtime
                 Elems[addr.Value] = ElementInstance.Empty;
             }
         }
+
+        public int FunctionCount() => Funcs.Count;
     }
 }

@@ -29,10 +29,8 @@ namespace Wacs.Core.Instructions.Numeric
 
         private readonly ValidationDelegate _validate;
 
-        private NumericInst(ByteCode op, ExecuteDelegate execute, ValidationDelegate validate, int stackDiff, bool isConst = false) =>
-            (Op, _execute, _validate, StackDiff, IsConstant) = (op, execute, validate, stackDiff, isConst);
-
-        public override ByteCode Op { get; }
+        private NumericInst(ByteCode op, ExecuteDelegate execute, ValidationDelegate validate, int stackDiff, bool isConst = false) : base(op, stackDiff) 
+            => (_execute, _validate, IsConstant) = (execute, validate, isConst);
 
         public bool IsConstant { get; }
 

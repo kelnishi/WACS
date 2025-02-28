@@ -73,15 +73,13 @@ namespace Wacs.Core.Instructions.Numeric
         private readonly NumericInst.ValidationDelegate _validate;
 
 
-        private InstI32BinOp(ByteCode op, NumericInst.ValidationDelegate validate, bool isConst = false)
+        private InstI32BinOp(ByteCode op, NumericInst.ValidationDelegate validate, bool isConst = false) : base(op, -1)
         {
-            Op = op;
             _validate = validate;
             IsConstant = isConst;
         }
-
-        public override ByteCode Op { get; }
-        public override int StackDiff => -1;
+        
+        public int LinkStackDiff => StackDiff;
         public bool IsConstant { get; }
 
         public override void Validate(IWasmValidationContext context) => _validate(context); // -1

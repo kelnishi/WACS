@@ -38,7 +38,7 @@ namespace Wacs.Core.Instructions
     public sealed class InstUnreachable : InstructionBase
     {
         public static readonly InstUnreachable Inst = new();
-        public override ByteCode Op => OpCode.Unreachable;
+        private InstUnreachable() : base(ByteCode.Unreachable, 0) { }
 
         // @Spec 3.3.8.2 unreachable
         public override void Validate(IWasmValidationContext context)
@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions
     public sealed class InstNop : InstructionBase
     {
         public static readonly InstNop Inst = new();
-        public override ByteCode Op => OpCode.Nop;
+        private InstNop() : base(ByteCode.Nop, 0) { }
 
         // @Spec 3.3.8.1. nop
         public override void Validate(IWasmValidationContext context)
@@ -81,9 +81,8 @@ namespace Wacs.Core.Instructions
     //0x02
     public class InstBlock : BlockTarget, IBlockInstruction
     {
-        private static readonly ByteCode BlockOp = OpCode.Block;
+        public InstBlock() : base(ByteCode.Block) { }
         private Block Block;
-        public override ByteCode Op => BlockOp;
 
         public ValType BlockType => Block.BlockType;
 
@@ -104,7 +103,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.DiscardValues(funcType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
-                context.PushControlFrame(BlockOp, funcType);
+                context.PushControlFrame(ByteCode.Block, funcType);
                 
                 //Continue on to instructions in sequence
                 context.ValidateBlock(Block);
@@ -116,13 +115,6 @@ namespace Wacs.Core.Instructions
                 context.Assert(false,
                     "Instruction block was invalid. BlockType {0} did not exist in the Context.",Block.BlockType);
             }
-        }
-
-        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
-        {
-            _ = base.Link(context, pointer);
-            Nop = true;
-            return this;
         }
 
         // @Spec 4.4.8.3. block
@@ -162,10 +154,9 @@ namespace Wacs.Core.Instructions
     //0x03
     public class InstLoop : BlockTarget, IBlockInstruction
     {
-        private static readonly ByteCode LoopOp = OpCode.Loop;
+        public InstLoop() : base(ByteCode.Loop) { }
+        
         private Block Block = null!;
-        public override ByteCode Op => LoopOp;
-
         public ValType BlockType => Block.BlockType;
 
         public int Count => 1;
@@ -185,7 +176,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.DiscardValues(funcType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
-                context.PushControlFrame(LoopOp, funcType);
+                context.PushControlFrame(ByteCode.Loop, funcType);
                 
                 //Continue on to instructions in sequence
                 context.ValidateBlock(Block);
@@ -197,13 +188,6 @@ namespace Wacs.Core.Instructions
                 context.Assert(false,
                     "Instruction loop invalid. BlockType {0} did not exist in the Context.",Block.BlockType);
             }
-        }
-
-        public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
-        {
-            _ = base.Link(context, pointer);
-            Nop = true;
-            return this;
         }
 
         // @Spec 4.4.8.4. loop
@@ -243,16 +227,12 @@ namespace Wacs.Core.Instructions
     //0x04
     public class InstIf : BlockTarget, IBlockInstruction, IIfInstruction
     {
-        private static readonly ByteCode IfOp = OpCode.If;
+        //Consume the predicate
+        public InstIf() : base(ByteCode.If, -1) { }
+        
         private Block ElseBlock = Block.Empty;
 
         private Block IfBlock = Block.Empty;
-
-        public override ByteCode Op => IfOp;
-
-        //Consume the predicate
-        public override int StackDiff => -1;
-
 
         public ValType BlockType => IfBlock.BlockType;
 
@@ -276,7 +256,7 @@ namespace Wacs.Core.Instructions
                 context.OpStack.DiscardValues(ifType.ParameterTypes);
                 
                 //ControlStack will push the values back on (Control Frame is our Label)
-                context.PushControlFrame(IfOp, ifType);
+                context.PushControlFrame(ByteCode.If, ifType);
 
                 //Continue on to instructions in sequence
                 // *any (end) contained within will pop the control frame and check values
@@ -358,15 +338,13 @@ namespace Wacs.Core.Instructions
     //0x05
     public class InstElse : BlockTarget
     {
-        // public new static readonly InstElse Inst = new();
-        private static readonly ByteCode ElseOp = OpCode.Else;
-        public override ByteCode Op => ElseOp;
-
+        public InstElse() : base(ByteCode.Else) { }
+        
         public override void Validate(IWasmValidationContext context)
         {
             var frame = context.PopControlFrame();
             context.Assert(frame.Opcode == OpCode.If, "Else terminated a non-If block");
-            context.PushControlFrame(ElseOp, frame.Types);
+            context.PushControlFrame(ByteCode.Else, frame.Types);
         }
 
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
@@ -382,7 +360,9 @@ namespace Wacs.Core.Instructions
             target.Else = pointer + 1;
 
             //Reset and re-consume the predicate
-            context.LinkOpStackHeight = target.Label.StackHeight;
+            int stackDiff = target.Label.StackHeight - context.LinkOpStackHeight;
+            context.DeltaStack(stackDiff, 0);
+            
             return this;
         }
 
@@ -397,10 +377,12 @@ namespace Wacs.Core.Instructions
     //0x0B
     public class InstEnd : InstructionBase
     {
+        public InstEnd() : base(ByteCode.End)
+        {
+            Nop = true;
+        }
+        
         public bool FunctionEnd;
-
-        // public static readonly InstEnd Inst = new();
-        public override ByteCode Op => OpCode.End;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -419,22 +401,21 @@ namespace Wacs.Core.Instructions
                 target.Else = pointer;
 
             context.LinkUnreachable = false;
-            context.LinkOpStackHeight = target.Label.StackHeight;
-            context.LinkOpStackHeight -= target.Label.Parameters;
-            context.LinkOpStackHeight += target.Label.Results;
 
-            if (!FunctionEnd)
-            {
-                Nop = true;
-            }
+            int stack = target.Label.StackHeight
+                        - target.Label.Parameters
+                        + target.Label.Results;
+            int stackDiff = stack - context.LinkOpStackHeight;
+            context.DeltaStack(stackDiff, 0);
+            
+            if (FunctionEnd)
+                return InstFuncReturn.Inst;
             
             return this;
         }
-
-        //Skipped unless FunctionEnd is true
+        
         public override void Execute(ExecContext context)
         {
-            context.FunctionReturn();
         }
 
         // public override string RenderText(ExecContext? context)
@@ -483,12 +464,12 @@ namespace Wacs.Core.Instructions
     //0x0C
     public sealed class InstBranch : InstructionBase, IBranchInstruction
     {
+        public InstBranch() : base(ByteCode.Br) { }
+        
         private static Stack<Value> _asideVals = new();
 
         private LabelIdx L;
         private BlockTarget? LinkedLabel;
-
-        public override ByteCode Op => OpCode.Br;
 
         // @Spec 3.3.8.6. br l
         public override void Validate(IWasmValidationContext context)
@@ -517,6 +498,7 @@ namespace Wacs.Core.Instructions
 
         public static void SetStackHeight(ExecContext context, BlockTarget label)
         {
+            //DeltaStack is always negative (discard) so we can skip max stack calculation
             context.LinkOpStackHeight = label.Label.StackHeight + label.Label.Arity;
         }
 
@@ -536,26 +518,21 @@ namespace Wacs.Core.Instructions
 
         public static void ExecuteInstruction(ExecContext context, BlockTarget? target)
         {
-            var label = target?.Label switch
-            {
-                null => context.Frame.ReturnLabel,
-                { Instruction: { x00: OpCode.Func} } => context.Frame.ReturnLabel,
-                var l => l
-            };
+            var label = target!.Label;
+            if (label.Instruction.x00 == OpCode.Func)
+                label = context.Frame.ReturnLabel;
             
             context.Assert( context.OpStack.Count >= label.Arity,
                 $"Instruction br failed. Not enough values on the stack.");
             context.Assert(_asideVals.Count == 0,
                 "Shared temporary stack had values left in it.");
-
-            //Only reset the stack if there blocks containing extra values.
-            // An ideal solution would be to slice the OpStack array, but we don't have access.
-            if (context.OpStack.Count > context.Frame.StackHeight + label.StackHeight + label.Arity)
+            
+            int targetStackHeight = label.StackHeight + label.Arity;
+            if (label != context.Frame.ReturnLabel)
+                targetStackHeight += context.Frame.ReturnLabel.StackHeight;
+            if (context.OpStack.Count > targetStackHeight)
             {
-                //TODO Move the elements in OpStack's registers array.
-                context.OpStack.PopResults(label.Arity, ref _asideVals);
-                context.ResetStack(label);
-                context.OpStack.PushResults(_asideVals);
+                context.OpStack.ShiftResults(label.Arity, targetStackHeight);
             }
 
             switch (label.Instruction.x00)
@@ -598,11 +575,12 @@ namespace Wacs.Core.Instructions
     //0x0D
     public sealed class InstBranchIf : InstructionBase, IBranchInstruction, IComplexLinkBehavior, INodeConsumer<int>
     {
+        public InstBranchIf() : base(ByteCode.BrIf,-1) { }
+        
         public LabelIdx L;
         private BlockTarget? LinkedLabel;
 
-        public override ByteCode Op => OpCode.BrIf;
-        public override int StackDiff => -1;
+        public int LinkStackDiff => StackDiff;
 
         public Action<ExecContext, int> GetFunc => BranchIf;
 
@@ -670,13 +648,15 @@ namespace Wacs.Core.Instructions
     //0x0E
     public sealed class InstBranchTable : InstructionBase, IBranchInstruction, IComplexLinkBehavior, INodeConsumer<int>
     {
+        public InstBranchTable() : base(ByteCode.BrTable) { }
+        
         private BlockTarget? LinkedLabeln;
         private BlockTarget?[] LinkedLabels;
         private LabelIdx Ln; //Default m
 
         private LabelIdx[] Ls = null!;
 
-        public override ByteCode Op => OpCode.BrTable;
+        public int LinkStackDiff { get; set; }
 
         public Action<ExecContext, int> GetFunc => BranchTable;
 
@@ -714,7 +694,7 @@ namespace Wacs.Core.Instructions
             LinkedLabeln = InstBranch.PrecomputeStack(context, Ln);
             int stack = context.LinkOpStackHeight;
             InstBranch.SetStackHeight(context, LinkedLabeln);
-            StackDiff = context.LinkOpStackHeight - stack;
+            LinkStackDiff = context.LinkOpStackHeight - stack;
             
             LinkedLabels = Ls.Select(l => InstBranch.PrecomputeStack(context, l)).ToArray();
             context.LinkUnreachable = true;
@@ -803,9 +783,10 @@ namespace Wacs.Core.Instructions
     //0x0F
     public sealed class InstReturn : InstructionBase
     {
+        public InstReturn() : base(ByteCode.Return) { }
+        
         public static readonly InstReturn Inst = new();
-        public override ByteCode Op => OpCode.Return;
-
+        
         // @Spec 3.3.8.9. return
         public override void Validate(IWasmValidationContext context)
         {
@@ -825,9 +806,6 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.9. return
         public override void Execute(ExecContext context)
         {
-            
-            // var address = context.PopFrame();
-            // context.ResumeSequence(address);
             context.FunctionReturn();
         }
     }
@@ -840,12 +818,10 @@ namespace Wacs.Core.Instructions
         private FunctionInstance? linkedFunctionInstance;
         private HostFunction? linkedHostFunction;
 
-        public InstCall()
+        public InstCall() : base(ByteCode.Call)
         {
             IsAsync = true;
         }
-
-        public override ByteCode Op => OpCode.Call;
 
         public bool IsBound(ExecContext context)
         {
@@ -893,11 +869,13 @@ namespace Wacs.Core.Instructions
             }
 
             var funcType = inst.Type;
-            int stack = context.LinkOpStackHeight;
-            context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
-            context.LinkOpStackHeight += funcType.ResultType.Arity;
-            //For recordkeeping
-            StackDiff = context.LinkOpStackHeight - stack;
+            
+            int stack = context.LinkOpStackHeight
+                        - funcType.ParameterTypes.Arity
+                        + funcType.ResultType.Arity;
+            int stackDiff = stack - context.LinkOpStackHeight; 
+            
+            context.DeltaStack(stackDiff,0);
             
             return this;
         }
@@ -978,12 +956,10 @@ namespace Wacs.Core.Instructions
 
         private TypeIdx Y;
 
-        public InstCallIndirect()
+        public InstCallIndirect() : base(ByteCode.CallIndirect)
         {
             IsAsync = true;
         }
-
-        public override ByteCode Op => OpCode.CallIndirect;
 
         public bool IsBound(ExecContext context)
         {
@@ -1028,9 +1004,9 @@ namespace Wacs.Core.Instructions
                 "Instruction call_indirect was invalid. Not a FuncType. {0}", type);
 
             var at = tableType.Limits.AddressType;
-            context.OpStack.PopType(at.ToValType());
-            context.OpStack.DiscardValues(funcType.ParameterTypes);
-            context.OpStack.PushResult(funcType.ResultType);
+            context.OpStack.PopType(at.ToValType());                // -1
+            context.OpStack.DiscardValues(funcType.ParameterTypes); // -(N+1)
+            context.OpStack.PushResult(funcType.ResultType);        // -(N+1)+M
         }
 
         public override InstructionBase Link(ExecContext context, InstructionPointer pointer)
@@ -1048,11 +1024,13 @@ namespace Wacs.Core.Instructions
             context.Assert(funcType,
                 $"Instruction {Op.GetMnemonic()} failed. Not a function type.");
 
-            int stack = context.LinkOpStackHeight;
-            context.LinkOpStackHeight -= funcType.ParameterTypes.Arity;
-            context.LinkOpStackHeight += funcType.ResultType.Arity;
-            //For recordkeeping
-            StackDiff = context.LinkOpStackHeight - stack;
+            int stack = context.LinkOpStackHeight
+                        - 1
+                        - funcType.ParameterTypes.Arity
+                        + funcType.ResultType.Arity;
+            int stackDiff = stack - context.LinkOpStackHeight;
+            
+            context.DeltaStack(stackDiff, 0);
             
             //TODO Precompute call targets, cache the whole table
             

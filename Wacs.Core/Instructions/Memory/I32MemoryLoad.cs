@@ -37,7 +37,7 @@ namespace Wacs.Core.Instructions.Memory
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             long offset = context.OpStack.PopAddr();
             uint value = FetchFromMemory(context, offset);
-            context.OpStack.PushValue(value);
+            context.OpStack.PushU32(value);
         }
 
         //@Spec 4.4.7.1. t.load and t.loadN_sx
@@ -65,7 +65,7 @@ namespace Wacs.Core.Instructions.Memory
             context.Assert( context.Store.Contains(a),
                 $"Instruction {Op.GetMnemonic()} failed. Address for Memory 0 was not in the Store.");
             cachedInstance = context.Store[a];
-            return this;
+            return base.Link(context, pointer);
         }
     }
     
