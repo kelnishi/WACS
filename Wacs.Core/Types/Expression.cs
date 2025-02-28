@@ -97,10 +97,10 @@ namespace Wacs.Core.Types
         public void ExecuteInitializer(ExecContext context)
         {
             int callStackHeight = context.StackHeight;
-            var frame = context.ReserveFrame(context.Frame.Module, FunctionType.Empty, FuncIdx.ExpressionEvaluation);
+            var frame = context.ReserveFrame(context.Frame.Module, 0);
             if (context.OpStack.Count != 0)
                 throw new InvalidDataException("OpStack should be empty");
-            frame.ReturnLabel = LabelTarget.Label;
+            frame.ReturnLabel = new (LabelTarget.Label);
             context.PushFrame(frame);
             foreach (var inst in Instructions)
             {
@@ -137,32 +137,6 @@ namespace Wacs.Core.Types
 
         public bool ContainsInstructions(HashSet<ByteCode> opcodes) => 
             Instructions.ContainsInstruction(opcodes);
-
-        public IEnumerable<InstructionBase> Flatten()
-        {
-            Queue<InstructionBase> seq = new();
-            Enqueue(seq, Instructions);
-            return seq;
-        }
-
-        private static void Enqueue(Queue<InstructionBase> queue, IEnumerable<InstructionBase> instructions)
-        {
-            foreach (var inst in instructions)
-            {
-                queue.Enqueue(inst);
-                switch (inst)
-                {
-                    case IBlockInstruction node:
-                        for (int i = 0; i < node.Count; i++)
-                        {
-                            var block = node.GetBlock(i);
-                            Enqueue(queue, block.Instructions);
-                        }
-                        break;
-                    default: break;
-                }
-            }
-        }
 
         /// <summary>
         /// @Spec 3.3.10. Expressions

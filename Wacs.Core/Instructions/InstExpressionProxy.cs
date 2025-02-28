@@ -20,17 +20,14 @@ namespace Wacs.Core.Instructions
 {
     public class InstExpressionProxy : BlockTarget
     {
-        private readonly ByteCode _op = OpCode.Expr;
-
-        public InstExpressionProxy(Label label)
+        public InstExpressionProxy(Label label) : base(ByteCode.Expr)
         {
             EnclosingBlock = this;
             Label = label;
             //Ensure that we jump out of invocations
             End = -1;
         }
-
-        public override ByteCode Op => _op;
+        
         public override void Validate(IWasmValidationContext context) { }
 
         public override void Execute(ExecContext context) { }

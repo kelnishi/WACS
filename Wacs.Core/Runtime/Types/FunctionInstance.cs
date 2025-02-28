@@ -40,17 +40,24 @@ namespace Wacs.Core.Runtime.Types
 
         public readonly FuncIdx Index;
 
+        public FuncAddr Address;
+        public int CallCount;
+
         public readonly ModuleInstance Module;
 
         //Copied from the static Definition
         //Can be processed with optimization passes
         public Expression Body;
         public int Length;
+        public int MaxStack;
 
         public InstructionPointer LinkedOffset;
 
         //Copied from the static Definition
         public ValType[] Locals;
+        private int LocalCount;
+        private int ParameterCount;
+        private int TotalCount;
 
         /// <summary>
         /// @Spec 4.5.3.1. Functions
@@ -69,6 +76,9 @@ namespace Wacs.Core.Runtime.Types
             Body = definition.Body;
             Body.LabelTarget.Label.Arity = Type.ResultType.Arity;
             Locals = definition.Locals;
+            LocalCount = Locals.Length;
+            ParameterCount = funcType.ParameterTypes.Arity;
+            TotalCount = LocalCount + ParameterCount;
             Index = definition.Index;
             
             if (!string.IsNullOrEmpty(Definition.Id))
@@ -112,23 +122,19 @@ namespace Wacs.Core.Runtime.Types
 #endif
             //8.
             //Push the frame and operate on the frame on the stack.
-            var frame = context.ReserveFrame(Module, funcType, Index, t);
-            int parameterCount = funcType.ParameterTypes.Arity;
-            int localCount = t.Length;
-            int totalCount = parameterCount + localCount;
-            //Load parameters
-            // int li = context.OpStack.PopResults(funcType.ParameterTypes, ref frame.Locals.Data);
-            // frame.StackHeight -= li;
-
-            frame.Locals = context.OpStack.ReserveLocals(parameterCount, totalCount);
+            var frame = context.ReserveFrame(Module, funcType.ResultType.Arity);
+            frame.FuncAddr = (ushort)Address.Value;
+            frame.Locals = context.OpStack.ReserveLocals(ParameterCount, TotalCount);
+            context.OpStack.GuardExhaust(MaxStack);
+                
             //Return the stack to this height after the function returns
-            frame.StackHeight += localCount;
+            frame.ReturnLabel.StackHeight += LocalCount;
             
             //Set the Locals to default
-            var slice = frame.Locals.Span[parameterCount..totalCount];
-            for (int ti = 0; ti < localCount; ti++)
+            var slice = frame.Locals.Span[ParameterCount..TotalCount];
+            for (int ti = 0; ti < LocalCount; ti++)
             {
-                slice[ti] = new Value(t[ti]);
+                slice[ti].ResetToDefault(t[ti]);
             }
 
             //9.
@@ -140,9 +146,8 @@ namespace Wacs.Core.Runtime.Types
             frame.ReturnLabel.ContinuationAddress = context.GetPointer();
             frame.Head = LinkedOffset;
             
-            // frame.SetLabel(Body.LabelTarget); 
-            
             context.InstructionPointer = LinkedOffset - 1;
+            CallCount++;
         }
         
         public void TailInvoke(ExecContext context)
@@ -154,26 +159,20 @@ namespace Wacs.Core.Runtime.Types
             var t = Locals;
             
             frame.Module = Module;
-            frame.Type = funcType;
-            frame.Index = Index;
-            
-            int parameterCount = funcType.ParameterTypes.Arity;
-            
+
             int lastLocalsCount = frame.Locals.Length;
-            int resultCount = frame.Type.ResultType.Arity;
-            int resultsHeight = frame.StackHeight - lastLocalsCount + parameterCount;
-            context.OpStack.ShiftResults(parameterCount, resultsHeight);
-            
-            int localsCount = t.Length;
-            int totalCount = parameterCount + localsCount;
-            frame.Locals = context.OpStack.ReserveLocals(parameterCount, totalCount);
+            int resultsHeight = frame.ReturnLabel.StackHeight - lastLocalsCount + ParameterCount;
+            context.OpStack.ShiftResults(ParameterCount, resultsHeight);
+
+            frame.Locals = context.OpStack.ReserveLocals(ParameterCount, TotalCount);
+            context.OpStack.GuardExhaust(MaxStack);
             
             //Return the stack to this height after the function returns
-            frame.StackHeight = resultsHeight + localsCount;
+            frame.ReturnLabel.StackHeight = resultsHeight + LocalCount;
             
             //Set the Locals to default
-            var slice = frame.Locals.Span[parameterCount..totalCount];
-            for (int ti = 0; ti < localsCount; ti++)
+            var slice = frame.Locals.Span[ParameterCount..TotalCount];
+            for (int ti = 0; ti < LocalCount; ti++)
             {
                 slice[ti] = new Value(t[ti]);
             }
@@ -184,6 +183,8 @@ namespace Wacs.Core.Runtime.Types
             frame.Head = LinkedOffset;
             
             context.InstructionPointer = LinkedOffset - 1;
+            
+            CallCount++;
         }
 
         public override string ToString() => $"FunctionInstance[{Id}] (Type: {Type}, IsExport: {IsExport})";

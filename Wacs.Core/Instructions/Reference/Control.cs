@@ -26,10 +26,10 @@ namespace Wacs.Core.Instructions.Reference
 {
     public class InstBrOnNull : InstructionBase
     {
+        public InstBrOnNull() : base(ByteCode.BrOnNull) { }
+        
         private LabelIdx L;
         private BlockTarget? LinkedLabel;
-
-        public override ByteCode Op => OpCode.BrOnNull;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -80,11 +80,10 @@ namespace Wacs.Core.Instructions.Reference
     
     public class InstBrOnNonNull : InstructionBase
     {
+        public InstBrOnNonNull() : base(ByteCode.BrOnNonNull, -1) { }
+        
         private LabelIdx L;
         private BlockTarget? LinkedLabel;
-
-        public override ByteCode Op => OpCode.BrOnNonNull;
-        public override int StackDiff => -1;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -137,13 +136,9 @@ namespace Wacs.Core.Instructions.Reference
         public TypeIdx X;
         private FunctionType cachedFunctionType;
 
-        public InstCallRef()
-        {
-            IsAsync = true;
-        }
-
-        public override ByteCode Op => OpCode.Call;
-
+        public InstCallRef() : base(ByteCode.CallRef) 
+            => IsAsync = true;
+        
         public bool IsBound(ExecContext context)
         {
             return false;
@@ -173,10 +168,9 @@ namespace Wacs.Core.Instructions.Reference
                 $"Instruction call_ref failed to link. Function Type for {X} was not in the Context.");
             
             cachedFunctionType = (context.Frame.Module.Types[X].Expansion as FunctionType)!;
-            
-            context.LinkOpStackHeight -= 1;
-            context.LinkOpStackHeight -= cachedFunctionType!.ParameterTypes.Arity;
-            context.LinkOpStackHeight += cachedFunctionType.ResultType.Arity;
+
+            int stackDiff = -1 -cachedFunctionType!.ParameterTypes.Arity +cachedFunctionType.ResultType.Arity;
+            context.DeltaStack(stackDiff);
             return this;
         }
 

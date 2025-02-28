@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -28,18 +29,23 @@ namespace Wacs.Core.Instructions.Transpiler
         private readonly Func<ExecContext, TIn2> _in2;
         private readonly Func<ExecContext, TIn3> _in3;
         private readonly Func<ExecContext, Value> _wrap;
-        public sealed override int StackDiff { get; set; }
+        public int LinkStackDiff { get; set; }
+        private List<InstructionBase> linkDependents = new();
 
         public InstAggregate3_1(
             ITypedValueProducer<TIn1> in1,
             ITypedValueProducer<TIn2> in2,
             ITypedValueProducer<TIn3> in3,
-            INodeComputer<TIn1,TIn2,TIn3,TOut> compute)
+            INodeComputer<TIn1,TIn2,TIn3,TOut> compute) : base(ByteCode.Aggr3_1)
         {
             _in1 = in1.GetFunc;
             _in2 = in2.GetFunc;
             _in3 = in3.GetFunc;
-            StackDiff = Math.Min(0, in1.StackDiff) + Math.Min(0, in2.StackDiff) + Math.Min(0, in3.StackDiff);
+            LinkStackDiff = Math.Min(0, in1.LinkStackDiff) + Math.Min(0, in2.LinkStackDiff) + Math.Min(0, in3.LinkStackDiff);
+            
+            if (compute is IComplexLinkBehavior) 
+                linkDependents.Add((compute as InstructionBase)!);
+            
             _compute = compute.GetFunc;
             Size = in1.CalculateSize() + in2.CalculateSize() + 1;
 
@@ -54,8 +60,6 @@ namespace Wacs.Core.Instructions.Transpiler
             else throw new InvalidDataException($"Could not bind aggregate type {typeof(TOut)}");
         }
 
-        public override ByteCode Op => WacsCode.Aggr3_1;
-
         public int CalculateSize() => Size;
 
         public Func<ExecContext, TOut> GetFunc => Run;
@@ -68,10 +72,17 @@ namespace Wacs.Core.Instructions.Transpiler
         }
         public override InstructionBase Link(ExecContext context, int pointer)
         {
-            //Account for our own push to the stack if we're not subordinated
-            context.LinkOpStackHeight += StackDiff + 1;
+            context.LinkOpStackHeight += LinkStackDiff + 1;
+            
+            int stack = context.LinkOpStackHeight;
+            
+            foreach (var dependent in linkDependents)
+                dependent.Link(context, pointer);
+            
+            context.LinkOpStackHeight = stack;
             return this;
         }
+        
         public override void Execute(ExecContext context)
         {
             context.OpStack.PushValue(_wrap(context));

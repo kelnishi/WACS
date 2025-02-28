@@ -23,10 +23,11 @@ namespace Wacs.Core.Instructions.GC
 {
     public class InstRefI31 : InstructionBase, IConstInstruction
     {
+        public InstRefI31() : base(ByteCode.RefI31) { }
+        
         private const int SignBit31 = 0x4000_0000;
         private const int UnsignedMask = 0x3FFF_FFFF;
         private const ulong SignExtendBits = 0xFFFF_FFFF_C000_0000;
-        public override ByteCode Op => GcCode.RefI31;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-i31mathsfrefi31
@@ -61,12 +62,13 @@ namespace Wacs.Core.Instructions.GC
         }
     }
 
-    public class InstI32GetS : InstructionBase
+    public class InstI31GetS : InstructionBase
     {
+        public InstI31GetS() : base(ByteCode.I31GetS) { }
+        
         private const int SignBit31 = 0x4000_0000;
         private const int UnsignedMask = 0x3FFF_FFFF;
-        public override ByteCode Op => GcCode.I31GetS;
-
+        
         public override void Validate(IWasmValidationContext context)
         {
             context.OpStack.PopType(ValType.I31);   // -1
@@ -96,11 +98,12 @@ namespace Wacs.Core.Instructions.GC
         }
     }
     
-    public class InstI32GetU : InstructionBase
+    public class InstI31GetU : InstructionBase
     {
+        public InstI31GetU() : base(ByteCode.I31GetU) { }
+        
         private const uint BitMask31 = 0x7FFF_FFFF;
-        public override ByteCode Op => GcCode.I31GetU;
-
+        
         public override void Validate(IWasmValidationContext context)
         {
             context.OpStack.PopType(ValType.I31);   // -1

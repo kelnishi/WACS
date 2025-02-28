@@ -53,7 +53,7 @@ namespace Wacs.Core.Runtime
         public readonly RuntimeAttributes Attributes;
         public readonly Stopwatch InstructionTimer = new();
 
-        private readonly InstructionSequence linkedInstructions = new();
+        public readonly InstructionSequence linkedInstructions = new();
         public readonly OpStack OpStack;
 
         public readonly Stopwatch ProcessTimer = new();
@@ -67,7 +67,10 @@ namespace Wacs.Core.Runtime
         public Frame Frame = NullFrame;
         public int InstructionPointer;
         public int LinkOpStackHeight;
+        public int MaxLinkOpStackHeight;
         public bool LinkUnreachable;
+        public int LinkLocalCount;
+        public readonly Dictionary<Value, int> LinkConstants = new();
 
         public Dictionary<ushort, ExecStat> Stats = new();
         public long steps;
@@ -147,25 +150,13 @@ namespace Wacs.Core.Runtime
         public ValType StackTopTopType() => 
             OpStack.Peek().Type.TopHeapType(Frame.Module.Types);
 
-        public Frame ReserveFrame(
-            ModuleInstance module,
-            FunctionType type,
-            FuncIdx index,
-            ValType[]? locals = default)
+        public Frame ReserveFrame(ModuleInstance module, int arity)
         {
-            locals ??= EmptyLocals;
-            
             var frame = _framePool.Get();
             frame.Module = module;
-            frame.Type = type;
-            frame.Index = index;
-            frame.ContinuationAddress = InstructionPointer;
-            frame.ReturnLabel.Arity = type.ResultType.Arity;
-            // int capacity = type.ParameterTypes.Types.Length + locals.Length;
-            // var localData = _localsDataPool.Rent(capacity);
-            // frame.Locals = new(localData, type.ParameterTypes.Types, locals, true);
-            frame.StackHeight = OpStack.Count;
-            
+            frame.ReturnLabel.ContinuationAddress = InstructionPointer;
+            frame.ReturnLabel.Arity = arity;
+            frame.ReturnLabel.StackHeight = OpStack.Count;
             return frame;
         }
 
@@ -181,19 +172,17 @@ namespace Wacs.Core.Runtime
         public InstructionPointer PopFrame()
         {
             var frame = _callStack.Pop();
-            
+#if STRICT_EXECUTION
             Assert( OpStack.Count >= frame.Arity + frame.StackHeight,
                 $"Instruction return failed. Operand stack underflow");
-
-            int localsCount = frame.Locals.Length;
-            // int resultCount = frame.Type.ResultType.Arity;
+#endif
             int resultCount = frame.ReturnLabel.Arity;
-            int resultsHeight = frame.StackHeight + resultCount - localsCount;
+            int resultsHeight = frame.ReturnLabel.StackHeight + resultCount - frame.Locals.Length;
             OpStack.ShiftResults(resultCount, resultsHeight);
             frame.Locals = null;
             Frame = _callStack.Count > 0 ? _callStack.Peek() : NullFrame;
             
-            var address = frame.ContinuationAddress;
+            var address = frame.ReturnLabel.ContinuationAddress;
             _framePool.Return(frame);
             return address;
         }
@@ -267,11 +256,6 @@ namespace Wacs.Core.Runtime
             return label;
         }
 
-        public void ResetStack(Label label)
-        {
-            OpStack.PopTo(label.StackHeight + Frame.StackHeight);
-        }
-
         public void FlushCallStack()
         {
             ClearCallStack();
@@ -284,6 +268,14 @@ namespace Wacs.Core.Runtime
         public void ClearLinkLabels() => _linkLabelStack.Clear();
 
         public void PushLabel(BlockTarget inst) => _linkLabelStack.Push(inst);
+
+        public void DeltaStack(int stackDiff, int maxPush = 1)
+        {
+            LinkOpStackHeight += stackDiff;
+            int maxStack = LinkOpStackHeight + maxPush;
+            if (maxStack > MaxLinkOpStackHeight)
+                MaxLinkOpStackHeight = maxStack;
+        }
 
         public BlockTarget PopLabel() => _linkLabelStack.Pop();
 
@@ -341,8 +333,10 @@ namespace Wacs.Core.Runtime
         // @Spec 4.4.10.2. Returning from a function
         public void FunctionReturn()
         {
-            Assert( OpStack.Count >= Frame.Arity,
+#if STRICT_EXECUTION
+            Assert( OpStack.Count >= Frame.ReturnLabel.Arity,
                 $"Function Return failed. Stack did not contain return values");
+#endif
             var address = PopFrame();
             InstructionPointer = address;
         }
@@ -405,6 +399,19 @@ namespace Wacs.Core.Runtime
             { 
                 Stats[(ushort)(ByteCode)opcode] = new ExecStat();
             }
+
+            for (int i = 0, l = Store.FunctionCount(); i < l; i++)
+            {
+
+                if (Store[new FuncAddr(i)] is FunctionInstance inst)
+                {
+                    inst.CallCount = 0;
+                }
+                if (!Stats.TryGetValue((ushort)i, out var stat))
+                {
+                    Stats[(ushort)i] = new ExecStat();
+                }
+            }
         }
 
         public OpCode GetEndFor() => 
@@ -430,6 +437,7 @@ namespace Wacs.Core.Runtime
 
             LinkOpStackHeight = 0;
             LinkUnreachable = false;
+            MaxLinkOpStackHeight = 0;
             ClearLinkLabels();
             PushLabel(new InstExpressionProxy(new Label
             {
@@ -437,13 +445,11 @@ namespace Wacs.Core.Runtime
                 StackHeight = 0,
                 Arity = instance.Type.ResultType.Arity
             }));
-
-            linkedInstructions.Append(
-                instance.Body
-                    .Flatten()
-                    .Select((inst, idx) => inst.Link(this, offset + idx))
-            );
+            LinkLocalCount = instance.Type.ParameterTypes.Arity + instance.Locals.Length;
+            linkedInstructions.Append(instance.Body.Instructions.Flatten().Select((inst,idx)=>inst.Link(this, offset+idx)));
+            
             instance.Length = linkedInstructions.Count - instance.LinkedOffset;
+            instance.MaxStack = MaxLinkOpStackHeight;
         }
     }
 }

@@ -35,15 +35,14 @@ namespace Wacs.Core.Instructions.Numeric
 
         private readonly NumericInst.ValidationDelegate _validate;
 
-        private InstF32UnOp(ByteCode op, Func<float,float> execute, NumericInst.ValidationDelegate validate, bool isConst = false)
+        private InstF32UnOp(ByteCode op, Func<float,float> execute, NumericInst.ValidationDelegate validate, bool isConst = false) : base(op)
         {
-            Op = op;
             _execute = execute;
             _validate = validate;
             IsConstant = isConst;
         }
-
-        public override ByteCode Op { get; }
+        
+        public int LinkStackDiff => StackDiff;
 
         public bool IsConstant { get; }
 
