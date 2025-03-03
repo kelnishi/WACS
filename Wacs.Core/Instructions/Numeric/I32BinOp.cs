@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -78,22 +79,26 @@ namespace Wacs.Core.Instructions.Numeric
             _validate = validate;
             IsConstant = isConst;
         }
-        
+
         public int LinkStackDiff => StackDiff;
         public bool IsConstant { get; }
 
         public override void Validate(IWasmValidationContext context) => _validate(context); // -1
 
-        // @Spec 4.3.2.3. iadd
+        // i32.add
+        [OpSource(OpCode.I32Add)]
         private static int ExecuteI32Add(int i1, int i2) => i1 + i2;
 
-        // @Spec 4.3.2.4. isub
+        // i32.sub
+        [OpSource(OpCode.I32Sub)]
         private static int ExecuteI32Sub(int i1, int i2) => i1 - i2;
 
-        // @Spec 4.3.2.5. imul
+        // i32.mul
+        [OpSource(OpCode.I32Mul)]
         private static int ExecuteI32Mul(int i1, int i2) => unchecked(i1 * i2);
 
-        // @Spec 4.3.2.7. idiv_s
+        // i32.div_s
+        [OpSource(OpCode.I32DivS)]
         private static int ExecuteI32DivS(int j1, int j2)
         {
             if (j2 == 0)
@@ -104,6 +109,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.6. idiv_u
+        [OpSource(OpCode.I32DivU)]
         private static uint ExecuteI32DivU(uint i1, uint i2)
         {
             if (i2 == 0)
@@ -112,6 +118,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.8. irem_s
+        [OpSource(OpCode.I32RemS)]
         private static int ExecuteI32RemS(int j1, int j2)
         {
             if (j2 == 0)
@@ -121,6 +128,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.8. irem_u
+        [OpSource(OpCode.I32RemU)]
         private static uint ExecuteI32RemU(uint i1, uint i2)
         {
             if (i2 == 0)
@@ -128,16 +136,20 @@ namespace Wacs.Core.Instructions.Numeric
             return i1 % i2;
         }
 
-        // @Spec 4.3.2.11 iand        
+        // @Spec 4.3.2.11 iand
+        [OpSource(OpCode.I32And)]
         private static uint ExecuteI32And(uint i1, uint i2) => i1 & i2;
 
         // @Spec 4.3.2.13 ior
+        [OpSource(OpCode.I32Or)]
         private static uint ExecuteI32Or(uint i1, uint i2) => i1 | i2;
 
         // @Spec 4.3.2.14 ixor
+        [OpSource(OpCode.I32Xor)]
         private static uint ExecuteI32Xor(uint i1, uint i2) => i1 ^ i2;
 
         // @Spec 4.3.2.15 ishl
+        [OpSource(OpCode.I32Shl)]
         private static uint ExecuteI32Shl(uint i1, int i2)
         {
             int k = i2 & 0x1F;
@@ -145,6 +157,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.17 ishr_s
+        [OpSource(OpCode.I32ShrS)]
         private static int ExecuteI32ShrS(int i1, int i2)
         {
             int k = i2 & 0x1F;
@@ -152,6 +165,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.16 ishr_u
+        [OpSource(OpCode.I32ShrU)]
         private static uint ExecuteI32ShrU(uint i1, int i2)
         {
             int k = i2 & 0x1F;
@@ -159,6 +173,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.18 irotl
+        [OpSource(OpCode.I32Rotl)]
         private static uint ExecuteI32Rotl(uint i1, int i2)
         {
             int k = i2 & 0x1F;
@@ -169,6 +184,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.19 irotr
+        [OpSource(OpCode.I32Rotr)]
         private static uint ExecuteI32Rotr(uint i1, int i2)
         {
             int k = i2 & 0x1F;

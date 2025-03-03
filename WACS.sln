@@ -10,6 +10,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spec.Test", "Spec.Test\Spec
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Feature.Detect", "Feature.Detect\Feature.Detect.csproj", "{AE0D7913-8AA2-4054-B7BC-0C522584272C}"
 EndProject
+ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler", "Wacs.Transpiler\Wacs.Transpiler.csproj", "{047F4142-5620-4F5B-AFD9-344D398EBEB9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Compilation", "Wacs.Compilation\Wacs.Compilation.csproj", "{3330F8C1-1F9B-438E-B10B-BB1B34493E29}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -36,5 +40,13 @@ Global
 		{AE0D7913-8AA2-4054-B7BC-0C522584272C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{AE0D7913-8AA2-4054-B7BC-0C522584272C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{AE0D7913-8AA2-4054-B7BC-0C522584272C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{047F4142-5620-4F5B-AFD9-344D398EBEB9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{047F4142-5620-4F5B-AFD9-344D398EBEB9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{047F4142-5620-4F5B-AFD9-344D398EBEB9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{047F4142-5620-4F5B-AFD9-344D398EBEB9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3330F8C1-1F9B-438E-B10B-BB1B34493E29}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3330F8C1-1F9B-438E-B10B-BB1B34493E29}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3330F8C1-1F9B-438E-B10B-BB1B34493E29}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3330F8C1-1F9B-438E-B10B-BB1B34493E29}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

@@ -112,6 +112,13 @@ namespace Wacs.Core.Runtime
             throw new UnboundEntityException($"Function {id} was not exported from any modules currently loaded in the runtime.");
         }
 
+        public IFunctionInstance GetFunction(FuncAddr addr)
+        {
+            if (!Context.Store.Contains(addr))
+                throw new WasmRuntimeException($"Runtime context did not contain function at address {addr.Value}");
+            return Context.Store[addr];
+        }
+
         private IAddress? GetBoundEntity((string module, string entity) id) =>
             _entityBindings.GetValueOrDefault(id);
 

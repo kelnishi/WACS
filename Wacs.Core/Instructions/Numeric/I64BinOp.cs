@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -83,8 +84,10 @@ namespace Wacs.Core.Instructions.Numeric
 
         public override void Validate(IWasmValidationContext context) => _validate(context); // -1
 
+        [OpSource(OpCode.I64Add)]
         private static long ExecuteI64Add(long i1, long i2) => i1 + i2;
 
+        [OpSource(OpCode.I64Sub)]
         private static long ExecuteI64Sub(long i1, long i2) => i1 - i2;
 
         private static long ExecuteI64Mul(long i1, long i2) => unchecked(i1 * i2);
