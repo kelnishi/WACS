@@ -29,6 +29,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Wacs.Compilation\Wacs.Compilation.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Net.Compilers.Toolset" Version="4.3.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  
+  <ItemGroup>
     <None Include="README.md">
       <Pack>true</Pack>
       <PackagePath/>
