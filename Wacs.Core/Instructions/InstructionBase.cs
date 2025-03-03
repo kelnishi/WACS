@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using System;
 using System.IO;
 using System.Threading.Tasks;
 using Wacs.Core.Instructions.Numeric;
@@ -29,28 +28,28 @@ namespace Wacs.Core.Instructions
     /// </summary>
     public abstract class InstructionBase
     {
-        public bool IsAsync = false;
-        public int PointerAdvance = 0;
-        public bool Nop = false;
-
-        public int Size = 1;
-
         /// <summary>
         /// The opcode associated with the instruction.
         /// </summary>
         public readonly ByteCode Op;
-        
+
         /// <summary>
         /// Used in Link() to determine the operand stack height
         /// </summary>
         public readonly int StackDiff;
-        
+
+        public bool IsAsync = false;
+        public bool Nop = false;
+        public int PointerAdvance = 0;
+
+        public int Size = 1;
+
         public InstructionBase(ByteCode op, int stack) =>
             (Op, StackDiff) = (op, stack);
-        
+
         public InstructionBase(ByteCode op) =>
             (Op, StackDiff) = (op, 0);
-        
+
         public abstract void Validate(IWasmValidationContext context);
 
         public virtual InstructionBase Link(ExecContext context, InstructionPointer pointer)
@@ -106,5 +105,7 @@ namespace Wacs.Core.Instructions
 
         public static bool IsBound(ExecContext context, InstructionBase? inst) => 
             inst is ICallInstruction ci && ci.IsBound(context);
+
+        public virtual string ToNotation() => Op.GetMnemonic();
     }
 }
