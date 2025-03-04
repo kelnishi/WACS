@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -57,9 +58,11 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF32(result);
         }
 
+        [OpSource(OpCode.F32Abs)]
         private static float ExecuteF32Abs(float a) => Math.Abs(a);
+        [OpSource(OpCode.F32Neg)]
         private static float ExecuteF32Neg(float a) => -a;
-
+        [OpSource(OpCode.F32Ceil)]
         private static float ExecuteF32Ceil(float a)
         {
             float result = a switch {
@@ -72,7 +75,7 @@ namespace Wacs.Core.Instructions.Numeric
                 result = -0.0f;
             return result;
         }
-
+        [OpSource(OpCode.F32Floor)]
         private static float ExecuteF32Floor(float a)
         {
             float result = a switch {
@@ -85,9 +88,9 @@ namespace Wacs.Core.Instructions.Numeric
                 result = -0.0f;
             return result;
         }
-
+        [OpSource(OpCode.F32Trunc)]
         private static float ExecuteF32Trunc(float a) => (float)Math.Truncate(a);
-
+        [OpSource(OpCode.F32Nearest)]
         private static float ExecuteF32Nearest(float a)
         {
             float result = a switch {
@@ -100,7 +103,7 @@ namespace Wacs.Core.Instructions.Numeric
                 result = -0.0f;
             return result;
         }
-
+        [OpSource(OpCode.F32Sqrt)]
         private static float ExecuteF32Sqrt(float a) => (float)Math.Sqrt(a);
     }
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -64,20 +65,17 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
 
+        [OpSource(OpCode.F64Eq)]
         private static int ExecuteF64Eq(double i1, double i2) => i1 == i2 ? 1 : 0;
-
+        [OpSource(OpCode.F64Ne)]
         private static int ExecuteF64Ne(double i1, double i2) => i1 != i2 ? 1 : 0;
-
-        private static int ExecuteF64Lt(double i1, double i2) => 
-            double.IsNaN(i1) || double.IsNaN(i2) ? 0 : i1 < i2 ? 1 : 0;
-
-        private static int ExecuteF64Gt(double i1, double i2) => 
-            double.IsNaN(i1) || double.IsNaN(i2) ? 0 : i1 > i2 ? 1 : 0;
-
-        private static int ExecuteF64Le(double i1, double i2) => 
-            double.IsNaN(i1) || double.IsNaN(i2) ? 0 : i1 <= i2 ? 1 : 0;
-
-        private static int ExecuteF64Ge(double i1, double i2) => 
-            double.IsNaN(i1) || double.IsNaN(i2) ? 0 : i1 >= i2 ? 1 : 0;
+        [OpSource(OpCode.F64Lt)]
+        private static int ExecuteF64Lt(double i1, double i2) => double.IsNaN(i1) || double.IsNaN(i2) ? 0 : i1 < i2 ? 1 : 0;
+        [OpSource(OpCode.F64Gt)]
+        private static int ExecuteF64Gt(double i1, double i2) => double.IsNaN(i1) || double.IsNaN(i2) ? 0 : i1 > i2 ? 1 : 0;
+        [OpSource(OpCode.F64Le)]
+        private static int ExecuteF64Le(double i1, double i2) => double.IsNaN(i1) || double.IsNaN(i2) ? 0 : i1 <= i2 ? 1 : 0;
+        [OpSource(OpCode.F64Ge)]
+        private static int ExecuteF64Ge(double i1, double i2) => double.IsNaN(i1) || double.IsNaN(i2) ? 0 : i1 >= i2 ? 1 : 0;
     }
 }

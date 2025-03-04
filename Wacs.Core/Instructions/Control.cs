@@ -470,6 +470,7 @@ namespace Wacs.Core.Instructions
 
         private LabelIdx L;
         private BlockTarget? LinkedLabel;
+        public int Label => (int)L.Value;
 
         // @Spec 3.3.8.6. br l
         public override void Validate(IWasmValidationContext context)
@@ -576,9 +577,10 @@ namespace Wacs.Core.Instructions
     public sealed class InstBranchIf : InstructionBase, IBranchInstruction, IComplexLinkBehavior, INodeConsumer<int>
     {
         public InstBranchIf() : base(ByteCode.BrIf,-1) { }
-        
-        public LabelIdx L;
+
+        private LabelIdx L;
         private BlockTarget? LinkedLabel;
+        public int Label => (int)L.Value;
 
         public int LinkStackDiff => StackDiff;
 

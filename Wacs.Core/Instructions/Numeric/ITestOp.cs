@@ -79,6 +79,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
 
+        [OpSource(OpCode.I64Eqz)]
         private static int ExecuteI64Eqz(long i) => i == 0 ? 1 : 0;
     }
 }

@@ -33,9 +33,15 @@ namespace Wacs.Transpiler
     public class Transpiler
     {
         private int BlockIdx = 0;
-        private Dictionary<BlockTarget, string> blockLabels = new();
         private int OpIdx = 0;
-        private Stack<Value> OpStack = new();
+        
+        private Dictionary<string, Operand> Operands = new();
+        private Stack<Operand> OpStack = new();
+        private Stack<BlockLabel> LabelStack = new();
+
+        private string ReturnType = "void";
+
+        private void AddOperand(Operand op) => Operands[op.Name] = op;
 
         public void TranspileFunction(Module module, FunctionInstance funcInst)
         {
@@ -54,7 +60,28 @@ namespace Wacs.Transpiler
             
             var parameterList = SyntaxFactory.ParameterList(SyntaxFactory.SeparatedList(parameters));
 
-            var statements = CompileSequence(funcInst.Body.Instructions).ToList();
+            for (int i = 0, l = funcType.ParameterTypes.Arity; i < l; i++)
+            {
+                var parameter = funcType.ParameterTypes.Types[i];
+                AddOperand(new Operand
+                {
+                    Name = $"@local{i}",
+                    Type = GetTypeName(parameter),
+                    IsDeclared = true
+                });
+                OpIdx = i+1;
+            }
+            for (int i = 0, l = funcInst.Locals.Length; i < l; i++)
+            {
+                var local = funcInst.Locals[i];
+                AddOperand(new Operand
+                {
+                    Name = $"@local{OpIdx++}",
+                    Type = GetTypeName(local),
+                    IsDeclared = false
+                });
+            }
+            
             
             var result = funcInst.Type.ResultType;
             TypeSyntax returnType;
@@ -64,11 +91,14 @@ namespace Wacs.Transpiler
                 case 1: returnType = SyntaxFactory.ParseTypeName(GetTypeName(result.Types[0])); break;
                 default: throw new TranspilerException("Cannot generate multiple return values");
             }
+            ReturnType = returnType.ToFullString();
+            
+            var statements = CompileSequence(funcInst.Body.Instructions).ToList();
             
             // Build a method declaration that contains the generated statements.
             var methodDeclaration = SyntaxFactory.MethodDeclaration(
                     returnType,
-                    $"Fuction{funcInst.Index.Value}")
+                    $"Function{funcInst.Index.Value}")
                 .AddModifiers(SyntaxFactory.Token(SyntaxKind.PublicKeyword), SyntaxFactory.Token(SyntaxKind.StaticKeyword))
                 .WithParameterList(parameterList)
                 .WithBody(SyntaxFactory.Block(statements));
@@ -93,80 +123,168 @@ namespace Wacs.Transpiler
 
         private IEnumerable<StatementSyntax> CompileSequence(IEnumerable<InstructionBase> seq) 
             => seq.SelectMany(CompileInstruction);
-
+        
+        
         private IEnumerable<StatementSyntax> CompileInstruction(InstructionBase inst)
         {
             var source = InstructionSource.Get(inst.Op);
-            //TODO: Use the InstructionSource pattern
-            switch (inst)
+            if (source is not null)
             {
-                case InstBlock blockOp:
-                    foreach (var subinst in CompileBlock(blockOp))
-                        yield return subinst;
-                    break;
-                case InstEnd endOp: //Ignore
-                    break;
-                case InstLoop loopOp:
-                    foreach (var subinst in CompileLoop(loopOp))
-                        yield return subinst;
-                    break;
-                case InstIf ifOp:
-                    foreach (var subinst in CompileIf(ifOp))
-                        yield return subinst;
-                    break;
-                case InstI32BinOp binOp:
-                    yield return SyntaxFactory.ParseStatement("var b = context.OpStack.PopI32();");
-                    yield return SyntaxFactory.ParseStatement("var a = context.OpStack.PopI32();");
-                    yield return SyntaxFactory.ParseStatement("context.OpStack.PushI32(a + b);");
-                    break;
-                case InstI32RelOp relOp:
-                    yield return SyntaxFactory.ParseStatement("var b = context.OpStack.PopI32();");
-                    yield return SyntaxFactory.ParseStatement("var a = context.OpStack.PopI32();");
-                    yield return SyntaxFactory.ParseStatement("context.OpStack.PushI32(a < b?1:0);");
-                    break;
-                case InstI32TestOp testOp:
-                    yield return SyntaxFactory.ParseStatement("var b = context.OpStack.PopI32();");
-                    yield return SyntaxFactory.ParseStatement("var a = context.OpStack.PopI32();");
-                    yield return SyntaxFactory.ParseStatement("context.OpStack.PushI32(a == b?1:0);");
-                    break;
-                case InstI32Const constOp:
-                    yield return SyntaxFactory.ParseStatement($"context.OpStack.PushI32({constOp.Value});");
-                    break;
-                case InstLocalGet getOp:
-                    yield return SyntaxFactory.ParseStatement($"context.OpStack.Push(local{getOp.GetIndex()});");
-                    break;
-                case InstLocalSet setOp:
-                    yield return SyntaxFactory.ParseStatement($"local{setOp.GetIndex()} = context.OpStack.Pop();");
-                    break;
-                case InstLocalTee teeOp:
-                    yield return SyntaxFactory.ParseStatement("var a = context.OpStack.PopI32();");
-                    yield return SyntaxFactory.ParseStatement($"local{teeOp.GetIndex()} = a;");
-                    yield return SyntaxFactory.ParseStatement($"context.OpStack.Push(a);");
-                    break;
-                case InstUnreachable:
-                    yield return SyntaxFactory.ParseStatement($"throw new WasmRuntimeException(\'unreachable\');");
-                    break;
-                default:
-                    // throw new TranspilerException($"Opcode {inst.Op.GetMnemonic()} not supported");
-                    yield return SyntaxFactory.ParseStatement($"throw new NotSupportedException(\"Opcode {inst.Op.GetMnemonic()} not supported.\");");
-                    break;
+                int parameterCount = source.ParameterCount;
+                object?[] parameters = new object?[parameterCount];
+                for (int i = parameterCount - 1; i >= 0; i--)
+                {
+                    var op = OpStack.Pop();
+                    parameters[i] = $"{(op.IsDeclared ? op.Name : op.Value.ToLiteral())}";
+                }
+                var statement = string.Format(source.Template, parameters);
+
+                if (source.Return != "void")
+                {
+                    string stackOp = $"stack{OpIdx++}";
+                    OpStack.Push(new Operand
+                    {
+                        Name = stackOp,
+                        Type = source.Return,
+                        IsDeclared = true,
+                    });
+                    if (statement.Contains("return"))
+                    {
+                        statement = statement.Replace("return", $"{source.Return} {stackOp} = ");
+                    }
+                    else
+                    {
+                        statement = $"{source.Return} {stackOp} = ({statement});";
+                    }
+                }
+                
+                yield return SyntaxFactory.ParseStatement(statement);
+            }
+            else
+            {
+                switch (inst)
+                {
+                    case InstBlock blockOp:
+                        foreach (var subinst in CompileBlock(blockOp))
+                            yield return subinst;
+                        break;
+                    case InstEnd endOp:
+                        if (endOp.FunctionEnd)
+                        {
+                            if (ReturnType != "void")
+                            {
+                                var op = OpStack.Pop();
+                                string statement = $"return {op.Name};";
+                                yield return SyntaxFactory.ParseStatement(statement);
+                            }
+                        }
+                        break;
+                    case InstLoop loopOp:
+                        foreach (var subinst in CompileLoop(loopOp))
+                            yield return subinst;
+                        break;
+                    case InstIf ifOp:
+                        foreach (var subinst in CompileIf(ifOp))
+                            yield return subinst;
+                        break;
+                    case InstBranch brOp:
+                    {
+                        Stack<BlockLabel> aside = new();
+                        for (int i = 0; i <= brOp.Label; i++)
+                        {
+                            aside.Push(LabelStack.Pop());
+                        }
+                        yield return SyntaxFactory.GotoStatement(SyntaxKind.GotoStatement, SyntaxFactory.ParseExpression(aside.Peek().Name));
+                        while (aside.Count > 0) LabelStack.Push(aside.Pop());
+                    } break;
+                    case InstBranchIf brIfOp:
+                    {
+                        Stack<BlockLabel> aside = new();
+                        for (int i = 0; i <= brIfOp.Label; i++)
+                        {
+                            aside.Push(LabelStack.Pop());
+                        }
+                        var op = OpStack.Pop();
+                        yield return SyntaxFactory.IfStatement(
+                            SyntaxFactory.ParseExpression($"{(op.IsDeclared ? op.Name : op.Value.ToLiteral())} != 0"),
+                            SyntaxFactory.GotoStatement(SyntaxKind.GotoStatement, SyntaxFactory.ParseExpression(aside.Peek().Name))
+                        );
+                        while (aside.Count > 0) LabelStack.Push(aside.Pop());
+                    } break;
+                    case InstI32Const constOp:
+                        OpStack.Push(new Operand
+                        {
+                            Name = $"stack{OpIdx++}",
+                            Type = "int",
+                            IsDeclared = false,
+                            Value = new Value(constOp.Value)
+                        });
+                        break;
+                    case InstLocalGet getOp:
+                    {
+                        var localName = $"@local{getOp.GetIndex()}";
+                        var op = Operands[localName];
+                        OpStack.Push(op);
+                    } break;
+                    case InstLocalSet setOp:
+                    {
+                        var op = OpStack.Pop();
+                        var localName = $"@local{setOp.GetIndex()}";
+                        var local = Operands[localName];
+                        string statement =
+                            $"{(local.IsDeclared ? "" : local.Type)} {localName} = {(op.IsDeclared ? op.Name : op.Value.ToLiteral())};";
+                        local.IsDeclared = true;
+                        yield return SyntaxFactory.ParseStatement(statement);
+                    } break;
+                    case InstLocalTee teeOp:
+                    {
+                        var op = OpStack.Pop();
+                        var localName = $"@local{teeOp.GetIndex()}";
+                        var local = Operands[localName];
+                        string statement =
+                            $"{(local.IsDeclared ? "" : local.Type)} {localName} = {(op.IsDeclared ? op.Name : op.Value.ToLiteral())};";
+                        local.IsDeclared = true;
+                        yield return SyntaxFactory.ParseStatement(statement);
+                        OpStack.Push(local);
+                    } break;
+                    case InstUnreachable:
+                        yield return SyntaxFactory.ParseStatement($"throw new WasmRuntimeException(\'unreachable\');");
+                        break;
+                    default:
+                        // throw new TranspilerException($"Opcode {inst.Op.GetMnemonic()} not supported");
+                        yield return SyntaxFactory.ParseStatement($"throw new NotSupportedException(\"Opcode {inst.Op.GetMnemonic()} not supported.\");");
+                        break;
+                }
             }
         }
 
         private IEnumerable<StatementSyntax> CompileBlock(InstBlock instBlock)
         {
+            var blockLabel = new BlockLabel {
+                Name = $"block{BlockIdx++}", 
+            };
+            LabelStack.Push(blockLabel);
+            
             var label = SyntaxFactory.LabeledStatement(
-                SyntaxFactory.Identifier($"block{BlockIdx++}"),
+                SyntaxFactory.Identifier(blockLabel.Name),
                 SyntaxFactory.EmptyStatement()); 
             yield return SyntaxFactory.Block(CompileSequence(instBlock.GetBlock(0).Instructions).Concat(new []{label}));
 
+            LabelStack.Pop();
         }
 
         private IEnumerable<StatementSyntax> CompileLoop(InstLoop instLoop)
         {
+            var blockLabel = new BlockLabel {
+                Name = $"loop{BlockIdx++}", 
+            };
+            LabelStack.Push(blockLabel);
+            
             yield return SyntaxFactory.LabeledStatement(
-                SyntaxFactory.Identifier($"loop{BlockIdx++}"),
+                SyntaxFactory.Identifier(blockLabel.Name),
                 SyntaxFactory.Block(CompileSequence(instLoop.GetBlock(0).Instructions)));
+            
+            LabelStack.Pop();
         }
 
         private IEnumerable<StatementSyntax> CompileIf(InstIf instIf)

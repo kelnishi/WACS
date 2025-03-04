@@ -14,6 +14,7 @@
 
 using System;
 using System.Runtime.InteropServices;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -73,19 +74,19 @@ namespace Wacs.Core.Instructions.Numeric
             double result = _execute(z1, z2);
             context.OpStack.PushF64(result);
         }
-
+        [OpSource(OpCode.F64Add)]
         private static double ExecuteF64Add(double z1, double z2) => z1 + z2;
-
+        [OpSource(OpCode.F64Sub)]
         private static double ExecuteF64Sub(double z1, double z2) => z1 - z2;
-
+        [OpSource(OpCode.F64Mul)]
         private static double ExecuteF64Mul(double z1, double z2) => z1 * z2;
-
+        [OpSource(OpCode.F64Div)]
         private static double ExecuteF64Div(double z1, double z2) => z1 / z2;
-
+        [OpSource(OpCode.F64Min)]
         private static double ExecuteF64Min(double z1, double z2) => Math.Min(z1, z2);
-
+        [OpSource(OpCode.F64Max)]
         private static double ExecuteF64Max(double z1, double z2) => Math.Max(z1, z2);
-
+        [OpSource(OpCode.F64Copysign)]
         private static double ExecuteF64Copysign(double z1, double z2)
         {
             // Extract raw integer bits of x and y

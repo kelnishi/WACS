@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -62,24 +63,25 @@ namespace Wacs.Core.Instructions.Numeric
         public int LinkStackDiff => StackDiff;
         public override void Validate(IWasmValidationContext context) => _validate(context); // -1
 
+        [OpSource(OpCode.I64Eq)]
         private static int ExecuteI64Eq(long i1, long i2) => i1 == i2 ? 1 : 0;
-
+        [OpSource(OpCode.I64Ne)]
         private static int ExecuteI64Ne(long i1, long i2) => i1 != i2 ? 1 : 0;
-
+        [OpSource(OpCode.I64LtS)]
         private static int ExecuteI64LtS(long i1, long i2) => i1 < i2 ? 1 : 0;
-
+        [OpSource(OpCode.I64LtU)]
         private static int ExecuteI64LtU(ulong i1, ulong i2) => i1 < i2 ? 1 : 0;
-
+        [OpSource(OpCode.I64GtS)]
         private static int ExecuteI64GtS(long i1, long i2) => i1 > i2 ? 1 : 0;
-
+        [OpSource(OpCode.I64GtU)]
         private static int ExecuteI64GtU(ulong i1, ulong i2) => i1 > i2 ? 1 : 0;
-
+        [OpSource(OpCode.I64LeS)]
         private static int ExecuteI64LeS(long i1, long i2) => i1 <= i2 ? 1 : 0;
-
+        [OpSource(OpCode.I64LeU)]
         private static int ExecuteI64LeU(ulong i1, ulong i2) => i1 <= i2 ? 1 : 0;
-
+        [OpSource(OpCode.I64GeS)]
         private static int ExecuteI64GeS(long i1, long i2) => i1 >= i2 ? 1 : 0;
-
+        [OpSource(OpCode.I64GeU)]
         private static int ExecuteI64GeU(ulong i1, ulong i2) => i1 >= i2 ? 1 : 0;
 
         private sealed class Signed : InstI64RelOp, INodeComputer<long,long,int>
