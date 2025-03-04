@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -68,16 +69,17 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI64((long)result);
         }
 
+        [OpSource(OpCode.I64Extend8S)]
         private static ulong ExecuteI64Extend8S(uint value) =>
             (value & ByteSign) != 0
                 ? I64ByteExtend | value
                 : ByteMask & value;
-
+        [OpSource(OpCode.I64Extend16S)]
         private static ulong ExecuteI64Extend16S(uint value) =>
             (value & ShortSign) != 0
                 ? I64ShortExtend | value
                 : ShortMask & value;
-
+        [OpSource(OpCode.I64Extend32S)]
         private static ulong ExecuteI64Extend32S(uint value) =>
             (value & WordSign) != 0
                 ? WordExtend | value

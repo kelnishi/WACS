@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -65,22 +66,17 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
 
-        private static int ExecuteF32Eq(float i1, float i2) =>
-            i1 == i2 ? 1 : 0;
-
-        private static int ExecuteF32Ne(float i1, float i2) => 
-            i1 != i2 ? 1 : 0;
-
-        private static int ExecuteF32Lt(float i1, float i2) => 
-            float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 < i2 ? 1 : 0;
-
-        private static int ExecuteF32Gt(float i1, float i2) => 
-            float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 > i2 ? 1 : 0;
-
-        private static int ExecuteF32Le(float i1, float i2) => 
-            float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 <= i2 ? 1 : 0;
-
-        private static int ExecuteF32Ge(float i1, float i2) => 
-            float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 >= i2 ? 1 : 0;
+        [OpSource(OpCode.F32Eq)]
+        private static int ExecuteF32Eq(float i1, float i2) => i1 == i2 ? 1 : 0;
+        [OpSource(OpCode.F32Ne)]
+        private static int ExecuteF32Ne(float i1, float i2) => i1 != i2 ? 1 : 0;
+        [OpSource(OpCode.F32Le)]
+        private static int ExecuteF32Lt(float i1, float i2) => float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 < i2 ? 1 : 0;
+        [OpSource(OpCode.F32Gt)]
+        private static int ExecuteF32Gt(float i1, float i2) => float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 > i2 ? 1 : 0;
+        [OpSource(OpCode.F32Le)]
+        private static int ExecuteF32Le(float i1, float i2) => float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 <= i2 ? 1 : 0;
+        [OpSource(OpCode.F32Ge)]
+        private static int ExecuteF32Ge(float i1, float i2) => float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 >= i2 ? 1 : 0;
     }
 }

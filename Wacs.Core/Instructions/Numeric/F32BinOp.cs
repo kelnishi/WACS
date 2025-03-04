@@ -14,6 +14,7 @@
 
 using System;
 using System.Runtime.InteropServices;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -76,18 +77,19 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF32(result);
         }
 
+        [OpSource(OpCode.F32Add)]
         private static float ExecuteF32Add(float z1, float z2) => z1 + z2;
-
+        [OpSource(OpCode.F32Sub)]
         private static float ExecuteF32Sub(float z1, float z2) => z1 - z2;
-
+        [OpSource(OpCode.F32Mul)]
         private static float ExecuteF32Mul(float z1, float z2) => z1 * z2;
-
+        [OpSource(OpCode.F32Div)]
         private static float ExecuteF32Div(float z1, float z2) => z1 / z2;
-
+        [OpSource(OpCode.F32Min)]
         private static float ExecuteF32Min(float z1, float z2) => Math.Min(z1, z2);
-
+        [OpSource(OpCode.F32Max)]
         private static float ExecuteF32Max(float z1, float z2) => Math.Max(z1, z2);
-
+        [OpSource(OpCode.F32Copysign)]
         private static float ExecuteF32Copysign(float z1, float z2)
         {
             // Extract raw integer bits of x and y
