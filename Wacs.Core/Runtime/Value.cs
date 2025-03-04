@@ -739,6 +739,20 @@ namespace Wacs.Core.Runtime
                 _ => "Undefined",
             };
         }
-        
+
+        public string ToLiteral()
+        {
+            return Type switch
+            {
+                ValType.I32 => Data.Int32.ToString(),
+                ValType.I64 => Data.Int64.ToString(),
+                ValType.F32 => Data.Float32.ToString(),
+                ValType.F64 => Data.Float64.ToString(),
+                ValType.V128 => (GcRef as VecRef)!.V128.ToString(),
+                ValType.Bot => "Bot",
+                _ when Type.IsRefType() => $"{(Wat)Type}=&{Data.Ptr}",
+                _ => "Undefined",
+            };
+        }
     }
 }

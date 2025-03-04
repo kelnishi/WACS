@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -51,6 +52,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.20 iclz
+        [OpSource(OpCode.I32Clz)]
         private static uint ExecuteI32Clz(uint x)
         {
             if (x != 0)
@@ -70,6 +72,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.21 ictz
+        [OpSource(OpCode.I32Ctz)]
         private static uint ExecuteI32Ctz(uint x)
         {
             if (x != 0)
@@ -89,6 +92,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.22 ipopcnt
+        [OpSource(OpCode.I32Popcnt)]
         private static uint ExecuteI32Popcnt(uint x)
         {
             uint count = 0;

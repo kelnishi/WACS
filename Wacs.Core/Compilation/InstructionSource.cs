@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using Wacs.Core.OpCodes;
 
@@ -23,13 +24,16 @@ namespace Wacs.Core.Compilation
     {
         public ByteCode Op;
         public Dictionary<int, (string type, bool isparam)> Locals = new();
+        public string Template;
         public string Return;
+
+        public int ParameterCount => Locals.Values.Select((t, p) => p).Count();
 
         private static Dictionary<ByteCode, MethodInfo> _sources = new(); 
         
         static InstructionSource()
         {
-            var methods = typeof(Wacs.Core.Compilation.InstructionSource).GetMethods(BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+            var methods = typeof(InstructionSource).GetMethods(BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
             foreach (var method in methods)
             {
                 var attributes = method.GetCustomAttributes(typeof(OpSourceAttribute), false);
@@ -44,18 +48,14 @@ namespace Wacs.Core.Compilation
             }
         }
         
-        public static InstructionSource Get(ByteCode opcode)
+        public static InstructionSource? Get(ByteCode opcode)
         {
             if (!_sources.TryGetValue(opcode, out var mi))
-                return new InstructionSource
-                {
-                    Op = Core.OpCodes.OpCode.Nop,
-                    Return = "void"
-                };
+                return null;
 
             var opParams = mi.GetCustomAttributes(typeof(OpParamAttribute), false) as OpParamAttribute[];
-            var opLocals = mi.GetCustomAttributes(typeof(OpParamAttribute), false) as OpLocalAttribute[];
-            var opReturns = mi.GetCustomAttributes(typeof(OpParamAttribute), false) as OpReturnAttribute[];
+            var opLocals = mi.GetCustomAttributes(typeof(OpLocalAttribute), false) as OpLocalAttribute[];
+            var opReturns = mi.GetCustomAttributes(typeof(OpReturnAttribute), false) as OpReturnAttribute[];
 
             var locals = new Dictionary<int, (string type, bool isparam)>();
             string returns = "void";
@@ -74,11 +74,13 @@ namespace Wacs.Core.Compilation
             if (opReturns != null && opReturns.Length == 1)
                 returns = opReturns[0].Type;
 
+            string template = mi.Invoke(null, null) as string;
             var src = new InstructionSource
             {
                 Op = opcode,
                 Locals = locals,
-                Return = returns
+                Return = returns,
+                Template = template
             };
             
             return src;

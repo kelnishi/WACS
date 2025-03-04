@@ -89,9 +89,9 @@ namespace Wacs.Core.Instructions.Numeric
 
         [OpSource(OpCode.I64Sub)]
         private static long ExecuteI64Sub(long i1, long i2) => i1 - i2;
-
+        [OpSource(OpCode.I64Mul)]
         private static long ExecuteI64Mul(long i1, long i2) => unchecked(i1 * i2);
-
+        [OpSource(OpCode.I64DivS)]
         private static long ExecuteI64DivS(long j1, long j2)
         {
             if (j2 == 0)
@@ -100,14 +100,14 @@ namespace Wacs.Core.Instructions.Numeric
                 throw new TrapException("Operation results in arithmetic overflow");
             return j1 / j2;
         }
-
+        [OpSource(OpCode.I64DivU)]
         private static ulong ExecuteI64DivU(ulong j1, ulong j2)
         {
             if (j2 == 0)
                 throw new TrapException("Cannot divide by zero");
             return j1 / j2;
         }
-
+        [OpSource(OpCode.I64RemS)]
         private static long ExecuteI64RemS(long j1, long j2)
         {
             if (j2 == 0)
@@ -116,26 +116,26 @@ namespace Wacs.Core.Instructions.Numeric
             //Special case for arithmetic overflow
             return j2 == -1 && j1 == long.MinValue ? 0 : j1 % j2;
         }
-
+        [OpSource(OpCode.I64RemU)]
         private static ulong ExecuteI64RemU(ulong j1, ulong j2)
         {
             if (j2 == 0)
                 throw new TrapException("Cannot divide by zero");
             return j1 % j2;
         }
-
+        [OpSource(OpCode.I64And)]
         private static ulong ExecuteI64And(ulong i1, ulong i2) => i1 & i2;
-
+        [OpSource(OpCode.I64Or)]
         private static ulong ExecuteI64Or(ulong i1, ulong i2) => i1 | i2;
-
+        [OpSource(OpCode.I64Xor)]
         private static ulong ExecuteI64Xor(ulong i1, ulong i2) => i1 ^ i2;
-
+        [OpSource(OpCode.I64Shl)]
         private static ulong ExecuteI64Shl(ulong i1, long i2) => i1 << ((int)i2 & 0x3F);
-
+        [OpSource(OpCode.I64ShrS)]
         private static long ExecuteI64ShrS(long i1, long i2) => i1 >> ((int)i2 & 0x3F);
-
+        [OpSource(OpCode.I64ShrU)]
         private static ulong ExecuteI64ShrU(ulong i1, long i2) => i1 >> ((int)i2 & 0x3F);
-
+        [OpSource(OpCode.I64Rotl)]
         private static ulong ExecuteI64Rotl(ulong i1, long i2)
         {
             int k = (int)i2 & 0x3F;
@@ -144,7 +144,7 @@ namespace Wacs.Core.Instructions.Numeric
                 result |= i1 >> (64 - k);
             return result;
         }
-
+        [OpSource(OpCode.I64Rotr)]
         private static ulong ExecuteI64Rotr(ulong i1, long i2)
         {
             int k = (int)i2 & 0x3F;

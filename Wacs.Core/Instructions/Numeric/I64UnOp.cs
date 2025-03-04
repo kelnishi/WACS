@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -51,6 +52,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.20 iclz
+        [OpSource(OpCode.I64Clz)]
         private static ulong ExecuteI64Clz(ulong x)
         {
             if (x != 0)
@@ -68,6 +70,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.21 ictz
+        [OpSource(OpCode.I64Ctz)]
         private static ulong ExecuteI64Ctz(ulong x)
         {
             if (x != 0)
@@ -84,6 +87,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.3.2.22 ipopcnt
+        [OpSource(OpCode.I64Popcnt)]
         private static ulong ExecuteI64Popcnt(ulong x)
         {
             ulong count = 0;

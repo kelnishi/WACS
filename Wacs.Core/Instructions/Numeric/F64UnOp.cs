@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions.Transpiler;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -53,10 +54,11 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushF64(result);
         }
 
+        [OpSource(OpCode.F64Abs)]
         private static double ExecuteF64Abs(double a) => Math.Abs(a);
-
+        [OpSource(OpCode.F64Neg)]
         private static double ExecuteF64Neg(double a) => -a;
-
+        [OpSource(OpCode.F64Ceil)]
         private static double ExecuteF64Ceil(double a)
         {
             double result = a switch {
@@ -69,7 +71,7 @@ namespace Wacs.Core.Instructions.Numeric
                 result = -0.0;
             return result;
         }
-
+        [OpSource(OpCode.F64Floor)]
         private static double ExecuteF64Floor(double a)
         {
             double result = a switch {
@@ -82,9 +84,9 @@ namespace Wacs.Core.Instructions.Numeric
                 result = -0.0;
             return result;
         }
-
+        [OpSource(OpCode.F64Trunc)]
         private static double ExecuteF64Trunc(double a) => Math.Truncate(a);
-
+        [OpSource(OpCode.F64Nearest)]
         private static double ExecuteF64Nearest(double a)
         {
             double result = a switch {
@@ -97,7 +99,7 @@ namespace Wacs.Core.Instructions.Numeric
                 result = -0.0;
             return result;
         }
-
+        [OpSource(OpCode.F64Sqrt)]
         private static double ExecuteF64Sqrt(double a) => Math.Sqrt(a);
     }
 }
