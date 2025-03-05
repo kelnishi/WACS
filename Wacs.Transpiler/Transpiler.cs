@@ -29,12 +29,22 @@ using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
-using Module = Wacs.Core.Module;
+using Wacs.Core.Utilities;
 
 namespace Wacs.Transpiler
 {
     public class Transpiler
     {
+        private WasmRuntime _runtime;
+        private string _namespace;
+        
+        public Transpiler(WasmRuntime runtime, string @namespace)
+        {
+            _runtime = runtime;
+            _namespace = @namespace;
+        }
+        
+        
         private int BlockIdx = 0;
         private int OpIdx = 0;
         
@@ -48,7 +58,7 @@ namespace Wacs.Transpiler
 
         private void AddOperand(Operand op) => _operands[op.Name] = op;
 
-        public void TranspileModule(WasmRuntime runtime, ModuleInstance moduleInst)
+        public void TranspileModule(ModuleInstance moduleInst, string className)
         {
             Stopwatch timer = new();
             timer.Start();
@@ -56,16 +66,13 @@ namespace Wacs.Transpiler
             var methods = new List<MethodDeclarationSyntax>();
             foreach (var funcaddr in moduleInst.FuncAddrs)
             {
-                var func = runtime.GetFunction(funcaddr);
+                var func = _runtime.GetFunction(funcaddr);
                 if (func is FunctionInstance funcInst)
                 {
                     var method = TranspileFunction(funcInst);
                     methods.Add(method);
                 }
             }
-
-            string namespaceName = "CompiledWasm";
-            string className = "WasmExecutor";
             
             // Wrap the method in a class declaration.
             var classDeclaration = SyntaxFactory.ClassDeclaration(className)
@@ -73,7 +80,7 @@ namespace Wacs.Transpiler
                 .WithMembers(new SyntaxList<MemberDeclarationSyntax>(methods));
             
             // Place the class inside a namespace.
-            var namespaceDeclaration = SyntaxFactory.NamespaceDeclaration(SyntaxFactory.ParseName(namespaceName))
+            var namespaceDeclaration = SyntaxFactory.NamespaceDeclaration(SyntaxFactory.ParseName(_namespace))
                 .AddMembers(classDeclaration);
             
             // Create the complete compilation unit (source file).
@@ -87,10 +94,10 @@ namespace Wacs.Transpiler
             
             
             // Return the generated C# code as a string.
-            Console.WriteLine(compilationUnit.ToFullString());
+            // Console.WriteLine(compilationUnit.ToFullString());
             
             timer.Stop();
-            Console.WriteLine($"Transpilation took {timer.ElapsedMilliseconds}ms");
+            Console.WriteLine($"Transpilation took {timer.ElapsedMicroseconds():#0.###}us");
             timer.Restart();
             
             string methodName = methods[0].Identifier.ToFullString();
@@ -98,20 +105,20 @@ namespace Wacs.Transpiler
             var assembly = CompileAssembly(compilationUnit);
             
             timer.Stop();
-            Console.WriteLine($"Compilation took {timer.ElapsedMilliseconds}ms");
+            Console.WriteLine($"Compilation took {timer.ElapsedMicroseconds():#0.###}us");
             timer.Restart();
             
-            var type = assembly.GetType($"{namespaceName}.{className}");
+            var type = assembly.GetType($"{_namespace}.{className}");
             var instance = Activator.CreateInstance(type);
             var invoker = type.GetMethod(methodName);
             
             timer.Stop();
-            Console.WriteLine($"Dynamic Load took {timer.ElapsedMilliseconds}ms");
+            Console.WriteLine($"Dynamic Load took {timer.ElapsedMicroseconds():#0.###}us");
             timer.Restart();
             
             var result = invoker.Invoke(instance, new object?[]{ null, 12 });
             timer.Stop();
-            Console.WriteLine($"Invocation took {timer.ElapsedMilliseconds}ms");
+            Console.WriteLine($"Invocation took {timer.ElapsedMicroseconds():#0.###}us");
             
             Console.WriteLine(result);
         }
@@ -372,9 +379,9 @@ namespace Wacs.Transpiler
                         yield return SyntaxFactory.ParseStatement($"throw new WasmRuntimeException(\"unreachable\");");
                         break;
                     default:
-                        // throw new TranspilerException($"Opcode {inst.Op.GetMnemonic()} not supported");
-                        yield return SyntaxFactory.ParseStatement($"throw new NotSupportedException(\"Opcode {inst.Op.GetMnemonic()} not supported.\");");
-                        break;
+                        throw new TranspilerException($"Opcode {inst.Op.GetMnemonic()} not supported");
+                        // yield return SyntaxFactory.ParseStatement($"throw new NotSupportedException(\"Opcode {inst.Op.GetMnemonic()} not supported.\");");
+                        // break;
                 }
             }
         }

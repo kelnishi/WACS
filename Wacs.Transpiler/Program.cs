@@ -23,8 +23,8 @@ namespace Wacs.Transpiler
             
             timer.Stop();
             Console.WriteLine($"Parsing and Instantiation took {timer.ElapsedMilliseconds}ms");
-            var transpiler = new Transpiler();
-            transpiler.TranspileModule(runtime, moduleInst);
+            var transpiler = new Transpiler(runtime, "CompiledWasm");
+            transpiler.TranspileModule(moduleInst, "WasmExecutor");
         }
     }
 }
