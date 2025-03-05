@@ -18,8 +18,8 @@ namespace Wacs.Transpiler
 {
     public class Operand
     {
-        public string Name;
-        public string Type;
+        public string Name = null!;
+        public string Type = null!;
         public bool IsDeclared = false;
 
         public Value Value = Value.Void;

@@ -16,6 +16,6 @@ namespace Wacs.Transpiler
 {
     public class BlockLabel
     {
-        public string Name;
+        public string Name = null!;
     }
 }
