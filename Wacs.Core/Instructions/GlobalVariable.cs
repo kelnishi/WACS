@@ -29,7 +29,7 @@ namespace Wacs.Core.Instructions
     {
         public InstGlobalGet() : base(ByteCode.GlobalGet, +1) { }
         
-        private GlobalIdx Index;
+        public GlobalIdx Index { get; private set; }
 
         public int LinkStackDiff => StackDiff;
         
@@ -128,7 +128,7 @@ namespace Wacs.Core.Instructions
     {
         public InstGlobalSet() : base(ByteCode.GlobalSet, -1) { }
         
-        private GlobalIdx Index;
+        public GlobalIdx Index { get; private set; }
 
         public int LinkStackDiff => StackDiff;
         
@@ -210,5 +210,4 @@ namespace Wacs.Core.Instructions
             glob.Value = value;
         }
     }
-    
 }
