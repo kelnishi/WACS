@@ -31,6 +31,8 @@ namespace Wacs.Core.Instructions
         
         private GlobalIdx Index;
 
+        public GlobalIdx GetIndex() => Index;
+
         public int LinkStackDiff => StackDiff;
         
         public bool IsConstant(IWasmValidationContext? context)
@@ -129,6 +131,8 @@ namespace Wacs.Core.Instructions
         public InstGlobalSet() : base(ByteCode.GlobalSet, -1) { }
         
         private GlobalIdx Index;
+
+        public GlobalIdx GetIndex() => Index;
 
         public int LinkStackDiff => StackDiff;
         
