@@ -458,19 +458,32 @@ namespace Wacs.Core.Runtime
 
                 if (isNestedCall)
                 {
-                    // For nested calls: push results back onto stack so caller can use them
-                    // and restore the instruction pointer
-                    Context.OpStack.PushValues(results);
-                    Context.InstructionPointer = savedInstructionPointer;
+                    RestoreInstructionPointer(savedInstructionPointer, results);
                 }
                 else
                 {
-                    // For top-level calls: clear any remaining stack values
-                    while (Context.OpStack.HasValue)
-                        Context.OpStack.PopAny();
+                    FlushCallStack();
                 }
 
                 return results;
+            }
+
+            /// <summary>
+            /// Restores the instruction pointer and pushes results back onto the stack for nested calls.
+            /// </summary>
+            private void RestoreInstructionPointer(int savedInstructionPointer, Value[] results)
+            {
+                Context.OpStack.PushValues(results);
+                Context.InstructionPointer = savedInstructionPointer;
+            }
+
+            /// <summary>
+            /// Clears any remaining stack values for top-level calls.
+            /// </summary>
+            private void FlushCallStack()
+            {
+                while (Context.OpStack.HasValue)
+                    Context.OpStack.PopAny();
             }
         }
 
