@@ -295,8 +295,6 @@ namespace Wacs.Core.Runtime
                 bool isNestedCall = Context.OpStack.Count > 0;
 
                 // Only enforce empty stack for top-level calls
-                if (!isNestedCall && Context.OpStack.Count > 0)
-                    throw new WasmRuntimeException("Values left on operand stack");
 
                 Context.OpStack.PushScalars(funcType.ParameterTypes, args);
 
