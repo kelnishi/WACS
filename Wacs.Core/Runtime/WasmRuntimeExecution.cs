@@ -292,8 +292,7 @@ namespace Wacs.Core.Runtime
                 var funcType = funcInst.Type;
 
                 // Detect if this is a nested call by checking if stack has values
-                int savedStackHeight = Context.OpStack.Count;
-                bool isNestedCall = savedStackHeight > 0;
+                bool isNestedCall = Context.OpStack.Count > 0;
 
                 // Only enforce empty stack for top-level calls
                 if (!isNestedCall && Context.OpStack.Count > 0)
