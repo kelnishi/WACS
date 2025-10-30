@@ -467,24 +467,24 @@ namespace Wacs.Core.Runtime
 
                 return results;
             }
+        }
 
-            /// <summary>
-            /// Restores the instruction pointer and pushes results back onto the stack for nested calls.
-            /// </summary>
-            private void RestoreInstructionPointer(int savedInstructionPointer, Value[] results)
+        /// <summary>
+        /// Restores the instruction pointer and pushes results back onto the stack for nested calls.
+        /// </summary>
+        private void RestoreInstructionPointer(int savedInstructionPointer, Value[] results)
             {
                 Context.OpStack.PushValues(results);
                 Context.InstructionPointer = savedInstructionPointer;
             }
 
-            /// <summary>
-            /// Clears any remaining stack values for top-level calls.
-            /// </summary>
-            private void FlushCallStack()
-            {
-                while (Context.OpStack.HasValue)
-                    Context.OpStack.PopAny();
-            }
+        /// <summary>
+        /// Clears any remaining stack values for top-level calls.
+        /// </summary>
+        private void FlushCallStack()
+        {
+            while (Context.OpStack.HasValue)
+                Context.OpStack.PopAny();
         }
 
         public async Task ProcessThreadAsync(long gasLimit)
