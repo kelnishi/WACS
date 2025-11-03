@@ -291,9 +291,11 @@ namespace Wacs.Core.Runtime
                 var funcInst = Context.Store[funcAddr];
                 var funcType = funcInst.Type;
 
-                if (Context.OpStack.Count > 0)
-                    throw new WasmRuntimeException("Values left on operand stack");
-                
+                // Detect if this is a nested call by checking if stack has values
+                bool isNestedCall = Context.OpStack.Count > 0;
+
+                // Only enforce empty stack for top-level calls
+
                 Context.OpStack.PushScalars(funcType.ParameterTypes, args);
 
                 if (options.CollectStats != StatsDetail.None)
@@ -304,6 +306,9 @@ namespace Wacs.Core.Runtime
 
                 Context.ProcessTimer.Restart();
                 Context.InstructionTimer.Restart();
+
+                // Save instruction pointer for nested calls
+                int savedInstructionPointer = Context.InstructionPointer;
                 Context.InstructionPointer = ExecContext.AbortSequence;
 
                 if (options.SynchronousExecution)
@@ -315,6 +320,7 @@ namespace Wacs.Core.Runtime
                     var task = Context.InvokeAsync(funcAddr);
                     task.Wait();
                 }
+
                 Context.steps = 0;
                 bool fastPath = options.UseFastPath();
                 try
@@ -351,8 +357,15 @@ namespace Wacs.Core.Runtime
                         ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{Context.steps}\n{path}"));
                     }
 
-                    //Flush the stack before throwing...
-                    Context.FlushCallStack();
+                    // For nested calls, restore state; for top-level, flush
+                    if (isNestedCall)
+                    {
+                        Context.InstructionPointer = savedInstructionPointer;
+                    }
+                    else
+                    {
+                        Context.FlushCallStack();
+                    }
                     ExceptionDispatchInfo.Throw(exc);
                 }
                 catch (TrapException exc)
@@ -375,8 +388,14 @@ namespace Wacs.Core.Runtime
                         ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{Context.steps}\n{path}"));
                     }
 
-                    //Flush the stack before throwing...
-                    Context.FlushCallStack();
+                    if (isNestedCall)
+                    {
+                        Context.InstructionPointer = savedInstructionPointer;
+                    }
+                    else
+                    {
+                        Context.FlushCallStack();
+                    }
                     ExceptionDispatchInfo.Throw(exc);
                 }
                 catch (SignalException exc)
@@ -399,8 +418,14 @@ namespace Wacs.Core.Runtime
                         message = exc.Message + $":line {line} instruction #{Context.steps}\n{path}";
                     }
 
-                    //Flush the stack before throwing...
-                    Context.FlushCallStack();
+                    if (isNestedCall)
+                    {
+                        Context.InstructionPointer = savedInstructionPointer;
+                    }
+                    else
+                    {
+                        Context.FlushCallStack();
+                    }
 
                     var exType = exc.GetType();
                     var ctr = exType.GetConstructor(new Type[] { typeof(int), typeof(string) });
@@ -408,11 +433,17 @@ namespace Wacs.Core.Runtime
                 }
                 catch (WasmRuntimeException)
                 {
-                    //Maybe Log?
-                    Context.FlushCallStack();
+                    if (isNestedCall)
+                    {
+                        Context.InstructionPointer = savedInstructionPointer;
+                    }
+                    else
+                    {
+                        Context.FlushCallStack();
+                    }
                     throw;
                 }
-                
+
                 Context.ProcessTimer.Stop();
                 Context.InstructionTimer.Stop();
                 if (options.LogProgressEvery > 0) Console.Error.WriteLine("done.");
@@ -424,14 +455,36 @@ namespace Wacs.Core.Runtime
                 Context.OpStack.PopScalars(funcType.ResultType, span);
 
                 Context.GetModule(funcAddr)?.DerefTypes(span);
-                
-                // if (Context.OpStack.Count > 0)
-                //     throw new WasmRuntimeException("Values left on operand stack");
-                while (Context.OpStack.HasValue)
-                    Context.OpStack.PopAny();
-                
+
+                if (isNestedCall)
+                {
+                    RestoreInstructionPointer(savedInstructionPointer, results);
+                }
+                else
+                {
+                    FlushCallStack();
+                }
+
                 return results;
             }
+        }
+
+        /// <summary>
+        /// Restores the instruction pointer and pushes results back onto the stack for nested calls.
+        /// </summary>
+        private void RestoreInstructionPointer(int savedInstructionPointer, Value[] results)
+            {
+                Context.OpStack.PushValues(results);
+                Context.InstructionPointer = savedInstructionPointer;
+            }
+
+        /// <summary>
+        /// Clears any remaining stack values for top-level calls.
+        /// </summary>
+        private void FlushCallStack()
+        {
+            while (Context.OpStack.HasValue)
+                Context.OpStack.PopAny();
         }
 
         public async Task ProcessThreadAsync(long gasLimit)
