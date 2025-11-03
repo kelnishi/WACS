@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.5] Fix rollup
+- Fix to indirect calls
+- Fix to reentrant calls
+- Exposing global var index for use in parsing-only contexts
+
 ## [0.7.4] Performance
 ### Link-time optimization
 - Instantiated functions are now flattened into a tape at link time
