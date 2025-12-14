@@ -393,7 +393,10 @@ namespace Wacs.WASIp1
             if (_state.FileDescriptors.TryRemove(from, out var fileDescriptor))
             {
                 fileDescriptor.Fd = to;
-                _state.FileDescriptors.TryAdd(to, fileDescriptor);
+                if (!_state.FileDescriptors.TryAdd(to, fileDescriptor))
+                {
+                    throw new IOException($"Failed to add file descriptor {to}: key already exists or concurrent modification detected.");
+                }
             }
         }
 
