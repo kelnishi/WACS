@@ -20,7 +20,7 @@ using System.Linq;
 using Wacs.Core.Runtime;
 using Wacs.Core.WASIp1;
 using Wacs.WASIp1.Types;
-// Interop should use plain numeric types; functions are responsible for marshaling.
+
 using ptr = System.UInt32;
 using fd = System.UInt32;
 using filesize = System.UInt64;
@@ -35,15 +35,12 @@ namespace Wacs.WASIp1
     {
         private readonly WasiConfiguration _config;
         private readonly State _state;
-
-        // Track whether Dispose() has been called.
         private bool _disposed;
 
         public FileSystem(WasiConfiguration config, State state)
         {
             _config = config;
             _state = state;
-
             InitializeFs();
         }
 
@@ -52,73 +49,127 @@ namespace Wacs.WASIp1
             ThrowIfDisposed();
 
             string module = "wasi_snapshot_preview1";
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ErrNo>>(
-                (module, "path_create_directory"), PathCreateDirectory);
-            runtime.BindHostFunction<Func<ExecContext, fd, LookupFlags, ptr, size, ptr, ErrNo>>(
-                (module, "path_filestat_get"), PathFilestatGet);
-            runtime.BindHostFunction<Func<ExecContext, fd, LookupFlags, ptr, size, timestamp, timestamp, FstFlags, ErrNo>>(
-                (module, "path_filestat_set_times"), PathFilestatSetTimes);
-            runtime.BindHostFunction<Func<ExecContext, fd, LookupFlags, ptr, size, fd, ptr, size, ErrNo>>(
-                (module, "path_link"), PathLink);
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, int>>(
+                (module, "path_create_directory"), (ctx, a, b, c) => (int)PathCreateDirectory(ctx, a, b, c));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, int, ptr, size, ptr, int>>(
+                (module, "path_filestat_get"), (ctx, a, b, c, d, e) => (int)PathFilestatGet(ctx, a, (LookupFlags)b, c, d, e));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, int, ptr, size, timestamp, timestamp, int, int>>(
+                (module, "path_filestat_set_times"), (ctx, a, b, c, d, e, f, g) => (int)PathFilestatSetTimes(ctx, a, (LookupFlags)b, c, d, e, f, (FstFlags)g));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, int, ptr, size, fd, ptr, size, int>>(
+                (module, "path_link"), (ctx, a, b, c, d, e, f, g) => (int)PathLink(ctx, a, (LookupFlags)b, c, d, e, f, g));
 
-            // HACK: 10 parameters + return -> dotnet SEGFAULT!, so we're using outvars to return
-            // *outvars require defining our own delegate (can't use Action<T>).
-            runtime.BindHostFunction<PathOpenDelegate>(
-                (module, "path_open"), PathOpen);
+            runtime.BindHostFunction<Func<ExecContext, fd, int, ptr, size, int, long, long, int, ptr, int>>(
+                (module, "path_open"), PathOpenAot);
 
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ptr, size, ptr, ErrNo>>(
-                (module, "path_readlink"), PathReadlink);
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ErrNo>>(
-                (module, "path_remove_directory"), PathRemoveDirectory);
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, fd, ptr, size, ErrNo>>(
-                (module, "path_rename"), PathRename);
-            runtime.BindHostFunction<Func<ExecContext, ptr, size, fd, ptr, size, ErrNo>>(
-                (module, "path_symlink"), PathSymlink);
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ErrNo>>(
-                (module, "path_unlink_file"), PathUnlinkFile);
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ptr, size, ptr, int>>(
+                (module, "path_readlink"), (ctx, a, b, c, d, e, f) => (int)PathReadlink(ctx, a, b, c, d, e, f));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, int>>(
+                (module, "path_remove_directory"), (ctx, a, b, c) => (int)PathRemoveDirectory(ctx, a, b, c));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, fd, ptr, size, int>>(
+                (module, "path_rename"), (ctx, a, b, c, d, e, f) => (int)PathRename(ctx, a, b, c, d, e, f));
+            
+            runtime.BindHostFunction<Func<ExecContext, ptr, size, fd, ptr, size, int>>(
+                (module, "path_symlink"), (ctx, a, b, c, d, e) => (int)PathSymlink(ctx, a, b, c, d, e));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, int>>(
+                (module, "path_unlink_file"), (ctx, a, b, c) => (int)PathUnlinkFile(ctx, a, b, c));
 
-            runtime.BindHostFunction<Func<ExecContext, fd, filesize, filesize, Advice, ErrNo>>(
-                (module, "fd_advise"), FdAdvise);
-            runtime.BindHostFunction<Func<ExecContext, fd, filesize, filesize, ErrNo>>(
-                (module, "fd_allocate"), FdAllocate);
-            runtime.BindHostFunction<Func<ExecContext, fd, ErrNo>>(
-                (module, "fd_close"), FdClose);
-            runtime.BindHostFunction<Func<ExecContext, fd, ErrNo>>(
-                (module, "fd_datasync"), FdDatasync);
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, ErrNo>>(
-                (module, "fd_fdstat_get"), FdFdstatGet);
-            runtime.BindHostFunction<Func<ExecContext, fd, FdFlags, ErrNo>>(
-                (module, "fd_fdstat_set_flags"), FdFdstatSetFlags);
-            runtime.BindHostFunction<Func<ExecContext, fd, Rights, Rights, ErrNo>>(
-                (module, "fd_fdstat_set_rights"), FdFdstatSetRights);
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, ErrNo>>(
-                (module, "fd_filestat_get"), FdFilestatGet);
-            runtime.BindHostFunction<Func<ExecContext, fd, filesize, ErrNo>>(
-                (module, "fd_filestat_set_size"), FdFilestatSetSize);
-            runtime.BindHostFunction<Func<ExecContext, fd, timestamp, timestamp, FstFlags, ErrNo>>(
-                (module, "fd_filestat_set_times"), FdFilestatSetTimes);
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, filesize, ptr, ErrNo>>(
-                (module, "fd_pread"), FdPread);
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, ErrNo>>(
-                (module, "fd_prestat_get"), FdPrestatGet);
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ErrNo>>(
-                (module, "fd_prestat_dir_name"), FdPrestatDirName);
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, filesize, ptr, ErrNo>>(
-                (module, "fd_pwrite"), FdPwrite);
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ptr, ErrNo>>(
-                (module, "fd_read"), FdRead);
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, dircookie, ptr, ErrNo>>(
-                (module, "fd_readdir"), FdReaddir);
-            runtime.BindHostFunction<Func<ExecContext, fd, fd, ErrNo>>(
-                (module, "fd_renumber"), FdRenumber);
-            runtime.BindHostFunction<Func<ExecContext, fd, filedelta, Whence, ptr, ErrNo>>(
-                (module, "fd_seek"), FdSeek);
-            runtime.BindHostFunction<Func<ExecContext, fd, ErrNo>>(
-                (module, "fd_sync"), FdSync);
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, ErrNo>>(
-                (module, "fd_tell"), FdTell);
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ptr, ErrNo>>(
-                (module, "fd_write"), FdWrite);
+            runtime.BindHostFunction<Func<ExecContext, fd, filesize, filesize, int, int>>(
+                (module, "fd_advise"), (ctx, a, b, c, d) => (int)FdAdvise(ctx, a, b, c, (Advice)d));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, filesize, filesize, int>>(
+                (module, "fd_allocate"), (ctx, a, b, c) => (int)FdAllocate(ctx, a, b, c));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, int>>(
+                (module, "fd_close"), (ctx, a) => (int)FdClose(ctx, a));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, int>>(
+                (module, "fd_datasync"), (ctx, a) => (int)FdDatasync(ctx, a));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, int>>(
+                (module, "fd_fdstat_get"), (ctx, a, b) => (int)FdFdstatGet(ctx, a, b));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, int, int>>(
+                (module, "fd_fdstat_set_flags"), (ctx, a, b) => (int)FdFdstatSetFlags(ctx, a, (FdFlags)b));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, long, long, int>>(
+                (module, "fd_fdstat_set_rights"), (ctx, a, b, c) => (int)FdFdstatSetRights(ctx, a, (Rights)b, (Rights)c));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, int>>(
+                (module, "fd_filestat_get"), (ctx, a, b) => (int)FdFilestatGet(ctx, a, b));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, filesize, int>>(
+                (module, "fd_filestat_set_size"), (ctx, a, b) => (int)FdFilestatSetSize(ctx, a, b));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, timestamp, timestamp, int, int>>(
+                (module, "fd_filestat_set_times"), (ctx, a, b, c, d) => (int)FdFilestatSetTimes(ctx, a, b, c, (FstFlags)d));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, filesize, ptr, int>>(
+                (module, "fd_pread"), (ctx, a, b, c, d, e) => (int)FdPread(ctx, a, b, c, d, e));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, int>>(
+                (module, "fd_prestat_get"), (ctx, a, b) => (int)FdPrestatGet(ctx, a, b));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, int>>(
+                (module, "fd_prestat_dir_name"), (ctx, a, b, c) => (int)FdPrestatDirName(ctx, a, b, c));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, filesize, ptr, int>>(
+                (module, "fd_pwrite"), (ctx, a, b, c, d, e) => (int)FdPwrite(ctx, a, b, c, d, e));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ptr, int>>(
+                (module, "fd_read"), (ctx, a, b, c, d) => (int)FdRead(ctx, a, b, c, d));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, dircookie, ptr, int>>(
+                (module, "fd_readdir"), (ctx, a, b, c, d, e) => (int)FdReaddir(ctx, a, b, c, d, e));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, fd, int>>(
+                (module, "fd_renumber"), (ctx, a, b) => (int)FdRenumber(ctx, a, b));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, filedelta, int, ptr, int>>(
+                (module, "fd_seek"), (ctx, a, b, c, d) => (int)FdSeek(ctx, a, b, (Whence)c, d));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, int>>(
+                (module, "fd_sync"), (ctx, a) => (int)FdSync(ctx, a));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, int>>(
+                (module, "fd_tell"), (ctx, a, b) => (int)FdTell(ctx, a, b));
+            
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ptr, int>>(
+                (module, "fd_write"), (ctx, a, b, c, d) => (int)FdWrite(ctx, a, b, c, d));
+        }
+
+        private int PathOpenAot(
+            ExecContext ctx,
+            fd dirfd,
+            int dirflags,
+            ptr pathPtr,
+            size pathLen,
+            int oflags,
+            long fsRightsBase,
+            long fsRightsInheriting,
+            int fdflags,
+            ptr fdOut)
+        {
+            PathOpen(
+                ctx,
+                dirfd,
+                (LookupFlags)dirflags,
+                pathPtr,
+                pathLen,
+                (OFlags)oflags,
+                (Rights)fsRightsBase,
+                (Rights)fsRightsInheriting,
+                (FdFlags)fdflags,
+                fdOut,
+                out ErrNo result);
+
+            return (int)result;
         }
 
         private void InitializeFs()
@@ -132,7 +183,6 @@ namespace Wacs.WASIp1
         {
             ThrowIfDisposed();
 
-            // First, check that HostRootDirectory is not empty and actually exists.
             if (string.IsNullOrWhiteSpace(_config.HostRootDirectory))
             {
                 throw new ArgumentException(
@@ -148,7 +198,6 @@ namespace Wacs.WASIp1
 
             _state.PathMapper.SetRootMapping(_config.HostRootDirectory);
 
-            // Bind the HostRootDir as "/"
             BindDir(_config.HostRootDirectory, "/", _config.DefaultPermissions, true);
 
             foreach (var pod in _config.PreopenedDirectories)
@@ -192,7 +241,6 @@ namespace Wacs.WASIp1
 
             if (guestDir.StartsWith("/dev"))
             {
-                // We disallow binding anything under /dev except special cases handled internally.
                 throw new UnauthorizedAccessException(
                     $"The guest path '{guestDir}' is not allowed.");
             }
@@ -210,7 +258,6 @@ namespace Wacs.WASIp1
                 Type = Filetype.Directory,
             };
 
-            // More semantically correct to use DirectoryInfo here.
             var dirInfo = new DirectoryInfo(hostDir);
             var rights = FileDescriptor.ComputeFileRights(
                 dirInfo,
@@ -250,10 +297,7 @@ namespace Wacs.WASIp1
 
             if (entry == null) return;
 
-            if (!_state.FileDescriptors.TryRemove(entry.Fd, out _))
-            {
-                // Optionally log or handle
-            }
+            _state.FileDescriptors.TryRemove(entry.Fd, out _);
         }
 
         private fd BindFile(
@@ -266,7 +310,6 @@ namespace Wacs.WASIp1
         {
             ThrowIfDisposed();
 
-            // If it's "/dev/null", bind that specially
             if (guestPath == "/dev/null")
             {
                 return BindDevNull(perm);
@@ -278,8 +321,6 @@ namespace Wacs.WASIp1
                 throw new FileNotFoundException($"The host file '{hostpath}' does not exist.");
             }
 
-            // Apply the same logic as BindDir: combine 'rights' with restrictedRights
-            // and also adjust inherited rights.
             rights &= restrictedRights;
             if (inheritedRights == Rights.None)
             {
@@ -326,10 +367,6 @@ namespace Wacs.WASIp1
             return newFd;
         }
 
-        /// <summary>
-        /// Closes the Stream and removes the FileDescriptor
-        /// </summary>
-        /// <param name="fd"></param>
         private void RemoveFd(fd fd)
         {
             ThrowIfDisposed();
@@ -356,10 +393,7 @@ namespace Wacs.WASIp1
             if (_state.FileDescriptors.TryRemove(from, out var fileDescriptor))
             {
                 fileDescriptor.Fd = to;
-                if (_state.FileDescriptors.TryAdd(to, fileDescriptor))
-                {
-                    // Optionally log or handle
-                }
+                _state.FileDescriptors.TryAdd(to, fileDescriptor);
             }
         }
 
@@ -372,10 +406,7 @@ namespace Wacs.WASIp1
 
             if (entry == null) return;
 
-            if (_state.FileDescriptors.TryRemove(entry.Fd, out _))
-            {
-                // Optionally log or handle
-            }
+            _state.FileDescriptors.TryRemove(entry.Fd, out _);
         }
 
         private void BindStdio()
@@ -484,7 +515,6 @@ namespace Wacs.WASIp1
 
         public void Dispose()
         {
-            // If already disposed, do nothing
             if (_disposed) return;
 
             foreach (var fileDescriptor in _state.FileDescriptors.Values)
