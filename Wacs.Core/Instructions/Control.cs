@@ -658,6 +658,10 @@ namespace Wacs.Core.Instructions
 
         private LabelIdx[] Ls = null!;
 
+        public int DefaultLabel => (int)Ln.Value;
+        public int LabelCount => Ls.Length;
+        public int GetLabel(int index) => (int)Ls[index].Value;
+
         public int LinkStackDiff { get; set; }
 
         public Action<ExecContext, int> GetFunc => BranchTable;
@@ -957,6 +961,9 @@ namespace Wacs.Core.Instructions
         private TableIdx X;
 
         private TypeIdx Y;
+
+        public int TableIndex => (int)X.Value;
+        public int TypeIndex => (int)Y.Value;
 
         public InstCallIndirect() : base(ByteCode.CallIndirect)
         {
