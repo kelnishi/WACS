@@ -1,0 +1,9 @@
+{
+  "JsonDirectory": "../../Spec.Test/generated-json",
+  "TraceExecution": false,
+  "Single": null,
+  "SkipWasts": [
+    "comments.wast",
+    "annotations.wast"
+  ]
+}
