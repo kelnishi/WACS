@@ -28,8 +28,9 @@ namespace Wacs.Core.Instructions
     public class InstMemorySize : InstructionBase
     {
         public InstMemorySize() : base(ByteCode.MemorySize, +1) { }
-        
+
         private MemIdx M;
+        public int MemIndex => (int)M.Value;
         
         /// <summary>
         /// @Spec 3.3.7.10. memory.size
@@ -72,8 +73,9 @@ namespace Wacs.Core.Instructions
     public class InstMemoryGrow : InstructionBase
     {
         public InstMemoryGrow() : base(ByteCode.MemoryGrow) { }
-        
+
         private MemIdx M;
+        public int MemIndex => (int)M.Value;
 
         /// <summary>
         /// @Spec 3.3.7.11. memory.grow
