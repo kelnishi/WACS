@@ -92,14 +92,21 @@ namespace Wacs.Transpiler.AOT
                 $"{_namespace}.{moduleName}.Functions",
                 TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
 
-            // Collect all wasm functions (skip host functions)
+            // Collect all wasm functions and count imports
             var wasmFunctions = new List<FunctionInstance>();
+            int importCount = 0;
+            bool foundLocal = false;
             foreach (var funcAddr in moduleInst.FuncAddrs)
             {
                 var func = runtime.GetFunction(funcAddr);
                 if (func is FunctionInstance fi && fi.Module == moduleInst)
                 {
+                    foundLocal = true;
                     wasmFunctions.Add(fi);
+                }
+                else if (!foundLocal)
+                {
+                    importCount++;
                 }
             }
 
@@ -124,7 +131,7 @@ namespace Wacs.Transpiler.AOT
             {
                 var funcInst = wasmFunctions[i];
                 var mb = methodBuilders[i];
-                var codegen = new FunctionCodegen(mb, funcInst, methodBuilders);
+                var codegen = new FunctionCodegen(mb, funcInst, wasmFunctions.ToArray(), methodBuilders, importCount);
 
                 bool emitted = codegen.TryEmit();
 
