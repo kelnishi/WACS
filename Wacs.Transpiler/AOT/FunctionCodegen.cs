@@ -158,6 +158,13 @@ namespace Wacs.Transpiler.AOT
                 }
             }
 
+            // Memory operations
+            if (MemoryEmitter.CanEmit(op))
+            {
+                MemoryEmitter.Emit(il, inst, op);
+                return;
+            }
+
             // Function calls
             if (CallEmitter.CanEmit(op))
             {
@@ -268,6 +275,10 @@ namespace Wacs.Transpiler.AOT
 
             // Control flow
             if (ControlEmitter.CanEmit(op))
+                return true;
+
+            // Memory operations
+            if (MemoryEmitter.CanEmit(op))
                 return true;
 
             // Global access (numeric types only for now)
