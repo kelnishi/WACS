@@ -79,7 +79,7 @@ namespace Wacs.Transpiler.AOT
         /// </summary>
         public TranspilationResult Transpile(
             ModuleInstance moduleInst,
-            Store store,
+            WasmRuntime runtime,
             string moduleName = "WasmModule")
         {
             var assemblyName = new AssemblyName($"{_namespace}.{moduleName}");
@@ -96,7 +96,7 @@ namespace Wacs.Transpiler.AOT
             var wasmFunctions = new List<FunctionInstance>();
             foreach (var funcAddr in moduleInst.FuncAddrs)
             {
-                var func = store[funcAddr];
+                var func = runtime.GetFunction(funcAddr);
                 if (func is FunctionInstance fi && fi.Module == moduleInst)
                 {
                     wasmFunctions.Add(fi);
