@@ -28,8 +28,9 @@ namespace Wacs.Core.Instructions
     public class InstGlobalGet : InstructionBase, IContextConstInstruction, IVarInstruction, ITypedValueProducer<Value>
     {
         public InstGlobalGet() : base(ByteCode.GlobalGet, +1) { }
-        
+
         private GlobalIdx Index;
+        public int GetIndex() => (int)Index.Value;
 
         public int LinkStackDiff => StackDiff;
         
@@ -127,8 +128,9 @@ namespace Wacs.Core.Instructions
     public class InstGlobalSet : InstructionBase, IContextConstInstruction, IVarInstruction, INodeConsumer<Value>
     {
         public InstGlobalSet() : base(ByteCode.GlobalSet, -1) { }
-        
+
         private GlobalIdx Index;
+        public int GetIndex() => (int)Index.Value;
 
         public int LinkStackDiff => StackDiff;
         

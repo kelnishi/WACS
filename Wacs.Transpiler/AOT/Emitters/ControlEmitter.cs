@@ -64,7 +64,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                 || op == WasmOpCode.End
                 || op == WasmOpCode.Br
                 || op == WasmOpCode.BrIf
-                // br_table not yet supported (label array is private)
+                || op == WasmOpCode.BrTable
                 || op == WasmOpCode.Return;
         }
 
@@ -210,19 +210,23 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         /// <summary>
         /// Emit br_table — switch on an index. Pops i32 from stack.
-        /// If index is out of range, branches to default.
+        /// CIL switch jumps to labels[index], falls through if out of range.
         /// </summary>
         public static void EmitBrTable(ILGenerator il, InstBranchTable inst, Stack<EmitBlock> blockStack)
         {
-            // InstBranchTable has Ls (label array) and Ln (default label)
-            // We need to access these. The Label property gives the default.
-            // The Ls array is private, but we can access the labels via reflection
-            // or by examining the instruction's properties.
+            // Build CIL label array from WASM label depths
+            var labels = new Label[inst.LabelCount];
+            for (int i = 0; i < inst.LabelCount; i++)
+            {
+                labels[i] = PeekLabel(blockStack, inst.GetLabel(i)).BranchTarget;
+            }
 
-            // For now, fall through to a simpler implementation using the
-            // public properties available. InstBranchTable doesn't expose Ls publicly.
-            // We'll need to handle this — for now, signal unsupported.
-            throw new TranspilerException("br_table requires access to label array (not yet implemented)");
+            var defaultTarget = PeekLabel(blockStack, inst.DefaultLabel).BranchTarget;
+
+            // CIL switch: jumps to labels[index] if 0 <= index < labels.Length,
+            // falls through otherwise — then we branch to default.
+            il.Emit(OpCodes.Switch, labels);
+            il.Emit(OpCodes.Br, defaultTarget);
         }
 
         /// <summary>
