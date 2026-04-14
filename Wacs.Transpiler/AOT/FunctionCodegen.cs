@@ -36,8 +36,11 @@ namespace Wacs.Transpiler.AOT
     {
         private readonly MethodBuilder _method;
         private readonly FunctionInstance _funcInst;
+        private readonly FunctionInstance[] _siblingFunctions;
         private readonly MethodBuilder[] _siblingMethods;
         private readonly int _paramCount;
+        private readonly int _importCount;
+        private readonly ModuleInstance _moduleInst;
 
         // Control flow state
         private readonly Stack<EmitBlock> _blockStack = new();
@@ -47,12 +50,17 @@ namespace Wacs.Transpiler.AOT
         public FunctionCodegen(
             MethodBuilder method,
             FunctionInstance funcInst,
-            MethodBuilder[] siblingMethods)
+            FunctionInstance[] siblingFunctions,
+            MethodBuilder[] siblingMethods,
+            int importCount)
         {
             _method = method;
             _funcInst = funcInst;
+            _siblingFunctions = siblingFunctions;
             _siblingMethods = siblingMethods;
             _paramCount = funcInst.Type.ParameterTypes.Arity;
+            _importCount = importCount;
+            _moduleInst = funcInst.Module;
         }
 
         /// <summary>
@@ -128,6 +136,35 @@ namespace Wacs.Transpiler.AOT
                 return;
             }
 
+            // Global access
+            if (GlobalEmitter.CanEmit(op))
+            {
+                switch (op)
+                {
+                    case WasmOpCode.GlobalGet:
+                    {
+                        var getInst = (InstGlobalGet)inst;
+                        var globalType = ResolveGlobalType(getInst.GetIndex());
+                        GlobalEmitter.EmitGlobalGet(il, getInst, globalType);
+                        return;
+                    }
+                    case WasmOpCode.GlobalSet:
+                    {
+                        var setInst = (InstGlobalSet)inst;
+                        var globalType = ResolveGlobalType(setInst.GetIndex());
+                        GlobalEmitter.EmitGlobalSet(il, setInst, globalType);
+                        return;
+                    }
+                }
+            }
+
+            // Function calls
+            if (CallEmitter.CanEmit(op))
+            {
+                CallEmitter.EmitCall(il, (InstCall)inst, _siblingFunctions, _siblingMethods, _importCount);
+                return;
+            }
+
             // Control flow
             switch (op)
             {
@@ -192,7 +229,7 @@ namespace Wacs.Transpiler.AOT
         {
             foreach (var inst in instructions)
             {
-                if (!HasEmitter(inst.Op))
+                if (!HasEmitter(inst))
                     return false;
 
                 // Recursively check nested blocks
@@ -210,11 +247,11 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
-        /// Check if we have an IL emitter for the given bytecode.
+        /// Check if we have an IL emitter for the given instruction.
         /// </summary>
-        private bool HasEmitter(ByteCode bc)
+        private bool HasEmitter(InstructionBase inst)
         {
-            var op = bc.x00;
+            var op = inst.Op.x00;
 
             // Multi-byte opcodes (FB/FC/FD/FE prefix) — not yet supported
             if (op == WasmOpCode.FB || op == WasmOpCode.FC ||
@@ -233,7 +270,68 @@ namespace Wacs.Transpiler.AOT
             if (ControlEmitter.CanEmit(op))
                 return true;
 
+            // Global access (numeric types only for now)
+            if (GlobalEmitter.CanEmit(op))
+            {
+                int globalIdx = op == WasmOpCode.GlobalGet
+                    ? ((InstGlobalGet)inst).GetIndex()
+                    : ((InstGlobalSet)inst).GetIndex();
+                try
+                {
+                    var gtype = ResolveGlobalType(globalIdx);
+                    return gtype == ValType.I32 || gtype == ValType.I64 ||
+                           gtype == ValType.F32 || gtype == ValType.F64;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+
+            // Calls (intra-module only)
+            if (op == WasmOpCode.Call)
+            {
+                int funcIdx = (int)((InstCall)inst).X.Value;
+                return funcIdx >= _importCount;
+            }
+
             return false;
+        }
+
+        /// <summary>
+        /// Look up the content type of a global by its index in the module.
+        /// Global index space: imported globals first, then locally-defined.
+        /// </summary>
+        private ValType ResolveGlobalType(int globalIdx)
+        {
+            var module = _moduleInst.Repr;
+
+            // Count imported globals
+            int importedGlobalCount = 0;
+            foreach (var import in module.Imports)
+            {
+                if (import.Desc is Wacs.Core.Module.ImportDesc.GlobalDesc)
+                    importedGlobalCount++;
+            }
+
+            if (globalIdx < importedGlobalCount)
+            {
+                // Imported global — get type from import desc
+                int gi = 0;
+                foreach (var import in module.Imports)
+                {
+                    if (import.Desc is Wacs.Core.Module.ImportDesc.GlobalDesc gd)
+                    {
+                        if (gi == globalIdx)
+                            return gd.GlobalDef.ContentType;
+                        gi++;
+                    }
+                }
+            }
+
+            // Locally-defined global
+            int localIdx = globalIdx - importedGlobalCount;
+            return module.Globals[localIdx].Type.ContentType;
         }
     }
 }
