@@ -1,0 +1,155 @@
+// Copyright 2025 Kelvin Nishikawa
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+using System;
+using System.Collections.Generic;
+using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
+using WasmModule = Wacs.Core.Module;
+
+namespace Wacs.Transpiler.AOT
+{
+    /// <summary>
+    /// Describes the module's initialization requirements, computed at transpile time.
+    /// Consumed by the Module constructor at runtime.
+    /// </summary>
+    public class ModuleInitData
+    {
+        /// <summary>Memory declarations: (minPages, maxPages) per memory.</summary>
+        public (long min, long max)[] Memories { get; set; } = Array.Empty<(long, long)>();
+
+        /// <summary>Table declarations: (minSize, maxSize, elementType) per table.</summary>
+        public (long min, long max, ValType elemType)[] Tables { get; set; }
+            = Array.Empty<(long, long, ValType)>();
+
+        /// <summary>Global declarations: (type, mutability, initial value) per global.</summary>
+        public (ValType type, Mutability mut, Value init)[] Globals { get; set; }
+            = Array.Empty<(ValType, Mutability, Value)>();
+
+        /// <summary>Active data segments: (memIdx, offset, segmentId) per segment.</summary>
+        public (int memIdx, int offset, int segId)[] ActiveDataSegments { get; set; }
+            = Array.Empty<(int, int, int)>();
+
+        /// <summary>Active element segments: (tableIdx, offset, funcIndices) per segment.</summary>
+        public (int tableIdx, int offset, int[] funcIndices)[] ActiveElementSegments { get; set; }
+            = Array.Empty<(int, int, int[])>();
+
+        /// <summary>Start function index (-1 if none).</summary>
+        public int StartFuncIndex { get; set; } = -1;
+
+        /// <summary>Number of imported functions.</summary>
+        public int ImportFuncCount { get; set; }
+
+        /// <summary>Total function count (imports + locals).</summary>
+        public int TotalFuncCount { get; set; }
+    }
+
+    /// <summary>
+    /// Registry of ModuleInitData instances, indexed by registration ID.
+    /// The Module constructor references its init data by ID.
+    /// </summary>
+    public static class InitRegistry
+    {
+        private static readonly List<ModuleInitData> _initData = new();
+        private static readonly object _lock = new();
+
+        public static int Register(ModuleInitData data)
+        {
+            lock (_lock)
+            {
+                int id = _initData.Count;
+                _initData.Add(data);
+                return id;
+            }
+        }
+
+        public static ModuleInitData Get(int id) => _initData[id];
+    }
+
+    /// <summary>
+    /// Runtime initialization for the Module constructor.
+    /// Performs the WASM 3.0 instantiation sequence (Section 4.7.2):
+    ///   1. Allocate memories (sized from memory section)
+    ///   2. Allocate tables (sized from table section)
+    ///   3. Initialize globals (evaluate constant initializers)
+    ///   4. Copy active data segments to memories
+    ///   5. Copy active element segments to tables
+    ///
+    /// Called from the Module constructor's IL.
+    /// </summary>
+    public static class InitializationHelper
+    {
+        /// <summary>
+        /// Initialize a TranspiledContext from ModuleInitData.
+        /// Returns a fully initialized TranspiledContext ready for function execution.
+        /// </summary>
+        public static TranspiledContext Initialize(int initDataId)
+        {
+            var data = InitRegistry.Get(initDataId);
+
+            // 1. Allocate memories
+            var memories = new byte[data.Memories.Length][];
+            for (int i = 0; i < data.Memories.Length; i++)
+            {
+                long pages = data.Memories[i].min;
+                memories[i] = new byte[pages * 65536];
+            }
+
+            // 2. Allocate tables
+            var tables = new TableInstance[data.Tables.Length];
+            for (int i = 0; i < data.Tables.Length; i++)
+            {
+                var (min, max, elemType) = data.Tables[i];
+                var tableType = new TableType(elemType, new Limits(AddrType.I32, min, max));
+                tables[i] = new TableInstance(tableType, new Value(elemType));
+            }
+
+            // 3. Initialize globals
+            var globals = new GlobalInstance[data.Globals.Length];
+            for (int i = 0; i < data.Globals.Length; i++)
+            {
+                var (type, mut, init) = data.Globals[i];
+                globals[i] = new GlobalInstance(new GlobalType(type, mut), init);
+            }
+
+            // 4. Copy active data segments to memories
+            foreach (var (memIdx, offset, segId) in data.ActiveDataSegments)
+            {
+                ModuleInit.CopyDataSegment(memories, memIdx, offset, segId);
+            }
+
+            // 5. Copy active element segments to tables
+            foreach (var (tableIdx, elemOffset, funcIndices) in data.ActiveElementSegments)
+            {
+                var table = tables[tableIdx];
+                for (int j = 0; j < funcIndices.Length; j++)
+                {
+                    if (elemOffset + j < table.Elements.Count && funcIndices[j] >= 0)
+                    {
+                        table.Elements[elemOffset + j] = new Value(
+                            ValType.FuncRef, funcIndices[j]);
+                    }
+                }
+            }
+
+            // Create context
+            return new TranspiledContext(
+                memories: memories,
+                tables: tables,
+                globals: globals);
+        }
+    }
+}

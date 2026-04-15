@@ -1467,6 +1467,1532 @@ namespace Wacs.Transpiler.AOT.Emitters
                 var r = Vector128.Negate(vec);
                 return Unsafe.As<Vector128<long>, V128>(ref r);
             }
+
+            // ================================================================
+            // V128Const — pass-through
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 V128Const(V128 value) => value;
+
+            // ================================================================
+            // Integer unary — abs, popcnt
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16Abs(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<sbyte>>(ref v);
+                var r = Vector128.Abs(vec);
+                return Unsafe.As<Vector128<sbyte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8Abs(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<short>>(ref v);
+                var r = Vector128.Abs(vec);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4Abs(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<int>>(ref v);
+                var r = Vector128.Abs(vec);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2Abs(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<long>>(ref v);
+                var r = Vector128.Abs(vec);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            // No direct Vector128 popcnt per-byte — fallback to scalar
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16Popcnt(V128 v) => SimdHelpers.I8x16Popcnt(v);
+
+            // ================================================================
+            // Integer test — all_true, bitmask
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int I8x16AllTrue(V128 c)
+            {
+                var vec = Unsafe.As<V128, Vector128<byte>>(ref c);
+                return Vector128.Equals(vec, Vector128<byte>.Zero).ExtractMostSignificantBits() == 0 ? 1 : 0;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int I16x8AllTrue(V128 c)
+            {
+                var vec = Unsafe.As<V128, Vector128<short>>(ref c);
+                return Vector128.Equals(vec, Vector128<short>.Zero).ExtractMostSignificantBits() == 0 ? 1 : 0;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int I32x4AllTrue(V128 c)
+            {
+                var vec = Unsafe.As<V128, Vector128<int>>(ref c);
+                return Vector128.Equals(vec, Vector128<int>.Zero).ExtractMostSignificantBits() == 0 ? 1 : 0;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int I64x2AllTrue(V128 c)
+            {
+                var vec = Unsafe.As<V128, Vector128<long>>(ref c);
+                return Vector128.Equals(vec, Vector128<long>.Zero).ExtractMostSignificantBits() == 0 ? 1 : 0;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int I8x16Bitmask(V128 c)
+            {
+                var vec = Unsafe.As<V128, Vector128<byte>>(ref c);
+                return (int)Vector128.ShiftRightArithmetic(vec.AsSByte(), 7).AsByte().ExtractMostSignificantBits();
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int I16x8Bitmask(V128 c)
+            {
+                var vec = Unsafe.As<V128, Vector128<short>>(ref c);
+                return (int)Vector128.ShiftRightArithmetic(vec, 15).ExtractMostSignificantBits();
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int I32x4Bitmask(V128 c)
+            {
+                var vec = Unsafe.As<V128, Vector128<int>>(ref c);
+                return (int)Vector128.ShiftRightArithmetic(vec, 31).ExtractMostSignificantBits();
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int I64x2Bitmask(V128 c)
+            {
+                var vec = Unsafe.As<V128, Vector128<long>>(ref c);
+                return (int)Vector128.ShiftRightArithmetic(vec, 63).ExtractMostSignificantBits();
+            }
+
+            // ================================================================
+            // Splat
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16Splat(int v)
+            {
+                var r = Vector128.Create((byte)(uint)v);
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8Splat(int v)
+            {
+                var r = Vector128.Create((short)(ushort)(uint)v);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4Splat(int v)
+            {
+                var r = Vector128.Create(v);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2Splat(long v)
+            {
+                var r = Vector128.Create(v);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Splat(float v)
+            {
+                var r = Vector128.Create(v);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Splat(double v)
+            {
+                var r = Vector128.Create(v);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            // ================================================================
+            // Extract lane
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int I8x16ExtractLaneS(V128 c, byte lane)
+            {
+                var vec = Unsafe.As<V128, Vector128<sbyte>>(ref c);
+                return (int)vec.GetElement(lane);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int I8x16ExtractLaneU(V128 c, byte lane)
+            {
+                var vec = Unsafe.As<V128, Vector128<byte>>(ref c);
+                return (int)(uint)vec.GetElement(lane);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int I16x8ExtractLaneS(V128 c, byte lane)
+            {
+                var vec = Unsafe.As<V128, Vector128<short>>(ref c);
+                return (int)vec.GetElement(lane);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int I16x8ExtractLaneU(V128 c, byte lane)
+            {
+                var vec = Unsafe.As<V128, Vector128<ushort>>(ref c);
+                return (int)(uint)vec.GetElement(lane);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int I32x4ExtractLane(V128 c, byte lane)
+            {
+                var vec = Unsafe.As<V128, Vector128<int>>(ref c);
+                return vec.GetElement(lane);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static long I64x2ExtractLane(V128 c, byte lane)
+            {
+                var vec = Unsafe.As<V128, Vector128<long>>(ref c);
+                return vec.GetElement(lane);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static float F32x4ExtractLane(V128 c, byte lane)
+            {
+                var vec = Unsafe.As<V128, Vector128<float>>(ref c);
+                return vec.GetElement(lane);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static double F64x2ExtractLane(V128 c, byte lane)
+            {
+                var vec = Unsafe.As<V128, Vector128<double>>(ref c);
+                return vec.GetElement(lane);
+            }
+
+            // ================================================================
+            // Replace lane
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16ReplaceLane(V128 c, byte lane, int v)
+            {
+                var vec = Unsafe.As<V128, Vector128<byte>>(ref c);
+                var r = vec.WithElement(lane, (byte)(uint)v);
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8ReplaceLane(V128 c, byte lane, int v)
+            {
+                var vec = Unsafe.As<V128, Vector128<short>>(ref c);
+                var r = vec.WithElement(lane, (short)(ushort)(uint)v);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4ReplaceLane(V128 c, byte lane, int v)
+            {
+                var vec = Unsafe.As<V128, Vector128<int>>(ref c);
+                var r = vec.WithElement(lane, v);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2ReplaceLane(V128 c, byte lane, long v)
+            {
+                var vec = Unsafe.As<V128, Vector128<long>>(ref c);
+                var r = vec.WithElement(lane, v);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4ReplaceLane(V128 c, byte lane, float v)
+            {
+                var vec = Unsafe.As<V128, Vector128<float>>(ref c);
+                var r = vec.WithElement(lane, v);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2ReplaceLane(V128 c, byte lane, double v)
+            {
+                var vec = Unsafe.As<V128, Vector128<double>>(ref c);
+                var r = vec.WithElement(lane, v);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            // ================================================================
+            // Shuffle and Swizzle
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16Shuffle(V128 a, V128 b, V128 lanes)
+            {
+                // Vector128.Shuffle only handles single-source; fallback to scalar for two-source shuffle
+                return SimdHelpers.I8x16Shuffle(a, b, lanes);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16Swizzle(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<byte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<byte>>(ref b);
+                var r = Vector128.Shuffle(va, vb);
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            // ================================================================
+            // Integer relational ops — i8x16
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16Eq(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<byte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<byte>>(ref b);
+                var r = Vector128.Equals(va, vb);
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16Ne(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<byte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<byte>>(ref b);
+                var r = ~Vector128.Equals(va, vb);
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16LtS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<sbyte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<sbyte>>(ref b);
+                var r = Vector128.LessThan(va, vb);
+                return Unsafe.As<Vector128<sbyte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16LtU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<byte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<byte>>(ref b);
+                var r = Vector128.LessThan(va, vb);
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16GtS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<sbyte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<sbyte>>(ref b);
+                var r = Vector128.GreaterThan(va, vb);
+                return Unsafe.As<Vector128<sbyte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16GtU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<byte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<byte>>(ref b);
+                var r = Vector128.GreaterThan(va, vb);
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16LeS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<sbyte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<sbyte>>(ref b);
+                var r = Vector128.LessThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<sbyte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16LeU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<byte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<byte>>(ref b);
+                var r = Vector128.LessThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16GeS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<sbyte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<sbyte>>(ref b);
+                var r = Vector128.GreaterThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<sbyte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16GeU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<byte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<byte>>(ref b);
+                var r = Vector128.GreaterThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            // ================================================================
+            // Integer relational ops — i16x8
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8Eq(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<short>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<short>>(ref b);
+                var r = Vector128.Equals(va, vb);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8Ne(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<short>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<short>>(ref b);
+                var r = ~Vector128.Equals(va, vb);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8LtS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<short>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<short>>(ref b);
+                var r = Vector128.LessThan(va, vb);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8LtU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<ushort>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<ushort>>(ref b);
+                var r = Vector128.LessThan(va, vb);
+                return Unsafe.As<Vector128<ushort>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8GtS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<short>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<short>>(ref b);
+                var r = Vector128.GreaterThan(va, vb);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8GtU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<ushort>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<ushort>>(ref b);
+                var r = Vector128.GreaterThan(va, vb);
+                return Unsafe.As<Vector128<ushort>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8LeS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<short>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<short>>(ref b);
+                var r = Vector128.LessThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8LeU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<ushort>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<ushort>>(ref b);
+                var r = Vector128.LessThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<ushort>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8GeS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<short>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<short>>(ref b);
+                var r = Vector128.GreaterThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8GeU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<ushort>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<ushort>>(ref b);
+                var r = Vector128.GreaterThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<ushort>, V128>(ref r);
+            }
+
+            // ================================================================
+            // Integer relational ops — i32x4
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4Eq(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<int>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<int>>(ref b);
+                var r = Vector128.Equals(va, vb);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4Ne(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<int>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<int>>(ref b);
+                var r = ~Vector128.Equals(va, vb);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4LtS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<int>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<int>>(ref b);
+                var r = Vector128.LessThan(va, vb);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4LtU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<uint>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<uint>>(ref b);
+                var r = Vector128.LessThan(va, vb);
+                return Unsafe.As<Vector128<uint>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4GtS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<int>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<int>>(ref b);
+                var r = Vector128.GreaterThan(va, vb);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4GtU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<uint>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<uint>>(ref b);
+                var r = Vector128.GreaterThan(va, vb);
+                return Unsafe.As<Vector128<uint>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4LeS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<int>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<int>>(ref b);
+                var r = Vector128.LessThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4LeU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<uint>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<uint>>(ref b);
+                var r = Vector128.LessThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<uint>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4GeS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<int>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<int>>(ref b);
+                var r = Vector128.GreaterThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4GeU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<uint>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<uint>>(ref b);
+                var r = Vector128.GreaterThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<uint>, V128>(ref r);
+            }
+
+            // ================================================================
+            // Integer relational ops — i64x2
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2Eq(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<long>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<long>>(ref b);
+                var r = Vector128.Equals(va, vb);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2Ne(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<long>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<long>>(ref b);
+                var r = ~Vector128.Equals(va, vb);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2LtS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<long>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<long>>(ref b);
+                var r = Vector128.LessThan(va, vb);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2GtS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<long>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<long>>(ref b);
+                var r = Vector128.GreaterThan(va, vb);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2LeS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<long>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<long>>(ref b);
+                var r = Vector128.LessThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2GeS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<long>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<long>>(ref b);
+                var r = Vector128.GreaterThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            // ================================================================
+            // Saturating integer arithmetic
+            // ================================================================
+
+            // No direct Vector128 saturating add/sub — fallback to scalar
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16AddSatS(V128 a, V128 b) => SimdHelpers.I8x16AddSatS(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16AddSatU(V128 a, V128 b) => SimdHelpers.I8x16AddSatU(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16SubSatS(V128 a, V128 b) => SimdHelpers.I8x16SubSatS(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16SubSatU(V128 a, V128 b) => SimdHelpers.I8x16SubSatU(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8AddSatS(V128 a, V128 b) => SimdHelpers.I16x8AddSatS(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8AddSatU(V128 a, V128 b) => SimdHelpers.I16x8AddSatU(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8SubSatS(V128 a, V128 b) => SimdHelpers.I16x8SubSatS(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8SubSatU(V128 a, V128 b) => SimdHelpers.I16x8SubSatU(a, b);
+
+            // ================================================================
+            // Integer min/max
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16MinS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<sbyte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<sbyte>>(ref b);
+                var r = Vector128.Min(va, vb);
+                return Unsafe.As<Vector128<sbyte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16MinU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<byte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<byte>>(ref b);
+                var r = Vector128.Min(va, vb);
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16MaxS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<sbyte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<sbyte>>(ref b);
+                var r = Vector128.Max(va, vb);
+                return Unsafe.As<Vector128<sbyte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16MaxU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<byte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<byte>>(ref b);
+                var r = Vector128.Max(va, vb);
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8MinS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<short>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<short>>(ref b);
+                var r = Vector128.Min(va, vb);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8MinU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<ushort>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<ushort>>(ref b);
+                var r = Vector128.Min(va, vb);
+                return Unsafe.As<Vector128<ushort>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8MaxS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<short>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<short>>(ref b);
+                var r = Vector128.Max(va, vb);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8MaxU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<ushort>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<ushort>>(ref b);
+                var r = Vector128.Max(va, vb);
+                return Unsafe.As<Vector128<ushort>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4MinS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<int>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<int>>(ref b);
+                var r = Vector128.Min(va, vb);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4MinU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<uint>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<uint>>(ref b);
+                var r = Vector128.Min(va, vb);
+                return Unsafe.As<Vector128<uint>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4MaxS(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<int>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<int>>(ref b);
+                var r = Vector128.Max(va, vb);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4MaxU(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<uint>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<uint>>(ref b);
+                var r = Vector128.Max(va, vb);
+                return Unsafe.As<Vector128<uint>, V128>(ref r);
+            }
+
+            // ================================================================
+            // Average (round-up)
+            // ================================================================
+
+            // No direct Vector128 averaging — fallback to scalar
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16AvgrU(V128 a, V128 b) => SimdHelpers.I8x16AvgrU(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8AvgrU(V128 a, V128 b) => SimdHelpers.I16x8AvgrU(a, b);
+
+            // ================================================================
+            // Shift ops
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16Shl(V128 v, int s)
+            {
+                // Vector128.ShiftLeft on byte is not directly available; fallback to scalar
+                return SimdHelpers.I8x16Shl(v, s);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16ShrS(V128 v, int s)
+            {
+                // Vector128.ShiftRightArithmetic on sbyte is not directly available; fallback to scalar
+                return SimdHelpers.I8x16ShrS(v, s);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16ShrU(V128 v, int s)
+            {
+                // Vector128.ShiftRightLogical on byte is not directly available; fallback to scalar
+                return SimdHelpers.I8x16ShrU(v, s);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8Shl(V128 v, int s)
+            {
+                s %= 16;
+                var vec = Unsafe.As<V128, Vector128<short>>(ref v);
+                var r = Vector128.ShiftLeft(vec, s);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8ShrS(V128 v, int s)
+            {
+                s %= 16;
+                var vec = Unsafe.As<V128, Vector128<short>>(ref v);
+                var r = Vector128.ShiftRightArithmetic(vec, s);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8ShrU(V128 v, int s)
+            {
+                s %= 16;
+                var vec = Unsafe.As<V128, Vector128<ushort>>(ref v);
+                var r = Vector128.ShiftRightLogical(vec, s);
+                return Unsafe.As<Vector128<ushort>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4Shl(V128 v, int s)
+            {
+                var vec = Unsafe.As<V128, Vector128<int>>(ref v);
+                var r = Vector128.ShiftLeft(vec, s);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4ShrS(V128 v, int s)
+            {
+                var vec = Unsafe.As<V128, Vector128<int>>(ref v);
+                var r = Vector128.ShiftRightArithmetic(vec, s);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4ShrU(V128 v, int s)
+            {
+                var vec = Unsafe.As<V128, Vector128<uint>>(ref v);
+                var r = Vector128.ShiftRightLogical(vec, s);
+                return Unsafe.As<Vector128<uint>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2Shl(V128 v, int s)
+            {
+                var vec = Unsafe.As<V128, Vector128<long>>(ref v);
+                var r = Vector128.ShiftLeft(vec, s);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2ShrS(V128 v, int s)
+            {
+                var vec = Unsafe.As<V128, Vector128<long>>(ref v);
+                var r = Vector128.ShiftRightArithmetic(vec, s);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2ShrU(V128 v, int s)
+            {
+                var vec = Unsafe.As<V128, Vector128<ulong>>(ref v);
+                var r = Vector128.ShiftRightLogical(vec, s);
+                return Unsafe.As<Vector128<ulong>, V128>(ref r);
+            }
+
+            // ================================================================
+            // Extended multiply, dot, q15mulr, extadd_pairwise — fallback to scalar
+            // No direct Vector128 support for these complex operations
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8ExtAddPairwiseI8x16S(V128 v) => SimdHelpers.I16x8ExtAddPairwiseI8x16S(v);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8ExtAddPairwiseI8x16U(V128 v) => SimdHelpers.I16x8ExtAddPairwiseI8x16U(v);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4ExtAddPairwiseI16x8S(V128 v) => SimdHelpers.I32x4ExtAddPairwiseI16x8S(v);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4ExtAddPairwiseI16x8U(V128 v) => SimdHelpers.I32x4ExtAddPairwiseI16x8U(v);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8ExtMulLowI8x16S(V128 a, V128 b) => SimdHelpers.I16x8ExtMulLowI8x16S(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8ExtMulHighI8x16S(V128 a, V128 b) => SimdHelpers.I16x8ExtMulHighI8x16S(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8ExtMulLowI8x16U(V128 a, V128 b) => SimdHelpers.I16x8ExtMulLowI8x16U(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8ExtMulHighI8x16U(V128 a, V128 b) => SimdHelpers.I16x8ExtMulHighI8x16U(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4ExtMulLowI16x8S(V128 a, V128 b) => SimdHelpers.I32x4ExtMulLowI16x8S(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4ExtMulHighI16x8S(V128 a, V128 b) => SimdHelpers.I32x4ExtMulHighI16x8S(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4ExtMulLowI16x8U(V128 a, V128 b) => SimdHelpers.I32x4ExtMulLowI16x8U(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4ExtMulHighI16x8U(V128 a, V128 b) => SimdHelpers.I32x4ExtMulHighI16x8U(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2ExtMulLowI32x4S(V128 a, V128 b) => SimdHelpers.I64x2ExtMulLowI32x4S(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2ExtMulHighI32x4S(V128 a, V128 b) => SimdHelpers.I64x2ExtMulHighI32x4S(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2ExtMulLowI32x4U(V128 a, V128 b) => SimdHelpers.I64x2ExtMulLowI32x4U(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2ExtMulHighI32x4U(V128 a, V128 b) => SimdHelpers.I64x2ExtMulHighI32x4U(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4DotI16x8S(V128 a, V128 b) => SimdHelpers.I32x4DotI16x8S(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8Q15MulRSatS(V128 a, V128 b) => SimdHelpers.I16x8Q15MulRSatS(a, b);
+
+            // ================================================================
+            // Integer conversions — extend, narrow, trunc_sat
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8ExtendLowI8x16S(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<sbyte>>(ref v);
+                var r = Vector128.WidenLower(vec);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8ExtendHighI8x16S(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<sbyte>>(ref v);
+                var r = Vector128.WidenUpper(vec);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8ExtendLowI8x16U(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<byte>>(ref v);
+                var r = Vector128.WidenLower(vec);
+                return Unsafe.As<Vector128<ushort>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8ExtendHighI8x16U(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<byte>>(ref v);
+                var r = Vector128.WidenUpper(vec);
+                return Unsafe.As<Vector128<ushort>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4ExtendLowI16x8S(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<short>>(ref v);
+                var r = Vector128.WidenLower(vec);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4ExtendHighI16x8S(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<short>>(ref v);
+                var r = Vector128.WidenUpper(vec);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4ExtendLowI16x8U(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<ushort>>(ref v);
+                var r = Vector128.WidenLower(vec);
+                return Unsafe.As<Vector128<uint>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4ExtendHighI16x8U(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<ushort>>(ref v);
+                var r = Vector128.WidenUpper(vec);
+                return Unsafe.As<Vector128<uint>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2ExtendLowI32x4S(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<int>>(ref v);
+                var r = Vector128.WidenLower(vec);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2ExtendHighI32x4S(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<int>>(ref v);
+                var r = Vector128.WidenUpper(vec);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2ExtendLowI32x4U(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<uint>>(ref v);
+                var r = Vector128.WidenLower(vec);
+                return Unsafe.As<Vector128<ulong>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2ExtendHighI32x4U(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<uint>>(ref v);
+                var r = Vector128.WidenUpper(vec);
+                return Unsafe.As<Vector128<ulong>, V128>(ref r);
+            }
+
+            // Narrow with signed saturation — fallback to scalar (Vector128.Narrow does truncation, not saturation)
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16NarrowI16x8S(V128 a, V128 b) => SimdHelpers.I8x16NarrowI16x8S(a, b);
+
+            // Unsigned narrow with saturation — fallback to scalar
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16NarrowI16x8U(V128 a, V128 b) => SimdHelpers.I8x16NarrowI16x8U(a, b);
+
+            // Narrow with signed saturation — fallback to scalar
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8NarrowI32x4S(V128 a, V128 b) => SimdHelpers.I16x8NarrowI32x4S(a, b);
+
+            // Unsigned narrow with saturation — fallback to scalar
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8NarrowI32x4U(V128 a, V128 b) => SimdHelpers.I16x8NarrowI32x4U(a, b);
+
+            // TruncSat — complex NaN/overflow handling; fallback to scalar
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4TruncSatF32x4S(V128 c) => SimdHelpers.I32x4TruncSatF32x4S(c);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4TruncSatF32x4U(V128 c) => SimdHelpers.I32x4TruncSatF32x4U(c);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4TruncSatF64x2SZero(V128 c) => SimdHelpers.I32x4TruncSatF64x2SZero(c);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4TruncSatF64x2UZero(V128 c) => SimdHelpers.I32x4TruncSatF64x2UZero(c);
+
+            // ================================================================
+            // Float binary ops
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Add(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<float>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<float>>(ref b);
+                var r = va + vb;
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Sub(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<float>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<float>>(ref b);
+                var r = va - vb;
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Mul(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<float>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<float>>(ref b);
+                var r = va * vb;
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Div(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<float>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<float>>(ref b);
+                var r = va / vb;
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Min(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<float>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<float>>(ref b);
+                var r = Vector128.Min(va, vb);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Max(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<float>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<float>>(ref b);
+                var r = Vector128.Max(va, vb);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            // PMin/PMax have special NaN semantics — fallback to scalar
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4PMin(V128 a, V128 b) => SimdHelpers.F32x4PMin(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4PMax(V128 a, V128 b) => SimdHelpers.F32x4PMax(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Add(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<double>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<double>>(ref b);
+                var r = va + vb;
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Sub(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<double>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<double>>(ref b);
+                var r = va - vb;
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Mul(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<double>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<double>>(ref b);
+                var r = va * vb;
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Div(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<double>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<double>>(ref b);
+                var r = va / vb;
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Min(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<double>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<double>>(ref b);
+                var r = Vector128.Min(va, vb);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Max(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<double>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<double>>(ref b);
+                var r = Vector128.Max(va, vb);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            // PMin/PMax have special NaN semantics — fallback to scalar
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2PMin(V128 a, V128 b) => SimdHelpers.F64x2PMin(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2PMax(V128 a, V128 b) => SimdHelpers.F64x2PMax(a, b);
+
+            // ================================================================
+            // Float unary ops
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Abs(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<float>>(ref v);
+                var r = Vector128.Abs(vec);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Neg(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<float>>(ref v);
+                var r = Vector128.Negate(vec);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Sqrt(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<float>>(ref v);
+                var r = Vector128.Sqrt(vec);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Ceil(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<float>>(ref v);
+                var r = Vector128.Ceiling(vec);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Floor(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<float>>(ref v);
+                var r = Vector128.Floor(vec);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            // No direct Vector128.Truncate — fallback to scalar
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Trunc(V128 v) => SimdHelpers.F32x4Trunc(v);
+
+            // No direct Vector128.Round — fallback to scalar
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Nearest(V128 v) => SimdHelpers.F32x4Nearest(v);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Abs(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<double>>(ref v);
+                var r = Vector128.Abs(vec);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Neg(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<double>>(ref v);
+                var r = Vector128.Negate(vec);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Sqrt(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<double>>(ref v);
+                var r = Vector128.Sqrt(vec);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Ceil(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<double>>(ref v);
+                var r = Vector128.Ceiling(vec);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Floor(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<double>>(ref v);
+                var r = Vector128.Floor(vec);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            // No direct Vector128.Truncate — fallback to scalar
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Trunc(V128 v) => SimdHelpers.F64x2Trunc(v);
+
+            // No direct Vector128.Round — fallback to scalar
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Nearest(V128 v) => SimdHelpers.F64x2Nearest(v);
+
+            // ================================================================
+            // Float relational ops
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Eq(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<float>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<float>>(ref b);
+                var r = Vector128.Equals(va, vb);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Ne(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<float>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<float>>(ref b);
+                var r = ~Vector128.Equals(va, vb);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Lt(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<float>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<float>>(ref b);
+                var r = Vector128.LessThan(va, vb);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Gt(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<float>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<float>>(ref b);
+                var r = Vector128.GreaterThan(va, vb);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Le(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<float>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<float>>(ref b);
+                var r = Vector128.LessThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4Ge(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<float>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<float>>(ref b);
+                var r = Vector128.GreaterThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<float>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Eq(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<double>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<double>>(ref b);
+                var r = Vector128.Equals(va, vb);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Ne(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<double>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<double>>(ref b);
+                var r = ~Vector128.Equals(va, vb);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Lt(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<double>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<double>>(ref b);
+                var r = Vector128.LessThan(va, vb);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Gt(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<double>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<double>>(ref b);
+                var r = Vector128.GreaterThan(va, vb);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Le(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<double>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<double>>(ref b);
+                var r = Vector128.LessThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2Ge(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<double>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<double>>(ref b);
+                var r = Vector128.GreaterThanOrEqual(va, vb);
+                return Unsafe.As<Vector128<double>, V128>(ref r);
+            }
+
+            // ================================================================
+            // Float conversions — fallback to scalar for precision/NaN handling
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4ConvertI32x4S(V128 v) => SimdHelpers.F32x4ConvertI32x4S(v);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4ConvertI32x4U(V128 v) => SimdHelpers.F32x4ConvertI32x4U(v);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2ConvertLowI32x4S(V128 v) => SimdHelpers.F64x2ConvertLowI32x4S(v);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2ConvertLowI32x4U(V128 v) => SimdHelpers.F64x2ConvertLowI32x4U(v);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4DemoteF64x2Zero(V128 v) => SimdHelpers.F32x4DemoteF64x2Zero(v);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2PromoteLowF32x4(V128 v) => SimdHelpers.F64x2PromoteLowF32x4(v);
+
+            // ================================================================
+            // Relaxed SIMD — unary (trunc) — fallback to scalar
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4RelaxedTruncF32x4S(V128 a) => SimdHelpers.I32x4RelaxedTruncF32x4S(a);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4RelaxedTruncF32x4U(V128 a) => SimdHelpers.I32x4RelaxedTruncF32x4U(a);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4RelaxedTruncF64x2SZero(V128 a) => SimdHelpers.I32x4RelaxedTruncF64x2SZero(a);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4RelaxedTruncF64x2UZero(V128 a) => SimdHelpers.I32x4RelaxedTruncF64x2UZero(a);
+
+            // ================================================================
+            // Relaxed SIMD — binary — fallback to scalar
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16RelaxedSwizzle(V128 a, V128 s) => SimdHelpers.I8x16RelaxedSwizzle(a, s);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4RelaxedMin(V128 a, V128 b) => SimdHelpers.F32x4RelaxedMin(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4RelaxedMax(V128 a, V128 b) => SimdHelpers.F32x4RelaxedMax(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2RelaxedMin(V128 a, V128 b) => SimdHelpers.F64x2RelaxedMin(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2RelaxedMax(V128 a, V128 b) => SimdHelpers.F64x2RelaxedMax(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8RelaxedQ15MulrS(V128 a, V128 b) => SimdHelpers.I16x8RelaxedQ15MulrS(a, b);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8RelaxedDotI8x16I7x16S(V128 a, V128 b) => SimdHelpers.I16x8RelaxedDotI8x16I7x16S(a, b);
+
+            // ================================================================
+            // Relaxed SIMD — ternary
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16RelaxedLaneselect(V128 a, V128 b, V128 m)
+            {
+                var va = Unsafe.As<V128, Vector128<byte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<byte>>(ref b);
+                var vm = Unsafe.As<V128, Vector128<byte>>(ref m);
+                var r = Vector128.ConditionalSelect(vm, va, vb);
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8RelaxedLaneselect(V128 a, V128 b, V128 m)
+            {
+                var va = Unsafe.As<V128, Vector128<short>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<short>>(ref b);
+                var vm = Unsafe.As<V128, Vector128<short>>(ref m);
+                var r = Vector128.ConditionalSelect(vm, va, vb);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4RelaxedLaneselect(V128 a, V128 b, V128 m)
+            {
+                var va = Unsafe.As<V128, Vector128<int>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<int>>(ref b);
+                var vm = Unsafe.As<V128, Vector128<int>>(ref m);
+                var r = Vector128.ConditionalSelect(vm, va, vb);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2RelaxedLaneselect(V128 a, V128 b, V128 m)
+            {
+                var va = Unsafe.As<V128, Vector128<long>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<long>>(ref b);
+                var vm = Unsafe.As<V128, Vector128<long>>(ref m);
+                var r = Vector128.ConditionalSelect(vm, va, vb);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            // Relaxed FMA — fallback to scalar (complex precision semantics)
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4RelaxedMAdd(V128 a, V128 b, V128 c) => SimdHelpers.F32x4RelaxedMAdd(a, b, c);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F32x4RelaxedNMAdd(V128 a, V128 b, V128 c) => SimdHelpers.F32x4RelaxedNMAdd(a, b, c);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2RelaxedMAdd(V128 a, V128 b, V128 c) => SimdHelpers.F64x2RelaxedMAdd(a, b, c);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 F64x2RelaxedNMAdd(V128 a, V128 b, V128 c) => SimdHelpers.F64x2RelaxedNMAdd(a, b, c);
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4RelaxedDotI8x16I7x16AddS(V128 a, V128 b, V128 c) => SimdHelpers.I32x4RelaxedDotI8x16I7x16AddS(a, b, c);
         }
     }
 }

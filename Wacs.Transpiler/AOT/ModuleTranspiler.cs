@@ -157,12 +157,13 @@ namespace Wacs.Transpiler.AOT
             // === Analyze data segments ===
             var dataEmitter = new DataSegmentEmitter(moduleInst.Repr, _options.DataStorage, diagnostics);
             dataEmitter.Analyze();
-            // Register segment data for runtime access (dynamic assemblies)
+            // Register ALL segment data for runtime access (dynamic assemblies).
+            // Track the base segment ID so PrepareInitData can compute absolute IDs.
+            int dataSegmentBaseId = -1;
             for (int s = 0; s < dataEmitter.Segments.Length; s++)
             {
-                var seg = dataEmitter.Segments[s];
-                if (seg.Data.Length > 0 && !seg.IsPassive)
-                    ModuleInit.RegisterDataSegment(seg.Data);
+                int id = ModuleInit.RegisterDataSegment(dataEmitter.Segments[s].Data);
+                if (s == 0) dataSegmentBaseId = id;
             }
 
             // === Pass 0a: Generate typed interfaces for exports and imports ===
@@ -224,7 +225,7 @@ namespace Wacs.Transpiler.AOT
             var moduleClassGen = new ModuleClassGenerator(
                 moduleBuilder, $"{_namespace}.{moduleName}",
                 moduleInst.Repr, interfaceGen, typeBuilder, methodBuilders, importCount,
-                dataEmitter);
+                dataEmitter, dataSegmentBaseId >= 0 ? dataSegmentBaseId : 0);
             moduleClassGen.Generate();
 
             // Finalize the types

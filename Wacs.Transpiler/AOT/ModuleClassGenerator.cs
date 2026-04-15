@@ -13,12 +13,17 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using Wacs.Core.Instructions.Numeric;
+using Wacs.Core.Instructions.Reference;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
+using Wacs.Transpiler.AOT.Emitters;
 using WasmModule = Wacs.Core.Module;
 
 namespace Wacs.Transpiler.AOT
@@ -54,6 +59,8 @@ namespace Wacs.Transpiler.AOT
         public TypeBuilder? ModuleType { get; private set; }
 
         private readonly DataSegmentEmitter? _dataEmitter;
+        private readonly int _dataSegmentBaseId;
+        private int _initDataId = -1;
 
         public ModuleClassGenerator(
             ModuleBuilder moduleBuilder,
@@ -63,7 +70,8 @@ namespace Wacs.Transpiler.AOT
             TypeBuilder functionsType,
             MethodBuilder[] methodBuilders,
             int importCount,
-            DataSegmentEmitter? dataEmitter = null)
+            DataSegmentEmitter? dataEmitter = null,
+            int dataSegmentBaseId = 0)
         {
             _moduleBuilder = moduleBuilder;
             _namespace = @namespace;
@@ -76,6 +84,136 @@ namespace Wacs.Transpiler.AOT
             _hasStart = wasmModule.StartIndex != FuncIdx.Default;
             _startFuncIndex = _hasStart ? (int)wasmModule.StartIndex.Value : -1;
             _dataEmitter = dataEmitter;
+            _dataSegmentBaseId = dataSegmentBaseId;
+        }
+
+        /// <summary>
+        /// Build ModuleInitData from the WASM module and register it.
+        /// Must be called before Generate() so the constructor can reference the init data ID.
+        /// </summary>
+        public void PrepareInitData()
+        {
+            var data = new ModuleInitData();
+
+            // Memories (imported + module-defined)
+            var mems = new List<(long min, long max)>();
+            foreach (var mem in _wasmModule.ImportedMems)
+            {
+                mems.Add((mem.Limits.Minimum, mem.Limits.Maximum ?? 65536));
+            }
+            foreach (var mem in _wasmModule.Memories)
+            {
+                mems.Add((mem.Limits.Minimum, mem.Limits.Maximum ?? 65536));
+            }
+            data.Memories = mems.ToArray();
+
+            // Tables (imported + module-defined)
+            var tables = new List<(long min, long max, ValType elemType)>();
+            foreach (var tbl in _wasmModule.ImportedTables)
+            {
+                tables.Add((tbl.Limits.Minimum, tbl.Limits.Maximum ?? uint.MaxValue, tbl.ElementType));
+            }
+            foreach (var tbl in _wasmModule.Tables)
+            {
+                tables.Add((tbl.Limits.Minimum, tbl.Limits.Maximum ?? uint.MaxValue, tbl.ElementType));
+            }
+            data.Tables = tables.ToArray();
+
+            // Globals (imported + module-defined)
+            var globals = new List<(ValType type, Mutability mut, Value init)>();
+            foreach (var g in _wasmModule.ImportedGlobals)
+            {
+                // Imported globals get default initial values (the actual value comes from imports)
+                globals.Add((g.Type.ContentType, g.Type.Mutability, new Value(g.Type.ContentType)));
+            }
+            foreach (var g in _wasmModule.Globals)
+            {
+                globals.Add((g.Type.ContentType, g.Type.Mutability, EvaluateGlobalInit(g)));
+            }
+            data.Globals = globals.ToArray();
+
+            // Active data segments
+            if (_dataEmitter != null)
+            {
+                var activeSegs = new List<(int memIdx, int offset, int segId)>();
+                for (int i = 0; i < _dataEmitter.Segments.Length; i++)
+                {
+                    var seg = _dataEmitter.Segments[i];
+                    if (seg.IsPassive || seg.Data.Length == 0) continue;
+                    activeSegs.Add((seg.MemoryIndex, (int)seg.Offset, _dataSegmentBaseId + i));
+                }
+                data.ActiveDataSegments = activeSegs.ToArray();
+            }
+
+            // Active element segments
+            var activeElems = new List<(int tableIdx, int offset, int[] funcIndices)>();
+            for (int i = 0; i < _wasmModule.Elements.Length; i++)
+            {
+                var elem = _wasmModule.Elements[i];
+                if (elem.Mode is not WasmModule.ElementMode.ActiveMode active) continue;
+
+                int tableIdx = (int)active.TableIndex.Value;
+                int offset = EvaluateConstI32(active.Offset);
+                int[] funcIndices = ExtractFuncIndices(elem);
+                activeElems.Add((tableIdx, offset, funcIndices));
+            }
+            data.ActiveElementSegments = activeElems.ToArray();
+
+            // Start function
+            data.StartFuncIndex = _startFuncIndex;
+            data.ImportFuncCount = _importCount;
+            data.TotalFuncCount = _importCount + _methodBuilders.Length;
+
+            _initDataId = InitRegistry.Register(data);
+        }
+
+        /// <summary>
+        /// Evaluate a global's constant initializer expression to a Value.
+        /// Handles i32.const, i64.const, f32.const, f64.const, ref.null, ref.func.
+        /// </summary>
+        private static Value EvaluateGlobalInit(WasmModule.Global global)
+        {
+            foreach (var inst in global.Initializer.Instructions)
+            {
+                if (inst is InstI32Const i32) return new Value(i32.Value);
+                if (inst is InstI64Const i64) return new Value(i64.FetchImmediate(null!));
+                if (inst is InstF32Const f32) return new Value(f32.FetchImmediate(null!));
+                if (inst is InstF64Const f64) return new Value(f64.FetchImmediate(null!));
+                if (inst is InstRefNull) return new Value(ValType.Nil);
+                if (inst is InstRefFunc refFunc)
+                    return new Value(ValType.FuncRef, (int)refFunc.FunctionIndex.Value);
+            }
+            return new Value(global.Type.ContentType);
+        }
+
+        /// <summary>
+        /// Evaluate a constant i32 expression (typically i32.const N).
+        /// </summary>
+        private static int EvaluateConstI32(Wacs.Core.Types.Expression expr)
+        {
+            foreach (var inst in expr.Instructions)
+            {
+                if (inst is InstI32Const i32) return i32.Value;
+            }
+            return 0;
+        }
+
+        /// <summary>
+        /// Extract function indices from element segment initializers.
+        /// Each initializer is typically a single ref.func instruction.
+        /// </summary>
+        private static int[] ExtractFuncIndices(WasmModule.ElementSegment elem)
+        {
+            var indices = new int[elem.Initializers.Length];
+            for (int i = 0; i < elem.Initializers.Length; i++)
+            {
+                var expr = elem.Initializers[i];
+                if (expr.Instructions.Count > 0 && expr.Instructions[0] is InstRefFunc rf)
+                    indices[i] = (int)rf.FunctionIndex.Value;
+                else
+                    indices[i] = -1; // ref.null or other — no function
+            }
+            return indices;
         }
 
         /// <summary>
@@ -84,6 +222,10 @@ namespace Wacs.Transpiler.AOT
         /// </summary>
         public void Generate()
         {
+            // Ensure init data is prepared
+            if (_initDataId < 0)
+                PrepareInitData();
+
             var parentInterfaces = _interfaces.ExportsInterface != null
                 ? new[] { _interfaces.ExportsInterface }
                 : Type.EmptyTypes;
@@ -140,64 +282,122 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
 
-            // === Allocate memories ===
-            // Create byte[][] from memory declarations
-            int memCount = _dataEmitter?.Memories.Length ?? _memoryCount;
-            il.Emit(OpCodes.Ldc_I4, memCount);
-            il.Emit(OpCodes.Newarr, typeof(byte[]));
-            var memoriesLocal = il.DeclareLocal(typeof(byte[][]));
-            il.Emit(OpCodes.Stloc, memoriesLocal);
-
-            if (_dataEmitter != null)
-            {
-                for (int m = 0; m < _dataEmitter.Memories.Length; m++)
-                {
-                    long pages = _dataEmitter.Memories[m].MinPages;
-                    il.Emit(OpCodes.Ldloc, memoriesLocal);
-                    il.Emit(OpCodes.Ldc_I4, m);
-                    il.Emit(OpCodes.Ldc_I4, (int)(pages * 65536));
-                    il.Emit(OpCodes.Newarr, typeof(byte));
-                    il.Emit(OpCodes.Stelem_Ref);
-                }
-            }
-
-            // === Create TranspiledContext ===
-            il.Emit(OpCodes.Ldloc, memoriesLocal);                // memories
-            il.Emit(OpCodes.Ldnull);                              // tables (TODO)
-            il.Emit(OpCodes.Ldnull);                              // globals (TODO)
-            il.Emit(OpCodes.Ldnull);                              // importDelegates (TODO)
-            il.Emit(OpCodes.Ldnull);                              // funcTable (TODO)
-            il.Emit(OpCodes.Newobj, typeof(TranspiledContext).GetConstructor(
-                new[] { typeof(byte[][]), typeof(TableInstance[]), typeof(GlobalInstance[]),
-                        typeof(Delegate[]), typeof(Delegate[]) })!);
+            // === Initialize via InitializationHelper ===
+            // TranspiledContext ctx = InitializationHelper.Initialize(initDataId);
+            il.Emit(OpCodes.Ldc_I4, _initDataId);
+            il.Emit(OpCodes.Call, typeof(InitializationHelper).GetMethod(
+                nameof(InitializationHelper.Initialize),
+                BindingFlags.Public | BindingFlags.Static)!);
             var ctxLocal = il.DeclareLocal(typeof(TranspiledContext));
             il.Emit(OpCodes.Stloc, ctxLocal);
 
-            // === Initialize data segments ===
-            if (_dataEmitter != null)
+            // === Wire import delegates from IImports ===
+            if (_interfaces.ImportsInterface != null && _interfaces.ImportMethods.Count > 0)
             {
-                for (int i = 0; i < _dataEmitter.Segments.Length; i++)
-                {
-                    var seg = _dataEmitter.Segments[i];
-                    if (seg.IsPassive || seg.Data.Length == 0) continue;
-
-                    // Call ModuleInit.CopyDataSegment(memories, memIdx, offset, segmentIndex)
-                    il.Emit(OpCodes.Ldloc, memoriesLocal);
-                    il.Emit(OpCodes.Ldc_I4, seg.MemoryIndex);
-                    il.Emit(OpCodes.Ldc_I4, (int)seg.Offset);
-                    il.Emit(OpCodes.Ldc_I4, i);
-                    il.Emit(OpCodes.Call, typeof(ModuleInit).GetMethod(
-                        nameof(ModuleInit.CopyDataSegment),
-                        BindingFlags.Public | BindingFlags.Static)!);
-                }
+                EmitImportDelegateWiring(il, ctxLocal);
             }
 
-            // Store ctx
+            // === Populate FuncTable ===
+            EmitFuncTablePopulation(il, ctxLocal);
+
+            // Store ctx field
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldloc, ctxLocal);
             il.Emit(OpCodes.Stfld, ctxField);
 
             il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// Emit IL to extract typed delegates from the IImports interface methods
+        /// and store them in ctx.ImportDelegates[].
+        /// </summary>
+        private void EmitImportDelegateWiring(ILGenerator il, LocalBuilder ctxLocal)
+        {
+            int importCount = _interfaces.ImportMethods.Count;
+
+            // ctx.ImportDelegates = new Delegate[importCount];
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldc_I4, importCount);
+            il.Emit(OpCodes.Newarr, typeof(Delegate));
+            il.Emit(OpCodes.Stfld, typeof(TranspiledContext).GetField(
+                nameof(TranspiledContext.ImportDelegates))!);
+
+            // For each import method, create a delegate wrapping the IImports method
+            // and store it in ImportDelegates[i]
+            for (int i = 0; i < importCount; i++)
+            {
+                var importMethod = _interfaces.ImportMethods[i];
+                var funcType = importMethod.WasmType;
+
+                // Build the delegate type for this import
+                var delegateType = CallEmitter.BuildDelegateType(funcType);
+                if (delegateType == null) continue;
+
+                // ctx.ImportDelegates[i] = Delegate.CreateDelegate(delegateType, imports, methodInfo)
+                // But since IImports is a TypeBuilder (not yet baked), we use:
+                // ctx.ImportDelegates[i] = (cast)imports.MethodName  (via ldftn)
+
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldfld, typeof(TranspiledContext).GetField(
+                    nameof(TranspiledContext.ImportDelegates))!);
+                il.Emit(OpCodes.Ldc_I4, i);
+
+                // Push imports arg (arg 1 for instance ctor)
+                il.Emit(OpCodes.Ldarg_1);
+                // Push function pointer for the interface method
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldvirtftn, importMethod.Method!);
+                // new DelegateType(object, IntPtr)
+                il.Emit(OpCodes.Newobj, delegateType.GetConstructor(
+                    new[] { typeof(object), typeof(IntPtr) })!);
+
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+        }
+
+        /// <summary>
+        /// Emit IL to populate ctx.FuncTable with all function delegates.
+        /// Imports come from ImportDelegates, locals from static method wrappers.
+        /// </summary>
+        private void EmitFuncTablePopulation(ILGenerator il, LocalBuilder ctxLocal)
+        {
+            int totalFuncs = _importCount + _methodBuilders.Length;
+            if (totalFuncs == 0) return;
+
+            // ctx.FuncTable = new Delegate[totalFuncs];
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldc_I4, totalFuncs);
+            il.Emit(OpCodes.Newarr, typeof(Delegate));
+            il.Emit(OpCodes.Stfld, typeof(TranspiledContext).GetField(
+                nameof(TranspiledContext.FuncTable))!);
+
+            // Copy import delegates (0..importCount-1)
+            if (_importCount > 0 && _interfaces.ImportMethods.Count > 0)
+            {
+                for (int i = 0; i < Math.Min(_importCount, _interfaces.ImportMethods.Count); i++)
+                {
+                    il.Emit(OpCodes.Ldloc, ctxLocal);
+                    il.Emit(OpCodes.Ldfld, typeof(TranspiledContext).GetField(
+                        nameof(TranspiledContext.FuncTable))!);
+                    il.Emit(OpCodes.Ldc_I4, i);
+
+                    il.Emit(OpCodes.Ldloc, ctxLocal);
+                    il.Emit(OpCodes.Ldfld, typeof(TranspiledContext).GetField(
+                        nameof(TranspiledContext.ImportDelegates))!);
+                    il.Emit(OpCodes.Ldc_I4, i);
+                    il.Emit(OpCodes.Ldelem_Ref);
+
+                    il.Emit(OpCodes.Stelem_Ref);
+                }
+            }
+
+            // Local functions (importCount..totalFuncs-1)
+            // Each gets a delegate wrapping the static Functions.FunctionN method
+            // with ctx bound as the first argument via a closure
+            // For now, we skip delegate creation for locals — they're called directly
+            // by call instructions. FuncTable entries for locals are needed only for
+            // call_indirect. We'll populate them lazily or via a helper.
         }
 
         private void EmitExportMethods(FieldBuilder ctxField)
