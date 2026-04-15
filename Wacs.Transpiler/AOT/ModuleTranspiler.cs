@@ -159,7 +159,8 @@ namespace Wacs.Transpiler.AOT
                     Index = i,
                     MethodName = mb.Name,
                     IsTranspiled = emitted,
-                    ExportName = funcInst.IsExport ? funcInst.Name : null
+                    ExportName = funcInst.IsExport ? funcInst.Name : null,
+                    RejectionReason = emitted ? null : codegen.LastRejectionReason
                 });
 
                 if (emitted)

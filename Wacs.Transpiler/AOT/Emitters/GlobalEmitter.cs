@@ -72,8 +72,13 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldelem_Ref);                 // GlobalInstance
             il.Emit(OpCodes.Callvirt, ValueGetter);       // Value (struct returned)
 
-            // Extract typed value from Value struct
-            EmitExtractTypedValue(il, globalType);
+            // For ref types, leave Value on stack. For numerics, extract typed value.
+            if (globalType == ValType.I32 || globalType == ValType.I64 ||
+                globalType == ValType.F32 || globalType == ValType.F64)
+            {
+                EmitExtractTypedValue(il, globalType);
+            }
+            // else: Value stays on CIL stack for ref types
         }
 
         /// <summary>
@@ -87,19 +92,36 @@ namespace Wacs.Transpiler.AOT.Emitters
             // But the typed value is already on top of the CIL stack.
             // Spill it to a temp, load the GlobalInstance, construct Value, call setter.
 
-            var temp = il.DeclareLocal(ModuleTranspiler.MapValType(globalType));
-            il.Emit(OpCodes.Stloc, temp);                // save typed value
+            if (globalType == ValType.I32 || globalType == ValType.I64 ||
+                globalType == ValType.F32 || globalType == ValType.F64)
+            {
+                // Numeric: spill typed value, construct Value, store
+                var temp = il.DeclareLocal(ModuleTranspiler.MapValType(globalType));
+                il.Emit(OpCodes.Stloc, temp);
 
-            il.Emit(OpCodes.Ldarg_0);                    // TranspiledContext
-            il.Emit(OpCodes.Ldfld, GlobalsField);        // GlobalInstance[]
-            il.Emit(OpCodes.Ldc_I4, idx);                // index
-            il.Emit(OpCodes.Ldelem_Ref);                 // GlobalInstance
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, GlobalsField);
+                il.Emit(OpCodes.Ldc_I4, idx);
+                il.Emit(OpCodes.Ldelem_Ref);
 
-            // Construct Value from typed value
-            il.Emit(OpCodes.Ldloc, temp);
-            EmitConstructValue(il, globalType);
+                il.Emit(OpCodes.Ldloc, temp);
+                EmitConstructValue(il, globalType);
+                il.Emit(OpCodes.Callvirt, ValueSetter);
+            }
+            else
+            {
+                // Ref type: Value is already on stack
+                var temp = il.DeclareLocal(typeof(Value));
+                il.Emit(OpCodes.Stloc, temp);
 
-            il.Emit(OpCodes.Callvirt, ValueSetter);       // set Value
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, GlobalsField);
+                il.Emit(OpCodes.Ldc_I4, idx);
+                il.Emit(OpCodes.Ldelem_Ref);
+
+                il.Emit(OpCodes.Ldloc, temp);
+                il.Emit(OpCodes.Callvirt, ValueSetter);
+            }
         }
 
         /// <summary>

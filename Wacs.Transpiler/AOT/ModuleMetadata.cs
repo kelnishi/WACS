@@ -59,6 +59,7 @@ namespace Wacs.Transpiler.AOT
             public string MethodName { get; set; } = "";
             public bool IsTranspiled { get; set; }
             public string? ExportName { get; set; }
+            public string? RejectionReason { get; set; }
         }
 
         /// <summary>
