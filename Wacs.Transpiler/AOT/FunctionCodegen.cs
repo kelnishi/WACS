@@ -121,6 +121,13 @@ namespace Wacs.Transpiler.AOT
         {
             var op = inst.Op.x00;
 
+            // 0xFB prefix (GC: struct, array, ref.test/cast, i31)
+            if (op == WasmOpCode.FB)
+            {
+                GcEmitter.Emit(il, inst, inst.Op.xFB, _gcTypes, _moduleInst);
+                return;
+            }
+
             // 0xFC prefix (extensions: sat truncation, bulk memory)
             if (op == WasmOpCode.FC)
             {
@@ -129,7 +136,7 @@ namespace Wacs.Transpiler.AOT
             }
 
             // Other multi-byte prefix opcodes (not yet supported)
-            if (op == WasmOpCode.FB || op == WasmOpCode.FD || op == WasmOpCode.FE)
+            if (op == WasmOpCode.FD || op == WasmOpCode.FE)
             {
                 throw new TranspilerException(
                     $"FunctionCodegen: prefix opcode {inst.Op.GetMnemonic()} should have been caught by CanEmit");
@@ -294,12 +301,16 @@ namespace Wacs.Transpiler.AOT
         {
             var op = inst.Op.x00;
 
+            // 0xFB prefix (GC)
+            if (op == WasmOpCode.FB)
+                return GcEmitter.CanEmit(inst.Op.xFB, _gcTypes);
+
             // 0xFC prefix — check extended opcode
             if (op == WasmOpCode.FC)
                 return ExtEmitter.CanEmit(inst.Op.xFC);
 
             // Other multi-byte opcodes — not yet supported
-            if (op == WasmOpCode.FB || op == WasmOpCode.FD || op == WasmOpCode.FE)
+            if (op == WasmOpCode.FD || op == WasmOpCode.FE)
                 return false;
 
             // Numeric instructions (0x41-0xC4)
