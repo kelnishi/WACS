@@ -200,6 +200,8 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Ldloc, temps[i]);
                 il.Emit(OpCodes.Stfld, gcType.Fields[i]);
             }
+
+            EmitWrapGcRef(il, inst.TypeIndex);
         }
 
         // struct.new_default X: create instance (fields already zero-initialized by CLR)
@@ -210,6 +212,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (gcType == null)
                 throw new TranspilerException($"struct.new_default: type {inst.TypeIndex} not emitted");
             il.Emit(OpCodes.Newobj, gcType.ClrType.GetConstructor(Type.EmptyTypes)!);
+            EmitWrapGcRef(il, inst.TypeIndex);
         }
 
         // struct.get X Y: pop structref, load field Y
@@ -220,8 +223,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (gcType == null)
                 throw new TranspilerException($"struct.get: type {inst.TypeIndex} not emitted");
 
-            // Stack: [structref (object)]
-            il.Emit(OpCodes.Castclass, gcType.ClrType);
+            // Stack: [structref (Value)]
+            EmitUnwrapGcRef(il, gcType.ClrType);
             il.Emit(OpCodes.Ldfld, gcType.Fields[inst.FieldIndex]);
 
             // Handle packed field sign extension
@@ -242,10 +245,10 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (gcType == null)
                 throw new TranspilerException($"struct.set: type {inst.TypeIndex} not emitted");
 
-            // Stack: [structref, value]
+            // Stack: [structref (Value), value]
             var valLocal = il.DeclareLocal(gcType.Fields[inst.FieldIndex].FieldType);
             il.Emit(OpCodes.Stloc, valLocal);
-            il.Emit(OpCodes.Castclass, gcType.ClrType);
+            EmitUnwrapGcRef(il, gcType.ClrType);
             il.Emit(OpCodes.Ldloc, valLocal);
             il.Emit(OpCodes.Stfld, gcType.Fields[inst.FieldIndex]);
         }
@@ -278,6 +281,10 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Stfld, gcType.Fields[1]); // length
 
             // TODO: fill with init value
+
+            // Wrap the CLR object reference into a Value struct.
+            // The CIL stack has WasmArray_N (an IGcRef). Method signatures use Value.
+            EmitWrapGcRef(il, inst.TypeIndex);
         }
 
         // array.new_default X: pop [length], create zero-initialized array
@@ -299,6 +306,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Dup);
             il.Emit(OpCodes.Ldloc, lenLocal);
             il.Emit(OpCodes.Stfld, gcType.Fields[1]);
+
+            EmitWrapGcRef(il, inst.TypeIndex);
         }
 
         // array.get X: pop [arrayref, index], load element
@@ -309,10 +318,10 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (gcType == null)
                 throw new TranspilerException($"array.get: type {inst.TypeIndex} not emitted");
 
-            // Stack: [arrayref, index]
+            // Stack: [arrayref (Value), index]
             var idxLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, idxLocal);
-            il.Emit(OpCodes.Castclass, gcType.ClrType);
+            EmitUnwrapGcRef(il, gcType.ClrType);
             il.Emit(OpCodes.Ldfld, gcType.Fields[0]); // elements array
             il.Emit(OpCodes.Ldloc, idxLocal);
             il.Emit(OpCodes.Ldelem, gcType.Fields[0].FieldType.GetElementType()!);
@@ -332,12 +341,12 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (gcType == null)
                 throw new TranspilerException($"array.set: type {inst.TypeIndex} not emitted");
 
-            // Stack: [arrayref, index, value]
+            // Stack: [arrayref (Value), index, value]
             var valLocal = il.DeclareLocal(gcType.Fields[0].FieldType.GetElementType()!);
             il.Emit(OpCodes.Stloc, valLocal);
             var idxLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, idxLocal);
-            il.Emit(OpCodes.Castclass, gcType.ClrType);
+            EmitUnwrapGcRef(il, gcType.ClrType);
             il.Emit(OpCodes.Ldfld, gcType.Fields[0]); // elements array
             il.Emit(OpCodes.Ldloc, idxLocal);
             il.Emit(OpCodes.Ldloc, valLocal);
@@ -538,6 +547,38 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
                 nameof(GcRuntimeHelpers.I31Get), BindingFlags.Public | BindingFlags.Static)!);
         }
+
+        // ==================================================================
+        // GC ref wrapping/unwrapping for CIL stack type safety.
+        //
+        // WASM uses opaque ref types on the stack. The CIL representation is
+        // Value (a struct). GC emitters produce CLR object references that
+        // must be wrapped into Value for the rest of the IL to work.
+        // ==================================================================
+
+        /// <summary>
+        /// Wrap a CLR GC object reference (IGcRef) on the CIL stack into a Value.
+        /// Stack: [object ref] → [Value]
+        /// </summary>
+        private static void EmitWrapGcRef(ILGenerator il, int typeIndex)
+        {
+            // Stack has the CLR object implementing IGcRef.
+            // Call GcRuntimeHelpers.WrapRef(object) → Value
+            il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                nameof(GcRuntimeHelpers.WrapRef), BindingFlags.Public | BindingFlags.Static)!);
+        }
+
+        /// <summary>
+        /// Unwrap a Value on the CIL stack to a typed CLR GC object reference.
+        /// Stack: [Value] → [typed object ref]
+        /// </summary>
+        private static void EmitUnwrapGcRef(ILGenerator il, Type targetClrType)
+        {
+            // Call GcRuntimeHelpers.UnwrapRef(Value) → object, then cast
+            il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                nameof(GcRuntimeHelpers.UnwrapRef), BindingFlags.Public | BindingFlags.Static)!);
+            il.Emit(OpCodes.Castclass, targetClrType);
+        }
     }
 
     /// <summary>
@@ -546,6 +587,26 @@ namespace Wacs.Transpiler.AOT.Emitters
     /// </summary>
     public static class GcRuntimeHelpers
     {
+        /// <summary>
+        /// Wrap a CLR GC object into a Value. The object must implement IGcRef.
+        /// </summary>
+        public static Value WrapRef(IGcRef gcRef)
+        {
+            // Use the 3-arg constructor that doesn't switch on StoreIndex
+            return new Value(ValType.Nil, 0, gcRef);
+        }
+
+        /// <summary>
+        /// Unwrap a Value to get the underlying CLR GC object.
+        /// Returns the IGcRef as object for casting.
+        /// </summary>
+        public static object UnwrapRef(Value val)
+        {
+            if (val.IsNullRef)
+                throw new TrapException("null reference");
+            return val.GcRef ?? throw new TrapException("null reference");
+        }
+
         /// <summary>
         /// Check if an object reference is null, including boxed Value structs
         /// representing WASM null references.

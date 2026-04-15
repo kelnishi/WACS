@@ -16,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
@@ -97,7 +98,8 @@ namespace Wacs.Transpiler.AOT
                     gcType.TypeBuilder = _moduleBuilder.DefineType(
                         $"{_namespace}.WasmStruct_{i}",
                         TypeAttributes.Public | TypeAttributes.Class,
-                        typeof(object));
+                        typeof(object),
+                        new[] { typeof(IGcRef) });
                     _emittedTypes[i] = gcType;
                 }
                 else if (expansion is ArrayType)
@@ -106,7 +108,8 @@ namespace Wacs.Transpiler.AOT
                     gcType.TypeBuilder = _moduleBuilder.DefineType(
                         $"{_namespace}.WasmArray_{i}",
                         TypeAttributes.Public | TypeAttributes.Class,
-                        typeof(object));
+                        typeof(object),
+                        new[] { typeof(IGcRef) });
                     _emittedTypes[i] = gcType;
                 }
             }
@@ -134,6 +137,10 @@ namespace Wacs.Transpiler.AOT
                     typeof(int),
                     FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.Literal);
                 hashField.SetConstant(gcType.StructuralHash);
+
+                // Implement IGcRef.StoreIndex — returns a RefIdx for this instance.
+                // For transpiled types, we use the type index as a stable identifier.
+                EmitStoreIndexProperty(gcType);
             }
 
             // Third pass: create types (bake the TypeBuilders)
@@ -170,6 +177,34 @@ namespace Wacs.Transpiler.AOT
                 typeof(int),
                 FieldAttributes.Public);
             gcType.Fields = new[] { elementsField, lengthField };
+        }
+
+        /// <summary>
+        /// Emit the IGcRef.StoreIndex property implementation.
+        /// Returns a PtrIdx with the type index as identifier.
+        /// </summary>
+        private static void EmitStoreIndexProperty(EmittedGcType gcType)
+        {
+            var tb = gcType.TypeBuilder!;
+
+            // _storeIndex backing field
+            var backingField = tb.DefineField("_storeIndex",
+                typeof(PtrIdx), FieldAttributes.Private);
+
+            // Property
+            var prop = tb.DefineProperty("StoreIndex", PropertyAttributes.None, typeof(RefIdx), null);
+
+            // Getter: return (RefIdx)_storeIndex
+            var getter = tb.DefineMethod("get_StoreIndex",
+                MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.SpecialName,
+                typeof(RefIdx), Type.EmptyTypes);
+            var il = getter.GetILGenerator();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, backingField);
+            il.Emit(OpCodes.Box, typeof(PtrIdx));
+            il.Emit(OpCodes.Ret);
+
+            prop.SetGetMethod(getter);
         }
 
         /// <summary>
