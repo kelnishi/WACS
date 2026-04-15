@@ -131,12 +131,13 @@ namespace Wacs.Transpiler.AOT.Emitters
         public static void EmitCallSite(
             ILGenerator il, CallSite site,
             MethodBuilder[] siblingMethods,
-            ModuleInstance moduleInst)
+            ModuleInstance moduleInst,
+            TranspilerOptions? options = null)
         {
             switch (site.Strategy)
             {
                 case CallStrategy.DirectSibling:
-                    EmitDirectCall(il, site, siblingMethods);
+                    EmitDirectCall(il, site, siblingMethods, options);
                     break;
 
                 case CallStrategy.ImportDispatch:
@@ -157,12 +158,21 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// DirectSibling: insert TranspiledContext under params, call MethodBuilder directly.
         /// For multi-value returns: declare locals for out params, pass ldloca, destructure after.
         /// </summary>
-        private static void EmitDirectCall(ILGenerator il, CallSite site, MethodBuilder[] siblingMethods)
+        private static void EmitDirectCall(
+            ILGenerator il, CallSite site, MethodBuilder[] siblingMethods,
+            TranspilerOptions? options)
         {
             var targetMethod = siblingMethods[site.LocalFuncIndex];
             int paramCount = site.FuncType.ParameterTypes.Arity;
             var resultTypes = site.FuncType.ResultType.Types;
             int outParamCount = resultTypes.Length > 1 ? resultTypes.Length - 1 : 0;
+
+            // tail. prefix: reuse stack frame for return_call to sibling.
+            // Only valid when there are no out params (CLR constraint: tail. requires
+            // that the callee's return value is the caller's return value directly).
+            bool emitTail = site.IsTailCall
+                && (options?.EmitTailCallPrefix ?? false)
+                && outParamCount == 0;
 
             // Spill WASM params from CIL stack
             var paramTypes = site.FuncType.ParameterTypes.Types;
@@ -187,15 +197,23 @@ namespace Wacs.Transpiler.AOT.Emitters
             for (int r = 0; r < outParamCount; r++)
                 il.Emit(OpCodes.Ldloca, outLocals[r]);
 
+            if (emitTail)
+                il.Emit(OpCodes.Tailcall);
+
             il.Emit(OpCodes.Call, targetMethod);
 
-            // Result 0 is now on the CIL stack (CLR return value).
-            // Push out results onto CIL stack in order: result1, result2, ...
-            // WASM expects stack to have [r0, r1, r2, ...] with r0 deepest.
-            // r0 is already there from the call return. Push out results on top.
-            for (int r = 0; r < outParamCount; r++)
+            if (emitTail)
             {
-                il.Emit(OpCodes.Ldloc, outLocals[r]);
+                il.Emit(OpCodes.Ret);
+            }
+            else
+            {
+                // Result 0 is now on the CIL stack (CLR return value).
+                // Push out results onto CIL stack in order: result1, result2, ...
+                for (int r = 0; r < outParamCount; r++)
+                {
+                    il.Emit(OpCodes.Ldloc, outLocals[r]);
+                }
             }
         }
 
