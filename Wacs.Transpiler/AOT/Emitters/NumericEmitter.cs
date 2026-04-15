@@ -15,6 +15,7 @@
 using System;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
 using WasmOpCode = Wacs.Core.OpCodes.OpCode;
@@ -63,11 +64,36 @@ namespace Wacs.Transpiler.AOT.Emitters
                     il.Emit(OpCodes.Ldc_I8, ((InstI64Const)inst).FetchImmediate(null!));
                     break;
                 case WasmOpCode.F32Const:
-                    il.Emit(OpCodes.Ldc_R4, ((InstF32Const)inst).FetchImmediate(null!));
+                {
+                    float fval = ((InstF32Const)inst).FetchImmediate(null!);
+                    if (float.IsNaN(fval))
+                    {
+                        // Load NaN via int bits to preserve sNaN/qNaN payload
+                        il.Emit(OpCodes.Ldc_I4, BitConverter.SingleToInt32Bits(fval));
+                        il.Emit(OpCodes.Call, typeof(BitConverter).GetMethod(
+                            nameof(BitConverter.Int32BitsToSingle))!);
+                    }
+                    else
+                    {
+                        il.Emit(OpCodes.Ldc_R4, fval);
+                    }
                     break;
+                }
                 case WasmOpCode.F64Const:
-                    il.Emit(OpCodes.Ldc_R8, ((InstF64Const)inst).FetchImmediate(null!));
+                {
+                    double dval = ((InstF64Const)inst).FetchImmediate(null!);
+                    if (double.IsNaN(dval))
+                    {
+                        il.Emit(OpCodes.Ldc_I8, BitConverter.DoubleToInt64Bits(dval));
+                        il.Emit(OpCodes.Call, typeof(BitConverter).GetMethod(
+                            nameof(BitConverter.Int64BitsToDouble))!);
+                    }
+                    else
+                    {
+                        il.Emit(OpCodes.Ldc_R8, dval);
+                    }
                     break;
+                }
 
                 // === i32 Test ===
                 case WasmOpCode.I32Eqz:
@@ -387,20 +413,32 @@ namespace Wacs.Transpiler.AOT.Emitters
                 // CIL conv.ovf.* throws OverflowException which TranspiledFunction wraps as TrapException.
                 // For unsigned targets, we convert via the larger unsigned type then narrow.
                 case WasmOpCode.I32WrapI64:        il.Emit(OpCodes.Conv_I4); break;
-                case WasmOpCode.I32TruncF32S:      il.Emit(OpCodes.Conv_I4); break;
-                case WasmOpCode.I32TruncF32U:
-                    il.Emit(OpCodes.Conv_U4);
+                case WasmOpCode.I32TruncF32S:
+                    il.Emit(OpCodes.Call, typeof(TruncHelpers).GetMethod(nameof(TruncHelpers.I32TruncF32S))!);
                     break;
-                case WasmOpCode.I32TruncF64S:      il.Emit(OpCodes.Conv_I4); break;
+                case WasmOpCode.I32TruncF32U:
+                    il.Emit(OpCodes.Call, typeof(TruncHelpers).GetMethod(nameof(TruncHelpers.I32TruncF32U))!);
+                    break;
+                case WasmOpCode.I32TruncF64S:
+                    il.Emit(OpCodes.Call, typeof(TruncHelpers).GetMethod(nameof(TruncHelpers.I32TruncF64S))!);
+                    break;
                 case WasmOpCode.I32TruncF64U:
-                    il.Emit(OpCodes.Conv_U4);
+                    il.Emit(OpCodes.Call, typeof(TruncHelpers).GetMethod(nameof(TruncHelpers.I32TruncF64U))!);
                     break;
                 case WasmOpCode.I64ExtendI32S:     il.Emit(OpCodes.Conv_I8); break;
                 case WasmOpCode.I64ExtendI32U:     il.Emit(OpCodes.Conv_U8); break;
-                case WasmOpCode.I64TruncF32S:      il.Emit(OpCodes.Conv_I8); break;
-                case WasmOpCode.I64TruncF32U:      il.Emit(OpCodes.Conv_U8); break;
-                case WasmOpCode.I64TruncF64S:      il.Emit(OpCodes.Conv_I8); break;
-                case WasmOpCode.I64TruncF64U:      il.Emit(OpCodes.Conv_U8); break;
+                case WasmOpCode.I64TruncF32S:
+                    il.Emit(OpCodes.Call, typeof(TruncHelpers).GetMethod(nameof(TruncHelpers.I64TruncF32S))!);
+                    break;
+                case WasmOpCode.I64TruncF32U:
+                    il.Emit(OpCodes.Call, typeof(TruncHelpers).GetMethod(nameof(TruncHelpers.I64TruncF32U))!);
+                    break;
+                case WasmOpCode.I64TruncF64S:
+                    il.Emit(OpCodes.Call, typeof(TruncHelpers).GetMethod(nameof(TruncHelpers.I64TruncF64S))!);
+                    break;
+                case WasmOpCode.I64TruncF64U:
+                    il.Emit(OpCodes.Call, typeof(TruncHelpers).GetMethod(nameof(TruncHelpers.I64TruncF64U))!);
+                    break;
                 case WasmOpCode.F32ConvertI32S:    il.Emit(OpCodes.Conv_R4); break;
                 case WasmOpCode.F32ConvertI32U:    il.Emit(OpCodes.Conv_R_Un); il.Emit(OpCodes.Conv_R4); break;
                 case WasmOpCode.F32ConvertI64S:    il.Emit(OpCodes.Conv_R4); break;
@@ -453,6 +491,78 @@ namespace Wacs.Transpiler.AOT.Emitters
                 default:
                     throw new TranspilerException($"NumericEmitter: unhandled opcode {op}");
             }
+        }
+    }
+
+    /// <summary>
+    /// WASM trapping float-to-int conversions.
+    /// CLR conv.i4/conv.u4 silently wraps on overflow. WASM requires trapping
+    /// on NaN or out-of-range values. These helpers implement the spec-mandated behavior.
+    /// </summary>
+    public static class TruncHelpers
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int I32TruncF32S(float v)
+        {
+            if (float.IsNaN(v)) throw new Wacs.Core.Runtime.Types.TrapException("invalid conversion to integer");
+            if (v >= 2147483648.0f || v < -2147483648.0f) throw new Wacs.Core.Runtime.Types.TrapException("integer overflow");
+            return (int)v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int I32TruncF32U(float v)
+        {
+            if (float.IsNaN(v)) throw new Wacs.Core.Runtime.Types.TrapException("invalid conversion to integer");
+            if (v >= 4294967296.0f || v <= -1.0f) throw new Wacs.Core.Runtime.Types.TrapException("integer overflow");
+            return (int)(uint)v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int I32TruncF64S(double v)
+        {
+            if (double.IsNaN(v)) throw new Wacs.Core.Runtime.Types.TrapException("invalid conversion to integer");
+            if (v >= 2147483648.0 || v <= -2147483649.0) throw new Wacs.Core.Runtime.Types.TrapException("integer overflow");
+            return (int)v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int I32TruncF64U(double v)
+        {
+            if (double.IsNaN(v)) throw new Wacs.Core.Runtime.Types.TrapException("invalid conversion to integer");
+            if (v >= 4294967296.0 || v <= -1.0) throw new Wacs.Core.Runtime.Types.TrapException("integer overflow");
+            return (int)(uint)v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static long I64TruncF32S(float v)
+        {
+            if (float.IsNaN(v)) throw new Wacs.Core.Runtime.Types.TrapException("invalid conversion to integer");
+            if (v >= 9223372036854775808.0f || v < -9223372036854775808.0f) throw new Wacs.Core.Runtime.Types.TrapException("integer overflow");
+            return (long)v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static long I64TruncF32U(float v)
+        {
+            if (float.IsNaN(v)) throw new Wacs.Core.Runtime.Types.TrapException("invalid conversion to integer");
+            if (v >= 18446744073709551616.0f || v <= -1.0f) throw new Wacs.Core.Runtime.Types.TrapException("integer overflow");
+            return (long)(ulong)v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static long I64TruncF64S(double v)
+        {
+            if (double.IsNaN(v)) throw new Wacs.Core.Runtime.Types.TrapException("invalid conversion to integer");
+            if (v >= 9223372036854775808.0 || v < -9223372036854775808.0) throw new Wacs.Core.Runtime.Types.TrapException("integer overflow");
+            return (long)v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static long I64TruncF64U(double v)
+        {
+            if (double.IsNaN(v)) throw new Wacs.Core.Runtime.Types.TrapException("invalid conversion to integer");
+            if (v >= 18446744073709551616.0 || v <= -1.0) throw new Wacs.Core.Runtime.Types.TrapException("integer overflow");
+            return (long)(ulong)v;
         }
     }
 }
