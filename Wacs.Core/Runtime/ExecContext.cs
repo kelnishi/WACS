@@ -303,6 +303,9 @@ namespace Wacs.Core.Runtime
                     else
                         hostFunc.Invoke(this);
                 } return;
+                default:
+                    funcInst.Invoke(this);
+                    return;
             }
         }
 
@@ -324,9 +327,15 @@ namespace Wacs.Core.Runtime
                 {
                     if (funcInst.IsAsync)
                         throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
-                    
+
                     hostFunc.Invoke(this);
                 } return;
+                default:
+                    // Generic IFunctionInstance fallback — used by TranspiledFunction
+                    // and any future IFunctionInstance implementations.
+                    // Pops params from OpStack, invokes, pushes results.
+                    funcInst.Invoke(this);
+                    return;
             }
         }
 

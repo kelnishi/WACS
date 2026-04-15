@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime.Types
@@ -27,5 +28,6 @@ namespace Wacs.Core.Runtime.Types
         public string Name { get; }
         public bool IsExport { get; set; }
         public void SetName(string name);
+        public void Invoke(ExecContext context);
     }
 }
