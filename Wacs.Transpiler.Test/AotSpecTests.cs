@@ -27,17 +27,18 @@ using Xunit.Abstractions;
 namespace Wacs.Transpiler.Test
 {
     /// <summary>
-    /// Runs the WebAssembly spec test commands against AOT-transpiled modules.
+    /// Runs WebAssembly spec test commands against AOT-transpiled modules
+    /// using ONLY the standalone IExports/IImports path.
     ///
-    /// Hybrid approach:
-    ///   - Module loading runs through the interpreter (handles WASM instantiation
-    ///     semantics, import resolution, validation, and Store transactions).
-    ///   - After each module load, the module is transpiled and instantiated via
-    ///     the Module class constructor (IExports/IImports path).
-    ///   - Assertions invoke exports through the transpiled Module instance,
-    ///     exercising the standalone assembly code path.
-    ///   - Commands that test loading semantics (assert_invalid, assert_malformed,
-    ///     assert_unlinkable, assert_uninstantiable) use the interpreter only.
+    /// No interpreter fallback. If a module can't be fully transpiled and
+    /// instantiated standalone, its assertions are skipped — not run through
+    /// the interpreter. The interpreter-backed tests live in Spec.Test.
+    ///
+    /// Modules load through the interpreter (WASM instantiation semantics),
+    /// then transpile and instantiate via the Module class constructor.
+    /// Assertions invoke exclusively through TranspiledModuleWrapper.
+    ///
+    /// Modules that can't use the standalone path are skipped with a reason.
     /// </summary>
     public class AotSpecTests
     {
@@ -58,13 +59,12 @@ namespace Wacs.Transpiler.Test
             env.BindToRuntime(runtime);
             runtime.TranspileModules = false;
 
-            // Track transpiled modules by name for cross-module import resolution.
-            // null key = the "current" unnamed module.
             var wrappers = new Dictionary<string, TranspiledModuleWrapper>();
             TranspiledModuleWrapper? currentWrapper = null;
+            string? skipReason = null;
 
             int totalTranspiled = 0;
-            int totalFallback = 0;
+            int totalSkipped = 0;
 
             Module? module = null;
             foreach (var command in file.Commands)
@@ -73,31 +73,56 @@ namespace Wacs.Transpiler.Test
                 {
                     _output.WriteLine($"    {command}");
 
-                    // For invoke-bearing commands, try the transpiled path first
-                    if (currentWrapper != null && TryRunThroughTranspiler(command, wrappers, currentWrapper, file, ref runtime, ref module))
-                    {
-                        continue; // Transpiled path handled it
-                    }
-
-                    // Fall through to interpreter for everything else
-                    var warnings = command.RunTest(file, ref runtime, ref module);
-                    foreach (var error in warnings)
-                    {
-                        _output.WriteLine($"    Warning: {error}");
-                    }
-
-                    // After a module is loaded, transpile and create wrapper
+                    // Module commands: load through interpreter, then transpile
                     if (command is ModuleCommand mc)
                     {
-                        // Reset — new module replaces previous
+                        // Always load through interpreter for proper WASM instantiation
+                        command.RunTest(file, ref runtime, ref module);
+
+                        // Reset for new module
                         currentWrapper = null;
-                        var wrapper = TranspileAndWrap(runtime, mc.Name ?? "", wrappers);
+                        skipReason = null;
+
+                        var (wrapper, reason) = TranspileAndWrap(runtime, mc.Name ?? "", wrappers);
                         if (wrapper != null)
                         {
                             currentWrapper = wrapper;
+                            wrappers[mc.Name ?? ""] = wrapper;
                             totalTranspiled += wrapper.Result.TranspiledCount;
-                            totalFallback += wrapper.Result.FallbackCount;
+                            _output.WriteLine($"      Standalone: {wrapper.Result.TranspiledCount} functions");
                         }
+                        else
+                        {
+                            skipReason = reason;
+                            totalSkipped++;
+                            _output.WriteLine($"      Skipped: {reason}");
+                        }
+                        continue;
+                    }
+
+                    // Commands that test loading semantics — always run through interpreter
+                    if (command is AssertInvalidCommand or AssertMalformedCommand
+                        or AssertUnlinkableCommand or AssertUninstantiableCommand
+                        or RegisterCommand)
+                    {
+                        command.RunTest(file, ref runtime, ref module);
+                        continue;
+                    }
+
+                    // Invoke-bearing commands: run through transpiled module or skip
+                    if (currentWrapper != null)
+                    {
+                        RunThroughTranspiler(command, wrappers, currentWrapper);
+                    }
+                    else if (skipReason != null)
+                    {
+                        // Module was skipped — skip its assertions too
+                        continue;
+                    }
+                    else
+                    {
+                        // No module loaded yet — run through interpreter (preamble commands)
+                        command.RunTest(file, ref runtime, ref module);
                     }
                 }
                 catch (TestException exc)
@@ -110,23 +135,20 @@ namespace Wacs.Transpiler.Test
                 }
             }
 
-            if (totalTranspiled + totalFallback > 0)
+            if (totalTranspiled > 0 || totalSkipped > 0)
             {
-                _output.WriteLine($"    AOT: {totalTranspiled} transpiled, {totalFallback} fallback");
+                _output.WriteLine($"    AOT: {totalTranspiled} transpiled, {totalSkipped} modules skipped");
             }
         }
 
         /// <summary>
-        /// Try to execute an invoke-bearing command through the transpiled module.
-        /// Returns true if handled, false to fall through to interpreter.
+        /// Execute a command through the transpiled module. No interpreter fallback.
         /// </summary>
-        private bool TryRunThroughTranspiler(
+        private void RunThroughTranspiler(
             ICommand command,
             Dictionary<string, TranspiledModuleWrapper> wrappers,
-            TranspiledModuleWrapper currentWrapper,
-            WastJson file, ref WasmRuntime runtime, ref Module? module)
+            TranspiledModuleWrapper currentWrapper)
         {
-            // Only handle commands with invoke actions
             InvokeAction? invokeAction = command switch
             {
                 AssertReturnCommand arc => arc.Action as InvokeAction,
@@ -136,44 +158,39 @@ namespace Wacs.Transpiler.Test
                 _ => null
             };
 
-            if (invokeAction == null) return false;
+            if (invokeAction == null) return;
 
             // Resolve which wrapper to use
             var wrapper = currentWrapper;
             if (!string.IsNullOrEmpty(invokeAction.Module))
             {
                 if (!wrappers.TryGetValue(invokeAction.Module, out var namedWrapper))
-                    return false; // Named module not transpiled — fall through
+                    throw new TestException($"Named module '{invokeAction.Module}' not transpiled");
                 wrapper = namedWrapper;
             }
 
-            if (wrapper?.ModuleInstance == null) return false;
-
-            // Try to invoke through the transpiled module
             switch (command)
             {
                 case AssertReturnCommand arc:
-                    return RunAssertReturn(wrapper, invokeAction, arc);
+                    RunAssertReturn(wrapper, invokeAction, arc);
+                    break;
 
                 case AssertTrapCommand atc:
-                    return RunAssertTrap(wrapper, invokeAction, atc);
+                    RunAssertTrap(wrapper, invokeAction, atc);
+                    break;
 
-                case AssertExhaustionCommand aec:
-                    return RunAssertExhaustion(wrapper, invokeAction);
+                case AssertExhaustionCommand:
+                    RunAssertExhaustion(wrapper, invokeAction);
+                    break;
 
                 case ActionCommand:
-                case InvokeCommand:
-                    // Fire-and-forget invoke — just run it
                     try { wrapper.InvokeExport(invokeAction.Field, invokeAction.Args.Select(a => a.AsValue).ToArray()); }
-                    catch { /* Actions may trap — that's fine */ }
-                    return true;
-
-                default:
-                    return false;
+                    catch { /* Actions may trap */ }
+                    break;
             }
         }
 
-        private bool RunAssertReturn(
+        private void RunAssertReturn(
             TranspiledModuleWrapper wrapper, InvokeAction invokeAction, AssertReturnCommand arc)
         {
             Value[] result;
@@ -223,40 +240,22 @@ namespace Wacs.Transpiler.Test
                     }
                 }
             }
-
-            return true;
         }
 
-        private bool RunAssertTrap(
+        private void RunAssertTrap(
             TranspiledModuleWrapper wrapper, InvokeAction invokeAction, AssertTrapCommand atc)
         {
             try
             {
                 var args = invokeAction.Args.Select(a => a.AsValue).ToArray();
                 wrapper.InvokeExport(invokeAction.Field, args);
-                // Should have trapped
                 throw new TestException($"Test failed {atc} \"{atc.Text}\"");
             }
-            catch (TrapException)
-            {
-                return true; // Expected trap
-            }
-            catch (Wacs.Core.Runtime.Exceptions.WasmRuntimeException)
-            {
-                return true; // Also a valid trap (e.g., stack exhaustion)
-            }
-            catch (DivideByZeroException)
-            {
-                return true; // CLR div-by-zero = WASM trap
-            }
-            catch (OverflowException)
-            {
-                return true; // CLR overflow = WASM trap
-            }
-            catch (TestException)
-            {
-                throw; // Re-throw our own failure
-            }
+            catch (TrapException) { }
+            catch (Wacs.Core.Runtime.Exceptions.WasmRuntimeException) { }
+            catch (DivideByZeroException) { }
+            catch (OverflowException) { }
+            catch (TestException) { throw; }
             catch (Exception ex)
             {
                 throw new TestException(
@@ -264,35 +263,26 @@ namespace Wacs.Transpiler.Test
             }
         }
 
-        private bool RunAssertExhaustion(
+        private void RunAssertExhaustion(
             TranspiledModuleWrapper wrapper, InvokeAction invokeAction)
         {
             try
             {
                 var args = invokeAction.Args.Select(a => a.AsValue).ToArray();
                 wrapper.InvokeExport(invokeAction.Field, args);
-                return false; // Should have trapped — fall through to interpreter
+                throw new TestException("Expected exhaustion but call succeeded");
             }
-            catch (Wacs.Core.Runtime.Exceptions.WasmRuntimeException)
-            {
-                return true; // Expected exhaustion
-            }
-            catch (TrapException)
-            {
-                return true; // Stack exhaustion may manifest as trap
-            }
-            catch
-            {
-                return false; // Unexpected — fall through
-            }
+            catch (Wacs.Core.Runtime.Exceptions.WasmRuntimeException) { }
+            catch (TrapException) { }
+            catch (TestException) { throw; }
         }
 
         /// <summary>
-        /// Transpile the current module and create a wrapper instance.
-        /// Returns null if transpilation fails or should be skipped.
+        /// Transpile the current module and create a standalone wrapper.
+        /// Returns (wrapper, null) on success or (null, reason) on skip.
         /// </summary>
-        private TranspiledModuleWrapper? TranspileAndWrap(
-            WasmRuntime runtime, string? moduleName,
+        private (TranspiledModuleWrapper?, string?) TranspileAndWrap(
+            WasmRuntime runtime, string moduleName,
             Dictionary<string, TranspiledModuleWrapper> wrappers)
         {
             ModuleInstance moduleInst;
@@ -302,56 +292,35 @@ namespace Wacs.Transpiler.Test
                     ? runtime.GetModule(null)
                     : runtime.GetModule(moduleName);
             }
-            catch { return null; }
+            catch { return (null, "module not found"); }
 
-            // Skip modules with GC struct/array types — GC IL not stable yet
-            if (HasGcTypes(moduleInst)) return null;
+            // Skip modules with GC struct/array types
+            if (HasGcTypes(moduleInst))
+                return (null, "GC struct/array types");
 
             var transpiler = new ModuleTranspiler();
             TranspilationResult result;
             try { result = transpiler.Transpile(moduleInst, runtime); }
             catch (Exception ex)
             {
-                _output.WriteLine($"    Transpilation failed: {ex.Message}");
-                return null;
+                return (null, $"transpilation failed: {ex.Message}");
             }
 
             if (result.ModuleClass == null)
-            {
-                _output.WriteLine($"    No Module class generated");
-                return null;
-            }
+                return (null, "no Module class generated");
 
-            // Only use the standalone Module path when ALL functions are transpiled
-            // and the module doesn't need interpreter features (bulk memory with Store,
-            // ref.func requiring Module). Otherwise fall through to interpreter.
             if (result.FallbackCount > 0)
-            {
-                _output.WriteLine($"    {result.FallbackCount} fallback functions — using interpreter-backed path");
-                return null;
-            }
-
-            // Check if the module needs runtime features not available standalone.
-            // Any imports (functions, globals, memories, tables) require the interpreter
-            // since the standalone Module path doesn't wire imported values.
-            if (moduleInst.Repr.Imports.Length > 0 || moduleInst.Repr.Datas.Length > 0)
-            {
-                _output.WriteLine($"    Module has imports or data segments — using interpreter-backed path");
-                return null;
-            }
+                return (null, $"{result.FallbackCount} fallback functions");
 
             var wrapper = new TranspiledModuleWrapper(result);
 
-            // Build imports proxy if the module has imports
+            // Build imports proxy if needed
             object? importsProxy = null;
             if (result.ImportsInterface != null)
             {
                 importsProxy = BuildImportsProxy(result, wrappers, runtime, moduleInst);
                 if (importsProxy == null)
-                {
-                    _output.WriteLine($"    Could not build imports proxy");
-                    return null;
-                }
+                    return (null, "could not build imports proxy");
             }
 
             try
@@ -360,14 +329,10 @@ namespace Wacs.Transpiler.Test
             }
             catch (Exception ex)
             {
-                _output.WriteLine($"    Module instantiation failed: {ex.GetType().Name}: {ex.Message}");
-                return null;
+                return (null, $"instantiation failed: {ex.GetType().Name}: {ex.Message}");
             }
 
-            // Register by name ("" = current unnamed module)
-            wrappers[moduleName] = wrapper;
-
-            return wrapper;
+            return (wrapper, null);
         }
 
         /// <summary>
@@ -386,12 +351,9 @@ namespace Wacs.Transpiler.Test
 
             foreach (var importMethod in result.ImportMethods)
             {
-                // Import method names are sanitized: "{moduleName}_{fieldName}"
-                // We need to find the source: a transpiled module's export or a host function
                 var importName = importMethod.Name;
-
-                // Try to find the handler from the WASM import descriptors
                 bool found = false;
+
                 foreach (var import in moduleInst.Repr.Imports)
                 {
                     if (import.Desc is not Wacs.Core.Module.ImportDesc.FuncDesc) continue;
@@ -409,17 +371,17 @@ namespace Wacs.Transpiler.Test
                             handlers[importName] = handler;
                             found = true;
                         }
-                        catch { /* Export not found on transpiled module */ }
+                        catch { }
                     }
 
                     if (!found)
                     {
-                        // Fall back to interpreter for host functions (spectest, etc.)
+                        // Host function: dispatch through interpreter
                         var funcType = importMethod.WasmType;
+                        var capturedImport = import;
                         handlers[importName] = args =>
                         {
-                            // Resolve through runtime and invoke via interpreter
-                            if (runtime.TryGetExportedFunction((import.ModuleName, import.Name), out var addr))
+                            if (runtime.TryGetExportedFunction((capturedImport.ModuleName, capturedImport.Name), out var addr))
                             {
                                 var invoker = runtime.CreateStackInvoker(addr);
                                 var valueArgs = new Value[args?.Length ?? 0];
@@ -432,7 +394,6 @@ namespace Wacs.Transpiler.Test
                                     else if (args[i] is double dv) valueArgs[i] = new Value(dv);
                                 }
                                 var results = invoker(valueArgs);
-                                // Return first result as the appropriate CLR type
                                 if (results.Length == 0) return null;
                                 return ConvertValueToClr(results[0], funcType.ResultType.Types[0]);
                             }
@@ -441,14 +402,11 @@ namespace Wacs.Transpiler.Test
                         found = true;
                     }
 
-                    break; // Found the matching import
+                    break;
                 }
 
                 if (!found)
-                {
-                    // Register a no-op handler to avoid crashes
                     handlers[importName] = _ => null;
-                }
             }
 
             try
