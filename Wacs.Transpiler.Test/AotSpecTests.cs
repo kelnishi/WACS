@@ -104,11 +104,14 @@ namespace Wacs.Transpiler.Test
             // when GC objects are constructed at runtime. TODO: fix GC IL emission.
             try
             {
-                foreach (var t in moduleInst.Repr.Types)
+                foreach (var recType in moduleInst.Repr.Types)
                 {
-                    var s = t?.ToString() ?? "";
-                    if (s.Contains("struct") || s.Contains("array"))
-                        return (0, 0);
+                    foreach (var subType in recType.SubTypes)
+                    {
+                        if (subType.Body is Wacs.Core.Types.StructType
+                            || subType.Body is Wacs.Core.Types.ArrayType)
+                            return (0, 0);
+                    }
                 }
             }
             catch { /* safe fallback */ }
@@ -141,18 +144,6 @@ namespace Wacs.Transpiler.Test
                 int funcAddrIndex = importCount + entry.Index;
                 var funcAddr = moduleInst.FuncAddrs.ElementAt(funcAddrIndex);
                 var originalFunc = runtime.GetFunction(funcAddr);
-
-                // Validate the emitted IL by pre-JIT compiling.
-                // If it fails, skip this function — leave the interpreter version.
-                try
-                {
-                    System.Runtime.CompilerServices.RuntimeHelpers.PrepareMethod(
-                        result.Methods[entry.Index].MethodHandle);
-                }
-                catch
-                {
-                    continue; // Invalid IL — skip swap
-                }
 
                 var transpiledFunc = new TranspiledFunction(
                     result.Methods[entry.Index], originalFunc.Type, ctx);
