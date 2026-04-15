@@ -159,37 +159,40 @@ namespace Wacs.Transpiler.AOT.Emitters
         public static void MemoryCopy(TranspiledContext ctx, int dstMemIdx, int srcMemIdx,
             int dst, int src, int len)
         {
-            if (len == 0) return;
             var dstMem = ctx.Memories[dstMemIdx];
             var srcMem = ctx.Memories[srcMemIdx];
-            if ((long)src + len > srcMem.Length || (long)dst + len > dstMem.Length ||
-                src < 0 || dst < 0)
+            // WASM spec: bounds check applies even when len == 0
+            if ((long)(uint)src + (long)(uint)len > srcMem.Length ||
+                (long)(uint)dst + (long)(uint)len > dstMem.Length)
                 throw new TrapException("out of bounds memory access");
+            if (len == 0) return;
             Buffer.BlockCopy(srcMem, src, dstMem, dst, len);
         }
 
         public static void MemoryFill(TranspiledContext ctx, int memIdx,
             int dst, int val, int len)
         {
-            if (len == 0) return;
             var mem = ctx.Memories[memIdx];
-            if ((long)dst + len > mem.Length || dst < 0)
+            // WASM spec: bounds check applies even when len == 0
+            if ((long)(uint)dst + (long)(uint)len > mem.Length)
                 throw new TrapException("out of bounds memory access");
+            if (len == 0) return;
             Array.Fill(mem, (byte)val, dst, len);
         }
 
         public static void MemoryInit(TranspiledContext ctx, int memIdx, int dataIdx,
             int dst, int src, int len)
         {
-            if (len == 0) return;
             if (ctx.Store == null || ctx.Module == null)
                 throw new TrapException("memory.init requires runtime store");
             var mem = ctx.Memories[memIdx];
             var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
             var data = ctx.Store[dataAddr];
-            if ((long)src + len > data.Data.Length || (long)dst + len > mem.Length ||
-                src < 0 || dst < 0)
+            // WASM spec: bounds check applies even when len == 0
+            if ((long)(uint)src + (long)(uint)len > data.Data.Length ||
+                (long)(uint)dst + (long)(uint)len > mem.Length)
                 throw new TrapException("out of bounds memory access");
+            if (len == 0) return;
             Buffer.BlockCopy(data.Data, src, mem, dst, len);
         }
 

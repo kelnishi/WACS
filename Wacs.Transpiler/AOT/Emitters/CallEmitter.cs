@@ -267,11 +267,26 @@ namespace Wacs.Transpiler.AOT.Emitters
             var argsLocal = il.DeclareLocal(typeof(object[]));
             il.Emit(OpCodes.Stloc, argsLocal);
 
-            // Call InvokeIndirect(ctx, tableIdx, elemIdx, args)
+            // Call InvokeIndirect(ctx, tableIdx, elemIdx, args, expectedReturn)
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldc_I4, site.TableIdx);
             il.Emit(OpCodes.Ldloc, elemIdxLocal);
             il.Emit(OpCodes.Ldloc, argsLocal);
+
+            // Push expected return type for type checking
+            if (resultTypes.Length > 0)
+            {
+                il.Emit(OpCodes.Ldtoken, ModuleTranspiler.MapValType(resultTypes[0]));
+                il.Emit(OpCodes.Call, typeof(Type).GetMethod(
+                    nameof(Type.GetTypeFromHandle), new[] { typeof(RuntimeTypeHandle) })!);
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldtoken, typeof(void));
+                il.Emit(OpCodes.Call, typeof(Type).GetMethod(
+                    nameof(Type.GetTypeFromHandle), new[] { typeof(RuntimeTypeHandle) })!);
+            }
+
             il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
                 nameof(CallHelpers.InvokeIndirect), BindingFlags.Public | BindingFlags.Static)!);
 
@@ -576,10 +591,11 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// <summary>
         /// Resolve and invoke call_indirect in one step.
         /// Returns the result as object (null for void).
-        /// Converts InvalidCastException to WASM indirect call type mismatch trap.
+        /// Validates delegate signature matches expected arg count before invoking.
         /// </summary>
         public static object? InvokeIndirect(
-            TranspiledContext ctx, int tableIdx, int elemIdx, object?[] args)
+            TranspiledContext ctx, int tableIdx, int elemIdx, object?[] args,
+            Type? expectedReturn = null)
         {
             int funcIdx = ResolveIndirect(ctx, tableIdx, elemIdx);
 
@@ -590,22 +606,45 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (del == null)
                 throw new TrapException("uninitialized element");
 
+            // Type check: verify delegate parameter count matches args.
+            // Full WASM type checking compares param AND result types — we check
+            // param count here and catch type mismatches from DynamicInvoke below.
+            var invokeMethod = del.GetType().GetMethod("Invoke");
+            if (invokeMethod != null)
+            {
+                var delParams = invokeMethod.GetParameters();
+                if (delParams.Length != args.Length)
+                    throw new TrapException("indirect call type mismatch");
+
+                // Check parameter types match
+                for (int i = 0; i < args.Length; i++)
+                {
+                    if (args[i] != null && !delParams[i].ParameterType.IsInstanceOfType(args[i]))
+                        throw new TrapException("indirect call type mismatch");
+                }
+
+                // Check return type matches caller's expectation
+                if (expectedReturn != null && invokeMethod.ReturnType != expectedReturn)
+                    throw new TrapException("indirect call type mismatch");
+                if (expectedReturn == null && invokeMethod.ReturnType != typeof(void))
+                    throw new TrapException("indirect call type mismatch");
+                if (expectedReturn != null && expectedReturn != typeof(void) && invokeMethod.ReturnType == typeof(void))
+                    throw new TrapException("indirect call type mismatch");
+            }
+
             try
             {
                 return del.DynamicInvoke(args);
-            }
-            catch (System.Reflection.TargetParameterCountException)
-            {
-                throw new TrapException("indirect call type mismatch");
-            }
-            catch (System.ArgumentException)
-            {
-                throw new TrapException("indirect call type mismatch");
             }
             catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
             {
                 System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
                 return null; // unreachable
+            }
+            catch (Exception ex) when (ex is System.Reflection.TargetParameterCountException
+                or System.ArgumentException or System.InvalidCastException)
+            {
+                throw new TrapException("indirect call type mismatch");
             }
         }
 
@@ -628,18 +667,15 @@ namespace Wacs.Transpiler.AOT.Emitters
             {
                 return del.DynamicInvoke(args);
             }
-            catch (System.Reflection.TargetParameterCountException)
-            {
-                throw new TrapException("indirect call type mismatch");
-            }
-            catch (System.ArgumentException)
-            {
-                throw new TrapException("indirect call type mismatch");
-            }
             catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
             {
                 System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
                 return null; // unreachable
+            }
+            catch (Exception ex) when (ex is System.Reflection.TargetParameterCountException
+                or System.ArgumentException or System.InvalidCastException)
+            {
+                throw new TrapException("indirect call type mismatch");
             }
         }
 
