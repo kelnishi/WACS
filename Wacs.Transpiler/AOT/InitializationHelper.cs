@@ -145,11 +145,18 @@ namespace Wacs.Transpiler.AOT
                 }
             }
 
+            // Memory limits for standalone memory.grow
+            var memoryLimits = new long[data.Memories.Length];
+            for (int i = 0; i < data.Memories.Length; i++)
+                memoryLimits[i] = data.Memories[i].max;
+
             // Create context
-            return new TranspiledContext(
+            var ctx = new TranspiledContext(
                 memories: memories,
                 tables: tables,
                 globals: globals);
+            ctx.MemoryLimits = memoryLimits;
+            return ctx;
         }
     }
 }

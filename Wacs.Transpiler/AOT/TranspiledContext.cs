@@ -37,6 +37,10 @@ namespace Wacs.Transpiler.AOT
         // reload after any call that might trigger growth.
         public byte[][] Memories;
 
+        // Max pages per memory — used by standalone memory.grow.
+        // Null when running in framework mode (Store handles limits).
+        public long[]? MemoryLimits;
+
         // === Tables ===
         // Indexed by tableidx. Elements are function references for call_indirect.
         public TableInstance[] Tables;
