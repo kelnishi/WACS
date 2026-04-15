@@ -20,6 +20,7 @@ using System.Runtime.CompilerServices;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
@@ -597,9 +598,9 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Call, TryEnsureStackMethod);
             il.Emit(OpCodes.Brtrue_S, okLabel);
 
-            // throw new TrapException("call stack exhausted");
+            // throw new WasmRuntimeException("call stack exhausted");
             il.Emit(OpCodes.Ldstr, "call stack exhausted");
-            il.Emit(OpCodes.Newobj, typeof(TrapException).GetConstructor(
+            il.Emit(OpCodes.Newobj, typeof(WasmRuntimeException).GetConstructor(
                 new[] { typeof(string) })!);
             il.Emit(OpCodes.Throw);
 

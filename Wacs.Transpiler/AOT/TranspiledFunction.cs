@@ -15,6 +15,7 @@
 using System;
 using System.Reflection;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
@@ -83,7 +84,7 @@ namespace Wacs.Transpiler.AOT
             catch (System.Reflection.TargetInvocationException tie)
             {
                 var inner = tie.InnerException;
-                if (inner is TrapException)
+                if (inner is TrapException or WasmRuntimeException)
                 {
                     System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
                 }
