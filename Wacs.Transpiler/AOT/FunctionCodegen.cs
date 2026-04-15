@@ -17,6 +17,7 @@ using System.Collections.Generic;
 using System.Reflection.Emit;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
@@ -77,10 +78,6 @@ namespace Wacs.Transpiler.AOT
         /// </summary>
         public bool TryEmit()
         {
-            // Multi-value returns not yet supported
-            if (_funcInst.Type.ResultType.Arity > 1)
-                return false;
-
             // First pass: check if we can handle every instruction (recursive)
             if (!CanEmitAllInstructions(_funcInst.Body.Instructions))
             {
@@ -250,13 +247,13 @@ namespace Wacs.Transpiler.AOT
                 case WasmOpCode.End:
                     if (inst is InstEnd endInst && endInst.FunctionEnd)
                     {
-                        il.Emit(OpCodes.Ret);
+                        EmitFunctionReturn(il);
                     }
                     // Non-function End is handled by the block/loop/if emitters
                     break;
 
                 case WasmOpCode.Return:
-                    il.Emit(OpCodes.Ret);
+                    EmitFunctionReturn(il);
                     break;
 
                 case WasmOpCode.Br:
@@ -354,6 +351,62 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// Check if we have an IL emitter for the given instruction.
         /// </summary>
+        /// <summary>
+        /// Emit return sequence for the function.
+        /// For 0 results: just ret.
+        /// For 1 result: value is on CIL stack, ret.
+        /// For N results: CIL stack has [r0, r1, ..., rN-1].
+        ///   Store r1..rN-1 to out params (reverse order), leave r0 for ret.
+        /// </summary>
+        private void EmitFunctionReturn(ILGenerator il)
+        {
+            var resultTypes = _funcInst.Type.ResultType.Types;
+            int resultCount = resultTypes.Length;
+
+            if (resultCount <= 1)
+            {
+                il.Emit(OpCodes.Ret);
+                return;
+            }
+
+            // CIL stack has [r0, r1, ..., rN-1] (r0 deepest, rN-1 on top)
+            // Need to store r1..rN-1 into out params, leave r0 for ret.
+            // Out param for result index i (1-based) is at CIL arg: 1 + _paramCount + (i-1)
+
+            // Spill all results to temps (reverse order — top of stack first)
+            var temps = new LocalBuilder[resultCount];
+            for (int i = resultCount - 1; i >= 0; i--)
+            {
+                temps[i] = il.DeclareLocal(ModuleTranspiler.MapValType(resultTypes[i]));
+                il.Emit(OpCodes.Stloc, temps[i]);
+            }
+
+            // Store results 1..N-1 to out params via stind
+            for (int i = 1; i < resultCount; i++)
+            {
+                int outArgIdx = 1 + _paramCount + (i - 1); // CIL arg index for out param
+                il.Emit(OpCodes.Ldarg, outArgIdx);  // load out param address
+                il.Emit(OpCodes.Ldloc, temps[i]);    // load result value
+                EmitStind(il, resultTypes[i]);        // store indirect
+            }
+
+            // Push result 0 back for ret
+            il.Emit(OpCodes.Ldloc, temps[0]);
+            il.Emit(OpCodes.Ret);
+        }
+
+        private static void EmitStind(ILGenerator il, ValType type)
+        {
+            switch (type)
+            {
+                case ValType.I32: il.Emit(OpCodes.Stind_I4); break;
+                case ValType.I64: il.Emit(OpCodes.Stind_I8); break;
+                case ValType.F32: il.Emit(OpCodes.Stind_R4); break;
+                case ValType.F64: il.Emit(OpCodes.Stind_R8); break;
+                default: il.Emit(OpCodes.Stobj, typeof(Value)); break; // ref types
+            }
+        }
+
         /// <summary>
         /// Debug: find and store the first unsupported instruction's mnemonic.
         /// </summary>

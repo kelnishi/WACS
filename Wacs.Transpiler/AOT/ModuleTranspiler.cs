@@ -195,31 +195,27 @@ namespace Wacs.Transpiler.AOT
             FunctionType funcType,
             int index)
         {
-            // Build parameter types: TranspiledContext + wasm params
+            // Build parameter types: TranspiledContext + wasm params + out params for multi-value
             var wasmParamTypes = funcType.ParameterTypes.Types;
-            var paramTypes = new Type[wasmParamTypes.Length + 1];
+            var resultTypes = funcType.ResultType.Types;
+            int outParamCount = resultTypes.Length > 1 ? resultTypes.Length - 1 : 0;
+
+            var paramTypes = new Type[1 + wasmParamTypes.Length + outParamCount];
             paramTypes[0] = typeof(TranspiledContext);
             for (int p = 0; p < wasmParamTypes.Length; p++)
             {
                 paramTypes[p + 1] = MapValType(wasmParamTypes[p]);
             }
-
-            // Return type
-            Type returnType;
-            switch (funcType.ResultType.Arity)
+            // Out params for results 1..N (result 0 is the CLR return value)
+            for (int r = 0; r < outParamCount; r++)
             {
-                case 0:
-                    returnType = typeof(void);
-                    break;
-                case 1:
-                    returnType = MapValType(funcType.ResultType.Types[0]);
-                    break;
-                default:
-                    // Multi-value: fall back to Value[] for now
-                    // TODO: Use WasmReturn<T1,T2> structs in Phase 3
-                    returnType = typeof(Value[]);
-                    break;
+                paramTypes[1 + wasmParamTypes.Length + r] = MapValType(resultTypes[r + 1]).MakeByRefType();
             }
+
+            // Return type: result 0, or void if no results
+            Type returnType = resultTypes.Length >= 1
+                ? MapValType(resultTypes[0])
+                : typeof(void);
 
             string methodName = !string.IsNullOrEmpty(funcInst.Name)
                 ? $"Function_{funcInst.Name}"
@@ -236,6 +232,10 @@ namespace Wacs.Transpiler.AOT
             for (int p = 0; p < wasmParamTypes.Length; p++)
             {
                 mb.DefineParameter(p + 2, ParameterAttributes.None, $"param{p}");
+            }
+            for (int r = 0; r < outParamCount; r++)
+            {
+                mb.DefineParameter(2 + wasmParamTypes.Length + r, ParameterAttributes.Out, $"result{r + 1}");
             }
 
             return mb;

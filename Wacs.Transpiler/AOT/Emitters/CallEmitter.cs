@@ -155,30 +155,47 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         /// <summary>
         /// DirectSibling: insert TranspiledContext under params, call MethodBuilder directly.
+        /// For multi-value returns: declare locals for out params, pass ldloca, destructure after.
         /// </summary>
         private static void EmitDirectCall(ILGenerator il, CallSite site, MethodBuilder[] siblingMethods)
         {
             var targetMethod = siblingMethods[site.LocalFuncIndex];
             int paramCount = site.FuncType.ParameterTypes.Arity;
+            var resultTypes = site.FuncType.ResultType.Types;
+            int outParamCount = resultTypes.Length > 1 ? resultTypes.Length - 1 : 0;
 
-            if (paramCount == 0)
+            // Spill WASM params from CIL stack
+            var paramTypes = site.FuncType.ParameterTypes.Types;
+            var temps = new LocalBuilder[paramCount];
+            for (int i = paramCount - 1; i >= 0; i--)
             {
-                il.Emit(OpCodes.Ldarg_0);
-                il.Emit(OpCodes.Call, targetMethod);
+                temps[i] = il.DeclareLocal(ModuleTranspiler.MapValType(paramTypes[i]));
+                il.Emit(OpCodes.Stloc, temps[i]);
             }
-            else
+
+            // Declare locals for out results
+            var outLocals = new LocalBuilder[outParamCount];
+            for (int r = 0; r < outParamCount; r++)
             {
-                var paramTypes = site.FuncType.ParameterTypes.Types;
-                var temps = new LocalBuilder[paramCount];
-                for (int i = paramCount - 1; i >= 0; i--)
-                {
-                    temps[i] = il.DeclareLocal(ModuleTranspiler.MapValType(paramTypes[i]));
-                    il.Emit(OpCodes.Stloc, temps[i]);
-                }
-                il.Emit(OpCodes.Ldarg_0);
-                for (int i = 0; i < paramCount; i++)
-                    il.Emit(OpCodes.Ldloc, temps[i]);
-                il.Emit(OpCodes.Call, targetMethod);
+                outLocals[r] = il.DeclareLocal(ModuleTranspiler.MapValType(resultTypes[r + 1]));
+            }
+
+            // Push: ctx, params, &out0, &out1, ...
+            il.Emit(OpCodes.Ldarg_0);
+            for (int i = 0; i < paramCount; i++)
+                il.Emit(OpCodes.Ldloc, temps[i]);
+            for (int r = 0; r < outParamCount; r++)
+                il.Emit(OpCodes.Ldloca, outLocals[r]);
+
+            il.Emit(OpCodes.Call, targetMethod);
+
+            // Result 0 is now on the CIL stack (CLR return value).
+            // Push out results onto CIL stack in order: result1, result2, ...
+            // WASM expects stack to have [r0, r1, r2, ...] with r0 deepest.
+            // r0 is already there from the call return. Push out results on top.
+            for (int r = 0; r < outParamCount; r++)
+            {
+                il.Emit(OpCodes.Ldloc, outLocals[r]);
             }
         }
 

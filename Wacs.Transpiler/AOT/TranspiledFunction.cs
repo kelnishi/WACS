@@ -44,6 +44,8 @@ namespace Wacs.Transpiler.AOT
         public bool IsExport { get; set; }
         public bool IsAsync => false;
 
+        private readonly int _outParamCount;
+
         public TranspiledFunction(
             MethodInfo method,
             FunctionType type,
@@ -54,8 +56,9 @@ namespace Wacs.Transpiler.AOT
             _ctx = ctx;
             _paramCount = type.ParameterTypes.Arity;
             _resultCount = type.ResultType.Arity;
-            // +1 for the TranspiledContext first parameter
-            _paramBuffer = new object?[_paramCount + 1];
+            _outParamCount = _resultCount > 1 ? _resultCount - 1 : 0;
+            // +1 for TranspiledContext + out params
+            _paramBuffer = new object?[1 + _paramCount + _outParamCount];
             _paramBuffer[0] = ctx;
         }
 
@@ -102,7 +105,14 @@ namespace Wacs.Transpiler.AOT
                 if (result == null)
                     throw new System.InvalidOperationException(
                         $"TranspiledFunction '{Name}' expected {_resultCount} result(s) but method returned null");
+                // Result 0 is the CLR return value
                 context.OpStack.PushValue(ConvertToValue(result, Type.ResultType.Types[0]));
+                // Results 1..N are in the out param slots of _paramBuffer
+                for (int i = 0; i < _outParamCount; i++)
+                {
+                    var outVal = _paramBuffer[1 + _paramCount + i];
+                    context.OpStack.PushValue(ConvertToValue(outVal!, Type.ResultType.Types[i + 1]));
+                }
             }
         }
 
