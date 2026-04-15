@@ -294,9 +294,8 @@ namespace Wacs.Transpiler.Test
             }
             catch { return (null, "module not found"); }
 
-            // Skip modules with GC struct/array types
-            if (HasGcTypes(moduleInst))
-                return (null, "GC struct/array types");
+            // GC modules go through the same path — no special-casing.
+            // If the GC emitter produces bad IL, it surfaces as a test failure.
 
             var transpiler = new ModuleTranspiler();
             TranspilationResult result;
@@ -313,6 +312,7 @@ namespace Wacs.Transpiler.Test
                 return (null, $"{result.FallbackCount} fallback functions");
 
             var wrapper = new TranspiledModuleWrapper(result);
+
 
             // Build imports proxy if needed
             object? importsProxy = null;
@@ -439,18 +439,5 @@ namespace Wacs.Transpiler.Test
             return actual.Equals(expected);
         }
 
-        private static bool HasGcTypes(ModuleInstance moduleInst)
-        {
-            try
-            {
-                foreach (var recType in moduleInst.Repr.Types)
-                    foreach (var subType in recType.SubTypes)
-                        if (subType.Body is Wacs.Core.Types.StructType
-                            || subType.Body is Wacs.Core.Types.ArrayType)
-                            return true;
-            }
-            catch { }
-            return false;
-        }
     }
 }
