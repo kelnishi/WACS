@@ -253,10 +253,13 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         public static Value RefFunc(TranspiledContext ctx, int funcIdx)
         {
-            if (ctx.Module == null)
-                throw new TrapException("ref.func requires runtime module");
-            var funcAddr = ctx.Module.FuncAddrs[(FuncIdx)funcIdx];
-            return new Value(funcAddr);
+            if (ctx.Module != null)
+            {
+                var funcAddr = ctx.Module.FuncAddrs[(FuncIdx)funcIdx];
+                return new Value(funcAddr);
+            }
+            // Standalone mode: use function index directly as the FuncAddr value
+            return new Value(ValType.FuncRef, funcIdx);
         }
 
         public static int TableSize(TranspiledContext ctx, int tableIdx)

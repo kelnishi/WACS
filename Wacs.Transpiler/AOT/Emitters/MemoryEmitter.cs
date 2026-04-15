@@ -234,8 +234,8 @@ namespace Wacs.Transpiler.AOT.Emitters
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void BoundsCheck(byte[] mem, long ea, int width)
         {
-            if ((ulong)ea > (ulong)(mem.Length - width))
-                throw new TrapException($"out of bounds memory access: ea={ea}, size={width}, memlen={mem.Length}");
+            if (ea < 0 || ea + width > mem.Length)
+                throw new TrapException("out of bounds memory access");
         }
 
         // === i32 loads ===
