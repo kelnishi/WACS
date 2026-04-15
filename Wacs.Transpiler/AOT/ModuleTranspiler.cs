@@ -46,13 +46,29 @@ namespace Wacs.Transpiler.AOT
         /// <summary>Diagnostics emitted during transpilation.</summary>
         public IReadOnlyList<TranspilerDiagnostic> Diagnostics { get; }
 
+        /// <summary>Generated interface for module exports. Null if no exports.</summary>
+        public Type? ExportsInterface { get; }
+
+        /// <summary>Generated interface for module imports. Null if no imports.</summary>
+        public Type? ImportsInterface { get; }
+
+        /// <summary>Export method metadata (name, type, index).</summary>
+        public IReadOnlyList<InterfaceMethod> ExportMethods { get; }
+
+        /// <summary>Import method metadata (name, type, index).</summary>
+        public IReadOnlyList<InterfaceMethod> ImportMethods { get; }
+
         public TranspilationResult(
             Assembly assembly,
             Type functionsType,
             MethodInfo[] methods,
             ModuleMetadata.Manifest manifest,
             Dictionary<int, MethodInfo> functionMethodMap,
-            IReadOnlyList<TranspilerDiagnostic> diagnostics)
+            IReadOnlyList<TranspilerDiagnostic> diagnostics,
+            Type? exportsInterface,
+            Type? importsInterface,
+            IReadOnlyList<InterfaceMethod> exportMethods,
+            IReadOnlyList<InterfaceMethod> importMethods)
         {
             Assembly = assembly;
             FunctionsType = functionsType;
@@ -60,6 +76,10 @@ namespace Wacs.Transpiler.AOT
             Manifest = manifest;
             FunctionMethodMap = functionMethodMap;
             Diagnostics = diagnostics;
+            ExportsInterface = exportsInterface;
+            ImportsInterface = importsInterface;
+            ExportMethods = exportMethods;
+            ImportMethods = importMethods;
         }
     }
 
@@ -127,7 +147,13 @@ namespace Wacs.Transpiler.AOT
                 if (fIdx >= allFunctionTypes.Length) break;
             }
 
-            // === Pass 0: Emit CLR types for WASM struct/array definitions ===
+            // === Pass 0a: Generate typed interfaces for exports and imports ===
+            var interfaceGen = new InterfaceGenerator(
+                moduleBuilder, $"{_namespace}.{moduleName}",
+                moduleInst.Repr, moduleInst, runtime, importCount);
+            interfaceGen.Generate();
+
+            // === Pass 0b: Emit CLR types for WASM struct/array definitions ===
             var gcTypeEmitter = new GcTypeEmitter(moduleBuilder, $"{_namespace}.{moduleName}", moduleInst.Types);
             gcTypeEmitter.EmitTypes();
 
@@ -196,7 +222,11 @@ namespace Wacs.Transpiler.AOT
                 methods,
                 manifest,
                 methodMap,
-                diagnostics.Diagnostics);
+                diagnostics.Diagnostics,
+                interfaceGen.ExportsInterface?.UnderlyingSystemType,
+                interfaceGen.ImportsInterface?.UnderlyingSystemType,
+                interfaceGen.ExportMethods,
+                interfaceGen.ImportMethods);
         }
 
         private MethodBuilder CreateMethodStub(
