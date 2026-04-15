@@ -16,6 +16,7 @@ using System;
 using System.IO;
 using System.Linq;
 using Spec.Test;
+using Spec.Test.WastJson;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -26,33 +27,8 @@ using Xunit.Abstractions;
 namespace Wacs.Transpiler.Test
 {
     /// <summary>
-    /// xUnit ClassData adapter using the shared WastTestDataProvider.
-    /// </summary>
-    public class TranspilerWasmTestData : WastTestDataAdapter
-    {
-    }
-
-    /// <summary>
-    /// Base class for adapting WastTestDataProvider to xUnit ClassData.
-    /// </summary>
-    public abstract class WastTestDataAdapter : System.Collections.IEnumerable,
-        System.Collections.Generic.IEnumerable<object[]>
-    {
-        private static readonly WastTestDataProvider Provider = new();
-
-        public System.Collections.Generic.IEnumerator<object[]> GetEnumerator()
-        {
-            foreach (var wasmPath in Provider.GetWasmFiles())
-            {
-                yield return new object[] { wasmPath };
-            }
-        }
-
-        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
-    }
-
-    /// <summary>
     /// xUnit ClassData adapter for full test definitions (JSON commands).
+    /// Used by both TranspilerTests and AotSpecTests.
     /// </summary>
     public class TranspilerTestDefinitions : System.Collections.IEnumerable,
         System.Collections.Generic.IEnumerable<object[]>
@@ -80,98 +56,76 @@ namespace Wacs.Transpiler.Test
         }
 
         /// <summary>
-        /// Verify that the transpiler can process a module without crashing.
-        /// Reports how many functions were transpiled vs fell back.
-        /// </summary>
-        [Theory]
-        [ClassData(typeof(TranspilerWasmTestData))]
-        public void TranspileModule(string wasmPath)
-        {
-            var testName = Path.GetFileName(wasmPath);
-
-            Module module;
-            using (var stream = new FileStream(wasmPath, FileMode.Open, FileAccess.Read))
-            {
-                try { module = BinaryModuleParser.ParseWasm(stream); }
-                catch
-                {
-                    _output.WriteLine($"  {testName}: skipped (parse error)");
-                    return;
-                }
-            }
-
-            var runtime = new WasmRuntime();
-
-            ModuleInstance moduleInst;
-            try
-            {
-                moduleInst = runtime.InstantiateModule(module);
-            }
-            catch
-            {
-                _output.WriteLine($"  {testName}: skipped (missing imports)");
-                return;
-            }
-
-            var transpiler = new ModuleTranspiler();
-            var result = transpiler.Transpile(moduleInst, runtime);
-
-            _output.WriteLine($"  {testName}: {result.TranspiledCount} transpiled, {result.FallbackCount} fallback");
-
-            Assert.NotNull(result.Assembly);
-            Assert.NotNull(result.FunctionsType);
-            Assert.Equal(result.TranspiledCount + result.FallbackCount, result.Methods.Length);
-        }
-
-        /// <summary>
-        /// Verify the IBindable pattern — transpiled exports bind to a runtime.
+        /// Verify that the transpiler can process each module in a wast test plan
+        /// without crashing. Walks the command sequence inline, just like the core
+        /// test suite, so that imports are available and only valid modules are tested.
         /// </summary>
         [Theory]
         [ClassData(typeof(TranspilerTestDefinitions))]
-        public void TranspiledModuleBindsAsIBindable(Spec.Test.WastJson.WastJson file)
+        public void TranspileModule(WastJson file)
         {
-            _output.WriteLine($"  Testing: {file.TestName}");
+            _output.WriteLine($"Transpile: {file.TestName}");
+            var env = new SpecTestEnv();
+            var runtime = new WasmRuntime();
+            env.BindToRuntime(runtime);
+            runtime.TranspileModules = false;
 
-            // Load the first module command's wasm file
-            var moduleCmd = file.Commands
-                .OfType<Spec.Test.WastJson.ModuleCommand>()
-                .FirstOrDefault();
+            int modulesTranspiled = 0;
+            int totalFunctions = 0;
+            int totalTranspiled = 0;
 
-            if (moduleCmd == null || string.IsNullOrEmpty(moduleCmd.Filename))
-                return;
-
-            var filepath = Path.Combine(file.Path, moduleCmd.Filename);
-            if (!File.Exists(filepath))
-                return;
-
-            Module module;
-            using (var stream = new FileStream(filepath, FileMode.Open, FileAccess.Read))
+            Module? module = null;
+            foreach (var command in file.Commands)
             {
-                try { module = BinaryModuleParser.ParseWasm(stream); }
-                catch { return; }
+                // Only process module loads — skip assertions and other commands
+                if (command is not ModuleCommand)
+                {
+                    try { command.RunTest(file, ref runtime, ref module); }
+                    catch { /* assertion failures don't matter for transpile test */ }
+                    continue;
+                }
+
+                try
+                {
+                    // Load the module through the standard path (provides imports)
+                    command.RunTest(file, ref runtime, ref module);
+                }
+                catch (Exception ex)
+                {
+                    _output.WriteLine($"    Module load failed: {ex.Message}");
+                    continue;
+                }
+
+                // Transpile the just-loaded module
+                ModuleInstance moduleInst;
+                try { moduleInst = runtime.GetModule(null); }
+                catch { continue; }
+
+                var transpiler = new ModuleTranspiler();
+                TranspilationResult result;
+                try
+                {
+                    result = transpiler.Transpile(moduleInst, runtime);
+                }
+                catch (Exception ex)
+                {
+                    Assert.Fail($"Transpilation crashed on {file.TestName}: {ex.Message}");
+                    return;
+                }
+
+                Assert.NotNull(result.Assembly);
+                Assert.NotNull(result.FunctionsType);
+                Assert.Equal(result.TranspiledCount + result.FallbackCount, result.Methods.Length);
+
+                modulesTranspiled++;
+                totalFunctions += result.Methods.Length;
+                totalTranspiled += result.TranspiledCount;
             }
 
-            var runtime = new WasmRuntime();
-            var env = new SpecTestEnv();
-            env.BindToRuntime(runtime);
-
-            ModuleInstance moduleInst;
-            try { moduleInst = runtime.InstantiateModule(module); }
-            catch { return; }
-
-            var transpiler = new ModuleTranspiler();
-            var result = transpiler.Transpile(moduleInst, runtime);
-            var ctx = new TranspiledContext();
-
-            var transpiledModule = new AOT.TranspiledModule("test", result, ctx);
-
-            // Bind to a fresh runtime — should not throw
-            var runtime2 = new WasmRuntime();
-            transpiledModule.BindToRuntime(runtime2);
-
-            int exportCount = result.Manifest.Functions
-                .Count(f => !string.IsNullOrEmpty(f.ExportName));
-            _output.WriteLine($"    Bound {exportCount} exports, {result.TranspiledCount}/{result.Methods.Length} transpiled");
+            if (modulesTranspiled > 0)
+            {
+                _output.WriteLine($"    {modulesTranspiled} modules, {totalTranspiled}/{totalFunctions} functions transpiled");
+            }
         }
 
         /// <summary>
@@ -187,34 +141,45 @@ namespace Wacs.Transpiler.Test
             int totalFallback = 0;
             int modulesProcessed = 0;
 
-            foreach (var wasmPath in provider.GetWasmFiles())
+            foreach (var testDef in provider.GetTestDefinitions())
             {
-                Module module;
-                using (var stream = new FileStream(wasmPath, FileMode.Open, FileAccess.Read))
-                {
-                    try { module = BinaryModuleParser.ParseWasm(stream); }
-                    catch { continue; }
-                }
-
+                var env = new SpecTestEnv();
                 var runtime = new WasmRuntime();
-                ModuleInstance moduleInst;
-                try { moduleInst = runtime.InstantiateModule(module); }
-                catch { continue; }
+                env.BindToRuntime(runtime);
+                runtime.TranspileModules = false;
 
-                var transpiler = new ModuleTranspiler();
-                TranspilationResult result;
-                try { result = transpiler.Transpile(moduleInst, runtime); }
-                catch { continue; }
+                Module? module = null;
+                foreach (var command in testDef.Commands)
+                {
+                    if (command is not ModuleCommand)
+                    {
+                        try { command.RunTest(testDef, ref runtime, ref module); }
+                        catch { }
+                        continue;
+                    }
 
-                totalTranspiled += result.TranspiledCount;
-                totalFallback += result.FallbackCount;
-                modulesProcessed++;
+                    try { command.RunTest(testDef, ref runtime, ref module); }
+                    catch { continue; }
 
-                Assert.Equal(result.Methods.Length, result.Manifest.Functions.Count);
-                Assert.Equal(result.TranspiledCount,
-                    result.Manifest.Functions.Count(f => f.IsTranspiled));
-                Assert.Equal(result.FallbackCount,
-                    result.Manifest.Functions.Count(f => !f.IsTranspiled));
+                    ModuleInstance moduleInst;
+                    try { moduleInst = runtime.GetModule(null); }
+                    catch { continue; }
+
+                    var transpiler = new ModuleTranspiler();
+                    TranspilationResult result;
+                    try { result = transpiler.Transpile(moduleInst, runtime); }
+                    catch { continue; }
+
+                    totalTranspiled += result.TranspiledCount;
+                    totalFallback += result.FallbackCount;
+                    modulesProcessed++;
+
+                    Assert.Equal(result.Methods.Length, result.Manifest.Functions.Count);
+                    Assert.Equal(result.TranspiledCount,
+                        result.Manifest.Functions.Count(f => f.IsTranspiled));
+                    Assert.Equal(result.FallbackCount,
+                        result.Manifest.Functions.Count(f => !f.IsTranspiled));
+                }
             }
 
             int total = totalTranspiled + totalFallback;
