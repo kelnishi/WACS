@@ -363,19 +363,18 @@ namespace Wacs.Transpiler.AOT.Emitters
             var temps = new LocalBuilder[n];
             for (int i = n - 1; i >= 0; i--)
             {
-                temps[i] = il.DeclareLocal(typeof(object));
-                il.Emit(OpCodes.Box, typeof(object)); // box if value type
+                temps[i] = il.DeclareLocal(typeof(Value));
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
-            // Call helper: ArrayNewFixed(ctx, typeIdx, object[] vals) → object
+            // Call helper: ArrayNewFixed(ctx, typeIdx, Value[] vals) → object
             il.Emit(OpCodes.Ldc_I4, n);
-            il.Emit(OpCodes.Newarr, typeof(object));
+            il.Emit(OpCodes.Newarr, typeof(Value));
             for (int i = 0; i < n; i++)
             {
                 il.Emit(OpCodes.Dup);
                 il.Emit(OpCodes.Ldc_I4, i);
                 il.Emit(OpCodes.Ldloc, temps[i]);
-                il.Emit(OpCodes.Stelem_Ref);
+                il.Emit(OpCodes.Stelem, typeof(Value));
             }
             il.Emit(OpCodes.Ldarg_0); // ctx
             il.Emit(OpCodes.Ldc_I4, typeIdx);
@@ -398,9 +397,9 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             // Stack: [arrayref, offset, val, len]
             var len = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, len);
-            var val = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Box, typeof(object)); il.Emit(OpCodes.Stloc, val);
+            var val = il.DeclareLocal(typeof(Value)); il.Emit(OpCodes.Stloc, val);
             var off = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, off);
-            var arr = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Stloc, arr);
+            var arr = il.DeclareLocal(typeof(Value)); il.Emit(OpCodes.Stloc, arr);
             il.Emit(OpCodes.Ldloc, arr);
             il.Emit(OpCodes.Ldloc, off);
             il.Emit(OpCodes.Ldloc, val);
@@ -433,7 +432,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             var len = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, len);
             var srcoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, srcoff);
             var dstoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, dstoff);
-            var arr = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Stloc, arr);
+            var arr = il.DeclareLocal(typeof(Value)); il.Emit(OpCodes.Stloc, arr);
             il.Emit(OpCodes.Ldarg_0); // ctx
             il.Emit(OpCodes.Ldloc, arr);
             il.Emit(OpCodes.Ldloc, dstoff);
@@ -449,7 +448,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             var len = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, len);
             var srcoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, srcoff);
             var dstoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, dstoff);
-            var arr = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Stloc, arr);
+            var arr = il.DeclareLocal(typeof(Value)); il.Emit(OpCodes.Stloc, arr);
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldloc, arr);
             il.Emit(OpCodes.Ldloc, dstoff);
@@ -558,15 +557,18 @@ namespace Wacs.Transpiler.AOT.Emitters
             return false;
         }
 
-        public static int ArrayLen(object arrayRef)
+        public static int ArrayLen(Value arrayRef)
         {
-            if (arrayRef == null)
+            if (arrayRef.IsNullRef)
+                throw new TrapException("null array reference");
+            var gcRef = arrayRef.GcRef;
+            if (gcRef == null)
                 throw new TrapException("null array reference");
             // All emitted array types have a public 'length' field
-            var field = arrayRef.GetType().GetField("length");
+            var field = gcRef.GetType().GetField("length");
             if (field == null)
                 throw new TrapException("not an array type");
-            return (int)field.GetValue(arrayRef)!;
+            return (int)field.GetValue(gcRef)!;
         }
 
         public static int RefTest(object val, int heapType, int nullable)
@@ -603,13 +605,14 @@ namespace Wacs.Transpiler.AOT.Emitters
             return val;
         }
 
-        public static object ArrayNewFixed(object[] values, TranspiledContext ctx, int typeIdx)
+        public static object ArrayNewFixed(Value[] values, TranspiledContext ctx, int typeIdx)
         {
             // Create array instance and populate from values
             var gcType = ctx.Module?.Types[(TypeIdx)typeIdx];
             // For now, return a simple wrapper
             var arr = new object[values.Length];
-            System.Array.Copy(values, arr, values.Length);
+            for (int i = 0; i < values.Length; i++)
+                arr[i] = values[i].GcRef!;
             return arr;
         }
 
@@ -641,12 +644,14 @@ namespace Wacs.Transpiler.AOT.Emitters
             return result;
         }
 
-        public static void ArrayFill(object arrayRef, int offset, object value, int length)
+        public static void ArrayFill(Value arrayRef, int offset, Value value, int length)
         {
-            if (IsNullRef(arrayRef)) throw new TrapException("null array reference");
-            var elementsField = arrayRef.GetType().GetField("elements");
+            if (arrayRef.IsNullRef) throw new TrapException("null array reference");
+            var gcRef = arrayRef.GcRef;
+            if (gcRef == null) throw new TrapException("null array reference");
+            var elementsField = gcRef.GetType().GetField("elements");
             if (elementsField == null) throw new TrapException("not an array type");
-            var elements = (System.Array)elementsField.GetValue(arrayRef)!;
+            var elements = (System.Array)elementsField.GetValue(gcRef)!;
             for (int i = 0; i < length; i++)
                 elements.SetValue(value, offset + i);
         }
@@ -686,33 +691,37 @@ namespace Wacs.Transpiler.AOT.Emitters
                 length);
         }
 
-        public static void ArrayInitData(TranspiledContext ctx, object arrayRef, int dstOff,
+        public static void ArrayInitData(TranspiledContext ctx, Value arrayRef, int dstOff,
             int dataIdx, int srcOff, int length)
         {
             if (ctx.Store == null || ctx.Module == null)
                 throw new TrapException("array.init_data requires runtime store");
-            if (IsNullRef(arrayRef)) throw new TrapException("null array reference");
+            if (arrayRef.IsNullRef) throw new TrapException("null array reference");
+            var gcRef = arrayRef.GcRef;
+            if (gcRef == null) throw new TrapException("null array reference");
             var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
             var data = ctx.Store[dataAddr];
-            var field = arrayRef.GetType().GetField("elements");
+            var field = gcRef.GetType().GetField("elements");
             if (field == null) throw new TrapException("not an array type");
-            var elements = (System.Array)field.GetValue(arrayRef)!;
+            var elements = (System.Array)field.GetValue(gcRef)!;
             // Byte-level copy from data segment to array elements
             for (int i = 0; i < length; i++)
                 elements.SetValue(data.Data[srcOff + i], dstOff + i);
         }
 
-        public static void ArrayInitElem(TranspiledContext ctx, object arrayRef, int dstOff,
+        public static void ArrayInitElem(TranspiledContext ctx, Value arrayRef, int dstOff,
             int elemIdx, int srcOff, int length)
         {
             if (ctx.Store == null || ctx.Module == null)
                 throw new TrapException("array.init_elem requires runtime store");
-            if (IsNullRef(arrayRef)) throw new TrapException("null array reference");
+            if (arrayRef.IsNullRef) throw new TrapException("null array reference");
+            var gcRef = arrayRef.GcRef;
+            if (gcRef == null) throw new TrapException("null array reference");
             var elemAddr = ctx.Module.ElemAddrs[(ElemIdx)elemIdx];
             var elem = ctx.Store[elemAddr];
-            var field = arrayRef.GetType().GetField("elements");
+            var field = gcRef.GetType().GetField("elements");
             if (field == null) throw new TrapException("not an array type");
-            var elements = (System.Array)field.GetValue(arrayRef)!;
+            var elements = (System.Array)field.GetValue(gcRef)!;
             for (int i = 0; i < length; i++)
                 elements.SetValue(elem.Elements[srcOff + i], dstOff + i);
         }

@@ -656,5 +656,46 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             return (int)funcRef.Data.Ptr;
         }
+
+        /// <summary>
+        /// Fallback dispatch for functions that weren't transpiled.
+        /// Packs arguments into Value[], invokes through the interpreter's ExecContext,
+        /// and returns results as Value[].
+        ///
+        /// Called from the fallback method body instead of throwing NotSupportedException.
+        /// In standalone mode (no ExecContext), throws NotSupportedException as before.
+        /// </summary>
+        public static Value[] InvokeFallback(TranspiledContext ctx, int funcIndex, Value[] args)
+        {
+            if (ctx.ExecContext == null || ctx.Module == null)
+                throw new NotSupportedException(
+                    $"Function {funcIndex} not transpiled and no interpreter available");
+
+            // Get the FuncAddr for this function from the module's index space
+            int idx = 0;
+            foreach (var addr in ctx.Module.FuncAddrs)
+            {
+                if (idx == funcIndex)
+                {
+                    // Push args onto OpStack
+                    for (int i = 0; i < args.Length; i++)
+                        ctx.ExecContext.OpStack.PushValue(args[i]);
+
+                    // Invoke through interpreter
+                    ctx.ExecContext.Invoke(addr);
+
+                    // Pop results
+                    var func = ctx.Store![addr];
+                    int resultCount = func.Type.ResultType.Arity;
+                    var results = new Value[resultCount];
+                    for (int r = resultCount - 1; r >= 0; r--)
+                        results[r] = ctx.ExecContext.OpStack.PopAny();
+                    return results;
+                }
+                idx++;
+            }
+
+            throw new TrapException($"Function index {funcIndex} not found in module");
+        }
     }
 }
