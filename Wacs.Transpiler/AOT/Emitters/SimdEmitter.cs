@@ -87,31 +87,16 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             switch (op)
             {
-                // === Chunk 2: Bitwise ops ===
-                case SimdCode.V128Not:
-                    EmitUnaryV128(il, nameof(SimdHelpers.V128Not));
-                    return true;
-                case SimdCode.V128And:
-                    EmitBinaryV128(il, nameof(SimdHelpers.V128And));
-                    return true;
-                case SimdCode.V128Or:
-                    EmitBinaryV128(il, nameof(SimdHelpers.V128Or));
-                    return true;
-                case SimdCode.V128Xor:
-                    EmitBinaryV128(il, nameof(SimdHelpers.V128Xor));
-                    return true;
-                case SimdCode.V128AndNot:
-                    EmitBinaryV128(il, nameof(SimdHelpers.V128AndNot));
-                    return true;
-                case SimdCode.V128BitSelect:
-                    EmitTernaryV128(il, nameof(SimdHelpers.V128BitSelect));
-                    return true;
-                case SimdCode.V128AnyTrue:
-                    EmitV128ToI32(il, nameof(SimdHelpers.V128AnyTrue));
-                    return true;
+                // === Bitwise ops ===
+                case SimdCode.V128Not: EmitUnaryV128(il, nameof(SimdHelpers.V128Not)); return true;
+                case SimdCode.V128And: EmitBinaryV128(il, nameof(SimdHelpers.V128And)); return true;
+                case SimdCode.V128Or: EmitBinaryV128(il, nameof(SimdHelpers.V128Or)); return true;
+                case SimdCode.V128Xor: EmitBinaryV128(il, nameof(SimdHelpers.V128Xor)); return true;
+                case SimdCode.V128AndNot: EmitBinaryV128(il, nameof(SimdHelpers.V128AndNot)); return true;
+                case SimdCode.V128BitSelect: EmitTernaryV128(il, nameof(SimdHelpers.V128BitSelect)); return true;
+                case SimdCode.V128AnyTrue: EmitV128ToI32(il, nameof(SimdHelpers.V128AnyTrue)); return true;
 
-                // === Chunk 3: Integer arithmetic ===
-                // add/sub per shape
+                // === Integer add/sub/mul ===
                 case SimdCode.I8x16Add: EmitBinaryV128(il, nameof(SimdHelpers.I8x16Add)); return true;
                 case SimdCode.I8x16Sub: EmitBinaryV128(il, nameof(SimdHelpers.I8x16Sub)); return true;
                 case SimdCode.I16x8Add: EmitBinaryV128(il, nameof(SimdHelpers.I16x8Add)); return true;
@@ -123,11 +108,238 @@ namespace Wacs.Transpiler.AOT.Emitters
                 case SimdCode.I64x2Add: EmitBinaryV128(il, nameof(SimdHelpers.I64x2Add)); return true;
                 case SimdCode.I64x2Sub: EmitBinaryV128(il, nameof(SimdHelpers.I64x2Sub)); return true;
                 case SimdCode.I64x2Mul: EmitBinaryV128(il, nameof(SimdHelpers.I64x2Mul)); return true;
-                // neg per shape
+
+                // === Integer abs/neg/popcnt ===
+                case SimdCode.I8x16Abs: EmitUnaryV128(il, nameof(SimdHelpers.I8x16Abs)); return true;
+                case SimdCode.I16x8Abs: EmitUnaryV128(il, nameof(SimdHelpers.I16x8Abs)); return true;
+                case SimdCode.I32x4Abs: EmitUnaryV128(il, nameof(SimdHelpers.I32x4Abs)); return true;
+                case SimdCode.I64x2Abs: EmitUnaryV128(il, nameof(SimdHelpers.I64x2Abs)); return true;
                 case SimdCode.I8x16Neg: EmitUnaryV128(il, nameof(SimdHelpers.I8x16Neg)); return true;
                 case SimdCode.I16x8Neg: EmitUnaryV128(il, nameof(SimdHelpers.I16x8Neg)); return true;
                 case SimdCode.I32x4Neg: EmitUnaryV128(il, nameof(SimdHelpers.I32x4Neg)); return true;
                 case SimdCode.I64x2Neg: EmitUnaryV128(il, nameof(SimdHelpers.I64x2Neg)); return true;
+                case SimdCode.I8x16Popcnt: EmitUnaryV128(il, nameof(SimdHelpers.I8x16Popcnt)); return true;
+
+                // === Integer test/bitmask ===
+                case SimdCode.I8x16AllTrue: EmitV128ToI32(il, nameof(SimdHelpers.I8x16AllTrue)); return true;
+                case SimdCode.I16x8AllTrue: EmitV128ToI32(il, nameof(SimdHelpers.I16x8AllTrue)); return true;
+                case SimdCode.I32x4AllTrue: EmitV128ToI32(il, nameof(SimdHelpers.I32x4AllTrue)); return true;
+                case SimdCode.I64x2AllTrue: EmitV128ToI32(il, nameof(SimdHelpers.I64x2AllTrue)); return true;
+                case SimdCode.I8x16Bitmask: EmitV128ToI32(il, nameof(SimdHelpers.I8x16Bitmask)); return true;
+                case SimdCode.I16x8Bitmask: EmitV128ToI32(il, nameof(SimdHelpers.I16x8Bitmask)); return true;
+                case SimdCode.I32x4Bitmask: EmitV128ToI32(il, nameof(SimdHelpers.I32x4Bitmask)); return true;
+                case SimdCode.I64x2Bitmask: EmitV128ToI32(il, nameof(SimdHelpers.I64x2Bitmask)); return true;
+
+                // === Integer relational ops ===
+                case SimdCode.I8x16Eq: EmitBinaryV128(il, nameof(SimdHelpers.I8x16Eq)); return true;
+                case SimdCode.I8x16Ne: EmitBinaryV128(il, nameof(SimdHelpers.I8x16Ne)); return true;
+                case SimdCode.I8x16LtS: EmitBinaryV128(il, nameof(SimdHelpers.I8x16LtS)); return true;
+                case SimdCode.I8x16LtU: EmitBinaryV128(il, nameof(SimdHelpers.I8x16LtU)); return true;
+                case SimdCode.I8x16GtS: EmitBinaryV128(il, nameof(SimdHelpers.I8x16GtS)); return true;
+                case SimdCode.I8x16GtU: EmitBinaryV128(il, nameof(SimdHelpers.I8x16GtU)); return true;
+                case SimdCode.I8x16LeS: EmitBinaryV128(il, nameof(SimdHelpers.I8x16LeS)); return true;
+                case SimdCode.I8x16LeU: EmitBinaryV128(il, nameof(SimdHelpers.I8x16LeU)); return true;
+                case SimdCode.I8x16GeS: EmitBinaryV128(il, nameof(SimdHelpers.I8x16GeS)); return true;
+                case SimdCode.I8x16GeU: EmitBinaryV128(il, nameof(SimdHelpers.I8x16GeU)); return true;
+                case SimdCode.I16x8Eq: EmitBinaryV128(il, nameof(SimdHelpers.I16x8Eq)); return true;
+                case SimdCode.I16x8Ne: EmitBinaryV128(il, nameof(SimdHelpers.I16x8Ne)); return true;
+                case SimdCode.I16x8LtS: EmitBinaryV128(il, nameof(SimdHelpers.I16x8LtS)); return true;
+                case SimdCode.I16x8LtU: EmitBinaryV128(il, nameof(SimdHelpers.I16x8LtU)); return true;
+                case SimdCode.I16x8GtS: EmitBinaryV128(il, nameof(SimdHelpers.I16x8GtS)); return true;
+                case SimdCode.I16x8GtU: EmitBinaryV128(il, nameof(SimdHelpers.I16x8GtU)); return true;
+                case SimdCode.I16x8LeS: EmitBinaryV128(il, nameof(SimdHelpers.I16x8LeS)); return true;
+                case SimdCode.I16x8LeU: EmitBinaryV128(il, nameof(SimdHelpers.I16x8LeU)); return true;
+                case SimdCode.I16x8GeS: EmitBinaryV128(il, nameof(SimdHelpers.I16x8GeS)); return true;
+                case SimdCode.I16x8GeU: EmitBinaryV128(il, nameof(SimdHelpers.I16x8GeU)); return true;
+                case SimdCode.I32x4Eq: EmitBinaryV128(il, nameof(SimdHelpers.I32x4Eq)); return true;
+                case SimdCode.I32x4Ne: EmitBinaryV128(il, nameof(SimdHelpers.I32x4Ne)); return true;
+                case SimdCode.I32x4LtS: EmitBinaryV128(il, nameof(SimdHelpers.I32x4LtS)); return true;
+                case SimdCode.I32x4LtU: EmitBinaryV128(il, nameof(SimdHelpers.I32x4LtU)); return true;
+                case SimdCode.I32x4GtS: EmitBinaryV128(il, nameof(SimdHelpers.I32x4GtS)); return true;
+                case SimdCode.I32x4GtU: EmitBinaryV128(il, nameof(SimdHelpers.I32x4GtU)); return true;
+                case SimdCode.I32x4LeS: EmitBinaryV128(il, nameof(SimdHelpers.I32x4LeS)); return true;
+                case SimdCode.I32x4LeU: EmitBinaryV128(il, nameof(SimdHelpers.I32x4LeU)); return true;
+                case SimdCode.I32x4GeS: EmitBinaryV128(il, nameof(SimdHelpers.I32x4GeS)); return true;
+                case SimdCode.I32x4GeU: EmitBinaryV128(il, nameof(SimdHelpers.I32x4GeU)); return true;
+                case SimdCode.I64x2Eq: EmitBinaryV128(il, nameof(SimdHelpers.I64x2Eq)); return true;
+                case SimdCode.I64x2Ne: EmitBinaryV128(il, nameof(SimdHelpers.I64x2Ne)); return true;
+                case SimdCode.I64x2LtS: EmitBinaryV128(il, nameof(SimdHelpers.I64x2LtS)); return true;
+                case SimdCode.I64x2GtS: EmitBinaryV128(il, nameof(SimdHelpers.I64x2GtS)); return true;
+                case SimdCode.I64x2LeS: EmitBinaryV128(il, nameof(SimdHelpers.I64x2LeS)); return true;
+                case SimdCode.I64x2GeS: EmitBinaryV128(il, nameof(SimdHelpers.I64x2GeS)); return true;
+
+                // === Saturating arithmetic ===
+                case SimdCode.I8x16AddSatS: EmitBinaryV128(il, nameof(SimdHelpers.I8x16AddSatS)); return true;
+                case SimdCode.I8x16AddSatU: EmitBinaryV128(il, nameof(SimdHelpers.I8x16AddSatU)); return true;
+                case SimdCode.I8x16SubSatS: EmitBinaryV128(il, nameof(SimdHelpers.I8x16SubSatS)); return true;
+                case SimdCode.I8x16SubSatU: EmitBinaryV128(il, nameof(SimdHelpers.I8x16SubSatU)); return true;
+                case SimdCode.I16x8AddSatS: EmitBinaryV128(il, nameof(SimdHelpers.I16x8AddSatS)); return true;
+                case SimdCode.I16x8AddSatU: EmitBinaryV128(il, nameof(SimdHelpers.I16x8AddSatU)); return true;
+                case SimdCode.I16x8SubSatS: EmitBinaryV128(il, nameof(SimdHelpers.I16x8SubSatS)); return true;
+                case SimdCode.I16x8SubSatU: EmitBinaryV128(il, nameof(SimdHelpers.I16x8SubSatU)); return true;
+
+                // === Integer min/max/avgr ===
+                case SimdCode.I8x16MinS: EmitBinaryV128(il, nameof(SimdHelpers.I8x16MinS)); return true;
+                case SimdCode.I8x16MinU: EmitBinaryV128(il, nameof(SimdHelpers.I8x16MinU)); return true;
+                case SimdCode.I8x16MaxS: EmitBinaryV128(il, nameof(SimdHelpers.I8x16MaxS)); return true;
+                case SimdCode.I8x16MaxU: EmitBinaryV128(il, nameof(SimdHelpers.I8x16MaxU)); return true;
+                case SimdCode.I16x8MinS: EmitBinaryV128(il, nameof(SimdHelpers.I16x8MinS)); return true;
+                case SimdCode.I16x8MinU: EmitBinaryV128(il, nameof(SimdHelpers.I16x8MinU)); return true;
+                case SimdCode.I16x8MaxS: EmitBinaryV128(il, nameof(SimdHelpers.I16x8MaxS)); return true;
+                case SimdCode.I16x8MaxU: EmitBinaryV128(il, nameof(SimdHelpers.I16x8MaxU)); return true;
+                case SimdCode.I32x4MinS: EmitBinaryV128(il, nameof(SimdHelpers.I32x4MinS)); return true;
+                case SimdCode.I32x4MinU: EmitBinaryV128(il, nameof(SimdHelpers.I32x4MinU)); return true;
+                case SimdCode.I32x4MaxS: EmitBinaryV128(il, nameof(SimdHelpers.I32x4MaxS)); return true;
+                case SimdCode.I32x4MaxU: EmitBinaryV128(il, nameof(SimdHelpers.I32x4MaxU)); return true;
+                case SimdCode.I8x16AvgrU: EmitBinaryV128(il, nameof(SimdHelpers.I8x16AvgrU)); return true;
+                case SimdCode.I16x8AvgrU: EmitBinaryV128(il, nameof(SimdHelpers.I16x8AvgrU)); return true;
+
+                // === Shift ops (V128 + i32 -> V128) ===
+                case SimdCode.I8x16Shl: EmitShiftV128(il, nameof(SimdHelpers.I8x16Shl)); return true;
+                case SimdCode.I8x16ShrS: EmitShiftV128(il, nameof(SimdHelpers.I8x16ShrS)); return true;
+                case SimdCode.I8x16ShrU: EmitShiftV128(il, nameof(SimdHelpers.I8x16ShrU)); return true;
+                case SimdCode.I16x8Shl: EmitShiftV128(il, nameof(SimdHelpers.I16x8Shl)); return true;
+                case SimdCode.I16x8ShrS: EmitShiftV128(il, nameof(SimdHelpers.I16x8ShrS)); return true;
+                case SimdCode.I16x8ShrU: EmitShiftV128(il, nameof(SimdHelpers.I16x8ShrU)); return true;
+                case SimdCode.I32x4Shl: EmitShiftV128(il, nameof(SimdHelpers.I32x4Shl)); return true;
+                case SimdCode.I32x4ShrS: EmitShiftV128(il, nameof(SimdHelpers.I32x4ShrS)); return true;
+                case SimdCode.I32x4ShrU: EmitShiftV128(il, nameof(SimdHelpers.I32x4ShrU)); return true;
+                case SimdCode.I64x2Shl: EmitShiftV128(il, nameof(SimdHelpers.I64x2Shl)); return true;
+                case SimdCode.I64x2ShrS: EmitShiftV128(il, nameof(SimdHelpers.I64x2ShrS)); return true;
+                case SimdCode.I64x2ShrU: EmitShiftV128(il, nameof(SimdHelpers.I64x2ShrU)); return true;
+
+                // === Swizzle, dot, q15mulr, extmul ===
+                case SimdCode.I8x16Swizzle: EmitBinaryV128(il, nameof(SimdHelpers.I8x16Swizzle)); return true;
+                case SimdCode.I32x4DotI16x8S: EmitBinaryV128(il, nameof(SimdHelpers.I32x4DotI16x8S)); return true;
+                case SimdCode.I16x8Q15MulRSatS: EmitBinaryV128(il, nameof(SimdHelpers.I16x8Q15MulRSatS)); return true;
+
+                // === Extended multiply ===
+                case SimdCode.I16x8ExtMulLowI8x16S: EmitBinaryV128(il, nameof(SimdHelpers.I16x8ExtMulLowI8x16S)); return true;
+                case SimdCode.I16x8ExtMulHighI8x16S: EmitBinaryV128(il, nameof(SimdHelpers.I16x8ExtMulHighI8x16S)); return true;
+                case SimdCode.I16x8ExtMulLowI8x16U: EmitBinaryV128(il, nameof(SimdHelpers.I16x8ExtMulLowI8x16U)); return true;
+                case SimdCode.I16x8ExtMulHighI8x16U: EmitBinaryV128(il, nameof(SimdHelpers.I16x8ExtMulHighI8x16U)); return true;
+                case SimdCode.I32x4ExtMulLowI16x8S: EmitBinaryV128(il, nameof(SimdHelpers.I32x4ExtMulLowI16x8S)); return true;
+                case SimdCode.I32x4ExtMulHighI16x8S: EmitBinaryV128(il, nameof(SimdHelpers.I32x4ExtMulHighI16x8S)); return true;
+                case SimdCode.I32x4ExtMulLowI16x8U: EmitBinaryV128(il, nameof(SimdHelpers.I32x4ExtMulLowI16x8U)); return true;
+                case SimdCode.I32x4ExtMulHighI16x8U: EmitBinaryV128(il, nameof(SimdHelpers.I32x4ExtMulHighI16x8U)); return true;
+                case SimdCode.I64x2ExtMulLowI32x4S: EmitBinaryV128(il, nameof(SimdHelpers.I64x2ExtMulLowI32x4S)); return true;
+                case SimdCode.I64x2ExtMulHighI32x4S: EmitBinaryV128(il, nameof(SimdHelpers.I64x2ExtMulHighI32x4S)); return true;
+                case SimdCode.I64x2ExtMulLowI32x4U: EmitBinaryV128(il, nameof(SimdHelpers.I64x2ExtMulLowI32x4U)); return true;
+                case SimdCode.I64x2ExtMulHighI32x4U: EmitBinaryV128(il, nameof(SimdHelpers.I64x2ExtMulHighI32x4U)); return true;
+
+                // === ExtAdd pairwise (unary) ===
+                case SimdCode.I16x8ExtAddPairwiseI8x16S: EmitUnaryV128(il, nameof(SimdHelpers.I16x8ExtAddPairwiseI8x16S)); return true;
+                case SimdCode.I16x8ExtAddPairwiseI8x16U: EmitUnaryV128(il, nameof(SimdHelpers.I16x8ExtAddPairwiseI8x16U)); return true;
+                case SimdCode.I32x4ExtAddPairwiseI16x8S: EmitUnaryV128(il, nameof(SimdHelpers.I32x4ExtAddPairwiseI16x8S)); return true;
+                case SimdCode.I32x4ExtAddPairwiseI16x8U: EmitUnaryV128(il, nameof(SimdHelpers.I32x4ExtAddPairwiseI16x8U)); return true;
+
+                // === Narrow (binary) ===
+                case SimdCode.I8x16NarrowI16x8S: EmitBinaryV128(il, nameof(SimdHelpers.I8x16NarrowI16x8S)); return true;
+                case SimdCode.I8x16NarrowI16x8U: EmitBinaryV128(il, nameof(SimdHelpers.I8x16NarrowI16x8U)); return true;
+                case SimdCode.I16x8NarrowI32x4S: EmitBinaryV128(il, nameof(SimdHelpers.I16x8NarrowI32x4S)); return true;
+                case SimdCode.I16x8NarrowI32x4U: EmitBinaryV128(il, nameof(SimdHelpers.I16x8NarrowI32x4U)); return true;
+
+                // === Extend (unary) ===
+                case SimdCode.I16x8ExtendLowI8x16S: EmitUnaryV128(il, nameof(SimdHelpers.I16x8ExtendLowI8x16S)); return true;
+                case SimdCode.I16x8ExtendHighI8x16S: EmitUnaryV128(il, nameof(SimdHelpers.I16x8ExtendHighI8x16S)); return true;
+                case SimdCode.I16x8ExtendLowI8x16U: EmitUnaryV128(il, nameof(SimdHelpers.I16x8ExtendLowI8x16U)); return true;
+                case SimdCode.I16x8ExtendHighI8x16U: EmitUnaryV128(il, nameof(SimdHelpers.I16x8ExtendHighI8x16U)); return true;
+                case SimdCode.I32x4ExtendLowI16x8S: EmitUnaryV128(il, nameof(SimdHelpers.I32x4ExtendLowI16x8S)); return true;
+                case SimdCode.I32x4ExtendHighI16x8S: EmitUnaryV128(il, nameof(SimdHelpers.I32x4ExtendHighI16x8S)); return true;
+                case SimdCode.I32x4ExtendLowI16x8U: EmitUnaryV128(il, nameof(SimdHelpers.I32x4ExtendLowI16x8U)); return true;
+                case SimdCode.I32x4ExtendHighI16x8U: EmitUnaryV128(il, nameof(SimdHelpers.I32x4ExtendHighI16x8U)); return true;
+                case SimdCode.I64x2ExtendLowI32x4S: EmitUnaryV128(il, nameof(SimdHelpers.I64x2ExtendLowI32x4S)); return true;
+                case SimdCode.I64x2ExtendHighI32x4S: EmitUnaryV128(il, nameof(SimdHelpers.I64x2ExtendHighI32x4S)); return true;
+                case SimdCode.I64x2ExtendLowI32x4U: EmitUnaryV128(il, nameof(SimdHelpers.I64x2ExtendLowI32x4U)); return true;
+                case SimdCode.I64x2ExtendHighI32x4U: EmitUnaryV128(il, nameof(SimdHelpers.I64x2ExtendHighI32x4U)); return true;
+
+                // === TruncSat (unary) ===
+                case SimdCode.I32x4TruncSatF32x4S: EmitUnaryV128(il, nameof(SimdHelpers.I32x4TruncSatF32x4S)); return true;
+                case SimdCode.I32x4TruncSatF32x4U: EmitUnaryV128(il, nameof(SimdHelpers.I32x4TruncSatF32x4U)); return true;
+                case SimdCode.I32x4TruncSatF64x2SZero: EmitUnaryV128(il, nameof(SimdHelpers.I32x4TruncSatF64x2SZero)); return true;
+                case SimdCode.I32x4TruncSatF64x2UZero: EmitUnaryV128(il, nameof(SimdHelpers.I32x4TruncSatF64x2UZero)); return true;
+
+                // === Float binary ops ===
+                case SimdCode.F32x4Add: EmitBinaryV128(il, nameof(SimdHelpers.F32x4Add)); return true;
+                case SimdCode.F32x4Sub: EmitBinaryV128(il, nameof(SimdHelpers.F32x4Sub)); return true;
+                case SimdCode.F32x4Mul: EmitBinaryV128(il, nameof(SimdHelpers.F32x4Mul)); return true;
+                case SimdCode.F32x4Div: EmitBinaryV128(il, nameof(SimdHelpers.F32x4Div)); return true;
+                case SimdCode.F32x4Min: EmitBinaryV128(il, nameof(SimdHelpers.F32x4Min)); return true;
+                case SimdCode.F32x4Max: EmitBinaryV128(il, nameof(SimdHelpers.F32x4Max)); return true;
+                case SimdCode.F32x4PMin: EmitBinaryV128(il, nameof(SimdHelpers.F32x4PMin)); return true;
+                case SimdCode.F32x4PMax: EmitBinaryV128(il, nameof(SimdHelpers.F32x4PMax)); return true;
+                case SimdCode.F64x2Add: EmitBinaryV128(il, nameof(SimdHelpers.F64x2Add)); return true;
+                case SimdCode.F64x2Sub: EmitBinaryV128(il, nameof(SimdHelpers.F64x2Sub)); return true;
+                case SimdCode.F64x2Mul: EmitBinaryV128(il, nameof(SimdHelpers.F64x2Mul)); return true;
+                case SimdCode.F64x2Div: EmitBinaryV128(il, nameof(SimdHelpers.F64x2Div)); return true;
+                case SimdCode.F64x2Min: EmitBinaryV128(il, nameof(SimdHelpers.F64x2Min)); return true;
+                case SimdCode.F64x2Max: EmitBinaryV128(il, nameof(SimdHelpers.F64x2Max)); return true;
+                case SimdCode.F64x2PMin: EmitBinaryV128(il, nameof(SimdHelpers.F64x2PMin)); return true;
+                case SimdCode.F64x2PMax: EmitBinaryV128(il, nameof(SimdHelpers.F64x2PMax)); return true;
+
+                // === Float unary ops ===
+                case SimdCode.F32x4Abs: EmitUnaryV128(il, nameof(SimdHelpers.F32x4Abs)); return true;
+                case SimdCode.F32x4Neg: EmitUnaryV128(il, nameof(SimdHelpers.F32x4Neg)); return true;
+                case SimdCode.F32x4Sqrt: EmitUnaryV128(il, nameof(SimdHelpers.F32x4Sqrt)); return true;
+                case SimdCode.F32x4Ceil: EmitUnaryV128(il, nameof(SimdHelpers.F32x4Ceil)); return true;
+                case SimdCode.F32x4Floor: EmitUnaryV128(il, nameof(SimdHelpers.F32x4Floor)); return true;
+                case SimdCode.F32x4Trunc: EmitUnaryV128(il, nameof(SimdHelpers.F32x4Trunc)); return true;
+                case SimdCode.F32x4Nearest: EmitUnaryV128(il, nameof(SimdHelpers.F32x4Nearest)); return true;
+                case SimdCode.F64x2Abs: EmitUnaryV128(il, nameof(SimdHelpers.F64x2Abs)); return true;
+                case SimdCode.F64x2Neg: EmitUnaryV128(il, nameof(SimdHelpers.F64x2Neg)); return true;
+                case SimdCode.F64x2Sqrt: EmitUnaryV128(il, nameof(SimdHelpers.F64x2Sqrt)); return true;
+                case SimdCode.F64x2Ceil: EmitUnaryV128(il, nameof(SimdHelpers.F64x2Ceil)); return true;
+                case SimdCode.F64x2Floor: EmitUnaryV128(il, nameof(SimdHelpers.F64x2Floor)); return true;
+                case SimdCode.F64x2Trunc: EmitUnaryV128(il, nameof(SimdHelpers.F64x2Trunc)); return true;
+                case SimdCode.F64x2Nearest: EmitUnaryV128(il, nameof(SimdHelpers.F64x2Nearest)); return true;
+
+                // === Float relational ops ===
+                case SimdCode.F32x4Eq: EmitBinaryV128(il, nameof(SimdHelpers.F32x4Eq)); return true;
+                case SimdCode.F32x4Ne: EmitBinaryV128(il, nameof(SimdHelpers.F32x4Ne)); return true;
+                case SimdCode.F32x4Lt: EmitBinaryV128(il, nameof(SimdHelpers.F32x4Lt)); return true;
+                case SimdCode.F32x4Gt: EmitBinaryV128(il, nameof(SimdHelpers.F32x4Gt)); return true;
+                case SimdCode.F32x4Le: EmitBinaryV128(il, nameof(SimdHelpers.F32x4Le)); return true;
+                case SimdCode.F32x4Ge: EmitBinaryV128(il, nameof(SimdHelpers.F32x4Ge)); return true;
+                case SimdCode.F64x2Eq: EmitBinaryV128(il, nameof(SimdHelpers.F64x2Eq)); return true;
+                case SimdCode.F64x2Ne: EmitBinaryV128(il, nameof(SimdHelpers.F64x2Ne)); return true;
+                case SimdCode.F64x2Lt: EmitBinaryV128(il, nameof(SimdHelpers.F64x2Lt)); return true;
+                case SimdCode.F64x2Gt: EmitBinaryV128(il, nameof(SimdHelpers.F64x2Gt)); return true;
+                case SimdCode.F64x2Le: EmitBinaryV128(il, nameof(SimdHelpers.F64x2Le)); return true;
+                case SimdCode.F64x2Ge: EmitBinaryV128(il, nameof(SimdHelpers.F64x2Ge)); return true;
+
+                // === Float convert/promote/demote ===
+                case SimdCode.F32x4ConvertI32x4S: EmitUnaryV128(il, nameof(SimdHelpers.F32x4ConvertI32x4S)); return true;
+                case SimdCode.F32x4ConvertI32x4U: EmitUnaryV128(il, nameof(SimdHelpers.F32x4ConvertI32x4U)); return true;
+                case SimdCode.F64x2ConvertLowI32x4S: EmitUnaryV128(il, nameof(SimdHelpers.F64x2ConvertLowI32x4S)); return true;
+                case SimdCode.F64x2ConvertLowI32x4U: EmitUnaryV128(il, nameof(SimdHelpers.F64x2ConvertLowI32x4U)); return true;
+                case SimdCode.F32x4DemoteF64x2Zero: EmitUnaryV128(il, nameof(SimdHelpers.F32x4DemoteF64x2Zero)); return true;
+                case SimdCode.F64x2PromoteLowF32x4: EmitUnaryV128(il, nameof(SimdHelpers.F64x2PromoteLowF32x4)); return true;
+
+                // === Relaxed SIMD — unary ===
+                case SimdCode.I32x4RelaxedTruncF32x4S: EmitUnaryV128(il, nameof(SimdHelpers.I32x4RelaxedTruncF32x4S)); return true;
+                case SimdCode.I32x4RelaxedTruncF32x4U: EmitUnaryV128(il, nameof(SimdHelpers.I32x4RelaxedTruncF32x4U)); return true;
+                case SimdCode.I32x4RelaxedTruncF64x2SZero: EmitUnaryV128(il, nameof(SimdHelpers.I32x4RelaxedTruncF64x2SZero)); return true;
+                case SimdCode.I32x4RelaxedTruncF64x2UZero: EmitUnaryV128(il, nameof(SimdHelpers.I32x4RelaxedTruncF64x2UZero)); return true;
+
+                // === Relaxed SIMD — binary ===
+                case SimdCode.I8x16RelaxedSwizzle: EmitBinaryV128(il, nameof(SimdHelpers.I8x16RelaxedSwizzle)); return true;
+                case SimdCode.F32x4RelaxedMin: EmitBinaryV128(il, nameof(SimdHelpers.F32x4RelaxedMin)); return true;
+                case SimdCode.F32x4RelaxedMax: EmitBinaryV128(il, nameof(SimdHelpers.F32x4RelaxedMax)); return true;
+                case SimdCode.F64x2RelaxedMin: EmitBinaryV128(il, nameof(SimdHelpers.F64x2RelaxedMin)); return true;
+                case SimdCode.F64x2RelaxedMax: EmitBinaryV128(il, nameof(SimdHelpers.F64x2RelaxedMax)); return true;
+                case SimdCode.I16x8RelaxedQ15MulrS: EmitBinaryV128(il, nameof(SimdHelpers.I16x8RelaxedQ15MulrS)); return true;
+                case SimdCode.I16x8RelaxedDotI8x16I7x16S: EmitBinaryV128(il, nameof(SimdHelpers.I16x8RelaxedDotI8x16I7x16S)); return true;
+
+                // === Relaxed SIMD — ternary ===
+                case SimdCode.I8x16RelaxedLaneselect: EmitTernaryV128(il, nameof(SimdHelpers.I8x16RelaxedLaneselect)); return true;
+                case SimdCode.I16x8RelaxedLaneselect: EmitTernaryV128(il, nameof(SimdHelpers.I16x8RelaxedLaneselect)); return true;
+                case SimdCode.I32x4RelaxedLaneselect: EmitTernaryV128(il, nameof(SimdHelpers.I32x4RelaxedLaneselect)); return true;
+                case SimdCode.I64x2RelaxedLaneselect: EmitTernaryV128(il, nameof(SimdHelpers.I64x2RelaxedLaneselect)); return true;
+                case SimdCode.F32x4RelaxedMAdd: EmitTernaryV128(il, nameof(SimdHelpers.F32x4RelaxedMAdd)); return true;
+                case SimdCode.F32x4RelaxedNMAdd: EmitTernaryV128(il, nameof(SimdHelpers.F32x4RelaxedNMAdd)); return true;
+                case SimdCode.F64x2RelaxedMAdd: EmitTernaryV128(il, nameof(SimdHelpers.F64x2RelaxedMAdd)); return true;
+                case SimdCode.F64x2RelaxedNMAdd: EmitTernaryV128(il, nameof(SimdHelpers.F64x2RelaxedNMAdd)); return true;
+                case SimdCode.I32x4RelaxedDotI8x16I7x16AddS: EmitTernaryV128(il, nameof(SimdHelpers.I32x4RelaxedDotI8x16I7x16AddS)); return true;
 
                 default:
                     return false;
@@ -176,6 +388,19 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldloc, v3);
             il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName,
                 new[] { typeof(V128), typeof(V128), typeof(V128) })!);
+            EmitBoxV128(il);
+        }
+
+        /// <summary>Shift (V128, i32) → V128. Stack: [Value(v128), i32] — i32 on top</summary>
+        private static void EmitShiftV128(ILGenerator il, string helperName)
+        {
+            // Stack: [Value(v), i32_shift] — shift amount on top (already raw i32)
+            var shift = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Stloc, shift);
+            EmitUnboxV128(il); // unbox v
+            il.Emit(OpCodes.Ldloc, shift);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName,
+                new[] { typeof(V128), typeof(int) })!);
             EmitBoxV128(il);
         }
 
