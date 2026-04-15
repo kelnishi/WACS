@@ -183,58 +183,94 @@ namespace Wacs.Transpiler.AOT.Emitters
         public static void MemoryInit(TranspiledContext ctx, int memIdx, int dataIdx,
             int dst, int src, int len)
         {
-            if (ctx.Store == null || ctx.Module == null)
-                throw new TrapException("memory.init requires runtime store");
             var mem = ctx.Memories[memIdx];
-            var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
-            var data = ctx.Store[dataAddr];
+            byte[] segData;
+
+            if (ctx.Store != null && ctx.Module != null)
+            {
+                var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
+                var data = ctx.Store[dataAddr];
+                segData = data.Data;
+            }
+            else
+            {
+                // Standalone: use registered data segments
+                segData = ModuleInit.GetDataSegmentData(dataIdx) ?? Array.Empty<byte>();
+            }
+
             // WASM spec: bounds check applies even when len == 0
-            if ((long)(uint)src + (long)(uint)len > data.Data.Length ||
+            if ((long)(uint)src + (long)(uint)len > segData.Length ||
                 (long)(uint)dst + (long)(uint)len > mem.Length)
                 throw new TrapException("out of bounds memory access");
             if (len == 0) return;
-            Buffer.BlockCopy(data.Data, src, mem, dst, len);
+            Buffer.BlockCopy(segData, src, mem, dst, len);
         }
 
         public static void DataDrop(TranspiledContext ctx, int dataIdx)
         {
-            if (ctx.Store == null || ctx.Module == null) return;
-            var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
-            ctx.Store.DropData(dataAddr);
+            if (ctx.Store != null && ctx.Module != null)
+            {
+                var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
+                ctx.Store.DropData(dataAddr);
+            }
+            // Standalone: data segments are static, dropping is a no-op
+            // (the spec says dropped segments behave as empty for subsequent init)
         }
 
         public static void TableInit(TranspiledContext ctx, int tableIdx, int elemIdx,
             int dst, int src, int len)
         {
-            if (len == 0) return;
-            if (ctx.Store == null || ctx.Module == null)
-                throw new TrapException("table.init requires runtime store");
             var table = ctx.Tables[tableIdx];
-            var elemAddr = ctx.Module.ElemAddrs[(ElemIdx)elemIdx];
-            var elem = ctx.Store[elemAddr];
-            if ((long)src + len > elem.Elements.Count || (long)dst + len > table.Elements.Count ||
-                src < 0 || dst < 0)
-                throw new TrapException("out of bounds table access");
-            for (int i = 0; i < len; i++)
-                table.Elements[dst + i] = elem.Elements[src + i];
+
+            if (ctx.Store != null && ctx.Module != null)
+            {
+                // Framework mode
+                var elemAddr = ctx.Module.ElemAddrs[(ElemIdx)elemIdx];
+                var elem = ctx.Store[elemAddr];
+                if ((long)(uint)src + (long)(uint)len > elem.Elements.Count ||
+                    (long)(uint)dst + (long)(uint)len > table.Elements.Count)
+                    throw new TrapException("out of bounds table access");
+                if (len == 0) return;
+                for (int i = 0; i < len; i++)
+                    table.Elements[dst + i] = elem.Elements[src + i];
+            }
+            else
+            {
+                // Standalone mode: use registered element segments
+                var elemData = ModuleInit.GetElemSegment(elemIdx);
+                if (elemData == null)
+                    throw new TrapException("out of bounds table access");
+                if ((long)(uint)src + (long)(uint)len > elemData.Length ||
+                    (long)(uint)dst + (long)(uint)len > table.Elements.Count)
+                    throw new TrapException("out of bounds table access");
+                if (len == 0) return;
+                for (int i = 0; i < len; i++)
+                    table.Elements[dst + i] = elemData[src + i];
+            }
         }
 
         public static void ElemDrop(TranspiledContext ctx, int elemIdx)
         {
-            if (ctx.Store == null || ctx.Module == null) return;
-            var elemAddr = ctx.Module.ElemAddrs[(ElemIdx)elemIdx];
-            ctx.Store.DropElement(elemAddr);
+            if (ctx.Store != null && ctx.Module != null)
+            {
+                var elemAddr = ctx.Module.ElemAddrs[(ElemIdx)elemIdx];
+                ctx.Store.DropElement(elemAddr);
+            }
+            else
+            {
+                ModuleInit.DropElemSegment(elemIdx);
+            }
         }
 
         public static void TableCopy(TranspiledContext ctx, int dstTableIdx, int srcTableIdx,
             int dst, int src, int len)
         {
-            if (len == 0) return;
             var dstTable = ctx.Tables[dstTableIdx];
             var srcTable = ctx.Tables[srcTableIdx];
-            if ((long)src + len > srcTable.Elements.Count || (long)dst + len > dstTable.Elements.Count ||
-                src < 0 || dst < 0)
+            if ((long)(uint)src + (long)(uint)len > srcTable.Elements.Count ||
+                (long)(uint)dst + (long)(uint)len > dstTable.Elements.Count)
                 throw new TrapException("out of bounds table access");
+            if (len == 0) return;
             // Handle overlapping copy
             if (dst <= src)
             {

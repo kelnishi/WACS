@@ -17,6 +17,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.Instructions.Reference;
 using Wacs.Core.Runtime;
@@ -131,7 +132,7 @@ namespace Wacs.Transpiler.AOT
             }
             foreach (var g in _wasmModule.Globals)
             {
-                globals.Add((g.Type.ContentType, g.Type.Mutability, EvaluateGlobalInit(g)));
+                globals.Add((g.Type.ContentType, g.Type.Mutability, EvaluateGlobalInit(g, globals)));
             }
             data.Globals = globals.ToArray();
 
@@ -174,7 +175,13 @@ namespace Wacs.Transpiler.AOT
         /// Evaluate a global's constant initializer expression to a Value.
         /// Handles i32.const, i64.const, f32.const, f64.const, ref.null, ref.func.
         /// </summary>
-        private static Value EvaluateGlobalInit(WasmModule.Global global)
+        /// <summary>
+        /// Evaluate a global's constant initializer, with access to previously
+        /// initialized globals (for global.get in initializer expressions).
+        /// </summary>
+        private static Value EvaluateGlobalInit(
+            WasmModule.Global global,
+            List<(ValType type, Mutability mut, Value init)> previousGlobals)
         {
             foreach (var inst in global.Initializer.Instructions)
             {
@@ -185,6 +192,12 @@ namespace Wacs.Transpiler.AOT
                 if (inst is InstRefNull rn) return new Value(rn.RefType);
                 if (inst is InstRefFunc refFunc)
                     return new Value(ValType.FuncRef, (int)refFunc.FunctionIndex.Value);
+                if (inst is InstGlobalGet gg)
+                {
+                    int idx = gg.GetIndex();
+                    if (idx >= 0 && idx < previousGlobals.Count)
+                        return previousGlobals[idx].init;
+                }
             }
             return new Value(global.Type.ContentType);
         }

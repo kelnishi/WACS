@@ -332,7 +332,7 @@ namespace Wacs.Transpiler.Test
             }
 
             // Check if the module needs runtime features not available standalone
-            bool needsStore = moduleInst.Repr.Datas.Length > 0 // memory.init needs data segments via Store
+            bool needsStore = moduleInst.Repr.Datas.Length > 0
                 || moduleInst.Repr.Imports.Any(i => i.Desc is Wacs.Core.Module.ImportDesc.FuncDesc);
             if (needsStore)
             {

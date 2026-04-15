@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using Wacs.Core.Runtime;
 
 namespace Wacs.Transpiler.AOT
 {
@@ -52,6 +53,53 @@ namespace Wacs.Transpiler.AOT
             var memory = memories[memIdx];
             if (offset + data.Length > memory.Length) return; // bounds safety
             Buffer.BlockCopy(data, 0, memory, offset, data.Length);
+        }
+
+        /// <summary>
+        /// Get a registered data segment's bytes by ID.
+        /// </summary>
+        public static byte[]? GetDataSegmentData(int segmentId)
+        {
+            return _dataSegments.TryGetValue(segmentId, out var data) ? data : null;
+        }
+
+        // === Element segment storage ===
+        // Stores element segment function indices for standalone table.init.
+        private static readonly Dictionary<int, Value[]> _elemSegments = new();
+        private static readonly object _elemLock = new();
+
+        /// <summary>
+        /// Register an element segment's values at transpile time.
+        /// Returns the segment ID.
+        /// </summary>
+        public static int RegisterElemSegment(Value[] values)
+        {
+            lock (_elemLock)
+            {
+                int id = _elemSegments.Count;
+                _elemSegments[id] = values;
+                return id;
+            }
+        }
+
+        /// <summary>
+        /// Get a registered element segment by ID.
+        /// Returns null if not found.
+        /// </summary>
+        public static Value[]? GetElemSegment(int segId)
+        {
+            return _elemSegments.TryGetValue(segId, out var values) ? values : null;
+        }
+
+        /// <summary>
+        /// Drop (clear) an element segment by ID.
+        /// </summary>
+        public static void DropElemSegment(int segId)
+        {
+            lock (_elemLock)
+            {
+                _elemSegments[segId] = Array.Empty<Value>();
+            }
         }
     }
 }
