@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System;
 using System.Collections.Generic;
 using System.Reflection.Emit;
 using Wacs.Core.Instructions;
@@ -121,10 +122,21 @@ namespace Wacs.Transpiler.AOT
         {
             var op = inst.Op.x00;
 
-            // 0xFB prefix (GC: struct, array, ref.test/cast, i31)
+            // 0xFB prefix (GC: struct, array, ref.test/cast, i31, br_on_cast)
             if (op == WasmOpCode.FB)
             {
-                GcEmitter.Emit(il, inst, inst.Op.xFB, _gcTypes, _moduleInst);
+                // Pass block stack resolver for br_on_cast/fail
+                Func<int, System.Reflection.Emit.Label> branchResolver = depth =>
+                {
+                    int i = 0;
+                    foreach (var block in _blockStack)
+                    {
+                        if (i == depth) return block.BranchTarget;
+                        i++;
+                    }
+                    throw new TranspilerException($"br_on_cast label depth {depth} exceeds block stack");
+                };
+                GcEmitter.Emit(il, inst, inst.Op.xFB, _gcTypes, _moduleInst, branchResolver);
                 return;
             }
 
