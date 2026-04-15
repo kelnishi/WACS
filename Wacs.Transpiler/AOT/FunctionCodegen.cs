@@ -70,6 +70,10 @@ namespace Wacs.Transpiler.AOT
         /// </summary>
         public bool TryEmit()
         {
+            // Multi-value returns not yet supported
+            if (_funcInst.Type.ResultType.Arity > 1)
+                return false;
+
             // First pass: check if we can handle every instruction (recursive)
             if (!CanEmitAllInstructions(_funcInst.Body.Instructions))
                 return false;

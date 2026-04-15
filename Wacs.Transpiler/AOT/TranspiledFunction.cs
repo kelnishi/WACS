@@ -78,9 +78,21 @@ namespace Wacs.Transpiler.AOT
             }
             catch (System.Reflection.TargetInvocationException tie)
             {
-                // Unwrap — propagate the inner exception (TrapException, etc.)
-                if (tie.InnerException != null)
-                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
+                var inner = tie.InnerException;
+                if (inner is TrapException)
+                {
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
+                }
+                // Wrap CLR arithmetic/memory exceptions as WASM traps
+                if (inner is DivideByZeroException)
+                    throw new TrapException("integer divide by zero");
+                if (inner is OverflowException)
+                    throw new TrapException("integer overflow");
+                if (inner is IndexOutOfRangeException)
+                    throw new TrapException("out of bounds memory access");
+
+                if (inner != null)
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
                 throw;
             }
 

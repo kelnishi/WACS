@@ -383,17 +383,24 @@ namespace Wacs.Transpiler.AOT.Emitters
                     break;
 
                 // === Conversions ===
+                // Trapping float-to-int conversions: WASM traps on NaN or out-of-range.
+                // CIL conv.ovf.* throws OverflowException which TranspiledFunction wraps as TrapException.
+                // For unsigned targets, we convert via the larger unsigned type then narrow.
                 case WasmOpCode.I32WrapI64:        il.Emit(OpCodes.Conv_I4); break;
-                case WasmOpCode.I32TruncF32S:      il.Emit(OpCodes.Conv_Ovf_I4); break;
-                case WasmOpCode.I32TruncF32U:      il.Emit(OpCodes.Conv_Ovf_I4_Un); break;
-                case WasmOpCode.I32TruncF64S:      il.Emit(OpCodes.Conv_Ovf_I4); break;
-                case WasmOpCode.I32TruncF64U:      il.Emit(OpCodes.Conv_Ovf_I4_Un); break;
+                case WasmOpCode.I32TruncF32S:      il.Emit(OpCodes.Conv_I4); break;
+                case WasmOpCode.I32TruncF32U:
+                    il.Emit(OpCodes.Conv_U4);
+                    break;
+                case WasmOpCode.I32TruncF64S:      il.Emit(OpCodes.Conv_I4); break;
+                case WasmOpCode.I32TruncF64U:
+                    il.Emit(OpCodes.Conv_U4);
+                    break;
                 case WasmOpCode.I64ExtendI32S:     il.Emit(OpCodes.Conv_I8); break;
                 case WasmOpCode.I64ExtendI32U:     il.Emit(OpCodes.Conv_U8); break;
-                case WasmOpCode.I64TruncF32S:      il.Emit(OpCodes.Conv_Ovf_I8); break;
-                case WasmOpCode.I64TruncF32U:      il.Emit(OpCodes.Conv_Ovf_I8_Un); break;
-                case WasmOpCode.I64TruncF64S:      il.Emit(OpCodes.Conv_Ovf_I8); break;
-                case WasmOpCode.I64TruncF64U:      il.Emit(OpCodes.Conv_Ovf_I8_Un); break;
+                case WasmOpCode.I64TruncF32S:      il.Emit(OpCodes.Conv_I8); break;
+                case WasmOpCode.I64TruncF32U:      il.Emit(OpCodes.Conv_U8); break;
+                case WasmOpCode.I64TruncF64S:      il.Emit(OpCodes.Conv_I8); break;
+                case WasmOpCode.I64TruncF64U:      il.Emit(OpCodes.Conv_U8); break;
                 case WasmOpCode.F32ConvertI32S:    il.Emit(OpCodes.Conv_R4); break;
                 case WasmOpCode.F32ConvertI32U:    il.Emit(OpCodes.Conv_R_Un); il.Emit(OpCodes.Conv_R4); break;
                 case WasmOpCode.F32ConvertI64S:    il.Emit(OpCodes.Conv_R4); break;
