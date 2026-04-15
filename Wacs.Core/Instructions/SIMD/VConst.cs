@@ -25,7 +25,8 @@ namespace Wacs.Core.Instructions.Simd
         public InstV128Const() : base(ByteCode.V128Const, +1) { }
         
         private V128 V128;
-        
+        public V128 Value => V128;
+
         /// <summary>
         /// @Spec 3.3.1.1 t.const
         /// </summary>
