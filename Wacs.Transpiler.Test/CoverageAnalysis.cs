@@ -21,6 +21,7 @@ using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
+using Wacs.Transpiler.AOT;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -35,6 +36,10 @@ namespace Wacs.Transpiler.Test
             _output = output;
         }
 
+        /// <summary>
+        /// Report which unsupported opcodes block the most functions.
+        /// Uses the actual transpiler to determine what's unsupported.
+        /// </summary>
         [Fact]
         public void ReportBlockingOpcodes()
         {
@@ -55,17 +60,38 @@ namespace Wacs.Transpiler.Test
                 try { moduleInst = runtime.InstantiateModule(module); }
                 catch { continue; }
 
+                var transpiler = new ModuleTranspiler();
+                TranspilationResult result;
+                try { result = transpiler.Transpile(moduleInst, runtime); }
+                catch { continue; }
+
+                // For each non-transpiled function, find the first unsupported opcode
+                int importCount = 0;
+                bool foundLocal = false;
                 foreach (var funcAddr in moduleInst.FuncAddrs)
                 {
                     var func = runtime.GetFunction(funcAddr);
-                    if (func is not FunctionInstance fi || fi.Module != moduleInst)
-                        continue;
-
-                    var blocker = FindFirstUnsupportedOpcode(fi.Body.Instructions);
-                    if (blocker != null)
+                    if (func is FunctionInstance fi && fi.Module == moduleInst)
                     {
-                        blockers.TryGetValue(blocker, out int count);
-                        blockers[blocker] = count + 1;
+                        foundLocal = true;
+                        int localIdx = (int)fi.Index.Value - importCount;
+                        if (localIdx >= 0 && localIdx < result.Manifest.Functions.Count)
+                        {
+                            var entry = result.Manifest.Functions[localIdx];
+                            if (!entry.IsTranspiled)
+                            {
+                                var blocker = FindFirstUnsupportedInBody(fi);
+                                if (blocker != null)
+                                {
+                                    blockers.TryGetValue(blocker, out int count);
+                                    blockers[blocker] = count + 1;
+                                }
+                            }
+                        }
+                    }
+                    else if (!foundLocal)
+                    {
+                        importCount++;
                     }
                 }
             }
@@ -77,30 +103,45 @@ namespace Wacs.Transpiler.Test
             }
         }
 
-        private static string? FindFirstUnsupportedOpcode(IEnumerable<InstructionBase> instructions)
+        /// <summary>
+        /// Walk the instruction tree and return the mnemonic of the first
+        /// opcode that causes the transpiler to reject the function.
+        /// </summary>
+        private static string? FindFirstUnsupportedInBody(FunctionInstance fi)
+        {
+            return FindFirst(fi.Body.Instructions);
+        }
+
+        private static string? FindFirst(IEnumerable<InstructionBase> instructions)
         {
             foreach (var inst in instructions)
             {
+                // Use the mnemonic for any unsupported opcode.
+                // The transpiler's HasEmitter is the source of truth,
+                // but we approximate here since it's internal.
                 var op = inst.Op.x00;
 
-                if (op == OpCode.FB || op == OpCode.FC ||
-                    op == OpCode.FD || op == OpCode.FE)
+                // Prefix opcodes: report the full prefixed mnemonic
+                if (op == Wacs.Core.OpCodes.OpCode.FB ||
+                    op == Wacs.Core.OpCodes.OpCode.FD ||
+                    op == Wacs.Core.OpCodes.OpCode.FE)
                     return inst.Op.GetMnemonic();
 
-                byte b = (byte)op;
-                if (b >= 0x28 && b <= 0xC4) continue; // memory + numeric
+                // 0xFC: sat trunc (0x00-0x07) and bulk ops (0x08-0x11) are supported
+                if (op == Wacs.Core.OpCodes.OpCode.FC)
+                {
+                    byte ext = (byte)inst.Op.xFC;
+                    if (ext <= 0x11) continue;
+                    return inst.Op.GetMnemonic();
+                }
 
-                if (op == OpCode.Unreachable || op == OpCode.Nop ||
-                    op == OpCode.Block || op == OpCode.Loop ||
-                    op == OpCode.If || op == OpCode.Else ||
-                    op == OpCode.End || op == OpCode.Br ||
-                    op == OpCode.BrIf || op == OpCode.BrTable ||
-                    op == OpCode.Return || op == OpCode.Call ||
-                    op == OpCode.LocalGet || op == OpCode.LocalSet ||
-                    op == OpCode.LocalTee || op == OpCode.Drop ||
-                    op == OpCode.Select || op == OpCode.SelectT ||
-                    op == OpCode.GlobalGet || op == OpCode.GlobalSet)
-                    continue;
+                // Single-byte: anything not in the handled ranges
+                byte b = (byte)op;
+                if (b >= 0x00 && b <= 0x1F) continue; // control + exception + try_table
+                if (b >= 0x1A && b <= 0x1C) continue; // drop, select
+                if (b >= 0x20 && b <= 0x26) continue; // locals, globals, table.get/set
+                if (b >= 0x28 && b <= 0xC4) continue; // memory + numeric + sign ext
+                if (b >= 0xD0 && b <= 0xD6) continue; // ref ops + br_on_null/non_null
 
                 return inst.Op.GetMnemonic();
             }
@@ -111,7 +152,7 @@ namespace Wacs.Transpiler.Test
                 {
                     for (int i = 0; i < blockInst.Count; i++)
                     {
-                        var result = FindFirstUnsupportedOpcode(blockInst.GetBlock(i).Instructions);
+                        var result = FindFirst(blockInst.GetBlock(i).Instructions);
                         if (result != null)
                             return result;
                     }
