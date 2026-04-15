@@ -61,6 +61,122 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// </summary>
         public static void Emit(ILGenerator il, InstructionBase inst, SimdCode op)
         {
+            // Try direct helper path (bypasses interpreter, uses scalar/intrinsics)
+            if (TryEmitDirect(il, inst, op))
+                return;
+
+            // Fallback: interpreter dispatch via OpStack marshaling
+            EmitInterpreterDispatch(il, inst, op);
+        }
+
+        /// <summary>
+        /// Direct helper calls for opcodes with dedicated SimdHelpers methods.
+        /// Returns true if handled. Opcodes are added incrementally by chunk.
+        /// </summary>
+        private static bool TryEmitDirect(ILGenerator il, InstructionBase inst, SimdCode op)
+        {
+            switch (op)
+            {
+                // === Chunk 2: Bitwise ops ===
+                case SimdCode.V128Not:
+                    EmitUnaryV128(il, nameof(SimdHelpers.V128Not));
+                    return true;
+                case SimdCode.V128And:
+                    EmitBinaryV128(il, nameof(SimdHelpers.V128And));
+                    return true;
+                case SimdCode.V128Or:
+                    EmitBinaryV128(il, nameof(SimdHelpers.V128Or));
+                    return true;
+                case SimdCode.V128Xor:
+                    EmitBinaryV128(il, nameof(SimdHelpers.V128Xor));
+                    return true;
+                case SimdCode.V128AndNot:
+                    EmitBinaryV128(il, nameof(SimdHelpers.V128AndNot));
+                    return true;
+                case SimdCode.V128BitSelect:
+                    EmitTernaryV128(il, nameof(SimdHelpers.V128BitSelect));
+                    return true;
+                case SimdCode.V128AnyTrue:
+                    EmitV128ToI32(il, nameof(SimdHelpers.V128AnyTrue));
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        // ================================================================
+        // Emission templates for direct helper calls
+        // ================================================================
+
+        /// <summary>Unary V128 → V128</summary>
+        private static void EmitUnaryV128(ILGenerator il, string helperName)
+        {
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName,
+                new[] { typeof(V128) })!);
+            EmitBoxV128(il);
+        }
+
+        /// <summary>Binary (V128, V128) → V128</summary>
+        private static void EmitBinaryV128(ILGenerator il, string helperName)
+        {
+            // Stack: [Value(v1), Value(v2)] — v2 on top
+            var v2 = il.DeclareLocal(typeof(V128));
+            EmitUnboxV128(il); // unbox v2
+            il.Emit(OpCodes.Stloc, v2);
+            EmitUnboxV128(il); // unbox v1
+            il.Emit(OpCodes.Ldloc, v2);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName,
+                new[] { typeof(V128), typeof(V128) })!);
+            EmitBoxV128(il);
+        }
+
+        /// <summary>Ternary (V128, V128, V128) → V128</summary>
+        private static void EmitTernaryV128(ILGenerator il, string helperName)
+        {
+            // Stack: [Value(v1), Value(v2), Value(v3)]
+            var v3 = il.DeclareLocal(typeof(V128));
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Stloc, v3);
+            var v2 = il.DeclareLocal(typeof(V128));
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Stloc, v2);
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Ldloc, v2);
+            il.Emit(OpCodes.Ldloc, v3);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName,
+                new[] { typeof(V128), typeof(V128), typeof(V128) })!);
+            EmitBoxV128(il);
+        }
+
+        /// <summary>V128 → i32 (test ops)</summary>
+        private static void EmitV128ToI32(ILGenerator il, string helperName)
+        {
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName,
+                new[] { typeof(V128) })!);
+            // Result is i32 on CIL stack — matches WASM result type
+        }
+
+        private static void EmitUnboxV128(ILGenerator il)
+        {
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(
+                nameof(SimdHelpers.UnboxV128), BindingFlags.Public | BindingFlags.Static)!);
+        }
+
+        private static void EmitBoxV128(ILGenerator il)
+        {
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(
+                nameof(SimdHelpers.BoxV128), BindingFlags.Public | BindingFlags.Static)!);
+        }
+
+        // ================================================================
+        // Interpreter fallback dispatch (for ops without direct helpers)
+        // ================================================================
+
+        private static void EmitInterpreterDispatch(ILGenerator il, InstructionBase inst, SimdCode op)
+        {
             bool isStore = op == SimdCode.V128Store ||
                            op == SimdCode.V128Store8Lane ||
                            op == SimdCode.V128Store16Lane ||
@@ -72,7 +188,6 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             int instId = RegisterInstruction(inst);
 
-            // Spill inputs from CIL stack
             var inputLocals = new LocalBuilder[inputCount];
             for (int i = inputCount - 1; i >= 0; i--)
             {
@@ -80,7 +195,6 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Stloc, inputLocals[i]);
             }
 
-            // Push inputs to OpStack
             for (int i = 0; i < inputCount; i++)
             {
                 il.Emit(OpCodes.Ldarg_0);
@@ -89,13 +203,11 @@ namespace Wacs.Transpiler.AOT.Emitters
                     nameof(SimdDispatch.PushValue), BindingFlags.Public | BindingFlags.Static)!);
             }
 
-            // Execute via interpreter
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldc_I4, instId);
             il.Emit(OpCodes.Call, typeof(SimdDispatch).GetMethod(
                 nameof(SimdDispatch.ExecuteSimdOp), BindingFlags.Public | BindingFlags.Static)!);
 
-            // Pop results from OpStack
             for (int i = 0; i < outputCount; i++)
             {
                 il.Emit(OpCodes.Ldarg_0);
