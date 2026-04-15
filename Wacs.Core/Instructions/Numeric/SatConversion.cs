@@ -295,5 +295,46 @@ namespace Wacs.Core.Instructions.Numeric
             ulong result = (ulong)Math.Truncate(value);
             context.OpStack.PushI64((long)result);
         }
+
+        // Public static helpers for transpiler (i64 variants)
+        public static long TruncSatF32SToI64(float value)
+        {
+            if (float.IsNaN(value)) return 0;
+            if (float.IsPositiveInfinity(value)) return long.MaxValue;
+            if (float.IsNegativeInfinity(value)) return long.MinValue;
+            if (Math.Abs(value) >= 9223372036854775808.0f)
+                return value > 0 ? long.MaxValue : long.MinValue;
+            return (long)Math.Truncate((double)value);
+        }
+
+        public static long TruncSatF32UToI64(float value)
+        {
+            if (float.IsNaN(value)) return 0;
+            if (float.IsPositiveInfinity(value)) return -1; // ulong.MaxValue
+            if (float.IsNegativeInfinity(value)) return 0;
+            if (value >= 18446744073709551616.0f) return -1;
+            if (value <= 0) return 0;
+            return (long)(ulong)Math.Truncate((double)value);
+        }
+
+        public static long TruncSatF64SToI64(double value)
+        {
+            if (double.IsNaN(value)) return 0;
+            if (double.IsPositiveInfinity(value)) return long.MaxValue;
+            if (double.IsNegativeInfinity(value)) return long.MinValue;
+            if (Math.Abs(value) >= 9223372036854775808.0)
+                return value > 0 ? long.MaxValue : long.MinValue;
+            return (long)Math.Truncate(value);
+        }
+
+        public static long TruncSatF64UToI64(double value)
+        {
+            if (double.IsNaN(value)) return 0;
+            if (double.IsPositiveInfinity(value)) return -1;
+            if (double.IsNegativeInfinity(value)) return 0;
+            if (value >= 18446744073709551616.0) return -1;
+            if (value <= 0) return 0;
+            return (long)(ulong)Math.Truncate(value);
+        }
     }
 }
