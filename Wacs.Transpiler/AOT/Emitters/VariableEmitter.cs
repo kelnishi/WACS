@@ -22,7 +22,7 @@ namespace Wacs.Transpiler.AOT.Emitters
     /// Emits CIL for WebAssembly variable and parametric instructions.
     ///
     /// WASM locals map to CIL locals + method parameters:
-    /// - Parameters 0..N-1 are CIL args 1..N (arg 0 is TranspiledContext)
+    /// - Parameters 0..N-1 are CIL args 1..N (arg 0 is ThinContext)
     /// - Locals N..M are CIL locals 0..M-N
     ///
     /// local.get → ldarg / ldloc
@@ -92,14 +92,14 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         /// <summary>
-        /// WASM local index 0..paramCount-1 → CIL arg 1..paramCount (arg 0 = TranspiledContext)
+        /// WASM local index 0..paramCount-1 → CIL arg 1..paramCount (arg 0 = ThinContext)
         /// WASM local index paramCount..N → CIL local 0..N-paramCount
         /// </summary>
         private static void EmitLocalGet(ILGenerator il, int wasmIdx, int paramCount)
         {
             if (wasmIdx < paramCount)
             {
-                // WASM param → CIL arg (offset by 1 for TranspiledContext)
+                // WASM param → CIL arg (offset by 1 for ThinContext)
                 il.Emit(OpCodes.Ldarg, wasmIdx + 1);
             }
             else
