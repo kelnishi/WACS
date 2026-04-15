@@ -20,6 +20,8 @@ using Spec.Test.WastJson;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Transpiler.AOT;
 using Xunit;
 using Xunit.Abstractions;
@@ -28,17 +30,15 @@ namespace Wacs.Transpiler.Test
 {
     /// <summary>
     /// Runs WebAssembly spec test commands against AOT-transpiled modules
-    /// using ONLY the standalone IExports/IImports path.
+    /// using the ModuleLinker for context creation and cross-module wiring.
     ///
-    /// No interpreter fallback. If a module can't be fully transpiled and
-    /// instantiated standalone, its assertions are skipped — not run through
-    /// the interpreter. The interpreter-backed tests live in Spec.Test.
+    /// No interpreter fallback for function execution. The interpreter handles
+    /// module loading (WASM instantiation semantics) and validation commands
+    /// (assert_invalid, assert_malformed, etc.). All function invocations
+    /// go through the transpiled assembly's standalone path.
     ///
-    /// Modules load through the interpreter (WASM instantiation semantics),
-    /// then transpile and instantiate via the Module class constructor.
-    /// Assertions invoke exclusively through TranspiledModuleWrapper.
-    ///
-    /// Modules that can't use the standalone path are skipped with a reason.
+    /// Modules that can't be transpiled have their assertions skipped with
+    /// a diagnostic reason — never silently run through the interpreter.
     /// </summary>
     public class AotSpecTests
     {
@@ -59,12 +59,15 @@ namespace Wacs.Transpiler.Test
             env.BindToRuntime(runtime);
             runtime.TranspileModules = false;
 
-            var wrappers = new Dictionary<string, TranspiledModuleWrapper>();
-            TranspiledModuleWrapper? currentWrapper = null;
-            string? skipReason = null;
+            // Linker manages ThinContext creation and cross-module wiring
+            var linker = new ModuleLinker();
+            SetupHostModules(linker, runtime);
 
+            // Track current module for assertion dispatch
+            TranspiledModuleWrapper? currentWrapper = null;
+            var wrappers = new Dictionary<string, TranspiledModuleWrapper>();
+            string? skipReason = null;
             int totalTranspiled = 0;
-            int totalSkipped = 0;
 
             Module? module = null;
             foreach (var command in file.Commands)
@@ -73,55 +76,65 @@ namespace Wacs.Transpiler.Test
                 {
                     _output.WriteLine($"    {command}");
 
-                    // Module commands: load through interpreter, then transpile
                     if (command is ModuleCommand mc)
                     {
-                        // Always load through interpreter for proper WASM instantiation
+                        // Load through interpreter for WASM instantiation semantics
                         command.RunTest(file, ref runtime, ref module);
 
-                        // Reset for new module
+                        // Reset
                         currentWrapper = null;
                         skipReason = null;
 
-                        var (wrapper, reason) = TranspileAndWrap(runtime, mc.Name ?? "", wrappers);
+                        var (wrapper, reason) = TranspileAndLink(
+                            linker, runtime, mc.Name ?? "", wrappers);
                         if (wrapper != null)
                         {
                             currentWrapper = wrapper;
                             wrappers[mc.Name ?? ""] = wrapper;
                             totalTranspiled += wrapper.Result.TranspiledCount;
-                            _output.WriteLine($"      Standalone: {wrapper.Result.TranspiledCount} functions");
+                            _output.WriteLine($"      Linked: {wrapper.Result.TranspiledCount} functions");
                         }
                         else
                         {
                             skipReason = reason;
-                            totalSkipped++;
                             _output.WriteLine($"      Skipped: {reason}");
                         }
                         continue;
                     }
 
-                    // Commands that test loading semantics — always run through interpreter
+                    // Register commands: register the module name with the interpreter
+                    // AND update our linker's module registry
+                    if (command is RegisterCommand rc)
+                    {
+                        command.RunTest(file, ref runtime, ref module);
+                        // Re-register in the linker under the new name
+                        if (currentWrapper != null && !string.IsNullOrEmpty(rc.Name))
+                        {
+                            wrappers[rc.Name] = currentWrapper;
+                        }
+                        continue;
+                    }
+
+                    // Validation commands — interpreter only
                     if (command is AssertInvalidCommand or AssertMalformedCommand
-                        or AssertUnlinkableCommand or AssertUninstantiableCommand
-                        or RegisterCommand)
+                        or AssertUnlinkableCommand or AssertUninstantiableCommand)
                     {
                         command.RunTest(file, ref runtime, ref module);
                         continue;
                     }
 
-                    // Invoke-bearing commands: run through transpiled module or skip
+                    // Invoke-bearing commands: transpiled module or skip
                     if (currentWrapper != null)
                     {
                         RunThroughTranspiler(command, wrappers, currentWrapper);
                     }
                     else if (skipReason != null)
                     {
-                        // Module was skipped — skip its assertions too
-                        continue;
+                        continue; // Module skipped — skip assertions
                     }
                     else
                     {
-                        // No module loaded yet — run through interpreter (preamble commands)
+                        // Preamble (before first module)
                         command.RunTest(file, ref runtime, ref module);
                     }
                 }
@@ -135,15 +148,185 @@ namespace Wacs.Transpiler.Test
                 }
             }
 
-            if (totalTranspiled > 0 || totalSkipped > 0)
-            {
-                _output.WriteLine($"    AOT: {totalTranspiled} transpiled, {totalSkipped} modules skipped");
-            }
+            if (totalTranspiled > 0)
+                _output.WriteLine($"    AOT: {totalTranspiled} functions transpiled");
         }
 
         /// <summary>
-        /// Execute a command through the transpiled module. No interpreter fallback.
+        /// Register host functions from SpecTestEnv with the linker.
+        /// Host functions are dispatched through the interpreter's runtime.
         /// </summary>
+        private static void SetupHostModules(ModuleLinker linker, WasmRuntime runtime)
+        {
+            // The spectest module provides: print, print_i32, etc. + globals + table + memory.
+            // Host functions are registered as delegates that dispatch through the runtime.
+            // Non-function imports (globals, table, memory) use the linker's host registries.
+
+            // We don't pre-register individual host functions — they're resolved
+            // lazily when BuildImportsProxy creates delegates that call through
+            // runtime.CreateStackInvoker. The linker handles table/memory/global
+            // sharing for host modules.
+
+            // Register spectest globals
+            linker.RegisterHostGlobal("spectest", "global_i32",
+                new GlobalInstance(new GlobalType(Wacs.Core.Types.Defs.ValType.I32, Mutability.Immutable),
+                    new Value(Wacs.Core.Types.Defs.ValType.I32, 666)));
+            linker.RegisterHostGlobal("spectest", "global_i64",
+                new GlobalInstance(new GlobalType(Wacs.Core.Types.Defs.ValType.I64, Mutability.Immutable),
+                    new Value(Wacs.Core.Types.Defs.ValType.I64, 666L)));
+            linker.RegisterHostGlobal("spectest", "global_f32",
+                new GlobalInstance(new GlobalType(Wacs.Core.Types.Defs.ValType.F32, Mutability.Immutable),
+                    new Value(666.6f)));
+            linker.RegisterHostGlobal("spectest", "global_f64",
+                new GlobalInstance(new GlobalType(Wacs.Core.Types.Defs.ValType.F64, Mutability.Immutable),
+                    new Value(666.6)));
+        }
+
+        /// <summary>
+        /// Transpile a module and link it via the ModuleLinker.
+        /// Returns (wrapper, null) on success, (null, reason) on skip.
+        /// </summary>
+        private (TranspiledModuleWrapper?, string?) TranspileAndLink(
+            ModuleLinker linker, WasmRuntime runtime, string moduleName,
+            Dictionary<string, TranspiledModuleWrapper> wrappers)
+        {
+            ModuleInstance moduleInst;
+            try
+            {
+                moduleInst = string.IsNullOrEmpty(moduleName)
+                    ? runtime.GetModule(null)
+                    : runtime.GetModule(moduleName);
+            }
+            catch { return (null, "module not found"); }
+
+            var transpiler = new ModuleTranspiler();
+            TranspilationResult result;
+            try { result = transpiler.Transpile(moduleInst, runtime); }
+            catch (Exception ex)
+            {
+                return (null, $"transpilation failed: {ex.Message}");
+            }
+
+            if (result.ModuleClass == null)
+                return (null, "no Module class generated");
+
+            if (result.FallbackCount > 0)
+                return (null, $"{result.FallbackCount} fallback functions");
+
+            // Link the module — resolves imports, creates ThinContext with shared state
+            LinkedModule linked;
+            try
+            {
+                linked = linker.Instantiate(result, moduleInst.Repr, moduleName);
+            }
+            catch (Exception ex)
+            {
+                return (null, $"linking failed: {ex.GetType().Name}: {ex.Message}");
+            }
+
+            // Create wrapper for invocation
+            var wrapper = new TranspiledModuleWrapper(result);
+            try
+            {
+                // Build imports proxy for function imports (host functions dispatch through runtime)
+                object? importsProxy = null;
+                if (result.ImportsInterface != null)
+                {
+                    importsProxy = BuildImportsProxy(result, wrappers, runtime, moduleInst);
+                    if (importsProxy == null)
+                        return (null, "could not build imports proxy");
+                }
+                wrapper.Instantiate(importsProxy);
+            }
+            catch (Exception ex)
+            {
+                return (null, $"instantiation failed: {ex.GetType().Name}: {ex.Message}");
+            }
+
+            return (wrapper, null);
+        }
+
+        /// <summary>
+        /// Build an IImports proxy for function imports.
+        /// Host functions dispatch through the runtime's stack invoker.
+        /// Cross-module functions dispatch through the source module's wrapper.
+        /// </summary>
+        private object? BuildImportsProxy(
+            TranspilationResult result,
+            Dictionary<string, TranspiledModuleWrapper> wrappers,
+            WasmRuntime runtime,
+            ModuleInstance moduleInst)
+        {
+            if (result.ImportsInterface == null) return null;
+
+            var handlers = new Dictionary<string, Func<object?[], object?>>();
+
+            foreach (var importMethod in result.ImportMethods)
+            {
+                var importName = importMethod.Name;
+                bool found = false;
+
+                foreach (var import in moduleInst.Repr.Imports)
+                {
+                    if (import.Desc is not Wacs.Core.Module.ImportDesc.FuncDesc) continue;
+
+                    var expectedName = InterfaceGenerator.SanitizeName($"{import.ModuleName}_{import.Name}");
+                    if (expectedName != importName) continue;
+
+                    // Try transpiled module exports first
+                    if (wrappers.TryGetValue(import.ModuleName, out var sourceWrapper)
+                        && sourceWrapper.ModuleInstance != null)
+                    {
+                        try
+                        {
+                            handlers[importName] = sourceWrapper.CreateExportHandler(import.Name);
+                            found = true;
+                        }
+                        catch { }
+                    }
+
+                    if (!found)
+                    {
+                        // Host function: dispatch through interpreter
+                        var funcType = importMethod.WasmType;
+                        var capturedImport = import;
+                        handlers[importName] = args =>
+                        {
+                            if (runtime.TryGetExportedFunction(
+                                (capturedImport.ModuleName, capturedImport.Name), out var addr))
+                            {
+                                var invoker = runtime.CreateStackInvoker(addr);
+                                var valueArgs = ConvertArgsToValues(args);
+                                var results = invoker(valueArgs);
+                                if (results.Length == 0) return null;
+                                return ConvertValueToClr(results[0], funcType.ResultType.Types[0]);
+                            }
+                            return null;
+                        };
+                        found = true;
+                    }
+                    break;
+                }
+
+                if (!found)
+                    handlers[importName] = _ => null;
+            }
+
+            try
+            {
+                return ImportDispatcher.Create(result.ImportsInterface, handlers);
+            }
+            catch (Exception ex)
+            {
+                _output.WriteLine($"    Proxy creation failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        // ==================================================================
+        // Assertion execution through transpiled module
+        // ==================================================================
+
         private void RunThroughTranspiler(
             ICommand command,
             Dictionary<string, TranspiledModuleWrapper> wrappers,
@@ -157,16 +340,14 @@ namespace Wacs.Transpiler.Test
                 ActionCommand ac => ac.Action as InvokeAction,
                 _ => null
             };
-
             if (invokeAction == null) return;
 
-            // Resolve which wrapper to use
             var wrapper = currentWrapper;
             if (!string.IsNullOrEmpty(invokeAction.Module))
             {
-                if (!wrappers.TryGetValue(invokeAction.Module, out var namedWrapper))
+                if (!wrappers.TryGetValue(invokeAction.Module, out var named))
                     throw new TestException($"Named module '{invokeAction.Module}' not transpiled");
-                wrapper = namedWrapper;
+                wrapper = named;
             }
 
             switch (command)
@@ -174,30 +355,27 @@ namespace Wacs.Transpiler.Test
                 case AssertReturnCommand arc:
                     RunAssertReturn(wrapper, invokeAction, arc);
                     break;
-
                 case AssertTrapCommand atc:
                     RunAssertTrap(wrapper, invokeAction, atc);
                     break;
-
                 case AssertExhaustionCommand:
                     RunAssertExhaustion(wrapper, invokeAction);
                     break;
-
                 case ActionCommand:
                     try { wrapper.InvokeExport(invokeAction.Field, invokeAction.Args.Select(a => a.AsValue).ToArray()); }
-                    catch { /* Actions may trap */ }
+                    catch { }
                     break;
             }
         }
 
-        private void RunAssertReturn(
+        private static void RunAssertReturn(
             TranspiledModuleWrapper wrapper, InvokeAction invokeAction, AssertReturnCommand arc)
         {
             Value[] result;
             try
             {
-                var args = invokeAction.Args.Select(a => a.AsValue).ToArray();
-                result = wrapper.InvokeExport(invokeAction.Field, args);
+                result = wrapper.InvokeExport(invokeAction.Field,
+                    invokeAction.Args.Select(a => a.AsValue).ToArray());
             }
             catch (Exception ex)
             {
@@ -242,13 +420,13 @@ namespace Wacs.Transpiler.Test
             }
         }
 
-        private void RunAssertTrap(
+        private static void RunAssertTrap(
             TranspiledModuleWrapper wrapper, InvokeAction invokeAction, AssertTrapCommand atc)
         {
             try
             {
-                var args = invokeAction.Args.Select(a => a.AsValue).ToArray();
-                wrapper.InvokeExport(invokeAction.Field, args);
+                wrapper.InvokeExport(invokeAction.Field,
+                    invokeAction.Args.Select(a => a.AsValue).ToArray());
                 throw new TestException($"Test failed {atc} \"{atc.Text}\"");
             }
             catch (TrapException) { }
@@ -263,13 +441,13 @@ namespace Wacs.Transpiler.Test
             }
         }
 
-        private void RunAssertExhaustion(
+        private static void RunAssertExhaustion(
             TranspiledModuleWrapper wrapper, InvokeAction invokeAction)
         {
             try
             {
-                var args = invokeAction.Args.Select(a => a.AsValue).ToArray();
-                wrapper.InvokeExport(invokeAction.Field, args);
+                wrapper.InvokeExport(invokeAction.Field,
+                    invokeAction.Args.Select(a => a.AsValue).ToArray());
                 throw new TestException("Expected exhaustion but call succeeded");
             }
             catch (Wacs.Core.Runtime.Exceptions.WasmRuntimeException) { }
@@ -277,147 +455,27 @@ namespace Wacs.Transpiler.Test
             catch (TestException) { throw; }
         }
 
-        /// <summary>
-        /// Transpile the current module and create a standalone wrapper.
-        /// Returns (wrapper, null) on success or (null, reason) on skip.
-        /// </summary>
-        private (TranspiledModuleWrapper?, string?) TranspileAndWrap(
-            WasmRuntime runtime, string moduleName,
-            Dictionary<string, TranspiledModuleWrapper> wrappers)
+        // ==================================================================
+        // Value conversion helpers
+        // ==================================================================
+
+        private static Value[] ConvertArgsToValues(object?[]? args)
         {
-            ModuleInstance moduleInst;
-            try
+            if (args == null) return Array.Empty<Value>();
+            var values = new Value[args.Length];
+            for (int i = 0; i < args.Length; i++)
             {
-                moduleInst = string.IsNullOrEmpty(moduleName)
-                    ? runtime.GetModule(null)
-                    : runtime.GetModule(moduleName);
-            }
-            catch { return (null, "module not found"); }
-
-            // GC modules go through the same path — no special-casing.
-            // If the GC emitter produces bad IL, it surfaces as a test failure.
-
-            var transpiler = new ModuleTranspiler();
-            TranspilationResult result;
-            try { result = transpiler.Transpile(moduleInst, runtime); }
-            catch (Exception ex)
-            {
-                return (null, $"transpilation failed: {ex.Message}");
-            }
-
-            if (result.ModuleClass == null)
-                return (null, "no Module class generated");
-
-            if (result.FallbackCount > 0)
-                return (null, $"{result.FallbackCount} fallback functions");
-
-            var wrapper = new TranspiledModuleWrapper(result);
-
-
-            // Build imports proxy if needed
-            object? importsProxy = null;
-            if (result.ImportsInterface != null)
-            {
-                importsProxy = BuildImportsProxy(result, wrappers, runtime, moduleInst);
-                if (importsProxy == null)
-                    return (null, "could not build imports proxy");
-            }
-
-            try
-            {
-                wrapper.Instantiate(importsProxy);
-            }
-            catch (Exception ex)
-            {
-                return (null, $"instantiation failed: {ex.GetType().Name}: {ex.Message}");
-            }
-
-            return (wrapper, null);
-        }
-
-        /// <summary>
-        /// Build an IImports proxy backed by previously transpiled module exports
-        /// and interpreter-backed host functions.
-        /// </summary>
-        private object? BuildImportsProxy(
-            TranspilationResult result,
-            Dictionary<string, TranspiledModuleWrapper> wrappers,
-            WasmRuntime runtime,
-            ModuleInstance moduleInst)
-        {
-            if (result.ImportsInterface == null) return null;
-
-            var handlers = new Dictionary<string, Func<object?[], object?>>();
-
-            foreach (var importMethod in result.ImportMethods)
-            {
-                var importName = importMethod.Name;
-                bool found = false;
-
-                foreach (var import in moduleInst.Repr.Imports)
+                values[i] = args[i] switch
                 {
-                    if (import.Desc is not Wacs.Core.Module.ImportDesc.FuncDesc) continue;
-
-                    var expectedName = InterfaceGenerator.SanitizeName($"{import.ModuleName}_{import.Name}");
-                    if (expectedName != importName) continue;
-
-                    // Check if we have a transpiled module for this import's source
-                    if (wrappers.TryGetValue(import.ModuleName, out var sourceWrapper)
-                        && sourceWrapper.ModuleInstance != null)
-                    {
-                        try
-                        {
-                            var handler = sourceWrapper.CreateExportHandler(import.Name);
-                            handlers[importName] = handler;
-                            found = true;
-                        }
-                        catch { }
-                    }
-
-                    if (!found)
-                    {
-                        // Host function: dispatch through interpreter
-                        var funcType = importMethod.WasmType;
-                        var capturedImport = import;
-                        handlers[importName] = args =>
-                        {
-                            if (runtime.TryGetExportedFunction((capturedImport.ModuleName, capturedImport.Name), out var addr))
-                            {
-                                var invoker = runtime.CreateStackInvoker(addr);
-                                var valueArgs = new Value[args?.Length ?? 0];
-                                for (int i = 0; i < valueArgs.Length; i++)
-                                {
-                                    if (args![i] is Value v) valueArgs[i] = v;
-                                    else if (args[i] is int iv) valueArgs[i] = new Value(iv);
-                                    else if (args[i] is long lv) valueArgs[i] = new Value(lv);
-                                    else if (args[i] is float fv) valueArgs[i] = new Value(fv);
-                                    else if (args[i] is double dv) valueArgs[i] = new Value(dv);
-                                }
-                                var results = invoker(valueArgs);
-                                if (results.Length == 0) return null;
-                                return ConvertValueToClr(results[0], funcType.ResultType.Types[0]);
-                            }
-                            return null;
-                        };
-                        found = true;
-                    }
-
-                    break;
-                }
-
-                if (!found)
-                    handlers[importName] = _ => null;
+                    Value v => v,
+                    int iv => new Value(iv),
+                    long lv => new Value(lv),
+                    float fv => new Value(fv),
+                    double dv => new Value(dv),
+                    _ => default
+                };
             }
-
-            try
-            {
-                return ImportDispatcher.Create(result.ImportsInterface, handlers);
-            }
-            catch (Exception ex)
-            {
-                _output.WriteLine($"    Proxy creation failed: {ex.Message}");
-                return null;
-            }
+            return values;
         }
 
         private static object? ConvertValueToClr(Value val, Wacs.Core.Types.Defs.ValType type)
@@ -434,10 +492,8 @@ namespace Wacs.Transpiler.Test
 
         private static bool CompareValues(Value actual, Value expected)
         {
-            if (expected.IsNullRef)
-                return actual.IsNullRef;
+            if (expected.IsNullRef) return actual.IsNullRef;
             return actual.Equals(expected);
         }
-
     }
 }
