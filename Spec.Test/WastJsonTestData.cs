@@ -14,84 +14,28 @@
 //  * limitations under the License.
 //  */
 
-using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using Microsoft.Extensions.Configuration;
-using Spec.Test.WastJson;
 
 namespace Spec.Test
 {
+    /// <summary>
+    /// xUnit ClassData adapter over WastTestDataProvider.
+    /// </summary>
     public class WastJsonTestData : IEnumerable<object[]>
     {
-        private static readonly IConfiguration Configuration;
+        private static readonly WastTestDataProvider Provider = new();
 
-        static WastJsonTestData()
-        {
-            // Use ConfigurationFixture to get the JSON directory path
-            Configuration = new ConfigurationBuilder()
-                .SetBasePath(AppContext.BaseDirectory) // Set to current directory
-                .AddJsonFile("testsettings.json", optional: false, reloadOnChange: true)
-                .Build();
-        }
+        public static bool TraceExecution => Provider.TraceExecution;
 
-        private static string JsonDirectory => Path.Combine(AppContext.BaseDirectory, Configuration["JsonDirectory"] ?? "");
-
-        public static string SingleTest => Configuration["Single"] ?? "";
-        public static HashSet<string> SkipWasts =>
-            Configuration
-                .GetSection("SkipWasts")
-                .GetChildren()
-                .Select(cfg => cfg.Value ?? "")
-                .ToHashSet();
-
-        public static bool TraceExecution => Configuration["TraceExecution"] == "True";
-        
         public IEnumerator<object[]> GetEnumerator()
         {
-            var files = Directory.GetFiles(JsonDirectory, "*.json", SearchOption.AllDirectories).OrderBy(path => path);
-            foreach (var file in files)
+            foreach (var testData in Provider.GetTestDefinitions())
             {
-                var testData = LoadTestDefinition(file);
-
-                if (!string.IsNullOrEmpty(SingleTest) && SingleTest != testData.TestName)
-                    continue;
-                
-                if (SkipWasts.Contains(testData.TestName))
-                    continue;
-                        
                 yield return new object[] { testData };
             }
         }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-
-        static WastJson.WastJson LoadTestDefinition(string jsonPath)
-        {
-            string json = File.ReadAllText(jsonPath);
-
-            var options = new JsonSerializerOptions
-            {
-                Converters =
-                {
-                    new CommandJsonConverter(),
-                    new ActionJsonConverter(),
-                    new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)
-                },
-                PropertyNameCaseInsensitive = true
-            };
-
-            var testDefinition = JsonSerializer.Deserialize<WastJson.WastJson>(json, options);
-            if (testDefinition == null)
-                throw new JsonException($"Error while parsing {jsonPath}");
-
-            testDefinition.Path = Path.GetDirectoryName(jsonPath)!;
-            testDefinition.TraceExecution = TraceExecution;
-            return testDefinition;
-        }
     }
 }

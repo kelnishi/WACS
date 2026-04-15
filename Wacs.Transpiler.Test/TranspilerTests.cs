@@ -15,6 +15,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using Spec.Test;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -24,26 +25,54 @@ using Xunit.Abstractions;
 
 namespace Wacs.Transpiler.Test
 {
+    /// <summary>
+    /// xUnit ClassData adapter using the shared WastTestDataProvider.
+    /// </summary>
+    public class TranspilerWasmTestData : WastTestDataAdapter
+    {
+    }
+
+    /// <summary>
+    /// Base class for adapting WastTestDataProvider to xUnit ClassData.
+    /// </summary>
+    public abstract class WastTestDataAdapter : System.Collections.IEnumerable,
+        System.Collections.Generic.IEnumerable<object[]>
+    {
+        private static readonly WastTestDataProvider Provider = new();
+
+        public System.Collections.Generic.IEnumerator<object[]> GetEnumerator()
+        {
+            foreach (var wasmPath in Provider.GetWasmFiles())
+            {
+                yield return new object[] { wasmPath };
+            }
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    /// <summary>
+    /// xUnit ClassData adapter for full test definitions (JSON commands).
+    /// </summary>
+    public class TranspilerTestDefinitions : System.Collections.IEnumerable,
+        System.Collections.Generic.IEnumerable<object[]>
+    {
+        private static readonly WastTestDataProvider Provider = new();
+
+        public System.Collections.Generic.IEnumerator<object[]> GetEnumerator()
+        {
+            foreach (var testDef in Provider.GetTestDefinitions())
+            {
+                yield return new object[] { testDef };
+            }
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     public class TranspilerTests
     {
         private readonly ITestOutputHelper _output;
-        private static readonly string? SpecTestDir;
-
-        static TranspilerTests()
-        {
-            // Walk up from bin dir to find Spec.Test/generated-json
-            var dir = AppContext.BaseDirectory;
-            for (int i = 0; i < 8; i++)
-            {
-                var candidate = Path.Combine(dir, "Spec.Test", "generated-json");
-                if (Directory.Exists(candidate))
-                {
-                    SpecTestDir = candidate;
-                    break;
-                }
-                dir = Path.GetDirectoryName(dir) ?? dir;
-            }
-        }
 
         public TranspilerTests(ITestOutputHelper output)
         {
@@ -51,11 +80,11 @@ namespace Wacs.Transpiler.Test
         }
 
         /// <summary>
-        /// Verify that the transpiler processes modules without crashing,
-        /// producing valid IL for functions it can handle.
+        /// Verify that the transpiler can process a module without crashing.
+        /// Reports how many functions were transpiled vs fell back.
         /// </summary>
         [Theory]
-        [MemberData(nameof(GetSpecTestWasmFiles))]
+        [ClassData(typeof(TranspilerWasmTestData))]
         public void TranspileModule(string wasmPath)
         {
             var testName = Path.GetFileName(wasmPath);
@@ -63,13 +92,9 @@ namespace Wacs.Transpiler.Test
             Module module;
             using (var stream = new FileStream(wasmPath, FileMode.Open, FileAccess.Read))
             {
-                try
-                {
-                    module = BinaryModuleParser.ParseWasm(stream);
-                }
+                try { module = BinaryModuleParser.ParseWasm(stream); }
                 catch
                 {
-                    // Malformed wasm files (spec tests include intentionally broken modules)
                     _output.WriteLine($"  {testName}: skipped (parse error)");
                     return;
                 }
@@ -84,7 +109,6 @@ namespace Wacs.Transpiler.Test
             }
             catch
             {
-                // Modules requiring imports we don't provide — skip
                 _output.WriteLine($"  {testName}: skipped (missing imports)");
                 return;
             }
@@ -102,74 +126,75 @@ namespace Wacs.Transpiler.Test
         /// <summary>
         /// Verify the IBindable pattern — transpiled exports bind to a runtime.
         /// </summary>
-        [Fact]
-        public void TranspiledModuleBindsAsIBindable()
+        [Theory]
+        [ClassData(typeof(TranspilerTestDefinitions))]
+        public void TranspiledModuleBindsAsIBindable(Spec.Test.WastJson.WastJson file)
         {
-            if (SpecTestDir == null)
-            {
-                _output.WriteLine("Skipped: spec test directory not found");
+            _output.WriteLine($"  Testing: {file.TestName}");
+
+            // Load the first module command's wasm file
+            var moduleCmd = file.Commands
+                .OfType<Spec.Test.WastJson.ModuleCommand>()
+                .FirstOrDefault();
+
+            if (moduleCmd == null || string.IsNullOrEmpty(moduleCmd.Filename))
                 return;
-            }
 
-            var wasmFiles = Directory.GetFiles(SpecTestDir, "*.wasm", SearchOption.AllDirectories)
-                .OrderBy(f => f)
-                .Take(5)
-                .ToList();
+            var filepath = Path.Combine(file.Path, moduleCmd.Filename);
+            if (!File.Exists(filepath))
+                return;
 
-            foreach (var wasmPath in wasmFiles)
+            Module module;
+            using (var stream = new FileStream(filepath, FileMode.Open, FileAccess.Read))
             {
-                using var stream = new FileStream(wasmPath, FileMode.Open, FileAccess.Read);
-                var module = BinaryModuleParser.ParseWasm(stream);
-
-                var runtime = new WasmRuntime();
-                ModuleInstance moduleInst;
-                try
-                {
-                    moduleInst = runtime.InstantiateModule(module);
-                }
-                catch { continue; }
-
-                var transpiler = new ModuleTranspiler();
-                var result = transpiler.Transpile(moduleInst, runtime);
-                var ctx = new TranspiledContext();
-
-                var transpiledModule = new AOT.TranspiledModule("test", result, ctx);
-
-                // Bind to a fresh runtime — should not throw
-                var runtime2 = new WasmRuntime();
-                transpiledModule.BindToRuntime(runtime2);
-
-                int exportCount = result.Manifest.Functions
-                    .Count(f => !string.IsNullOrEmpty(f.ExportName));
-                _output.WriteLine($"  {Path.GetFileName(wasmPath)}: bound {exportCount} exports");
+                try { module = BinaryModuleParser.ParseWasm(stream); }
+                catch { return; }
             }
+
+            var runtime = new WasmRuntime();
+            var env = new SpecTestEnv();
+            env.BindToRuntime(runtime);
+
+            ModuleInstance moduleInst;
+            try { moduleInst = runtime.InstantiateModule(module); }
+            catch { return; }
+
+            var transpiler = new ModuleTranspiler();
+            var result = transpiler.Transpile(moduleInst, runtime);
+            var ctx = new TranspiledContext();
+
+            var transpiledModule = new AOT.TranspiledModule("test", result, ctx);
+
+            // Bind to a fresh runtime — should not throw
+            var runtime2 = new WasmRuntime();
+            transpiledModule.BindToRuntime(runtime2);
+
+            int exportCount = result.Manifest.Functions
+                .Count(f => !string.IsNullOrEmpty(f.ExportName));
+            _output.WriteLine($"    Bound {exportCount} exports, {result.TranspiledCount}/{result.Methods.Length} transpiled");
         }
 
         /// <summary>
         /// Verify the manifest correctly tracks transpiled vs fallback counts.
+        /// Reports overall coverage across the entire spec test suite.
         /// </summary>
         [Fact]
         public void ManifestTracksTranspilationCoverage()
         {
-            if (SpecTestDir == null)
-            {
-                _output.WriteLine("Skipped: spec test directory not found");
-                return;
-            }
+            var provider = new WastTestDataProvider();
 
             int totalTranspiled = 0;
             int totalFallback = 0;
             int modulesProcessed = 0;
 
-            var wasmFiles = Directory.GetFiles(SpecTestDir, "*.wasm", SearchOption.AllDirectories)
-                .OrderBy(f => f);
-
-            foreach (var wasmPath in wasmFiles)
+            foreach (var wasmPath in provider.GetWasmFiles())
             {
-                using var stream = new FileStream(wasmPath, FileMode.Open, FileAccess.Read);
                 Module module;
-                try { module = BinaryModuleParser.ParseWasm(stream); }
-                catch { continue; }
+                using (var stream = new FileStream(wasmPath, FileMode.Open, FileAccess.Read))
+                {
+                    try { module = BinaryModuleParser.ParseWasm(stream); }
+                    catch { continue; }
+                }
 
                 var runtime = new WasmRuntime();
                 ModuleInstance moduleInst;
@@ -185,7 +210,6 @@ namespace Wacs.Transpiler.Test
                 totalFallback += result.FallbackCount;
                 modulesProcessed++;
 
-                // Verify manifest consistency
                 Assert.Equal(result.Methods.Length, result.Manifest.Functions.Count);
                 Assert.Equal(result.TranspiledCount,
                     result.Manifest.Functions.Count(f => f.IsTranspiled));
@@ -196,23 +220,6 @@ namespace Wacs.Transpiler.Test
             int total = totalTranspiled + totalFallback;
             double pct = total > 0 ? (double)totalTranspiled / total * 100 : 0;
             _output.WriteLine($"Overall: {modulesProcessed} modules, {totalTranspiled}/{total} functions transpiled ({pct:F1}%)");
-        }
-
-        public static TheoryData<string> GetSpecTestWasmFiles()
-        {
-            var data = new TheoryData<string>();
-            if (SpecTestDir == null)
-                return data;
-
-            var wasmFiles = Directory.GetFiles(SpecTestDir, "*.wasm", SearchOption.AllDirectories)
-                .OrderBy(f => f);
-
-            foreach (var file in wasmFiles)
-            {
-                data.Add(file);
-            }
-
-            return data;
         }
     }
 }
