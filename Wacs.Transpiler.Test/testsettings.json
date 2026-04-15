@@ -1,5 +1,5 @@
 {
-  "JsonDirectory": "../../Spec.Test/generated-json",
+  "JsonDirectory": "../../../../Spec.Test/generated-json",
   "TraceExecution": false,
   "Single": null,
   "SkipWasts": [
