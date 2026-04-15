@@ -110,6 +110,10 @@ namespace Wacs.Transpiler.AOT
                 }
             }
 
+            // === Pass 0: Emit CLR types for WASM struct/array definitions ===
+            var gcTypeEmitter = new GcTypeEmitter(moduleBuilder, $"{_namespace}.{moduleName}", moduleInst.Types);
+            gcTypeEmitter.EmitTypes();
+
             // === Pass 1: Create method stubs ===
             var methodBuilders = new MethodBuilder[wasmFunctions.Count];
             for (int i = 0; i < wasmFunctions.Count; i++)
@@ -131,7 +135,7 @@ namespace Wacs.Transpiler.AOT
             {
                 var funcInst = wasmFunctions[i];
                 var mb = methodBuilders[i];
-                var codegen = new FunctionCodegen(mb, funcInst, wasmFunctions.ToArray(), methodBuilders, importCount);
+                var codegen = new FunctionCodegen(mb, funcInst, wasmFunctions.ToArray(), methodBuilders, importCount, gcTypeEmitter);
 
                 bool emitted = codegen.TryEmit();
 

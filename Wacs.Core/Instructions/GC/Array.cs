@@ -31,7 +31,9 @@ namespace Wacs.Core.Instructions.GC
         public InstArrayNew() : base(ByteCode.ArrayNew, -1) { }
         
         private TypeIdx X;
-        
+
+        public int TypeIndex => (int)X.Value;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -47,7 +49,7 @@ namespace Wacs.Core.Instructions.GC
 
             context.OpStack.PopI32();               // -1
             context.OpStack.PopType(t);             // -2
-            
+
             var resultType = ValType.Ref | (ValType)X;
             context.OpStack.PushType(resultType);   // -1
         }
@@ -103,6 +105,8 @@ namespace Wacs.Core.Instructions.GC
         
         private TypeIdx X;
 
+        public int TypeIndex => (int)X.Value;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -115,7 +119,7 @@ namespace Wacs.Core.Instructions.GC
                 "Instruction {0} was invalid. Referenced Type was not array:{1}",Op.GetMnemonic(),compositeType);
 
             var ft = arrayType.ElementType;
-            
+
             context.Assert(ft.StorageType.IsDefaultable(),
                 "Instruction {0} was invalid. FieldType was not defaultable:{1}",Op.GetMnemonic(),ft);
             
@@ -162,6 +166,9 @@ namespace Wacs.Core.Instructions.GC
         
         private uint N;
         private TypeIdx X;
+
+        public int FixedCount => (int)N;
+        public int TypeIndex => (int)X.Value;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -234,6 +241,9 @@ namespace Wacs.Core.Instructions.GC
         
         private TypeIdx X;
         private DataIdx Y;
+
+        public int TypeIndex => (int)X.Value;
+        public int DataIndex => (int)Y.Value;
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -346,6 +356,9 @@ namespace Wacs.Core.Instructions.GC
         private TypeIdx X;
         private ElemIdx Y;
 
+        public int TypeIndex => (int)X.Value;
+        public int ElemIndex => (int)Y.Value;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -356,22 +369,22 @@ namespace Wacs.Core.Instructions.GC
             var arrayType = compositeType as ArrayType;
             context.Assert(arrayType,
                 "Instruction {0} was invalid. Referenced Type was not array:{1}",Op.GetMnemonic(),compositeType);
-            
+
             var rt = arrayType.ElementType.StorageType;
             context.Assert(rt.IsRefType(),
                 "Instruction {0} was invalid. Array field type is not a RefType:{1}",Op.GetMnemonic(),rt);
-            
+
             context.Assert(context.Elements.Contains(Y),
                 "Instruction {0} was invalid. Element {1} was not in the Context.",Op.GetMnemonic(), Y);
 
             var rtp = context.Elements[Y].Type;
-            
+
             context.Assert(rtp.Matches(rt, context.Types),
                 "Instruction {0} was invalid. ElementType {1} does not match FieldType {2}",Op.GetMnemonic(), rtp, rt);
-            
+
             context.OpStack.PopI32();               // -1
             context.OpStack.PopI32();               // -2
-            
+
             var resultType = ValType.Ref | (ValType)X;
             context.OpStack.PushType(resultType);   // -1
         }
@@ -429,6 +442,9 @@ namespace Wacs.Core.Instructions.GC
     {
         private readonly PackedExt Sx;
         private TypeIdx X;
+
+        public PackedExt SignExtension => Sx;
+        public int TypeIndex => (int)X.Value;
 
         public InstArrayGet(PackedExt sx) : base(GetOp(sx), -1) 
             => Sx = sx;
@@ -537,22 +553,24 @@ namespace Wacs.Core.Instructions.GC
         public InstArraySet() : base(ByteCode.ArraySet, -3) { }
         
         private TypeIdx X;
-        
+
+        public int TypeIndex => (int)X.Value;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
                 "Instruction {0} was invalid. DefType {1} was not in the Context.",Op.GetMnemonic(), X);
-            
+
             var defType = context.Types[X];
             var compositeType = defType.Expansion;
             var arrayType = compositeType as ArrayType;
             context.Assert(arrayType,
                 "Instruction {0} was invalid. Referenced Type was not array:{1}",Op.GetMnemonic(),compositeType);
-            
+
             var fieldType = arrayType.ElementType;
             context.Assert(fieldType.Mut == Mutability.Mutable,
                 "Instruction {0} was invalid. Cannot set immutable field:{1}",Op.GetMnemonic(), fieldType);
-            
+
             var t = fieldType.UnpackType();
             var refType = ValType.NullableRef | (ValType)X;
 
@@ -657,7 +675,9 @@ namespace Wacs.Core.Instructions.GC
         public InstArrayFill() : base(ByteCode.ArrayFill, -4) { }
         
         private TypeIdx X;
-        
+
+        public int TypeIndex => (int)X.Value;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -739,7 +759,10 @@ namespace Wacs.Core.Instructions.GC
         
         private TypeIdx X; //dest
         private TypeIdx Y; //src
-        
+
+        public int DstTypeIndex => (int)X.Value;
+        public int SrcTypeIndex => (int)Y.Value;
+
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(context.Types.Contains(X),
@@ -867,7 +890,10 @@ namespace Wacs.Core.Instructions.GC
         
         private TypeIdx X;
         private DataIdx Y;
-        
+
+        public int TypeIndex => (int)X.Value;
+        public int DataIndex => (int)Y.Value;
+
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_dataxy
         /// </summary>
@@ -997,6 +1023,9 @@ namespace Wacs.Core.Instructions.GC
         
         private TypeIdx X;
         private ElemIdx Y;
+
+        public int TypeIndex => (int)X.Value;
+        public int ElemIndex => (int)Y.Value;
 
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-arraymathsfarrayinit_elemxy
