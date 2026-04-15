@@ -106,6 +106,7 @@ namespace Wacs.Transpiler.AOT
     /// </summary>
     public class ModuleTranspiler
     {
+        private static int _assemblyCounter;
         private readonly string _namespace;
         private readonly TranspilerOptions _options;
 
@@ -123,7 +124,10 @@ namespace Wacs.Transpiler.AOT
             WasmRuntime runtime,
             string moduleName = "WasmModule")
         {
-            var assemblyName = new AssemblyName($"{_namespace}.{moduleName}");
+            // Each transpilation gets a unique assembly name to prevent type conflicts
+            // across multiple dynamic assemblies (e.g., WasmStruct_0 in different modules).
+            var uniqueId = System.Threading.Interlocked.Increment(ref _assemblyCounter);
+            var assemblyName = new AssemblyName($"{_namespace}.{moduleName}_{uniqueId}");
             var assemblyBuilder = AssemblyBuilder.DefineDynamicAssembly(
                 assemblyName,
                 AssemblyBuilderAccess.Run);
