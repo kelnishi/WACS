@@ -175,6 +175,13 @@ namespace Wacs.Transpiler.AOT
                 return;
             }
 
+            // Table and reference instructions
+            if (TableRefEmitter.CanEmit(op))
+            {
+                TableRefEmitter.Emit(il, inst, op);
+                return;
+            }
+
             // Function calls
             if (CallEmitter.CanEmit(op))
             {
@@ -292,6 +299,10 @@ namespace Wacs.Transpiler.AOT
 
             // Memory operations
             if (MemoryEmitter.CanEmit(op))
+                return true;
+
+            // Table and reference instructions
+            if (TableRefEmitter.CanEmit(op))
                 return true;
 
             // Global access (numeric types only for now)

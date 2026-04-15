@@ -152,9 +152,11 @@ namespace Wacs.Core.Instructions
     public class InstMemoryInit : InstructionBase
     {
         public InstMemoryInit() : base(ByteCode.MemoryInit, -3) { }
-        
+
         private DataIdx X;
         private MemIdx Y;
+        public int DataIndex => (int)X.Value;
+        public int MemoryIndex => (int)Y.Value;
         
         /// <summary>
         /// @Spec 3.3.7.14. memory.init
@@ -259,8 +261,9 @@ namespace Wacs.Core.Instructions
     public class InstDataDrop : InstructionBase
     {
         public InstDataDrop() : base(ByteCode.DataDrop) { }
-        
+
         private DataIdx X;
+        public int DataIndex => (int)X.Value;
         
         /// <summary>
         /// @Spec 3.3.7.15. data.drop
@@ -305,9 +308,11 @@ namespace Wacs.Core.Instructions
     public class InstMemoryCopy : InstructionBase
     {
         public InstMemoryCopy() : base(ByteCode.MemoryCopy, -3) { }
-        
+
         private MemIdx DstX;
         private MemIdx SrcY;
+        public int DstMemIndex => (int)DstX.Value;
+        public int SrcMemIndex => (int)SrcY.Value;
         
         /// <summary>
         /// @Spec 3.3.7.13. memory.copy
@@ -408,8 +413,9 @@ namespace Wacs.Core.Instructions
     public class InstMemoryFill : InstructionBase
     {
         public InstMemoryFill() : base(ByteCode.MemoryFill, -3) { }
-        
+
         private MemIdx X;
+        public int MemoryIndex => (int)X.Value;
         
         /// <summary>
         /// @Spec 3.3.7.12. memory.fill
