@@ -189,7 +189,7 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// Sanitize a WASM name for use as a CLR identifier.
         /// </summary>
-        private static string SanitizeName(string wasmName)
+        public static string SanitizeName(string wasmName)
         {
             if (string.IsNullOrEmpty(wasmName))
                 return "_unnamed";
