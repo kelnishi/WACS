@@ -251,7 +251,9 @@ namespace Wacs.Transpiler.AOT.Emitters
                 case WasmOpCode.I32Mul: il.Emit(OpCodes.Mul); break;
                 case WasmOpCode.I32DivS: il.Emit(OpCodes.Div); break;
                 case WasmOpCode.I32DivU: il.Emit(OpCodes.Div_Un); break;
-                case WasmOpCode.I32RemS: il.Emit(OpCodes.Rem); break;
+                case WasmOpCode.I32RemS:
+                    il.Emit(OpCodes.Call, typeof(RemHelpers).GetMethod(nameof(RemHelpers.I32RemS))!);
+                    break;
                 case WasmOpCode.I32RemU: il.Emit(OpCodes.Rem_Un); break;
                 case WasmOpCode.I32And: il.Emit(OpCodes.And); break;
                 case WasmOpCode.I32Or:  il.Emit(OpCodes.Or); break;
@@ -285,7 +287,9 @@ namespace Wacs.Transpiler.AOT.Emitters
                 case WasmOpCode.I64Mul: il.Emit(OpCodes.Mul); break;
                 case WasmOpCode.I64DivS: il.Emit(OpCodes.Div); break;
                 case WasmOpCode.I64DivU: il.Emit(OpCodes.Div_Un); break;
-                case WasmOpCode.I64RemS: il.Emit(OpCodes.Rem); break;
+                case WasmOpCode.I64RemS:
+                    il.Emit(OpCodes.Call, typeof(RemHelpers).GetMethod(nameof(RemHelpers.I64RemS))!);
+                    break;
                 case WasmOpCode.I64RemU: il.Emit(OpCodes.Rem_Un); break;
                 case WasmOpCode.I64And: il.Emit(OpCodes.And); break;
                 case WasmOpCode.I64Or:  il.Emit(OpCodes.Or); break;
@@ -563,6 +567,29 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (double.IsNaN(v)) throw new Wacs.Core.Runtime.Types.TrapException("invalid conversion to integer");
             if (v >= 18446744073709551616.0 || v <= -1.0) throw new Wacs.Core.Runtime.Types.TrapException("integer overflow");
             return (long)(ulong)v;
+        }
+    }
+
+    /// <summary>
+    /// WASM remainder operations.
+    /// CLR throws OverflowException for INT_MIN % -1, but WASM spec requires result 0.
+    /// </summary>
+    public static class RemHelpers
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int I32RemS(int a, int b)
+        {
+            if (b == 0) throw new Wacs.Core.Runtime.Types.TrapException("integer divide by zero");
+            if (b == -1) return 0; // INT_MIN % -1 = 0 per spec
+            return a % b;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static long I64RemS(long a, long b)
+        {
+            if (b == 0) throw new Wacs.Core.Runtime.Types.TrapException("integer divide by zero");
+            if (b == -1) return 0; // LONG_MIN % -1 = 0 per spec
+            return a % b;
         }
     }
 }
