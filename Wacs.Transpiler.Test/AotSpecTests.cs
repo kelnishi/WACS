@@ -331,12 +331,12 @@ namespace Wacs.Transpiler.Test
                 return null;
             }
 
-            // Check if the module needs runtime features not available standalone
-            bool needsStore = moduleInst.Repr.Datas.Length > 0
-                || moduleInst.Repr.Imports.Any(i => i.Desc is Wacs.Core.Module.ImportDesc.FuncDesc);
-            if (needsStore)
+            // Check if the module needs runtime features not available standalone.
+            // Any imports (functions, globals, memories, tables) require the interpreter
+            // since the standalone Module path doesn't wire imported values.
+            if (moduleInst.Repr.Imports.Length > 0 || moduleInst.Repr.Datas.Length > 0)
             {
-                _output.WriteLine($"    Module needs Store features — using interpreter-backed path");
+                _output.WriteLine($"    Module has imports or data segments — using interpreter-backed path");
                 return null;
             }
 
