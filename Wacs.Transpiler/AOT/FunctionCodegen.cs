@@ -83,7 +83,11 @@ namespace Wacs.Transpiler.AOT
 
             // First pass: check if we can handle every instruction (recursive)
             if (!CanEmitAllInstructions(_funcInst.Body.Instructions))
+            {
+                // Debug: find first failing instruction
+                FindFirstUnsupported(_funcInst.Body.Instructions);
                 return false;
+            }
 
             // Second pass: emit IL
             _il = _method.GetILGenerator();
@@ -300,6 +304,31 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// Check if we have an IL emitter for the given instruction.
         /// </summary>
+        /// <summary>
+        /// Debug: find and store the first unsupported instruction's mnemonic.
+        /// </summary>
+        public string? LastRejectionReason { get; private set; }
+
+        private void FindFirstUnsupported(IEnumerable<InstructionBase> instructions)
+        {
+            foreach (var inst in instructions)
+            {
+                if (!HasEmitter(inst))
+                {
+                    LastRejectionReason = $"{inst.Op.GetMnemonic()} (0x{(byte)inst.Op.x00:X2})";
+                    return;
+                }
+                if (inst is IBlockInstruction blockInst)
+                {
+                    for (int i = 0; i < blockInst.Count; i++)
+                    {
+                        FindFirstUnsupported(blockInst.GetBlock(i).Instructions);
+                        if (LastRejectionReason != null) return;
+                    }
+                }
+            }
+        }
+
         private bool HasEmitter(InstructionBase inst)
         {
             var op = inst.Op.x00;
@@ -336,7 +365,7 @@ namespace Wacs.Transpiler.AOT
             if (TableRefEmitter.CanEmit(op))
                 return true;
 
-            // Global access (numeric types only for now)
+            // Global access
             if (GlobalEmitter.CanEmit(op))
             {
                 int globalIdx = op == WasmOpCode.GlobalGet
@@ -345,8 +374,9 @@ namespace Wacs.Transpiler.AOT
                 try
                 {
                     var gtype = ResolveGlobalType(globalIdx);
-                    return gtype == ValType.I32 || gtype == ValType.I64 ||
-                           gtype == ValType.F32 || gtype == ValType.F64;
+                    // Support numeric types and ref types (as Value)
+                    // V128 globals deferred to SIMD phase
+                    return gtype != ValType.V128;
                 }
                 catch
                 {
