@@ -110,6 +110,16 @@ namespace Wacs.Transpiler.AOT
                 }
             }
 
+            // Pre-resolve all function types (imports + locals) for call site resolution
+            var allFunctionTypes = new FunctionType[importCount + wasmFunctions.Count];
+            int fIdx = 0;
+            foreach (var funcAddr in moduleInst.FuncAddrs)
+            {
+                var func = runtime.GetFunction(funcAddr);
+                allFunctionTypes[fIdx++] = func.Type;
+                if (fIdx >= allFunctionTypes.Length) break;
+            }
+
             // === Pass 0: Emit CLR types for WASM struct/array definitions ===
             var gcTypeEmitter = new GcTypeEmitter(moduleBuilder, $"{_namespace}.{moduleName}", moduleInst.Types);
             gcTypeEmitter.EmitTypes();
@@ -135,7 +145,7 @@ namespace Wacs.Transpiler.AOT
             {
                 var funcInst = wasmFunctions[i];
                 var mb = methodBuilders[i];
-                var codegen = new FunctionCodegen(mb, funcInst, wasmFunctions.ToArray(), methodBuilders, importCount, gcTypeEmitter);
+                var codegen = new FunctionCodegen(mb, funcInst, wasmFunctions.ToArray(), methodBuilders, importCount, gcTypeEmitter, allFunctionTypes);
 
                 bool emitted = codegen.TryEmit();
 

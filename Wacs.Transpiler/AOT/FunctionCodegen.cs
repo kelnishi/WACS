@@ -43,6 +43,7 @@ namespace Wacs.Transpiler.AOT
         private readonly int _importCount;
         private readonly ModuleInstance _moduleInst;
         private readonly GcTypeEmitter _gcTypes;
+        private readonly FunctionType[] _allFunctionTypes;
 
         // Control flow state
         private readonly Stack<EmitBlock> _blockStack = new();
@@ -55,7 +56,8 @@ namespace Wacs.Transpiler.AOT
             FunctionInstance[] siblingFunctions,
             MethodBuilder[] siblingMethods,
             int importCount,
-            GcTypeEmitter gcTypes)
+            GcTypeEmitter gcTypes,
+            FunctionType[] allFunctionTypes)
         {
             _method = method;
             _funcInst = funcInst;
@@ -65,6 +67,7 @@ namespace Wacs.Transpiler.AOT
             _importCount = importCount;
             _moduleInst = funcInst.Module;
             _gcTypes = gcTypes;
+            _allFunctionTypes = allFunctionTypes;
         }
 
         /// <summary>
@@ -204,24 +207,12 @@ namespace Wacs.Transpiler.AOT
                 return;
             }
 
-            // Function calls
+            // Function calls — resolve strategy then emit
             if (CallEmitter.CanEmit(op))
             {
-                switch (op)
-                {
-                    case WasmOpCode.Call:
-                        CallEmitter.EmitCall(il, (InstCall)inst, _siblingFunctions, _siblingMethods, _importCount);
-                        break;
-                    case WasmOpCode.CallIndirect:
-                        CallEmitter.EmitCallIndirect(il, (InstCallIndirect)inst, _moduleInst);
-                        break;
-                    case WasmOpCode.ReturnCall:
-                        CallEmitter.EmitReturnCall(il, (InstReturnCall)inst, _siblingFunctions, _siblingMethods, _importCount);
-                        break;
-                    case WasmOpCode.ReturnCallIndirect:
-                        CallEmitter.EmitReturnCallIndirect(il, (InstReturnCallIndirect)inst, _moduleInst);
-                        break;
-                }
+                var site = CallEmitter.ResolveCallSite(
+                    inst, op, _siblingFunctions, _importCount, _moduleInst, _allFunctionTypes);
+                CallEmitter.EmitCallSite(il, site, _siblingMethods, _moduleInst);
                 return;
             }
 
@@ -363,19 +354,9 @@ namespace Wacs.Transpiler.AOT
                 }
             }
 
-            // Calls
-            if (op == WasmOpCode.Call)
-            {
-                int funcIdx = (int)((InstCall)inst).X.Value;
-                return funcIdx >= _importCount; // intra-module only for now
-            }
-            if (op == WasmOpCode.CallIndirect || op == WasmOpCode.ReturnCallIndirect)
+            // All call variants
+            if (CallEmitter.CanEmit(op))
                 return true;
-            if (op == WasmOpCode.ReturnCall)
-            {
-                int funcIdx = (int)((InstReturnCall)inst).X.Value;
-                return funcIdx >= _importCount;
-            }
 
             return false;
         }

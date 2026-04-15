@@ -13,9 +13,11 @@
 // limitations under the License.
 
 using System;
+using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using Wacs.Core.Instructions;
+using Wacs.Core.Instructions.Reference;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -25,15 +27,11 @@ using WasmOpCode = Wacs.Core.OpCodes.OpCode;
 namespace Wacs.Transpiler.AOT.Emitters
 {
     /// <summary>
-    /// Emits CIL for WebAssembly call instructions.
+    /// Emits CIL for all WebAssembly call instructions.
     ///
-    /// For intra-module calls to sibling transpiled functions:
-    /// The WASM stack has [param0, param1, ...] on top. The CIL method expects
-    /// (TranspiledContext ctx, param0, param1, ...). We need to insert ctx
-    /// underneath the params by spilling them to temp locals.
-    ///
-    /// Phase 3 handles: call (direct intra-module)
-    /// Deferred: call_indirect, call_ref, return_call variants
+    /// Each call is first resolved to a CallSite (analytical representation)
+    /// then emitted according to its strategy. This separation makes the
+    /// transpiler's assumptions about calling context explicit.
     /// </summary>
     internal static class CallEmitter
     {
@@ -41,182 +39,227 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             return op == WasmOpCode.Call
                 || op == WasmOpCode.CallIndirect
+                || op == WasmOpCode.CallRef
                 || op == WasmOpCode.ReturnCall
-                || op == WasmOpCode.ReturnCallIndirect;
+                || op == WasmOpCode.ReturnCallIndirect
+                || op == WasmOpCode.ReturnCallRef;
+        }
+
+        // ================================================================
+        // Call site resolution — determines strategy at transpile time
+        // ================================================================
+
+        /// <summary>
+        /// Resolve a call instruction to a CallSite describing the dispatch strategy.
+        /// </summary>
+        /// <summary>
+        /// allFunctionTypes: types for ALL functions in the module index space (imports + locals).
+        /// </summary>
+        public static CallSite ResolveCallSite(
+            InstructionBase inst, WasmOpCode op,
+            FunctionInstance[] siblingFunctions, int importCount,
+            ModuleInstance moduleInst,
+            FunctionType[] allFunctionTypes)
+        {
+            switch (op)
+            {
+                case WasmOpCode.Call:
+                case WasmOpCode.ReturnCall:
+                {
+                    bool tail = op == WasmOpCode.ReturnCall;
+                    int funcIdx = op == WasmOpCode.Call
+                        ? (int)((InstCall)inst).X.Value
+                        : (int)((InstReturnCall)inst).X.Value;
+
+                    if (funcIdx < importCount)
+                    {
+                        return CallSite.Import(allFunctionTypes[funcIdx], funcIdx, tail);
+                    }
+
+                    int localIdx = funcIdx - importCount;
+                    var calleeType = siblingFunctions[localIdx].Type;
+                    return CallSite.Direct(calleeType, localIdx, tail);
+                }
+
+                case WasmOpCode.CallIndirect:
+                case WasmOpCode.ReturnCallIndirect:
+                {
+                    bool tail = op == WasmOpCode.ReturnCallIndirect;
+                    int tableIdx, typeIdx;
+                    if (op == WasmOpCode.CallIndirect)
+                    {
+                        var ci = (InstCallIndirect)inst;
+                        tableIdx = ci.TableIndex;
+                        typeIdx = ci.TypeIndex;
+                    }
+                    else
+                    {
+                        var rci = (InstReturnCallIndirect)inst;
+                        tableIdx = rci.TableIndex;
+                        typeIdx = rci.TypeIndex;
+                    }
+                    var funcType = moduleInst.Types[(TypeIdx)typeIdx].Expansion as FunctionType
+                        ?? throw new TranspilerException($"Type {typeIdx} is not a function type");
+                    return CallSite.Indirect(funcType, tableIdx, typeIdx, tail);
+                }
+
+                case WasmOpCode.CallRef:
+                case WasmOpCode.ReturnCallRef:
+                {
+                    // Both use opcode 0x15 — distinguish by concrete type
+                    bool tail = inst is InstReturnCallRef;
+                    int typeIdx = tail
+                        ? ((InstReturnCallRef)inst).TypeIndex
+                        : ((InstCallRef)inst).TypeIndex;
+                    var funcType = moduleInst.Types[(TypeIdx)typeIdx].Expansion as FunctionType
+                        ?? throw new TranspilerException($"Type {typeIdx} is not a function type");
+                    return CallSite.Ref(funcType, typeIdx, tail);
+                }
+
+                default:
+                    throw new TranspilerException($"CallEmitter: unexpected opcode {op}");
+            }
+        }
+
+        // ================================================================
+        // IL emission — dispatches on CallSite.Strategy
+        // ================================================================
+
+        /// <summary>
+        /// Emit IL for a resolved call site.
+        /// </summary>
+        public static void EmitCallSite(
+            ILGenerator il, CallSite site,
+            MethodBuilder[] siblingMethods,
+            ModuleInstance moduleInst)
+        {
+            switch (site.Strategy)
+            {
+                case CallStrategy.DirectSibling:
+                    EmitDirectCall(il, site, siblingMethods);
+                    break;
+
+                case CallStrategy.ImportDispatch:
+                    EmitImportCall(il, site);
+                    break;
+
+                case CallStrategy.TableIndirect:
+                    EmitIndirectCall(il, site);
+                    break;
+
+                case CallStrategy.RefDispatch:
+                    EmitRefCall(il, site);
+                    break;
+            }
         }
 
         /// <summary>
-        /// Emit a direct call to a sibling function within the same module.
+        /// DirectSibling: insert TranspiledContext under params, call MethodBuilder directly.
         /// </summary>
-        /// <param name="il">IL generator</param>
-        /// <param name="inst">The call instruction (has FuncIdx X)</param>
-        /// <param name="siblingFunctions">FunctionInstance array for locally-defined functions</param>
-        /// <param name="siblingMethods">MethodBuilder array for locally-defined functions</param>
-        /// <param name="importCount">Number of imported functions (offset into FuncAddrs)</param>
-        public static void EmitCall(
-            ILGenerator il,
-            InstCall inst,
-            FunctionInstance[] siblingFunctions,
-            MethodBuilder[] siblingMethods,
-            int importCount)
+        private static void EmitDirectCall(ILGenerator il, CallSite site, MethodBuilder[] siblingMethods)
         {
-            int funcIdx = (int)inst.X.Value;
+            var targetMethod = siblingMethods[site.LocalFuncIndex];
+            int paramCount = site.FuncType.ParameterTypes.Arity;
 
-            if (funcIdx < importCount)
+            if (paramCount == 0)
             {
-                throw new TranspilerException(
-                    $"CallEmitter: calls to imported functions not yet supported (funcIdx={funcIdx})");
-            }
-
-            int localIdx = funcIdx - importCount;
-            if (localIdx < 0 || localIdx >= siblingMethods.Length)
-            {
-                throw new TranspilerException(
-                    $"CallEmitter: function index {funcIdx} out of range (imports={importCount}, locals={siblingMethods.Length})");
-            }
-
-            var targetMethod = siblingMethods[localIdx];
-            var calleeType = siblingFunctions[localIdx].Type;
-            int wasmParamCount = calleeType.ParameterTypes.Arity;
-
-            if (wasmParamCount == 0)
-            {
-                il.Emit(OpCodes.Ldarg_0); // TranspiledContext
+                il.Emit(OpCodes.Ldarg_0);
                 il.Emit(OpCodes.Call, targetMethod);
             }
             else
             {
-                // Spill WASM params to temps, insert ctx underneath, push back
-                var paramTypes = calleeType!.ParameterTypes.Types;
-                var temps = new LocalBuilder[wasmParamCount];
-                for (int i = wasmParamCount - 1; i >= 0; i--)
+                var paramTypes = site.FuncType.ParameterTypes.Types;
+                var temps = new LocalBuilder[paramCount];
+                for (int i = paramCount - 1; i >= 0; i--)
                 {
                     temps[i] = il.DeclareLocal(ModuleTranspiler.MapValType(paramTypes[i]));
                     il.Emit(OpCodes.Stloc, temps[i]);
                 }
-
-                il.Emit(OpCodes.Ldarg_0); // TranspiledContext
-
-                for (int i = 0; i < wasmParamCount; i++)
-                {
+                il.Emit(OpCodes.Ldarg_0);
+                for (int i = 0; i < paramCount; i++)
                     il.Emit(OpCodes.Ldloc, temps[i]);
-                }
-
                 il.Emit(OpCodes.Call, targetMethod);
             }
         }
 
         /// <summary>
-        /// Emit call_indirect: table lookup + type check + dispatch.
-        /// Stack has: [param0, param1, ..., paramN, i32 tableIndex]
-        /// The function type is known at compile time from TypeIdx.
-        ///
-        /// Strategy: spill all params + table index, call a helper that does
-        /// the full dispatch through ExecContext (OpStack marshaling).
+        /// ImportDispatch: marshal params to Value[], call helper with FuncIdx.
+        /// Spec: call to imported function. Resolved at module instantiation via FuncAddrs.
         /// </summary>
-        public static void EmitCallIndirect(
-            ILGenerator il,
-            InstCallIndirect inst,
-            ModuleInstance moduleInst)
+        private static void EmitImportCall(ILGenerator il, CallSite site)
         {
-            EmitIndirectDispatch(il, inst.TableIndex, inst.TypeIndex, moduleInst);
+            int paramCount = site.FuncType.ParameterTypes.Arity;
+            int resultCount = site.FuncType.ResultType.Arity;
+
+            EmitSpillParamsToArray(il, site.FuncType.ParameterTypes.Types, paramCount, out var paramsLocal);
+
+            il.Emit(OpCodes.Ldarg_0); // TranspiledContext
+            il.Emit(OpCodes.Ldc_I4, site.FuncIdx);
+            il.Emit(OpCodes.Ldloc, paramsLocal);
+            il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
+                nameof(CallHelpers.CallImport), BindingFlags.Public | BindingFlags.Static)!);
+
+            EmitUnpackResults(il, site.FuncType.ResultType.Types, resultCount);
         }
 
         /// <summary>
-        /// Shared logic for call_indirect and return_call_indirect.
+        /// TableIndirect: pop elem index, marshal params, call helper with table/type indices.
+        /// Spec: resolve from table, type check against DefType, dispatch.
         /// </summary>
-        private static void EmitIndirectDispatch(
-            ILGenerator il, int tableIdx, int typeIdx, ModuleInstance moduleInst)
+        private static void EmitIndirectCall(ILGenerator il, CallSite site)
         {
-            var funcType = moduleInst.Types[(TypeIdx)typeIdx].Expansion as FunctionType;
-            if (funcType == null)
-                throw new TranspilerException("call_indirect: could not resolve function type");
-
-            int paramCount = funcType.ParameterTypes.Arity;
-            int resultCount = funcType.ResultType.Arity;
+            int paramCount = site.FuncType.ParameterTypes.Arity;
+            int resultCount = site.FuncType.ResultType.Arity;
 
             // Stack: [p0, p1, ..., pN-1, elemIdx]
             var elemIdxLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, elemIdxLocal);
 
-            EmitSpillParamsToArray(il, funcType.ParameterTypes.Types, paramCount, out var paramsLocal);
+            EmitSpillParamsToArray(il, site.FuncType.ParameterTypes.Types, paramCount, out var paramsLocal);
 
-            il.Emit(OpCodes.Ldarg_0); // TranspiledContext
-            il.Emit(OpCodes.Ldc_I4, tableIdx);
-            il.Emit(OpCodes.Ldc_I4, typeIdx);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldc_I4, site.TableIdx);
+            il.Emit(OpCodes.Ldc_I4, site.TypeIdx);
             il.Emit(OpCodes.Ldloc, elemIdxLocal);
             il.Emit(OpCodes.Ldloc, paramsLocal);
             il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
                 nameof(CallHelpers.CallIndirect), BindingFlags.Public | BindingFlags.Static)!);
 
-            EmitUnpackResults(il, funcType.ResultType.Types, resultCount);
+            EmitUnpackResults(il, site.FuncType.ResultType.Types, resultCount);
         }
 
         /// <summary>
-        /// Emit return_call: tail-call to a sibling function.
-        /// Semantically identical to call + return. We emit it as a regular call + ret
-        /// since CIL tail. prefix has restrictions that may not be met.
+        /// RefDispatch: pop funcref from stack, marshal params, call helper.
+        /// Spec: pop funcref, null check, type check, dispatch.
         /// </summary>
-        public static void EmitReturnCall(
-            ILGenerator il,
-            InstReturnCall inst,
-            FunctionInstance[] siblingFunctions,
-            MethodBuilder[] siblingMethods,
-            int importCount)
+        private static void EmitRefCall(ILGenerator il, CallSite site)
         {
-            // return_call has the same FuncIdx field as call
-            int funcIdx = (int)inst.X.Value;
+            int paramCount = site.FuncType.ParameterTypes.Arity;
+            int resultCount = site.FuncType.ResultType.Arity;
 
-            if (funcIdx < importCount)
-                throw new TranspilerException($"CallEmitter: return_call to imports not yet supported");
+            // Stack: [p0, p1, ..., pN-1, funcref (Value)]
+            var funcRefLocal = il.DeclareLocal(typeof(Value));
+            il.Emit(OpCodes.Stloc, funcRefLocal);
 
-            int localIdx = funcIdx - importCount;
-            var targetMethod = siblingMethods[localIdx];
-            var calleeType = siblingFunctions[localIdx].Type;
-            int wasmParamCount = calleeType.ParameterTypes.Arity;
+            EmitSpillParamsToArray(il, site.FuncType.ParameterTypes.Types, paramCount, out var paramsLocal);
 
-            if (wasmParamCount == 0)
-            {
-                il.Emit(OpCodes.Ldarg_0);
-                il.Emit(OpCodes.Call, targetMethod);
-            }
-            else
-            {
-                var paramTypes = calleeType.ParameterTypes.Types;
-                var temps = new LocalBuilder[wasmParamCount];
-                for (int i = wasmParamCount - 1; i >= 0; i--)
-                {
-                    temps[i] = il.DeclareLocal(ModuleTranspiler.MapValType(paramTypes[i]));
-                    il.Emit(OpCodes.Stloc, temps[i]);
-                }
-                il.Emit(OpCodes.Ldarg_0);
-                for (int i = 0; i < wasmParamCount; i++)
-                    il.Emit(OpCodes.Ldloc, temps[i]);
-                il.Emit(OpCodes.Call, targetMethod);
-            }
-            // Implicit return — the value is on the stack, ret follows from End
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldc_I4, site.TypeIdx);
+            il.Emit(OpCodes.Ldloc, funcRefLocal);
+            il.Emit(OpCodes.Ldloc, paramsLocal);
+            il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
+                nameof(CallHelpers.CallRef), BindingFlags.Public | BindingFlags.Static)!);
+
+            EmitUnpackResults(il, site.FuncType.ResultType.Types, resultCount);
         }
 
-        /// <summary>
-        /// Emit return_call_indirect: tail-call through table.
-        /// Emitted as call_indirect + implicit return.
-        /// </summary>
-        public static void EmitReturnCallIndirect(
-            ILGenerator il,
-            InstReturnCallIndirect inst,
-            ModuleInstance moduleInst)
-        {
-            // Reuse call_indirect logic — same table/type indices, same dispatch
-            EmitIndirectDispatch(il, inst.TableIndex, inst.TypeIndex, moduleInst);
-        }
+        // ================================================================
+        // Value[] marshaling helpers
+        // ================================================================
 
-        /// <summary>
-        /// Spill N typed values from the CIL stack into a Value[] local.
-        /// </summary>
         private static void EmitSpillParamsToArray(
             ILGenerator il, ValType[] paramTypes, int count, out LocalBuilder arrayLocal)
         {
-            // First spill each param to a typed temp (reverse order — top of stack first)
             var temps = new LocalBuilder[count];
             for (int i = count - 1; i >= 0; i--)
             {
@@ -224,7 +267,6 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
 
-            // Create Value[] and populate
             arrayLocal = il.DeclareLocal(typeof(Value[]));
             il.Emit(OpCodes.Ldc_I4, count);
             il.Emit(OpCodes.Newarr, typeof(Value));
@@ -240,15 +282,11 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
         }
 
-        /// <summary>
-        /// Unpack Value[] results onto the CIL stack as typed values.
-        /// Assumes the Value[] is on top of the stack.
-        /// </summary>
         private static void EmitUnpackResults(ILGenerator il, ValType[] resultTypes, int count)
         {
             if (count == 0)
             {
-                il.Emit(OpCodes.Pop); // discard Value[]
+                il.Emit(OpCodes.Pop);
                 return;
             }
 
@@ -275,9 +313,6 @@ namespace Wacs.Transpiler.AOT.Emitters
         private static readonly FieldInfo Float64Field =
             typeof(DUnion).GetField(nameof(DUnion.Float64))!;
 
-        /// <summary>
-        /// Convert a typed CIL value to Value struct (for array storage).
-        /// </summary>
         private static void EmitBoxToValue(ILGenerator il, ValType type)
         {
             switch (type)
@@ -295,105 +330,149 @@ namespace Wacs.Transpiler.AOT.Emitters
                     il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(double) })!);
                     break;
                 default:
-                    // Reference types are already Value on the CIL stack
-                    break;
+                    break; // Reference types are already Value
             }
         }
 
-        /// <summary>
-        /// Extract typed CIL value from a Value struct.
-        /// </summary>
         private static void EmitUnboxFromValue(ILGenerator il, ValType type)
         {
             switch (type)
             {
                 case ValType.I32:
-                {
-                    var local = il.DeclareLocal(typeof(Value));
-                    il.Emit(OpCodes.Stloc, local);
-                    il.Emit(OpCodes.Ldloca, local);
-                    il.Emit(OpCodes.Ldflda, DataField);
-                    il.Emit(OpCodes.Ldfld, Int32Field);
-                    break;
-                }
                 case ValType.I64:
-                {
-                    var local = il.DeclareLocal(typeof(Value));
-                    il.Emit(OpCodes.Stloc, local);
-                    il.Emit(OpCodes.Ldloca, local);
-                    il.Emit(OpCodes.Ldflda, DataField);
-                    il.Emit(OpCodes.Ldfld, Int64Field);
-                    break;
-                }
                 case ValType.F32:
-                {
-                    var local = il.DeclareLocal(typeof(Value));
-                    il.Emit(OpCodes.Stloc, local);
-                    il.Emit(OpCodes.Ldloca, local);
-                    il.Emit(OpCodes.Ldflda, DataField);
-                    il.Emit(OpCodes.Ldfld, Float32Field);
-                    break;
-                }
                 case ValType.F64:
                 {
                     var local = il.DeclareLocal(typeof(Value));
                     il.Emit(OpCodes.Stloc, local);
                     il.Emit(OpCodes.Ldloca, local);
                     il.Emit(OpCodes.Ldflda, DataField);
-                    il.Emit(OpCodes.Ldfld, Float64Field);
+                    il.Emit(OpCodes.Ldfld, type switch
+                    {
+                        ValType.I32 => Int32Field,
+                        ValType.I64 => Int64Field,
+                        ValType.F32 => Float32Field,
+                        ValType.F64 => Float64Field,
+                        _ => throw new TranspilerException("unreachable")
+                    });
                     break;
                 }
                 default:
-                    // Reference types stay as Value
-                    break;
+                    break; // Reference types stay as Value
             }
         }
     }
 
     /// <summary>
-    /// Static helpers for indirect/ref calls from transpiled code.
-    /// These marshal through the ExecContext OpStack to invoke any IFunctionInstance.
+    /// Runtime dispatch helpers for call instructions.
+    /// Called from transpiled IL when the target isn't a direct sibling call.
+    ///
+    /// These match the interpreter's execution semantics:
+    /// - CallImport: resolves FuncAddr from module FuncAddrs, invokes via ExecContext
+    /// - CallIndirect: table lookup, null check, type check, invoke
+    /// - CallRef: funcref extraction, null check, type check, invoke
+    ///
+    /// All marshal parameters through ExecContext.OpStack to invoke any IFunctionInstance.
     /// </summary>
     public static class CallHelpers
     {
+        /// <summary>
+        /// Dispatch a call to an imported or cross-module function by FuncIdx.
+        /// Matches interpreter: InstCall.Execute → context.Invoke(FuncAddrs[X])
+        /// </summary>
+        public static Value[] CallImport(
+            TranspiledContext ctx, int funcIdx, Value[] args)
+        {
+            if (ctx.ExecContext == null || ctx.Module == null)
+                throw new TrapException("call to import requires runtime context");
+
+            var funcAddr = ctx.Module.FuncAddrs[(FuncIdx)funcIdx];
+            return InvokeViaOpStack(ctx, funcAddr, args);
+        }
+
+        /// <summary>
+        /// Dispatch a call_indirect: table lookup + type check + invoke.
+        /// Matches interpreter: InstCallIndirect.Execute steps 2-19.
+        /// </summary>
         public static Value[] CallIndirect(
             TranspiledContext ctx, int tableIdx, int typeIdx, int elemIdx, Value[] args)
         {
             if (ctx.ExecContext == null || ctx.Store == null || ctx.Module == null)
                 throw new TrapException("call_indirect requires runtime context");
 
+            // Steps 2-5: table lookup
             var table = ctx.Tables[tableIdx];
             if (elemIdx < 0 || elemIdx >= table.Elements.Count)
                 throw new TrapException($"undefined element {elemIdx}");
 
+            // Step 11: element fetch
             var r = table.Elements[elemIdx];
+            // Step 12: null check
             if (r.IsNullRef)
                 throw new TrapException("uninitialized element");
 
+            // Steps 13-14: funcref validation + addr extraction
             var funcAddr = r.GetFuncAddr(ctx.Module.Types);
             if (!ctx.Store.Contains(funcAddr))
                 throw new TrapException("call_indirect: function not found");
 
+            // Steps 16-18: type check (matches interpreter exactly)
             var funcInst = ctx.Store[funcAddr];
-
-            // Type check
             var expectedType = ctx.Module.Types[(TypeIdx)typeIdx];
             if (funcInst is FunctionInstance fi)
             {
                 if (!fi.DefType.Matches(expectedType, ctx.Module.Types))
                     throw new TrapException("indirect call type mismatch");
             }
-            var funcType = funcInst.Type;
-            if (!funcType.Matches(expectedType.Unroll.Body, ctx.Module.Types))
+            if (!funcInst.Type.Matches(expectedType.Unroll.Body, ctx.Module.Types))
                 throw new TrapException("indirect call type mismatch");
 
-            // Marshal through ExecContext
-            var execCtx = ctx.ExecContext;
+            // Step 19: invoke
+            return InvokeViaOpStack(ctx, funcAddr, args);
+        }
+
+        /// <summary>
+        /// Dispatch a call_ref: pop funcref, null check, type check, invoke.
+        /// Matches interpreter: InstCallRef.Execute steps 1-8.
+        /// </summary>
+        public static Value[] CallRef(
+            TranspiledContext ctx, int typeIdx, Value funcRef, Value[] args)
+        {
+            if (ctx.ExecContext == null || ctx.Store == null || ctx.Module == null)
+                throw new TrapException("call_ref requires runtime context");
+
+            // Step 3: null check
+            if (funcRef.IsNullRef)
+                throw new TrapException("null function reference");
+
+            // Step 5: extract FuncAddr
+            var funcAddr = funcRef.GetFuncAddr(ctx.Module.Types);
+            if (!ctx.Store.Contains(funcAddr))
+                throw new TrapException("call_ref: function not found");
+
+            // Step 7: type check
+            var funcInst = ctx.Store[funcAddr];
+            var expectedType = ctx.Module.Types[(TypeIdx)typeIdx];
+            if (!funcInst.Type.Matches(expectedType.Unroll.Body, ctx.Module.Types))
+                throw new TrapException("call_ref type mismatch");
+
+            // Step 8: invoke
+            return InvokeViaOpStack(ctx, funcAddr, args);
+        }
+
+        /// <summary>
+        /// Common invoke path: push params to OpStack, call IFunctionInstance.Invoke,
+        /// pop results from OpStack. Matches ExecContext.Invoke semantics.
+        /// </summary>
+        private static Value[] InvokeViaOpStack(TranspiledContext ctx, FuncAddr funcAddr, Value[] args)
+        {
+            var execCtx = ctx.ExecContext!;
+            var funcInst = ctx.Store![funcAddr];
+
             execCtx.OpStack.PushValues(args);
             funcInst.Invoke(execCtx);
 
-            // Pop results
-            var results = new Value[funcType.ResultType.Arity];
+            var results = new Value[funcInst.Type.ResultType.Arity];
             for (int i = results.Length - 1; i >= 0; i--)
                 results[i] = execCtx.OpStack.PopAny();
 
