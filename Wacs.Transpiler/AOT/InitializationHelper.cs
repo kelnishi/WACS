@@ -89,6 +89,15 @@ namespace Wacs.Transpiler.AOT
         }
 
         public static ModuleInitData Get(int id) => _initData[id];
+
+        /// <summary>
+        /// The ID of the most recently registered init data.
+        /// Used by ModuleLinker to find the init data for a just-transpiled module.
+        /// </summary>
+        public static int LastRegisteredId
+        {
+            get { lock (_lock) { return _initData.Count - 1; } }
+        }
     }
 
     /// <summary>

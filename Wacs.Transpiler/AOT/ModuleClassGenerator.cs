@@ -64,6 +64,7 @@ namespace Wacs.Transpiler.AOT
         private readonly int _dataSegmentBaseId;
         private readonly int _elemSegmentBaseId;
         private int _initDataId = -1;
+        public int InitDataId => _initDataId;
 
         public ModuleClassGenerator(
             ModuleBuilder moduleBuilder,
