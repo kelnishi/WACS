@@ -182,7 +182,7 @@ namespace Wacs.Transpiler.AOT
                 if (inst is InstI64Const i64) return new Value(i64.FetchImmediate(null!));
                 if (inst is InstF32Const f32) return new Value(f32.FetchImmediate(null!));
                 if (inst is InstF64Const f64) return new Value(f64.FetchImmediate(null!));
-                if (inst is InstRefNull) return new Value(ValType.Nil);
+                if (inst is InstRefNull rn) return new Value(rn.RefType);
                 if (inst is InstRefFunc refFunc)
                     return new Value(ValType.FuncRef, (int)refFunc.FunctionIndex.Value);
             }
