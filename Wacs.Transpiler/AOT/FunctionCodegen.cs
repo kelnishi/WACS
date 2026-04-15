@@ -41,6 +41,7 @@ namespace Wacs.Transpiler.AOT
         private readonly int _paramCount;
         private readonly int _importCount;
         private readonly ModuleInstance _moduleInst;
+        private readonly GcTypeEmitter _gcTypes;
 
         // Control flow state
         private readonly Stack<EmitBlock> _blockStack = new();
@@ -52,7 +53,8 @@ namespace Wacs.Transpiler.AOT
             FunctionInstance funcInst,
             FunctionInstance[] siblingFunctions,
             MethodBuilder[] siblingMethods,
-            int importCount)
+            int importCount,
+            GcTypeEmitter gcTypes)
         {
             _method = method;
             _funcInst = funcInst;
@@ -61,6 +63,7 @@ namespace Wacs.Transpiler.AOT
             _paramCount = funcInst.Type.ParameterTypes.Arity;
             _importCount = importCount;
             _moduleInst = funcInst.Module;
+            _gcTypes = gcTypes;
         }
 
         /// <summary>

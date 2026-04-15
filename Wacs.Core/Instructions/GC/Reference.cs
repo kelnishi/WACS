@@ -28,8 +28,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private ValType Ht;
         private bool Nullable = false;
-        
-        public InstRefCast(bool nullable) : base(nullable?ByteCode.RefCastNull:ByteCode.RefCast) 
+        public ValType HeapType => Ht;
+        public bool IsNullable => Nullable;
+
+        public InstRefCast(bool nullable) : base(nullable?ByteCode.RefCastNull:ByteCode.RefCast)
             => Nullable = nullable;
 
         /// <summary>
@@ -77,8 +79,10 @@ namespace Wacs.Core.Instructions.GC
     {
         private ValType Ht;
         private bool Nullable = false;
-        
-        public InstRefTest(bool nullable) : base(nullable?ByteCode.RefTestNull: ByteCode.RefTest) 
+        public ValType HeapType => Ht;
+        public bool IsNullable => Nullable;
+
+        public InstRefTest(bool nullable) : base(nullable?ByteCode.RefTestNull: ByteCode.RefTest)
             => Nullable = nullable;
 
         /// <summary>
