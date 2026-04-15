@@ -100,6 +100,25 @@ namespace Wacs.Transpiler.AOT.Emitters
                     EmitV128ToI32(il, nameof(SimdHelpers.V128AnyTrue));
                     return true;
 
+                // === Chunk 3: Integer arithmetic ===
+                // add/sub per shape
+                case SimdCode.I8x16Add: EmitBinaryV128(il, nameof(SimdHelpers.I8x16Add)); return true;
+                case SimdCode.I8x16Sub: EmitBinaryV128(il, nameof(SimdHelpers.I8x16Sub)); return true;
+                case SimdCode.I16x8Add: EmitBinaryV128(il, nameof(SimdHelpers.I16x8Add)); return true;
+                case SimdCode.I16x8Sub: EmitBinaryV128(il, nameof(SimdHelpers.I16x8Sub)); return true;
+                case SimdCode.I16x8Mul: EmitBinaryV128(il, nameof(SimdHelpers.I16x8Mul)); return true;
+                case SimdCode.I32x4Add: EmitBinaryV128(il, nameof(SimdHelpers.I32x4Add)); return true;
+                case SimdCode.I32x4Sub: EmitBinaryV128(il, nameof(SimdHelpers.I32x4Sub)); return true;
+                case SimdCode.I32x4Mul: EmitBinaryV128(il, nameof(SimdHelpers.I32x4Mul)); return true;
+                case SimdCode.I64x2Add: EmitBinaryV128(il, nameof(SimdHelpers.I64x2Add)); return true;
+                case SimdCode.I64x2Sub: EmitBinaryV128(il, nameof(SimdHelpers.I64x2Sub)); return true;
+                case SimdCode.I64x2Mul: EmitBinaryV128(il, nameof(SimdHelpers.I64x2Mul)); return true;
+                // neg per shape
+                case SimdCode.I8x16Neg: EmitUnaryV128(il, nameof(SimdHelpers.I8x16Neg)); return true;
+                case SimdCode.I16x8Neg: EmitUnaryV128(il, nameof(SimdHelpers.I16x8Neg)); return true;
+                case SimdCode.I32x4Neg: EmitUnaryV128(il, nameof(SimdHelpers.I32x4Neg)); return true;
+                case SimdCode.I64x2Neg: EmitUnaryV128(il, nameof(SimdHelpers.I64x2Neg)); return true;
+
                 default:
                     return false;
             }
