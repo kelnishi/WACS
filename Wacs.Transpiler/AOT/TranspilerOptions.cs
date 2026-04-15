@@ -65,6 +65,34 @@ namespace Wacs.Transpiler.AOT
         /// 0 = no limit.
         /// </summary>
         public int MaxFunctionSize { get; set; } = 0;
+
+        /// <summary>How data segments are stored in the transpiled assembly.</summary>
+        public DataSegmentStorage DataStorage { get; set; } = DataSegmentStorage.CompressedResource;
+    }
+
+    /// <summary>
+    /// Strategy for storing WASM data segments in the transpiled assembly.
+    /// </summary>
+    public enum DataSegmentStorage
+    {
+        /// <summary>
+        /// Data segments embedded as Brotli-compressed assembly resources.
+        /// Decompressed at module instantiation. Smallest assembly size.
+        /// </summary>
+        CompressedResource,
+
+        /// <summary>
+        /// Data segments embedded as uncompressed assembly resources.
+        /// Fastest instantiation (no decompression). Moderate assembly size.
+        /// </summary>
+        RawResource,
+
+        /// <summary>
+        /// Data segments emitted as static readonly byte[] fields on the Functions class.
+        /// Loaded into managed heap at first access. Largest assembly size.
+        /// No resource API needed — simplest for debugging.
+        /// </summary>
+        StaticArrays,
     }
 
     /// <summary>
