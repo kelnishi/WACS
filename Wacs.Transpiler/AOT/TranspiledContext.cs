@@ -45,14 +45,20 @@ namespace Wacs.Transpiler.AOT
         public GlobalInstance[] Globals;
 
         // === Function dispatch ===
-        // Indexed by funcidx (module-local index space, imports first).
-        // For intra-module transpiled calls, the IL uses direct call instructions.
-        // For cross-module and host calls, dispatch goes through this table.
-        public IFunctionInstance[] Functions;
+        // ImportDelegates: typed delegates for imported functions.
+        // Filled by the implementor at load time. Each delegate's signature matches
+        // the WASM import's function type (no TranspiledContext parameter).
+        public Delegate[] ImportDelegates;
 
-        // === Runtime services (nullable for standalone mode) ===
-        // When running inside the WACS framework, these enable host function
-        // interop, GC operations, and type checks. When standalone, they are null.
+        // FuncTable: delegates for ALL functions in the module index space.
+        // Imports (0..importCount-1): same objects as ImportDelegates.
+        // Locals (importCount..N): wrapping the transpiled static methods.
+        // Used by call_indirect/call_ref for dynamic dispatch.
+        public Delegate[] FuncTable;
+
+        // === Interpreter interop (nullable — not needed for standalone) ===
+        // When running inside the WACS framework, these enable mixed-mode
+        // execution with interpreted modules. When standalone, they are null.
         public Store? Store;
         public ExecContext? ExecContext;
         public ModuleInstance? Module;
@@ -68,12 +74,14 @@ namespace Wacs.Transpiler.AOT
             byte[][]? memories = null,
             TableInstance[]? tables = null,
             GlobalInstance[]? globals = null,
-            IFunctionInstance[]? functions = null)
+            Delegate[]? importDelegates = null,
+            Delegate[]? funcTable = null)
         {
             Memories = memories ?? Array.Empty<byte[]>();
             Tables = tables ?? Array.Empty<TableInstance>();
             Globals = globals ?? Array.Empty<GlobalInstance>();
-            Functions = functions ?? Array.Empty<IFunctionInstance>();
+            ImportDelegates = importDelegates ?? Array.Empty<Delegate>();
+            FuncTable = funcTable ?? Array.Empty<Delegate>();
         }
 
         /// <summary>
@@ -93,7 +101,8 @@ namespace Wacs.Transpiler.AOT
             Memories = ResolveMemories(store, moduleInstance);
             Tables = ResolveTables(store, moduleInstance);
             Globals = ResolveGlobals(store, moduleInstance);
-            Functions = ResolveFunctions(store, moduleInstance);
+            ImportDelegates = Array.Empty<Delegate>(); // Filled by consumer
+            FuncTable = Array.Empty<Delegate>(); // Filled after transpilation
         }
 
         /// <summary>
@@ -147,9 +156,21 @@ namespace Wacs.Transpiler.AOT
             return globals;
         }
 
-        private static IFunctionInstance[] ResolveFunctions(Store store, ModuleInstance module)
+        /// <summary>
+        /// Populate the FuncTable with delegates wrapping transpiled methods
+        /// and import delegates. Called after transpilation.
+        /// </summary>
+        public void PopulateFuncTable(Delegate[] localDelegates, int importCount)
         {
-            return module.FuncAddrs.Select(addr => store[addr]).ToArray();
+            FuncTable = new Delegate[importCount + localDelegates.Length];
+            for (int i = 0; i < importCount; i++)
+            {
+                FuncTable[i] = i < ImportDelegates.Length ? ImportDelegates[i] : null!;
+            }
+            for (int i = 0; i < localDelegates.Length; i++)
+            {
+                FuncTable[importCount + i] = localDelegates[i];
+            }
         }
     }
 }
