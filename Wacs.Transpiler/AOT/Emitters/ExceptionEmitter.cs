@@ -310,7 +310,7 @@ namespace Wacs.Transpiler.AOT.Emitters
 
     public static class ExceptionHelpers
     {
-        public static void CreateAndThrow(TranspiledContext ctx, int tagIdx, Value[] fields)
+        public static void CreateAndThrow(ThinContext ctx, int tagIdx, Value[] fields)
         {
             if (ctx.Module == null || ctx.Store == null)
                 throw new TrapException("throw requires runtime context");
@@ -335,7 +335,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             throw new WasmException(exn.Tag, exn.Fields.ToArray(), exnRefVal);
         }
 
-        public static bool TagMatches(TranspiledContext ctx, WasmException wex, int tagIdx)
+        public static bool TagMatches(ThinContext ctx, WasmException wex, int tagIdx)
         {
             if (ctx.Module == null) return false;
             var expected = ctx.Module.TagAddrs[(TagIdx)tagIdx];

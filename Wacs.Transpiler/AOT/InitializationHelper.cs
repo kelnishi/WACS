@@ -105,10 +105,10 @@ namespace Wacs.Transpiler.AOT
     public static class InitializationHelper
     {
         /// <summary>
-        /// Initialize a TranspiledContext from ModuleInitData.
-        /// Returns a fully initialized TranspiledContext ready for function execution.
+        /// Initialize a ThinContext from ModuleInitData.
+        /// Returns a fully initialized ThinContext ready for function execution.
         /// </summary>
-        public static TranspiledContext Initialize(int initDataId)
+        public static ThinContext Initialize(int initDataId)
         {
             var data = InitRegistry.Get(initDataId);
 
@@ -169,7 +169,7 @@ namespace Wacs.Transpiler.AOT
                 memoryLimits[i] = data.Memories[i].max;
 
             // Create context
-            var ctx = new TranspiledContext(
+            var ctx = new ThinContext(
                 memories: memories,
                 tables: tables,
                 globals: globals);

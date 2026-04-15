@@ -29,7 +29,7 @@ namespace Wacs.Transpiler.AOT
     /// When running standalone (without WasmRuntime), consumers construct this directly.
     /// When running inside the WACS framework, LoadTranspiledModule populates it from the Store.
     /// </summary>
-    public class TranspiledContext
+    public class ThinContext
     {
         // === Linear Memory ===
         // Indexed by memidx. Most modules use only Memories[0].
@@ -58,7 +58,7 @@ namespace Wacs.Transpiler.AOT
         // === Function dispatch ===
         // ImportDelegates: typed delegates for imported functions.
         // Filled by the implementor at load time. Each delegate's signature matches
-        // the WASM import's function type (no TranspiledContext parameter).
+        // the WASM import's function type (no ThinContext parameter).
         public Delegate[] ImportDelegates;
 
         // FuncTable: delegates for ALL functions in the module index space.
@@ -79,9 +79,9 @@ namespace Wacs.Transpiler.AOT
         public TypesSpace? Types;
 
         /// <summary>
-        /// Construct a TranspiledContext for standalone use (no WasmRuntime).
+        /// Construct a ThinContext for standalone use (no WasmRuntime).
         /// </summary>
-        public TranspiledContext(
+        public ThinContext(
             byte[][]? memories = null,
             TableInstance[]? tables = null,
             GlobalInstance[]? globals = null,
@@ -96,9 +96,9 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
-        /// Construct a TranspiledContext wired to the WACS framework.
+        /// Construct a ThinContext wired to the WACS framework.
         /// </summary>
-        public TranspiledContext(
+        public ThinContext(
             Store store,
             ExecContext execContext,
             ModuleInstance moduleInstance)
@@ -245,7 +245,7 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
-        /// Build CLR delegate type for a WASM function type (without TranspiledContext param).
+        /// Build CLR delegate type for a WASM function type (without ThinContext param).
         /// </summary>
         private static Type? BuildDelegateTypeForFunc(FunctionType funcType)
         {

@@ -155,7 +155,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         /// <summary>
-        /// DirectSibling: insert TranspiledContext under params, call MethodBuilder directly.
+        /// DirectSibling: insert ThinContext under params, call MethodBuilder directly.
         /// For multi-value returns: declare locals for out params, pass ldloca, destructure after.
         /// </summary>
         private static void EmitDirectCall(
@@ -218,9 +218,9 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         private static readonly FieldInfo ImportDelegatesField =
-            typeof(TranspiledContext).GetField(nameof(TranspiledContext.ImportDelegates))!;
+            typeof(ThinContext).GetField(nameof(ThinContext.ImportDelegates))!;
         private static readonly FieldInfo FuncTableField =
-            typeof(TranspiledContext).GetField(nameof(TranspiledContext.FuncTable))!;
+            typeof(ThinContext).GetField(nameof(ThinContext.FuncTable))!;
 
         /// <summary>
         /// ImportDispatch: load typed delegate from ctx.ImportDelegates[idx], invoke directly.
@@ -570,7 +570,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// Resolve call_indirect: table lookup + null check → FuncTable index.
         /// Returns the FuncAddr value which is the index into FuncTable.
         /// </summary>
-        public static int ResolveIndirect(TranspiledContext ctx, int tableIdx, int elemIdx)
+        public static int ResolveIndirect(ThinContext ctx, int tableIdx, int elemIdx)
         {
             var table = ctx.Tables[tableIdx];
             if (elemIdx < 0 || elemIdx >= table.Elements.Count)
@@ -594,7 +594,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// Validates delegate signature matches expected arg count before invoking.
         /// </summary>
         public static object? InvokeIndirect(
-            TranspiledContext ctx, int tableIdx, int elemIdx, object?[] args,
+            ThinContext ctx, int tableIdx, int elemIdx, object?[] args,
             Type? expectedReturn = null)
         {
             int funcIdx = ResolveIndirect(ctx, tableIdx, elemIdx);
@@ -652,7 +652,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// Resolve and invoke call_ref in one step.
         /// </summary>
         public static object? InvokeRef(
-            TranspiledContext ctx, Value funcRef, object?[] args)
+            ThinContext ctx, Value funcRef, object?[] args)
         {
             int funcIdx = ResolveRef(ctx, funcRef);
 
@@ -682,7 +682,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// <summary>
         /// Resolve call_ref: funcref → FuncTable index.
         /// </summary>
-        public static int ResolveRef(TranspiledContext ctx, Value funcRef)
+        public static int ResolveRef(ThinContext ctx, Value funcRef)
         {
             if (funcRef.IsNullRef)
                 throw new TrapException("null function reference");
@@ -701,7 +701,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// Called from the fallback method body instead of throwing NotSupportedException.
         /// In standalone mode (no ExecContext), throws NotSupportedException as before.
         /// </summary>
-        public static Value[] InvokeFallback(TranspiledContext ctx, int funcIndex, Value[] args)
+        public static Value[] InvokeFallback(ThinContext ctx, int funcIndex, Value[] args)
         {
             if (ctx.ExecContext == null || ctx.Module == null)
                 throw new NotSupportedException(

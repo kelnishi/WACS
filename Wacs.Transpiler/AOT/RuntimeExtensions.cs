@@ -25,19 +25,19 @@ namespace Wacs.Transpiler.AOT
     ///
     /// Each exported transpiled function is bound as a host function under the
     /// given module name, using the standard BindHostFunction path.
-    /// The TranspiledContext is captured in wrapper delegates so the runtime
+    /// The ThinContext is captured in wrapper delegates so the runtime
     /// sees normal .NET delegates with WASM-visible parameter signatures.
     /// </summary>
     public class TranspiledModule : IBindable
     {
         private readonly string _moduleName;
         private readonly TranspilationResult _result;
-        private readonly TranspiledContext _ctx;
+        private readonly ThinContext _ctx;
 
         public TranspiledModule(
             string moduleName,
             TranspilationResult result,
-            TranspiledContext ctx)
+            ThinContext ctx)
         {
             _moduleName = moduleName;
             _result = result;
@@ -63,15 +63,15 @@ namespace Wacs.Transpiler.AOT
 
         /// <summary>
         /// Creates a delegate that wraps a transpiled static method, capturing the
-        /// TranspiledContext so the resulting delegate has only the WASM-visible parameters.
+        /// ThinContext so the resulting delegate has only the WASM-visible parameters.
         ///
-        /// Input:  static int Function0(TranspiledContext ctx, int p0, long p1)
+        /// Input:  static int Function0(ThinContext ctx, int p0, long p1)
         /// Output: Func&lt;int, long, int&gt; wrapper = (p0, p1) => Function0(capturedCtx, p0, p1)
         /// </summary>
-        internal static Delegate? CreateContextWrapper(MethodInfo method, TranspiledContext ctx)
+        internal static Delegate? CreateContextWrapper(MethodInfo method, ThinContext ctx)
         {
             var allParams = method.GetParameters();
-            if (allParams.Length == 0 || allParams[0].ParameterType != typeof(TranspiledContext))
+            if (allParams.Length == 0 || allParams[0].ParameterType != typeof(ThinContext))
                 return null;
 
             var wasmParamTypes = allParams.Skip(1).Select(p => p.ParameterType).ToArray();
@@ -116,16 +116,16 @@ namespace Wacs.Transpiler.AOT
     }
 
     /// <summary>
-    /// Captures a TranspiledContext and a MethodInfo, providing typed trampoline
+    /// Captures a ThinContext and a MethodInfo, providing typed trampoline
     /// methods that prepend the context to arguments. The trampoline is bound as
     /// a delegate, avoiding per-call argument array allocation.
     /// </summary>
     internal class MethodWrapper
     {
         private readonly MethodInfo _method;
-        private readonly TranspiledContext _ctx;
+        private readonly ThinContext _ctx;
 
-        public MethodWrapper(MethodInfo method, TranspiledContext ctx)
+        public MethodWrapper(MethodInfo method, ThinContext ctx)
         {
             _method = method;
             _ctx = ctx;

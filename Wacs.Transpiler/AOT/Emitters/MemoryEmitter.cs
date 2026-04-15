@@ -39,7 +39,7 @@ namespace Wacs.Transpiler.AOT.Emitters
     internal static class MemoryEmitter
     {
         private static readonly FieldInfo MemoriesField =
-            typeof(TranspiledContext).GetField(nameof(TranspiledContext.Memories))!;
+            typeof(ThinContext).GetField(nameof(ThinContext.Memories))!;
 
         public static bool CanEmit(WasmOpCode op)
         {
@@ -151,7 +151,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             var addrLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, addrLocal);      // save address
 
-            il.Emit(OpCodes.Ldarg_0);                // TranspiledContext
+            il.Emit(OpCodes.Ldarg_0);                // ThinContext
             il.Emit(OpCodes.Ldfld, MemoriesField);   // byte[][]
             il.Emit(OpCodes.Ldc_I4, inst.MemIndex);  // memIdx
             il.Emit(OpCodes.Ldelem_Ref);              // byte[]
@@ -182,7 +182,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             var addrLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, addrLocal);        // save address
 
-            il.Emit(OpCodes.Ldarg_0);                  // TranspiledContext
+            il.Emit(OpCodes.Ldarg_0);                  // ThinContext
             il.Emit(OpCodes.Ldfld, MemoriesField);     // byte[][]
             il.Emit(OpCodes.Ldc_I4, inst.MemIndex);    // memIdx
             il.Emit(OpCodes.Ldelem_Ref);                // byte[]
@@ -197,7 +197,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         private static void EmitMemorySize(ILGenerator il, InstMemorySize inst)
         {
             // Push ctx.Memories[memIdx].Length / PageSize
-            il.Emit(OpCodes.Ldarg_0);                  // TranspiledContext
+            il.Emit(OpCodes.Ldarg_0);                  // ThinContext
             il.Emit(OpCodes.Ldfld, MemoriesField);     // byte[][]
             il.Emit(OpCodes.Ldc_I4, inst.MemIndex);    // memIdx
             il.Emit(OpCodes.Ldelem_Ref);                // byte[]
@@ -210,11 +210,11 @@ namespace Wacs.Transpiler.AOT.Emitters
         private static void EmitMemoryGrow(ILGenerator il, InstMemoryGrow inst)
         {
             // Stack: [delta pages (i32)]
-            // call MemoryHelpers.Grow(TranspiledContext, memIdx, delta) → i32 (old size or -1)
+            // call MemoryHelpers.Grow(ThinContext, memIdx, delta) → i32 (old size or -1)
             var deltaLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, deltaLocal);
 
-            il.Emit(OpCodes.Ldarg_0);                  // TranspiledContext
+            il.Emit(OpCodes.Ldarg_0);                  // ThinContext
             il.Emit(OpCodes.Ldc_I4, inst.MemIndex);    // memIdx
             il.Emit(OpCodes.Ldloc, deltaLocal);         // delta
 
@@ -618,7 +618,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         // === memory.grow ===
-        public static int MemoryGrow(TranspiledContext ctx, int memIdx, int deltaPages)
+        public static int MemoryGrow(ThinContext ctx, int memIdx, int deltaPages)
         {
             if (ctx.Store != null && ctx.Module != null)
             {
@@ -642,7 +642,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (deltaPages == 0) return oldPages;
 
             long newPages = (long)oldPages + deltaPages;
-            // Check against max pages (stored in MemoryLimits on TranspiledContext)
+            // Check against max pages (stored in MemoryLimits on ThinContext)
             long maxPages = ctx.MemoryLimits != null && memIdx < ctx.MemoryLimits.Length
                 ? ctx.MemoryLimits[memIdx]
                 : 65536; // WASM default max

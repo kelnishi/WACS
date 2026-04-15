@@ -32,7 +32,7 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// Direct IL call to a sibling MethodBuilder within the same transpiled module.
         /// Target function index and type are known at transpile time.
-        /// Parameters are passed on the CIL stack with TranspiledContext prepended.
+        /// Parameters are passed on the CIL stack with ThinContext prepended.
         /// Fastest path — no indirection, no marshaling.
         /// </summary>
         DirectSibling,

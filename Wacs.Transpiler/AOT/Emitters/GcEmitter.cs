@@ -666,7 +666,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             return val;
         }
 
-        public static object ArrayNewFixed(Value[] values, TranspiledContext ctx, int typeIdx)
+        public static object ArrayNewFixed(Value[] values, ThinContext ctx, int typeIdx)
         {
             // Create array instance and populate from values
             var gcType = ctx.Module?.Types[(TypeIdx)typeIdx];
@@ -677,7 +677,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             return arr;
         }
 
-        public static object ArrayNewData(TranspiledContext ctx, int typeIdx, int dataIdx, int offset, int length)
+        public static object ArrayNewData(ThinContext ctx, int typeIdx, int dataIdx, int offset, int length)
         {
             if (ctx.Store == null || ctx.Module == null)
                 throw new TrapException("array.new_data requires runtime store");
@@ -691,7 +691,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             return result;
         }
 
-        public static object ArrayNewElem(TranspiledContext ctx, int typeIdx, int elemIdx, int offset, int length)
+        public static object ArrayNewElem(ThinContext ctx, int typeIdx, int elemIdx, int offset, int length)
         {
             if (ctx.Store == null || ctx.Module == null)
                 throw new TrapException("array.new_elem requires runtime store");
@@ -752,7 +752,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                 length);
         }
 
-        public static void ArrayInitData(TranspiledContext ctx, Value arrayRef, int dstOff,
+        public static void ArrayInitData(ThinContext ctx, Value arrayRef, int dstOff,
             int dataIdx, int srcOff, int length)
         {
             if (ctx.Store == null || ctx.Module == null)
@@ -770,7 +770,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                 elements.SetValue(data.Data[srcOff + i], dstOff + i);
         }
 
-        public static void ArrayInitElem(TranspiledContext ctx, Value arrayRef, int dstOff,
+        public static void ArrayInitElem(ThinContext ctx, Value arrayRef, int dstOff,
             int elemIdx, int srcOff, int length)
         {
             if (ctx.Store == null || ctx.Module == null)

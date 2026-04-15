@@ -643,7 +643,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         private static readonly FieldInfo MemoriesField =
-            typeof(TranspiledContext).GetField(nameof(TranspiledContext.Memories))!;
+            typeof(ThinContext).GetField(nameof(ThinContext.Memories))!;
 
         // === SIMD memory load: [addr (i32)] → V128 boxed as Value ===
         private static void EmitSimdLoad(ILGenerator il, InstructionBase inst, SimdCode op)
@@ -859,21 +859,21 @@ namespace Wacs.Transpiler.AOT.Emitters
     /// </summary>
     public static class SimdDispatch
     {
-        public static void PushValue(TranspiledContext ctx, Value val)
+        public static void PushValue(ThinContext ctx, Value val)
         {
             if (ctx.ExecContext == null)
                 throw new TrapException("SIMD ops require ExecContext");
             ctx.ExecContext.OpStack.PushValue(val);
         }
 
-        public static Value PopValue(TranspiledContext ctx)
+        public static Value PopValue(ThinContext ctx)
         {
             if (ctx.ExecContext == null)
                 throw new TrapException("SIMD ops require ExecContext");
             return ctx.ExecContext.OpStack.PopAny();
         }
 
-        public static V128 GetShuffleLanes(TranspiledContext ctx, int instructionId)
+        public static V128 GetShuffleLanes(ThinContext ctx, int instructionId)
         {
             var inst = SimdEmitter.InstructionRegistry[instructionId];
             return ((Wacs.Core.Instructions.InstShuffleOp)inst).LaneIndices;
@@ -885,7 +885,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             return ((Wacs.Core.Instructions.Simd.InstV128Const)inst).Value;
         }
 
-        public static void ExecuteSimdOp(TranspiledContext ctx, int instructionId)
+        public static void ExecuteSimdOp(ThinContext ctx, int instructionId)
         {
             if (ctx.ExecContext == null)
                 throw new TrapException("SIMD ops require ExecContext");
