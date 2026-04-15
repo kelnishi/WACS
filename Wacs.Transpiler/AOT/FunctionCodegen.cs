@@ -14,7 +14,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -102,6 +104,11 @@ namespace Wacs.Transpiler.AOT
             {
                 _locals[i] = _il.DeclareLocal(ModuleTranspiler.MapValType(wasmLocals[i]));
             }
+
+            // Stack guard: trap before CLR StackOverflow kills the process.
+            // TryEnsureSufficientExecutionStack() is a cheap SP-vs-limit compare
+            // that returns false when stack space is running low.
+            EmitStackGuard(_il);
 
             // The function body is an implicit block — br 0 at function level
             // targets the function return. Push a function-level block.
@@ -245,7 +252,7 @@ namespace Wacs.Transpiler.AOT
             {
                 var site = CallEmitter.ResolveCallSite(
                     inst, op, _siblingFunctions, _importCount, _moduleInst, _allFunctionTypes);
-                CallEmitter.EmitCallSite(il, site, _siblingMethods, _moduleInst);
+                CallEmitter.EmitCallSite(il, site, _siblingMethods, _moduleInst, _options);
                 return;
             }
 
@@ -569,6 +576,34 @@ namespace Wacs.Transpiler.AOT
             // Locally-defined global
             int localIdx = globalIdx - importedGlobalCount;
             return module.Globals[localIdx].Type.ContentType;
+        }
+
+        private static readonly MethodInfo TryEnsureStackMethod =
+            typeof(RuntimeHelpers).GetMethod(
+                nameof(RuntimeHelpers.TryEnsureSufficientExecutionStack),
+                BindingFlags.Public | BindingFlags.Static)!;
+
+        /// <summary>
+        /// Emit a stack depth guard at function entry.
+        /// Calls RuntimeHelpers.TryEnsureSufficientExecutionStack() which is a cheap
+        /// SP-vs-limit compare. If it returns false, we throw a TrapException before
+        /// the CLR's unrecoverable StackOverflowException can fire.
+        /// </summary>
+        private static void EmitStackGuard(ILGenerator il)
+        {
+            var okLabel = il.DefineLabel();
+
+            // if (RuntimeHelpers.TryEnsureSufficientExecutionStack()) goto ok;
+            il.Emit(OpCodes.Call, TryEnsureStackMethod);
+            il.Emit(OpCodes.Brtrue_S, okLabel);
+
+            // throw new TrapException("call stack exhausted");
+            il.Emit(OpCodes.Ldstr, "call stack exhausted");
+            il.Emit(OpCodes.Newobj, typeof(TrapException).GetConstructor(
+                new[] { typeof(string) })!);
+            il.Emit(OpCodes.Throw);
+
+            il.MarkLabel(okLabel);
         }
     }
 }
