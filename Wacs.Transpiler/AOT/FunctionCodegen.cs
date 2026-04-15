@@ -374,6 +374,24 @@ namespace Wacs.Transpiler.AOT
                 if (!HasEmitter(inst))
                     return false;
 
+                // Reject blocks with multi-value params or results.
+                // These require shuttle locals which aren't implemented yet.
+                if (inst is InstBlock blk && !IsSimpleBlockType(blk.BlockType))
+                {
+                    LastRejectionReason = $"multi-value block type {blk.BlockType}";
+                    return false;
+                }
+                if (inst is InstLoop lp && !IsSimpleBlockType(lp.BlockType))
+                {
+                    LastRejectionReason = $"multi-value loop type {lp.BlockType}";
+                    return false;
+                }
+                if (inst is InstIf iff && !IsSimpleBlockType(iff.BlockType))
+                {
+                    LastRejectionReason = $"multi-value if type {iff.BlockType}";
+                    return false;
+                }
+
                 // Recursively check nested blocks
                 if (inst is IBlockInstruction blockInst)
                 {
@@ -386,6 +404,37 @@ namespace Wacs.Transpiler.AOT
                 }
             }
             return true;
+        }
+
+        /// <summary>
+        /// Check if a block type is simple (void or single result, no params).
+        /// Multi-value block types (type indices resolving to multi-param or multi-result
+        /// function types) require shuttle locals and are not yet supported.
+        /// </summary>
+        private bool IsSimpleBlockType(ValType blockType)
+        {
+            switch (blockType)
+            {
+                case ValType.Empty:
+                case ValType.I32:
+                case ValType.I64:
+                case ValType.F32:
+                case ValType.F64:
+                case ValType.V128:
+                    return true;
+                default:
+                    if (blockType.IsRefType() && !blockType.IsDefType())
+                        return true; // single ref result
+                    if (blockType.IsDefType())
+                    {
+                        // Resolve the type index to check if it's multi-value
+                        var funcType = _moduleInst.Types.ResolveBlockType(blockType);
+                        if (funcType == null) return false;
+                        return funcType.ParameterTypes.Arity == 0
+                            && funcType.ResultType.Arity <= 1;
+                    }
+                    return false;
+            }
         }
 
         /// <summary>
