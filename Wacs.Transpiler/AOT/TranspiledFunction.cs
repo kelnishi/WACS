@@ -33,6 +33,7 @@ namespace Wacs.Transpiler.AOT
     public class TranspiledFunction : IFunctionInstance
     {
         private readonly MethodInfo _method;
+        public MethodInfo Method => _method;
         private readonly TranspiledContext _ctx;
         private readonly object?[] _paramBuffer;
         private readonly int _paramCount;

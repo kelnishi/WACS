@@ -404,7 +404,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                 throw new TrapException("call to import requires runtime context");
 
             var funcAddr = ctx.Module.FuncAddrs[(FuncIdx)funcIdx];
-            return InvokeViaOpStack(ctx, funcAddr, args);
+            return InvokeFunction(ctx, funcAddr, args);
         }
 
         /// <summary>
@@ -445,7 +445,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                 throw new TrapException("indirect call type mismatch");
 
             // Step 19: invoke
-            return InvokeViaOpStack(ctx, funcAddr, args);
+            return InvokeFunction(ctx, funcAddr, args);
         }
 
         /// <summary>
@@ -474,17 +474,38 @@ namespace Wacs.Transpiler.AOT.Emitters
                 throw new TrapException("call_ref type mismatch");
 
             // Step 8: invoke
-            return InvokeViaOpStack(ctx, funcAddr, args);
+            return InvokeFunction(ctx, funcAddr, args);
         }
 
         /// <summary>
-        /// Common invoke path: push params to OpStack, call IFunctionInstance.Invoke,
-        /// pop results from OpStack. Matches ExecContext.Invoke semantics.
+        /// Invoke a function by FuncAddr with Value[] args, returning Value[] results.
+        ///
+        /// Dispatch strategy:
+        /// - TranspiledFunction: call the .NET method directly via Invoke
+        /// - HostFunction: call via a dedicated OpStack frame (not shared with interpreter)
+        /// - FunctionInstance: call via a dedicated OpStack frame
+        ///
+        /// This avoids corrupting the interpreter's shared OpStack state.
         /// </summary>
-        private static Value[] InvokeViaOpStack(TranspiledContext ctx, FuncAddr funcAddr, Value[] args)
+        private static Value[] InvokeFunction(TranspiledContext ctx, FuncAddr funcAddr, Value[] args)
         {
-            var execCtx = ctx.ExecContext!;
             var funcInst = ctx.Store![funcAddr];
+
+            // Fast path: TranspiledFunction has its own invoke that doesn't use OpStack
+            if (funcInst is TranspiledFunction tf)
+            {
+                // TranspiledFunction.Invoke uses ExecContext.OpStack internally.
+                // Instead, call the underlying method directly.
+                return InvokeTranspiledDirect(tf, ctx, args);
+            }
+
+            // For HostFunction and FunctionInstance: we need ExecContext + OpStack.
+            // Use the shared ExecContext but save/restore OpStack height to prevent corruption.
+            if (ctx.ExecContext == null)
+                throw new TrapException("Cross-module call requires runtime context");
+
+            var execCtx = ctx.ExecContext;
+            int savedHeight = execCtx.OpStack.Count;
 
             execCtx.OpStack.PushValues(args);
             funcInst.Invoke(execCtx);
@@ -493,7 +514,71 @@ namespace Wacs.Transpiler.AOT.Emitters
             for (int i = results.Length - 1; i >= 0; i--)
                 results[i] = execCtx.OpStack.PopAny();
 
+            // Verify we didn't corrupt the stack
+            while (execCtx.OpStack.Count > savedHeight)
+                execCtx.OpStack.PopAny();
+
             return results;
         }
+
+        /// <summary>
+        /// Call a TranspiledFunction's underlying method directly, bypassing OpStack.
+        /// </summary>
+        private static Value[] InvokeTranspiledDirect(TranspiledFunction tf, TranspiledContext ctx, Value[] args)
+        {
+            var method = tf.Method;
+            var funcType = tf.Type;
+            int paramCount = funcType.ParameterTypes.Arity;
+
+            var paramBuffer = new object?[1 + paramCount + (funcType.ResultType.Arity > 1 ? funcType.ResultType.Arity - 1 : 0)];
+            paramBuffer[0] = ctx;
+            for (int i = 0; i < paramCount; i++)
+            {
+                paramBuffer[i + 1] = ConvertFromValue(args[i], funcType.ParameterTypes.Types[i]);
+            }
+
+            object? result;
+            try
+            {
+                result = method.Invoke(null, paramBuffer);
+            }
+            catch (System.Reflection.TargetInvocationException tie)
+            {
+                if (tie.InnerException != null)
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
+                throw;
+            }
+
+            int resultCount = funcType.ResultType.Arity;
+            if (resultCount == 0)
+                return Array.Empty<Value>();
+
+            var results = new Value[resultCount];
+            if (result != null)
+                results[0] = ConvertToValue(result, funcType.ResultType.Types[0]);
+            // Out params for multi-value
+            for (int i = 1; i < resultCount; i++)
+                results[i] = ConvertToValue(paramBuffer[1 + paramCount + (i - 1)]!, funcType.ResultType.Types[i]);
+
+            return results;
+        }
+
+        private static object ConvertFromValue(Value val, ValType type) => type switch
+        {
+            ValType.I32 => val.Data.Int32,
+            ValType.I64 => val.Data.Int64,
+            ValType.F32 => val.Data.Float32,
+            ValType.F64 => val.Data.Float64,
+            _ => (object)val
+        };
+
+        private static Value ConvertToValue(object obj, ValType type) => type switch
+        {
+            ValType.I32 => new Value((int)obj),
+            ValType.I64 => new Value((long)obj),
+            ValType.F32 => new Value((float)obj),
+            ValType.F64 => new Value((double)obj),
+            _ => (Value)obj
+        };
     }
 }
