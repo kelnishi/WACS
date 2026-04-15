@@ -448,13 +448,6 @@ namespace Wacs.Transpiler.AOT
         {
             foreach (var export in _interfaces.ExportMethods)
             {
-                // The export interface method was defined by InterfaceGenerator.
-                // We need to implement it by forwarding to Functions.FunctionN
-
-                int localIdx = export.FuncIndex - _importCount;
-                if (localIdx < 0 || localIdx >= _methodBuilders.Length) continue;
-
-                var targetMethod = _methodBuilders[localIdx];
                 var funcType = export.WasmType;
                 int paramCount = funcType.ParameterTypes.Arity;
                 var resultTypes = funcType.ResultType.Types;
@@ -485,6 +478,19 @@ namespace Wacs.Transpiler.AOT
                 for (int r = 0; r < outParamCount; r++)
                     mb.DefineParameter(clrParamTypes.Length + r + 1, ParameterAttributes.Out, $"result{r + 1}");
 
+                int localIdx = export.FuncIndex - _importCount;
+
+                if (localIdx < 0)
+                {
+                    // Exported import: forward through ctx.ImportDelegates[funcIndex]
+                    EmitExportedImportBody(mb, ctxField, export.FuncIndex, funcType);
+                    continue;
+                }
+
+                if (localIdx >= _methodBuilders.Length) continue;
+
+                var targetMethod = _methodBuilders[localIdx];
+
                 // Emit body: forward to Functions.FunctionN(ctx, params...)
                 var il = mb.GetILGenerator();
 
@@ -501,6 +507,71 @@ namespace Wacs.Transpiler.AOT
                     il.Emit(OpCodes.Ldarg, clrParamTypes.Length + r + 1);
 
                 il.Emit(OpCodes.Call, targetMethod);
+                il.Emit(OpCodes.Ret);
+            }
+        }
+
+        /// <summary>
+        /// Emit method body for an exported import: forward through the IImports
+        /// delegate stored in ctx.ImportDelegates[importIndex].
+        ///
+        /// The import delegate's signature matches the WASM function type (no ctx),
+        /// so we invoke it directly with the method's parameters.
+        /// </summary>
+        private static void EmitExportedImportBody(
+            MethodBuilder mb, FieldBuilder ctxField, int importIndex, FunctionType funcType)
+        {
+            var il = mb.GetILGenerator();
+            var paramTypes = funcType.ParameterTypes.Types;
+            var resultTypes = funcType.ResultType.Types;
+
+            // Load the delegate: ctx.ImportDelegates[importIndex]
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, ctxField);
+            il.Emit(OpCodes.Ldfld, typeof(TranspiledContext).GetField(
+                nameof(TranspiledContext.ImportDelegates))!);
+            il.Emit(OpCodes.Ldc_I4, importIndex);
+            il.Emit(OpCodes.Ldelem_Ref);
+
+            // Build the delegate type and cast
+            var delegateType = CallEmitter.BuildDelegateType(funcType);
+            if (delegateType != null)
+            {
+                il.Emit(OpCodes.Castclass, delegateType);
+
+                // Push all params (arg 1..N)
+                for (int p = 0; p < paramTypes.Length; p++)
+                    il.Emit(OpCodes.Ldarg, p + 1);
+
+                // Invoke typed delegate
+                il.Emit(OpCodes.Callvirt, delegateType.GetMethod("Invoke")!);
+                il.Emit(OpCodes.Ret);
+            }
+            else
+            {
+                // Fallback for unsupported delegate types: DynamicInvoke
+                // Pack params into object[]
+                il.Emit(OpCodes.Ldc_I4, paramTypes.Length);
+                il.Emit(OpCodes.Newarr, typeof(object));
+                for (int p = 0; p < paramTypes.Length; p++)
+                {
+                    il.Emit(OpCodes.Dup);
+                    il.Emit(OpCodes.Ldc_I4, p);
+                    il.Emit(OpCodes.Ldarg, p + 1);
+                    il.Emit(OpCodes.Box, ModuleTranspiler.MapValType(paramTypes[p]));
+                    il.Emit(OpCodes.Stelem_Ref);
+                }
+                il.Emit(OpCodes.Callvirt, typeof(Delegate).GetMethod(
+                    nameof(Delegate.DynamicInvoke))!);
+
+                if (resultTypes.Length == 0)
+                {
+                    il.Emit(OpCodes.Pop);
+                }
+                else
+                {
+                    il.Emit(OpCodes.Unbox_Any, ModuleTranspiler.MapValType(resultTypes[0]));
+                }
                 il.Emit(OpCodes.Ret);
             }
         }
