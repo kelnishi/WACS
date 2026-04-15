@@ -271,6 +271,56 @@ namespace Wacs.Transpiler.AOT
                     ControlEmitter.EmitBrTable(il, (InstBranchTable)inst, _blockStack);
                     break;
 
+                case WasmOpCode.BrOnNull:
+                {
+                    // br_on_null L: pop ref, if null branch to L (ref consumed), else push ref back
+                    var brInst = (Wacs.Core.Instructions.Reference.InstBrOnNull)inst;
+                    int depth = brInst.Label;
+                    int i = 0;
+                    EmitBlock target = null!;
+                    foreach (var block in _blockStack)
+                    {
+                        if (i == depth) { target = block; break; }
+                        i++;
+                    }
+                    // Stack: [Value ref]
+                    il.Emit(OpCodes.Dup);
+                    il.Emit(OpCodes.Call, typeof(Emitters.TableRefHelpers).GetMethod(
+                        nameof(Emitters.TableRefHelpers.RefIsNull),
+                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!);
+                    var skipLabel = il.DefineLabel();
+                    il.Emit(OpCodes.Brfalse, skipLabel); // not null → skip
+                    il.Emit(OpCodes.Pop); // consume ref (null case)
+                    il.Emit(OpCodes.Br, target.BranchTarget);
+                    il.MarkLabel(skipLabel);
+                    break;
+                }
+
+                case WasmOpCode.BrOnNonNull:
+                {
+                    // br_on_non_null L: pop ref, if non-null branch to L (ref on stack), else consume
+                    var brInst = (Wacs.Core.Instructions.Reference.InstBrOnNonNull)inst;
+                    int depth = brInst.Label;
+                    int i = 0;
+                    EmitBlock target = null!;
+                    foreach (var block in _blockStack)
+                    {
+                        if (i == depth) { target = block; break; }
+                        i++;
+                    }
+                    // Stack: [Value ref]
+                    il.Emit(OpCodes.Dup);
+                    il.Emit(OpCodes.Call, typeof(Emitters.TableRefHelpers).GetMethod(
+                        nameof(Emitters.TableRefHelpers.RefIsNull),
+                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!);
+                    var skipLabel = il.DefineLabel();
+                    il.Emit(OpCodes.Brtrue, skipLabel); // null → skip
+                    il.Emit(OpCodes.Br, target.BranchTarget); // non-null → branch (ref stays)
+                    il.MarkLabel(skipLabel);
+                    il.Emit(OpCodes.Pop); // consume ref (null case, no branch)
+                    break;
+                }
+
                 default:
                     throw new TranspilerException(
                         $"FunctionCodegen: no emitter for opcode {inst.Op.GetMnemonic()} (0x{(byte)op:X2})");
@@ -353,8 +403,10 @@ namespace Wacs.Transpiler.AOT
             if (VariableEmitter.CanEmit(op))
                 return true;
 
-            // Control flow
+            // Control flow (including br_on_null/non_null)
             if (ControlEmitter.CanEmit(op))
+                return true;
+            if (op == WasmOpCode.BrOnNull || op == WasmOpCode.BrOnNonNull)
                 return true;
 
             // Memory operations
