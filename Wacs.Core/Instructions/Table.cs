@@ -30,6 +30,7 @@ namespace Wacs.Core.Instructions
     {
         public InstTableGet() : base(ByteCode.TableGet) { }
         private TableIdx X;
+        public int TableIndex => (int)X.Value;
         
         // @Spec 3.3.6.1. table.get
         public override void Validate(IWasmValidationContext context)
@@ -90,6 +91,7 @@ namespace Wacs.Core.Instructions
     {
         public InstTableSet() : base(ByteCode.TableSet, -2) { }
         private TableIdx X;
+        public int TableIndex => (int)X.Value;
         
         // @Spec 3.3.6.2. table.set
         public override void Validate(IWasmValidationContext context)
@@ -154,6 +156,8 @@ namespace Wacs.Core.Instructions
         public InstTableInit() : base(ByteCode.TableInit, -3) { }
         private TableIdx X;
         private ElemIdx Y;
+        public int TableIndex => (int)X.Value;
+        public int ElemIndex => (int)Y.Value;
         
         // @Spec 3.3.6.7. table.init x y
         public override void Validate(IWasmValidationContext context)
@@ -255,8 +259,9 @@ namespace Wacs.Core.Instructions
     public class InstElemDrop : InstructionBase
     {
         public InstElemDrop() : base(ByteCode.ElemDrop) { }
-        
+
         private ElemIdx X;
+        public int ElemIndex => (int)X.Value;
 
         // @Spec 3.3.6.8. elem.drop x
         public override void Validate(IWasmValidationContext context)
@@ -300,9 +305,11 @@ namespace Wacs.Core.Instructions
     public class InstTableCopy : InstructionBase
     {
         public InstTableCopy() : base(ByteCode.TableCopy, -3) { }
-        
+
         private TableIdx DstX;
         private TableIdx SrcY;
+        public int DstTableIndex => (int)DstX.Value;
+        public int SrcTableIndex => (int)SrcY.Value;
         
         // @Spec 3.3.6.6. table.copy
         public override void Validate(IWasmValidationContext context)
@@ -436,8 +443,9 @@ namespace Wacs.Core.Instructions
     public class InstTableGrow : InstructionBase
     {
         public InstTableGrow() : base(ByteCode.TableGrow, -1) { }
-        
+
         private TableIdx X;
+        public int TableIndex => (int)X.Value;
         
         // @Spec 3.3.6.4. table.grow x
         public override void Validate(IWasmValidationContext context)
@@ -506,8 +514,9 @@ namespace Wacs.Core.Instructions
     public class InstTableSize : InstructionBase
     {
         public InstTableSize() : base(ByteCode.TableSize, +1) { }
-        
+
         private TableIdx X;
+        public int TableIndex => (int)X.Value;
         
         // @Spec 3.3.6.3. table.size x
         public override void Validate(IWasmValidationContext context)
@@ -554,8 +563,9 @@ namespace Wacs.Core.Instructions
     public class InstTableFill : InstructionBase
     {
         public InstTableFill() : base(ByteCode.TableFill, -3) { }
-        
+
         private TableIdx X;
+        public int TableIndex => (int)X.Value;
         
         // @Spec 3.3.6.5. table.fill
         public override void Validate(IWasmValidationContext context)
