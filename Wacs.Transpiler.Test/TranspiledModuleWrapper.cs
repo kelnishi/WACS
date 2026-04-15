@@ -47,7 +47,7 @@ namespace Wacs.Transpiler.Test
 
         /// <summary>
         /// Instantiate the Module class with the given IImports proxy (or null for no imports).
-        /// This is the standalone path: Module constructor → InitializationHelper → TranspiledContext.
+        /// This is the standalone path: Module constructor → InitializationHelper → ThinContext.
         /// </summary>
         public void Instantiate(object? importsProxy = null)
         {

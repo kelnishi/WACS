@@ -35,7 +35,7 @@ namespace Wacs.Transpiler.AOT
     /// The module class is the primary consumer-facing type:
     ///   - Implements IExports (typed methods for each WASM export)
     ///   - Constructor accepts IImports (typed methods the consumer provides)
-    ///   - Manages TranspiledContext internally
+    ///   - Manages ThinContext internally
     ///   - Exposes Memory, Tables, Globals as properties
     ///   - Provides Start() if the module has a start function
     ///
@@ -268,9 +268,9 @@ namespace Wacs.Transpiler.AOT
                 typeof(object),
                 parentInterfaces);
 
-            // Private field: TranspiledContext
+            // Private field: ThinContext
             var ctxField = ModuleType.DefineField(
-                "_ctx", typeof(TranspiledContext), FieldAttributes.Private);
+                "_ctx", typeof(ThinContext), FieldAttributes.Private);
 
             // Constructor
             EmitConstructor(ctxField);
@@ -315,12 +315,12 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
 
             // === Initialize via InitializationHelper ===
-            // TranspiledContext ctx = InitializationHelper.Initialize(initDataId);
+            // ThinContext ctx = InitializationHelper.Initialize(initDataId);
             il.Emit(OpCodes.Ldc_I4, _initDataId);
             il.Emit(OpCodes.Call, typeof(InitializationHelper).GetMethod(
                 nameof(InitializationHelper.Initialize),
                 BindingFlags.Public | BindingFlags.Static)!);
-            var ctxLocal = il.DeclareLocal(typeof(TranspiledContext));
+            var ctxLocal = il.DeclareLocal(typeof(ThinContext));
             il.Emit(OpCodes.Stloc, ctxLocal);
 
             // === Wire import delegates from IImports ===
@@ -352,8 +352,8 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Ldloc, ctxLocal);
             il.Emit(OpCodes.Ldc_I4, importCount);
             il.Emit(OpCodes.Newarr, typeof(Delegate));
-            il.Emit(OpCodes.Stfld, typeof(TranspiledContext).GetField(
-                nameof(TranspiledContext.ImportDelegates))!);
+            il.Emit(OpCodes.Stfld, typeof(ThinContext).GetField(
+                nameof(ThinContext.ImportDelegates))!);
 
             // For each import method, create a delegate wrapping the IImports method
             // and store it in ImportDelegates[i]
@@ -371,8 +371,8 @@ namespace Wacs.Transpiler.AOT
                 // ctx.ImportDelegates[i] = (cast)imports.MethodName  (via ldftn)
 
                 il.Emit(OpCodes.Ldloc, ctxLocal);
-                il.Emit(OpCodes.Ldfld, typeof(TranspiledContext).GetField(
-                    nameof(TranspiledContext.ImportDelegates))!);
+                il.Emit(OpCodes.Ldfld, typeof(ThinContext).GetField(
+                    nameof(ThinContext.ImportDelegates))!);
                 il.Emit(OpCodes.Ldc_I4, i);
 
                 // Push imports arg (arg 1 for instance ctor)
@@ -394,7 +394,7 @@ namespace Wacs.Transpiler.AOT
         /// to bind ctx as the first argument of the static transpiled method.
         ///
         /// This enables call_indirect/call_ref to dispatch through FuncTable
-        /// without needing to know the TranspiledContext at the call site.
+        /// without needing to know the ThinContext at the call site.
         /// </summary>
         private void EmitFuncTablePopulation(ILGenerator il, LocalBuilder ctxLocal)
         {
@@ -405,8 +405,8 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Ldloc, ctxLocal);
             il.Emit(OpCodes.Ldc_I4, totalFuncs);
             il.Emit(OpCodes.Newarr, typeof(Delegate));
-            il.Emit(OpCodes.Stfld, typeof(TranspiledContext).GetField(
-                nameof(TranspiledContext.FuncTable))!);
+            il.Emit(OpCodes.Stfld, typeof(ThinContext).GetField(
+                nameof(ThinContext.FuncTable))!);
 
             // Copy import delegates (0..importCount-1)
             if (_importCount > 0 && _interfaces.ImportMethods.Count > 0)
@@ -414,13 +414,13 @@ namespace Wacs.Transpiler.AOT
                 for (int i = 0; i < Math.Min(_importCount, _interfaces.ImportMethods.Count); i++)
                 {
                     il.Emit(OpCodes.Ldloc, ctxLocal);
-                    il.Emit(OpCodes.Ldfld, typeof(TranspiledContext).GetField(
-                        nameof(TranspiledContext.FuncTable))!);
+                    il.Emit(OpCodes.Ldfld, typeof(ThinContext).GetField(
+                        nameof(ThinContext.FuncTable))!);
                     il.Emit(OpCodes.Ldc_I4, i);
 
                     il.Emit(OpCodes.Ldloc, ctxLocal);
-                    il.Emit(OpCodes.Ldfld, typeof(TranspiledContext).GetField(
-                        nameof(TranspiledContext.ImportDelegates))!);
+                    il.Emit(OpCodes.Ldfld, typeof(ThinContext).GetField(
+                        nameof(ThinContext.ImportDelegates))!);
                     il.Emit(OpCodes.Ldc_I4, i);
                     il.Emit(OpCodes.Ldelem_Ref);
 
@@ -448,8 +448,8 @@ namespace Wacs.Transpiler.AOT
 
                 // ctx.FuncTable[importCount + i] = Delegate.CreateDelegate(delegateType, ctx, methodInfo)
                 il.Emit(OpCodes.Ldloc, ctxLocal);
-                il.Emit(OpCodes.Ldfld, typeof(TranspiledContext).GetField(
-                    nameof(TranspiledContext.FuncTable))!);
+                il.Emit(OpCodes.Ldfld, typeof(ThinContext).GetField(
+                    nameof(ThinContext.FuncTable))!);
                 il.Emit(OpCodes.Ldc_I4, _importCount + i);
 
                 // Push delegateType (typeof)
@@ -557,8 +557,8 @@ namespace Wacs.Transpiler.AOT
             // Load the delegate: ctx.ImportDelegates[importIndex]
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, ctxField);
-            il.Emit(OpCodes.Ldfld, typeof(TranspiledContext).GetField(
-                nameof(TranspiledContext.ImportDelegates))!);
+            il.Emit(OpCodes.Ldfld, typeof(ThinContext).GetField(
+                nameof(ThinContext.ImportDelegates))!);
             il.Emit(OpCodes.Ldc_I4, importIndex);
             il.Emit(OpCodes.Ldelem_Ref);
 
@@ -621,7 +621,7 @@ namespace Wacs.Transpiler.AOT
             var il = getter.GetILGenerator();
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, ctxField);
-            il.Emit(OpCodes.Ldfld, typeof(TranspiledContext).GetField(nameof(TranspiledContext.Memories))!);
+            il.Emit(OpCodes.Ldfld, typeof(ThinContext).GetField(nameof(ThinContext.Memories))!);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
             il.Emit(OpCodes.Ret);

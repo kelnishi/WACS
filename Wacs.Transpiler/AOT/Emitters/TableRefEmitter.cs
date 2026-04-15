@@ -30,7 +30,7 @@ namespace Wacs.Transpiler.AOT.Emitters
     /// Emits CIL for table access and reference type instructions.
     /// These operate on Value (reference types stay as Value on the CIL stack).
     ///
-    /// Table ops dispatch through TranspiledContext.Tables[].
+    /// Table ops dispatch through ThinContext.Tables[].
     /// Ref ops create/inspect Value structs.
     /// Also handles 0xFC prefix table.size/grow/fill.
     /// </summary>
@@ -215,7 +215,7 @@ namespace Wacs.Transpiler.AOT.Emitters
 
     public static class TableRefHelpers
     {
-        public static Value TableGet(TranspiledContext ctx, int tableIdx, int index)
+        public static Value TableGet(ThinContext ctx, int tableIdx, int index)
         {
             var table = ctx.Tables[tableIdx];
             if (index < 0 || index >= table.Elements.Count)
@@ -223,7 +223,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             return table.Elements[index];
         }
 
-        public static void TableSet(TranspiledContext ctx, int tableIdx, int index, Value val)
+        public static void TableSet(ThinContext ctx, int tableIdx, int index, Value val)
         {
             var table = ctx.Tables[tableIdx];
             if (index < 0 || index >= table.Elements.Count)
@@ -251,7 +251,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             return val;
         }
 
-        public static Value RefFunc(TranspiledContext ctx, int funcIdx)
+        public static Value RefFunc(ThinContext ctx, int funcIdx)
         {
             if (ctx.Module != null)
             {
@@ -262,12 +262,12 @@ namespace Wacs.Transpiler.AOT.Emitters
             return new Value(ValType.FuncRef, funcIdx);
         }
 
-        public static int TableSize(TranspiledContext ctx, int tableIdx)
+        public static int TableSize(ThinContext ctx, int tableIdx)
         {
             return ctx.Tables[tableIdx].Elements.Count;
         }
 
-        public static int TableGrow(TranspiledContext ctx, int tableIdx, Value initVal, int delta)
+        public static int TableGrow(ThinContext ctx, int tableIdx, Value initVal, int delta)
         {
             var table = ctx.Tables[tableIdx];
             int oldSize = table.Elements.Count;
@@ -276,7 +276,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             return oldSize;
         }
 
-        public static void TableFill(TranspiledContext ctx, int tableIdx, int dst, Value val, int len)
+        public static void TableFill(ThinContext ctx, int tableIdx, int dst, Value val, int len)
         {
             if (len == 0) return;
             var table = ctx.Tables[tableIdx];

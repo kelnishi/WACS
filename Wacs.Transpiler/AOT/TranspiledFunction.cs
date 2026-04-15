@@ -27,7 +27,7 @@ namespace Wacs.Transpiler.AOT
     /// This enables the interpreter to call transpiled code through the standard
     /// Store dispatch path, and vice versa.
     ///
-    /// The wrapped method has signature: static T MethodName(TranspiledContext ctx, ...)
+    /// The wrapped method has signature: static T MethodName(ThinContext ctx, ...)
     /// When Invoke(ExecContext) is called, parameters are popped from OpStack,
     /// the transpiled method is invoked, and results are pushed back onto OpStack.
     /// </summary>
@@ -35,7 +35,7 @@ namespace Wacs.Transpiler.AOT
     {
         private readonly MethodInfo _method;
         public MethodInfo Method => _method;
-        private readonly TranspiledContext _ctx;
+        private readonly ThinContext _ctx;
         private readonly object?[] _paramBuffer;
         private readonly int _paramCount;
         private readonly int _resultCount;
@@ -51,7 +51,7 @@ namespace Wacs.Transpiler.AOT
         public TranspiledFunction(
             MethodInfo method,
             FunctionType type,
-            TranspiledContext ctx)
+            ThinContext ctx)
         {
             _method = method;
             Type = type;
@@ -59,7 +59,7 @@ namespace Wacs.Transpiler.AOT
             _paramCount = type.ParameterTypes.Arity;
             _resultCount = type.ResultType.Arity;
             _outParamCount = _resultCount > 1 ? _resultCount - 1 : 0;
-            // +1 for TranspiledContext + out params
+            // +1 for ThinContext + out params
             _paramBuffer = new object?[1 + _paramCount + _outParamCount];
             _paramBuffer[0] = ctx;
         }

@@ -289,13 +289,13 @@ namespace Wacs.Transpiler.AOT
             FunctionType funcType,
             int index)
         {
-            // Build parameter types: TranspiledContext + wasm params + out params for multi-value
+            // Build parameter types: ThinContext + wasm params + out params for multi-value
             var wasmParamTypes = funcType.ParameterTypes.Types;
             var resultTypes = funcType.ResultType.Types;
             int outParamCount = resultTypes.Length > 1 ? resultTypes.Length - 1 : 0;
 
             var paramTypes = new Type[1 + wasmParamTypes.Length + outParamCount];
-            paramTypes[0] = typeof(TranspiledContext);
+            paramTypes[0] = typeof(ThinContext);
             for (int p = 0; p < wasmParamTypes.Length; p++)
             {
                 paramTypes[p + 1] = MapValType(wasmParamTypes[p]);
@@ -350,7 +350,7 @@ namespace Wacs.Transpiler.AOT
             var resultTypes = funcType.ResultType.Types;
 
             // Build Value[] args from the CLR-typed parameters
-            // arg 0 = TranspiledContext ctx, args 1..N = WASM params
+            // arg 0 = ThinContext ctx, args 1..N = WASM params
             il.Emit(OpCodes.Ldc_I4, paramTypes.Length);
             il.Emit(OpCodes.Newarr, typeof(Value));
 

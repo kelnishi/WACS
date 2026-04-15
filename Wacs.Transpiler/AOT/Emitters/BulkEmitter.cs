@@ -73,7 +73,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                 {
                     var dd = (InstDataDrop)inst;
                     // Stack: []
-                    il.Emit(OpCodes.Ldarg_0); // TranspiledContext
+                    il.Emit(OpCodes.Ldarg_0); // ThinContext
                     il.Emit(OpCodes.Ldc_I4, dd.DataIndex);
                     il.Emit(OpCodes.Call, typeof(BulkHelpers).GetMethod(
                         nameof(BulkHelpers.DataDrop), BindingFlags.Public | BindingFlags.Static)!);
@@ -119,7 +119,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Stloc, a1);
             il.Emit(OpCodes.Stloc, a0);
 
-            il.Emit(OpCodes.Ldarg_0); // TranspiledContext
+            il.Emit(OpCodes.Ldarg_0); // ThinContext
             il.Emit(OpCodes.Ldc_I4, imm1);
             il.Emit(OpCodes.Ldc_I4, imm2);
             il.Emit(OpCodes.Ldloc, a0);
@@ -152,11 +152,11 @@ namespace Wacs.Transpiler.AOT.Emitters
 
     /// <summary>
     /// Static helpers for bulk memory and table operations.
-    /// Called from transpiled IL — these need TranspiledContext for Store access.
+    /// Called from transpiled IL — these need ThinContext for Store access.
     /// </summary>
     public static class BulkHelpers
     {
-        public static void MemoryCopy(TranspiledContext ctx, int dstMemIdx, int srcMemIdx,
+        public static void MemoryCopy(ThinContext ctx, int dstMemIdx, int srcMemIdx,
             int dst, int src, int len)
         {
             var dstMem = ctx.Memories[dstMemIdx];
@@ -169,7 +169,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             Buffer.BlockCopy(srcMem, src, dstMem, dst, len);
         }
 
-        public static void MemoryFill(TranspiledContext ctx, int memIdx,
+        public static void MemoryFill(ThinContext ctx, int memIdx,
             int dst, int val, int len)
         {
             var mem = ctx.Memories[memIdx];
@@ -180,7 +180,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             Array.Fill(mem, (byte)val, dst, len);
         }
 
-        public static void MemoryInit(TranspiledContext ctx, int memIdx, int dataIdx,
+        public static void MemoryInit(ThinContext ctx, int memIdx, int dataIdx,
             int dst, int src, int len)
         {
             var mem = ctx.Memories[memIdx];
@@ -207,7 +207,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             Buffer.BlockCopy(segData, src, mem, dst, len);
         }
 
-        public static void DataDrop(TranspiledContext ctx, int dataIdx)
+        public static void DataDrop(ThinContext ctx, int dataIdx)
         {
             if (ctx.Store != null && ctx.Module != null)
             {
@@ -221,7 +221,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
         }
 
-        public static void TableInit(TranspiledContext ctx, int tableIdx, int elemIdx,
+        public static void TableInit(ThinContext ctx, int tableIdx, int elemIdx,
             int dst, int src, int len)
         {
             var table = ctx.Tables[tableIdx];
@@ -253,7 +253,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
         }
 
-        public static void ElemDrop(TranspiledContext ctx, int elemIdx)
+        public static void ElemDrop(ThinContext ctx, int elemIdx)
         {
             if (ctx.Store != null && ctx.Module != null)
             {
@@ -266,7 +266,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
         }
 
-        public static void TableCopy(TranspiledContext ctx, int dstTableIdx, int srcTableIdx,
+        public static void TableCopy(ThinContext ctx, int dstTableIdx, int srcTableIdx,
             int dst, int src, int len)
         {
             var dstTable = ctx.Tables[dstTableIdx];

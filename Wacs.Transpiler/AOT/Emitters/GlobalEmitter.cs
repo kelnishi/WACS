@@ -26,13 +26,13 @@ namespace Wacs.Transpiler.AOT.Emitters
     /// <summary>
     /// Emits CIL for WebAssembly global variable access.
     ///
-    /// global.get: Load from TranspiledContext.Globals[idx].Value, extract typed field
-    /// global.set: Store to TranspiledContext.Globals[idx].Value with typed construction
+    /// global.get: Load from ThinContext.Globals[idx].Value, extract typed field
+    /// global.set: Store to ThinContext.Globals[idx].Value with typed construction
     /// </summary>
     internal static class GlobalEmitter
     {
         private static readonly FieldInfo GlobalsField =
-            typeof(TranspiledContext).GetField(nameof(TranspiledContext.Globals))!;
+            typeof(ThinContext).GetField(nameof(ThinContext.Globals))!;
 
         private static readonly PropertyInfo ValueProperty =
             typeof(GlobalInstance).GetProperty(nameof(GlobalInstance.Value))!;
@@ -66,7 +66,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             int idx = inst.GetIndex();
 
             // ctx.Globals[idx].Value.Data.{TypedField}
-            il.Emit(OpCodes.Ldarg_0);                    // TranspiledContext
+            il.Emit(OpCodes.Ldarg_0);                    // ThinContext
             il.Emit(OpCodes.Ldfld, GlobalsField);        // GlobalInstance[]
             il.Emit(OpCodes.Ldc_I4, idx);                // index
             il.Emit(OpCodes.Ldelem_Ref);                 // GlobalInstance
