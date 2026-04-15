@@ -212,7 +212,7 @@ namespace Wacs.Core.Instructions.Memory
     
     public class InstI64Load32S : InstMemoryLoad, INodeComputer<long, long>
     {
-        public InstI64Load32S() : base(ValType.I64, BitWidth.S32, OpCode.I64Load16S) {}
+        public InstI64Load32S() : base(ValType.I64, BitWidth.S32, OpCode.I64Load32S) {}
 
         public Func<ExecContext, long, long> GetFunc => FetchFromMemory;
 
