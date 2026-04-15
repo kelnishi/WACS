@@ -59,13 +59,23 @@ namespace Wacs.Transpiler.AOT.Emitters
         ///   Stores: outputCount = 0. Everything else: outputCount = 1.
         ///   inputCount = outputCount - StackDiff
         /// </summary>
-        public static void Emit(ILGenerator il, InstructionBase inst, SimdCode op)
+        public static void Emit(ILGenerator il, InstructionBase inst, SimdCode op,
+            TranspilerOptions options, DiagnosticCollector diagnostics, string? functionName = null)
         {
-            // Try direct helper path (bypasses interpreter, uses scalar/intrinsics)
+            if (options.Simd == SimdStrategy.InterpreterDispatch)
+            {
+                EmitInterpreterDispatch(il, inst, op);
+                return;
+            }
+
+            // Try direct helper path (scalar or intrinsics)
             if (TryEmitDirect(il, inst, op))
                 return;
 
-            // Fallback: interpreter dispatch via OpStack marshaling
+            // Fallback to interpreter for ops without direct helpers
+            diagnostics.Warning(
+                $"SIMD op falls back to interpreter dispatch (no direct helper yet)",
+                functionName, inst.Op.GetMnemonic());
             EmitInterpreterDispatch(il, inst, op);
         }
 

@@ -45,6 +45,8 @@ namespace Wacs.Transpiler.AOT
         private readonly ModuleInstance _moduleInst;
         private readonly GcTypeEmitter _gcTypes;
         private readonly FunctionType[] _allFunctionTypes;
+        private readonly TranspilerOptions _options;
+        private readonly DiagnosticCollector _diagnostics;
 
         // Control flow state
         private readonly Stack<EmitBlock> _blockStack = new();
@@ -58,7 +60,9 @@ namespace Wacs.Transpiler.AOT
             MethodBuilder[] siblingMethods,
             int importCount,
             GcTypeEmitter gcTypes,
-            FunctionType[] allFunctionTypes)
+            FunctionType[] allFunctionTypes,
+            TranspilerOptions options,
+            DiagnosticCollector diagnostics)
         {
             _method = method;
             _funcInst = funcInst;
@@ -69,6 +73,8 @@ namespace Wacs.Transpiler.AOT
             _moduleInst = funcInst.Module;
             _gcTypes = gcTypes;
             _allFunctionTypes = allFunctionTypes;
+            _options = options;
+            _diagnostics = diagnostics;
         }
 
         /// <summary>
@@ -173,7 +179,7 @@ namespace Wacs.Transpiler.AOT
             // 0xFD prefix (SIMD)
             if (op == WasmOpCode.FD)
             {
-                SimdEmitter.Emit(il, inst, inst.Op.xFD);
+                SimdEmitter.Emit(il, inst, inst.Op.xFD, _options, _diagnostics, _funcInst.Name);
                 return;
             }
 
