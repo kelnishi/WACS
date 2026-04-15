@@ -116,6 +116,8 @@ namespace Wacs.Transpiler.Test
                     throw new TrapException("integer divide by zero");
                 if (inner is OverflowException)
                     throw new TrapException("integer overflow");
+                if (inner is IndexOutOfRangeException)
+                    throw new TrapException("out of bounds memory access");
                 System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
                 return Array.Empty<Value>(); // unreachable
             }
