@@ -119,6 +119,17 @@ namespace Wacs.Core.Runtime
             return Context.Store[addr];
         }
 
+        /// <summary>
+        /// Replace the function at the given address with a different implementation.
+        /// Used by the AOT transpiler to swap interpreter-backed functions with transpiled versions.
+        /// </summary>
+        public void ReplaceFunction(FuncAddr addr, IFunctionInstance replacement)
+        {
+            if (!Context.Store.Contains(addr))
+                throw new WasmRuntimeException($"Runtime context did not contain function at address {addr.Value}");
+            Context.Store.ReplaceFunction(addr, replacement);
+        }
+
         private IAddress? GetBoundEntity((string module, string entity) id) =>
             _entityBindings.GetValueOrDefault(id);
 

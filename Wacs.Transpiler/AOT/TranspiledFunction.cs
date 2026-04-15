@@ -71,14 +71,27 @@ namespace Wacs.Transpiler.AOT
             }
 
             // Invoke the transpiled method
-            var result = _method.Invoke(null, _paramBuffer);
+            object? result;
+            try
+            {
+                result = _method.Invoke(null, _paramBuffer);
+            }
+            catch (System.Reflection.TargetInvocationException tie)
+            {
+                // Unwrap — propagate the inner exception (TrapException, etc.)
+                if (tie.InnerException != null)
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
+                throw;
+            }
 
             // Push results back onto OpStack
-            if (_resultCount == 1 && result != null)
+            if (_resultCount >= 1)
             {
+                if (result == null)
+                    throw new System.InvalidOperationException(
+                        $"TranspiledFunction '{Name}' expected {_resultCount} result(s) but method returned null");
                 context.OpStack.PushValue(ConvertToValue(result, Type.ResultType.Types[0]));
             }
-            // TODO: Handle multi-value returns (WasmReturn structs) in later phases
         }
 
         private static object ConvertFromValue(Value val, ValType type)
