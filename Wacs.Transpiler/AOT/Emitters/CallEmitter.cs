@@ -214,17 +214,19 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         /// <summary>
-        /// TableIndirect: resolve funcref from table → index into FuncTable → typed delegate call.
+        /// TableIndirect: pack params into object[], call InvokeIndirect, unbox result.
+        /// Uses DynamicInvoke for type-safe dispatch that properly traps on type mismatches.
         /// </summary>
         private static void EmitIndirectCall(ILGenerator il, CallSite site)
         {
             int paramCount = site.FuncType.ParameterTypes.Arity;
+            var resultTypes = site.FuncType.ResultType.Types;
 
             // Stack: [p0, p1, ..., pN-1, elemIdx]
             var elemIdxLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, elemIdxLocal);
 
-            // Spill params
+            // Spill params and pack into object[]
             var paramTypes = site.FuncType.ParameterTypes.Types;
             var temps = new LocalBuilder[paramCount];
             for (int i = paramCount - 1; i >= 0; i--)
@@ -233,41 +235,39 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
 
-            // Resolve: ctx.FuncTable[CallHelpers.ResolveIndirect(ctx, tableIdx, elemIdx)]
+            // Build object[] args
+            il.Emit(OpCodes.Ldc_I4, paramCount);
+            il.Emit(OpCodes.Newarr, typeof(object));
+            for (int i = 0; i < paramCount; i++)
+            {
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, i);
+                il.Emit(OpCodes.Ldloc, temps[i]);
+                il.Emit(OpCodes.Box, ModuleTranspiler.MapValType(paramTypes[i]));
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+            var argsLocal = il.DeclareLocal(typeof(object[]));
+            il.Emit(OpCodes.Stloc, argsLocal);
+
+            // Call InvokeIndirect(ctx, tableIdx, elemIdx, args)
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldc_I4, site.TableIdx);
             il.Emit(OpCodes.Ldloc, elemIdxLocal);
+            il.Emit(OpCodes.Ldloc, argsLocal);
             il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
-                nameof(CallHelpers.ResolveIndirect), BindingFlags.Public | BindingFlags.Static)!);
-            // Stack: [int funcTableIdx]
+                nameof(CallHelpers.InvokeIndirect), BindingFlags.Public | BindingFlags.Static)!);
 
-            var funcIdxLocal = il.DeclareLocal(typeof(int));
-            il.Emit(OpCodes.Stloc, funcIdxLocal);
-
-            // Load delegate from FuncTable
-            il.Emit(OpCodes.Ldarg_0);
-            il.Emit(OpCodes.Ldfld, FuncTableField);
-            il.Emit(OpCodes.Ldloc, funcIdxLocal);
-            il.Emit(OpCodes.Ldelem_Ref);
-
-            // Cast to typed delegate and invoke
-            var delegateType = BuildDelegateType(site.FuncType);
-            il.Emit(OpCodes.Castclass, delegateType);
-
-            // Push params
-            for (int i = 0; i < paramCount; i++)
-                il.Emit(OpCodes.Ldloc, temps[i]);
-
-            // Invoke
-            il.Emit(OpCodes.Callvirt, delegateType.GetMethod("Invoke")!);
+            // Unbox result
+            EmitUnboxResult(il, resultTypes);
         }
 
         /// <summary>
-        /// RefDispatch: resolve funcref → FuncTable index → typed delegate call.
+        /// RefDispatch: pack params into object[], call InvokeRef, unbox result.
         /// </summary>
         private static void EmitRefCall(ILGenerator il, CallSite site)
         {
             int paramCount = site.FuncType.ParameterTypes.Arity;
+            var resultTypes = site.FuncType.ResultType.Types;
 
             // Stack: [p0, ..., pN-1, funcref (Value)]
             var funcRefLocal = il.DeclareLocal(typeof(Value));
@@ -281,27 +281,44 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
 
-            // Resolve: CallHelpers.ResolveRef(ctx, funcref)
+            // Build object[] args
+            il.Emit(OpCodes.Ldc_I4, paramCount);
+            il.Emit(OpCodes.Newarr, typeof(object));
+            for (int i = 0; i < paramCount; i++)
+            {
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, i);
+                il.Emit(OpCodes.Ldloc, temps[i]);
+                il.Emit(OpCodes.Box, ModuleTranspiler.MapValType(paramTypes[i]));
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+            var argsLocal = il.DeclareLocal(typeof(object[]));
+            il.Emit(OpCodes.Stloc, argsLocal);
+
+            // Call InvokeRef(ctx, funcref, args)
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldloc, funcRefLocal);
+            il.Emit(OpCodes.Ldloc, argsLocal);
             il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
-                nameof(CallHelpers.ResolveRef), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(CallHelpers.InvokeRef), BindingFlags.Public | BindingFlags.Static)!);
 
-            var funcIdxLocal = il.DeclareLocal(typeof(int));
-            il.Emit(OpCodes.Stloc, funcIdxLocal);
+            // Unbox result
+            EmitUnboxResult(il, resultTypes);
+        }
 
-            il.Emit(OpCodes.Ldarg_0);
-            il.Emit(OpCodes.Ldfld, FuncTableField);
-            il.Emit(OpCodes.Ldloc, funcIdxLocal);
-            il.Emit(OpCodes.Ldelem_Ref);
+        /// <summary>
+        /// Unbox the object? result from DynamicInvoke to the expected CIL stack type.
+        /// </summary>
+        private static void EmitUnboxResult(ILGenerator il, ValType[] resultTypes)
+        {
+            if (resultTypes.Length == 0)
+            {
+                il.Emit(OpCodes.Pop); // Discard null from DynamicInvoke
+                return;
+            }
 
-            var delegateType = BuildDelegateType(site.FuncType);
-            il.Emit(OpCodes.Castclass, delegateType);
-
-            for (int i = 0; i < paramCount; i++)
-                il.Emit(OpCodes.Ldloc, temps[i]);
-
-            il.Emit(OpCodes.Callvirt, delegateType.GetMethod("Invoke")!);
+            var resultClrType = ModuleTranspiler.MapValType(resultTypes[0]);
+            il.Emit(OpCodes.Unbox_Any, resultClrType);
         }
 
         /// <summary>
@@ -342,7 +359,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// Build the CLR delegate type matching a WASM function signature.
         /// (param i32 i64) (result f32) → Func&lt;int, long, float&gt;
         /// </summary>
-        internal static Type BuildDelegateType(FunctionType funcType)
+        internal static Type? BuildDelegateType(FunctionType funcType)
         {
             var paramClrTypes = funcType.ParameterTypes.Types
                 .Select(t => ModuleTranspiler.MapValType(t)).ToArray();
@@ -352,17 +369,24 @@ namespace Wacs.Transpiler.AOT.Emitters
             {
                 return paramClrTypes.Length switch
                 {
-                    0 => typeof(Action),
-                    1 => typeof(Action<>).MakeGenericType(paramClrTypes),
-                    2 => typeof(Action<,>).MakeGenericType(paramClrTypes),
-                    3 => typeof(Action<,,>).MakeGenericType(paramClrTypes),
-                    4 => typeof(Action<,,,>).MakeGenericType(paramClrTypes),
-                    5 => typeof(Action<,,,,>).MakeGenericType(paramClrTypes),
-                    6 => typeof(Action<,,,,,>).MakeGenericType(paramClrTypes),
-                    7 => typeof(Action<,,,,,,>).MakeGenericType(paramClrTypes),
-                    8 => typeof(Action<,,,,,,,>).MakeGenericType(paramClrTypes),
-                    _ => typeof(Action<,,,,,,,,,,,,,,,>).MakeGenericType(
-                        paramClrTypes.Take(16).ToArray()) // Action supports up to 16
+                    0  => typeof(Action),
+                    1  => typeof(Action<>).MakeGenericType(paramClrTypes),
+                    2  => typeof(Action<,>).MakeGenericType(paramClrTypes),
+                    3  => typeof(Action<,,>).MakeGenericType(paramClrTypes),
+                    4  => typeof(Action<,,,>).MakeGenericType(paramClrTypes),
+                    5  => typeof(Action<,,,,>).MakeGenericType(paramClrTypes),
+                    6  => typeof(Action<,,,,,>).MakeGenericType(paramClrTypes),
+                    7  => typeof(Action<,,,,,,>).MakeGenericType(paramClrTypes),
+                    8  => typeof(Action<,,,,,,,>).MakeGenericType(paramClrTypes),
+                    9  => typeof(Action<,,,,,,,,>).MakeGenericType(paramClrTypes),
+                    10 => typeof(Action<,,,,,,,,,>).MakeGenericType(paramClrTypes),
+                    11 => typeof(Action<,,,,,,,,,,>).MakeGenericType(paramClrTypes),
+                    12 => typeof(Action<,,,,,,,,,,,>).MakeGenericType(paramClrTypes),
+                    13 => typeof(Action<,,,,,,,,,,,,>).MakeGenericType(paramClrTypes),
+                    14 => typeof(Action<,,,,,,,,,,,,,>).MakeGenericType(paramClrTypes),
+                    15 => typeof(Action<,,,,,,,,,,,,,,>).MakeGenericType(paramClrTypes),
+                    16 => typeof(Action<,,,,,,,,,,,,,,,>).MakeGenericType(paramClrTypes),
+                    _  => null // >16 params not supported by Action<>
                 };
             }
 
@@ -370,19 +394,25 @@ namespace Wacs.Transpiler.AOT.Emitters
             var allTypes = paramClrTypes.Append(returnType).ToArray();
             return allTypes.Length switch
             {
-                1 => typeof(Func<>).MakeGenericType(allTypes),
-                2 => typeof(Func<,>).MakeGenericType(allTypes),
-                3 => typeof(Func<,,>).MakeGenericType(allTypes),
-                4 => typeof(Func<,,,>).MakeGenericType(allTypes),
-                5 => typeof(Func<,,,,>).MakeGenericType(allTypes),
-                6 => typeof(Func<,,,,,>).MakeGenericType(allTypes),
-                7 => typeof(Func<,,,,,,>).MakeGenericType(allTypes),
-                8 => typeof(Func<,,,,,,,>).MakeGenericType(allTypes),
-                9 => typeof(Func<,,,,,,,,>).MakeGenericType(allTypes),
-                _ => typeof(Func<,,,,,,,,,,,,,,,>).MakeGenericType(
-                    allTypes.Take(16).ToArray())
+                1  => typeof(Func<>).MakeGenericType(allTypes),
+                2  => typeof(Func<,>).MakeGenericType(allTypes),
+                3  => typeof(Func<,,>).MakeGenericType(allTypes),
+                4  => typeof(Func<,,,>).MakeGenericType(allTypes),
+                5  => typeof(Func<,,,,>).MakeGenericType(allTypes),
+                6  => typeof(Func<,,,,,>).MakeGenericType(allTypes),
+                7  => typeof(Func<,,,,,,>).MakeGenericType(allTypes),
+                8  => typeof(Func<,,,,,,,>).MakeGenericType(allTypes),
+                9  => typeof(Func<,,,,,,,,>).MakeGenericType(allTypes),
+                10 => typeof(Func<,,,,,,,,,>).MakeGenericType(allTypes),
+                11 => typeof(Func<,,,,,,,,,,>).MakeGenericType(allTypes),
+                12 => typeof(Func<,,,,,,,,,,,>).MakeGenericType(allTypes),
+                13 => typeof(Func<,,,,,,,,,,,,>).MakeGenericType(allTypes),
+                14 => typeof(Func<,,,,,,,,,,,,,>).MakeGenericType(allTypes),
+                15 => typeof(Func<,,,,,,,,,,,,,,>).MakeGenericType(allTypes),
+                16 => typeof(Func<,,,,,,,,,,,,,,,>).MakeGenericType(allTypes),
+                17 => typeof(Func<,,,,,,,,,,,,,,,,>).MakeGenericType(allTypes),
+                _  => null // >16 params + return not supported by Func<>
             };
-            // TODO: multi-value returns via out params in delegate type
         }
 
         // ================================================================
@@ -506,7 +536,6 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// <summary>
         /// Resolve call_indirect: table lookup + null check → FuncTable index.
         /// Returns the FuncAddr value which is the index into FuncTable.
-        /// Type checking deferred to the delegate cast (will throw InvalidCastException on mismatch).
         /// </summary>
         public static int ResolveIndirect(TranspiledContext ctx, int tableIdx, int elemIdx)
         {
@@ -524,6 +553,76 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             // Standalone fallback: FuncAddr is stored in Data.Ptr
             return (int)r.Data.Ptr;
+        }
+
+        /// <summary>
+        /// Resolve and invoke call_indirect in one step.
+        /// Returns the result as object (null for void).
+        /// Converts InvalidCastException to WASM indirect call type mismatch trap.
+        /// </summary>
+        public static object? InvokeIndirect(
+            TranspiledContext ctx, int tableIdx, int elemIdx, object?[] args)
+        {
+            int funcIdx = ResolveIndirect(ctx, tableIdx, elemIdx);
+
+            if (funcIdx < 0 || funcIdx >= ctx.FuncTable.Length)
+                throw new TrapException("undefined element");
+
+            var del = ctx.FuncTable[funcIdx];
+            if (del == null)
+                throw new TrapException("uninitialized element");
+
+            try
+            {
+                return del.DynamicInvoke(args);
+            }
+            catch (System.Reflection.TargetParameterCountException)
+            {
+                throw new TrapException("indirect call type mismatch");
+            }
+            catch (System.ArgumentException)
+            {
+                throw new TrapException("indirect call type mismatch");
+            }
+            catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
+                return null; // unreachable
+            }
+        }
+
+        /// <summary>
+        /// Resolve and invoke call_ref in one step.
+        /// </summary>
+        public static object? InvokeRef(
+            TranspiledContext ctx, Value funcRef, object?[] args)
+        {
+            int funcIdx = ResolveRef(ctx, funcRef);
+
+            if (funcIdx < 0 || funcIdx >= ctx.FuncTable.Length)
+                throw new TrapException("undefined element");
+
+            var del = ctx.FuncTable[funcIdx];
+            if (del == null)
+                throw new TrapException("uninitialized element");
+
+            try
+            {
+                return del.DynamicInvoke(args);
+            }
+            catch (System.Reflection.TargetParameterCountException)
+            {
+                throw new TrapException("indirect call type mismatch");
+            }
+            catch (System.ArgumentException)
+            {
+                throw new TrapException("indirect call type mismatch");
+            }
+            catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
+                return null; // unreachable
+            }
         }
 
         /// <summary>

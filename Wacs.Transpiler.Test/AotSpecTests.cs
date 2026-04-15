@@ -137,6 +137,13 @@ namespace Wacs.Transpiler.Test
                 swapped++;
             }
 
+            // Build FuncTable so call_indirect can dispatch through transpiled delegates
+            // instead of falling back to the interpreter (which causes StackOverflow on recursion)
+            if (result.AllFunctionTypes.Length > 0)
+            {
+                ctx.BuildFuncTable(result.Methods, result.AllFunctionTypes, importCount);
+            }
+
             return (swapped, result.FallbackCount);
         }
 

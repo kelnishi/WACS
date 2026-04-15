@@ -55,6 +55,7 @@ namespace Wacs.Transpiler.AOT
         private readonly int _memoryCount;
         private readonly bool _hasStart;
         private readonly int _startFuncIndex;
+        private readonly FunctionType[] _allFunctionTypes;
 
         public TypeBuilder? ModuleType { get; private set; }
 
@@ -71,7 +72,8 @@ namespace Wacs.Transpiler.AOT
             MethodBuilder[] methodBuilders,
             int importCount,
             DataSegmentEmitter? dataEmitter = null,
-            int dataSegmentBaseId = 0)
+            int dataSegmentBaseId = 0,
+            FunctionType[]? allFunctionTypes = null)
         {
             _moduleBuilder = moduleBuilder;
             _namespace = @namespace;
@@ -85,6 +87,7 @@ namespace Wacs.Transpiler.AOT
             _startFuncIndex = _hasStart ? (int)wasmModule.StartIndex.Value : -1;
             _dataEmitter = dataEmitter;
             _dataSegmentBaseId = dataSegmentBaseId;
+            _allFunctionTypes = allFunctionTypes ?? Array.Empty<FunctionType>();
         }
 
         /// <summary>
@@ -358,7 +361,11 @@ namespace Wacs.Transpiler.AOT
 
         /// <summary>
         /// Emit IL to populate ctx.FuncTable with all function delegates.
-        /// Imports come from ImportDelegates, locals from static method wrappers.
+        /// Imports come from ImportDelegates, locals use Delegate.CreateDelegate
+        /// to bind ctx as the first argument of the static transpiled method.
+        ///
+        /// This enables call_indirect/call_ref to dispatch through FuncTable
+        /// without needing to know the TranspiledContext at the call site.
         /// </summary>
         private void EmitFuncTablePopulation(ILGenerator il, LocalBuilder ctxLocal)
         {
@@ -393,11 +400,48 @@ namespace Wacs.Transpiler.AOT
             }
 
             // Local functions (importCount..totalFuncs-1)
-            // Each gets a delegate wrapping the static Functions.FunctionN method
-            // with ctx bound as the first argument via a closure
-            // For now, we skip delegate creation for locals — they're called directly
-            // by call instructions. FuncTable entries for locals are needed only for
-            // call_indirect. We'll populate them lazily or via a helper.
+            // For each local function, create a closed delegate via
+            // Delegate.CreateDelegate(delegateType, ctx, methodInfo)
+            // This binds ctx as the first arg of the static method, so the resulting
+            // delegate signature matches what call_indirect expects (no ctx param).
+            var createDelegateMethod = typeof(Delegate).GetMethod(
+                nameof(Delegate.CreateDelegate),
+                new[] { typeof(Type), typeof(object), typeof(MethodInfo) })!;
+
+            for (int i = 0; i < _methodBuilders.Length; i++)
+            {
+                var mb = _methodBuilders[i];
+                var funcType = _allFunctionTypes[_importCount + i];
+
+                // Build the delegate type without ctx (what call_indirect expects)
+                var delegateType = CallEmitter.BuildDelegateType(funcType);
+                if (delegateType == null) continue;
+
+                // ctx.FuncTable[importCount + i] = Delegate.CreateDelegate(delegateType, ctx, methodInfo)
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldfld, typeof(TranspiledContext).GetField(
+                    nameof(TranspiledContext.FuncTable))!);
+                il.Emit(OpCodes.Ldc_I4, _importCount + i);
+
+                // Push delegateType (typeof)
+                il.Emit(OpCodes.Ldtoken, delegateType);
+                il.Emit(OpCodes.Call, typeof(Type).GetMethod(
+                    nameof(Type.GetTypeFromHandle), new[] { typeof(RuntimeTypeHandle) })!);
+
+                // Push ctx (first argument to bind)
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+
+                // Push MethodInfo via ldtoken
+                il.Emit(OpCodes.Ldtoken, mb);
+                il.Emit(OpCodes.Call, typeof(MethodBase).GetMethod(
+                    nameof(MethodBase.GetMethodFromHandle), new[] { typeof(RuntimeMethodHandle) })!);
+                il.Emit(OpCodes.Castclass, typeof(MethodInfo));
+
+                // Call Delegate.CreateDelegate(Type, object, MethodInfo)
+                il.Emit(OpCodes.Call, createDelegateMethod);
+
+                il.Emit(OpCodes.Stelem_Ref);
+            }
         }
 
         private void EmitExportMethods(FieldBuilder ctxField)
