@@ -16,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
 using Wacs.Transpiler.AOT;
 
 namespace Wacs.Transpiler.Test
@@ -109,7 +110,13 @@ namespace Wacs.Transpiler.Test
             }
             catch (TargetInvocationException tie) when (tie.InnerException != null)
             {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
+                var inner = tie.InnerException;
+                // Convert CLR arithmetic/memory exceptions to WASM traps
+                if (inner is DivideByZeroException)
+                    throw new TrapException("integer divide by zero");
+                if (inner is OverflowException)
+                    throw new TrapException("integer overflow");
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
                 return Array.Empty<Value>(); // unreachable
             }
 

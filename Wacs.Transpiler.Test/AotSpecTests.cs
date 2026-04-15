@@ -196,21 +196,31 @@ namespace Wacs.Transpiler.Test
 
             foreach (var (actual, arg) in result.Zip(arc.Expected, (a, e) => (a, e)))
             {
-                var expected = arg.AsValue;
-                if (expected.IsNullRef)
+                if (arg.Type == "either")
                 {
-                    // Null ref comparison — just check nullness
-                    if (!actual.IsNullRef)
+                    if (!arg.AsValues.Any(v => CompareValues(actual, v)))
                         throw new TestException(
                             $"Test failed {arc} \"{invokeAction.Field}\": " +
-                            $"Expected null ref, but got {actual}");
+                            $"\nExpected either:[{string.Join(", ", arg.AsValues)}]," +
+                            $"\n but got [{string.Join(", ", result.Select(r => r.ToString()))}]");
                 }
-                else if (!actual.Equals(expected))
+                else
                 {
-                    throw new TestException(
-                        $"Test failed {arc} \"{invokeAction.Field}\": " +
-                        $"\nExpected [{string.Join(", ", arc.Expected.Select(e => e.AsValue))}]," +
-                        $"\n but got [{string.Join(", ", result.Select(r => r.ToString()))}]");
+                    var expected = arg.AsValue;
+                    if (expected.IsNullRef)
+                    {
+                        if (!actual.IsNullRef)
+                            throw new TestException(
+                                $"Test failed {arc} \"{invokeAction.Field}\": " +
+                                $"Expected null ref, but got {actual}");
+                    }
+                    else if (!CompareValues(actual, expected))
+                    {
+                        throw new TestException(
+                            $"Test failed {arc} \"{invokeAction.Field}\": " +
+                            $"\nExpected [{string.Join(", ", arc.Expected.Select(e => e.AsValue))}]," +
+                            $"\n but got [{string.Join(", ", result.Select(r => r.ToString()))}]");
+                    }
                 }
             }
 
@@ -234,6 +244,14 @@ namespace Wacs.Transpiler.Test
             catch (Wacs.Core.Runtime.Exceptions.WasmRuntimeException)
             {
                 return true; // Also a valid trap (e.g., stack exhaustion)
+            }
+            catch (DivideByZeroException)
+            {
+                return true; // CLR div-by-zero = WASM trap
+            }
+            catch (OverflowException)
+            {
+                return true; // CLR overflow = WASM trap
             }
             catch (TestException)
             {
@@ -454,6 +472,13 @@ namespace Wacs.Transpiler.Test
                 Wacs.Core.Types.Defs.ValType.F64 => val.Data.Float64,
                 _ => val
             };
+        }
+
+        private static bool CompareValues(Value actual, Value expected)
+        {
+            if (expected.IsNullRef)
+                return actual.IsNullRef;
+            return actual.Equals(expected);
         }
 
         private static bool HasGcTypes(ModuleInstance moduleInst)
