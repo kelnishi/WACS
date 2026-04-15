@@ -341,6 +341,85 @@ namespace Wacs.Transpiler.AOT.Emitters
                 case SimdCode.F64x2RelaxedNMAdd: EmitTernaryV128(il, nameof(SimdHelpers.F64x2RelaxedNMAdd)); return true;
                 case SimdCode.I32x4RelaxedDotI8x16I7x16AddS: EmitTernaryV128(il, nameof(SimdHelpers.I32x4RelaxedDotI8x16I7x16AddS)); return true;
 
+                // === Splat ops: scalar → V128 ===
+                case SimdCode.I8x16Splat: EmitSplatI32(il, nameof(SimdHelpers.I8x16Splat)); return true;
+                case SimdCode.I16x8Splat: EmitSplatI32(il, nameof(SimdHelpers.I16x8Splat)); return true;
+                case SimdCode.I32x4Splat: EmitSplatI32(il, nameof(SimdHelpers.I32x4Splat)); return true;
+                case SimdCode.I64x2Splat: EmitSplatI64(il, nameof(SimdHelpers.I64x2Splat)); return true;
+                case SimdCode.F32x4Splat: EmitSplatF32(il, nameof(SimdHelpers.F32x4Splat)); return true;
+                case SimdCode.F64x2Splat: EmitSplatF64(il, nameof(SimdHelpers.F64x2Splat)); return true;
+
+                // === Extract lane: V128 → scalar (lane index from instruction) ===
+                case SimdCode.I8x16ExtractLaneS: EmitExtractLaneI32(il, inst, nameof(SimdHelpers.I8x16ExtractLaneS)); return true;
+                case SimdCode.I8x16ExtractLaneU: EmitExtractLaneI32(il, inst, nameof(SimdHelpers.I8x16ExtractLaneU)); return true;
+                case SimdCode.I16x8ExtractLaneS: EmitExtractLaneI32(il, inst, nameof(SimdHelpers.I16x8ExtractLaneS)); return true;
+                case SimdCode.I16x8ExtractLaneU: EmitExtractLaneI32(il, inst, nameof(SimdHelpers.I16x8ExtractLaneU)); return true;
+                case SimdCode.I32x4ExtractLane: EmitExtractLaneI32(il, inst, nameof(SimdHelpers.I32x4ExtractLane)); return true;
+                case SimdCode.I64x2ExtractLane: EmitExtractLaneI64(il, inst, nameof(SimdHelpers.I64x2ExtractLane)); return true;
+                case SimdCode.F32x4ExtractLane: EmitExtractLaneF32(il, inst, nameof(SimdHelpers.F32x4ExtractLane)); return true;
+                case SimdCode.F64x2ExtractLane: EmitExtractLaneF64(il, inst, nameof(SimdHelpers.F64x2ExtractLane)); return true;
+
+                // === Replace lane: V128 + scalar → V128 ===
+                case SimdCode.I8x16ReplaceLane: EmitReplaceLaneI32(il, inst, nameof(SimdHelpers.I8x16ReplaceLane)); return true;
+                case SimdCode.I16x8ReplaceLane: EmitReplaceLaneI32(il, inst, nameof(SimdHelpers.I16x8ReplaceLane)); return true;
+                case SimdCode.I32x4ReplaceLane: EmitReplaceLaneI32(il, inst, nameof(SimdHelpers.I32x4ReplaceLane)); return true;
+                case SimdCode.I64x2ReplaceLane: EmitReplaceLaneI64(il, inst, nameof(SimdHelpers.I64x2ReplaceLane)); return true;
+                case SimdCode.F32x4ReplaceLane: EmitReplaceLaneF32(il, inst, nameof(SimdHelpers.F32x4ReplaceLane)); return true;
+                case SimdCode.F64x2ReplaceLane: EmitReplaceLaneF64(il, inst, nameof(SimdHelpers.F64x2ReplaceLane)); return true;
+
+                // === Shuffle: V128 + V128 → V128 with lane indices ===
+                case SimdCode.I8x16Shuffle: EmitShuffle(il, inst); return true;
+
+                // === V128.const: immediate → V128 ===
+                case SimdCode.V128Const: EmitV128Const(il, inst); return true;
+
+                // === V128 memory loads: addr → V128 ===
+                case SimdCode.V128Load:
+                case SimdCode.V128Load8x8S: case SimdCode.V128Load8x8U:
+                case SimdCode.V128Load16x4S: case SimdCode.V128Load16x4U:
+                case SimdCode.V128Load32x2S: case SimdCode.V128Load32x2U:
+                case SimdCode.V128Load8Splat: case SimdCode.V128Load16Splat:
+                case SimdCode.V128Load32Splat: case SimdCode.V128Load64Splat:
+                case SimdCode.V128Load32Zero: case SimdCode.V128Load64Zero:
+                    EmitSimdLoad(il, inst, op);
+                    return true;
+
+                // === V128 lane loads: V128 + addr → V128 ===
+                case SimdCode.V128Load8Lane: case SimdCode.V128Load16Lane:
+                case SimdCode.V128Load32Lane: case SimdCode.V128Load64Lane:
+                    EmitSimdLoadLane(il, inst, op);
+                    return true;
+
+                // === V128 store: addr + V128 → void ===
+                case SimdCode.V128Store:
+                    EmitSimdStore(il, inst);
+                    return true;
+
+                // === V128 lane stores: addr + V128 → void ===
+                case SimdCode.V128Store8Lane: case SimdCode.V128Store16Lane:
+                case SimdCode.V128Store32Lane: case SimdCode.V128Store64Lane:
+                    EmitSimdStoreLane(il, inst, op);
+                    return true;
+
+                // === Prototype relaxed (duplicate encodings) ===
+                case SimdCode.Prototype_I8x16RelaxedSwizzle: EmitBinaryV128(il, nameof(SimdHelpers.I8x16RelaxedSwizzle)); return true;
+                case SimdCode.Prototype_I8x16RelaxedLaneselect: EmitTernaryV128(il, nameof(SimdHelpers.I8x16RelaxedLaneselect)); return true;
+                case SimdCode.Prototype_I16x8RelaxedLaneselect: EmitTernaryV128(il, nameof(SimdHelpers.I16x8RelaxedLaneselect)); return true;
+                case SimdCode.Prototype_I32x4RelaxedLaneselect: EmitTernaryV128(il, nameof(SimdHelpers.I32x4RelaxedLaneselect)); return true;
+                case SimdCode.Prototype_I64x2RelaxedLaneselect: EmitTernaryV128(il, nameof(SimdHelpers.I64x2RelaxedLaneselect)); return true;
+                case SimdCode.Prototype_F32x4RelaxedMin: EmitBinaryV128(il, nameof(SimdHelpers.F32x4RelaxedMin)); return true;
+                case SimdCode.Prototype_F32x4RelaxedMax: EmitBinaryV128(il, nameof(SimdHelpers.F32x4RelaxedMax)); return true;
+                case SimdCode.Prototype_F64x2RelaxedMin: EmitBinaryV128(il, nameof(SimdHelpers.F64x2RelaxedMin)); return true;
+                case SimdCode.Prototype_F64x2RelaxedMax: EmitBinaryV128(il, nameof(SimdHelpers.F64x2RelaxedMax)); return true;
+                case SimdCode.Prototype_F32x4RelaxedMAdd: EmitTernaryV128(il, nameof(SimdHelpers.F32x4RelaxedMAdd)); return true;
+                case SimdCode.Prototype_F32x4RelaxedNMAdd: EmitTernaryV128(il, nameof(SimdHelpers.F32x4RelaxedNMAdd)); return true;
+                case SimdCode.Prototype_F64x2RelaxedMAdd: EmitTernaryV128(il, nameof(SimdHelpers.F64x2RelaxedMAdd)); return true;
+                case SimdCode.Prototype_F64x2RelaxedNMAdd: EmitTernaryV128(il, nameof(SimdHelpers.F64x2RelaxedNMAdd)); return true;
+                case SimdCode.Prototype_I32x4RelaxedTruncF32x4S: EmitUnaryV128(il, nameof(SimdHelpers.I32x4RelaxedTruncF32x4S)); return true;
+                case SimdCode.Prototype_I32x4RelaxedTruncF32x4U: EmitUnaryV128(il, nameof(SimdHelpers.I32x4RelaxedTruncF32x4U)); return true;
+                case SimdCode.Prototype_I32x4RelaxedTruncF64x2SZero: EmitUnaryV128(il, nameof(SimdHelpers.I32x4RelaxedTruncF64x2SZero)); return true;
+                case SimdCode.Prototype_I32x4RelaxedTruncF64x2UZero: EmitUnaryV128(il, nameof(SimdHelpers.I32x4RelaxedTruncF64x2UZero)); return true;
+
                 default:
                     return false;
             }
@@ -411,6 +490,228 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName,
                 new[] { typeof(V128) })!);
             // Result is i32 on CIL stack — matches WASM result type
+        }
+
+        // === Splat: scalar on CIL stack → V128 boxed to Value ===
+        private static void EmitSplatI32(ILGenerator il, string helperName)
+        {
+            // Stack has: [int] → call helper(int) → V128 → box
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName, new[] { typeof(int) })!);
+            EmitBoxV128(il);
+        }
+
+        private static void EmitSplatI64(ILGenerator il, string helperName)
+        {
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName, new[] { typeof(long) })!);
+            EmitBoxV128(il);
+        }
+
+        private static void EmitSplatF32(ILGenerator il, string helperName)
+        {
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName, new[] { typeof(float) })!);
+            EmitBoxV128(il);
+        }
+
+        private static void EmitSplatF64(ILGenerator il, string helperName)
+        {
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName, new[] { typeof(double) })!);
+            EmitBoxV128(il);
+        }
+
+        // === Extract lane: V128 → scalar, lane from instruction immediate ===
+        private static void EmitExtractLaneI32(ILGenerator il, InstructionBase inst, string helperName)
+        {
+            byte lane = ((Wacs.Core.Instructions.Numeric.InstLaneOp)inst).LaneIndex;
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Ldc_I4, (int)lane);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName, new[] { typeof(V128), typeof(byte) })!);
+            // Result is int on CIL stack
+        }
+
+        private static void EmitExtractLaneI64(ILGenerator il, InstructionBase inst, string helperName)
+        {
+            byte lane = ((Wacs.Core.Instructions.Numeric.InstLaneOp)inst).LaneIndex;
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Ldc_I4, (int)lane);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName, new[] { typeof(V128), typeof(byte) })!);
+        }
+
+        private static void EmitExtractLaneF32(ILGenerator il, InstructionBase inst, string helperName)
+        {
+            byte lane = ((Wacs.Core.Instructions.Numeric.InstLaneOp)inst).LaneIndex;
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Ldc_I4, (int)lane);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName, new[] { typeof(V128), typeof(byte) })!);
+        }
+
+        private static void EmitExtractLaneF64(ILGenerator il, InstructionBase inst, string helperName)
+        {
+            byte lane = ((Wacs.Core.Instructions.Numeric.InstLaneOp)inst).LaneIndex;
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Ldc_I4, (int)lane);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName, new[] { typeof(V128), typeof(byte) })!);
+        }
+
+        // === Replace lane: V128 + scalar → V128, lane from instruction ===
+        private static void EmitReplaceLaneI32(ILGenerator il, InstructionBase inst, string helperName)
+        {
+            byte lane = ((Wacs.Core.Instructions.Numeric.InstLaneOp)inst).LaneIndex;
+            // Stack: [Value(v128), int]
+            var scalar = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Stloc, scalar);
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Ldc_I4, (int)lane);
+            il.Emit(OpCodes.Ldloc, scalar);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName, new[] { typeof(V128), typeof(byte), typeof(int) })!);
+            EmitBoxV128(il);
+        }
+
+        private static void EmitReplaceLaneI64(ILGenerator il, InstructionBase inst, string helperName)
+        {
+            byte lane = ((Wacs.Core.Instructions.Numeric.InstLaneOp)inst).LaneIndex;
+            var scalar = il.DeclareLocal(typeof(long));
+            il.Emit(OpCodes.Stloc, scalar);
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Ldc_I4, (int)lane);
+            il.Emit(OpCodes.Ldloc, scalar);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName, new[] { typeof(V128), typeof(byte), typeof(long) })!);
+            EmitBoxV128(il);
+        }
+
+        private static void EmitReplaceLaneF32(ILGenerator il, InstructionBase inst, string helperName)
+        {
+            byte lane = ((Wacs.Core.Instructions.Numeric.InstLaneOp)inst).LaneIndex;
+            var scalar = il.DeclareLocal(typeof(float));
+            il.Emit(OpCodes.Stloc, scalar);
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Ldc_I4, (int)lane);
+            il.Emit(OpCodes.Ldloc, scalar);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName, new[] { typeof(V128), typeof(byte), typeof(float) })!);
+            EmitBoxV128(il);
+        }
+
+        private static void EmitReplaceLaneF64(ILGenerator il, InstructionBase inst, string helperName)
+        {
+            byte lane = ((Wacs.Core.Instructions.Numeric.InstLaneOp)inst).LaneIndex;
+            var scalar = il.DeclareLocal(typeof(double));
+            il.Emit(OpCodes.Stloc, scalar);
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Ldc_I4, (int)lane);
+            il.Emit(OpCodes.Ldloc, scalar);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(helperName, new[] { typeof(V128), typeof(byte), typeof(double) })!);
+            EmitBoxV128(il);
+        }
+
+        // === Shuffle: V128 + V128 → V128 with lane indices from instruction ===
+        private static void EmitShuffle(ILGenerator il, InstructionBase inst)
+        {
+            var lanes = ((Wacs.Core.Instructions.InstShuffleOp)inst).LaneIndices;
+            // Stack: [Value(v1), Value(v2)]
+            var v2 = il.DeclareLocal(typeof(V128));
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Stloc, v2);
+            EmitUnboxV128(il);
+            il.Emit(OpCodes.Ldloc, v2);
+            // Pass lanes as a V128 (the lane indices are stored as a V128 in the instruction)
+            // We register the lanes value and load it at runtime
+            int lanesId = RegisterInstruction(inst); // reuse registry to stash the instruction
+            il.Emit(OpCodes.Ldarg_0); // ctx (unused but needed for registry access)
+            il.Emit(OpCodes.Ldc_I4, lanesId);
+            il.Emit(OpCodes.Call, typeof(SimdDispatch).GetMethod(
+                nameof(SimdDispatch.GetShuffleLanes), BindingFlags.Public | BindingFlags.Static)!);
+            il.Emit(OpCodes.Call, typeof(SimdHelpers).GetMethod(
+                nameof(SimdHelpers.I8x16Shuffle), new[] { typeof(V128), typeof(V128), typeof(V128) })!);
+            EmitBoxV128(il);
+        }
+
+        // === V128.const: push immediate value ===
+        private static void EmitV128Const(ILGenerator il, InstructionBase inst)
+        {
+            var constInst = (Wacs.Core.Instructions.Simd.InstV128Const)inst;
+            var value = constInst.Value;
+            // Register the value and load at runtime (V128 can't be embedded as IL constant)
+            int constId = RegisterInstruction(inst);
+            il.Emit(OpCodes.Ldc_I4, constId);
+            il.Emit(OpCodes.Call, typeof(SimdDispatch).GetMethod(
+                nameof(SimdDispatch.GetV128Const), BindingFlags.Public | BindingFlags.Static)!);
+            EmitBoxV128(il);
+        }
+
+        // === SIMD memory load: [addr] → V128 boxed as Value ===
+        private static void EmitSimdLoad(ILGenerator il, InstructionBase inst, SimdCode op)
+        {
+            // These ops all use interpreter dispatch — they need MemArg access
+            // and the load semantics vary by type (extending, splatting, zero-extending).
+            // Delegate to interpreter dispatch for correctness, then migrate per-op.
+            // The instruction already has MemArg parsed.
+            int instId = RegisterInstruction(inst);
+            // Stack: [addr (i32)]
+            var addrLocal = il.DeclareLocal(typeof(Value));
+            il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(int) })!);
+            il.Emit(OpCodes.Stloc, addrLocal);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldloc, addrLocal);
+            il.Emit(OpCodes.Call, typeof(SimdDispatch).GetMethod(
+                nameof(SimdDispatch.PushValue), BindingFlags.Public | BindingFlags.Static)!);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldc_I4, instId);
+            il.Emit(OpCodes.Call, typeof(SimdDispatch).GetMethod(
+                nameof(SimdDispatch.ExecuteSimdOp), BindingFlags.Public | BindingFlags.Static)!);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Call, typeof(SimdDispatch).GetMethod(
+                nameof(SimdDispatch.PopValue), BindingFlags.Public | BindingFlags.Static)!);
+        }
+
+        // Lane loads: [V128, addr] → V128
+        private static void EmitSimdLoadLane(ILGenerator il, InstructionBase inst, SimdCode op)
+        {
+            int instId = RegisterInstruction(inst);
+            // Stack: [Value(v128), addr (i32)]
+            var addrLocal = il.DeclareLocal(typeof(Value));
+            il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(int) })!);
+            il.Emit(OpCodes.Stloc, addrLocal);
+            var vecLocal = il.DeclareLocal(typeof(Value));
+            il.Emit(OpCodes.Stloc, vecLocal);
+            // Push vec then addr
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldloc, vecLocal);
+            il.Emit(OpCodes.Call, typeof(SimdDispatch).GetMethod(nameof(SimdDispatch.PushValue), BindingFlags.Public | BindingFlags.Static)!);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldloc, addrLocal);
+            il.Emit(OpCodes.Call, typeof(SimdDispatch).GetMethod(nameof(SimdDispatch.PushValue), BindingFlags.Public | BindingFlags.Static)!);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldc_I4, instId);
+            il.Emit(OpCodes.Call, typeof(SimdDispatch).GetMethod(nameof(SimdDispatch.ExecuteSimdOp), BindingFlags.Public | BindingFlags.Static)!);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Call, typeof(SimdDispatch).GetMethod(nameof(SimdDispatch.PopValue), BindingFlags.Public | BindingFlags.Static)!);
+        }
+
+        // V128 store: [addr, Value(v128)] → void
+        private static void EmitSimdStore(ILGenerator il, InstructionBase inst)
+        {
+            int instId = RegisterInstruction(inst);
+            // Stack: [addr (i32), Value(v128)]
+            var vecLocal = il.DeclareLocal(typeof(Value));
+            il.Emit(OpCodes.Stloc, vecLocal);
+            var addrLocal = il.DeclareLocal(typeof(Value));
+            il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(int) })!);
+            il.Emit(OpCodes.Stloc, addrLocal);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldloc, addrLocal);
+            il.Emit(OpCodes.Call, typeof(SimdDispatch).GetMethod(nameof(SimdDispatch.PushValue), BindingFlags.Public | BindingFlags.Static)!);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldloc, vecLocal);
+            il.Emit(OpCodes.Call, typeof(SimdDispatch).GetMethod(nameof(SimdDispatch.PushValue), BindingFlags.Public | BindingFlags.Static)!);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldc_I4, instId);
+            il.Emit(OpCodes.Call, typeof(SimdDispatch).GetMethod(nameof(SimdDispatch.ExecuteSimdOp), BindingFlags.Public | BindingFlags.Static)!);
+        }
+
+        // Lane stores: [addr, Value(v128)] → void
+        private static void EmitSimdStoreLane(ILGenerator il, InstructionBase inst, SimdCode op)
+        {
+            // Same pattern as store
+            EmitSimdStore(il, inst);
         }
 
         private static void EmitUnboxV128(ILGenerator il)
@@ -490,6 +791,18 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (ctx.ExecContext == null)
                 throw new TrapException("SIMD ops require ExecContext");
             return ctx.ExecContext.OpStack.PopAny();
+        }
+
+        public static V128 GetShuffleLanes(TranspiledContext ctx, int instructionId)
+        {
+            var inst = SimdEmitter.InstructionRegistry[instructionId];
+            return ((Wacs.Core.Instructions.InstShuffleOp)inst).LaneIndices;
+        }
+
+        public static V128 GetV128Const(int instructionId)
+        {
+            var inst = SimdEmitter.InstructionRegistry[instructionId];
+            return ((Wacs.Core.Instructions.Simd.InstV128Const)inst).Value;
         }
 
         public static void ExecuteSimdOp(TranspiledContext ctx, int instructionId)
