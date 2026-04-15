@@ -37,7 +37,12 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             byte b = (byte)op;
             // Saturating truncation: 0x00-0x07
-            return b <= 0x07;
+            if (b <= 0x07) return true;
+            // Bulk memory/table: 0x08-0x0E
+            if (BulkEmitter.CanEmit(op)) return true;
+            // Table size/grow/fill: 0x0F-0x11
+            if (TableRefEmitter.CanEmitExt(op)) return true;
+            return false;
         }
 
         public static void Emit(ILGenerator il, InstructionBase inst, ExtCode op)
@@ -69,6 +74,16 @@ namespace Wacs.Transpiler.AOT.Emitters
                     EmitHelperCall(il, "TruncSatF64UToI64");
                     break;
                 default:
+                    if (BulkEmitter.CanEmit(op))
+                    {
+                        BulkEmitter.Emit(il, inst, op);
+                        break;
+                    }
+                    if (TableRefEmitter.CanEmitExt(op))
+                    {
+                        TableRefEmitter.EmitExt(il, inst, op);
+                        break;
+                    }
                     throw new TranspilerException($"ExtEmitter: unhandled opcode {op}");
             }
         }

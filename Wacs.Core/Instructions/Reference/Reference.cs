@@ -17,8 +17,9 @@ namespace Wacs.Core.Instructions.Reference
     public class InstRefNull : InstructionBase, IConstInstruction
     {
         public InstRefNull() : base(ByteCode.RefNull, +1) { }
-        
+
         private ValType Type;
+        public ValType RefType => Type;
 
         // @Spec 3.3.2.1. ref.null t
         public override void Validate(IWasmValidationContext context)
