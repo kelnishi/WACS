@@ -83,6 +83,87 @@ namespace Wacs.Transpiler.AOT.Emitters
             => (v.U64x2_0 != 0UL || v.U64x2_1 != 0UL) ? 1 : 0;
 
         // ================================================================
+        // Chunk 3: Integer arithmetic — Scalar reference implementations
+        // ================================================================
+
+        // --- add/sub per shape ---
+        public static V128 I8x16Add(V128 a, V128 b) => new V128(
+            (byte)(a.U8x16_0+b.U8x16_0), (byte)(a.U8x16_1+b.U8x16_1),
+            (byte)(a.U8x16_2+b.U8x16_2), (byte)(a.U8x16_3+b.U8x16_3),
+            (byte)(a.U8x16_4+b.U8x16_4), (byte)(a.U8x16_5+b.U8x16_5),
+            (byte)(a.U8x16_6+b.U8x16_6), (byte)(a.U8x16_7+b.U8x16_7),
+            (byte)(a.U8x16_8+b.U8x16_8), (byte)(a.U8x16_9+b.U8x16_9),
+            (byte)(a.U8x16_A+b.U8x16_A), (byte)(a.U8x16_B+b.U8x16_B),
+            (byte)(a.U8x16_C+b.U8x16_C), (byte)(a.U8x16_D+b.U8x16_D),
+            (byte)(a.U8x16_E+b.U8x16_E), (byte)(a.U8x16_F+b.U8x16_F));
+
+        public static V128 I8x16Sub(V128 a, V128 b) => new V128(
+            (byte)(a.U8x16_0-b.U8x16_0), (byte)(a.U8x16_1-b.U8x16_1),
+            (byte)(a.U8x16_2-b.U8x16_2), (byte)(a.U8x16_3-b.U8x16_3),
+            (byte)(a.U8x16_4-b.U8x16_4), (byte)(a.U8x16_5-b.U8x16_5),
+            (byte)(a.U8x16_6-b.U8x16_6), (byte)(a.U8x16_7-b.U8x16_7),
+            (byte)(a.U8x16_8-b.U8x16_8), (byte)(a.U8x16_9-b.U8x16_9),
+            (byte)(a.U8x16_A-b.U8x16_A), (byte)(a.U8x16_B-b.U8x16_B),
+            (byte)(a.U8x16_C-b.U8x16_C), (byte)(a.U8x16_D-b.U8x16_D),
+            (byte)(a.U8x16_E-b.U8x16_E), (byte)(a.U8x16_F-b.U8x16_F));
+
+        public static V128 I16x8Add(V128 a, V128 b) => new V128(
+            (short)(a.I16x8_0+b.I16x8_0), (short)(a.I16x8_1+b.I16x8_1),
+            (short)(a.I16x8_2+b.I16x8_2), (short)(a.I16x8_3+b.I16x8_3),
+            (short)(a.I16x8_4+b.I16x8_4), (short)(a.I16x8_5+b.I16x8_5),
+            (short)(a.I16x8_6+b.I16x8_6), (short)(a.I16x8_7+b.I16x8_7));
+
+        public static V128 I16x8Sub(V128 a, V128 b) => new V128(
+            (short)(a.I16x8_0-b.I16x8_0), (short)(a.I16x8_1-b.I16x8_1),
+            (short)(a.I16x8_2-b.I16x8_2), (short)(a.I16x8_3-b.I16x8_3),
+            (short)(a.I16x8_4-b.I16x8_4), (short)(a.I16x8_5-b.I16x8_5),
+            (short)(a.I16x8_6-b.I16x8_6), (short)(a.I16x8_7-b.I16x8_7));
+
+        public static V128 I16x8Mul(V128 a, V128 b) => new V128(
+            (short)(a.I16x8_0*b.I16x8_0), (short)(a.I16x8_1*b.I16x8_1),
+            (short)(a.I16x8_2*b.I16x8_2), (short)(a.I16x8_3*b.I16x8_3),
+            (short)(a.I16x8_4*b.I16x8_4), (short)(a.I16x8_5*b.I16x8_5),
+            (short)(a.I16x8_6*b.I16x8_6), (short)(a.I16x8_7*b.I16x8_7));
+
+        public static V128 I32x4Add(V128 a, V128 b) => new V128(
+            a.I32x4_0+b.I32x4_0, a.I32x4_1+b.I32x4_1,
+            a.I32x4_2+b.I32x4_2, a.I32x4_3+b.I32x4_3);
+
+        public static V128 I32x4Sub(V128 a, V128 b) => new V128(
+            a.I32x4_0-b.I32x4_0, a.I32x4_1-b.I32x4_1,
+            a.I32x4_2-b.I32x4_2, a.I32x4_3-b.I32x4_3);
+
+        public static V128 I32x4Mul(V128 a, V128 b) => new V128(
+            a.I32x4_0*b.I32x4_0, a.I32x4_1*b.I32x4_1,
+            a.I32x4_2*b.I32x4_2, a.I32x4_3*b.I32x4_3);
+
+        public static V128 I64x2Add(V128 a, V128 b) =>
+            new V128(a.I64x2_0+b.I64x2_0, a.I64x2_1+b.I64x2_1);
+
+        public static V128 I64x2Sub(V128 a, V128 b) =>
+            new V128(a.I64x2_0-b.I64x2_0, a.I64x2_1-b.I64x2_1);
+
+        public static V128 I64x2Mul(V128 a, V128 b) =>
+            new V128(a.I64x2_0*b.I64x2_0, a.I64x2_1*b.I64x2_1);
+
+        // --- neg per shape ---
+        public static V128 I8x16Neg(V128 v) => new V128(
+            (byte)(0-v.U8x16_0), (byte)(0-v.U8x16_1), (byte)(0-v.U8x16_2), (byte)(0-v.U8x16_3),
+            (byte)(0-v.U8x16_4), (byte)(0-v.U8x16_5), (byte)(0-v.U8x16_6), (byte)(0-v.U8x16_7),
+            (byte)(0-v.U8x16_8), (byte)(0-v.U8x16_9), (byte)(0-v.U8x16_A), (byte)(0-v.U8x16_B),
+            (byte)(0-v.U8x16_C), (byte)(0-v.U8x16_D), (byte)(0-v.U8x16_E), (byte)(0-v.U8x16_F));
+
+        public static V128 I16x8Neg(V128 v) => new V128(
+            (short)(-v.I16x8_0), (short)(-v.I16x8_1), (short)(-v.I16x8_2), (short)(-v.I16x8_3),
+            (short)(-v.I16x8_4), (short)(-v.I16x8_5), (short)(-v.I16x8_6), (short)(-v.I16x8_7));
+
+        public static V128 I32x4Neg(V128 v) =>
+            new V128(-v.I32x4_0, -v.I32x4_1, -v.I32x4_2, -v.I32x4_3);
+
+        public static V128 I64x2Neg(V128 v) =>
+            new V128(-v.I64x2_0, -v.I64x2_1);
+
+        // ================================================================
         // Chunk 2: Bitwise ops — Intrinsics implementations
         // These produce identical results to the scalar versions.
         // Gated by transpiler options (future — currently unused).
@@ -149,6 +230,148 @@ namespace Wacs.Transpiler.AOT.Emitters
             {
                 var vec = Unsafe.As<V128, Vector128<byte>>(ref v);
                 return vec != Vector128<byte>.Zero ? 1 : 0;
+            }
+
+            // ================================================================
+            // Chunk 3: Integer arithmetic — Intrinsics
+            //
+            // CLR coverage:
+            // - add/sub: Vector128 operator +/- for all shapes ✓
+            // - mul i16x8/i32x4: Vector128 operator * ✓
+            // - mul i64x2: NO direct CLR intrinsic — requires emulation
+            //   (Sse41.MultiplyLow for low 32 bits + manual high bits)
+            // - neg: Vector128.Negate ✓
+            // - i8x16 mul: NO direct CLR intrinsic — requires widening to i16, mul, narrow
+            // ================================================================
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16Add(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<byte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<byte>>(ref b);
+                var r = va + vb;
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16Sub(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<byte>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<byte>>(ref b);
+                var r = va - vb;
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8Add(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<short>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<short>>(ref b);
+                var r = va + vb;
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8Sub(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<short>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<short>>(ref b);
+                var r = va - vb;
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8Mul(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<short>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<short>>(ref b);
+                var r = va * vb;
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4Add(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<int>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<int>>(ref b);
+                var r = va + vb;
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4Sub(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<int>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<int>>(ref b);
+                var r = va - vb;
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4Mul(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<int>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<int>>(ref b);
+                var r = va * vb;
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2Add(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<long>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<long>>(ref b);
+                var r = va + vb;
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2Sub(V128 a, V128 b)
+            {
+                var va = Unsafe.As<V128, Vector128<long>>(ref a);
+                var vb = Unsafe.As<V128, Vector128<long>>(ref b);
+                var r = va - vb;
+                return Unsafe.As<Vector128<long>, V128>(ref r);
+            }
+
+            // i64x2.mul: NO direct Vector128 operator * for long.
+            // Must use scalar fallback or emulate via 32-bit multiply + shift.
+            public static V128 I64x2Mul(V128 a, V128 b)
+            {
+                // Fallback to scalar — Vector128<long> * is not available in .NET 8
+                return SimdHelpers.I64x2Mul(a, b);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I8x16Neg(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<byte>>(ref v);
+                var r = Vector128<byte>.Zero - vec;
+                return Unsafe.As<Vector128<byte>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I16x8Neg(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<short>>(ref v);
+                var r = Vector128.Negate(vec);
+                return Unsafe.As<Vector128<short>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I32x4Neg(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<int>>(ref v);
+                var r = Vector128.Negate(vec);
+                return Unsafe.As<Vector128<int>, V128>(ref r);
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static V128 I64x2Neg(V128 v)
+            {
+                var vec = Unsafe.As<V128, Vector128<long>>(ref v);
+                var r = Vector128.Negate(vec);
+                return Unsafe.As<Vector128<long>, V128>(ref r);
             }
         }
     }
