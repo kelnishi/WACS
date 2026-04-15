@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Spec.Test;
 using Wacs.Core;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
@@ -35,26 +35,13 @@ namespace Wacs.Transpiler.Test
             _output = output;
         }
 
-        /// <summary>
-        /// Report which unsupported opcodes block the most functions from being transpiled.
-        /// </summary>
         [Fact]
         public void ReportBlockingOpcodes()
         {
-            var specDir = FindSpecTestDir();
-            if (string.IsNullOrEmpty(specDir) || !Directory.Exists(specDir))
-            {
-                _output.WriteLine("Skipped: no spec test files found");
-                return;
-            }
-
-            // Track: for each opcode, how many functions does it block?
+            var provider = new WastTestDataProvider();
             var blockers = new Dictionary<string, int>();
 
-            var wasmFiles = Directory.GetFiles(specDir, "*.wasm", SearchOption.AllDirectories)
-                .OrderBy(f => f);
-
-            foreach (var wasmPath in wasmFiles)
+            foreach (var wasmPath in provider.GetWasmFiles())
             {
                 Module module;
                 using (var stream = new FileStream(wasmPath, FileMode.Open, FileAccess.Read))
@@ -96,35 +83,28 @@ namespace Wacs.Transpiler.Test
             {
                 var op = inst.Op.x00;
 
-                // Multi-byte prefix
                 if (op == OpCode.FB || op == OpCode.FC ||
                     op == OpCode.FD || op == OpCode.FE)
-                {
                     return inst.Op.GetMnemonic();
-                }
 
-                // Numeric (0x41-0xC4) — supported
                 byte b = (byte)op;
-                if (b >= 0x41 && b <= 0xC4)
-                    continue;
+                if (b >= 0x28 && b <= 0xC4) continue; // memory + numeric
 
-                // Supported control/variable/parametric
                 if (op == OpCode.Unreachable || op == OpCode.Nop ||
                     op == OpCode.Block || op == OpCode.Loop ||
                     op == OpCode.If || op == OpCode.Else ||
                     op == OpCode.End || op == OpCode.Br ||
                     op == OpCode.BrIf || op == OpCode.BrTable ||
-                    op == OpCode.Return ||
+                    op == OpCode.Return || op == OpCode.Call ||
                     op == OpCode.LocalGet || op == OpCode.LocalSet ||
                     op == OpCode.LocalTee || op == OpCode.Drop ||
-                    op == OpCode.Select || op == OpCode.SelectT)
+                    op == OpCode.Select || op == OpCode.SelectT ||
+                    op == OpCode.GlobalGet || op == OpCode.GlobalSet)
                     continue;
 
-                // Anything else is unsupported
                 return inst.Op.GetMnemonic();
             }
 
-            // Check nested blocks
             foreach (var inst in instructions)
             {
                 if (inst is IBlockInstruction blockInst)
@@ -139,19 +119,6 @@ namespace Wacs.Transpiler.Test
             }
 
             return null;
-        }
-
-        private static string FindSpecTestDir()
-        {
-            var dir = AppContext.BaseDirectory;
-            for (int i = 0; i < 8; i++)
-            {
-                var candidate = Path.Combine(dir, "Spec.Test", "generated-json");
-                if (Directory.Exists(candidate))
-                    return candidate;
-                dir = Path.GetDirectoryName(dir) ?? dir;
-            }
-            return "";
         }
     }
 }
