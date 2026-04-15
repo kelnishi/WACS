@@ -225,16 +225,20 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             // Stack: [structref (Value)]
             EmitUnwrapGcRef(il, gcType.ClrType);
+            var fieldType = gcType.Fields[inst.FieldIndex].FieldType;
             il.Emit(OpCodes.Ldfld, gcType.Fields[inst.FieldIndex]);
 
             // Handle packed field sign extension
             if (inst.SignExtension == PackedExt.Signed)
             {
-                // Byte → sbyte → int (sign extend)
                 il.Emit(OpCodes.Conv_I1);
                 il.Emit(OpCodes.Conv_I4);
             }
-            // Unsigned packed fields: byte naturally zero-extends to int
+
+            if (!IsScalarType(fieldType))
+            {
+                EmitWrapGcRef(il, inst.TypeIndex);
+            }
         }
 
         // struct.set X Y: pop structref, pop value, store field Y
@@ -324,12 +328,22 @@ namespace Wacs.Transpiler.AOT.Emitters
             EmitUnwrapGcRef(il, gcType.ClrType);
             il.Emit(OpCodes.Ldfld, gcType.Fields[0]); // elements array
             il.Emit(OpCodes.Ldloc, idxLocal);
-            il.Emit(OpCodes.Ldelem, gcType.Fields[0].FieldType.GetElementType()!);
+
+            var elementClrType = gcType.Fields[0].FieldType.GetElementType()!;
+            il.Emit(OpCodes.Ldelem, elementClrType);
 
             if (inst.SignExtension == PackedExt.Signed)
             {
                 il.Emit(OpCodes.Conv_I1);
                 il.Emit(OpCodes.Conv_I4);
+            }
+
+            // If element is a reference type (not a scalar), wrap back to Value.
+            // Scalar types (int, long, float, double, byte, short) stay on the CIL stack.
+            // Reference types (GC objects, object) need wrapping.
+            if (!IsScalarType(elementClrType))
+            {
+                EmitWrapGcRef(il, inst.TypeIndex);
             }
         }
 
@@ -557,6 +571,19 @@ namespace Wacs.Transpiler.AOT.Emitters
         // ==================================================================
 
         /// <summary>
+        /// Check if a CLR type is a scalar (stays on CIL stack as-is).
+        /// Non-scalar types (object, interface, emitted GC types) need wrap/unwrap.
+        /// </summary>
+        private static bool IsScalarType(Type t)
+        {
+            return t == typeof(int) || t == typeof(long)
+                || t == typeof(float) || t == typeof(double)
+                || t == typeof(byte) || t == typeof(sbyte)
+                || t == typeof(short) || t == typeof(ushort)
+                || t == typeof(Value);
+        }
+
+        /// <summary>
         /// Wrap a CLR GC object reference (IGcRef) on the CIL stack into a Value.
         /// Stack: [object ref] → [Value]
         /// </summary>
@@ -590,10 +617,12 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// <summary>
         /// Wrap a CLR GC object into a Value. The object must implement IGcRef.
         /// </summary>
-        public static Value WrapRef(IGcRef gcRef)
+        public static Value WrapRef(object gcRef)
         {
-            // Use the 3-arg constructor that doesn't switch on StoreIndex
-            return new Value(ValType.Nil, 0, gcRef);
+            if (gcRef is IGcRef igc)
+                return new Value(ValType.Nil, 0, igc);
+            // Fallback for untyped GC refs
+            return new Value(ValType.Nil);
         }
 
         /// <summary>
