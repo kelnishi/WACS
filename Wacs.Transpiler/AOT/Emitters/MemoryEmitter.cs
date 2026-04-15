@@ -314,7 +314,9 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 4);
-            return Unsafe.ReadUnaligned<int>(ref mem[(int)ea]);
+            int raw = Unsafe.ReadUnaligned<int>(ref mem[(int)ea]);
+            System.IO.File.AppendAllText("/tmp/mem_trace.log",$"  L32S mem={mem.GetHashCode()} ea={ea} bytes=[{mem[(int)ea]:X2},{mem[(int)ea+1]:X2},{mem[(int)ea+2]:X2},{mem[(int)ea+3]:X2}] raw=0x{raw:X8}={raw}\n");
+            return raw;
         }
 
         public static long LoadI64_32U(byte[] mem, int addr, long offset)
@@ -352,6 +354,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 1);
             mem[(int)ea] = (byte)value;
+            if (ea < 4)
+                System.IO.File.AppendAllText("/tmp/mem_trace.log",$"  S8 mem={mem.GetHashCode()} ea={ea} val=0x{value:X8} byte=0x{(byte)value:X2} mem[0..3]=[{mem[0]:X2},{mem[1]:X2},{mem[2]:X2},{mem[3]:X2}]\n");
         }
 
         public static void StoreI32_16(byte[] mem, int addr, long offset, int value)
