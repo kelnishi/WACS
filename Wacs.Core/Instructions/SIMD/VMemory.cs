@@ -357,6 +357,7 @@ namespace Wacs.Core.Instructions.SIMD
         private MemArg M;
         public long MemOffset => M.Offset;
         public int MemIndex => (int)M.M.Value;
+        public int LoadWidth => WidthN.ByteSize();
         public InstMemoryLoadZero(BitWidth width) : base(GetOp(width))
             => WidthN = width;
 
