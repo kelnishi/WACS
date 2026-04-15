@@ -163,7 +163,10 @@ namespace Wacs.Core.Instructions
 
         private TypeIdx Y;
 
-        public InstReturnCallIndirect() : base(ByteCode.ReturnCallIndirect) 
+        public int TableIndex => (int)X.Value;
+        public int TypeIndex => (int)Y.Value;
+
+        public InstReturnCallIndirect() : base(ByteCode.ReturnCallIndirect)
             => IsAsync = true;
 
         public bool IsBound(ExecContext context)

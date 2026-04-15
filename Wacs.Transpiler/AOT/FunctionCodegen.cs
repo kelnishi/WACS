@@ -185,7 +185,21 @@ namespace Wacs.Transpiler.AOT
             // Function calls
             if (CallEmitter.CanEmit(op))
             {
-                CallEmitter.EmitCall(il, (InstCall)inst, _siblingFunctions, _siblingMethods, _importCount);
+                switch (op)
+                {
+                    case WasmOpCode.Call:
+                        CallEmitter.EmitCall(il, (InstCall)inst, _siblingFunctions, _siblingMethods, _importCount);
+                        break;
+                    case WasmOpCode.CallIndirect:
+                        CallEmitter.EmitCallIndirect(il, (InstCallIndirect)inst, _moduleInst);
+                        break;
+                    case WasmOpCode.ReturnCall:
+                        CallEmitter.EmitReturnCall(il, (InstReturnCall)inst, _siblingFunctions, _siblingMethods, _importCount);
+                        break;
+                    case WasmOpCode.ReturnCallIndirect:
+                        CallEmitter.EmitReturnCallIndirect(il, (InstReturnCallIndirect)inst, _moduleInst);
+                        break;
+                }
                 return;
             }
 
@@ -323,10 +337,17 @@ namespace Wacs.Transpiler.AOT
                 }
             }
 
-            // Calls (intra-module only)
+            // Calls
             if (op == WasmOpCode.Call)
             {
                 int funcIdx = (int)((InstCall)inst).X.Value;
+                return funcIdx >= _importCount; // intra-module only for now
+            }
+            if (op == WasmOpCode.CallIndirect || op == WasmOpCode.ReturnCallIndirect)
+                return true;
+            if (op == WasmOpCode.ReturnCall)
+            {
+                int funcIdx = (int)((InstReturnCall)inst).X.Value;
                 return funcIdx >= _importCount;
             }
 
