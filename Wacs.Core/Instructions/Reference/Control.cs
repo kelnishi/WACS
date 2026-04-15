@@ -135,8 +135,9 @@ namespace Wacs.Core.Instructions.Reference
     {
         public TypeIdx X;
         private FunctionType cachedFunctionType;
+        public int TypeIndex => (int)X.Value;
 
-        public InstCallRef() : base(ByteCode.CallRef) 
+        public InstCallRef() : base(ByteCode.CallRef)
             => IsAsync = true;
         
         public bool IsBound(ExecContext context)

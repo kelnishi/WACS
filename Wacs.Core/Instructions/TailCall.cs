@@ -431,8 +431,9 @@ namespace Wacs.Core.Instructions
     public class InstReturnCallRef : InstructionBase, ICallInstruction
     {
         public TypeIdx X;
+        public int TypeIndex => (int)X.Value;
 
-        public InstReturnCallRef() : base(ByteCode.CallRef) 
+        public InstReturnCallRef() : base(ByteCode.CallRef)
             => IsAsync = true;
 
         public bool IsBound(ExecContext context)
