@@ -616,19 +616,38 @@ namespace Wacs.Transpiler.AOT.Emitters
         // === memory.grow ===
         public static int MemoryGrow(TranspiledContext ctx, int memIdx, int deltaPages)
         {
-            if (ctx.Store == null || ctx.Module == null)
-                return -1; // standalone mode — can't grow
+            if (ctx.Store != null && ctx.Module != null)
+            {
+                // Framework mode: grow via Store
+                var memAddr = ctx.Module.MemAddrs[(MemIdx)memIdx];
+                var mem = ctx.Store[memAddr];
+                long oldSize = mem.Size;
 
-            var memAddr = ctx.Module.MemAddrs[(MemIdx)memIdx];
-            var mem = ctx.Store[memAddr];
-            long oldSize = mem.Size;
+                if (!mem.Grow(deltaPages))
+                    return -1;
 
-            if (!mem.Grow(deltaPages))
-                return -1;
+                ctx.Memories[memIdx] = mem.Data;
+                return (int)oldSize;
+            }
 
-            // Refresh the cached byte[] reference after growth
-            ctx.Memories[memIdx] = mem.Data;
-            return (int)oldSize;
+            // Standalone mode: grow the byte[] directly
+            var memory = ctx.Memories[memIdx];
+            int oldPages = memory.Length / 65536;
+
+            if (deltaPages < 0) return -1;
+            if (deltaPages == 0) return oldPages;
+
+            long newPages = (long)oldPages + deltaPages;
+            // Check against max pages (stored in MemoryLimits on TranspiledContext)
+            long maxPages = ctx.MemoryLimits != null && memIdx < ctx.MemoryLimits.Length
+                ? ctx.MemoryLimits[memIdx]
+                : 65536; // WASM default max
+            if (newPages > maxPages) return -1;
+
+            var newMemory = new byte[newPages * 65536];
+            Buffer.BlockCopy(memory, 0, newMemory, 0, memory.Length);
+            ctx.Memories[memIdx] = newMemory;
+            return oldPages;
         }
     }
 }
