@@ -43,18 +43,23 @@ namespace Wacs.Transpiler.AOT
         public int TranspiledCount => Manifest.TranspiledCount;
         public int FallbackCount => Manifest.FallbackCount;
 
+        /// <summary>Diagnostics emitted during transpilation.</summary>
+        public IReadOnlyList<TranspilerDiagnostic> Diagnostics { get; }
+
         public TranspilationResult(
             Assembly assembly,
             Type functionsType,
             MethodInfo[] methods,
             ModuleMetadata.Manifest manifest,
-            Dictionary<int, MethodInfo> functionMethodMap)
+            Dictionary<int, MethodInfo> functionMethodMap,
+            IReadOnlyList<TranspilerDiagnostic> diagnostics)
         {
             Assembly = assembly;
             FunctionsType = functionsType;
             Methods = methods;
             Manifest = manifest;
             FunctionMethodMap = functionMethodMap;
+            Diagnostics = diagnostics;
         }
     }
 
@@ -68,10 +73,12 @@ namespace Wacs.Transpiler.AOT
     public class ModuleTranspiler
     {
         private readonly string _namespace;
+        private readonly TranspilerOptions _options;
 
-        public ModuleTranspiler(string @namespace = "Wacs.Transpiled")
+        public ModuleTranspiler(string @namespace = "Wacs.Transpiled", TranspilerOptions? options = null)
         {
             _namespace = @namespace;
+            _options = options ?? new TranspilerOptions();
         }
 
         /// <summary>
@@ -134,6 +141,8 @@ namespace Wacs.Transpiler.AOT
             }
 
             // === Pass 2: Emit IL bodies ===
+            var diagnostics = new DiagnosticCollector();
+
             var manifest = new ModuleMetadata.Manifest
             {
                 ModuleName = moduleName,
@@ -145,7 +154,7 @@ namespace Wacs.Transpiler.AOT
             {
                 var funcInst = wasmFunctions[i];
                 var mb = methodBuilders[i];
-                var codegen = new FunctionCodegen(mb, funcInst, wasmFunctions.ToArray(), methodBuilders, importCount, gcTypeEmitter, allFunctionTypes);
+                var codegen = new FunctionCodegen(mb, funcInst, wasmFunctions.ToArray(), methodBuilders, importCount, gcTypeEmitter, allFunctionTypes, _options, diagnostics);
 
                 bool emitted = codegen.TryEmit();
 
@@ -186,7 +195,8 @@ namespace Wacs.Transpiler.AOT
                 functionsType,
                 methods,
                 manifest,
-                methodMap);
+                methodMap,
+                diagnostics.Diagnostics);
         }
 
         private MethodBuilder CreateMethodStub(
