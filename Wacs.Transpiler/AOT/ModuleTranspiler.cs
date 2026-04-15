@@ -52,6 +52,9 @@ namespace Wacs.Transpiler.AOT
         /// <summary>Generated interface for module imports. Null if no imports.</summary>
         public Type? ImportsInterface { get; }
 
+        /// <summary>Generated Module class (implements IExports, accepts IImports).</summary>
+        public Type? ModuleClass { get; }
+
         /// <summary>Export method metadata (name, type, index).</summary>
         public IReadOnlyList<InterfaceMethod> ExportMethods { get; }
 
@@ -67,6 +70,7 @@ namespace Wacs.Transpiler.AOT
             IReadOnlyList<TranspilerDiagnostic> diagnostics,
             Type? exportsInterface,
             Type? importsInterface,
+            Type? moduleClass,
             IReadOnlyList<InterfaceMethod> exportMethods,
             IReadOnlyList<InterfaceMethod> importMethods)
         {
@@ -78,6 +82,7 @@ namespace Wacs.Transpiler.AOT
             Diagnostics = diagnostics;
             ExportsInterface = exportsInterface;
             ImportsInterface = importsInterface;
+            ModuleClass = moduleClass;
             ExportMethods = exportMethods;
             ImportMethods = importMethods;
         }
@@ -204,8 +209,15 @@ namespace Wacs.Transpiler.AOT
                     manifest.FallbackCount++;
             }
 
-            // Finalize the type
+            // === Generate Module class (implements IExports, accepts IImports) ===
+            var moduleClassGen = new ModuleClassGenerator(
+                moduleBuilder, $"{_namespace}.{moduleName}",
+                moduleInst.Repr, interfaceGen, typeBuilder, methodBuilders, importCount);
+            moduleClassGen.Generate();
+
+            // Finalize the types
             var functionsType = typeBuilder.CreateType()!;
+            var moduleClassType = moduleClassGen.CreateType();
 
             // Retrieve the actual MethodInfo objects from the baked type
             var methods = new MethodInfo[wasmFunctions.Count];
@@ -225,6 +237,7 @@ namespace Wacs.Transpiler.AOT
                 diagnostics.Diagnostics,
                 interfaceGen.ExportsInterface?.UnderlyingSystemType,
                 interfaceGen.ImportsInterface?.UnderlyingSystemType,
+                moduleClassType,
                 interfaceGen.ExportMethods,
                 interfaceGen.ImportMethods);
         }
