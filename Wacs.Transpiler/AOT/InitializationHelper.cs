@@ -50,6 +50,18 @@ namespace Wacs.Transpiler.AOT
         /// <summary>Start function index (-1 if none).</summary>
         public int StartFuncIndex { get; set; } = -1;
 
+        /// <summary>Base ID for data segments in the global ModuleInit registry.</summary>
+        public int DataSegmentBaseId { get; set; }
+
+        /// <summary>Base ID for element segments in the global ModuleInit registry.</summary>
+        public int ElemSegmentBaseId { get; set; }
+
+        /// <summary>Module-local indices of active element segments (implicitly dropped after init).</summary>
+        public int[] ActiveElemIndices { get; set; } = Array.Empty<int>();
+
+        /// <summary>Module-local indices of active data segments (implicitly dropped after init).</summary>
+        public int[] ActiveDataIndices { get; set; } = Array.Empty<int>();
+
         /// <summary>Number of imported functions.</summary>
         public int ImportFuncCount { get; set; }
 
@@ -145,6 +157,12 @@ namespace Wacs.Transpiler.AOT
                 }
             }
 
+            // 6. Implicitly drop active segments per spec §4.5.4
+            foreach (var idx in data.ActiveElemIndices)
+                ModuleInit.DropElemSegment(data.ElemSegmentBaseId + idx);
+            foreach (var idx in data.ActiveDataIndices)
+                ModuleInit.DropDataSegment(data.DataSegmentBaseId + idx);
+
             // Memory limits for standalone memory.grow
             var memoryLimits = new long[data.Memories.Length];
             for (int i = 0; i < data.Memories.Length; i++)
@@ -156,6 +174,8 @@ namespace Wacs.Transpiler.AOT
                 tables: tables,
                 globals: globals);
             ctx.MemoryLimits = memoryLimits;
+            ctx.DataSegmentBaseId = data.DataSegmentBaseId;
+            ctx.ElemSegmentBaseId = data.ElemSegmentBaseId;
             return ctx;
         }
     }

@@ -194,8 +194,9 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
             else
             {
-                // Standalone: use registered data segments
-                segData = ModuleInit.GetDataSegmentData(dataIdx) ?? Array.Empty<byte>();
+                // Standalone: use registered data segments with base offset
+                segData = ModuleInit.GetDataSegmentData(ctx.DataSegmentBaseId + dataIdx)
+                    ?? Array.Empty<byte>();
             }
 
             // WASM spec: bounds check applies even when len == 0
@@ -213,8 +214,11 @@ namespace Wacs.Transpiler.AOT.Emitters
                 var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
                 ctx.Store.DropData(dataAddr);
             }
-            // Standalone: data segments are static, dropping is a no-op
-            // (the spec says dropped segments behave as empty for subsequent init)
+            else
+            {
+                // Standalone: replace segment with empty array in registry
+                ModuleInit.DropDataSegment(ctx.DataSegmentBaseId + dataIdx);
+            }
         }
 
         public static void TableInit(TranspiledContext ctx, int tableIdx, int elemIdx,
@@ -236,8 +240,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
             else
             {
-                // Standalone mode: use registered element segments
-                var elemData = ModuleInit.GetElemSegment(elemIdx);
+                // Standalone mode: use registered element segments with base offset
+                var elemData = ModuleInit.GetElemSegment(ctx.ElemSegmentBaseId + elemIdx);
                 if (elemData == null)
                     throw new TrapException("out of bounds table access");
                 if ((long)(uint)src + (long)(uint)len > elemData.Length ||
@@ -258,7 +262,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
             else
             {
-                ModuleInit.DropElemSegment(elemIdx);
+                ModuleInit.DropElemSegment(ctx.ElemSegmentBaseId + elemIdx);
             }
         }
 

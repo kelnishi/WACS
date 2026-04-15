@@ -251,6 +251,7 @@ namespace Wacs.Transpiler.AOT
                 moduleBuilder, $"{_namespace}.{moduleName}",
                 moduleInst.Repr, interfaceGen, typeBuilder, methodBuilders, importCount,
                 dataEmitter, dataSegmentBaseId >= 0 ? dataSegmentBaseId : 0,
+                elemSegmentBaseId >= 0 ? elemSegmentBaseId : 0,
                 allFunctionTypes);
             moduleClassGen.Generate();
 

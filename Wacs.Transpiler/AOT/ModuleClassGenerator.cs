@@ -62,6 +62,7 @@ namespace Wacs.Transpiler.AOT
 
         private readonly DataSegmentEmitter? _dataEmitter;
         private readonly int _dataSegmentBaseId;
+        private readonly int _elemSegmentBaseId;
         private int _initDataId = -1;
 
         public ModuleClassGenerator(
@@ -74,6 +75,7 @@ namespace Wacs.Transpiler.AOT
             int importCount,
             DataSegmentEmitter? dataEmitter = null,
             int dataSegmentBaseId = 0,
+            int elemSegmentBaseId = 0,
             FunctionType[]? allFunctionTypes = null)
         {
             _moduleBuilder = moduleBuilder;
@@ -88,6 +90,7 @@ namespace Wacs.Transpiler.AOT
             _startFuncIndex = _hasStart ? (int)wasmModule.StartIndex.Value : -1;
             _dataEmitter = dataEmitter;
             _dataSegmentBaseId = dataSegmentBaseId;
+            _elemSegmentBaseId = elemSegmentBaseId;
             _allFunctionTypes = allFunctionTypes ?? Array.Empty<FunctionType>();
         }
 
@@ -137,6 +140,7 @@ namespace Wacs.Transpiler.AOT
             data.Globals = globals.ToArray();
 
             // Active data segments
+            var activeDataIndices = new List<int>();
             if (_dataEmitter != null)
             {
                 var activeSegs = new List<(int memIdx, int offset, int segId)>();
@@ -145,28 +149,40 @@ namespace Wacs.Transpiler.AOT
                     var seg = _dataEmitter.Segments[i];
                     if (seg.IsPassive || seg.Data.Length == 0) continue;
                     activeSegs.Add((seg.MemoryIndex, (int)seg.Offset, _dataSegmentBaseId + i));
+                    activeDataIndices.Add(i);
                 }
                 data.ActiveDataSegments = activeSegs.ToArray();
             }
+            data.ActiveDataIndices = activeDataIndices.ToArray();
 
             // Active element segments
+            var droppedElemIndices = new List<int>();
             var activeElems = new List<(int tableIdx, int offset, int[] funcIndices)>();
             for (int i = 0; i < _wasmModule.Elements.Length; i++)
             {
                 var elem = _wasmModule.Elements[i];
-                if (elem.Mode is not WasmModule.ElementMode.ActiveMode active) continue;
-
-                int tableIdx = (int)active.TableIndex.Value;
-                int offset = EvaluateConstI32(active.Offset);
-                int[] funcIndices = ExtractFuncIndices(elem);
-                activeElems.Add((tableIdx, offset, funcIndices));
+                if (elem.Mode is WasmModule.ElementMode.ActiveMode active)
+                {
+                    int tableIdx = (int)active.TableIndex.Value;
+                    int offset = EvaluateConstI32(active.Offset);
+                    int[] funcIndices = ExtractFuncIndices(elem);
+                    activeElems.Add((tableIdx, offset, funcIndices));
+                    droppedElemIndices.Add(i); // Active segments implicitly dropped
+                }
+                else if (elem.Mode is WasmModule.ElementMode.DeclarativeMode)
+                {
+                    droppedElemIndices.Add(i); // Declarative segments also implicitly dropped
+                }
             }
             data.ActiveElementSegments = activeElems.ToArray();
+            data.ActiveElemIndices = droppedElemIndices.ToArray();
 
             // Start function
             data.StartFuncIndex = _startFuncIndex;
             data.ImportFuncCount = _importCount;
             data.TotalFuncCount = _importCount + _methodBuilders.Length;
+            data.DataSegmentBaseId = _dataSegmentBaseId;
+            data.ElemSegmentBaseId = _elemSegmentBaseId;
 
             _initDataId = InitRegistry.Register(data);
         }
