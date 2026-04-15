@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 
 namespace Wacs.Transpiler.Test
@@ -60,9 +61,10 @@ namespace Wacs.Transpiler.Test
         /// </summary>
         public static object Create(Type importsInterface, Dictionary<string, Func<object?[], object?>> handlers)
         {
-            // DispatchProxy.Create<TInterface, TProxy>() — we need the generic version
+            // DispatchProxy.Create<TInterface, TProxy>() — find the 2-type-arg generic overload
             var createMethod = typeof(DispatchProxy)
-                .GetMethod(nameof(DispatchProxy.Create), BindingFlags.Public | BindingFlags.Static)!
+                .GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .First(m => m.Name == "Create" && m.GetGenericArguments().Length == 2)
                 .MakeGenericMethod(importsInterface, typeof(ImportDispatcher));
 
             var proxy = createMethod.Invoke(null, null)!;
