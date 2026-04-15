@@ -20,6 +20,7 @@ using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
+using Wacs.Transpiler.AOT.Emitters;
 
 namespace Wacs.Transpiler.AOT
 {
@@ -208,7 +209,7 @@ namespace Wacs.Transpiler.AOT
 
                 if (!emitted)
                 {
-                    EmitFallbackBody(mb, i);
+                    EmitFallbackBody(mb, importCount + i, funcInst.Type);
                 }
 
                 manifest.Functions.Add(new ModuleMetadata.FunctionEntry
@@ -314,12 +315,146 @@ namespace Wacs.Transpiler.AOT
             return mb;
         }
 
-        private void EmitFallbackBody(MethodBuilder mb, int funcIndex)
+        /// <summary>
+        /// Emit a fallback body that dispatches through the interpreter
+        /// instead of throwing NotSupportedException. This allows transpiled
+        /// functions to call non-transpiled siblings seamlessly.
+        ///
+        /// The fallback packs CLR-typed parameters into Value[], calls
+        /// CallHelpers.InvokeFallback, and unpacks the result.
+        /// </summary>
+        private void EmitFallbackBody(MethodBuilder mb, int moduleFuncIndex, FunctionType funcType)
         {
             var il = mb.GetILGenerator();
-            il.Emit(OpCodes.Ldstr, $"Function {funcIndex} not yet transpiled — use interpreter fallback");
-            il.Emit(OpCodes.Newobj, typeof(NotSupportedException).GetConstructor(new[] { typeof(string) })!);
-            il.Emit(OpCodes.Throw);
+            var paramTypes = funcType.ParameterTypes.Types;
+            var resultTypes = funcType.ResultType.Types;
+
+            // Build Value[] args from the CLR-typed parameters
+            // arg 0 = TranspiledContext ctx, args 1..N = WASM params
+            il.Emit(OpCodes.Ldc_I4, paramTypes.Length);
+            il.Emit(OpCodes.Newarr, typeof(Value));
+
+            for (int p = 0; p < paramTypes.Length; p++)
+            {
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, p);
+                il.Emit(OpCodes.Ldarg, p + 1); // skip ctx at arg 0
+                EmitBoxToValue(il, paramTypes[p]);
+                il.Emit(OpCodes.Stelem, typeof(Value));
+            }
+
+            var argsLocal = il.DeclareLocal(typeof(Value[]));
+            il.Emit(OpCodes.Stloc, argsLocal);
+
+            // Call InvokeFallback(ctx, funcIndex, args) → Value[]
+            il.Emit(OpCodes.Ldarg_0); // ctx
+            il.Emit(OpCodes.Ldc_I4, moduleFuncIndex);
+            il.Emit(OpCodes.Ldloc, argsLocal);
+            il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
+                nameof(CallHelpers.InvokeFallback),
+                BindingFlags.Public | BindingFlags.Static)!);
+
+            // Unpack result
+            if (resultTypes.Length == 0)
+            {
+                il.Emit(OpCodes.Pop); // discard Value[]
+            }
+            else
+            {
+                // Result 0 is CLR return value
+                var resultsLocal = il.DeclareLocal(typeof(Value[]));
+                il.Emit(OpCodes.Stloc, resultsLocal);
+
+                il.Emit(OpCodes.Ldloc, resultsLocal);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem, typeof(Value));
+                EmitUnboxFromValue(il, resultTypes[0]);
+
+                // Results 1..N go to out params
+                for (int r = 1; r < resultTypes.Length; r++)
+                {
+                    il.Emit(OpCodes.Ldarg, 1 + paramTypes.Length + (r - 1)); // out param
+                    il.Emit(OpCodes.Ldloc, resultsLocal);
+                    il.Emit(OpCodes.Ldc_I4, r);
+                    il.Emit(OpCodes.Ldelem, typeof(Value));
+                    EmitUnboxFromValue(il, resultTypes[r]);
+                    EmitStind(il, resultTypes[r]);
+                }
+            }
+
+            il.Emit(OpCodes.Ret);
+        }
+
+        private static void EmitBoxToValue(ILGenerator il, ValType type)
+        {
+            switch (type)
+            {
+                case ValType.I32:
+                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(int) })!);
+                    break;
+                case ValType.I64:
+                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(long) })!);
+                    break;
+                case ValType.F32:
+                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(float) })!);
+                    break;
+                case ValType.F64:
+                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(double) })!);
+                    break;
+                default:
+                    break; // Reference types are already Value on the CIL stack
+            }
+        }
+
+        private static readonly FieldInfo DataField =
+            typeof(Value).GetField(nameof(Value.Data))!;
+        private static readonly FieldInfo Int32Field =
+            typeof(DUnion).GetField(nameof(DUnion.Int32))!;
+        private static readonly FieldInfo Int64Field =
+            typeof(DUnion).GetField(nameof(DUnion.Int64))!;
+        private static readonly FieldInfo Float32Field =
+            typeof(DUnion).GetField(nameof(DUnion.Float32))!;
+        private static readonly FieldInfo Float64Field =
+            typeof(DUnion).GetField(nameof(DUnion.Float64))!;
+
+        private static void EmitUnboxFromValue(ILGenerator il, ValType type)
+        {
+            switch (type)
+            {
+                case ValType.I32:
+                case ValType.I64:
+                case ValType.F32:
+                case ValType.F64:
+                {
+                    var local = il.DeclareLocal(typeof(Value));
+                    il.Emit(OpCodes.Stloc, local);
+                    il.Emit(OpCodes.Ldloca, local);
+                    il.Emit(OpCodes.Ldflda, DataField);
+                    il.Emit(OpCodes.Ldfld, type switch
+                    {
+                        ValType.I32 => Int32Field,
+                        ValType.I64 => Int64Field,
+                        ValType.F32 => Float32Field,
+                        ValType.F64 => Float64Field,
+                        _ => throw new InvalidOperationException()
+                    });
+                    break;
+                }
+                default:
+                    break; // Reference types stay as Value
+            }
+        }
+
+        private static void EmitStind(ILGenerator il, ValType type)
+        {
+            switch (type)
+            {
+                case ValType.I32: il.Emit(OpCodes.Stind_I4); break;
+                case ValType.I64: il.Emit(OpCodes.Stind_I8); break;
+                case ValType.F32: il.Emit(OpCodes.Stind_R4); break;
+                case ValType.F64: il.Emit(OpCodes.Stind_R8); break;
+                default: il.Emit(OpCodes.Stobj, typeof(Value)); break;
+            }
         }
 
         /// <summary>
