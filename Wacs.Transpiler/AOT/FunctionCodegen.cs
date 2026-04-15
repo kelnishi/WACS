@@ -170,8 +170,15 @@ namespace Wacs.Transpiler.AOT
                 return;
             }
 
+            // 0xFD prefix (SIMD)
+            if (op == WasmOpCode.FD)
+            {
+                SimdEmitter.Emit(il, inst, inst.Op.xFD);
+                return;
+            }
+
             // Other multi-byte prefix opcodes (not yet supported)
-            if (op == WasmOpCode.FD || op == WasmOpCode.FE)
+            if (op == WasmOpCode.FE)
             {
                 throw new TranspilerException(
                     $"FunctionCodegen: prefix opcode {inst.Op.GetMnemonic()} should have been caught by CanEmit");
@@ -463,8 +470,12 @@ namespace Wacs.Transpiler.AOT
             if (op == WasmOpCode.FC)
                 return ExtEmitter.CanEmit(inst.Op.xFC);
 
+            // 0xFD prefix (SIMD)
+            if (op == WasmOpCode.FD)
+                return SimdEmitter.CanEmit(inst.Op.xFD);
+
             // Other multi-byte opcodes — not yet supported
-            if (op == WasmOpCode.FD || op == WasmOpCode.FE)
+            if (op == WasmOpCode.FE)
                 return false;
 
             // Numeric instructions (0x41-0xC4)
@@ -502,9 +513,8 @@ namespace Wacs.Transpiler.AOT
                 try
                 {
                     var gtype = ResolveGlobalType(globalIdx);
-                    // Support numeric types and ref types (as Value)
-                    // V128 globals deferred to SIMD phase
-                    return gtype != ValType.V128;
+                    // All global types supported (numeric, ref, v128 — all via Value)
+                    return true;
                 }
                 catch
                 {
