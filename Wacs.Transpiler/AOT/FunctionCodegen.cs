@@ -126,6 +126,25 @@ namespace Wacs.Transpiler.AOT
         {
             var op = inst.Op.x00;
 
+            // Exception handling
+            if (ExceptionEmitter.CanEmit(op))
+            {
+                switch (op)
+                {
+                    case WasmOpCode.Throw:
+                        ExceptionEmitter.EmitThrow(il, (InstThrow)inst, _moduleInst);
+                        break;
+                    case WasmOpCode.ThrowRef:
+                        ExceptionEmitter.EmitThrowRef(il);
+                        break;
+                    case WasmOpCode.TryTable:
+                        ExceptionEmitter.EmitTryTable(il, (InstTryTable)inst, _blockStack,
+                            EmitInstruction, _moduleInst);
+                        break;
+                }
+                return;
+            }
+
             // 0xFB prefix (GC: struct, array, ref.test/cast, i31, br_on_cast)
             if (op == WasmOpCode.FB)
             {
@@ -460,6 +479,10 @@ namespace Wacs.Transpiler.AOT
             if (ControlEmitter.CanEmit(op))
                 return true;
             if (op == WasmOpCode.BrOnNull || op == WasmOpCode.BrOnNonNull)
+                return true;
+
+            // Exception handling
+            if (ExceptionEmitter.CanEmit(op))
                 return true;
 
             // Memory operations
