@@ -66,6 +66,14 @@ namespace Wacs.Core.Runtime
         public DataInstance this[DataAddr addr] =>
             CurrentTransaction?.Datas.GetValueOrDefault(addr)??Datas[addr.Value];
 
+        /// <summary>
+        /// Replace the function instance at the given address.
+        /// Used by the AOT transpiler to swap interpreter-backed functions
+        /// with transpiled implementations.
+        /// </summary>
+        public void ReplaceFunction(FuncAddr addr, IFunctionInstance replacement) =>
+            Funcs[addr.Value] = replacement;
+
         public bool Contains(FuncAddr addr) => addr.Value < Funcs.Count || (CurrentTransaction?.Funcs.ContainsKey(addr) ?? false);
         public bool Contains(TableAddr addr) => addr.Value < Tables.Count || (CurrentTransaction?.Tables.ContainsKey(addr) ?? false);
         public bool Contains(MemAddr addr) => addr.Value < MemsCount || (CurrentTransaction?.Mems.ContainsKey(addr) ?? false);
