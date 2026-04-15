@@ -65,6 +65,9 @@ namespace Wacs.Transpiler.AOT
         /// <summary>Function types for all functions in module index space (imports + locals).</summary>
         public FunctionType[] AllFunctionTypes { get; }
 
+        /// <summary>ID into InitRegistry for this module's initialization data.</summary>
+        public int InitDataId { get; set; } = -1;
+
         public TranspilationResult(
             Assembly assembly,
             Type functionsType,
@@ -268,7 +271,7 @@ namespace Wacs.Transpiler.AOT
                 methodMap[i] = methods[i];
             }
 
-            return new TranspilationResult(
+            var result = new TranspilationResult(
                 assemblyBuilder,
                 functionsType,
                 methods,
@@ -281,6 +284,8 @@ namespace Wacs.Transpiler.AOT
                 interfaceGen.ExportMethods,
                 interfaceGen.ImportMethods,
                 allFunctionTypes);
+            result.InitDataId = moduleClassGen.InitDataId;
+            return result;
         }
 
         private MethodBuilder CreateMethodStub(

@@ -1,0 +1,317 @@
+// Copyright 2025 Kelvin Nishikawa
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
+
+namespace Wacs.Transpiler.AOT
+{
+    /// <summary>
+    /// Describes a module instance managed by the linker.
+    /// Holds the ThinContext, transpilation result, and exported entities.
+    /// </summary>
+    public class LinkedModule
+    {
+        public string Name { get; }
+        public ThinContext Context { get; }
+        public TranspilationResult Result { get; }
+
+        /// <summary>
+        /// Exported functions as typed delegates, keyed by export name.
+        /// </summary>
+        public Dictionary<string, Delegate> ExportedFunctions { get; } = new();
+
+        /// <summary>
+        /// Exported memories, keyed by export name.
+        /// References into Context.Memories.
+        /// </summary>
+        public Dictionary<string, (int memIdx, byte[] mem)> ExportedMemories { get; } = new();
+
+        /// <summary>
+        /// Exported tables, keyed by export name.
+        /// References into Context.Tables.
+        /// </summary>
+        public Dictionary<string, (int tableIdx, TableInstance table)> ExportedTables { get; } = new();
+
+        /// <summary>
+        /// Exported globals, keyed by export name.
+        /// References into Context.Globals.
+        /// </summary>
+        public Dictionary<string, (int globalIdx, GlobalInstance global)> ExportedGlobals { get; } = new();
+
+        public LinkedModule(string name, ThinContext context, TranspilationResult result)
+        {
+            Name = name;
+            Context = context;
+            Result = result;
+        }
+    }
+
+    /// <summary>
+    /// Factory that manages ThinContext creation and cross-module wiring
+    /// for transpiled WASM assemblies.
+    ///
+    /// Implements the WASM linking/instantiation pattern:
+    ///   1. Register host modules (spectest, WASI, etc.)
+    ///   2. Transpile and instantiate modules in dependency order
+    ///   3. Resolve imports from previously registered modules
+    ///   4. Share table/memory/global instances across modules
+    ///
+    /// Each instantiated module gets a ThinContext with:
+    ///   - Imported memories/tables/globals: shared references from provider modules
+    ///   - Local memories/tables/globals: newly allocated
+    ///   - Import delegates: resolved from provider modules' exports
+    ///   - FuncTable: populated with all function delegates
+    ///
+    /// Usage:
+    ///   var linker = new ModuleLinker();
+    ///   linker.RegisterHostFunctions("spectest", hostFuncs);
+    ///   var moduleA = linker.Instantiate(resultA, "moduleA");
+    ///   var moduleB = linker.Instantiate(resultB, "moduleB"); // imports from moduleA
+    /// </summary>
+    public class ModuleLinker
+    {
+        private readonly Dictionary<string, LinkedModule> _modules = new();
+
+        /// <summary>
+        /// Host function registry: (moduleName, fieldName) → delegate.
+        /// Registered before any WASM modules are instantiated.
+        /// </summary>
+        private readonly Dictionary<(string module, string field), Delegate> _hostFunctions = new();
+
+        /// <summary>
+        /// Host global registry: (moduleName, fieldName) → GlobalInstance.
+        /// </summary>
+        private readonly Dictionary<(string module, string field), GlobalInstance> _hostGlobals = new();
+
+        /// <summary>
+        /// Host memory registry: (moduleName, fieldName) → byte[].
+        /// </summary>
+        private readonly Dictionary<(string module, string field), byte[]> _hostMemories = new();
+
+        /// <summary>
+        /// Host table registry: (moduleName, fieldName) → TableInstance.
+        /// </summary>
+        private readonly Dictionary<(string module, string field), TableInstance> _hostTables = new();
+
+        /// <summary>
+        /// Register a host function (e.g., spectest.print_i32).
+        /// </summary>
+        public void RegisterHostFunction(string moduleName, string fieldName, Delegate func)
+        {
+            _hostFunctions[(moduleName, fieldName)] = func;
+        }
+
+        /// <summary>
+        /// Register a host global.
+        /// </summary>
+        public void RegisterHostGlobal(string moduleName, string fieldName, GlobalInstance global)
+        {
+            _hostGlobals[(moduleName, fieldName)] = global;
+        }
+
+        /// <summary>
+        /// Register a host memory.
+        /// </summary>
+        public void RegisterHostMemory(string moduleName, string fieldName, byte[] memory)
+        {
+            _hostMemories[(moduleName, fieldName)] = memory;
+        }
+
+        /// <summary>
+        /// Register a host table.
+        /// </summary>
+        public void RegisterHostTable(string moduleName, string fieldName, TableInstance table)
+        {
+            _hostTables[(moduleName, fieldName)] = table;
+        }
+
+        /// <summary>
+        /// Get a previously instantiated module by name.
+        /// </summary>
+        public LinkedModule? GetModule(string name)
+        {
+            return _modules.TryGetValue(name, out var m) ? m : null;
+        }
+
+        /// <summary>
+        /// Instantiate a transpiled module, resolving imports from registered
+        /// modules and host functions. Returns a LinkedModule with a fully
+        /// wired ThinContext.
+        /// </summary>
+        public LinkedModule Instantiate(
+            TranspilationResult result,
+            Wacs.Core.Module wasmModule,
+            string? name = null)
+        {
+            name ??= $"module_{_modules.Count}";
+
+            // Resolve imports → build ThinContext with shared state
+            var ctx = BuildContext(result, wasmModule);
+
+            var linked = new LinkedModule(name, ctx, result);
+
+            // Populate exported entities
+            PopulateExports(linked, wasmModule);
+
+            _modules[name] = linked;
+            return linked;
+        }
+
+        /// <summary>
+        /// Build a ThinContext by resolving imports and allocating local entities.
+        /// Imported memories/tables/globals are shared references.
+        /// Local ones are newly allocated via InitializationHelper.
+        /// </summary>
+        private ThinContext BuildContext(TranspilationResult result, Wacs.Core.Module wasmModule)
+        {
+            // Start with InitializationHelper for local allocations
+            // (this creates all memories/tables/globals including placeholder imports)
+            var initData = InitRegistry.Get(FindInitDataId(result));
+            var ctx = InitializationHelper.Initialize(FindInitDataId(result));
+
+            // Override imported slots with shared instances
+            int memImportIdx = 0;
+            int tableImportIdx = 0;
+            int globalImportIdx = 0;
+
+            foreach (var import in wasmModule.Imports)
+            {
+                switch (import.Desc)
+                {
+                    case Wacs.Core.Module.ImportDesc.MemDesc:
+                    {
+                        if (TryResolveMemory(import.ModuleName, import.Name, out var mem))
+                            ctx.Memories[memImportIdx] = mem;
+                        memImportIdx++;
+                        break;
+                    }
+                    case Wacs.Core.Module.ImportDesc.TableDesc:
+                    {
+                        if (TryResolveTable(import.ModuleName, import.Name, out var table))
+                            ctx.Tables[tableImportIdx] = table;
+                        tableImportIdx++;
+                        break;
+                    }
+                    case Wacs.Core.Module.ImportDesc.GlobalDesc:
+                    {
+                        if (TryResolveGlobal(import.ModuleName, import.Name, out var global))
+                            ctx.Globals[globalImportIdx] = global;
+                        globalImportIdx++;
+                        break;
+                    }
+                    case Wacs.Core.Module.ImportDesc.FuncDesc:
+                    {
+                        // Function imports handled via ImportDelegates — already wired
+                        // by the Module constructor's EmitImportDelegateWiring
+                        break;
+                    }
+                }
+            }
+
+            return ctx;
+        }
+
+        private bool TryResolveMemory(string moduleName, string fieldName, out byte[] memory)
+        {
+            if (_hostMemories.TryGetValue((moduleName, fieldName), out memory!))
+                return true;
+            if (_modules.TryGetValue(moduleName, out var mod) &&
+                mod.ExportedMemories.TryGetValue(fieldName, out var exported))
+            {
+                memory = exported.mem;
+                return true;
+            }
+            memory = null!;
+            return false;
+        }
+
+        private bool TryResolveTable(string moduleName, string fieldName, out TableInstance table)
+        {
+            if (_hostTables.TryGetValue((moduleName, fieldName), out table!))
+                return true;
+            if (_modules.TryGetValue(moduleName, out var mod) &&
+                mod.ExportedTables.TryGetValue(fieldName, out var exported))
+            {
+                table = exported.table;
+                return true;
+            }
+            table = null!;
+            return false;
+        }
+
+        private bool TryResolveGlobal(string moduleName, string fieldName, out GlobalInstance global)
+        {
+            if (_hostGlobals.TryGetValue((moduleName, fieldName), out global!))
+                return true;
+            if (_modules.TryGetValue(moduleName, out var mod) &&
+                mod.ExportedGlobals.TryGetValue(fieldName, out var exported))
+            {
+                global = exported.global;
+                return true;
+            }
+            global = null!;
+            return false;
+        }
+
+        /// <summary>
+        /// Populate a LinkedModule's export maps from the WASM module's export section.
+        /// </summary>
+        private static void PopulateExports(LinkedModule linked, Wacs.Core.Module wasmModule)
+        {
+            foreach (var export in wasmModule.Exports)
+            {
+                switch (export.Desc)
+                {
+                    case Wacs.Core.Module.ExportDesc.MemDesc md:
+                    {
+                        int idx = (int)md.MemoryIndex.Value;
+                        if (idx < linked.Context.Memories.Length)
+                            linked.ExportedMemories[export.Name] = (idx, linked.Context.Memories[idx]);
+                        break;
+                    }
+                    case Wacs.Core.Module.ExportDesc.TableDesc td:
+                    {
+                        int idx = (int)td.TableIndex.Value;
+                        if (idx < linked.Context.Tables.Length)
+                            linked.ExportedTables[export.Name] = (idx, linked.Context.Tables[idx]);
+                        break;
+                    }
+                    case Wacs.Core.Module.ExportDesc.GlobalDesc gd:
+                    {
+                        int idx = (int)gd.GlobalIndex.Value;
+                        if (idx < linked.Context.Globals.Length)
+                            linked.ExportedGlobals[export.Name] = (idx, linked.Context.Globals[idx]);
+                        break;
+                    }
+                    case Wacs.Core.Module.ExportDesc.FuncDesc:
+                    {
+                        // Function exports are accessible via the Module class's IExports
+                        break;
+                    }
+                }
+            }
+        }
+
+        private static int FindInitDataId(TranspilationResult result)
+        {
+            return result.InitDataId;
+        }
+    }
+}
