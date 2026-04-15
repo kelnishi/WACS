@@ -53,6 +53,8 @@ namespace Wacs.Transpiler.AOT
 
         public TypeBuilder? ModuleType { get; private set; }
 
+        private readonly DataSegmentEmitter? _dataEmitter;
+
         public ModuleClassGenerator(
             ModuleBuilder moduleBuilder,
             string @namespace,
@@ -60,7 +62,8 @@ namespace Wacs.Transpiler.AOT
             InterfaceGenerator interfaces,
             TypeBuilder functionsType,
             MethodBuilder[] methodBuilders,
-            int importCount)
+            int importCount,
+            DataSegmentEmitter? dataEmitter = null)
         {
             _moduleBuilder = moduleBuilder;
             _namespace = @namespace;
@@ -72,6 +75,7 @@ namespace Wacs.Transpiler.AOT
             _memoryCount = wasmModule.Memories.Count;
             _hasStart = wasmModule.StartIndex != FuncIdx.Default;
             _startFuncIndex = _hasStart ? (int)wasmModule.StartIndex.Value : -1;
+            _dataEmitter = dataEmitter;
         }
 
         /// <summary>
@@ -118,7 +122,6 @@ namespace Wacs.Transpiler.AOT
 
         private void EmitConstructor(FieldBuilder ctxField)
         {
-            // Constructor parameters: IImports (if any), optional memory pages
             var ctorParams = _interfaces.ImportsInterface != null
                 ? new[] { _interfaces.ImportsInterface }
                 : Type.EmptyTypes;
@@ -137,16 +140,62 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
 
-            // Create TranspiledContext
-            il.Emit(OpCodes.Ldarg_0);
+            // === Allocate memories ===
+            // Create byte[][] from memory declarations
+            int memCount = _dataEmitter?.Memories.Length ?? _memoryCount;
+            il.Emit(OpCodes.Ldc_I4, memCount);
+            il.Emit(OpCodes.Newarr, typeof(byte[]));
+            var memoriesLocal = il.DeclareLocal(typeof(byte[][]));
+            il.Emit(OpCodes.Stloc, memoriesLocal);
+
+            if (_dataEmitter != null)
+            {
+                for (int m = 0; m < _dataEmitter.Memories.Length; m++)
+                {
+                    long pages = _dataEmitter.Memories[m].MinPages;
+                    il.Emit(OpCodes.Ldloc, memoriesLocal);
+                    il.Emit(OpCodes.Ldc_I4, m);
+                    il.Emit(OpCodes.Ldc_I4, (int)(pages * 65536));
+                    il.Emit(OpCodes.Newarr, typeof(byte));
+                    il.Emit(OpCodes.Stelem_Ref);
+                }
+            }
+
+            // === Create TranspiledContext ===
+            il.Emit(OpCodes.Ldloc, memoriesLocal);                // memories
+            il.Emit(OpCodes.Ldnull);                              // tables (TODO)
+            il.Emit(OpCodes.Ldnull);                              // globals (TODO)
+            il.Emit(OpCodes.Ldnull);                              // importDelegates (TODO)
+            il.Emit(OpCodes.Ldnull);                              // funcTable (TODO)
             il.Emit(OpCodes.Newobj, typeof(TranspiledContext).GetConstructor(
                 new[] { typeof(byte[][]), typeof(TableInstance[]), typeof(GlobalInstance[]),
                         typeof(Delegate[]), typeof(Delegate[]) })!);
-            il.Emit(OpCodes.Stfld, ctxField);
+            var ctxLocal = il.DeclareLocal(typeof(TranspiledContext));
+            il.Emit(OpCodes.Stloc, ctxLocal);
 
-            // TODO: Initialize memories from module data
-            // TODO: Wire import delegates from IImports interface methods
-            // TODO: Populate FuncTable with transpiled method delegates
+            // === Initialize data segments ===
+            if (_dataEmitter != null)
+            {
+                for (int i = 0; i < _dataEmitter.Segments.Length; i++)
+                {
+                    var seg = _dataEmitter.Segments[i];
+                    if (seg.IsPassive || seg.Data.Length == 0) continue;
+
+                    // Call ModuleInit.CopyDataSegment(memories, memIdx, offset, segmentIndex)
+                    il.Emit(OpCodes.Ldloc, memoriesLocal);
+                    il.Emit(OpCodes.Ldc_I4, seg.MemoryIndex);
+                    il.Emit(OpCodes.Ldc_I4, (int)seg.Offset);
+                    il.Emit(OpCodes.Ldc_I4, i);
+                    il.Emit(OpCodes.Call, typeof(ModuleInit).GetMethod(
+                        nameof(ModuleInit.CopyDataSegment),
+                        BindingFlags.Public | BindingFlags.Static)!);
+                }
+            }
+
+            // Store ctx
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Stfld, ctxField);
 
             il.Emit(OpCodes.Ret);
         }

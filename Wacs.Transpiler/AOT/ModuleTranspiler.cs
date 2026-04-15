@@ -152,6 +152,19 @@ namespace Wacs.Transpiler.AOT
                 if (fIdx >= allFunctionTypes.Length) break;
             }
 
+            var diagnostics = new DiagnosticCollector();
+
+            // === Analyze data segments ===
+            var dataEmitter = new DataSegmentEmitter(moduleInst.Repr, _options.DataStorage, diagnostics);
+            dataEmitter.Analyze();
+            // Register segment data for runtime access (dynamic assemblies)
+            for (int s = 0; s < dataEmitter.Segments.Length; s++)
+            {
+                var seg = dataEmitter.Segments[s];
+                if (seg.Data.Length > 0 && !seg.IsPassive)
+                    ModuleInit.RegisterDataSegment(seg.Data);
+            }
+
             // === Pass 0a: Generate typed interfaces for exports and imports ===
             var interfaceGen = new InterfaceGenerator(
                 moduleBuilder, $"{_namespace}.{moduleName}",
@@ -172,8 +185,6 @@ namespace Wacs.Transpiler.AOT
             }
 
             // === Pass 2: Emit IL bodies ===
-            var diagnostics = new DiagnosticCollector();
-
             var manifest = new ModuleMetadata.Manifest
             {
                 ModuleName = moduleName,
@@ -212,7 +223,8 @@ namespace Wacs.Transpiler.AOT
             // === Generate Module class (implements IExports, accepts IImports) ===
             var moduleClassGen = new ModuleClassGenerator(
                 moduleBuilder, $"{_namespace}.{moduleName}",
-                moduleInst.Repr, interfaceGen, typeBuilder, methodBuilders, importCount);
+                moduleInst.Repr, interfaceGen, typeBuilder, methodBuilders, importCount,
+                dataEmitter);
             moduleClassGen.Generate();
 
             // Finalize the types
