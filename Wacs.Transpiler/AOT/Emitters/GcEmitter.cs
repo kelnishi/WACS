@@ -43,18 +43,12 @@ namespace Wacs.Transpiler.AOT.Emitters
             // Struct ops: 0x00-0x05
             if (b <= 0x05) return true;
 
-            // Array ops: 0x06-0x13 (complex — defer for now except simple ones)
-            // Start with basic ones: array.new (0x06), array.new_default (0x07),
-            // array.get (0x0B-0x0D), array.set (0x0E), array.len (0x0F)
-            if (op == GcCode.ArrayNew || op == GcCode.ArrayNewDefault ||
-                op == GcCode.ArrayGet || op == GcCode.ArrayGetS || op == GcCode.ArrayGetU ||
-                op == GcCode.ArraySet || op == GcCode.ArrayLen)
-                return true;
+            // All array ops: 0x06-0x13
+            if (b >= 0x06 && b <= 0x13) return true;
 
             // ref.test/cast: 0x14-0x17
-            if (op == GcCode.RefTest || op == GcCode.RefTestNull ||
-                op == GcCode.RefCast || op == GcCode.RefCastNull)
-                return true;
+            // br_on_cast/fail: 0x18-0x19
+            if (b >= 0x14 && b <= 0x19) return true;
 
             // Conversion: 0x1A-0x1B
             if (op == GcCode.AnyConvertExtern || op == GcCode.ExternConvertAny)
@@ -67,8 +61,13 @@ namespace Wacs.Transpiler.AOT.Emitters
             return false;
         }
 
+        /// <summary>
+        /// branchTarget is a callback to resolve label depth → IL Label (from block stack).
+        /// Needed for br_on_cast/fail.
+        /// </summary>
         public static void Emit(ILGenerator il, InstructionBase inst, GcCode op,
-            GcTypeEmitter gcTypes, ModuleInstance moduleInst)
+            GcTypeEmitter gcTypes, ModuleInstance moduleInst,
+            Func<int, System.Reflection.Emit.Label>? branchTarget = null)
         {
             switch (op)
             {
@@ -106,6 +105,27 @@ namespace Wacs.Transpiler.AOT.Emitters
                 case GcCode.ArrayLen:
                     EmitArrayLen(il);
                     break;
+                case GcCode.ArrayNewFixed:
+                    EmitArrayNewFixed(il, (InstArrayNewFixed)inst, gcTypes, moduleInst);
+                    break;
+                case GcCode.ArrayNewData:
+                    EmitArrayNewData(il, (InstArrayNewData)inst, gcTypes);
+                    break;
+                case GcCode.ArrayNewElem:
+                    EmitArrayNewElem(il, (InstArrayNewElem)inst, gcTypes);
+                    break;
+                case GcCode.ArrayFill:
+                    EmitArrayFill(il, (InstArrayFill)inst, gcTypes);
+                    break;
+                case GcCode.ArrayCopy:
+                    EmitArrayCopy(il, (InstArrayCopy)inst, gcTypes);
+                    break;
+                case GcCode.ArrayInitData:
+                    EmitArrayInitData(il, (InstArrayInitData)inst, gcTypes);
+                    break;
+                case GcCode.ArrayInitElem:
+                    EmitArrayInitElem(il, (InstArrayInitElem)inst, gcTypes);
+                    break;
 
                 // === ref.test / ref.cast ===
                 case GcCode.RefTest:
@@ -115,6 +135,14 @@ namespace Wacs.Transpiler.AOT.Emitters
                 case GcCode.RefCast:
                 case GcCode.RefCastNull:
                     EmitRefCast(il, (InstRefCast)inst);
+                    break;
+
+                // === br_on_cast ===
+                case GcCode.BrOnCast:
+                    EmitBrOnCast(il, (InstBrOnCast)inst, branchTarget!, castFail: false);
+                    break;
+                case GcCode.BrOnCastFail:
+                    EmitBrOnCast(il, (InstBrOnCastFail)inst, branchTarget!, castFail: true);
                     break;
 
                 // === Conversions ===
@@ -325,7 +353,160 @@ namespace Wacs.Transpiler.AOT.Emitters
                 nameof(GcRuntimeHelpers.ArrayLen), BindingFlags.Public | BindingFlags.Static)!);
         }
 
-        // ref.test: pop [ref], push [i32 (0 or 1)]
+        // array.new_fixed X N: pop N values, create array
+        private static void EmitArrayNewFixed(ILGenerator il, InstArrayNewFixed inst,
+            GcTypeEmitter gcTypes, ModuleInstance moduleInst)
+        {
+            int n = inst.FixedCount;
+            int typeIdx = inst.TypeIndex;
+            // Spill N values, push ctx + typeIdx + n + values as args to helper
+            var temps = new LocalBuilder[n];
+            for (int i = n - 1; i >= 0; i--)
+            {
+                temps[i] = il.DeclareLocal(typeof(object));
+                il.Emit(OpCodes.Box, typeof(object)); // box if value type
+                il.Emit(OpCodes.Stloc, temps[i]);
+            }
+            // Call helper: ArrayNewFixed(ctx, typeIdx, object[] vals) → object
+            il.Emit(OpCodes.Ldc_I4, n);
+            il.Emit(OpCodes.Newarr, typeof(object));
+            for (int i = 0; i < n; i++)
+            {
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, i);
+                il.Emit(OpCodes.Ldloc, temps[i]);
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+            il.Emit(OpCodes.Ldarg_0); // ctx
+            il.Emit(OpCodes.Ldc_I4, typeIdx);
+            il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                nameof(GcRuntimeHelpers.ArrayNewFixed), BindingFlags.Public | BindingFlags.Static)!);
+        }
+
+        // array.new_data/new_elem/fill/copy/init_data/init_elem: dispatch to helpers
+        private static void EmitArrayNewData(ILGenerator il, InstArrayNewData inst, GcTypeEmitter gcTypes)
+        {
+            EmitArrayHelper(il, inst.TypeIndex, inst.DataIndex, nameof(GcRuntimeHelpers.ArrayNewData), 2);
+        }
+
+        private static void EmitArrayNewElem(ILGenerator il, InstArrayNewElem inst, GcTypeEmitter gcTypes)
+        {
+            EmitArrayHelper(il, inst.TypeIndex, inst.ElemIndex, nameof(GcRuntimeHelpers.ArrayNewElem), 2);
+        }
+
+        private static void EmitArrayFill(ILGenerator il, InstArrayFill inst, GcTypeEmitter gcTypes)
+        {
+            // Stack: [arrayref, offset, val, len]
+            var len = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, len);
+            var val = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Box, typeof(object)); il.Emit(OpCodes.Stloc, val);
+            var off = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, off);
+            var arr = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Stloc, arr);
+            il.Emit(OpCodes.Ldloc, arr);
+            il.Emit(OpCodes.Ldloc, off);
+            il.Emit(OpCodes.Ldloc, val);
+            il.Emit(OpCodes.Ldloc, len);
+            il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                nameof(GcRuntimeHelpers.ArrayFill), BindingFlags.Public | BindingFlags.Static)!);
+        }
+
+        private static void EmitArrayCopy(ILGenerator il, InstArrayCopy inst, GcTypeEmitter gcTypes)
+        {
+            // Stack: [dstref, dstoff, srcref, srcoff, len]
+            var len = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, len);
+            var srcoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, srcoff);
+            var srcref = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Stloc, srcref);
+            var dstoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, dstoff);
+            var dstref = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Stloc, dstref);
+            il.Emit(OpCodes.Ldloc, dstref);
+            il.Emit(OpCodes.Ldloc, dstoff);
+            il.Emit(OpCodes.Ldloc, srcref);
+            il.Emit(OpCodes.Ldloc, srcoff);
+            il.Emit(OpCodes.Ldloc, len);
+            il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                nameof(GcRuntimeHelpers.ArrayCopy), BindingFlags.Public | BindingFlags.Static)!);
+        }
+
+        private static void EmitArrayInitData(ILGenerator il, InstArrayInitData inst, GcTypeEmitter gcTypes)
+        {
+            // Stack: [arrayref, dstoff, srcoff, len]
+            var len = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, len);
+            var srcoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, srcoff);
+            var dstoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, dstoff);
+            var arr = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Stloc, arr);
+            il.Emit(OpCodes.Ldarg_0); // ctx
+            il.Emit(OpCodes.Ldloc, arr);
+            il.Emit(OpCodes.Ldloc, dstoff);
+            il.Emit(OpCodes.Ldc_I4, inst.DataIndex);
+            il.Emit(OpCodes.Ldloc, srcoff);
+            il.Emit(OpCodes.Ldloc, len);
+            il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                nameof(GcRuntimeHelpers.ArrayInitData), BindingFlags.Public | BindingFlags.Static)!);
+        }
+
+        private static void EmitArrayInitElem(ILGenerator il, InstArrayInitElem inst, GcTypeEmitter gcTypes)
+        {
+            var len = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, len);
+            var srcoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, srcoff);
+            var dstoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, dstoff);
+            var arr = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Stloc, arr);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldloc, arr);
+            il.Emit(OpCodes.Ldloc, dstoff);
+            il.Emit(OpCodes.Ldc_I4, inst.ElemIndex);
+            il.Emit(OpCodes.Ldloc, srcoff);
+            il.Emit(OpCodes.Ldloc, len);
+            il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                nameof(GcRuntimeHelpers.ArrayInitElem), BindingFlags.Public | BindingFlags.Static)!);
+        }
+
+        // Helper for array.new_data/new_elem pattern: pop [offset, length], call helper
+        private static void EmitArrayHelper(ILGenerator il, int typeIdx, int segIdx, string helperName, int stackArgs)
+        {
+            var len = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, len);
+            var off = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, off);
+            il.Emit(OpCodes.Ldarg_0); // ctx
+            il.Emit(OpCodes.Ldc_I4, typeIdx);
+            il.Emit(OpCodes.Ldc_I4, segIdx);
+            il.Emit(OpCodes.Ldloc, off);
+            il.Emit(OpCodes.Ldloc, len);
+            il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                helperName, BindingFlags.Public | BindingFlags.Static)!);
+        }
+
+        // br_on_cast / br_on_cast_fail
+        private static void EmitBrOnCast(ILGenerator il, InstructionBase inst,
+            Func<int, System.Reflection.Emit.Label> branchTarget, bool castFail)
+        {
+            int label;
+            ValType targetType;
+            if (inst is InstBrOnCast boc)
+            {
+                label = boc.Label;
+                targetType = boc.TargetType;
+            }
+            else
+            {
+                var bocf = (InstBrOnCastFail)inst;
+                label = bocf.Label;
+                targetType = bocf.TargetType;
+            }
+
+            // Stack: [ref (object)]
+            // Test type, branch if match (br_on_cast) or mismatch (br_on_cast_fail)
+            il.Emit(OpCodes.Dup); // keep ref on stack for both paths
+            il.Emit(OpCodes.Ldc_I4, (int)targetType);
+            il.Emit(OpCodes.Ldc_I4, 1); // nullable
+            il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                nameof(GcRuntimeHelpers.RefTest), BindingFlags.Public | BindingFlags.Static)!);
+
+            var target = branchTarget(label);
+            if (castFail)
+                il.Emit(OpCodes.Brfalse, target); // branch if test FAILS
+            else
+                il.Emit(OpCodes.Brtrue, target);  // branch if test SUCCEEDS
+        }
+
+
         private static void EmitRefTest(ILGenerator il, InstRefTest inst)
         {
             il.Emit(OpCodes.Ldc_I4, (int)inst.HeapType);
@@ -408,6 +589,96 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (signed != 0 && (val & 0x40000000) != 0)
                 val |= unchecked((int)0x80000000); // sign extend bit 30
             return val;
+        }
+
+        public static object ArrayNewFixed(object[] values, TranspiledContext ctx, int typeIdx)
+        {
+            // Create array instance and populate from values
+            var gcType = ctx.Module?.Types[(TypeIdx)typeIdx];
+            // For now, return a simple wrapper
+            var arr = new object[values.Length];
+            System.Array.Copy(values, arr, values.Length);
+            return arr;
+        }
+
+        public static object ArrayNewData(TranspiledContext ctx, int typeIdx, int dataIdx, int offset, int length)
+        {
+            if (ctx.Store == null || ctx.Module == null)
+                throw new TrapException("array.new_data requires runtime store");
+            // Simplified: create array from data segment bytes
+            var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
+            var data = ctx.Store[dataAddr];
+            if (offset + length > data.Data.Length)
+                throw new TrapException("out of bounds data access");
+            var result = new byte[length];
+            System.Buffer.BlockCopy(data.Data, offset, result, 0, length);
+            return result;
+        }
+
+        public static object ArrayNewElem(TranspiledContext ctx, int typeIdx, int elemIdx, int offset, int length)
+        {
+            if (ctx.Store == null || ctx.Module == null)
+                throw new TrapException("array.new_elem requires runtime store");
+            var elemAddr = ctx.Module.ElemAddrs[(ElemIdx)elemIdx];
+            var elem = ctx.Store[elemAddr];
+            if (offset + length > elem.Elements.Count)
+                throw new TrapException("out of bounds element access");
+            var result = new object[length];
+            for (int i = 0; i < length; i++)
+                result[i] = elem.Elements[offset + i];
+            return result;
+        }
+
+        public static void ArrayFill(object arrayRef, int offset, object value, int length)
+        {
+            if (arrayRef == null) throw new TrapException("null array reference");
+            var elementsField = arrayRef.GetType().GetField("elements");
+            if (elementsField == null) throw new TrapException("not an array type");
+            var elements = (System.Array)elementsField.GetValue(arrayRef)!;
+            for (int i = 0; i < length; i++)
+                elements.SetValue(value, offset + i);
+        }
+
+        public static void ArrayCopy(object dstRef, int dstOff, object srcRef, int srcOff, int length)
+        {
+            if (dstRef == null || srcRef == null) throw new TrapException("null array reference");
+            var dstField = dstRef.GetType().GetField("elements");
+            var srcField = srcRef.GetType().GetField("elements");
+            if (dstField == null || srcField == null) throw new TrapException("not an array type");
+            var dst = (System.Array)dstField.GetValue(dstRef)!;
+            var src = (System.Array)srcField.GetValue(srcRef)!;
+            System.Array.Copy(src, srcOff, dst, dstOff, length);
+        }
+
+        public static void ArrayInitData(TranspiledContext ctx, object arrayRef, int dstOff,
+            int dataIdx, int srcOff, int length)
+        {
+            if (ctx.Store == null || ctx.Module == null)
+                throw new TrapException("array.init_data requires runtime store");
+            if (arrayRef == null) throw new TrapException("null array reference");
+            var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
+            var data = ctx.Store[dataAddr];
+            var field = arrayRef.GetType().GetField("elements");
+            if (field == null) throw new TrapException("not an array type");
+            var elements = (System.Array)field.GetValue(arrayRef)!;
+            // Byte-level copy from data segment to array elements
+            for (int i = 0; i < length; i++)
+                elements.SetValue(data.Data[srcOff + i], dstOff + i);
+        }
+
+        public static void ArrayInitElem(TranspiledContext ctx, object arrayRef, int dstOff,
+            int elemIdx, int srcOff, int length)
+        {
+            if (ctx.Store == null || ctx.Module == null)
+                throw new TrapException("array.init_elem requires runtime store");
+            if (arrayRef == null) throw new TrapException("null array reference");
+            var elemAddr = ctx.Module.ElemAddrs[(ElemIdx)elemIdx];
+            var elem = ctx.Store[elemAddr];
+            var field = arrayRef.GetType().GetField("elements");
+            if (field == null) throw new TrapException("not an array type");
+            var elements = (System.Array)field.GetValue(arrayRef)!;
+            for (int i = 0; i < length; i++)
+                elements.SetValue(elem.Elements[srcOff + i], dstOff + i);
         }
     }
 }

@@ -121,9 +121,22 @@ namespace Wacs.Transpiler.Test
                 // but we approximate here since it's internal.
                 var op = inst.Op.x00;
 
-                // Prefix opcodes: report the full prefixed mnemonic
-                if (op == Wacs.Core.OpCodes.OpCode.FB ||
-                    op == Wacs.Core.OpCodes.OpCode.FD ||
+                // 0xFB (GC): check which are supported
+                if (op == Wacs.Core.OpCodes.OpCode.FB)
+                {
+                    byte gc = (byte)inst.Op.xFB;
+                    // Struct ops 0x00-0x05, basic array 0x06-0x07/0x0B-0x0F,
+                    // ref.test/cast 0x14-0x17, conversions 0x1A-0x1B, i31 0x1C-0x1E
+                    if (gc <= 0x05 || gc == 0x06 || gc == 0x07 ||
+                        (gc >= 0x0B && gc <= 0x0F) ||
+                        (gc >= 0x14 && gc <= 0x17) ||
+                        (gc >= 0x1A && gc <= 0x1E))
+                        continue;
+                    return inst.Op.GetMnemonic();
+                }
+
+                // 0xFD/0xFE not yet supported
+                if (op == Wacs.Core.OpCodes.OpCode.FD ||
                     op == Wacs.Core.OpCodes.OpCode.FE)
                     return inst.Op.GetMnemonic();
 
