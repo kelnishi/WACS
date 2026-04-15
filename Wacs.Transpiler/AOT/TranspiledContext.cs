@@ -41,6 +41,12 @@ namespace Wacs.Transpiler.AOT
         // Null when running in framework mode (Store handles limits).
         public long[]? MemoryLimits;
 
+        // Base offsets into the global ModuleInit registries.
+        // Translates module-local segment indices to global registry IDs.
+        // Set by InitializationHelper or the Module constructor.
+        public int DataSegmentBaseId;
+        public int ElemSegmentBaseId;
+
         // === Tables ===
         // Indexed by tableidx. Elements are function references for call_indirect.
         public TableInstance[] Tables;

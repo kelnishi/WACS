@@ -56,6 +56,18 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
+        /// Drop a data segment (replace with empty).
+        /// Per WASM spec, dropped segments behave as empty for subsequent memory.init.
+        /// </summary>
+        public static void DropDataSegment(int segmentId)
+        {
+            lock (_lock)
+            {
+                _dataSegments[segmentId] = Array.Empty<byte>();
+            }
+        }
+
+        /// <summary>
         /// Get a registered data segment's bytes by ID.
         /// </summary>
         public static byte[]? GetDataSegmentData(int segmentId)
