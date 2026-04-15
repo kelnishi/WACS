@@ -17,6 +17,7 @@ using System.Linq;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Transpiler.AOT
 {
@@ -172,5 +173,106 @@ namespace Wacs.Transpiler.AOT
                 FuncTable[importCount + i] = localDelegates[i];
             }
         }
+
+        /// <summary>
+        /// Build FuncTable from transpiled methods in mixed-mode (equivalence testing).
+        /// For each transpiled function, creates a closed delegate binding this context
+        /// as the first argument. Non-transpiled slots are left null.
+        ///
+        /// The FuncTable is indexed by Store FuncAddr (not module-local index),
+        /// so that ResolveIndirect can look up delegates using the FuncAddr values
+        /// stored in table elements by the interpreter.
+        /// </summary>
+        public void BuildFuncTable(
+            System.Reflection.MethodInfo[] transpiledMethods,
+            FunctionType[] functionTypes,
+            int importCount)
+        {
+            if (Module == null || Store == null) return;
+
+            // Find the maximum FuncAddr to size the table
+            int maxAddr = 0;
+            foreach (var addr in Module.FuncAddrs)
+            {
+                int a = (int)addr.Value;
+                if (a > maxAddr) maxAddr = a;
+            }
+            FuncTable = new Delegate[maxAddr + 1];
+
+            // Map each local function's Store FuncAddr to its delegate.
+            // After TranspileAndSwap, functions may be TranspiledFunction or FunctionInstance.
+            // We use index position relative to importCount to identify local functions.
+            int funcIdx = 0;
+            foreach (var addr in Module.FuncAddrs)
+            {
+                if (funcIdx >= importCount)
+                {
+                    int localIdx = funcIdx - importCount;
+                    if (localIdx < transpiledMethods.Length)
+                    {
+                        var method = transpiledMethods[localIdx];
+                        if (method != null && (importCount + localIdx) < functionTypes.Length)
+                        {
+                            var funcType = functionTypes[importCount + localIdx];
+                            var delegateType = BuildDelegateTypeForFunc(funcType);
+                            if (delegateType != null)
+                            {
+                                try
+                                {
+                                    FuncTable[(int)addr.Value] = Delegate.CreateDelegate(
+                                        delegateType, this, method);
+                                }
+                                catch
+                                {
+                                    // Signature mismatch (e.g., multi-value out params) — leave null
+                                }
+                            }
+                        }
+                    }
+                }
+                funcIdx++;
+            }
+        }
+
+        /// <summary>
+        /// Build CLR delegate type for a WASM function type (without TranspiledContext param).
+        /// </summary>
+        private static Type? BuildDelegateTypeForFunc(FunctionType funcType)
+        {
+            var paramClrTypes = funcType.ParameterTypes.Types
+                .Select(t => MapValType(t)).ToArray();
+            var resultTypes = funcType.ResultType.Types;
+
+            if (resultTypes.Length == 0)
+            {
+                return paramClrTypes.Length switch
+                {
+                    0 => typeof(Action),
+                    1 => typeof(Action<>).MakeGenericType(paramClrTypes),
+                    _ when paramClrTypes.Length <= 16 =>
+                        Type.GetType($"System.Action`{paramClrTypes.Length}")?.MakeGenericType(paramClrTypes),
+                    _ => null
+                };
+            }
+
+            var returnType = MapValType(resultTypes[0]);
+            var allTypes = paramClrTypes.Append(returnType).ToArray();
+            return allTypes.Length switch
+            {
+                1 => typeof(Func<>).MakeGenericType(allTypes),
+                _ when allTypes.Length <= 17 =>
+                    Type.GetType($"System.Func`{allTypes.Length}")?.MakeGenericType(allTypes),
+                _ => null
+            };
+        }
+
+        private static Type MapValType(ValType vt) => vt switch
+        {
+            ValType.I32 => typeof(int),
+            ValType.I64 => typeof(long),
+            ValType.F32 => typeof(float),
+            ValType.F64 => typeof(double),
+            _ => typeof(Value)
+        };
     }
 }

@@ -61,6 +61,9 @@ namespace Wacs.Transpiler.AOT
         /// <summary>Import method metadata (name, type, index).</summary>
         public IReadOnlyList<InterfaceMethod> ImportMethods { get; }
 
+        /// <summary>Function types for all functions in module index space (imports + locals).</summary>
+        public FunctionType[] AllFunctionTypes { get; }
+
         public TranspilationResult(
             Assembly assembly,
             Type functionsType,
@@ -72,7 +75,8 @@ namespace Wacs.Transpiler.AOT
             Type? importsInterface,
             Type? moduleClass,
             IReadOnlyList<InterfaceMethod> exportMethods,
-            IReadOnlyList<InterfaceMethod> importMethods)
+            IReadOnlyList<InterfaceMethod> importMethods,
+            FunctionType[]? allFunctionTypes = null)
         {
             Assembly = assembly;
             FunctionsType = functionsType;
@@ -85,6 +89,7 @@ namespace Wacs.Transpiler.AOT
             ModuleClass = moduleClass;
             ExportMethods = exportMethods;
             ImportMethods = importMethods;
+            AllFunctionTypes = allFunctionTypes ?? Array.Empty<FunctionType>();
         }
     }
 
@@ -225,7 +230,8 @@ namespace Wacs.Transpiler.AOT
             var moduleClassGen = new ModuleClassGenerator(
                 moduleBuilder, $"{_namespace}.{moduleName}",
                 moduleInst.Repr, interfaceGen, typeBuilder, methodBuilders, importCount,
-                dataEmitter, dataSegmentBaseId >= 0 ? dataSegmentBaseId : 0);
+                dataEmitter, dataSegmentBaseId >= 0 ? dataSegmentBaseId : 0,
+                allFunctionTypes);
             moduleClassGen.Generate();
 
             // Finalize the types
@@ -252,7 +258,8 @@ namespace Wacs.Transpiler.AOT
                 interfaceGen.ImportsInterface?.UnderlyingSystemType,
                 moduleClassType,
                 interfaceGen.ExportMethods,
-                interfaceGen.ImportMethods);
+                interfaceGen.ImportMethods,
+                allFunctionTypes);
         }
 
         private MethodBuilder CreateMethodStub(
