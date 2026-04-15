@@ -172,6 +172,25 @@ namespace Wacs.Transpiler.AOT
                 if (s == 0) dataSegmentBaseId = id;
             }
 
+            // Register element segments for standalone table.init
+            int elemSegmentBaseId = -1;
+            for (int e = 0; e < moduleInst.Repr.Elements.Length; e++)
+            {
+                var elem = moduleInst.Repr.Elements[e];
+                var values = new Value[elem.Initializers.Length];
+                for (int i = 0; i < elem.Initializers.Length; i++)
+                {
+                    var expr = elem.Initializers[i];
+                    if (expr.Instructions.Count > 0 &&
+                        expr.Instructions[0] is Wacs.Core.Instructions.Reference.InstRefFunc rf)
+                        values[i] = new Value(ValType.FuncRef, (int)rf.FunctionIndex.Value);
+                    else
+                        values[i] = new Value(ValType.Nil); // ref.null or other
+                }
+                int id = ModuleInit.RegisterElemSegment(values);
+                if (e == 0) elemSegmentBaseId = id;
+            }
+
             // === Pass 0a: Generate typed interfaces for exports and imports ===
             var interfaceGen = new InterfaceGenerator(
                 moduleBuilder, $"{_namespace}.{moduleName}",
