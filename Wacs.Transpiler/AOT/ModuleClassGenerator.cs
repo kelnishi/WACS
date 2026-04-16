@@ -147,7 +147,17 @@ namespace Wacs.Transpiler.AOT
                 }
                 else
                 {
-                    globals.Add((g.Type.ContentType, g.Type.Mutability, EvaluateGlobalInit(g, globals)));
+                    var initVal = EvaluateGlobalInit(g, globals);
+                    globals.Add((g.Type.ContentType, g.Type.Mutability, initVal));
+                    // Check if this global depends on an imported global
+                    foreach (var inst in g.Initializer.Instructions)
+                    {
+                        if (inst is InstGlobalGet gg && gg.GetIndex() < importedGlobalCount)
+                        {
+                            data.DeferredGlobalInits.Add((importedGlobalCount + gi, g.Initializer));
+                            break;
+                        }
+                    }
                 }
             }
             data.Globals = globals.ToArray();
@@ -267,23 +277,40 @@ namespace Wacs.Transpiler.AOT
             WasmModule.Global global,
             List<(ValType type, Mutability mut, Value init)> previousGlobals)
         {
+            // Stack-based evaluator for constant expressions including
+            // extended constant expressions (i32.add/sub/mul, i64.add/sub/mul).
+            var stack = new Stack<Value>();
             foreach (var inst in global.Initializer.Instructions)
             {
-                if (inst is InstI32Const i32) return new Value(i32.Value);
-                if (inst is InstI64Const i64) return new Value(i64.FetchImmediate(null!));
-                if (inst is InstF32Const f32) return new Value(f32.FetchImmediate(null!));
-                if (inst is InstF64Const f64) return new Value(f64.FetchImmediate(null!));
-                if (inst is InstRefNull rn) return new Value(rn.RefType);
+                if (inst is InstI32Const i32) { stack.Push(new Value(i32.Value)); continue; }
+                if (inst is InstI64Const i64) { stack.Push(new Value(i64.FetchImmediate(null!))); continue; }
+                if (inst is InstF32Const f32) { stack.Push(new Value(f32.FetchImmediate(null!))); continue; }
+                if (inst is InstF64Const f64) { stack.Push(new Value(f64.FetchImmediate(null!))); continue; }
+                if (inst is InstRefNull rn) { stack.Push(new Value(rn.RefType)); continue; }
                 if (inst is InstRefFunc refFunc)
-                    return new Value(ValType.FuncRef, (int)refFunc.FunctionIndex.Value);
+                { stack.Push(new Value(ValType.FuncRef, (int)refFunc.FunctionIndex.Value)); continue; }
                 if (inst is InstGlobalGet gg)
                 {
                     int idx = gg.GetIndex();
                     if (idx >= 0 && idx < previousGlobals.Count)
-                        return previousGlobals[idx].init;
+                        stack.Push(previousGlobals[idx].init);
+                    else
+                        stack.Push(new Value(global.Type.ContentType));
+                    continue;
+                }
+                // Extended constant expressions
+                var op = inst.Op.x00;
+                if (stack.Count >= 2)
+                {
+                    if (op == Wacs.Core.OpCodes.OpCode.I32Add) { int b = stack.Pop().Data.Int32, a = stack.Pop().Data.Int32; stack.Push(new Value(a + b)); continue; }
+                    if (op == Wacs.Core.OpCodes.OpCode.I32Sub) { int b = stack.Pop().Data.Int32, a = stack.Pop().Data.Int32; stack.Push(new Value(a - b)); continue; }
+                    if (op == Wacs.Core.OpCodes.OpCode.I32Mul) { int b = stack.Pop().Data.Int32, a = stack.Pop().Data.Int32; stack.Push(new Value(a * b)); continue; }
+                    if (op == Wacs.Core.OpCodes.OpCode.I64Add) { long b = stack.Pop().Data.Int64, a = stack.Pop().Data.Int64; stack.Push(new Value(a + b)); continue; }
+                    if (op == Wacs.Core.OpCodes.OpCode.I64Sub) { long b = stack.Pop().Data.Int64, a = stack.Pop().Data.Int64; stack.Push(new Value(a - b)); continue; }
+                    if (op == Wacs.Core.OpCodes.OpCode.I64Mul) { long b = stack.Pop().Data.Int64, a = stack.Pop().Data.Int64; stack.Push(new Value(a * b)); continue; }
                 }
             }
-            return new Value(global.Type.ContentType);
+            return stack.Count > 0 ? stack.Pop() : new Value(global.Type.ContentType);
         }
 
         /// <summary>
@@ -489,6 +516,17 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldloc, ctxLocal);
             il.Emit(OpCodes.Stfld, ctxField);
+
+            // === Call start function (spec §4.5.4 step 15) ===
+            if (_hasStart)
+            {
+                int localIdx = _startFuncIndex - _importCount;
+                if (localIdx >= 0 && localIdx < _methodBuilders.Length)
+                {
+                    il.Emit(OpCodes.Ldloc, ctxLocal);
+                    il.Emit(OpCodes.Call, _methodBuilders[localIdx]);
+                }
+            }
 
             il.Emit(OpCodes.Ret);
         }

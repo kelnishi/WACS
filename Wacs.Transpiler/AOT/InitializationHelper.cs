@@ -69,6 +69,12 @@ namespace Wacs.Transpiler.AOT
         /// <summary>Module-local indices of active data segments (implicitly dropped after init).</summary>
         public int[] ActiveDataIndices { get; set; } = Array.Empty<int>();
 
+        /// <summary>
+        /// Globals whose initializers use global.get on imported globals.
+        /// Stores the full initializer instruction list for re-evaluation after import patching.
+        /// </summary>
+        public List<(int globalIdx, Wacs.Core.Types.Expression initializer)> DeferredGlobalInits { get; set; } = new();
+
         /// <summary>Number of imported functions.</summary>
         public int ImportFuncCount { get; set; }
 
