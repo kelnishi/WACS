@@ -22,6 +22,18 @@ using Wacs.Core.Types.Defs;
 namespace Wacs.Transpiler.AOT
 {
     /// <summary>
+    /// Wraps a Delegate as IGcRef so it can be stored in Value.GcRef.
+    /// Used to store bound delegates in table elements for cross-module
+    /// call_indirect dispatch.
+    /// </summary>
+    public class DelegateRef : IGcRef
+    {
+        public readonly Delegate Target;
+        public DelegateRef(Delegate target) => Target = target;
+        public RefIdx StoreIndex => default(PtrIdx);
+    }
+
+    /// <summary>
     /// Lean runtime context passed as the first parameter to every transpiled function.
     /// Holds pre-resolved module-level state for fast access without carrying
     /// interpreter-specific overhead (OpStack, InstructionPointer, Frame, etc.).
@@ -93,6 +105,39 @@ namespace Wacs.Transpiler.AOT
             Globals = globals ?? Array.Empty<GlobalInstance>();
             ImportDelegates = importDelegates ?? Array.Empty<Delegate>();
             FuncTable = funcTable ?? Array.Empty<Delegate>();
+        }
+
+        /// <summary>
+        /// Bind delegates into funcref table elements.
+        /// After FuncTable is populated, walks all tables and replaces raw funcref
+        /// index Values with Values that carry the bound delegate as GcRef.
+        /// This enables cross-module call_indirect: the delegate is self-contained
+        /// and doesn't need the originating module's FuncTable to dispatch.
+        /// </summary>
+        public void BindTableDelegates()
+        {
+            if (FuncTable == null || FuncTable.Length == 0) return;
+
+            foreach (var table in Tables)
+            {
+                for (int i = 0; i < table.Elements.Count; i++)
+                {
+                    var elem = table.Elements[i];
+                    if (elem.IsNullRef) continue;
+                    // Skip elements that already have a delegate bound (from another module)
+                    if (elem.GcRef is Delegate) continue;
+
+                    // Extract funcIdx from the raw funcref Value
+                    int funcIdx = (int)elem.Data.Ptr;
+                    if (funcIdx >= 0 && funcIdx < FuncTable.Length && FuncTable[funcIdx] != null)
+                    {
+                        // Store the delegate as GcRef, keeping the funcIdx for type checking
+                        var bound = new Value(ValType.FuncRef, funcIdx);
+                        bound.GcRef = new DelegateRef(FuncTable[funcIdx]);
+                        table.Elements[i] = bound;
+                    }
+                }
+            }
         }
 
         /// <summary>
