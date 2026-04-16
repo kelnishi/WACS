@@ -47,10 +47,10 @@ namespace Wacs.Transpiler.AOT
         /// Copy a registered data segment into a memory at the given offset.
         /// Called from the Module constructor's IL.
         /// </summary>
-        public static void CopyDataSegment(byte[][] memories, int memIdx, int offset, int segmentId)
+        public static void CopyDataSegment(Wacs.Core.Runtime.Types.MemoryInstance[] memories, int memIdx, int offset, int segmentId)
         {
             if (!_dataSegments.TryGetValue(segmentId, out var data)) return;
-            var memory = memories[memIdx];
+            var memory = memories[memIdx].Data;
             if (offset + data.Length > memory.Length) return; // bounds safety
             Buffer.BlockCopy(data, 0, memory, offset, data.Length);
         }
