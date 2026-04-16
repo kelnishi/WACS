@@ -34,6 +34,23 @@ namespace Wacs.Transpiler.AOT
     }
 
     /// <summary>
+    /// Flags indicating which transpiler features are active in this context.
+    /// Set at transpile time from TranspilerOptions, baked into the Module constructor.
+    /// Runtime helpers branch on these to enable layered behavior.
+    /// </summary>
+    [Flags]
+    public enum TranspilerCapabilities
+    {
+        None = 0,
+        /// <summary>Layer 0: CLR inheritance for intra-module subtyping (always on, included for interrogation).</summary>
+        ClrInheritance = 1 << 0,
+        /// <summary>Layer 1: cross-module structural hash comparison for ref.test/cast.</summary>
+        StructuralHash = 1 << 1,
+        /// <summary>Layer 2: full type descriptor registry for complete subtype queries.</summary>
+        FullRegistry = 1 << 2,
+    }
+
+    /// <summary>
     /// Lean runtime context passed as the first parameter to every transpiled function.
     /// Holds pre-resolved module-level state for fast access without carrying
     /// interpreter-specific overhead (OpStack, InstructionPointer, Frame, etc.).
@@ -43,14 +60,17 @@ namespace Wacs.Transpiler.AOT
     /// </summary>
     public class ThinContext
     {
+        // === Transpiler Capabilities ===
+        // Flags from TranspilerOptions, baked into the Module constructor.
+        public TranspilerCapabilities Capabilities;
+
+        // Init data ID for GcTypeRegistry lookups (concrete type ref.test/cast).
+        public int InitDataId = -1;
+
         // === Linear Memory ===
-        // Indexed by memidx. MemoryInstance is a reference type — growth
-        // (Array.Resize on Data) propagates to all modules sharing the instance.
         public MemoryInstance[] Memories;
 
         // Base offsets into the global ModuleInit registries.
-        // Translates module-local segment indices to global registry IDs.
-        // Set by InitializationHelper or the Module constructor.
         public int DataSegmentBaseId;
         public int ElemSegmentBaseId;
 

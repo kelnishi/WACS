@@ -301,6 +301,7 @@ namespace Wacs.Transpiler.AOT
                 globals: globals);
             ctx.DataSegmentBaseId = data.DataSegmentBaseId;
             ctx.ElemSegmentBaseId = data.ElemSegmentBaseId;
+            ctx.InitDataId = initDataId;
 
             // 7. Initialize GC-typed globals (array.new, etc.)
             InitializeGcGlobals(ctx, data, initDataId);

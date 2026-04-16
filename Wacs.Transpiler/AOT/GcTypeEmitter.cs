@@ -92,22 +92,27 @@ namespace Wacs.Transpiler.AOT
                 var defType = _types[(TypeIdx)i];
                 var expansion = defType.Expansion;
 
-                if (expansion is StructType)
+                if (expansion is StructType || expansion is ArrayType)
                 {
-                    var gcType = new EmittedGcType(i) { IsStruct = true };
+                    bool isStruct = expansion is StructType;
+                    var gcType = new EmittedGcType(i) { IsStruct = isStruct };
+
+                    // Resolve parent type for CLR inheritance (Layer 0)
+                    Type parentType = typeof(object);
+                    var subType = defType.Unroll;
+                    if (subType.SuperTypeIndexes.Length > 0)
+                    {
+                        int parentIdx = (int)subType.SuperTypeIndexes[0].Value;
+                        if (_emittedTypes.TryGetValue(parentIdx, out var parentGc)
+                            && parentGc.TypeBuilder != null)
+                            parentType = parentGc.TypeBuilder;
+                    }
+
+                    string prefix = isStruct ? "WasmStruct" : "WasmArray";
                     gcType.TypeBuilder = _moduleBuilder.DefineType(
-                        $"{_namespace}.WasmStruct_{i}",
+                        $"{_namespace}.{prefix}_{i}",
                         TypeAttributes.Public | TypeAttributes.Class,
-                        typeof(object));
-                    _emittedTypes[i] = gcType;
-                }
-                else if (expansion is ArrayType)
-                {
-                    var gcType = new EmittedGcType(i) { IsStruct = false };
-                    gcType.TypeBuilder = _moduleBuilder.DefineType(
-                        $"{_namespace}.WasmArray_{i}",
-                        TypeAttributes.Public | TypeAttributes.Class,
-                        typeof(object));
+                        parentType);
                     _emittedTypes[i] = gcType;
                 }
             }
@@ -136,7 +141,12 @@ namespace Wacs.Transpiler.AOT
                     FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.Literal);
                 hashField.SetConstant(gcType.StructuralHash);
 
-                // No IGcRef — emitted types are plain objects, wrapped via WrapRef(object)
+                // TypeCategory: 0=struct, 1=array (for abstract ref.test at runtime)
+                var catField = gcType.TypeBuilder!.DefineField(
+                    "TypeCategory",
+                    typeof(int),
+                    FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.Literal);
+                catField.SetConstant(gcType.IsStruct ? 0 : 1);
             }
 
             // Third pass: create types (bake the TypeBuilders)
@@ -148,8 +158,27 @@ namespace Wacs.Transpiler.AOT
 
         private void EmitStructFields(EmittedGcType gcType, StructType structType)
         {
+            // Determine how many fields are inherited from the parent type
+            int parentFieldCount = 0;
+            var defType = _types[(TypeIdx)gcType.TypeIndex];
+            var subType = defType.Unroll;
+            EmittedGcType? parentGc = null;
+            if (subType.SuperTypeIndexes.Length > 0)
+            {
+                int parentIdx = (int)subType.SuperTypeIndexes[0].Value;
+                if (_emittedTypes.TryGetValue(parentIdx, out parentGc))
+                    parentFieldCount = parentGc.Fields.Length;
+            }
+
             var fields = new FieldBuilder[structType.Arity];
-            for (int f = 0; f < structType.Arity; f++)
+            // Reference parent's FieldBuilders for inherited fields
+            if (parentGc != null)
+            {
+                for (int f = 0; f < parentFieldCount && f < fields.Length; f++)
+                    fields[f] = parentGc.Fields[f];
+            }
+            // Only emit NEW fields (child-specific)
+            for (int f = parentFieldCount; f < structType.Arity; f++)
             {
                 var fieldType = structType.FieldTypes[f];
                 var clrFieldType = MapFieldType(fieldType);
