@@ -852,9 +852,10 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// </summary>
         public static void ArrayCopyValues(Value dstRef, int dstOff, Value srcRef, int srcOff, int length)
         {
-            if (length == 0) return;
+            // Null check must happen before length-0 early exit (spec requires trap)
             var dst = UnwrapArrayRef(dstRef);
             var src = UnwrapArrayRef(srcRef);
+            if (length == 0) return;
             var dstField = dst.GetType().GetField("elements");
             var srcField = src.GetType().GetField("elements");
             if (dstField == null || srcField == null) throw new TrapException("not an array type");
