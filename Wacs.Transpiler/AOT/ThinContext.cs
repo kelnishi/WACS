@@ -44,14 +44,9 @@ namespace Wacs.Transpiler.AOT
     public class ThinContext
     {
         // === Linear Memory ===
-        // Indexed by memidx. Most modules use only Memories[0].
-        // memory.grow changes the byte[] reference, so transpiled code must
-        // reload after any call that might trigger growth.
-        public byte[][] Memories;
-
-        // Max pages per memory — used by standalone memory.grow.
-        // Null when running in framework mode (Store handles limits).
-        public long[]? MemoryLimits;
+        // Indexed by memidx. MemoryInstance is a reference type — growth
+        // (Array.Resize on Data) propagates to all modules sharing the instance.
+        public MemoryInstance[] Memories;
 
         // Base offsets into the global ModuleInit registries.
         // Translates module-local segment indices to global registry IDs.
@@ -94,13 +89,13 @@ namespace Wacs.Transpiler.AOT
         /// Construct a ThinContext for standalone use (no WasmRuntime).
         /// </summary>
         public ThinContext(
-            byte[][]? memories = null,
+            MemoryInstance[]? memories = null,
             TableInstance[]? tables = null,
             GlobalInstance[]? globals = null,
             Delegate[]? importDelegates = null,
             Delegate[]? funcTable = null)
         {
-            Memories = memories ?? Array.Empty<byte[]>();
+            Memories = memories ?? Array.Empty<MemoryInstance>();
             Tables = tables ?? Array.Empty<TableInstance>();
             Globals = globals ?? Array.Empty<GlobalInstance>();
             ImportDelegates = importDelegates ?? Array.Empty<Delegate>();
@@ -182,27 +177,15 @@ namespace Wacs.Transpiler.AOT
             FuncTable = Array.Empty<Delegate>(); // Filled after transpilation
         }
 
-        /// <summary>
-        /// Reload memory references after a potential memory.grow.
-        /// </summary>
-        public void RefreshMemories()
-        {
-            if (Store != null && Module != null)
-            {
-                Memories = ResolveMemories(Store, Module);
-            }
-        }
-
-        private static byte[][] ResolveMemories(Store store, ModuleInstance module)
+        private static MemoryInstance[] ResolveMemories(Store store, ModuleInstance module)
         {
             var addrs = module.MemAddrs;
             int count = 0;
-            // MemAddrs uses array-backed storage, count by probing Contains
             while (addrs.Contains((MemIdx)count)) count++;
-            var memories = new byte[count][];
+            var memories = new MemoryInstance[count];
             for (int i = 0; i < count; i++)
             {
-                memories[i] = store[addrs[(MemIdx)i]].Data;
+                memories[i] = store[addrs[(MemIdx)i]];
             }
             return memories;
         }

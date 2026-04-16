@@ -41,7 +41,7 @@ namespace Wacs.Transpiler.AOT
         /// Exported memories, keyed by export name.
         /// References into Context.Memories.
         /// </summary>
-        public Dictionary<string, (int memIdx, byte[] mem)> ExportedMemories { get; } = new();
+        public Dictionary<string, (int memIdx, MemoryInstance mem)> ExportedMemories { get; } = new();
 
         /// <summary>
         /// Exported tables, keyed by export name.
@@ -103,17 +103,13 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// Host memory registry: (moduleName, fieldName) → byte[].
         /// </summary>
-        private readonly Dictionary<(string module, string field), byte[]> _hostMemories = new();
+        private readonly Dictionary<(string module, string field), MemoryInstance> _hostMemories = new();
 
         /// <summary>
         /// Host table registry: (moduleName, fieldName) → TableInstance.
         /// </summary>
         private readonly Dictionary<(string module, string field), TableInstance> _hostTables = new();
 
-        /// <summary>
-        /// Host memory limits: (moduleName, fieldName) → max pages.
-        /// </summary>
-        private readonly Dictionary<(string module, string field), long> _hostMemoryLimits = new();
 
         /// <summary>
         /// Register a host function (e.g., spectest.print_i32).
@@ -134,10 +130,9 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// Register a host memory.
         /// </summary>
-        public void RegisterHostMemory(string moduleName, string fieldName, byte[] memory, long maxPages = 65536)
+        public void RegisterHostMemory(string moduleName, string fieldName, MemoryInstance memory)
         {
             _hostMemories[(moduleName, fieldName)] = memory;
-            _hostMemoryLimits[(moduleName, fieldName)] = maxPages;
         }
 
         /// <summary>
@@ -203,18 +198,9 @@ namespace Wacs.Transpiler.AOT
                     {
                         if (TryResolveMemory(import.ModuleName, import.Name, out var mem))
                         {
+                            // Share the same MemoryInstance — growth propagates automatically
                             ctx.Memories[memImportIdx] = mem;
                             patchedMemoryIndices.Add(memImportIdx);
-                            // Update memory limit to match actual shared memory's max.
-                            // The importer's declared max may differ from the exporter's.
-                            if (ctx.MemoryLimits != null && memImportIdx < ctx.MemoryLimits.Length)
-                            {
-                                // Use the actual memory size as a lower bound for the limit
-                                long exporterMax = TryGetExportedMemoryMax(import.ModuleName, import.Name);
-                                if (exporterMax > 0)
-                                    ctx.MemoryLimits[memImportIdx] = Math.Min(
-                                        ctx.MemoryLimits[memImportIdx], exporterMax);
-                            }
                         }
                         memImportIdx++;
                         break;
@@ -249,7 +235,7 @@ namespace Wacs.Transpiler.AOT
                     if (!patchedMemoryIndices.Contains(memIdx)) continue;
                     if (initData.SavedDataSegments.TryGetValue(segId, out var segData))
                     {
-                        var memory = ctx.Memories[memIdx];
+                        var memory = ctx.Memories[memIdx].Data;
                         if (offset + segData.Length <= memory.Length)
                             Buffer.BlockCopy(segData, 0, memory, offset, segData.Length);
                     }
@@ -345,7 +331,7 @@ namespace Wacs.Transpiler.AOT
                     {
                         if (memIdx < ctx.Memories.Length)
                         {
-                            var memory = ctx.Memories[memIdx];
+                            var memory = ctx.Memories[memIdx].Data;
                             if (newOffset + segData.Length <= memory.Length)
                                 Buffer.BlockCopy(segData, 0, memory, newOffset, segData.Length);
                         }
@@ -356,7 +342,7 @@ namespace Wacs.Transpiler.AOT
                         var segData2 = ModuleInit.GetDataSegmentData(segId);
                         if (segData2 != null && memIdx < ctx.Memories.Length)
                         {
-                            var memory = ctx.Memories[memIdx];
+                            var memory = ctx.Memories[memIdx].Data;
                             if (newOffset + segData2.Length <= memory.Length)
                                 Buffer.BlockCopy(segData2, 0, memory, newOffset, segData2.Length);
                         }
@@ -409,19 +395,6 @@ namespace Wacs.Transpiler.AOT
             return stack.Count > 0 ? stack.Pop() : default;
         }
 
-        private long TryGetExportedMemoryMax(string moduleName, string fieldName)
-        {
-            if (_hostMemoryLimits.TryGetValue((moduleName, fieldName), out var hostMax))
-                return hostMax;
-            if (_modules.TryGetValue(moduleName, out var mod) &&
-                mod.ExportedMemories.TryGetValue(fieldName, out var exported))
-            {
-                int memIdx = exported.memIdx;
-                if (mod.Context.MemoryLimits != null && memIdx < mod.Context.MemoryLimits.Length)
-                    return mod.Context.MemoryLimits[memIdx];
-            }
-            return 0;
-        }
 
         private static int EvaluateInitExpressionI32(
             Wacs.Core.Types.Expression expr, GlobalInstance[] globals)
@@ -430,7 +403,7 @@ namespace Wacs.Transpiler.AOT
             return val.Data.Int32;
         }
 
-        private bool TryResolveMemory(string moduleName, string fieldName, out byte[] memory)
+        private bool TryResolveMemory(string moduleName, string fieldName, out MemoryInstance memory)
         {
             if (_hostMemories.TryGetValue((moduleName, fieldName), out memory!))
                 return true;
