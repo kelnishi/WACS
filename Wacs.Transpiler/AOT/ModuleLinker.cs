@@ -244,6 +244,42 @@ namespace Wacs.Transpiler.AOT
                     }
                 }
             }
+
+            // Deferred element evaluation: re-resolve entries that used global.get
+            // on imported globals (which were null at transpile time, now patched).
+            if (initDataId >= 0)
+            {
+                var initData = InitRegistry.Get(initDataId);
+                foreach (var (elemSegIdx, slotIdx, globalIdx) in initData.DeferredElemGlobals)
+                {
+                    if (elemSegIdx >= initData.ActiveElementSegments.Length) continue;
+                    if (globalIdx >= ctx.Globals.Length) continue;
+
+                    var globalVal = ctx.Globals[globalIdx].Value;
+                    if (globalVal.IsNullRef) continue;
+
+                    // Extract funcref from the global's value
+                    int funcIdx = (int)globalVal.Data.Ptr;
+
+                    var (tableIdx, elemOffset, _) = initData.ActiveElementSegments[elemSegIdx];
+                    int tableSlot = elemOffset + slotIdx;
+                    if (tableIdx >= ctx.Tables.Length) continue;
+                    var table = ctx.Tables[tableIdx];
+                    if (tableSlot >= table.Elements.Count) continue;
+
+                    // Check if the global carries a delegate (from another module's BindTableDelegates)
+                    var val = new Value(ValType.FuncRef, funcIdx);
+                    if (globalVal.GcRef is DelegateRef dref)
+                    {
+                        val.GcRef = dref;
+                    }
+                    else if (funcIdx >= 0 && funcIdx < ctx.FuncTable.Length && ctx.FuncTable[funcIdx] != null)
+                    {
+                        val.GcRef = new DelegateRef(ctx.FuncTable[funcIdx]);
+                    }
+                    table.Elements[tableSlot] = val;
+                }
+            }
         }
 
         private bool TryResolveMemory(string moduleName, string fieldName, out byte[] memory)

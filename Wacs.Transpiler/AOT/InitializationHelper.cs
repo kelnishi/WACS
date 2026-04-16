@@ -47,6 +47,13 @@ namespace Wacs.Transpiler.AOT
         public (int tableIdx, int offset, int[] funcIndices)[] ActiveElementSegments { get; set; }
             = Array.Empty<(int, int, int[])>();
 
+        /// <summary>
+        /// Element entries that depend on globals (global.get in initializer).
+        /// (elemSegIdx, slotIdx within segment, globalIdx).
+        /// After import resolution patches globals, these can be re-evaluated.
+        /// </summary>
+        public List<(int elemSegIdx, int slotIdx, int globalIdx)> DeferredElemGlobals { get; set; } = new();
+
         /// <summary>Start function index (-1 if none).</summary>
         public int StartFuncIndex { get; set; } = -1;
 

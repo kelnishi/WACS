@@ -138,6 +138,23 @@ namespace Wacs.Transpiler.AOT
                     }
                 }
             }
+
+            // Also bind delegates into funcref globals so cross-module
+            // global.get carries the delegate for element initializers.
+            foreach (var global in Globals)
+            {
+                var gval = global.Value;
+                if (gval.Type != ValType.FuncRef || gval.IsNullRef) continue;
+                if (gval.GcRef is DelegateRef) continue; // already bound
+
+                int funcIdx = (int)gval.Data.Ptr;
+                if (funcIdx >= 0 && funcIdx < FuncTable.Length && FuncTable[funcIdx] != null)
+                {
+                    var bound = new Value(ValType.FuncRef, funcIdx);
+                    bound.GcRef = new DelegateRef(FuncTable[funcIdx]);
+                    global.Value = bound;
+                }
+            }
         }
 
         /// <summary>
