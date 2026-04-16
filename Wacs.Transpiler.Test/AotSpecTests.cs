@@ -534,7 +534,19 @@ namespace Wacs.Transpiler.Test
                     return false;
                 return true;
             }
-            return actual.Equals(expected);
+            if (actual.Equals(expected))
+                return true;
+
+            // Cross-type bit comparison: spec tests encode NaN floats as i32/i64 bit patterns.
+            // If types differ but the raw Data bits match, consider them equal.
+            if ((actual.Type == ValType.F32 && expected.Type == ValType.I32) ||
+                (actual.Type == ValType.I32 && expected.Type == ValType.F32))
+                return actual.Data.Int32 == expected.Data.Int32;
+            if ((actual.Type == ValType.F64 && expected.Type == ValType.I64) ||
+                (actual.Type == ValType.I64 && expected.Type == ValType.F64))
+                return actual.Data.Int64 == expected.Data.Int64;
+
+            return false;
         }
     }
 }
