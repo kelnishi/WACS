@@ -16,6 +16,7 @@ using System;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
 using WasmOpCode = Wacs.Core.OpCodes.OpCode;
@@ -455,12 +456,22 @@ namespace Wacs.Transpiler.AOT.Emitters
                 case WasmOpCode.F32ConvertI32U:    il.Emit(OpCodes.Conv_R_Un); il.Emit(OpCodes.Conv_R4); break;
                 case WasmOpCode.F32ConvertI64S:    il.Emit(OpCodes.Conv_R4); break;
                 case WasmOpCode.F32ConvertI64U:    il.Emit(OpCodes.Conv_R_Un); il.Emit(OpCodes.Conv_R4); break;
-                case WasmOpCode.F32DemoteF64:      il.Emit(OpCodes.Conv_R4); break;
+                case WasmOpCode.F32DemoteF64:
+                    il.Emit(OpCodes.Conv_R4);
+                    // ARM64 conv.r4 may not set the quiet NaN bit.
+                    // Spec requires arithmetic NaN (quiet bit set) for NaN inputs.
+                    il.Emit(OpCodes.Call, typeof(NanHelpers).GetMethod(
+                        nameof(NanHelpers.CanonicalizeF32))!);
+                    break;
                 case WasmOpCode.F64ConvertI32S:    il.Emit(OpCodes.Conv_R8); break;
                 case WasmOpCode.F64ConvertI32U:    il.Emit(OpCodes.Conv_R_Un); il.Emit(OpCodes.Conv_R8); break;
                 case WasmOpCode.F64ConvertI64S:    il.Emit(OpCodes.Conv_R8); break;
                 case WasmOpCode.F64ConvertI64U:    il.Emit(OpCodes.Conv_R_Un); il.Emit(OpCodes.Conv_R8); break;
-                case WasmOpCode.F64PromoteF32:     il.Emit(OpCodes.Conv_R8); break;
+                case WasmOpCode.F64PromoteF32:
+                    il.Emit(OpCodes.Conv_R8);
+                    il.Emit(OpCodes.Call, typeof(NanHelpers).GetMethod(
+                        nameof(NanHelpers.CanonicalizeF64))!);
+                    break;
 
                 // Reinterpret — no-op in CIL (same bit pattern, different type interpretation)
                 // But CIL verification requires explicit conversion for type safety
@@ -620,6 +631,37 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (b == 0) throw new Wacs.Core.Runtime.Types.TrapException("integer divide by zero");
             if (b == -1) return 0; // LONG_MIN % -1 = 0 per spec
             return a % b;
+        }
+    }
+
+    /// <summary>
+    /// NaN canonicalization helpers.
+    /// The WASM spec requires arithmetic operations (including promote/demote)
+    /// to produce "arithmetic NaN" — NaN with the quiet bit set.
+    /// On ARM64, CIL conv.r4/conv.r8 may preserve sNaN (quiet bit clear)
+    /// instead of canonicalizing. These helpers ensure the quiet bit is set.
+    /// </summary>
+    public static class NanHelpers
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float CanonicalizeF32(float v)
+        {
+            if (!float.IsNaN(v)) return v;
+            // Set quiet bit (bit 22) via memory reinterpret to avoid FPU canonicalization
+            var span = MemoryMarshal.CreateSpan(ref v, 1);
+            var bits = MemoryMarshal.Cast<float, int>(span);
+            bits[0] |= 0x00400000; // set quiet NaN bit
+            return v;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static double CanonicalizeF64(double v)
+        {
+            if (!double.IsNaN(v)) return v;
+            var span = MemoryMarshal.CreateSpan(ref v, 1);
+            var bits = MemoryMarshal.Cast<double, long>(span);
+            bits[0] |= 0x0008000000000000L; // set quiet NaN bit
+            return v;
         }
     }
 }
