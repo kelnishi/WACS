@@ -104,14 +104,14 @@ namespace Wacs.Transpiler.AOT
             var data = new ModuleInitData();
 
             // Memories (imported + module-defined)
-            var mems = new List<(long min, long max)>();
+            var mems = new List<(long min, long? max)>();
             foreach (var mem in _wasmModule.ImportedMems)
             {
-                mems.Add((mem.Limits.Minimum, mem.Limits.Maximum ?? 65536));
+                mems.Add((mem.Limits.Minimum, mem.Limits.Maximum));
             }
             foreach (var mem in _wasmModule.Memories)
             {
-                mems.Add((mem.Limits.Minimum, mem.Limits.Maximum ?? 65536));
+                mems.Add((mem.Limits.Minimum, mem.Limits.Maximum));
             }
             data.Memories = mems.ToArray();
 
