@@ -99,7 +99,9 @@ namespace Wacs.Transpiler.AOT
 
             // Pre-pass: compute stack heights and reachability (mirrors interpreter Link)
             _stackAnalysis = new StackAnalysis();
-            _stackAnalysis.Analyze(_funcInst.Type, _funcInst.Body.Instructions);
+            _stackAnalysis.Analyze(
+                _funcInst.Type, _funcInst.Body.Instructions,
+                _moduleInst, _allFunctionTypes, _importCount);
 
             // Emit pass: generate CIL using precomputed metadata
             _il = _method.GetILGenerator();
@@ -385,7 +387,8 @@ namespace Wacs.Transpiler.AOT
                 case WasmOpCode.BrTable:
                 {
                     int excess = _currentInfo?.Excess ?? 0;
-                    ControlEmitter.EmitBrTable(il, (InstBranchTable)inst, _blockStack, excess);
+                    ControlEmitter.EmitBrTable(il, (InstBranchTable)inst, _blockStack,
+                        excess, _currentInfo?.BrTableExcess);
                     break;
                 }
 

@@ -269,15 +269,73 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// Emit br_table — switch on an index. Pops i32 from stack.
         /// CIL switch jumps to labels[index], falls through if out of range.
         /// Uses precomputed excess from StackAnalysis.
+        ///
+        /// When all targets have the same excess (common case), a single cleanup
+        /// before the switch suffices. When targets have different depths, we emit
+        /// per-target trampolines: the switch jumps to cleanup stubs, each of
+        /// which does its own excess cleanup then branches to the real target.
         /// </summary>
         public static void EmitBrTable(ILGenerator il, InstBranchTable inst,
-            Stack<EmitBlock> blockStack, int excess = 0)
+            Stack<EmitBlock> blockStack, int excess = 0, int[]? perTargetExcess = null)
         {
+            if (perTargetExcess != null)
+            {
+                // Multi-depth targets: emit per-target trampolines.
+                // Save index and carried values to locals. Each trampoline does
+                // its own excess cleanup and branches to the real target.
+                var defTarget = PeekLabel(blockStack, inst.DefaultLabel);
+                int arity = defTarget.LabelArity; // all targets have same arity per spec
+
+                var indexLocal = il.DeclareLocal(typeof(int));
+                il.Emit(OpCodes.Stloc, indexLocal);
+
+                // Save carried values (same for all targets)
+                var carriedLocals = new LocalBuilder[arity];
+                for (int i = 0; i < arity; i++)
+                {
+                    var clrType = i < defTarget.ResultClrTypes.Length
+                        ? defTarget.ResultClrTypes[i] : typeof(int);
+                    carriedLocals[i] = il.DeclareLocal(clrType);
+                    il.Emit(OpCodes.Stloc, carriedLocals[i]);
+                }
+
+                // Define trampoline labels
+                var trampolines = new Label[inst.LabelCount];
+                for (int i = 0; i < inst.LabelCount; i++)
+                    trampolines[i] = il.DefineLabel();
+                var defTrampoline = il.DefineLabel();
+
+                // Emit the switch on the saved index
+                il.Emit(OpCodes.Ldloc, indexLocal);
+                il.Emit(OpCodes.Switch, trampolines);
+                il.Emit(OpCodes.Br, defTrampoline);
+
+                // Emit each trampoline: pop excess, restore carried, br real target
+                for (int i = 0; i < inst.LabelCount; i++)
+                {
+                    il.MarkLabel(trampolines[i]);
+                    int ex = perTargetExcess[i];
+                    for (int j = 0; j < ex; j++)
+                        il.Emit(OpCodes.Pop);
+                    for (int j = arity - 1; j >= 0; j--)
+                        il.Emit(OpCodes.Ldloc, carriedLocals[j]);
+                    il.Emit(OpCodes.Br, PeekLabel(blockStack, inst.GetLabel(i)).BranchTarget);
+                }
+
+                // Default trampoline
+                il.MarkLabel(defTrampoline);
+                int defEx = perTargetExcess[inst.LabelCount];
+                for (int j = 0; j < defEx; j++)
+                    il.Emit(OpCodes.Pop);
+                for (int j = arity - 1; j >= 0; j--)
+                    il.Emit(OpCodes.Ldloc, carriedLocals[j]);
+                il.Emit(OpCodes.Br, PeekLabel(blockStack, inst.DefaultLabel).BranchTarget);
+                return;
+            }
+
             if (excess > 0)
             {
-                // Need to clean up excess values before branching.
-                // Save index, save carried values, pop excess, restore carried,
-                // then switch. All targets have the same arity (spec requirement).
+                // All targets at same depth: single cleanup before switch.
                 var target = PeekLabel(blockStack, inst.DefaultLabel);
                 var indexLocal = il.DeclareLocal(typeof(int));
                 il.Emit(OpCodes.Stloc, indexLocal);

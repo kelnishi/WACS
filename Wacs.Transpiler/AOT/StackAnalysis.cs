@@ -16,6 +16,8 @@ using System;
 using System.Collections.Generic;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Reference;
+using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 using WasmOpCode = Wacs.Core.OpCodes.OpCode;
@@ -40,6 +42,13 @@ namespace Wacs.Transpiler.AOT
         /// Negative or zero means no cleanup needed.
         /// </summary>
         public int Excess;
+
+        /// <summary>
+        /// For br_table: per-target excess values (when targets at different depths
+        /// have different excess counts). Null when all targets have the same excess.
+        /// Index 0..N-1 = table labels, index N = default label.
+        /// </summary>
+        public int[]? BrTableExcess;
     }
 
     /// <summary>
@@ -77,6 +86,9 @@ namespace Wacs.Transpiler.AOT
         private readonly Stack<AnalysisBlock> _blockStack = new();
         private int _stackHeight;
         private bool _unreachable;
+        private ModuleInstance? _moduleInst;
+        private FunctionType[]? _allFunctionTypes;
+        private int _importCount;
 
         /// <summary>
         /// Look up precomputed info for an instruction.
@@ -91,8 +103,16 @@ namespace Wacs.Transpiler.AOT
         /// Run the analysis on a function body.
         /// Call once before IL emission begins.
         /// </summary>
-        public void Analyze(FunctionType funcType, IEnumerable<InstructionBase> bodyInstructions)
+        public void Analyze(
+            FunctionType funcType,
+            IEnumerable<InstructionBase> bodyInstructions,
+            ModuleInstance? moduleInst = null,
+            FunctionType[]? allFunctionTypes = null,
+            int importCount = 0)
         {
+            _moduleInst = moduleInst;
+            _allFunctionTypes = allFunctionTypes;
+            _importCount = importCount;
             _stackHeight = 0;
             _unreachable = false;
             _blockStack.Clear();
@@ -171,9 +191,16 @@ namespace Wacs.Transpiler.AOT
                 return;
             }
 
-            // Non-block instructions: apply StackDiff and check control flow
+            // Non-block instructions: apply stack diff.
+            // Most instructions use inst.StackDiff. But call/call_indirect/call_ref
+            // have StackDiff=0 in the constructor — their actual diff is computed
+            // during the interpreter's Link phase from the function type.
             if (!_unreachable)
-                ApplyStackDiff(inst);
+            {
+                int diff = ComputeStackDiff(inst, op);
+                _stackHeight += diff;
+                if (_stackHeight < 0) _stackHeight = 0;
+            }
 
             switch (op)
             {
@@ -212,11 +239,25 @@ namespace Wacs.Transpiler.AOT
                     if (!info.Unreachable)
                     {
                         var btInst = (InstBranchTable)inst;
-                        var target = PeekLabel(btInst.DefaultLabel);
-                        // br_table.StackDiff = 0 but it pops the index.
-                        // The CIL switch instruction also pops the index.
-                        // Excess = stack - index - target_stack
-                        info.Excess = _stackHeight - 1 - target.TargetStack;
+                        int stackAfterIndex = _stackHeight - 1; // CIL switch pops the index
+
+                        // Compute per-target excess (targets may have different depths)
+                        int totalLabels = btInst.LabelCount + 1; // labels + default
+                        var perTarget = new int[totalLabels];
+                        bool allSame = true;
+                        for (int j = 0; j < btInst.LabelCount; j++)
+                        {
+                            var t = PeekLabel(btInst.GetLabel(j));
+                            perTarget[j] = stackAfterIndex - t.TargetStack;
+                            if (j > 0 && perTarget[j] != perTarget[0]) allSame = false;
+                        }
+                        var defTarget = PeekLabel(btInst.DefaultLabel);
+                        perTarget[btInst.LabelCount] = stackAfterIndex - defTarget.TargetStack;
+                        if (perTarget[btInst.LabelCount] != perTarget[0]) allSame = false;
+
+                        info.Excess = perTarget[btInst.LabelCount]; // default excess
+                        if (!allSame)
+                            info.BrTableExcess = perTarget;
                     }
                     _unreachable = true;
                     break;
@@ -390,6 +431,88 @@ namespace Wacs.Transpiler.AOT
         {
             _stackHeight += inst.StackDiff;
             if (_stackHeight < 0) _stackHeight = 0;
+        }
+
+        /// <summary>
+        /// Compute the actual stack diff for an instruction.
+        /// Most instructions use inst.StackDiff. But call/call_indirect/call_ref
+        /// have constructor StackDiff=0 — their actual diff depends on the function type
+        /// (computed during the interpreter's Link phase via context.DeltaStack).
+        /// </summary>
+        private int ComputeStackDiff(InstructionBase inst, WasmOpCode op)
+        {
+            switch (op)
+            {
+                case WasmOpCode.Call:
+                {
+                    // call: -paramArity + resultArity
+                    var callInst = (Wacs.Core.Instructions.InstCall)inst;
+                    int funcIdx = (int)callInst.X.Value;
+                    var funcType = ResolveFuncType(funcIdx);
+                    if (funcType != null)
+                        return -funcType.ParameterTypes.Arity + funcType.ResultType.Arity;
+                    return inst.StackDiff;
+                }
+                case WasmOpCode.CallIndirect:
+                {
+                    // call_indirect: -1 (index) - paramArity + resultArity
+                    var ciInst = (Wacs.Core.Instructions.InstCallIndirect)inst;
+                    int typeIdx = ciInst.TypeIndex;
+                    var funcType = ResolveTypeIdx(typeIdx);
+                    if (funcType != null)
+                        return -1 - funcType.ParameterTypes.Arity + funcType.ResultType.Arity;
+                    return inst.StackDiff;
+                }
+                case WasmOpCode.CallRef:
+                {
+                    // call_ref: -1 (funcref) - paramArity + resultArity
+                    if (inst is InstCallRef crInst)
+                    {
+                        var funcType = ResolveTypeIdx(crInst.TypeIndex);
+                        if (funcType != null)
+                            return -1 - funcType.ParameterTypes.Arity + funcType.ResultType.Arity;
+                    }
+                    return inst.StackDiff;
+                }
+                case WasmOpCode.ReturnCall:
+                {
+                    // return_call: same as call but sets unreachable
+                    var rcInst = (Wacs.Core.Instructions.InstReturnCall)inst;
+                    int funcIdx = (int)rcInst.X.Value;
+                    var funcType = ResolveFuncType(funcIdx);
+                    if (funcType != null)
+                        return -funcType.ParameterTypes.Arity + funcType.ResultType.Arity;
+                    return inst.StackDiff;
+                }
+                case WasmOpCode.ReturnCallIndirect:
+                {
+                    var rci = (Wacs.Core.Instructions.InstReturnCallIndirect)inst;
+                    int typeIdx = rci.TypeIndex;
+                    var funcType = ResolveTypeIdx(typeIdx);
+                    if (funcType != null)
+                        return -1 - funcType.ParameterTypes.Arity + funcType.ResultType.Arity;
+                    return inst.StackDiff;
+                }
+                default:
+                    return inst.StackDiff;
+            }
+        }
+
+        private FunctionType? ResolveFuncType(int funcIdx)
+        {
+            if (_allFunctionTypes != null && funcIdx < _allFunctionTypes.Length)
+                return _allFunctionTypes[funcIdx];
+            return null;
+        }
+
+        private FunctionType? ResolveTypeIdx(int typeIdx)
+        {
+            if (_moduleInst != null)
+            {
+                var typeDef = _moduleInst.Types[(Wacs.Core.Types.TypeIdx)typeIdx];
+                return typeDef?.Expansion as FunctionType;
+            }
+            return null;
         }
 
         private AnalysisBlock PeekLabel(int depth)
