@@ -729,18 +729,23 @@ namespace Wacs.Transpiler.AOT.Emitters
             return false;
         }
 
+        /// <summary>
+        /// Unwrap a Value to the underlying emitted GC object, handling GcObjectAdapter.
+        /// </summary>
+        private static object UnwrapArrayRef(Value arrayRef)
+        {
+            if (arrayRef.IsNullRef) throw new TrapException("null array reference");
+            var gcRef = arrayRef.GcRef ?? throw new TrapException("null array reference");
+            return gcRef is GcObjectAdapter adapter ? adapter.Target : gcRef;
+        }
+
         public static int ArrayLen(Value arrayRef)
         {
-            if (arrayRef.IsNullRef)
-                throw new TrapException("null array reference");
-            var gcRef = arrayRef.GcRef;
-            if (gcRef == null)
-                throw new TrapException("null array reference");
-            // All emitted array types have a public 'length' field
-            var field = gcRef.GetType().GetField("length");
+            var target = UnwrapArrayRef(arrayRef);
+            var field = target.GetType().GetField("length");
             if (field == null)
                 throw new TrapException("not an array type");
-            return (int)field.GetValue(gcRef)!;
+            return (int)field.GetValue(target)!;
         }
 
         public static int RefTest(object val, int heapType, int nullable)
@@ -818,12 +823,10 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         public static void ArrayFill(Value arrayRef, int offset, Value value, int length)
         {
-            if (arrayRef.IsNullRef) throw new TrapException("null array reference");
-            var gcRef = arrayRef.GcRef;
-            if (gcRef == null) throw new TrapException("null array reference");
-            var elementsField = gcRef.GetType().GetField("elements");
+            var target = UnwrapArrayRef(arrayRef);
+            var elementsField = target.GetType().GetField("elements");
             if (elementsField == null) throw new TrapException("not an array type");
-            var elements = (System.Array)elementsField.GetValue(gcRef)!;
+            var elements = (System.Array)elementsField.GetValue(target)!;
             for (int i = 0; i < length; i++)
                 elements.SetValue(value, offset + i);
         }
@@ -831,12 +834,15 @@ namespace Wacs.Transpiler.AOT.Emitters
         public static void ArrayCopy(object dstRef, int dstOff, object srcRef, int srcOff, int length)
         {
             if (IsNullRef(dstRef) || IsNullRef(srcRef)) throw new TrapException("null array reference");
-            var dstField = dstRef.GetType().GetField("elements");
-            var srcField = srcRef.GetType().GetField("elements");
+            // Unwrap GcObjectAdapter if present
+            var dstTarget = dstRef is GcObjectAdapter da ? da.Target : dstRef;
+            var srcTarget = srcRef is GcObjectAdapter sa ? sa.Target : srcRef;
+            var dstField = dstTarget.GetType().GetField("elements");
+            var srcField = srcTarget.GetType().GetField("elements");
             if (dstField == null || srcField == null) throw new TrapException("not an array type");
-            var dst = (System.Array)dstField.GetValue(dstRef)!;
-            var src = (System.Array)srcField.GetValue(srcRef)!;
-            if (length == 0) return; // No-op copy is always valid
+            var dst = (System.Array)dstField.GetValue(dstTarget)!;
+            var src = (System.Array)srcField.GetValue(srcTarget)!;
+            if (length == 0) return;
             System.Array.Copy(src, srcOff, dst, dstOff, length);
         }
 
@@ -846,20 +852,15 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// </summary>
         public static void ArrayCopyValues(Value dstRef, int dstOff, Value srcRef, int srcOff, int length)
         {
-            if (dstRef.IsNullRef || srcRef.IsNullRef)
-                throw new TrapException("null array reference");
             if (length == 0) return;
-            // Extract underlying GcRef objects (IGcRef) and use reflection
-            var dstGc = dstRef.GcRef;
-            var srcGc = srcRef.GcRef;
-            if (dstGc == null || srcGc == null)
-                throw new TrapException("null array reference");
-            var dstField = dstGc.GetType().GetField("elements");
-            var srcField = srcGc.GetType().GetField("elements");
+            var dst = UnwrapArrayRef(dstRef);
+            var src = UnwrapArrayRef(srcRef);
+            var dstField = dst.GetType().GetField("elements");
+            var srcField = src.GetType().GetField("elements");
             if (dstField == null || srcField == null) throw new TrapException("not an array type");
             System.Array.Copy(
-                (System.Array)srcField.GetValue(srcGc)!, srcOff,
-                (System.Array)dstField.GetValue(dstGc)!, dstOff,
+                (System.Array)srcField.GetValue(src)!, srcOff,
+                (System.Array)dstField.GetValue(dst)!, dstOff,
                 length);
         }
 
@@ -868,14 +869,12 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             if (ctx.Store == null || ctx.Module == null)
                 throw new TrapException("array.init_data requires runtime store");
-            if (arrayRef.IsNullRef) throw new TrapException("null array reference");
-            var gcRef = arrayRef.GcRef;
-            if (gcRef == null) throw new TrapException("null array reference");
+            var target = UnwrapArrayRef(arrayRef);
             var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
             var data = ctx.Store[dataAddr];
-            var field = gcRef.GetType().GetField("elements");
+            var field = target.GetType().GetField("elements");
             if (field == null) throw new TrapException("not an array type");
-            var elements = (System.Array)field.GetValue(gcRef)!;
+            var elements = (System.Array)field.GetValue(target)!;
             // Byte-level copy from data segment to array elements
             for (int i = 0; i < length; i++)
                 elements.SetValue(data.Data[srcOff + i], dstOff + i);
@@ -886,14 +885,12 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             if (ctx.Store == null || ctx.Module == null)
                 throw new TrapException("array.init_elem requires runtime store");
-            if (arrayRef.IsNullRef) throw new TrapException("null array reference");
-            var gcRef = arrayRef.GcRef;
-            if (gcRef == null) throw new TrapException("null array reference");
+            var target = UnwrapArrayRef(arrayRef);
             var elemAddr = ctx.Module.ElemAddrs[(ElemIdx)elemIdx];
             var elem = ctx.Store[elemAddr];
-            var field = gcRef.GetType().GetField("elements");
+            var field = target.GetType().GetField("elements");
             if (field == null) throw new TrapException("not an array type");
-            var elements = (System.Array)field.GetValue(gcRef)!;
+            var elements = (System.Array)field.GetValue(target)!;
             for (int i = 0; i < length; i++)
                 elements.SetValue(elem.Elements[srcOff + i], dstOff + i);
         }
