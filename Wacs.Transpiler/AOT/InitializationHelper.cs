@@ -213,7 +213,10 @@ namespace Wacs.Transpiler.AOT
             for (int i = 0; i < data.Memories.Length; i++)
             {
                 var (min, max) = data.Memories[i];
-                var memType = new MemoryType(minimum: (uint)min, maximum: max > 0 ? (uint?)max : null);
+                // max of 0 means "declared max is 0 pages" (can't grow)
+                // Only omit max (null) when it wasn't declared at all
+                var memType = new MemoryType(minimum: (uint)min,
+                    maximum: max < 65536 ? (uint?)max : null);
                 memories[i] = new MemoryInstance(memType);
             }
 
