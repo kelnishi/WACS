@@ -189,7 +189,7 @@ namespace Wacs.Transpiler.AOT
                 {
                     int tableIdx = (int)active.TableIndex.Value;
                     int offset = EvaluateConstI32(active.Offset);
-                    var (funcIndices, deferredGlobals) = ExtractFuncIndicesWithDeferred(elem, globals, activeElemIdx);
+                    var (funcIndices, deferredGlobals) = ExtractFuncIndicesWithDeferred(elem, globals, activeElemIdx, data.GcElementValues);
                     activeElems.Add((tableIdx, offset, funcIndices));
                     data.DeferredElemGlobals.AddRange(deferredGlobals);
                     droppedElemIndices.Add(i); // Active segments implicitly dropped
@@ -349,7 +349,8 @@ namespace Wacs.Transpiler.AOT
             ExtractFuncIndicesWithDeferred(
             WasmModule.ElementSegment elem,
             List<(ValType type, Mutability mut, Value init)> globals,
-            int elemSegIdx)
+            int elemSegIdx,
+            Dictionary<(int segIdx, int slotIdx), Value>? gcElemValues = null)
         {
             var deferred = new List<(int, int, int)>();
             var indices = new int[elem.Initializers.Length];
@@ -357,6 +358,31 @@ namespace Wacs.Transpiler.AOT
             {
                 var expr = elem.Initializers[i];
                 indices[i] = -1;
+
+                // Check for GC-typed initializers (ref.i31, struct.new, etc.)
+                foreach (var inst in expr.Instructions)
+                {
+                    if (inst.GetType().Namespace == "Wacs.Core.Instructions.GC")
+                    {
+                        // Evaluate GC element initializer
+                        var gcOp = inst.Op.xFB;
+                        if (gcOp == Wacs.Core.OpCodes.GcCode.RefI31)
+                        {
+                            // Find the i32.const that precedes ref.i31
+                            foreach (var prev in expr.Instructions)
+                            {
+                                if (prev is Wacs.Core.Instructions.Numeric.InstI32Const ic)
+                                {
+                                    gcElemValues?.Add((elemSegIdx, i),
+                                        new Value(ValType.I31, ic.Value & 0x7FFFFFFF));
+                                    indices[i] = -2; // sentinel: GC value, not a funcIdx
+                                    break;
+                                }
+                            }
+                        }
+                        goto nextElement;
+                    }
+                }
 
                 foreach (var inst in expr.Instructions)
                 {
@@ -382,6 +408,7 @@ namespace Wacs.Transpiler.AOT
                         break;
                     }
                 }
+                nextElement:;
             }
             return (indices, deferred);
         }
