@@ -382,20 +382,19 @@ namespace Wacs.Transpiler.AOT.Emitters
                 nameof(GcRuntimeHelpers.ArrayLen), BindingFlags.Public | BindingFlags.Static)!);
         }
 
-        // array.new_fixed X N: pop N values, create array
+        // array.new_fixed X N: pop N values, create array directly
         private static void EmitArrayNewFixed(ILGenerator il, InstArrayNewFixed inst,
             GcTypeEmitter gcTypes, ModuleInstance moduleInst)
         {
             int n = inst.FixedCount;
             int typeIdx = inst.TypeIndex;
-
-            // Determine the element CLR type from the array type definition
             var gcType = gcTypes.GetGcType(typeIdx);
-            Type elemClrType = typeof(Value); // fallback
-            if (gcType != null && gcType.Fields.Length > 0)
-                elemClrType = gcType.Fields[0].FieldType.GetElementType() ?? typeof(Value);
+            if (gcType == null)
+                throw new TranspilerException($"array.new_fixed: type {typeIdx} not emitted");
 
-            // Spill N values from CIL stack — use the ACTUAL element type
+            var elemClrType = gcType.Fields[0].FieldType.GetElementType()!;
+
+            // Spill N values from CIL stack using the actual element type
             var temps = new LocalBuilder[n];
             for (int i = n - 1; i >= 0; i--)
             {
@@ -403,39 +402,29 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
 
-            // Build Value[] for the helper
+            // Create WasmArray_N instance directly
+            il.Emit(OpCodes.Newobj, gcType.ClrType.GetConstructor(Type.EmptyTypes)!);
+            il.Emit(OpCodes.Dup);
+
+            // arr.elements = new T[n]
             il.Emit(OpCodes.Ldc_I4, n);
-            il.Emit(OpCodes.Newarr, typeof(Value));
+            il.Emit(OpCodes.Newarr, elemClrType);
+
+            // Fill elements
             for (int i = 0; i < n; i++)
             {
                 il.Emit(OpCodes.Dup);
                 il.Emit(OpCodes.Ldc_I4, i);
                 il.Emit(OpCodes.Ldloc, temps[i]);
-
-                // Convert scalar to Value for the helper's Value[] parameter
-                if (IsScalarType(elemClrType) && elemClrType != typeof(Value))
-                {
-                    // Box the scalar into a Value via constructor
-                    if (elemClrType == typeof(int) || elemClrType == typeof(byte) || elemClrType == typeof(short))
-                    {
-                        if (elemClrType != typeof(int)) il.Emit(OpCodes.Conv_I4);
-                        il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(int) })!);
-                    }
-                    else if (elemClrType == typeof(long))
-                        il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(long) })!);
-                    else if (elemClrType == typeof(float))
-                        il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(float) })!);
-                    else if (elemClrType == typeof(double))
-                        il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(double) })!);
-                }
-
-                il.Emit(OpCodes.Stelem, typeof(Value));
+                il.Emit(OpCodes.Stelem, elemClrType);
             }
 
-            il.Emit(OpCodes.Ldarg_0); // ctx
-            il.Emit(OpCodes.Ldc_I4, typeIdx);
-            il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.ArrayNewFixed), BindingFlags.Public | BindingFlags.Static)!);
+            il.Emit(OpCodes.Stfld, gcType.Fields[0]); // elements
+
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Ldc_I4, n);
+            il.Emit(OpCodes.Stfld, gcType.Fields[1]); // length
+
             EmitWrapGcRef(il, typeIdx);
         }
 
