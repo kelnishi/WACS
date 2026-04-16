@@ -143,9 +143,15 @@ namespace Wacs.Transpiler.AOT
         private void EmitInstruction(ILGenerator il, InstructionBase inst)
         {
             // Track CIL stack height using the WASM instruction's StackDiff.
-            // This tells us the net stack change (+1 = push, -1 = pop, etc.)
-            _cilStackHeight += inst.StackDiff;
-            if (_cilStackHeight < 0) _cilStackHeight = 0;
+            // Block-structured instructions (block/loop/if) have StackDiff that
+            // accounts for the entire block's net effect. Since we also iterate
+            // children and track their StackDiffs individually, we skip the
+            // block instruction's own StackDiff to avoid double-counting.
+            if (inst is not IBlockInstruction)
+            {
+                _cilStackHeight += inst.StackDiff;
+                if (_cilStackHeight < 0) _cilStackHeight = 0;
+            }
 
             // Detect GC instructions by class type — their opcodes may be aliased
             // after the interpreter's linking step rewrites the ByteCode.
