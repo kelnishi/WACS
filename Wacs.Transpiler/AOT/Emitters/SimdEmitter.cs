@@ -644,6 +644,8 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         private static readonly FieldInfo MemoriesField =
             typeof(ThinContext).GetField(nameof(ThinContext.Memories))!;
+        private static readonly FieldInfo MemoryDataField =
+            MemoryEmitter.MemoryDataField;
 
         // === SIMD memory load: [addr (i32)] → V128 boxed as Value ===
         private static void EmitSimdLoad(ILGenerator il, InstructionBase inst, SimdCode op)
@@ -698,7 +700,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4, memIndex);
-            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldelem_Ref);              // MemoryInstance
+            il.Emit(OpCodes.Ldfld, MemoryDataField);  // byte[] Data
             il.Emit(OpCodes.Ldloc, addrLocal);
             il.Emit(OpCodes.Ldc_I8, memOffset);
             il.Emit(OpCodes.Call, typeof(MemoryHelpers).GetMethod(helperName,
@@ -729,7 +732,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4, laneInst.MemIndex);
-            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldelem_Ref);              // MemoryInstance
+            il.Emit(OpCodes.Ldfld, MemoryDataField);  // byte[] Data
             il.Emit(OpCodes.Ldloc, addrLocal);
             il.Emit(OpCodes.Ldc_I8, laneInst.MemOffset);
             il.Emit(OpCodes.Ldloc, vecLocal);
@@ -754,7 +758,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4, storeInst.MemIndex);
-            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldelem_Ref);              // MemoryInstance
+            il.Emit(OpCodes.Ldfld, MemoryDataField);  // byte[] Data
             il.Emit(OpCodes.Ldloc, addrLocal);
             il.Emit(OpCodes.Ldc_I8, storeInst.MemOffset);
             il.Emit(OpCodes.Ldloc, vecLocal);
@@ -785,7 +790,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4, laneInst.MemIndex);
-            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldelem_Ref);              // MemoryInstance
+            il.Emit(OpCodes.Ldfld, MemoryDataField);  // byte[] Data
             il.Emit(OpCodes.Ldloc, addrLocal);
             il.Emit(OpCodes.Ldc_I8, laneInst.MemOffset);
             il.Emit(OpCodes.Ldloc, vecLocal);

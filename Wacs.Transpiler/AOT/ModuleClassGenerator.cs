@@ -864,7 +864,8 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Ldfld, ctxField);
             il.Emit(OpCodes.Ldfld, typeof(ThinContext).GetField(nameof(ThinContext.Memories))!);
             il.Emit(OpCodes.Ldc_I4_0);
-            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldelem_Ref);              // MemoryInstance
+            il.Emit(OpCodes.Ldfld, typeof(MemoryInstance).GetField(nameof(MemoryInstance.Data))!);
             il.Emit(OpCodes.Ret);
 
             memProp.SetGetMethod(getter);

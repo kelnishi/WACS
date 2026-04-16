@@ -208,12 +208,13 @@ namespace Wacs.Transpiler.AOT
         {
             var data = InitRegistry.Get(initDataId);
 
-            // 1. Allocate memories
-            var memories = new byte[data.Memories.Length][];
+            // 1. Allocate memories (as MemoryInstance for shared growth)
+            var memories = new MemoryInstance[data.Memories.Length];
             for (int i = 0; i < data.Memories.Length; i++)
             {
-                long pages = data.Memories[i].min;
-                memories[i] = new byte[pages * 65536];
+                var (min, max) = data.Memories[i];
+                var memType = new MemoryType(minimum: (uint)min, maximum: max > 0 ? (uint?)max : null);
+                memories[i] = new MemoryInstance(memType);
             }
 
             // 2. Allocate tables
@@ -278,17 +279,11 @@ namespace Wacs.Transpiler.AOT
             foreach (var idx in data.ActiveDataIndices)
                 ModuleInit.DropDataSegment(data.DataSegmentBaseId + idx);
 
-            // Memory limits for standalone memory.grow
-            var memoryLimits = new long[data.Memories.Length];
-            for (int i = 0; i < data.Memories.Length; i++)
-                memoryLimits[i] = data.Memories[i].max;
-
-            // Create context
+            // Create context (MemoryInstance carries its own limits)
             var ctx = new ThinContext(
                 memories: memories,
                 tables: tables,
                 globals: globals);
-            ctx.MemoryLimits = memoryLimits;
             ctx.DataSegmentBaseId = data.DataSegmentBaseId;
             ctx.ElemSegmentBaseId = data.ElemSegmentBaseId;
 

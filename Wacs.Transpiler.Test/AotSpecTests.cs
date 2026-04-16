@@ -185,8 +185,9 @@ namespace Wacs.Transpiler.Test
             // sharing for host modules.
 
             // Register spectest memory and table
-            var spectestMem = new byte[1 * 65536]; // 1 page, max 2
-            linker.RegisterHostMemory("spectest", "memory", spectestMem, maxPages: 2);
+            var spectestMem = new Wacs.Core.Runtime.Types.MemoryInstance(
+                new Wacs.Core.Types.MemoryType(minimum: 1, maximum: 2));
+            linker.RegisterHostMemory("spectest", "memory", spectestMem);
             var spectestTable = new TableInstance(
                 new TableType(Wacs.Core.Types.Defs.ValType.FuncRef,
                     new Limits(AddrType.I32, 10, 20)),

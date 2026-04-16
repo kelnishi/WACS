@@ -159,8 +159,8 @@ namespace Wacs.Transpiler.AOT.Emitters
         public static void MemoryCopy(ThinContext ctx, int dstMemIdx, int srcMemIdx,
             int dst, int src, int len)
         {
-            var dstMem = ctx.Memories[dstMemIdx];
-            var srcMem = ctx.Memories[srcMemIdx];
+            var dstMem = ctx.Memories[dstMemIdx].Data;
+            var srcMem = ctx.Memories[srcMemIdx].Data;
             // WASM spec: bounds check applies even when len == 0
             if ((long)(uint)src + (long)(uint)len > srcMem.Length ||
                 (long)(uint)dst + (long)(uint)len > dstMem.Length)
@@ -172,7 +172,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         public static void MemoryFill(ThinContext ctx, int memIdx,
             int dst, int val, int len)
         {
-            var mem = ctx.Memories[memIdx];
+            var mem = ctx.Memories[memIdx].Data;
             // WASM spec: bounds check applies even when len == 0
             if ((long)(uint)dst + (long)(uint)len > mem.Length)
                 throw new TrapException("out of bounds memory access");
@@ -183,7 +183,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         public static void MemoryInit(ThinContext ctx, int memIdx, int dataIdx,
             int dst, int src, int len)
         {
-            var mem = ctx.Memories[memIdx];
+            var mem = ctx.Memories[memIdx].Data;
             byte[] segData;
 
             if (ctx.Store != null && ctx.Module != null)

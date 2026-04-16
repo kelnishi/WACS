@@ -40,6 +40,9 @@ namespace Wacs.Transpiler.AOT.Emitters
     {
         private static readonly FieldInfo MemoriesField =
             typeof(ThinContext).GetField(nameof(ThinContext.Memories))!;
+        internal static readonly FieldInfo MemoryDataField =
+            typeof(Wacs.Core.Runtime.Types.MemoryInstance).GetField(
+                nameof(Wacs.Core.Runtime.Types.MemoryInstance.Data))!;
 
         public static bool CanEmit(WasmOpCode op)
         {
@@ -152,9 +155,10 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Stloc, addrLocal);      // save address
 
             il.Emit(OpCodes.Ldarg_0);                // ThinContext
-            il.Emit(OpCodes.Ldfld, MemoriesField);   // byte[][]
+            il.Emit(OpCodes.Ldfld, MemoriesField);   // MemoryInstance[]
             il.Emit(OpCodes.Ldc_I4, inst.MemIndex);  // memIdx
-            il.Emit(OpCodes.Ldelem_Ref);              // byte[]
+            il.Emit(OpCodes.Ldelem_Ref);              // MemoryInstance
+            il.Emit(OpCodes.Ldfld, MemoryDataField);  // byte[] Data
 
             il.Emit(OpCodes.Ldloc, addrLocal);        // address
             il.Emit(OpCodes.Ldc_I8, inst.MemOffset);  // offset
@@ -183,9 +187,10 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Stloc, addrLocal);        // save address
 
             il.Emit(OpCodes.Ldarg_0);                  // ThinContext
-            il.Emit(OpCodes.Ldfld, MemoriesField);     // byte[][]
+            il.Emit(OpCodes.Ldfld, MemoriesField);     // MemoryInstance[]
             il.Emit(OpCodes.Ldc_I4, inst.MemIndex);    // memIdx
-            il.Emit(OpCodes.Ldelem_Ref);                // byte[]
+            il.Emit(OpCodes.Ldelem_Ref);                // MemoryInstance
+            il.Emit(OpCodes.Ldfld, MemoryDataField);    // byte[] Data
 
             il.Emit(OpCodes.Ldloc, addrLocal);          // address
             il.Emit(OpCodes.Ldc_I8, inst.MemOffset);    // offset
@@ -196,11 +201,12 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         private static void EmitMemorySize(ILGenerator il, InstMemorySize inst)
         {
-            // Push ctx.Memories[memIdx].Length / PageSize
+            // Push ctx.Memories[memIdx].Data.Length / PageSize
             il.Emit(OpCodes.Ldarg_0);                  // ThinContext
-            il.Emit(OpCodes.Ldfld, MemoriesField);     // byte[][]
+            il.Emit(OpCodes.Ldfld, MemoriesField);     // MemoryInstance[]
             il.Emit(OpCodes.Ldc_I4, inst.MemIndex);    // memIdx
-            il.Emit(OpCodes.Ldelem_Ref);                // byte[]
+            il.Emit(OpCodes.Ldelem_Ref);                // MemoryInstance
+            il.Emit(OpCodes.Ldfld, MemoryDataField);    // byte[] Data
             il.Emit(OpCodes.Ldlen);                     // length (native int)
             il.Emit(OpCodes.Conv_I4);
             il.Emit(OpCodes.Ldc_I4, 65536);             // PageSize
@@ -620,38 +626,17 @@ namespace Wacs.Transpiler.AOT.Emitters
         // === memory.grow ===
         public static int MemoryGrow(ThinContext ctx, int memIdx, int deltaPages)
         {
-            if (ctx.Store != null && ctx.Module != null)
-            {
-                // Framework mode: grow via Store
-                var memAddr = ctx.Module.MemAddrs[(MemIdx)memIdx];
-                var mem = ctx.Store[memAddr];
-                long oldSize = mem.Size;
-
-                if (!mem.Grow(deltaPages))
-                    return -1;
-
-                ctx.Memories[memIdx] = mem.Data;
-                return (int)oldSize;
-            }
-
-            // Standalone mode: grow the byte[] directly
-            var memory = ctx.Memories[memIdx];
-            int oldPages = memory.Length / 65536;
+            // Both framework and standalone use MemoryInstance.Grow() —
+            // it resizes Data in place, visible to all sharing modules.
+            var memInst = ctx.Memories[memIdx];
+            long oldSize = memInst.Size;
 
             if (deltaPages < 0) return -1;
-            if (deltaPages == 0) return oldPages;
+            if (deltaPages == 0) return (int)oldSize;
 
-            long newPages = (long)oldPages + deltaPages;
-            // Check against max pages (stored in MemoryLimits on ThinContext)
-            long maxPages = ctx.MemoryLimits != null && memIdx < ctx.MemoryLimits.Length
-                ? ctx.MemoryLimits[memIdx]
-                : 65536; // WASM default max
-            if (newPages > maxPages) return -1;
-
-            var newMemory = new byte[newPages * 65536];
-            Buffer.BlockCopy(memory, 0, newMemory, 0, memory.Length);
-            ctx.Memories[memIdx] = newMemory;
-            return oldPages;
+            if (!memInst.Grow(deltaPages))
+                return -1;
+            return (int)oldSize;
         }
     }
 }
