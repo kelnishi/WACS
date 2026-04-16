@@ -55,6 +55,7 @@ namespace Wacs.Transpiler.AOT
         private readonly Stack<EmitBlock> _blockStack = new();
         private LocalBuilder[] _locals = null!;
         private ILGenerator _il = null!;
+        private int _cilStackHeight; // CIL evaluation stack height tracking
 
         public FunctionCodegen(
             MethodBuilder method,
@@ -113,11 +114,14 @@ namespace Wacs.Transpiler.AOT
 
             // The function body is an implicit block — br 0 at function level
             // targets the function return. Push a function-level block.
+            _cilStackHeight = 0;
             var funcEndLabel = _il.DefineLabel();
             _blockStack.Push(new EmitBlock
             {
                 BranchTarget = funcEndLabel,
-                Kind = WasmOpCode.Block // block semantics: branch goes to end
+                Kind = WasmOpCode.Block,
+                StackHeight = 0,
+                LabelArity = _funcInst.Type.ResultType.Arity
             });
 
             // Emit instructions
@@ -138,6 +142,11 @@ namespace Wacs.Transpiler.AOT
         /// </summary>
         private void EmitInstruction(ILGenerator il, InstructionBase inst)
         {
+            // Track CIL stack height using the WASM instruction's StackDiff.
+            // This tells us the net stack change (+1 = push, -1 = pop, etc.)
+            _cilStackHeight += inst.StackDiff;
+            if (_cilStackHeight < 0) _cilStackHeight = 0;
+
             // Detect GC instructions by class type — their opcodes may be aliased
             // after the interpreter's linking step rewrites the ByteCode.
             if (inst.GetType().Namespace == "Wacs.Core.Instructions.GC")
@@ -287,15 +296,18 @@ namespace Wacs.Transpiler.AOT
                     break;
 
                 case WasmOpCode.Block:
-                    ControlEmitter.EmitBlock(il, (InstBlock)inst, _blockStack, EmitInstruction);
+                    ControlEmitter.EmitBlock(il, (InstBlock)inst, _blockStack, EmitInstruction,
+                        _cilStackHeight);
                     break;
 
                 case WasmOpCode.Loop:
-                    ControlEmitter.EmitLoop(il, (InstLoop)inst, _blockStack, EmitInstruction);
+                    ControlEmitter.EmitLoop(il, (InstLoop)inst, _blockStack, EmitInstruction,
+                        _cilStackHeight);
                     break;
 
                 case WasmOpCode.If:
-                    ControlEmitter.EmitIf(il, (InstIf)inst, _blockStack, EmitInstruction);
+                    ControlEmitter.EmitIf(il, (InstIf)inst, _blockStack, EmitInstruction,
+                        _cilStackHeight);
                     break;
 
                 case WasmOpCode.Else:
@@ -319,7 +331,8 @@ namespace Wacs.Transpiler.AOT
                     break;
 
                 case WasmOpCode.BrIf:
-                    ControlEmitter.EmitBrIf(il, (InstBranchIf)inst, _blockStack);
+                    ControlEmitter.EmitBrIf(il, (InstBranchIf)inst, _blockStack,
+                        _cilStackHeight);
                     break;
 
                 case WasmOpCode.BrTable:

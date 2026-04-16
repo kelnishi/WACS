@@ -34,6 +34,17 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         /// <summary>Whether this block is a loop (branch goes backward).</summary>
         public bool IsLoop => Kind == WasmOpCode.Loop;
+
+        /// <summary>
+        /// CIL stack height at block entry. Used to calculate how many excess
+        /// values need to be popped when br/br_if targets this block.
+        /// For blocks: label arity is the result count (0 for void blocks).
+        /// For loops: label arity is the param count (0 for simple loops).
+        /// </summary>
+        public int StackHeight;
+
+        /// <summary>Number of values the label expects (result arity for blocks, param arity for loops).</summary>
+        public int LabelArity;
     }
 
     /// <summary>
@@ -84,13 +95,16 @@ namespace Wacs.Transpiler.AOT.Emitters
             ILGenerator il,
             InstBlock inst,
             Stack<EmitBlock> blockStack,
-            EmitInstructionDelegate emitInstruction)
+            EmitInstructionDelegate emitInstruction,
+            int stackHeight = 0)
         {
             var endLabel = il.DefineLabel();
             blockStack.Push(new EmitBlock
             {
                 BranchTarget = endLabel,
-                Kind = WasmOpCode.Block
+                Kind = WasmOpCode.Block,
+                StackHeight = stackHeight,
+                LabelArity = BlockResultArity(inst.BlockType)
             });
 
             // Emit block body
@@ -111,7 +125,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             ILGenerator il,
             InstLoop inst,
             Stack<EmitBlock> blockStack,
-            EmitInstructionDelegate emitInstruction)
+            EmitInstructionDelegate emitInstruction,
+            int stackHeight = 0)
         {
             var startLabel = il.DefineLabel();
             il.MarkLabel(startLabel);
@@ -119,7 +134,9 @@ namespace Wacs.Transpiler.AOT.Emitters
             blockStack.Push(new EmitBlock
             {
                 BranchTarget = startLabel,
-                Kind = WasmOpCode.Loop
+                Kind = WasmOpCode.Loop,
+                StackHeight = stackHeight,
+                LabelArity = 0 // Loop labels have param arity (0 for simple loops)
             });
 
             var block = inst.GetBlock(0);
@@ -138,14 +155,17 @@ namespace Wacs.Transpiler.AOT.Emitters
             ILGenerator il,
             InstIf inst,
             Stack<EmitBlock> blockStack,
-            EmitInstructionDelegate emitInstruction)
+            EmitInstructionDelegate emitInstruction,
+            int stackHeight = 0)
         {
             var endLabel = il.DefineLabel();
 
             blockStack.Push(new EmitBlock
             {
                 BranchTarget = endLabel,
-                Kind = WasmOpCode.If
+                Kind = WasmOpCode.If,
+                StackHeight = stackHeight,
+                LabelArity = BlockResultArity(inst.BlockType)
             });
 
             bool hasElse = inst.Count == 2;
@@ -201,10 +221,57 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         /// <summary>
         /// Emit br_if — conditional branch. Pops i32 condition from stack.
+        ///
+        /// WASM br_if with excess values on the stack above the label arity:
+        /// the branch path must pop those excess values to maintain CIL stack
+        /// consistency at the merge point. We save the condition, pop excess
+        /// values on the branch path, then branch.
         /// </summary>
-        public static void EmitBrIf(ILGenerator il, InstBranchIf inst, Stack<EmitBlock> blockStack)
+        /// <summary>
+        /// Emit br_if — conditional branch. Pops i32 condition from stack.
+        ///
+        /// When there are excess values on the CIL stack above the label's
+        /// expected arity, the branch path must pop them to maintain CIL stack
+        /// consistency at the merge point (label target).
+        /// </summary>
+        public static void EmitBrIf(ILGenerator il, InstBranchIf inst,
+            Stack<EmitBlock> blockStack, int currentStackHeight = -1)
         {
             var target = PeekLabel(blockStack, inst.Label);
+
+            // Calculate excess values that need to be popped on the branch path.
+            // currentStackHeight includes the condition (already counted by WASM StackDiff).
+            // The br_if instruction has StackDiff that accounts for popping the condition.
+            // At this point, the WASM stack height BEFORE br_if's own adjustment
+            // would be currentStackHeight - inst.StackDiff (undo the tracking).
+            // But simpler: just check if stack > target.StackHeight + target.LabelArity + 1 (condition)
+            if (currentStackHeight >= 0 && target.StackHeight >= 0)
+            {
+                // Stack BEFORE br_if pops: currentStackHeight was AFTER StackDiff
+                // br_if StackDiff = -1 (pops condition). So pre-pop height = currentStackHeight + 1
+                int prePopHeight = currentStackHeight + 1;
+                int excessValues = prePopHeight - 1 - target.StackHeight - target.LabelArity;
+                // -1 for the condition that brtrue will pop
+
+                if (excessValues > 0)
+                {
+                    // Save condition, conditionally pop excess, then branch
+                    var condLocal = il.DeclareLocal(typeof(int));
+                    il.Emit(OpCodes.Stloc, condLocal);
+                    var fallThrough = il.DefineLabel();
+                    il.Emit(OpCodes.Ldloc, condLocal);
+                    il.Emit(OpCodes.Brfalse, fallThrough);
+
+                    // Branch path: pop excess values to match label arity
+                    for (int i = 0; i < excessValues; i++)
+                        il.Emit(OpCodes.Pop);
+                    il.Emit(OpCodes.Br, target.BranchTarget);
+
+                    il.MarkLabel(fallThrough);
+                    return;
+                }
+            }
+
             il.Emit(OpCodes.Brtrue, target.BranchTarget);
         }
 
@@ -227,6 +294,17 @@ namespace Wacs.Transpiler.AOT.Emitters
             // falls through otherwise — then we branch to default.
             il.Emit(OpCodes.Switch, labels);
             il.Emit(OpCodes.Br, defaultTarget);
+        }
+
+        /// <summary>
+        /// Get the result arity for a block type.
+        /// Empty = 0, simple value type = 1.
+        /// </summary>
+        private static int BlockResultArity(Wacs.Core.Types.Defs.ValType blockType)
+        {
+            if (blockType == Wacs.Core.Types.Defs.ValType.Empty) return 0;
+            // Any non-empty single value type = 1 result
+            return 1;
         }
 
         /// <summary>
