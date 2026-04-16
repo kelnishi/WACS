@@ -19,6 +19,7 @@ using System.Reflection.Emit;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Reference;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.GC;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
@@ -248,7 +249,22 @@ namespace Wacs.Transpiler.AOT.Emitters
             // ref.eq: both null → 1, both same ref → 1, else 0
             if (a.IsNullRef && b.IsNullRef) return 1;
             if (a.IsNullRef || b.IsNullRef) return 0;
+            // i31 refs: compare by value
+            if (a.GcRef is I31Ref ai31 && b.GcRef is I31Ref bi31)
+                return ai31.Value == bi31.Value ? 1 : 0;
+            // GC struct/array refs: compare by GcRef object identity
+            if (a.GcRef != null && b.GcRef != null)
+                return ReferenceEquals(UnwrapGcTarget(a.GcRef), UnwrapGcTarget(b.GcRef)) ? 1 : 0;
+            // Fallback: compare by Data.Ptr (funcref etc.)
             return a.Data.Ptr == b.Data.Ptr ? 1 : 0;
+        }
+
+        private static object UnwrapGcTarget(IGcRef gcRef)
+        {
+            // Unwrap GcObjectAdapter to get the actual CLR object
+            var targetField = gcRef.GetType().GetField("Target",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            return targetField != null ? targetField.GetValue(gcRef)! : gcRef;
         }
 
         public static Value RefAsNonNull(Value val)

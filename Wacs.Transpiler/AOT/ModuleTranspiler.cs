@@ -188,11 +188,7 @@ namespace Wacs.Transpiler.AOT
                 for (int i = 0; i < elem.Initializers.Length; i++)
                 {
                     var expr = elem.Initializers[i];
-                    if (expr.Instructions.Count > 0 &&
-                        expr.Instructions[0] is Wacs.Core.Instructions.Reference.InstRefFunc rf)
-                        values[i] = new Value(ValType.FuncRef, (int)rf.FunctionIndex.Value);
-                    else
-                        values[i] = new Value(ValType.Nil); // ref.null or other
+                    values[i] = EvaluateElemExpr(expr);
                 }
                 int id = ModuleInit.RegisterElemSegment(values);
                 if (e == 0) elemSegmentBaseId = id;
@@ -420,6 +416,29 @@ namespace Wacs.Transpiler.AOT
             }
 
             il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>Evaluate a const expression from an element segment initializer.</summary>
+        private static Value EvaluateElemExpr(Wacs.Core.Types.Expression expr)
+        {
+            // Simple stack-based evaluator for element segment const expressions
+            int i32val = 0;
+            foreach (var inst in expr.Instructions)
+            {
+                switch (inst)
+                {
+                    case Wacs.Core.Instructions.Reference.InstRefFunc rf:
+                        return new Value(ValType.FuncRef, (int)rf.FunctionIndex.Value);
+                    case Wacs.Core.Instructions.Reference.InstRefNull rn:
+                        return new Value(rn.RefType);
+                    case Wacs.Core.Instructions.Numeric.InstI32Const ic:
+                        i32val = ic.Value;
+                        continue;
+                    case Wacs.Core.Instructions.GC.InstRefI31:
+                        return GcRuntimeHelpers.RefI31Value(i32val);
+                }
+            }
+            return new Value(ValType.Nil); // fallback
         }
 
         private static void EmitBoxToValue(ILGenerator il, ValType type)

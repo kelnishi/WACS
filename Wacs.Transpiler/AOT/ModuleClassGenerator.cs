@@ -399,7 +399,7 @@ namespace Wacs.Transpiler.AOT
                                 if (prev is Wacs.Core.Instructions.Numeric.InstI32Const ic)
                                 {
                                     gcElemValues?.Add((elemSegIdx, i),
-                                        new Value(ValType.I31, ic.Value & 0x7FFFFFFF));
+                                        Emitters.GcRuntimeHelpers.RefI31Value(ic.Value));
                                     indices[i] = -2; // sentinel: GC value, not a funcIdx
                                     break;
                                 }

@@ -19,6 +19,7 @@ using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.GC;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.GC;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
@@ -146,10 +147,15 @@ namespace Wacs.Transpiler.AOT.Emitters
                     break;
 
                 // === Conversions ===
-                case GcCode.AnyConvertExtern:
                 case GcCode.ExternConvertAny:
-                    // These are identity operations for our representation
-                    // (both are Value on the CIL stack)
+                    // extern.convert_any: anyref → externref
+                    il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                        nameof(GcRuntimeHelpers.ExternConvertAny), BindingFlags.Public | BindingFlags.Static)!);
+                    break;
+                case GcCode.AnyConvertExtern:
+                    // any.convert_extern: externref → anyref
+                    il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                        nameof(GcRuntimeHelpers.AnyConvertExtern), BindingFlags.Public | BindingFlags.Static)!);
                     break;
 
                 // === i31 ===
@@ -585,7 +591,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             // Test type, branch if match (br_on_cast) or mismatch (br_on_cast_fail)
             il.Emit(OpCodes.Dup); // keep ref on stack for both paths
             il.Emit(OpCodes.Ldc_I4, (int)targetType);
-            il.Emit(OpCodes.Ldc_I4, 1); // nullable
+            il.Emit(OpCodes.Ldc_I4, targetType.IsNullable() ? 1 : 0);
             il.Emit(OpCodes.Ldarg_0); // ThinContext
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
                 nameof(GcRuntimeHelpers.RefTestValue), BindingFlags.Public | BindingFlags.Static)!);
@@ -690,10 +696,27 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// </summary>
         public static Value WrapRef(object gcRef)
         {
+            var valType = DeriveValType(gcRef);
             if (gcRef is IGcRef igc)
-                return new Value(ValType.Nil, 0, igc);
-            // Wrap non-IGcRef objects in an adapter
-            return new Value(ValType.Nil, 0, new GcObjectAdapter(gcRef));
+                return new Value(valType, 0, igc);
+            return new Value(valType, 0, new GcObjectAdapter(gcRef));
+        }
+
+        private static ValType DeriveValType(object gcRef)
+        {
+            var catField = gcRef.GetType().GetField("TypeCategory",
+                BindingFlags.Public | BindingFlags.Static);
+            if (catField != null)
+            {
+                int cat = (int)catField.GetValue(null)!;
+                return cat switch
+                {
+                    0 => ValType.Struct,
+                    1 => ValType.Array,
+                    _ => ValType.Any,
+                };
+            }
+            return ValType.Any;
         }
 
         /// <summary>
@@ -819,15 +842,39 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (gcRef == null) return false;
             object target = gcRef is GcObjectAdapter adapter ? adapter.Target : gcRef;
 
-            // Layer 0: CLR IsInstanceOfType (handles subtype via inheritance)
-            if (ctx.InitDataId >= 0)
+            if (ctx.InitDataId < 0) return false;
+
+            var targetClrType = GcTypeRegistry.Get(ctx.InitDataId, typeIndex);
+            if (targetClrType == null) return false;
+
+            // Layer 0: CLR IsInstanceOfType (handles subtype via direct inheritance)
+            if (targetClrType.IsInstanceOfType(target))
+                return true;
+
+            // Layer 1: Structural hash equivalence (equi-recursive type canonicalization)
+            // Walk the actual object's CLR type hierarchy, checking structural hash at each level
+            int? targetHash = GetStructuralHash(targetClrType);
+            if (targetHash == null) return false;
+
+            var checkType = target.GetType();
+            while (checkType != null && checkType != typeof(object))
             {
-                var targetClrType = GcTypeRegistry.Get(ctx.InitDataId, typeIndex);
-                if (targetClrType != null)
-                    return targetClrType.IsInstanceOfType(target);
+                int? checkHash = GetStructuralHash(checkType);
+                if (checkHash != null && checkHash.Value == targetHash.Value)
+                    return true;
+                checkType = checkType.BaseType;
             }
 
             return false;
+        }
+
+        private static int? GetStructuralHash(Type clrType)
+        {
+            var field = clrType.GetField("StructuralHash",
+                BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly);
+            if (field != null)
+                return (int)field.GetValue(null)!;
+            return null;
         }
 
         public static object RefCast(object val, int heapType, int nullable)
@@ -861,7 +908,8 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// <summary>Value-typed version for CIL stack compatibility.</summary>
         public static Value RefI31Value(int value)
         {
-            return new Value(ValType.I31, value & 0x7FFFFFFF);
+            int masked = value & 0x7FFFFFFF;
+            return new Value(ValType.I31, masked, new I31Ref(masked));
         }
 
         public static int I31Get(object i31Ref, int signed)
@@ -882,6 +930,50 @@ namespace Wacs.Transpiler.AOT.Emitters
             int val = (int)i31Ref.Data.Int32 & 0x7FFFFFFF;
             if (signed != 0 && (val & 0x40000000) != 0)
                 val |= unchecked((int)0x80000000);
+            return val;
+        }
+
+        /// <summary>extern.convert_any: anyref → externref. Re-tags type, preserving data.</summary>
+        public static Value ExternConvertAny(Value val)
+        {
+            if (val.IsNullRef)
+                return new Value(ValType.ExternRef);
+            var result = val;
+            result.Type = val.Type.IsNullable() ? ValType.ExternRef : ValType.Extern;
+            return result;
+        }
+
+        /// <summary>any.convert_extern: externref → anyref. Recovers internal type from GcRef.</summary>
+        public static Value AnyConvertExtern(Value val)
+        {
+            if (val.IsNullRef)
+                return new Value(ValType.Any);
+            bool nullable = val.Type.IsNullable();
+            var gcRef = val.GcRef;
+            if (gcRef is I31Ref)
+            {
+                val.Type = nullable ? ValType.I31 : ValType.I31NN;
+                return val;
+            }
+            if (gcRef != null)
+            {
+                object target = gcRef is GcObjectAdapter adapter ? adapter.Target : gcRef;
+                var catField = target.GetType().GetField("TypeCategory",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                if (catField != null)
+                {
+                    int cat = (int)catField.GetValue(null)!;
+                    val.Type = cat switch
+                    {
+                        0 => nullable ? ValType.Struct : ValType.StructNN,
+                        1 => nullable ? ValType.Array : ValType.ArrayNN,
+                        _ => nullable ? ValType.Any : ValType.AnyNN,
+                    };
+                    return val;
+                }
+            }
+            // Opaque external reference → anyref
+            val.Type = nullable ? ValType.Any : ValType.AnyNN;
             return val;
         }
 
