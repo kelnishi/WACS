@@ -795,30 +795,52 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         public static object ArrayNewData(ThinContext ctx, int typeIdx, int dataIdx, int offset, int length)
         {
-            if (ctx.Store == null || ctx.Module == null)
-                throw new TrapException("array.new_data requires runtime store");
-            // Simplified: create array from data segment bytes
-            var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
-            var data = ctx.Store[dataAddr];
-            if (offset + length > data.Data.Length)
+            byte[]? segData = null;
+            if (ctx.Store != null && ctx.Module != null)
+            {
+                var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
+                segData = ctx.Store[dataAddr].Data;
+            }
+            else
+            {
+                // Standalone: resolve via ModuleInit registry
+                int segId = ctx.DataSegmentBaseId + dataIdx;
+                segData = ModuleInit.GetDataSegmentData(segId);
+            }
+            if (segData == null)
+                throw new TrapException("data segment not found");
+            if (offset + length > segData.Length)
                 throw new TrapException("out of bounds data access");
             var result = new byte[length];
-            System.Buffer.BlockCopy(data.Data, offset, result, 0, length);
+            if (length > 0)
+                System.Buffer.BlockCopy(segData, offset, result, 0, length);
             return result;
         }
 
         public static object ArrayNewElem(ThinContext ctx, int typeIdx, int elemIdx, int offset, int length)
         {
-            if (ctx.Store == null || ctx.Module == null)
-                throw new TrapException("array.new_elem requires runtime store");
-            var elemAddr = ctx.Module.ElemAddrs[(ElemIdx)elemIdx];
-            var elem = ctx.Store[elemAddr];
-            if (offset + length > elem.Elements.Count)
+            if (ctx.Store != null && ctx.Module != null)
+            {
+                var elemAddr = ctx.Module.ElemAddrs[(ElemIdx)elemIdx];
+                var elem = ctx.Store[elemAddr];
+                if (offset + length > elem.Elements.Count)
+                    throw new TrapException("out of bounds element access");
+                var result = new object[length];
+                for (int i = 0; i < length; i++)
+                    result[i] = elem.Elements[offset + i];
+                return result;
+            }
+            // Standalone: resolve via ModuleInit registry
+            int segId = ctx.ElemSegmentBaseId + elemIdx;
+            var values = ModuleInit.GetElemSegment(segId);
+            if (values == null)
+                throw new TrapException("element segment not found");
+            if (offset + length > values.Length)
                 throw new TrapException("out of bounds element access");
-            var result = new object[length];
+            var result2 = new object[length];
             for (int i = 0; i < length; i++)
-                result[i] = elem.Elements[offset + i];
-            return result;
+                result2[i] = values[offset + i];
+            return result2;
         }
 
         public static void ArrayFill(Value arrayRef, int offset, Value value, int length)
@@ -870,32 +892,54 @@ namespace Wacs.Transpiler.AOT.Emitters
         public static void ArrayInitData(ThinContext ctx, Value arrayRef, int dstOff,
             int dataIdx, int srcOff, int length)
         {
-            if (ctx.Store == null || ctx.Module == null)
-                throw new TrapException("array.init_data requires runtime store");
             var target = UnwrapArrayRef(arrayRef);
-            var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
-            var data = ctx.Store[dataAddr];
+            byte[]? segData = null;
+            if (ctx.Store != null && ctx.Module != null)
+            {
+                var dataAddr = ctx.Module.DataAddrs[(DataIdx)dataIdx];
+                segData = ctx.Store[dataAddr].Data;
+            }
+            else
+            {
+                int segId = ctx.DataSegmentBaseId + dataIdx;
+                segData = ModuleInit.GetDataSegmentData(segId);
+            }
+            if (segData == null)
+                throw new TrapException("data segment not found");
             var field = target.GetType().GetField("elements");
             if (field == null) throw new TrapException("not an array type");
             var elements = (System.Array)field.GetValue(target)!;
-            // Byte-level copy from data segment to array elements
+            if (dstOff + length > elements.Length || srcOff + length > segData.Length)
+                throw new TrapException("out of bounds");
             for (int i = 0; i < length; i++)
-                elements.SetValue(data.Data[srcOff + i], dstOff + i);
+                elements.SetValue(segData[srcOff + i], dstOff + i);
         }
 
         public static void ArrayInitElem(ThinContext ctx, Value arrayRef, int dstOff,
             int elemIdx, int srcOff, int length)
         {
-            if (ctx.Store == null || ctx.Module == null)
-                throw new TrapException("array.init_elem requires runtime store");
             var target = UnwrapArrayRef(arrayRef);
-            var elemAddr = ctx.Module.ElemAddrs[(ElemIdx)elemIdx];
-            var elem = ctx.Store[elemAddr];
+            Value[]? values = null;
+            if (ctx.Store != null && ctx.Module != null)
+            {
+                var elemAddr = ctx.Module.ElemAddrs[(ElemIdx)elemIdx];
+                var elem = ctx.Store[elemAddr];
+                values = elem.Elements.ToArray();
+            }
+            else
+            {
+                int segId = ctx.ElemSegmentBaseId + elemIdx;
+                values = ModuleInit.GetElemSegment(segId);
+            }
+            if (values == null)
+                throw new TrapException("element segment not found");
             var field = target.GetType().GetField("elements");
             if (field == null) throw new TrapException("not an array type");
             var elements = (System.Array)field.GetValue(target)!;
+            if (dstOff + length > elements.Length || srcOff + length > values.Length)
+                throw new TrapException("out of bounds");
             for (int i = 0; i < length; i++)
-                elements.SetValue(elem.Elements[srcOff + i], dstOff + i);
+                elements.SetValue(values[srcOff + i], dstOff + i);
         }
     }
 }
