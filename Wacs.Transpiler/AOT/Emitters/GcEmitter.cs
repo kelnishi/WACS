@@ -881,6 +881,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             var elementsField = target.GetType().GetField("elements");
             if (elementsField == null) throw new TrapException("not an array type");
             var elements = (System.Array)elementsField.GetValue(target)!;
+            if (offset + length > elements.Length)
+                throw new TrapException("out of bounds array access");
             for (int i = 0; i < length; i++)
                 elements.SetValue(value, offset + i);
         }
