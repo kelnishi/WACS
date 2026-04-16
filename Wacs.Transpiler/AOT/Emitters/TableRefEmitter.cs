@@ -228,6 +228,13 @@ namespace Wacs.Transpiler.AOT.Emitters
             var table = ctx.Tables[tableIdx];
             if (index < 0 || index >= table.Elements.Count)
                 throw new TrapException("out of bounds table access");
+            // Enrich funcref with delegate for cross-module dispatch
+            if (val.Type == ValType.FuncRef && !val.IsNullRef && !(val.GcRef is DelegateRef))
+            {
+                int fi = (int)val.Data.Ptr;
+                if (fi >= 0 && fi < ctx.FuncTable.Length && ctx.FuncTable[fi] != null)
+                    val.GcRef = new DelegateRef(ctx.FuncTable[fi]);
+            }
             table.Elements[index] = val;
         }
 
@@ -258,8 +265,11 @@ namespace Wacs.Transpiler.AOT.Emitters
                 var funcAddr = ctx.Module.FuncAddrs[(FuncIdx)funcIdx];
                 return new Value(funcAddr);
             }
-            // Standalone mode: use function index directly as the FuncAddr value
-            return new Value(ValType.FuncRef, funcIdx);
+            // Standalone: bind delegate for cross-module portability
+            var val = new Value(ValType.FuncRef, funcIdx);
+            if (funcIdx >= 0 && funcIdx < ctx.FuncTable.Length && ctx.FuncTable[funcIdx] != null)
+                val.GcRef = new DelegateRef(ctx.FuncTable[funcIdx]);
+            return val;
         }
 
         public static int TableSize(ThinContext ctx, int tableIdx)
