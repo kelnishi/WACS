@@ -83,6 +83,12 @@ namespace Wacs.Transpiler.AOT
         public List<(int globalIdx, Wacs.Core.Types.Expression initializer)> DeferredGlobalInits { get; set; } = new();
 
         /// <summary>
+        /// Data segments whose offsets depend on globals (global.get in offset expression).
+        /// (dataSegIdx in ActiveDataSegments, offset expression). Re-evaluated after import patching.
+        /// </summary>
+        public List<(int dataSegIdx, Wacs.Core.Types.Expression offsetExpr)> DeferredDataOffsets { get; set; } = new();
+
+        /// <summary>
         /// Saved data segment bytes (keyed by segId) for linker re-apply.
         /// Active data segments are dropped after initialization, but the linker
         /// may need to re-copy them to shared imported memories.

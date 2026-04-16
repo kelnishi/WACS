@@ -332,6 +332,36 @@ namespace Wacs.Transpiler.AOT
                     var val = EvaluateInitExpression(initializer, ctx.Globals);
                     globalValueField?.SetValue(ctx.Globals[globalIdx], val);
                 }
+
+                // Re-evaluate data segment offsets that depend on globals,
+                // then re-copy the data to the correct memory locations.
+                foreach (var (dataSegIdx, offsetExpr) in initData2.DeferredDataOffsets)
+                {
+                    if (dataSegIdx >= initData2.ActiveDataSegments.Length) continue;
+                    var (memIdx, _, segId) = initData2.ActiveDataSegments[dataSegIdx];
+                    int newOffset = EvaluateInitExpressionI32(offsetExpr, ctx.Globals);
+                    // Copy using saved data (original may be dropped)
+                    if (initData2.SavedDataSegments.TryGetValue(segId, out var segData))
+                    {
+                        if (memIdx < ctx.Memories.Length)
+                        {
+                            var memory = ctx.Memories[memIdx];
+                            if (newOffset + segData.Length <= memory.Length)
+                                Buffer.BlockCopy(segData, 0, memory, newOffset, segData.Length);
+                        }
+                    }
+                    else
+                    {
+                        // Try from ModuleInit (segment not yet dropped)
+                        var segData2 = ModuleInit.GetDataSegmentData(segId);
+                        if (segData2 != null && memIdx < ctx.Memories.Length)
+                        {
+                            var memory = ctx.Memories[memIdx];
+                            if (newOffset + segData2.Length <= memory.Length)
+                                Buffer.BlockCopy(segData2, 0, memory, newOffset, segData2.Length);
+                        }
+                    }
+                }
             }
         }
 
@@ -391,6 +421,13 @@ namespace Wacs.Transpiler.AOT
                     return mod.Context.MemoryLimits[memIdx];
             }
             return 0;
+        }
+
+        private static int EvaluateInitExpressionI32(
+            Wacs.Core.Types.Expression expr, GlobalInstance[] globals)
+        {
+            var val = EvaluateInitExpression(expr, globals);
+            return val.Data.Int32;
         }
 
         private bool TryResolveMemory(string moduleName, string fieldName, out byte[] memory)
