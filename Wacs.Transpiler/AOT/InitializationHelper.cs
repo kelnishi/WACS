@@ -18,6 +18,7 @@ using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
+using Wacs.Transpiler.AOT.Emitters;
 using WasmModule = Wacs.Core.Module;
 
 namespace Wacs.Transpiler.AOT
@@ -341,7 +342,7 @@ namespace Wacs.Transpiler.AOT
                     if (gcOp == Wacs.Core.OpCodes.GcCode.RefI31 && stack.Count > 0)
                     {
                         int val = stack.Pop().Data.Int32;
-                        stack.Push(new Value(ValType.I31, val & 0x7FFFFFFF));
+                        stack.Push(GcRuntimeHelpers.RefI31Value(val));
                     }
                     continue;
                 }
