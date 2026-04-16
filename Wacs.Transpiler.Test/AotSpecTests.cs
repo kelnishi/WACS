@@ -111,10 +111,19 @@ namespace Wacs.Transpiler.Test
                     if (command is RegisterCommand rc)
                     {
                         command.RunTest(file, ref runtime, ref module);
-                        // Re-register in the linker under the new name
-                        if (currentWrapper != null && !string.IsNullOrEmpty(rc.Name))
+                        // Re-register under the "as" name (e.g., "module4")
+                        string regName = rc.As ?? rc.Name ?? "";
+                        if (currentWrapper != null && !string.IsNullOrEmpty(regName))
                         {
-                            wrappers[rc.Name] = currentWrapper;
+                            wrappers[regName] = currentWrapper;
+                            // Also re-register in the linker so import resolution
+                            // can find the module by its registered name
+                            var ctx = ExtractContext(currentWrapper);
+                            if (ctx != null)
+                            {
+                                var moduleInst = runtime.GetModule(rc.Name);
+                                linker.Register(regName, ctx, currentWrapper.Result, moduleInst.Repr);
+                            }
                         }
                         continue;
                     }

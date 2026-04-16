@@ -171,6 +171,7 @@ namespace Wacs.Transpiler.AOT
             // Active element segments
             var droppedElemIndices = new List<int>();
             var activeElems = new List<(int tableIdx, int offset, int[] funcIndices)>();
+            int activeElemIdx = 0;
             for (int i = 0; i < _wasmModule.Elements.Length; i++)
             {
                 var elem = _wasmModule.Elements[i];
@@ -178,9 +179,11 @@ namespace Wacs.Transpiler.AOT
                 {
                     int tableIdx = (int)active.TableIndex.Value;
                     int offset = EvaluateConstI32(active.Offset);
-                    int[] funcIndices = ExtractFuncIndices(elem, globals);
+                    var (funcIndices, deferredGlobals) = ExtractFuncIndicesWithDeferred(elem, globals, activeElemIdx);
                     activeElems.Add((tableIdx, offset, funcIndices));
+                    data.DeferredElemGlobals.AddRange(deferredGlobals);
                     droppedElemIndices.Add(i); // Active segments implicitly dropped
+                    activeElemIdx++;
                 }
                 else if (elem.Mode is WasmModule.ElementMode.DeclarativeMode)
                 {
@@ -299,6 +302,51 @@ namespace Wacs.Transpiler.AOT
         /// Extract function indices from element segment initializers.
         /// Each initializer is typically a single ref.func instruction.
         /// </summary>
+        /// <summary>
+        /// Extract function indices from element initializers, also recording
+        /// entries that use global.get for deferred resolution after import patching.
+        /// </summary>
+        private static (int[] funcIndices, List<(int elemSegIdx, int slotIdx, int globalIdx)> deferred)
+            ExtractFuncIndicesWithDeferred(
+            WasmModule.ElementSegment elem,
+            List<(ValType type, Mutability mut, Value init)> globals,
+            int elemSegIdx)
+        {
+            var deferred = new List<(int, int, int)>();
+            var indices = new int[elem.Initializers.Length];
+            for (int i = 0; i < elem.Initializers.Length; i++)
+            {
+                var expr = elem.Initializers[i];
+                indices[i] = -1;
+
+                foreach (var inst in expr.Instructions)
+                {
+                    if (inst is InstRefFunc rf)
+                    {
+                        indices[i] = (int)rf.FunctionIndex.Value;
+                        break;
+                    }
+                    if (inst is InstGlobalGet gg)
+                    {
+                        int gIdx = gg.GetIndex();
+                        if (gIdx >= 0 && gIdx < globals.Count)
+                        {
+                            var gval = globals[gIdx].init;
+                            if (gval.Type.IsRefType() && !gval.IsNullRef)
+                            {
+                                indices[i] = (int)gval.Data.Ptr;
+                                break;
+                            }
+                        }
+                        // Record for deferred resolution (imported global not yet available)
+                        deferred.Add((elemSegIdx, i, gIdx));
+                        break;
+                    }
+                }
+            }
+            return (indices, deferred);
+        }
+
         private static int[] ExtractFuncIndices(
             WasmModule.ElementSegment elem,
             List<(ValType type, Mutability mut, Value init)> globals)
