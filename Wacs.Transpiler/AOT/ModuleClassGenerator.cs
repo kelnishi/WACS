@@ -134,9 +134,21 @@ namespace Wacs.Transpiler.AOT
                 // Imported globals get default initial values (the actual value comes from imports)
                 globals.Add((g.Type.ContentType, g.Type.Mutability, new Value(g.Type.ContentType)));
             }
-            foreach (var g in _wasmModule.Globals)
+            int importedGlobalCount = _wasmModule.ImportedGlobals.Count;
+            for (int gi = 0; gi < _wasmModule.Globals.Count; gi++)
             {
-                globals.Add((g.Type.ContentType, g.Type.Mutability, EvaluateGlobalInit(g, globals)));
+                var g = _wasmModule.Globals[gi];
+                var gcInit = TryParseGcGlobalInit(g, importedGlobalCount + gi);
+                if (gcInit != null)
+                {
+                    data.GcGlobalInits.Add(gcInit);
+                    // Placeholder — will be initialized at runtime
+                    globals.Add((g.Type.ContentType, g.Type.Mutability, new Value(g.Type.ContentType)));
+                }
+                else
+                {
+                    globals.Add((g.Type.ContentType, g.Type.Mutability, EvaluateGlobalInit(g, globals)));
+                }
             }
             data.Globals = globals.ToArray();
 
@@ -196,6 +208,58 @@ namespace Wacs.Transpiler.AOT
         /// Evaluate a global's constant initializer, with access to previously
         /// initialized globals (for global.get in initializer expressions).
         /// </summary>
+        /// <summary>
+        /// Check if a global initializer uses GC construction (array.new, etc.)
+        /// that can't be evaluated at transpile time.
+        /// </summary>
+        private static GcGlobalInit? TryParseGcGlobalInit(WasmModule.Global global, int globalIdx)
+        {
+            // Walk the initializer looking for GC instructions
+            var consts = new List<long>();
+            int gcTypeIdx = -1;
+            int initKind = -1;
+
+            foreach (var inst in global.Initializer.Instructions)
+            {
+                if (inst is InstI32Const i32c)
+                    consts.Add(i32c.Value);
+                else if (inst is InstI64Const i64c)
+                    consts.Add(i64c.FetchImmediate(null!));
+                else if (inst.GetType().Namespace == "Wacs.Core.Instructions.GC")
+                {
+                    // Detect GC construction instructions by opcode
+                    var gcOp = inst.Op.xFB;
+                    switch (gcOp)
+                    {
+                        case Wacs.Core.OpCodes.GcCode.ArrayNew:
+                            gcTypeIdx = ((Wacs.Core.Instructions.GC.InstArrayNew)inst).TypeIndex;
+                            initKind = 0;
+                            break;
+                        case Wacs.Core.OpCodes.GcCode.ArrayNewDefault:
+                            gcTypeIdx = ((Wacs.Core.Instructions.GC.InstArrayNewDefault)inst).TypeIndex;
+                            initKind = 1;
+                            break;
+                        case Wacs.Core.OpCodes.GcCode.ArrayNewFixed:
+                            gcTypeIdx = ((Wacs.Core.Instructions.GC.InstArrayNewFixed)inst).TypeIndex;
+                            initKind = 2;
+                            break;
+                    }
+                }
+            }
+
+            if (initKind >= 0 && gcTypeIdx >= 0)
+            {
+                return new GcGlobalInit
+                {
+                    GlobalIndex = globalIdx,
+                    TypeIndex = gcTypeIdx,
+                    InitKind = initKind,
+                    Params = consts.ToArray()
+                };
+            }
+            return null;
+        }
+
         private static Value EvaluateGlobalInit(
             WasmModule.Global global,
             List<(ValType type, Mutability mut, Value init)> previousGlobals)
