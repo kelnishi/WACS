@@ -166,7 +166,7 @@ namespace Wacs.Transpiler.AOT
                 {
                     int tableIdx = (int)active.TableIndex.Value;
                     int offset = EvaluateConstI32(active.Offset);
-                    int[] funcIndices = ExtractFuncIndices(elem);
+                    int[] funcIndices = ExtractFuncIndices(elem, globals);
                     activeElems.Add((tableIdx, offset, funcIndices));
                     droppedElemIndices.Add(i); // Active segments implicitly dropped
                 }
@@ -235,16 +235,36 @@ namespace Wacs.Transpiler.AOT
         /// Extract function indices from element segment initializers.
         /// Each initializer is typically a single ref.func instruction.
         /// </summary>
-        private static int[] ExtractFuncIndices(WasmModule.ElementSegment elem)
+        private static int[] ExtractFuncIndices(
+            WasmModule.ElementSegment elem,
+            List<(ValType type, Mutability mut, Value init)> globals)
         {
             var indices = new int[elem.Initializers.Length];
             for (int i = 0; i < elem.Initializers.Length; i++)
             {
                 var expr = elem.Initializers[i];
-                if (expr.Instructions.Count > 0 && expr.Instructions[0] is InstRefFunc rf)
-                    indices[i] = (int)rf.FunctionIndex.Value;
-                else
-                    indices[i] = -1; // ref.null or other — no function
+                indices[i] = -1; // default: no function
+
+                foreach (var inst in expr.Instructions)
+                {
+                    if (inst is InstRefFunc rf)
+                    {
+                        indices[i] = (int)rf.FunctionIndex.Value;
+                        break;
+                    }
+                    if (inst is InstGlobalGet gg)
+                    {
+                        // Resolve funcref from global (e.g., imported funcref global)
+                        int gIdx = gg.GetIndex();
+                        if (gIdx >= 0 && gIdx < globals.Count)
+                        {
+                            var gval = globals[gIdx].init;
+                            if (gval.Type.IsRefType() && !gval.IsNullRef)
+                                indices[i] = (int)gval.Data.Ptr;
+                        }
+                        break;
+                    }
+                }
             }
             return indices;
         }
