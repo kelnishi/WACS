@@ -91,6 +91,14 @@ namespace Wacs.Transpiler.AOT
         public static ModuleInitData Get(int id) => _initData[id];
 
         /// <summary>
+        /// Reset the registry. Call between test runs.
+        /// </summary>
+        public static void Reset()
+        {
+            lock (_lock) { _initData.Clear(); }
+        }
+
+        /// <summary>
         /// The ID of the most recently registered init data.
         /// Used by ModuleLinker to find the init data for a just-transpiled module.
         /// </summary>

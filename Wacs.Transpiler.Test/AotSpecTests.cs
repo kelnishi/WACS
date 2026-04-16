@@ -53,6 +53,11 @@ namespace Wacs.Transpiler.Test
         [ClassData(typeof(TranspilerTestDefinitions))]
         public void RunWastAotTranspiled(WastJson file)
         {
+            // Reset static registries from previous test runs to prevent
+            // accumulated state from corrupting dynamic assembly resolution.
+            ModuleInit.Reset();
+            InitRegistry.Reset();
+
             _output.WriteLine($"AOT spec test: {file.TestName}");
             var env = new SpecTestEnv();
             var runtime = new WasmRuntime();
@@ -150,6 +155,10 @@ namespace Wacs.Transpiler.Test
 
             if (totalTranspiled > 0)
                 _output.WriteLine($"    AOT: {totalTranspiled} functions transpiled");
+
+            // Force GC to collect dynamic assembly objects before the next test
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
         }
 
         /// <summary>

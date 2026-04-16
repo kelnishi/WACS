@@ -68,6 +68,15 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
+        /// Reset all registries. Call between test runs to prevent state accumulation.
+        /// </summary>
+        public static void Reset()
+        {
+            lock (_lock) { _dataSegments.Clear(); }
+            lock (_elemLock) { _elemSegments.Clear(); }
+        }
+
+        /// <summary>
         /// Get a registered data segment's bytes by ID.
         /// </summary>
         public static byte[]? GetDataSegmentData(int segmentId)
