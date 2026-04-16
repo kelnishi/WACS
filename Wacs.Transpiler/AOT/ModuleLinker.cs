@@ -187,6 +187,7 @@ namespace Wacs.Transpiler.AOT
             int tableImportIdx = 0;
             int globalImportIdx = 0;
             var patchedTableIndices = new HashSet<int>();
+            var patchedMemoryIndices = new HashSet<int>();
 
             foreach (var import in wasmModule.Imports)
             {
@@ -195,7 +196,10 @@ namespace Wacs.Transpiler.AOT
                     case Wacs.Core.Module.ImportDesc.MemDesc:
                     {
                         if (TryResolveMemory(import.ModuleName, import.Name, out var mem))
+                        {
                             ctx.Memories[memImportIdx] = mem;
+                            patchedMemoryIndices.Add(memImportIdx);
+                        }
                         memImportIdx++;
                         break;
                     }
@@ -216,6 +220,17 @@ namespace Wacs.Transpiler.AOT
                         globalImportIdx++;
                         break;
                     }
+                }
+            }
+
+            // Re-apply data segments that target imported (now shared) memories.
+            if (patchedMemoryIndices.Count > 0 && initDataId >= 0)
+            {
+                var initData = InitRegistry.Get(initDataId);
+                foreach (var (memIdx, offset, segId) in initData.ActiveDataSegments)
+                {
+                    if (!patchedMemoryIndices.Contains(memIdx)) continue;
+                    ModuleInit.CopyDataSegment(ctx.Memories, memIdx, offset, segId);
                 }
             }
 
@@ -280,6 +295,66 @@ namespace Wacs.Transpiler.AOT
                     table.Elements[tableSlot] = val;
                 }
             }
+
+            // Deferred global initialization: re-evaluate globals whose initializers
+            // used global.get on imported globals (which had default values at transpile time).
+            if (initDataId >= 0)
+            {
+                var initData2 = InitRegistry.Get(initDataId);
+                var globalValueField = typeof(GlobalInstance).GetField(
+                    "_value", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                foreach (var (globalIdx, initializer) in initData2.DeferredGlobalInits)
+                {
+                    if (globalIdx >= ctx.Globals.Length) continue;
+                    // Re-evaluate the initializer expression with access to resolved globals
+                    var val = EvaluateInitExpression(initializer, ctx.Globals);
+                    globalValueField?.SetValue(ctx.Globals[globalIdx], val);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Evaluate a constant initializer expression against resolved globals.
+        /// Used for deferred global initialization after import patching.
+        /// </summary>
+        private static Value EvaluateInitExpression(
+            Wacs.Core.Types.Expression expr, GlobalInstance[] globals)
+        {
+            var stack = new Stack<Value>();
+            foreach (var inst in expr.Instructions)
+            {
+                if (inst is Wacs.Core.Instructions.Numeric.InstI32Const i32)
+                    { stack.Push(new Value(i32.Value)); continue; }
+                if (inst is Wacs.Core.Instructions.Numeric.InstI64Const i64)
+                    { stack.Push(new Value(i64.FetchImmediate(null!))); continue; }
+                if (inst is Wacs.Core.Instructions.Numeric.InstF32Const f32)
+                    { stack.Push(new Value(f32.FetchImmediate(null!))); continue; }
+                if (inst is Wacs.Core.Instructions.Numeric.InstF64Const f64)
+                    { stack.Push(new Value(f64.FetchImmediate(null!))); continue; }
+                if (inst is Wacs.Core.Instructions.InstGlobalGet gg)
+                {
+                    int idx = gg.GetIndex();
+                    if (idx >= 0 && idx < globals.Length)
+                        stack.Push(globals[idx].Value);
+                    continue;
+                }
+                if (inst is Wacs.Core.Instructions.Reference.InstRefNull rn)
+                    { stack.Push(new Value(rn.RefType)); continue; }
+                if (inst is Wacs.Core.Instructions.Reference.InstRefFunc rf)
+                    { stack.Push(new Value(Wacs.Core.Types.Defs.ValType.FuncRef, (int)rf.FunctionIndex.Value)); continue; }
+                // Extended constant expressions
+                var op = inst.Op.x00;
+                if (stack.Count >= 2)
+                {
+                    if (op == Wacs.Core.OpCodes.OpCode.I32Add) { int b = stack.Pop().Data.Int32, a = stack.Pop().Data.Int32; stack.Push(new Value(a + b)); continue; }
+                    if (op == Wacs.Core.OpCodes.OpCode.I32Sub) { int b = stack.Pop().Data.Int32, a = stack.Pop().Data.Int32; stack.Push(new Value(a - b)); continue; }
+                    if (op == Wacs.Core.OpCodes.OpCode.I32Mul) { int b = stack.Pop().Data.Int32, a = stack.Pop().Data.Int32; stack.Push(new Value(a * b)); continue; }
+                    if (op == Wacs.Core.OpCodes.OpCode.I64Add) { long b = stack.Pop().Data.Int64, a = stack.Pop().Data.Int64; stack.Push(new Value(a + b)); continue; }
+                    if (op == Wacs.Core.OpCodes.OpCode.I64Sub) { long b = stack.Pop().Data.Int64, a = stack.Pop().Data.Int64; stack.Push(new Value(a - b)); continue; }
+                    if (op == Wacs.Core.OpCodes.OpCode.I64Mul) { long b = stack.Pop().Data.Int64, a = stack.Pop().Data.Int64; stack.Push(new Value(a * b)); continue; }
+                }
+            }
+            return stack.Count > 0 ? stack.Pop() : default;
         }
 
         private bool TryResolveMemory(string moduleName, string fieldName, out byte[] memory)
