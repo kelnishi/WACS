@@ -674,12 +674,20 @@ namespace Wacs.Transpiler.AOT.Emitters
         public static object? InvokeRef(
             ThinContext ctx, Value funcRef, object?[] args)
         {
-            int funcIdx = ResolveRef(ctx, funcRef);
+            if (funcRef.IsNullRef)
+                throw new TrapException("null function reference");
 
-            if (funcIdx < 0 || funcIdx >= ctx.FuncTable.Length)
-                throw new TrapException("undefined element");
+            // Try delegate from the Value itself (cross-module path)
+            Delegate? del = (funcRef.GcRef as DelegateRef)?.Target;
 
-            var del = ctx.FuncTable[funcIdx];
+            if (del == null)
+            {
+                // Fallback: module-local FuncTable
+                int funcIdx = ResolveRef(ctx, funcRef);
+                if (funcIdx < 0 || funcIdx >= ctx.FuncTable.Length)
+                    throw new TrapException("undefined element");
+                del = ctx.FuncTable[funcIdx];
+            }
             if (del == null)
                 throw new TrapException("uninitialized element");
 
