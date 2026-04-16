@@ -14,9 +14,12 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection.Emit;
 using Wacs.Core.Instructions;
 using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using WasmOpCode = Wacs.Core.OpCodes.OpCode;
 
 namespace Wacs.Transpiler.AOT.Emitters
@@ -101,16 +104,24 @@ namespace Wacs.Transpiler.AOT.Emitters
             InstBlock inst,
             Stack<EmitBlock> blockStack,
             EmitInstructionDelegate emitInstruction,
-            int stackHeight = 0)
+            int stackHeight = 0,
+            ModuleInstance? moduleInst = null)
         {
+            var (paramArity, resultArity, _, resultClrTypes) =
+                moduleInst != null
+                    ? ResolveBlockArities(inst.BlockType, moduleInst)
+                    : (0, inst.BlockType == ValType.Empty ? 0 : 1,
+                       Array.Empty<Type>(),
+                       inst.BlockType == ValType.Empty ? Array.Empty<Type>() : new[] { ModuleTranspiler.MapValType(inst.BlockType) });
+
             var endLabel = il.DefineLabel();
             blockStack.Push(new EmitBlock
             {
                 BranchTarget = endLabel,
                 Kind = WasmOpCode.Block,
-                StackHeight = stackHeight,
-                LabelArity = BlockResultArity(inst.BlockType),
-                ResultClrTypes = BlockResultClrTypes(inst.BlockType)
+                StackHeight = stackHeight - paramArity,
+                LabelArity = resultArity,
+                ResultClrTypes = resultClrTypes
             });
 
             // Emit block body
@@ -132,8 +143,14 @@ namespace Wacs.Transpiler.AOT.Emitters
             InstLoop inst,
             Stack<EmitBlock> blockStack,
             EmitInstructionDelegate emitInstruction,
-            int stackHeight = 0)
+            int stackHeight = 0,
+            ModuleInstance? moduleInst = null)
         {
+            var (paramArity, _, paramClrTypes, _) =
+                moduleInst != null
+                    ? ResolveBlockArities(inst.BlockType, moduleInst)
+                    : (0, 0, Array.Empty<Type>(), Array.Empty<Type>());
+
             var startLabel = il.DefineLabel();
             il.MarkLabel(startLabel);
 
@@ -141,8 +158,9 @@ namespace Wacs.Transpiler.AOT.Emitters
             {
                 BranchTarget = startLabel,
                 Kind = WasmOpCode.Loop,
-                StackHeight = stackHeight,
-                LabelArity = 0 // Loop labels have param arity (0 for simple loops)
+                StackHeight = stackHeight - paramArity,
+                LabelArity = paramArity, // Loop labels carry params on backward branch
+                ResultClrTypes = paramClrTypes
             });
 
             var block = inst.GetBlock(0);
@@ -162,17 +180,25 @@ namespace Wacs.Transpiler.AOT.Emitters
             InstIf inst,
             Stack<EmitBlock> blockStack,
             EmitInstructionDelegate emitInstruction,
-            int stackHeight = 0)
+            int stackHeight = 0,
+            ModuleInstance? moduleInst = null)
         {
+            var (paramArity, resultArity, _, resultClrTypes) =
+                moduleInst != null
+                    ? ResolveBlockArities(inst.BlockType, moduleInst)
+                    : (0, inst.BlockType == ValType.Empty ? 0 : 1,
+                       Array.Empty<Type>(),
+                       inst.BlockType == ValType.Empty ? Array.Empty<Type>() : new[] { ModuleTranspiler.MapValType(inst.BlockType) });
+
             var endLabel = il.DefineLabel();
 
             blockStack.Push(new EmitBlock
             {
                 BranchTarget = endLabel,
                 Kind = WasmOpCode.If,
-                StackHeight = stackHeight,
-                LabelArity = BlockResultArity(inst.BlockType),
-                ResultClrTypes = BlockResultClrTypes(inst.BlockType)
+                StackHeight = stackHeight - paramArity,
+                LabelArity = resultArity,
+                ResultClrTypes = resultClrTypes
             });
 
             bool hasElse = inst.Count == 2;
@@ -368,24 +394,31 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         /// <summary>
-        /// Get the result arity for a block type.
-        /// Empty = 0, simple value type = 1.
+        /// Resolve a block's type to param/result arities and CLR types.
+        /// Handles simple types (void, single value) and multi-value type indices.
         /// </summary>
-        private static int BlockResultArity(Wacs.Core.Types.Defs.ValType blockType)
+        internal static (int paramArity, int resultArity, Type[] paramClrTypes, Type[] resultClrTypes)
+            ResolveBlockArities(ValType blockType, ModuleInstance moduleInst)
         {
-            if (blockType == Wacs.Core.Types.Defs.ValType.Empty) return 0;
-            // Any non-empty single value type = 1 result
-            return 1;
-        }
+            if (blockType == ValType.Empty)
+                return (0, 0, Array.Empty<Type>(), Array.Empty<Type>());
 
-        /// <summary>
-        /// Get the CLR types for the block's result values.
-        /// Used by EmitBrIf to create correctly-typed shuttle locals.
-        /// </summary>
-        private static Type[] BlockResultClrTypes(Wacs.Core.Types.Defs.ValType blockType)
-        {
-            if (blockType == Wacs.Core.Types.Defs.ValType.Empty) return System.Array.Empty<Type>();
-            return new[] { ModuleTranspiler.MapValType(blockType) };
+            if (blockType.IsDefType())
+            {
+                var funcType = moduleInst.Types.ResolveBlockType(blockType);
+                if (funcType != null)
+                {
+                    var paramClr = funcType.ParameterTypes.Types
+                        .Select(t => ModuleTranspiler.MapValType(t)).ToArray();
+                    var resultClr = funcType.ResultType.Types
+                        .Select(t => ModuleTranspiler.MapValType(t)).ToArray();
+                    return (funcType.ParameterTypes.Arity, funcType.ResultType.Arity,
+                        paramClr, resultClr);
+                }
+            }
+
+            // Simple value type: 0 params, 1 result
+            return (0, 1, Array.Empty<Type>(), new[] { ModuleTranspiler.MapValType(blockType) });
         }
 
         /// <summary>

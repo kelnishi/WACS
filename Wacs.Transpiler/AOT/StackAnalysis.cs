@@ -323,55 +323,50 @@ namespace Wacs.Transpiler.AOT
             }
         }
 
+        private (int paramArity, int resultArity) ResolveBlockArities(ValType blockType)
+        {
+            if (blockType == ValType.Empty) return (0, 0);
+            if (blockType.IsDefType() && _moduleInst != null)
+            {
+                var funcType = _moduleInst.Types.ResolveBlockType(blockType);
+                if (funcType != null)
+                    return (funcType.ParameterTypes.Arity, funcType.ResultType.Arity);
+            }
+            return (0, 1); // simple value type
+        }
+
         private void AnalyzeBlock(InstBlock inst)
         {
-            var blockType = inst.BlockType;
-            int paramArity = 0; // simple blocks have no params
-            int resultArity = blockType == ValType.Empty ? 0 : 1;
+            var (paramArity, resultArity) = ResolveBlockArities(inst.BlockType);
 
             _blockStack.Push(new AnalysisBlock
             {
                 Kind = WasmOpCode.Block,
-                StackHeight = _stackHeight,
-                LabelArity = resultArity, // branch targets block end with results
+                StackHeight = _stackHeight - paramArity,
+                LabelArity = resultArity,
                 Parameters = paramArity,
                 Results = resultArity
             });
-
-            bool savedUnreachable = _unreachable;
-            // Body starts reachable (entering the block is reachable)
 
             var block = inst.GetBlock(0);
             AnalyzeSequence(block.Instructions);
 
             _blockStack.Pop();
-
-            // Restore reachability: End of block is reachable
-            // (even if body ended unreachable, the branch target is reachable)
             _unreachable = false;
 
-            // Compute stack after block: entry - params + results
-            var ab = new AnalysisBlock
-            {
-                StackHeight = _stackHeight, // will be overwritten
-                Parameters = paramArity,
-                Results = resultArity
-            };
             _stackHeight = (_info[inst]?.StackHeightBefore ?? _stackHeight)
                 - paramArity + resultArity;
         }
 
         private void AnalyzeLoop(InstLoop inst)
         {
-            var blockType = inst.BlockType;
-            int paramArity = 0; // simple loops have no params
-            int resultArity = blockType == ValType.Empty ? 0 : 1;
+            var (paramArity, resultArity) = ResolveBlockArities(inst.BlockType);
 
             _blockStack.Push(new AnalysisBlock
             {
                 Kind = WasmOpCode.Loop,
-                StackHeight = _stackHeight,
-                LabelArity = paramArity, // branch to loop targets start with params
+                StackHeight = _stackHeight - paramArity,
+                LabelArity = paramArity, // loop branches carry params
                 Parameters = paramArity,
                 Results = resultArity
             });
@@ -388,9 +383,7 @@ namespace Wacs.Transpiler.AOT
 
         private void AnalyzeIf(InstIf inst)
         {
-            var blockType = inst.BlockType;
-            int paramArity = 0;
-            int resultArity = blockType == ValType.Empty ? 0 : 1;
+            var (paramArity, resultArity) = ResolveBlockArities(inst.BlockType);
 
             // If consumes condition (-1)
             _stackHeight--;
@@ -399,7 +392,7 @@ namespace Wacs.Transpiler.AOT
             _blockStack.Push(new AnalysisBlock
             {
                 Kind = WasmOpCode.If,
-                StackHeight = entryHeight,
+                StackHeight = entryHeight - paramArity,
                 LabelArity = resultArity,
                 Parameters = paramArity,
                 Results = resultArity
