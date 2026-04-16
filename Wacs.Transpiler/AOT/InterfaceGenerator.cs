@@ -211,7 +211,7 @@ namespace Wacs.Transpiler.AOT
             if (result is "abstract" or "class" or "interface" or "new" or "return"
                 or "void" or "int" or "long" or "float" or "double" or "string"
                 or "bool" or "object" or "null" or "true" or "false")
-                result = "@" + result;
+                result = "_" + result;
 
             return result;
         }

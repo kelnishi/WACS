@@ -98,8 +98,7 @@ namespace Wacs.Transpiler.AOT
                     gcType.TypeBuilder = _moduleBuilder.DefineType(
                         $"{_namespace}.WasmStruct_{i}",
                         TypeAttributes.Public | TypeAttributes.Class,
-                        typeof(object),
-                        new[] { typeof(IGcRef) });
+                        typeof(object));
                     _emittedTypes[i] = gcType;
                 }
                 else if (expansion is ArrayType)
@@ -108,8 +107,7 @@ namespace Wacs.Transpiler.AOT
                     gcType.TypeBuilder = _moduleBuilder.DefineType(
                         $"{_namespace}.WasmArray_{i}",
                         TypeAttributes.Public | TypeAttributes.Class,
-                        typeof(object),
-                        new[] { typeof(IGcRef) });
+                        typeof(object));
                     _emittedTypes[i] = gcType;
                 }
             }
@@ -138,9 +136,7 @@ namespace Wacs.Transpiler.AOT
                     FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.Literal);
                 hashField.SetConstant(gcType.StructuralHash);
 
-                // Implement IGcRef.StoreIndex — returns a RefIdx for this instance.
-                // For transpiled types, we use the type index as a stable identifier.
-                EmitStoreIndexProperty(gcType);
+                // No IGcRef — emitted types are plain objects, wrapped via WrapRef(object)
             }
 
             // Third pass: create types (bake the TypeBuilders)
