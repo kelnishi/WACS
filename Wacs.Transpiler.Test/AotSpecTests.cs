@@ -251,7 +251,8 @@ namespace Wacs.Transpiler.Test
                 if (ctx != null)
                 {
                     // Patch shared imports (memories/tables/globals from other modules)
-                    linker.ResolveImports(ctx, moduleInst.Repr);
+                    // Pass initDataId so element segments can be re-applied to shared tables
+                    linker.ResolveImports(ctx, moduleInst.Repr, result.InitDataId);
                     linker.Register(moduleName, ctx, result, moduleInst.Repr);
                 }
             }

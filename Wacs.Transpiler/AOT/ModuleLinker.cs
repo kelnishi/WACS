@@ -175,12 +175,18 @@ namespace Wacs.Transpiler.AOT
         /// Resolve imported memories/tables/globals from previously registered
         /// modules and host registries. Call AFTER the Module constructor has
         /// created the ThinContext, then patch shared instances into it.
+        ///
+        /// After patching, re-applies element segments that target imported
+        /// tables so they write to the shared table instance (not the placeholder
+        /// that was initialized during the constructor).
         /// </summary>
-        public void ResolveImports(ThinContext ctx, Wacs.Core.Module wasmModule)
+        public void ResolveImports(ThinContext ctx, Wacs.Core.Module wasmModule,
+            int initDataId = -1)
         {
             int memImportIdx = 0;
             int tableImportIdx = 0;
             int globalImportIdx = 0;
+            var patchedTableIndices = new HashSet<int>();
 
             foreach (var import in wasmModule.Imports)
             {
@@ -196,7 +202,10 @@ namespace Wacs.Transpiler.AOT
                     case Wacs.Core.Module.ImportDesc.TableDesc:
                     {
                         if (TryResolveTable(import.ModuleName, import.Name, out var table))
+                        {
                             ctx.Tables[tableImportIdx] = table;
+                            patchedTableIndices.Add(tableImportIdx);
+                        }
                         tableImportIdx++;
                         break;
                     }
@@ -206,6 +215,27 @@ namespace Wacs.Transpiler.AOT
                             ctx.Globals[globalImportIdx] = global;
                         globalImportIdx++;
                         break;
+                    }
+                }
+            }
+
+            // Re-apply element segments that target imported (now shared) tables.
+            // The Module constructor's Initialize() wrote these to placeholder tables;
+            // now that we've patched the real shared tables in, re-apply them.
+            if (patchedTableIndices.Count > 0 && initDataId >= 0)
+            {
+                var initData = InitRegistry.Get(initDataId);
+                foreach (var (tableIdx, elemOffset, funcIndices) in initData.ActiveElementSegments)
+                {
+                    if (!patchedTableIndices.Contains(tableIdx)) continue;
+                    var table = ctx.Tables[tableIdx];
+                    for (int j = 0; j < funcIndices.Length; j++)
+                    {
+                        if (elemOffset + j < table.Elements.Count && funcIndices[j] >= 0)
+                        {
+                            table.Elements[elemOffset + j] = new Value(
+                                ValType.FuncRef, funcIndices[j]);
+                        }
                     }
                 }
             }
