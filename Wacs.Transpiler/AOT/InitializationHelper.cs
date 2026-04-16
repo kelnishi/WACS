@@ -75,6 +75,13 @@ namespace Wacs.Transpiler.AOT
         /// </summary>
         public List<(int globalIdx, Wacs.Core.Types.Expression initializer)> DeferredGlobalInits { get; set; } = new();
 
+        /// <summary>
+        /// Saved data segment bytes (keyed by segId) for linker re-apply.
+        /// Active data segments are dropped after initialization, but the linker
+        /// may need to re-copy them to shared imported memories.
+        /// </summary>
+        public Dictionary<int, byte[]> SavedDataSegments { get; set; } = new();
+
         /// <summary>Number of imported functions.</summary>
         public int ImportFuncCount { get; set; }
 
@@ -233,7 +240,17 @@ namespace Wacs.Transpiler.AOT
                 }
             }
 
-            // 6. Implicitly drop active segments per spec §4.5.4
+            // 6. Save data segment bytes for potential linker re-apply
+            // (the linker may need to re-apply data to imported shared memories
+            // after dropping — save copies keyed by segId before dropping)
+            foreach (var (memIdx, offset, segId) in data.ActiveDataSegments)
+            {
+                var segData = ModuleInit.GetDataSegmentData(segId);
+                if (segData != null && segData.Length > 0)
+                    data.SavedDataSegments[segId] = (byte[])segData.Clone();
+            }
+
+            // 7. Implicitly drop active segments per spec §4.5.4
             foreach (var idx in data.ActiveElemIndices)
                 ModuleInit.DropElemSegment(data.ElemSegmentBaseId + idx);
             foreach (var idx in data.ActiveDataIndices)
