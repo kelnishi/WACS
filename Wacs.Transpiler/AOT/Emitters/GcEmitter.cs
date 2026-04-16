@@ -586,6 +586,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Dup); // keep ref on stack for both paths
             il.Emit(OpCodes.Ldc_I4, (int)targetType);
             il.Emit(OpCodes.Ldc_I4, 1); // nullable
+            il.Emit(OpCodes.Ldarg_0); // ThinContext
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
                 nameof(GcRuntimeHelpers.RefTestValue), BindingFlags.Public | BindingFlags.Static)!);
 
@@ -599,8 +600,10 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         private static void EmitRefTest(ILGenerator il, InstRefTest inst)
         {
+            // Stack: [Value]
             il.Emit(OpCodes.Ldc_I4, (int)inst.HeapType);
             il.Emit(OpCodes.Ldc_I4, inst.IsNullable ? 1 : 0);
+            il.Emit(OpCodes.Ldarg_0); // ThinContext for type lookup
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
                 nameof(GcRuntimeHelpers.RefTestValue), BindingFlags.Public | BindingFlags.Static)!);
         }
@@ -610,6 +613,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             il.Emit(OpCodes.Ldc_I4, (int)inst.HeapType);
             il.Emit(OpCodes.Ldc_I4, inst.IsNullable ? 1 : 0);
+            il.Emit(OpCodes.Ldarg_0); // ThinContext for type lookup
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
                 nameof(GcRuntimeHelpers.RefCastValue), BindingFlags.Public | BindingFlags.Static)!);
         }
@@ -754,11 +758,76 @@ namespace Wacs.Transpiler.AOT.Emitters
             return 1;
         }
 
-        /// <summary>Value-typed version for CIL stack compatibility.</summary>
-        public static int RefTestValue(Value val, int heapType, int nullable)
+        /// <summary>
+        /// Test if a Value matches a heap type. Layer 0: CLR inheritance + abstract types.
+        /// heapType encoding: negative = abstract (HeapType enum), non-negative = concrete type index.
+        /// </summary>
+        // Mask to extract raw type index from ValType (strips Ref/Nullable bits)
+        private const int ValTypeIndexMask = ~(0x4000_0000 | 0x2000_0000); // ~NullableRef
+
+        public static int RefTestValue(Value val, int heapType, int nullable, ThinContext ctx)
         {
             if (val.IsNullRef) return nullable != 0 ? 1 : 0;
-            return 1;
+
+            // Extract raw index (strip Ref/Nullable bits)
+            int rawIndex = heapType & ValTypeIndexMask;
+
+            // Concrete type index (non-negative after masking, and not an abstract type byte)
+            if (rawIndex >= 0 && rawIndex < 0x60) // abstract types are 0x6A-0x74
+                return TestConcreteType(val, rawIndex, ctx) ? 1 : 0;
+
+            // Abstract heap type — the low byte identifies the heap type
+            byte ht = (byte)(heapType & 0xFF);
+            return TestAbstractType(val, ht) ? 1 : 0;
+        }
+
+        private static bool TestAbstractType(Value val, byte ht)
+        {
+            return ht switch
+            {
+                (byte)Wacs.Core.Types.Defs.HeapType.Any => true,
+                (byte)Wacs.Core.Types.Defs.HeapType.Eq => IsI31(val) || IsGcCategory(val, 0) || IsGcCategory(val, 1),
+                (byte)Wacs.Core.Types.Defs.HeapType.I31 => IsI31(val),
+                (byte)Wacs.Core.Types.Defs.HeapType.Struct => IsGcCategory(val, 0),
+                (byte)Wacs.Core.Types.Defs.HeapType.Array => IsGcCategory(val, 1),
+                (byte)Wacs.Core.Types.Defs.HeapType.Func => val.Type == ValType.FuncRef,
+                (byte)Wacs.Core.Types.Defs.HeapType.Extern => val.Type == ValType.ExternRef,
+                (byte)Wacs.Core.Types.Defs.HeapType.None
+                    or (byte)Wacs.Core.Types.Defs.HeapType.NoFunc
+                    or (byte)Wacs.Core.Types.Defs.HeapType.NoExtern => false, // bottom types
+                _ => true, // unknown abstract type — permissive
+            };
+        }
+
+        private static bool IsI31(Value val) =>
+            val.Type == ValType.I31;
+
+        private static bool IsGcCategory(Value val, int expectedCategory)
+        {
+            var gcRef = val.GcRef;
+            if (gcRef == null) return false;
+            object target = gcRef is GcObjectAdapter adapter ? adapter.Target : gcRef;
+            var catField = target.GetType().GetField("TypeCategory",
+                BindingFlags.Public | BindingFlags.Static);
+            if (catField == null) return false;
+            return (int)catField.GetValue(null)! == expectedCategory;
+        }
+
+        private static bool TestConcreteType(Value val, int typeIndex, ThinContext ctx)
+        {
+            var gcRef = val.GcRef;
+            if (gcRef == null) return false;
+            object target = gcRef is GcObjectAdapter adapter ? adapter.Target : gcRef;
+
+            // Layer 0: CLR IsInstanceOfType (handles subtype via inheritance)
+            if (ctx.InitDataId >= 0)
+            {
+                var targetClrType = GcTypeRegistry.Get(ctx.InitDataId, typeIndex);
+                if (targetClrType != null)
+                    return targetClrType.IsInstanceOfType(target);
+            }
+
+            return false;
         }
 
         public static object RefCast(object val, int heapType, int nullable)
@@ -771,14 +840,16 @@ namespace Wacs.Transpiler.AOT.Emitters
             return val;
         }
 
-        /// <summary>Value-typed version for CIL stack compatibility.</summary>
-        public static Value RefCastValue(Value val, int heapType, int nullable)
+        /// <summary>Cast a Value to a heap type, trapping on failure.</summary>
+        public static Value RefCastValue(Value val, int heapType, int nullable, ThinContext ctx)
         {
             if (val.IsNullRef)
             {
                 if (nullable != 0) return val;
                 throw new TrapException("cast failure: null reference");
             }
+            if (RefTestValue(val, heapType, nullable, ctx) == 0)
+                throw new TrapException("cast failure");
             return val;
         }
 
