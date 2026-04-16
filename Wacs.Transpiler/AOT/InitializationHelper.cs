@@ -48,6 +48,13 @@ namespace Wacs.Transpiler.AOT
             = Array.Empty<(int, int, int[])>();
 
         /// <summary>
+        /// GC-typed element values (parallel to ActiveElementSegments).
+        /// For elements using ref.i31, struct.new, etc. instead of ref.func.
+        /// Key: (elemSegIdx, slotIdx). Value: the Value to store in the table.
+        /// </summary>
+        public Dictionary<(int segIdx, int slotIdx), Value> GcElementValues { get; set; } = new();
+
+        /// <summary>
         /// Element entries that depend on globals (global.get in initializer).
         /// (elemSegIdx, slotIdx within segment, globalIdx).
         /// After import resolution patches globals, these can be re-evaluated.
@@ -227,17 +234,26 @@ namespace Wacs.Transpiler.AOT
             }
 
             // 5. Copy active element segments to tables
+            int elemSegIdx = 0;
             foreach (var (tableIdx, elemOffset, funcIndices) in data.ActiveElementSegments)
             {
                 var table = tables[tableIdx];
                 for (int j = 0; j < funcIndices.Length; j++)
                 {
-                    if (elemOffset + j < table.Elements.Count && funcIndices[j] >= 0)
+                    if (elemOffset + j >= table.Elements.Count) continue;
+                    if (funcIndices[j] == -2)
+                    {
+                        // GC-typed element: lookup precomputed Value
+                        if (data.GcElementValues.TryGetValue((elemSegIdx, j), out var gcVal))
+                            table.Elements[elemOffset + j] = gcVal;
+                    }
+                    else if (funcIndices[j] >= 0)
                     {
                         table.Elements[elemOffset + j] = new Value(
                             ValType.FuncRef, funcIndices[j]);
                     }
                 }
+                elemSegIdx++;
             }
 
             // 6. Save data segment bytes for potential linker re-apply
