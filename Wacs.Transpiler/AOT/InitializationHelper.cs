@@ -298,9 +298,12 @@ namespace Wacs.Transpiler.AOT
 
                 if (gcObj != null && gcInit.GlobalIndex < ctx.Globals.Length)
                 {
-                    // Wrap as Value with GcRef
+                    // Wrap as Value with GcRef. Use reflection to bypass
+                    // immutability check on the GlobalInstance.Value setter.
                     var val = Emitters.GcRuntimeHelpers.WrapRef(gcObj);
-                    ctx.Globals[gcInit.GlobalIndex].Value = val;
+                    var field = typeof(GlobalInstance).GetField(
+                        "_value", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    field?.SetValue(ctx.Globals[gcInit.GlobalIndex], val);
                 }
             }
         }
