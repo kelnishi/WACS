@@ -55,7 +55,8 @@ namespace Wacs.Transpiler.AOT
         private readonly Stack<EmitBlock> _blockStack = new();
         private LocalBuilder[] _locals = null!;
         private ILGenerator _il = null!;
-        private int _cilStackHeight; // CIL evaluation stack height tracking
+        private StackAnalysis _stackAnalysis = null!;
+        private InstructionInfo? _currentInfo; // precomputed info for current instruction
 
         public FunctionCodegen(
             MethodBuilder method,
@@ -96,7 +97,11 @@ namespace Wacs.Transpiler.AOT
                 return false;
             }
 
-            // Second pass: emit IL
+            // Pre-pass: compute stack heights and reachability (mirrors interpreter Link)
+            _stackAnalysis = new StackAnalysis();
+            _stackAnalysis.Analyze(_funcInst.Type, _funcInst.Body.Instructions);
+
+            // Emit pass: generate CIL using precomputed metadata
             _il = _method.GetILGenerator();
 
             // Declare CIL locals for WASM locals (parameters are CIL args, not locals)
@@ -114,14 +119,19 @@ namespace Wacs.Transpiler.AOT
 
             // The function body is an implicit block — br 0 at function level
             // targets the function return. Push a function-level block.
-            _cilStackHeight = 0;
             var funcEndLabel = _il.DefineLabel();
+            var funcResultTypes = _funcInst.Type.ResultType.Types;
+            var funcResultClrTypes = new Type[funcResultTypes.Length];
+            for (int i = 0; i < funcResultTypes.Length; i++)
+                funcResultClrTypes[i] = ModuleTranspiler.MapValType(funcResultTypes[i]);
+
             _blockStack.Push(new EmitBlock
             {
                 BranchTarget = funcEndLabel,
                 Kind = WasmOpCode.Block,
                 StackHeight = 0,
-                LabelArity = _funcInst.Type.ResultType.Arity
+                LabelArity = _funcInst.Type.ResultType.Arity,
+                ResultClrTypes = funcResultClrTypes
             });
 
             // Emit instructions
@@ -133,6 +143,13 @@ namespace Wacs.Transpiler.AOT
             _blockStack.Pop();
             _il.MarkLabel(funcEndLabel);
 
+            // Emit a trailing ret so that branches to funcEndLabel have a
+            // valid terminator. The function End instruction also emits ret
+            // inside the body, but funcEndLabel is placed after the body —
+            // code that branches here (br/br_if/br_table targeting label 0)
+            // would otherwise land at the end of the method with no ret.
+            _il.Emit(OpCodes.Ret);
+
             return true;
         }
 
@@ -142,16 +159,8 @@ namespace Wacs.Transpiler.AOT
         /// </summary>
         private void EmitInstruction(ILGenerator il, InstructionBase inst)
         {
-            // Track CIL stack height using the WASM instruction's StackDiff.
-            // Block-structured instructions (block/loop/if) have StackDiff that
-            // accounts for the entire block's net effect. Since we also iterate
-            // children and track their StackDiffs individually, we skip the
-            // block instruction's own StackDiff to avoid double-counting.
-            if (inst is not IBlockInstruction)
-            {
-                _cilStackHeight += inst.StackDiff;
-                if (_cilStackHeight < 0) _cilStackHeight = 0;
-            }
+            // Look up precomputed stack analysis for this instruction
+            _currentInfo = _stackAnalysis.Get(inst);
 
             // Detect GC instructions by class type — their opcodes may be aliased
             // after the interpreter's linking step rewrites the ByteCode.
@@ -302,19 +311,27 @@ namespace Wacs.Transpiler.AOT
                     break;
 
                 case WasmOpCode.Block:
-                    ControlEmitter.EmitBlock(il, (InstBlock)inst, _blockStack, EmitInstruction,
-                        _cilStackHeight);
+                {
+                    int sh = _currentInfo?.StackHeightBefore ?? 0;
+                    ControlEmitter.EmitBlock(il, (InstBlock)inst, _blockStack, EmitInstruction, sh);
                     break;
+                }
 
                 case WasmOpCode.Loop:
-                    ControlEmitter.EmitLoop(il, (InstLoop)inst, _blockStack, EmitInstruction,
-                        _cilStackHeight);
+                {
+                    int sh = _currentInfo?.StackHeightBefore ?? 0;
+                    ControlEmitter.EmitLoop(il, (InstLoop)inst, _blockStack, EmitInstruction, sh);
                     break;
+                }
 
                 case WasmOpCode.If:
-                    ControlEmitter.EmitIf(il, (InstIf)inst, _blockStack, EmitInstruction,
-                        _cilStackHeight);
+                {
+                    // StackHeightBefore includes the condition. After brfalse pops it,
+                    // the effective entry height is one less.
+                    int sh = (_currentInfo?.StackHeightBefore ?? 1) - 1;
+                    ControlEmitter.EmitIf(il, (InstIf)inst, _blockStack, EmitInstruction, sh);
                     break;
+                }
 
                 case WasmOpCode.Else:
                     // Handled inside EmitIf — should not appear at top level
@@ -323,41 +340,62 @@ namespace Wacs.Transpiler.AOT
                 case WasmOpCode.End:
                     if (inst is InstEnd endInst && endInst.FunctionEnd)
                     {
-                        EmitFunctionReturn(il);
+                        // Branch to funcEndLabel where ret is emitted.
+                        // This gives the JIT an explicit branch edge so it can
+                        // merge the stack state from here with any other branches
+                        // to funcEndLabel (br/br_if/br_table targeting label 0).
+                        EmitBlock funcBlock = null!;
+                        foreach (var block in _blockStack)
+                            funcBlock = block;
+                        il.Emit(OpCodes.Br, funcBlock.BranchTarget);
                     }
-                    // Non-function End is handled by the block/loop/if emitters
+                    // Non-function End is handled by the block/loop/if emitters.
                     break;
 
                 case WasmOpCode.Return:
-                    EmitFunctionReturn(il);
+                {
+                    // return ≡ br to the function-level block.
+                    // Use precomputed excess from StackAnalysis.
+                    EmitBlock funcBlock = null!;
+                    foreach (var block in _blockStack)
+                        funcBlock = block;
+
+                    int excess = _currentInfo?.Excess ?? 0;
+                    EmitExcessCleanup(il, excess, funcBlock);
+                    il.Emit(OpCodes.Ret);
                     break;
+                }
 
                 case WasmOpCode.Br:
-                    ControlEmitter.EmitBr(il, (InstBranch)inst, _blockStack);
+                {
+                    var target = ControlEmitter.PeekLabel(_blockStack, ((InstBranch)inst).Label);
+                    int excess = _currentInfo?.Excess ?? 0;
+                    EmitExcessCleanup(il, excess, target);
+                    il.Emit(OpCodes.Br, target.BranchTarget);
                     break;
+                }
 
                 case WasmOpCode.BrIf:
-                    ControlEmitter.EmitBrIf(il, (InstBranchIf)inst, _blockStack,
-                        _cilStackHeight);
+                {
+                    int excess = _currentInfo?.Excess ?? 0;
+                    ControlEmitter.EmitBrIf(il, (InstBranchIf)inst, _blockStack, excess);
                     break;
+                }
 
                 case WasmOpCode.BrTable:
-                    ControlEmitter.EmitBrTable(il, (InstBranchTable)inst, _blockStack);
+                {
+                    int excess = _currentInfo?.Excess ?? 0;
+                    ControlEmitter.EmitBrTable(il, (InstBranchTable)inst, _blockStack, excess);
                     break;
+                }
 
                 case WasmOpCode.BrOnNull:
                 {
                     // br_on_null L: pop ref, if null branch to L (ref consumed), else push ref back
                     var brInst = (Wacs.Core.Instructions.Reference.InstBrOnNull)inst;
-                    int depth = brInst.Label;
-                    int i = 0;
-                    EmitBlock target = null!;
-                    foreach (var block in _blockStack)
-                    {
-                        if (i == depth) { target = block; break; }
-                        i++;
-                    }
-                    // Stack: [Value ref]
+                    var target = ControlEmitter.PeekLabel(_blockStack, brInst.Label);
+                    int excess = _currentInfo?.Excess ?? 0;
+
                     il.Emit(OpCodes.Dup);
                     il.Emit(OpCodes.Call, typeof(Emitters.TableRefHelpers).GetMethod(
                         nameof(Emitters.TableRefHelpers.RefIsNull),
@@ -365,7 +403,10 @@ namespace Wacs.Transpiler.AOT
                     var skipLabel = il.DefineLabel();
                     il.Emit(OpCodes.Brfalse, skipLabel); // not null → skip
                     il.Emit(OpCodes.Pop); // consume ref (null case)
+
+                    EmitExcessCleanup(il, excess, target);
                     il.Emit(OpCodes.Br, target.BranchTarget);
+
                     il.MarkLabel(skipLabel);
                     break;
                 }
@@ -374,22 +415,21 @@ namespace Wacs.Transpiler.AOT
                 {
                     // br_on_non_null L: pop ref, if non-null branch to L (ref on stack), else consume
                     var brInst = (Wacs.Core.Instructions.Reference.InstBrOnNonNull)inst;
-                    int depth = brInst.Label;
-                    int i = 0;
-                    EmitBlock target = null!;
-                    foreach (var block in _blockStack)
-                    {
-                        if (i == depth) { target = block; break; }
-                        i++;
-                    }
-                    // Stack: [Value ref]
+                    var target = ControlEmitter.PeekLabel(_blockStack, brInst.Label);
+                    int excess = _currentInfo?.Excess ?? 0;
+
                     il.Emit(OpCodes.Dup);
                     il.Emit(OpCodes.Call, typeof(Emitters.TableRefHelpers).GetMethod(
                         nameof(Emitters.TableRefHelpers.RefIsNull),
                         System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!);
                     var skipLabel = il.DefineLabel();
                     il.Emit(OpCodes.Brtrue, skipLabel); // null → skip
-                    il.Emit(OpCodes.Br, target.BranchTarget); // non-null → branch (ref stays)
+
+                    // non-null path: ref is on stack, clean excess then branch
+                    // (excess was computed for the branch path which includes the ref)
+                    EmitExcessCleanup(il, excess, target);
+                    il.Emit(OpCodes.Br, target.BranchTarget);
+
                     il.MarkLabel(skipLabel);
                     il.Emit(OpCodes.Pop); // consume ref (null case, no branch)
                     break;
@@ -484,42 +524,41 @@ namespace Wacs.Transpiler.AOT
         /// For N results: CIL stack has [r0, r1, ..., rN-1].
         ///   Store r1..rN-1 to out params (reverse order), leave r0 for ret.
         /// </summary>
-        private void EmitFunctionReturn(ILGenerator il)
+        /// <summary>
+        /// Emit return sequence for the function.
+        /// <summary>
+        /// Emit CIL to clean up excess stack values before a branch.
+        /// Saves the label's carried values (arity), pops excess, restores carried.
+        /// Uses the precomputed excess count from StackAnalysis.
+        /// </summary>
+        private static void EmitExcessCleanup(ILGenerator il, int excess, EmitBlock target)
         {
-            var resultTypes = _funcInst.Type.ResultType.Types;
-            int resultCount = resultTypes.Length;
+            if (excess <= 0) return;
 
-            if (resultCount <= 1)
+            int arity = target.LabelArity;
+            if (arity > 0)
             {
-                il.Emit(OpCodes.Ret);
-                return;
+                // Shuttle carried values past excess
+                var carriedLocals = new LocalBuilder[arity];
+                for (int i = 0; i < arity; i++)
+                {
+                    var clrType = i < target.ResultClrTypes.Length
+                        ? target.ResultClrTypes[i] : typeof(int);
+                    carriedLocals[i] = il.DeclareLocal(clrType);
+                    il.Emit(OpCodes.Stloc, carriedLocals[i]);
+                }
+                for (int i = 0; i < excess; i++)
+                    il.Emit(OpCodes.Pop);
+                for (int i = arity - 1; i >= 0; i--)
+                    il.Emit(OpCodes.Ldloc, carriedLocals[i]);
             }
-
-            // CIL stack has [r0, r1, ..., rN-1] (r0 deepest, rN-1 on top)
-            // Need to store r1..rN-1 into out params, leave r0 for ret.
-            // Out param for result index i (1-based) is at CIL arg: 1 + _paramCount + (i-1)
-
-            // Spill all results to temps (reverse order — top of stack first)
-            var temps = new LocalBuilder[resultCount];
-            for (int i = resultCount - 1; i >= 0; i--)
+            else
             {
-                temps[i] = il.DeclareLocal(ModuleTranspiler.MapValType(resultTypes[i]));
-                il.Emit(OpCodes.Stloc, temps[i]);
+                for (int i = 0; i < excess; i++)
+                    il.Emit(OpCodes.Pop);
             }
-
-            // Store results 1..N-1 to out params via stind
-            for (int i = 1; i < resultCount; i++)
-            {
-                int outArgIdx = 1 + _paramCount + (i - 1); // CIL arg index for out param
-                il.Emit(OpCodes.Ldarg, outArgIdx);  // load out param address
-                il.Emit(OpCodes.Ldloc, temps[i]);    // load result value
-                EmitStind(il, resultTypes[i]);        // store indirect
-            }
-
-            // Push result 0 back for ret
-            il.Emit(OpCodes.Ldloc, temps[0]);
-            il.Emit(OpCodes.Ret);
         }
+
 
         private static void EmitStind(ILGenerator il, ValType type)
         {

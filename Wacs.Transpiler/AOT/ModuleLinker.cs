@@ -151,42 +151,33 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
-        /// Instantiate a transpiled module, resolving imports from registered
-        /// modules and host functions. Returns a LinkedModule with a fully
-        /// wired ThinContext.
+        /// Register a module instance after it has been constructed.
+        /// The Module constructor handles its own initialization via
+        /// InitializationHelper.Initialize — the linker does NOT call
+        /// Initialize, avoiding double-init corruption of data segments.
+        ///
+        /// The ThinContext is extracted from the Module instance and used
+        /// to track exported entities for cross-module import resolution.
         /// </summary>
-        public LinkedModule Instantiate(
+        public LinkedModule Register(
+            string name,
+            ThinContext ctx,
             TranspilationResult result,
-            Wacs.Core.Module wasmModule,
-            string? name = null)
+            Wacs.Core.Module wasmModule)
         {
-            name ??= $"module_{_modules.Count}";
-
-            // Resolve imports → build ThinContext with shared state
-            var ctx = BuildContext(result, wasmModule);
-
             var linked = new LinkedModule(name, ctx, result);
-
-            // Populate exported entities
             PopulateExports(linked, wasmModule);
-
             _modules[name] = linked;
             return linked;
         }
 
         /// <summary>
-        /// Build a ThinContext by resolving imports and allocating local entities.
-        /// Imported memories/tables/globals are shared references.
-        /// Local ones are newly allocated via InitializationHelper.
+        /// Resolve imported memories/tables/globals from previously registered
+        /// modules and host registries. Call AFTER the Module constructor has
+        /// created the ThinContext, then patch shared instances into it.
         /// </summary>
-        private ThinContext BuildContext(TranspilationResult result, Wacs.Core.Module wasmModule)
+        public void ResolveImports(ThinContext ctx, Wacs.Core.Module wasmModule)
         {
-            // Start with InitializationHelper for local allocations
-            // (this creates all memories/tables/globals including placeholder imports)
-            var initData = InitRegistry.Get(FindInitDataId(result));
-            var ctx = InitializationHelper.Initialize(FindInitDataId(result));
-
-            // Override imported slots with shared instances
             int memImportIdx = 0;
             int tableImportIdx = 0;
             int globalImportIdx = 0;
@@ -216,16 +207,8 @@ namespace Wacs.Transpiler.AOT
                         globalImportIdx++;
                         break;
                     }
-                    case Wacs.Core.Module.ImportDesc.FuncDesc:
-                    {
-                        // Function imports handled via ImportDelegates — already wired
-                        // by the Module constructor's EmitImportDelegateWiring
-                        break;
-                    }
                 }
             }
-
-            return ctx;
         }
 
         private bool TryResolveMemory(string moduleName, string fieldName, out byte[] memory)
@@ -309,9 +292,5 @@ namespace Wacs.Transpiler.AOT
             }
         }
 
-        private static int FindInitDataId(TranspilationResult result)
-        {
-            return result.InitDataId;
-        }
     }
 }
