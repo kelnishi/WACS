@@ -68,10 +68,15 @@ namespace Wacs.Transpiler.AOT.Emitters
                     float fval = ((InstF32Const)inst).FetchImmediate(null!);
                     if (float.IsNaN(fval))
                     {
-                        // Load NaN via int bits to preserve sNaN/qNaN payload
-                        il.Emit(OpCodes.Ldc_I4, BitConverter.SingleToInt32Bits(fval));
-                        il.Emit(OpCodes.Call, typeof(BitConverter).GetMethod(
-                            nameof(BitConverter.Int32BitsToSingle))!);
+                        // Load NaN via memory to preserve sNaN bit patterns.
+                        // On ARM64, BitConverter.Int32BitsToSingle gets JIT-inlined
+                        // through FPU instructions that canonicalize sNaN to qNaN.
+                        int fbits = BitConverter.SingleToInt32Bits(fval);
+                        var tmp = il.DeclareLocal(typeof(int));
+                        il.Emit(OpCodes.Ldc_I4, fbits);
+                        il.Emit(OpCodes.Stloc, tmp);
+                        il.Emit(OpCodes.Ldloca, tmp);
+                        il.Emit(OpCodes.Ldind_R4);
                     }
                     else
                     {
@@ -84,9 +89,12 @@ namespace Wacs.Transpiler.AOT.Emitters
                     double dval = ((InstF64Const)inst).FetchImmediate(null!);
                     if (double.IsNaN(dval))
                     {
-                        il.Emit(OpCodes.Ldc_I8, BitConverter.DoubleToInt64Bits(dval));
-                        il.Emit(OpCodes.Call, typeof(BitConverter).GetMethod(
-                            nameof(BitConverter.Int64BitsToDouble))!);
+                        long dbits = BitConverter.DoubleToInt64Bits(dval);
+                        var tmp = il.DeclareLocal(typeof(long));
+                        il.Emit(OpCodes.Ldc_I8, dbits);
+                        il.Emit(OpCodes.Stloc, tmp);
+                        il.Emit(OpCodes.Ldloca, tmp);
+                        il.Emit(OpCodes.Ldind_R8);
                     }
                     else
                     {
@@ -457,18 +465,40 @@ namespace Wacs.Transpiler.AOT.Emitters
                 // Reinterpret — no-op in CIL (same bit pattern, different type interpretation)
                 // But CIL verification requires explicit conversion for type safety
                 case WasmOpCode.I32ReinterpretF32:
-                    // TODO: Use Unsafe.As or BitConverter for proper reinterpret
-                    il.Emit(OpCodes.Call, typeof(BitConverter).GetMethod("SingleToInt32Bits", new[] { typeof(float) })!);
+                {
+                    // Spill float to memory, reload as int — preserves sNaN bits.
+                    // BitConverter calls get JIT-inlined through FPU on ARM64,
+                    // which canonicalizes sNaN to qNaN.
+                    var fl = il.DeclareLocal(typeof(float));
+                    il.Emit(OpCodes.Stloc, fl);
+                    il.Emit(OpCodes.Ldloca, fl);
+                    il.Emit(OpCodes.Ldind_I4);
                     break;
+                }
                 case WasmOpCode.I64ReinterpretF64:
-                    il.Emit(OpCodes.Call, typeof(BitConverter).GetMethod("DoubleToInt64Bits", new[] { typeof(double) })!);
+                {
+                    var dl = il.DeclareLocal(typeof(double));
+                    il.Emit(OpCodes.Stloc, dl);
+                    il.Emit(OpCodes.Ldloca, dl);
+                    il.Emit(OpCodes.Ldind_I8);
                     break;
+                }
                 case WasmOpCode.F32ReinterpretI32:
-                    il.Emit(OpCodes.Call, typeof(BitConverter).GetMethod("Int32BitsToSingle", new[] { typeof(int) })!);
+                {
+                    var il32 = il.DeclareLocal(typeof(int));
+                    il.Emit(OpCodes.Stloc, il32);
+                    il.Emit(OpCodes.Ldloca, il32);
+                    il.Emit(OpCodes.Ldind_R4);
                     break;
+                }
                 case WasmOpCode.F64ReinterpretI64:
-                    il.Emit(OpCodes.Call, typeof(BitConverter).GetMethod("Int64BitsToDouble", new[] { typeof(long) })!);
+                {
+                    var il64 = il.DeclareLocal(typeof(long));
+                    il.Emit(OpCodes.Stloc, il64);
+                    il.Emit(OpCodes.Ldloca, il64);
+                    il.Emit(OpCodes.Ldind_R8);
                     break;
+                }
 
                 // === Sign Extension ===
                 case WasmOpCode.I32Extend8S:
