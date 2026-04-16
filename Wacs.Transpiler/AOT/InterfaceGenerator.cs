@@ -31,13 +31,15 @@ namespace Wacs.Transpiler.AOT
     public class InterfaceMethod
     {
         public string Name { get; }
+        public string WasmName { get; }
         public FunctionType WasmType { get; }
         public int FuncIndex { get; }
         public MethodBuilder? Method { get; set; }
 
-        public InterfaceMethod(string name, FunctionType wasmType, int funcIndex)
+        public InterfaceMethod(string name, FunctionType wasmType, int funcIndex, string? wasmName = null)
         {
             Name = name;
+            WasmName = wasmName ?? name;
             WasmType = wasmType;
             FuncIndex = funcIndex;
         }
@@ -132,6 +134,7 @@ namespace Wacs.Transpiler.AOT
                 $"{_namespace}.IExports",
                 TypeAttributes.Public | TypeAttributes.Interface | TypeAttributes.Abstract);
 
+            var usedExportNames = new HashSet<string>();
             foreach (var export in exports)
             {
                 var funcDesc = (WasmModule.ExportDesc.FuncDesc)export.Desc;
@@ -142,9 +145,14 @@ namespace Wacs.Transpiler.AOT
                 var funcType = func.Type;
 
                 string methodName = SanitizeName(export.Name);
+                // Dedup: append counter if collision
+                string baseName = methodName;
+                int suffix = 2;
+                while (!usedExportNames.Add(methodName))
+                    methodName = $"{baseName}_{suffix++}";
 
                 var method = DefineInterfaceMethod(ExportsInterface, methodName, funcType);
-                ExportMethods.Add(new InterfaceMethod(methodName, funcType, funcIdx)
+                ExportMethods.Add(new InterfaceMethod(methodName, funcType, funcIdx, export.Name)
                 {
                     Method = method
                 });
@@ -188,6 +196,12 @@ namespace Wacs.Transpiler.AOT
 
         /// <summary>
         /// Sanitize a WASM name for use as a CLR identifier.
+        /// </summary>
+        /// <summary>
+        /// Sanitize a WASM name for use as a CLR method name.
+        /// Replaces invalid chars with _, prefixes digits, avoids reserved words.
+        /// NOTE: this can produce collisions (e.g., "0" and "-0" both → "_0").
+        /// Use SanitizeNameUnique for deduplication.
         /// </summary>
         public static string SanitizeName(string wasmName)
         {

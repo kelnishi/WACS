@@ -171,7 +171,21 @@ namespace Wacs.Transpiler.AOT
                 {
                     var seg = _dataEmitter.Segments[i];
                     if (seg.IsPassive || seg.Data.Length == 0) continue;
-                    activeSegs.Add((seg.MemoryIndex, (int)seg.Offset, _dataSegmentBaseId + i));
+                    // Re-evaluate offset only if it contains global.get
+                    // (DataSegmentEmitter computes simple offsets correctly)
+                    int offset = (int)seg.Offset;
+                    if (seg.OffsetExpression != null)
+                    {
+                        bool hasGlobalGet = false;
+                        foreach (var inst in seg.OffsetExpression.Instructions)
+                            if (inst is InstGlobalGet) { hasGlobalGet = true; break; }
+                        if (hasGlobalGet)
+                        {
+                            offset = EvaluateConstI32(seg.OffsetExpression, globals);
+                            data.DeferredDataOffsets.Add((activeDataIndices.Count, seg.OffsetExpression));
+                        }
+                    }
+                    activeSegs.Add((seg.MemoryIndex, offset, _dataSegmentBaseId + i));
                     activeDataIndices.Add(i);
                 }
                 data.ActiveDataSegments = activeSegs.ToArray();
@@ -188,7 +202,7 @@ namespace Wacs.Transpiler.AOT
                 if (elem.Mode is WasmModule.ElementMode.ActiveMode active)
                 {
                     int tableIdx = (int)active.TableIndex.Value;
-                    int offset = EvaluateConstI32(active.Offset);
+                    int offset = EvaluateConstI32(active.Offset, globals);
                     var (funcIndices, deferredGlobals) = ExtractFuncIndicesWithDeferred(elem, globals, activeElemIdx, data.GcElementValues);
                     activeElems.Add((tableIdx, offset, funcIndices));
                     data.DeferredElemGlobals.AddRange(deferredGlobals);
@@ -317,13 +331,22 @@ namespace Wacs.Transpiler.AOT
         /// Evaluate a constant i32 expression. Handles simple constants and
         /// extended constant expressions (i32.add, i32.sub, i32.mul).
         /// </summary>
-        private static int EvaluateConstI32(Wacs.Core.Types.Expression expr)
+        private int EvaluateConstI32(Wacs.Core.Types.Expression expr,
+            List<(ValType type, Mutability mut, Value init)>? globals = null)
         {
             var stack = new Stack<int>();
             foreach (var inst in expr.Instructions)
             {
                 if (inst is InstI32Const i32) { stack.Push(i32.Value); continue; }
-                if (inst is InstGlobalGet gg) { stack.Push(0); continue; } // placeholder
+                if (inst is InstGlobalGet gg)
+                {
+                    int idx = gg.GetIndex();
+                    if (globals != null && idx >= 0 && idx < globals.Count)
+                        stack.Push(globals[idx].init.Data.Int32);
+                    else
+                        stack.Push(0);
+                    continue;
+                }
                 // Extended constant expressions
                 var op = inst.Op.x00;
                 if (op == Wacs.Core.OpCodes.OpCode.I32Add && stack.Count >= 2)

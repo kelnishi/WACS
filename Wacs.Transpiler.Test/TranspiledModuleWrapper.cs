@@ -39,6 +39,7 @@ namespace Wacs.Transpiler.Test
         public Type? ImportsInterface => Result.ImportsInterface;
 
         private readonly Dictionary<string, MethodInfo> _exportMethods = new();
+        private readonly Dictionary<string, string> _wasmToClrName = new();
 
         public TranspiledModuleWrapper(TranspilationResult result)
         {
@@ -67,13 +68,17 @@ namespace Wacs.Transpiler.Test
 
             // Cache export methods for fast lookup
             _exportMethods.Clear();
+            _wasmToClrName.Clear();
             if (ExportsInterface != null && ModuleInstance != null)
             {
                 foreach (var method in ModuleClass.GetMethods(BindingFlags.Public | BindingFlags.Instance))
                 {
-                    if (!method.IsSpecialName) // skip property getters
+                    if (!method.IsSpecialName)
                         _exportMethods[method.Name] = method;
                 }
+                // Build WASM name → CLR name mapping from export metadata
+                foreach (var em in Result.ExportMethods)
+                    _wasmToClrName[em.WasmName] = em.Name;
             }
         }
 
@@ -87,10 +92,12 @@ namespace Wacs.Transpiler.Test
             if (ModuleInstance == null)
                 throw new InvalidOperationException("Module not instantiated");
 
-            // Find the export method by WASM name (sanitized)
-            var sanitized = InterfaceGenerator.SanitizeName(name);
-            if (!_exportMethods.TryGetValue(sanitized, out var method))
-                throw new InvalidOperationException($"Export '{name}' (sanitized: '{sanitized}') not found");
+            // Find the export method by WASM name → CLR name mapping
+            string clrName;
+            if (!_wasmToClrName.TryGetValue(name, out clrName!))
+                clrName = InterfaceGenerator.SanitizeName(name); // fallback
+            if (!_exportMethods.TryGetValue(clrName, out var method))
+                throw new InvalidOperationException($"Export '{name}' (clr: '{clrName}') not found");
 
             // Convert Value[] args to CLR-typed args
             var parameters = method.GetParameters();
@@ -150,8 +157,10 @@ namespace Wacs.Transpiler.Test
         /// </summary>
         public Func<object?[], object?> CreateExportHandler(string exportName)
         {
-            var sanitized = InterfaceGenerator.SanitizeName(exportName);
-            if (!_exportMethods.TryGetValue(sanitized, out var method))
+            string clrName;
+            if (!_wasmToClrName.TryGetValue(exportName, out clrName!))
+                clrName = InterfaceGenerator.SanitizeName(exportName);
+            if (!_exportMethods.TryGetValue(clrName, out var method))
                 throw new InvalidOperationException($"Export '{exportName}' not found");
 
             return args => method.Invoke(ModuleInstance, args);
