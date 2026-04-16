@@ -53,8 +53,6 @@ namespace Wacs.Transpiler.Test
         [ClassData(typeof(TranspilerTestDefinitions))]
         public void RunWastAotTranspiled(WastJson file)
         {
-            // Reset static registries from previous test runs to prevent
-            // accumulated state from corrupting dynamic assembly resolution.
             ModuleInit.Reset();
             InitRegistry.Reset();
 
@@ -192,7 +190,10 @@ namespace Wacs.Transpiler.Test
         }
 
         /// <summary>
-        /// Transpile a module and link it via the ModuleLinker.
+        /// Transpile a module, instantiate it, then register with the linker.
+        /// The Module constructor handles initialization (including data segments).
+        /// After construction, we extract the ThinContext and register it with the
+        /// linker so subsequent modules can resolve imports from this one.
         /// Returns (wrapper, null) on success, (null, reason) on skip.
         /// </summary>
         private (TranspiledModuleWrapper?, string?) TranspileAndLink(
@@ -222,22 +223,12 @@ namespace Wacs.Transpiler.Test
             if (result.FallbackCount > 0)
                 return (null, $"{result.FallbackCount} fallback functions");
 
-            // Link the module — resolves imports, creates ThinContext with shared state
-            LinkedModule linked;
-            try
-            {
-                linked = linker.Instantiate(result, moduleInst.Repr, moduleName);
-            }
-            catch (Exception ex)
-            {
-                return (null, $"linking failed: {ex.GetType().Name}: {ex.Message}");
-            }
-
-            // Create wrapper for invocation
+            // Create wrapper and instantiate the Module class.
+            // The Module constructor calls InitializationHelper.Initialize once,
+            // which allocates memories/tables/globals and copies data segments.
             var wrapper = new TranspiledModuleWrapper(result);
             try
             {
-                // Build imports proxy for function imports (host functions dispatch through runtime)
                 object? importsProxy = null;
                 if (result.ImportsInterface != null)
                 {
@@ -252,7 +243,36 @@ namespace Wacs.Transpiler.Test
                 return (null, $"instantiation failed: {ex.GetType().Name}: {ex.Message}");
             }
 
+            // Extract the ThinContext from the Module instance and register
+            // with the linker for cross-module import resolution.
+            try
+            {
+                var ctx = ExtractContext(wrapper);
+                if (ctx != null)
+                {
+                    // Patch shared imports (memories/tables/globals from other modules)
+                    linker.ResolveImports(ctx, moduleInst.Repr);
+                    linker.Register(moduleName, ctx, result, moduleInst.Repr);
+                }
+            }
+            catch (Exception ex)
+            {
+                _output.WriteLine($"      Linker registration warning: {ex.Message}");
+            }
+
             return (wrapper, null);
+        }
+
+        /// <summary>
+        /// Extract the ThinContext from a Module instance via reflection.
+        /// The Module class stores it as a private _ctx field.
+        /// </summary>
+        private static ThinContext? ExtractContext(TranspiledModuleWrapper wrapper)
+        {
+            if (wrapper.ModuleInstance == null || wrapper.ModuleClass == null) return null;
+            var field = wrapper.ModuleClass.GetField("_ctx",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            return field?.GetValue(wrapper.ModuleInstance) as ThinContext;
         }
 
         /// <summary>

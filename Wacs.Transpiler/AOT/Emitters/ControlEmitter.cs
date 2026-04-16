@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System;
 using System.Collections.Generic;
 using System.Reflection.Emit;
 using Wacs.Core.Instructions;
@@ -45,6 +46,10 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         /// <summary>Number of values the label expects (result arity for blocks, param arity for loops).</summary>
         public int LabelArity;
+
+        /// <summary>CLR types of the label's result values. Used to create correctly-typed
+        /// shuttle locals when br_if needs to rearrange stack values.</summary>
+        public Type[] ResultClrTypes = System.Array.Empty<Type>();
     }
 
     /// <summary>
@@ -104,7 +109,8 @@ namespace Wacs.Transpiler.AOT.Emitters
                 BranchTarget = endLabel,
                 Kind = WasmOpCode.Block,
                 StackHeight = stackHeight,
-                LabelArity = BlockResultArity(inst.BlockType)
+                LabelArity = BlockResultArity(inst.BlockType),
+                ResultClrTypes = BlockResultClrTypes(inst.BlockType)
             });
 
             // Emit block body
@@ -165,7 +171,8 @@ namespace Wacs.Transpiler.AOT.Emitters
                 BranchTarget = endLabel,
                 Kind = WasmOpCode.If,
                 StackHeight = stackHeight,
-                LabelArity = BlockResultArity(inst.BlockType)
+                LabelArity = BlockResultArity(inst.BlockType),
+                ResultClrTypes = BlockResultClrTypes(inst.BlockType)
             });
 
             bool hasElse = inst.Count == 2;
@@ -212,64 +219,47 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         /// <summary>
         /// Emit br — unconditional branch to the Nth enclosing block's target.
-        /// </summary>
-        public static void EmitBr(ILGenerator il, InstBranch inst, Stack<EmitBlock> blockStack)
-        {
-            var target = PeekLabel(blockStack, inst.Label);
-            il.Emit(OpCodes.Br, target.BranchTarget);
-        }
-
         /// <summary>
         /// Emit br_if — conditional branch. Pops i32 condition from stack.
+        /// Uses precomputed excess from StackAnalysis.
         ///
-        /// WASM br_if with excess values on the stack above the label arity:
-        /// the branch path must pop those excess values to maintain CIL stack
-        /// consistency at the merge point. We save the condition, pop excess
-        /// values on the branch path, then branch.
-        /// </summary>
-        /// <summary>
-        /// Emit br_if — conditional branch. Pops i32 condition from stack.
-        ///
-        /// When there are excess values on the CIL stack above the label's
-        /// expected arity, the branch path must pop them to maintain CIL stack
-        /// consistency at the merge point (label target).
+        /// When excess > 0, the branch path must: save condition, check,
+        /// shuttle carried values past excess, branch. Fall-through is unchanged.
         /// </summary>
         public static void EmitBrIf(ILGenerator il, InstBranchIf inst,
-            Stack<EmitBlock> blockStack, int currentStackHeight = -1)
+            Stack<EmitBlock> blockStack, int excess)
         {
             var target = PeekLabel(blockStack, inst.Label);
 
-            // Calculate excess values that need to be popped on the branch path.
-            // currentStackHeight includes the condition (already counted by WASM StackDiff).
-            // The br_if instruction has StackDiff that accounts for popping the condition.
-            // At this point, the WASM stack height BEFORE br_if's own adjustment
-            // would be currentStackHeight - inst.StackDiff (undo the tracking).
-            // But simpler: just check if stack > target.StackHeight + target.LabelArity + 1 (condition)
-            if (currentStackHeight >= 0 && target.StackHeight >= 0)
+            if (excess > 0)
             {
-                // Stack BEFORE br_if pops: currentStackHeight was AFTER StackDiff
-                // br_if StackDiff = -1 (pops condition). So pre-pop height = currentStackHeight + 1
-                int prePopHeight = currentStackHeight + 1;
-                int excessValues = prePopHeight - 1 - target.StackHeight - target.LabelArity;
-                // -1 for the condition that brtrue will pop
+                // Save condition, conditionally rearrange stack on branch path.
+                // CIL stack (top→bottom): [condition, carried..., excess..., label_stack...]
+                var condLocal = il.DeclareLocal(typeof(int));
+                il.Emit(OpCodes.Stloc, condLocal);
 
-                if (excessValues > 0)
+                var fallThrough = il.DefineLabel();
+                il.Emit(OpCodes.Ldloc, condLocal);
+                il.Emit(OpCodes.Brfalse, fallThrough);
+
+                // Branch path: shuttle carried values past excess
+                int arity = target.LabelArity;
+                var carriedLocals = new LocalBuilder[arity];
+                for (int i = 0; i < arity; i++)
                 {
-                    // Save condition, conditionally pop excess, then branch
-                    var condLocal = il.DeclareLocal(typeof(int));
-                    il.Emit(OpCodes.Stloc, condLocal);
-                    var fallThrough = il.DefineLabel();
-                    il.Emit(OpCodes.Ldloc, condLocal);
-                    il.Emit(OpCodes.Brfalse, fallThrough);
-
-                    // Branch path: pop excess values to match label arity
-                    for (int i = 0; i < excessValues; i++)
-                        il.Emit(OpCodes.Pop);
-                    il.Emit(OpCodes.Br, target.BranchTarget);
-
-                    il.MarkLabel(fallThrough);
-                    return;
+                    var clrType = i < target.ResultClrTypes.Length
+                        ? target.ResultClrTypes[i] : typeof(int);
+                    carriedLocals[i] = il.DeclareLocal(clrType);
+                    il.Emit(OpCodes.Stloc, carriedLocals[i]);
                 }
+                for (int i = 0; i < excess; i++)
+                    il.Emit(OpCodes.Pop);
+                for (int i = arity - 1; i >= 0; i--)
+                    il.Emit(OpCodes.Ldloc, carriedLocals[i]);
+
+                il.Emit(OpCodes.Br, target.BranchTarget);
+                il.MarkLabel(fallThrough);
+                return;
             }
 
             il.Emit(OpCodes.Brtrue, target.BranchTarget);
@@ -278,20 +268,43 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// <summary>
         /// Emit br_table — switch on an index. Pops i32 from stack.
         /// CIL switch jumps to labels[index], falls through if out of range.
+        /// Uses precomputed excess from StackAnalysis.
         /// </summary>
-        public static void EmitBrTable(ILGenerator il, InstBranchTable inst, Stack<EmitBlock> blockStack)
+        public static void EmitBrTable(ILGenerator il, InstBranchTable inst,
+            Stack<EmitBlock> blockStack, int excess = 0)
         {
-            // Build CIL label array from WASM label depths
+            if (excess > 0)
+            {
+                // Need to clean up excess values before branching.
+                // Save index, save carried values, pop excess, restore carried,
+                // then switch. All targets have the same arity (spec requirement).
+                var target = PeekLabel(blockStack, inst.DefaultLabel);
+                var indexLocal = il.DeclareLocal(typeof(int));
+                il.Emit(OpCodes.Stloc, indexLocal);
+
+                int arity = target.LabelArity;
+                var carriedLocals = new LocalBuilder[arity];
+                for (int i = 0; i < arity; i++)
+                {
+                    var clrType = i < target.ResultClrTypes.Length
+                        ? target.ResultClrTypes[i] : typeof(int);
+                    carriedLocals[i] = il.DeclareLocal(clrType);
+                    il.Emit(OpCodes.Stloc, carriedLocals[i]);
+                }
+                for (int i = 0; i < excess; i++)
+                    il.Emit(OpCodes.Pop);
+                for (int i = arity - 1; i >= 0; i--)
+                    il.Emit(OpCodes.Ldloc, carriedLocals[i]);
+
+                il.Emit(OpCodes.Ldloc, indexLocal);
+            }
+
             var labels = new Label[inst.LabelCount];
             for (int i = 0; i < inst.LabelCount; i++)
-            {
                 labels[i] = PeekLabel(blockStack, inst.GetLabel(i)).BranchTarget;
-            }
 
             var defaultTarget = PeekLabel(blockStack, inst.DefaultLabel).BranchTarget;
 
-            // CIL switch: jumps to labels[index] if 0 <= index < labels.Length,
-            // falls through otherwise — then we branch to default.
             il.Emit(OpCodes.Switch, labels);
             il.Emit(OpCodes.Br, defaultTarget);
         }
@@ -308,10 +321,20 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         /// <summary>
+        /// Get the CLR types for the block's result values.
+        /// Used by EmitBrIf to create correctly-typed shuttle locals.
+        /// </summary>
+        private static Type[] BlockResultClrTypes(Wacs.Core.Types.Defs.ValType blockType)
+        {
+            if (blockType == Wacs.Core.Types.Defs.ValType.Empty) return System.Array.Empty<Type>();
+            return new[] { ModuleTranspiler.MapValType(blockType) };
+        }
+
+        /// <summary>
         /// Look up a label by depth in the block stack.
         /// Depth 0 = innermost (top of stack), depth N = Nth enclosing.
         /// </summary>
-        private static EmitBlock PeekLabel(Stack<EmitBlock> blockStack, int depth)
+        internal static EmitBlock PeekLabel(Stack<EmitBlock> blockStack, int depth)
         {
             // Stack enumeration goes top-first, which matches WASM label indexing
             int i = 0;
