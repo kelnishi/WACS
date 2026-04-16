@@ -852,17 +852,19 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// </summary>
         public static void ArrayCopyValues(Value dstRef, int dstOff, Value srcRef, int srcOff, int length)
         {
-            // Null check must happen before length-0 early exit (spec requires trap)
+            // Null check must happen before any early exit (spec requires trap)
             var dst = UnwrapArrayRef(dstRef);
             var src = UnwrapArrayRef(srcRef);
-            if (length == 0) return;
             var dstField = dst.GetType().GetField("elements");
             var srcField = src.GetType().GetField("elements");
             if (dstField == null || srcField == null) throw new TrapException("not an array type");
-            System.Array.Copy(
-                (System.Array)srcField.GetValue(src)!, srcOff,
-                (System.Array)dstField.GetValue(dst)!, dstOff,
-                length);
+            var dstArr = (System.Array)dstField.GetValue(dst)!;
+            var srcArr = (System.Array)srcField.GetValue(src)!;
+            // Bounds check: offset+length must be in bounds even for length=0
+            if (dstOff + length > dstArr.Length || srcOff + length > srcArr.Length)
+                throw new TrapException("out of bounds array access");
+            if (length == 0) return;
+            System.Array.Copy(srcArr, srcOff, dstArr, dstOff, length);
         }
 
         public static void ArrayInitData(ThinContext ctx, Value arrayRef, int dstOff,

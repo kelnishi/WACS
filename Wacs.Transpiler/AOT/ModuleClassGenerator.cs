@@ -287,14 +287,26 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
-        /// Evaluate a constant i32 expression (typically i32.const N).
+        /// Evaluate a constant i32 expression. Handles simple constants and
+        /// extended constant expressions (i32.add, i32.sub, i32.mul).
         /// </summary>
         private static int EvaluateConstI32(Wacs.Core.Types.Expression expr)
         {
+            var stack = new Stack<int>();
             foreach (var inst in expr.Instructions)
             {
-                if (inst is InstI32Const i32) return i32.Value;
+                if (inst is InstI32Const i32) { stack.Push(i32.Value); continue; }
+                if (inst is InstGlobalGet gg) { stack.Push(0); continue; } // placeholder
+                // Extended constant expressions
+                var op = inst.Op.x00;
+                if (op == Wacs.Core.OpCodes.OpCode.I32Add && stack.Count >= 2)
+                    { int b = stack.Pop(), a = stack.Pop(); stack.Push(a + b); continue; }
+                if (op == Wacs.Core.OpCodes.OpCode.I32Sub && stack.Count >= 2)
+                    { int b = stack.Pop(), a = stack.Pop(); stack.Push(a - b); continue; }
+                if (op == Wacs.Core.OpCodes.OpCode.I32Mul && stack.Count >= 2)
+                    { int b = stack.Pop(), a = stack.Pop(); stack.Push(a * b); continue; }
             }
+            if (stack.Count > 0) return stack.Pop();
             return 0;
         }
 
