@@ -24,7 +24,9 @@ namespace Wacs.Transpiler.Test
 
         private void Log(string msg)
         {
-            File.AppendAllText(LogFile, msg + "\n");
+            using var sw = new StreamWriter(LogFile, append: true);
+            sw.WriteLine(msg);
+            sw.Flush();
         }
 
         /// <summary>
@@ -40,16 +42,108 @@ namespace Wacs.Transpiler.Test
             using var stream = new FileStream(path, FileMode.Open);
             var mod = BinaryModuleParser.ParseWasm(stream);
             var inst = runtime.InstantiateModule(mod);
+            // Dump instructions BEFORE transpile
+            Log("Pre-transpile instruction dump:");
+            try
+            {
+                var funcs = new System.Collections.Generic.List<FunctionInstance>();
+                foreach (var fa in inst.FuncAddrs)
+                {
+                    var f = runtime.GetFunction(fa);
+                    if (f is FunctionInstance fi && fi.Module == inst) funcs.Add(fi);
+                }
+                Log($"  {funcs.Count} local functions");
+                if (funcs.Count > 0)
+                {
+                    foreach (var instr in funcs[0].Body.Instructions)
+                        Log($"    {instr.GetType().FullName} 0x{(byte)instr.Op.x00:X2}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"  dump failed: {ex.GetType().Name}: {ex.Message}");
+            }
+
             var result = new ModuleTranspiler().Transpile(inst, runtime);
             Log($"Transpiled: {result.TranspiledCount}, fallback: {result.FallbackCount}");
 
+            // Dump the TRANSPILER's view of instructions
+            var wasmFuncs = new System.Collections.Generic.List<FunctionInstance>();
+            foreach (var fa in inst.FuncAddrs)
+            {
+                var func = runtime.GetFunction(fa);
+                if (func is FunctionInstance fi && fi.Module == inst)
+                    wasmFuncs.Add(fi);
+            }
+            Log($"Local functions: {wasmFuncs.Count}");
+            if (wasmFuncs.Count > 0)
+            {
+                var first = wasmFuncs[0];
+                Log($"  First: '{first.Name}' body has {first.Body.Instructions.Count} instructions");
+                int instrIdx = 0;
+                foreach (var instr in first.Body.Instructions)
+                {
+                    Log($"  [{instrIdx}] {instr.GetType().FullName} op.x00=0x{(byte)instr.Op.x00:X2} op.xFB=0x{(byte)instr.Op.xFB:X2}");
+                    instrIdx++;
+                    if (instrIdx > 5) break;
+                }
+            }
+
+            Log("About to access FuncAddrs");
+            Log($"FuncAddrs count: {inst.FuncAddrs.Count()}");
+            int faCnt = 0;
+            foreach (var fa in inst.FuncAddrs)
+            {
+                var func = runtime.GetFunction(fa);
+                Log($"  [{faCnt}] {func.GetType().Name} '{func.Name}'");
+                if (func is FunctionInstance fii && faCnt == 0)
+                {
+                    Log($"  Body instructions:");
+                    foreach (var instr in fii.Body.Instructions)
+                        Log($"    {instr.GetType().Name} 0x{(byte)instr.Op.x00:X2}");
+                }
+                faCnt++;
+                if (faCnt > 2) break;
+            }
+            Log($"Methods: {result.Methods.Length}");
+            for (int i = 0; i < result.Methods.Length; i++)
+            {
+                var m = result.Methods[i];
+                Log($"  [{i}] {m.ReturnType.Name} {m.Name}");
+            }
+
             if (result.FallbackCount > 0) { Log("Has fallbacks — skipping"); return; }
 
+            Log("About to instantiate");
             var wrapper = new TranspiledModuleWrapper(result);
             wrapper.Instantiate();
             Log("Instantiated");
 
-            // Call get(0, 0) with default args
+            // Try calling Function_new directly via reflection
+            Log("Calling Function_new via reflection...");
+            try
+            {
+                var method = result.Methods[0]; // Function_new
+                Log($"  Method: {method.Name}, Params: {method.GetParameters().Length}");
+
+                // Get the ctx from the Module instance
+                var ctxField = result.ModuleClass!.GetField("_ctx",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var ctx = ctxField?.GetValue(wrapper.ModuleInstance);
+                Log($"  ctx: {ctx?.GetType().Name ?? "null"}");
+
+                var r = method.Invoke(null, new[] { ctx });
+                Log($"  Result: {r?.GetType().Name ?? "null"}");
+            }
+            catch (Exception ex)
+            {
+                Log($"  FAIL: {ex.GetType().Name}: {ex.Message}");
+                if (ex.InnerException != null)
+                    Log($"  Inner: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+            }
+
+            // Then get
+            Log("Calling get...");
             try
             {
                 var r = wrapper.InvokeExport("get", new[] { new Value(0), new Value(0) });

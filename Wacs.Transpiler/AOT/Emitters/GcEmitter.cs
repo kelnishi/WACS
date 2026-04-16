@@ -322,10 +322,17 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (gcType == null)
                 throw new TranspilerException($"array.get: type {inst.TypeIndex} not emitted");
 
-            // Stack: [arrayref (Value), index]
+            // Stack: [arrayref, index]
+            // arrayref might be Value (from function params/returns) or raw CLR object
+            // (from a preceding array.get that returned a ref element).
+            // We handle both by checking the array type and using Castclass.
             var idxLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, idxLocal);
+
+            // Unwrap Value to CLR object if the stack has Value
+            // For nested gets, the stack might already have a CLR object
             EmitUnwrapGcRef(il, gcType.ClrType);
+
             il.Emit(OpCodes.Ldfld, gcType.Fields[0]); // elements array
             il.Emit(OpCodes.Ldloc, idxLocal);
 
@@ -338,9 +345,8 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Conv_I4);
             }
 
-            // If element is a reference type (not a scalar), wrap back to Value.
-            // Scalar types (int, long, float, double, byte, short) stay on the CIL stack.
-            // Reference types (GC objects, object) need wrapping.
+            // Reference-typed elements must be wrapped back to Value for the
+            // WASM stack (method signatures use Value for all ref types).
             if (!IsScalarType(elementClrType))
             {
                 EmitWrapGcRef(il, inst.TypeIndex);
@@ -382,14 +388,22 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             int n = inst.FixedCount;
             int typeIdx = inst.TypeIndex;
-            // Spill N values, push ctx + typeIdx + n + values as args to helper
+
+            // Determine the element CLR type from the array type definition
+            var gcType = gcTypes.GetGcType(typeIdx);
+            Type elemClrType = typeof(Value); // fallback
+            if (gcType != null && gcType.Fields.Length > 0)
+                elemClrType = gcType.Fields[0].FieldType.GetElementType() ?? typeof(Value);
+
+            // Spill N values from CIL stack — use the ACTUAL element type
             var temps = new LocalBuilder[n];
             for (int i = n - 1; i >= 0; i--)
             {
-                temps[i] = il.DeclareLocal(typeof(Value));
+                temps[i] = il.DeclareLocal(IsScalarType(elemClrType) ? elemClrType : typeof(Value));
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
-            // Call helper: ArrayNewFixed(ctx, typeIdx, Value[] vals) → object
+
+            // Build Value[] for the helper
             il.Emit(OpCodes.Ldc_I4, n);
             il.Emit(OpCodes.Newarr, typeof(Value));
             for (int i = 0; i < n; i++)
@@ -397,23 +411,45 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Dup);
                 il.Emit(OpCodes.Ldc_I4, i);
                 il.Emit(OpCodes.Ldloc, temps[i]);
+
+                // Convert scalar to Value for the helper's Value[] parameter
+                if (IsScalarType(elemClrType) && elemClrType != typeof(Value))
+                {
+                    // Box the scalar into a Value via constructor
+                    if (elemClrType == typeof(int) || elemClrType == typeof(byte) || elemClrType == typeof(short))
+                    {
+                        if (elemClrType != typeof(int)) il.Emit(OpCodes.Conv_I4);
+                        il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(int) })!);
+                    }
+                    else if (elemClrType == typeof(long))
+                        il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(long) })!);
+                    else if (elemClrType == typeof(float))
+                        il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(float) })!);
+                    else if (elemClrType == typeof(double))
+                        il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(double) })!);
+                }
+
                 il.Emit(OpCodes.Stelem, typeof(Value));
             }
+
             il.Emit(OpCodes.Ldarg_0); // ctx
             il.Emit(OpCodes.Ldc_I4, typeIdx);
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
                 nameof(GcRuntimeHelpers.ArrayNewFixed), BindingFlags.Public | BindingFlags.Static)!);
+            EmitWrapGcRef(il, typeIdx);
         }
 
         // array.new_data/new_elem/fill/copy/init_data/init_elem: dispatch to helpers
         private static void EmitArrayNewData(ILGenerator il, InstArrayNewData inst, GcTypeEmitter gcTypes)
         {
             EmitArrayHelper(il, inst.TypeIndex, inst.DataIndex, nameof(GcRuntimeHelpers.ArrayNewData), 2);
+            EmitWrapGcRef(il, inst.TypeIndex); // helper returns object, need Value
         }
 
         private static void EmitArrayNewElem(ILGenerator il, InstArrayNewElem inst, GcTypeEmitter gcTypes)
         {
             EmitArrayHelper(il, inst.TypeIndex, inst.ElemIndex, nameof(GcRuntimeHelpers.ArrayNewElem), 2);
+            EmitWrapGcRef(il, inst.TypeIndex); // helper returns object, need Value
         }
 
         private static void EmitArrayFill(ILGenerator il, InstArrayFill inst, GcTypeEmitter gcTypes)
@@ -621,8 +657,19 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             if (gcRef is IGcRef igc)
                 return new Value(ValType.Nil, 0, igc);
-            // Fallback for untyped GC refs
-            return new Value(ValType.Nil);
+            // Wrap non-IGcRef objects in an adapter
+            return new Value(ValType.Nil, 0, new GcObjectAdapter(gcRef));
+        }
+
+        /// <summary>
+        /// Adapter that wraps a plain CLR object as IGcRef.
+        /// Used for emitted GC types that don't implement IGcRef directly.
+        /// </summary>
+        private class GcObjectAdapter : IGcRef
+        {
+            public readonly object Target;
+            public GcObjectAdapter(object target) => Target = target;
+            public RefIdx StoreIndex => default(PtrIdx);
         }
 
         /// <summary>
@@ -633,7 +680,11 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             if (val.IsNullRef)
                 throw new TrapException("null reference");
-            return val.GcRef ?? throw new TrapException("null reference");
+            var gcRef = val.GcRef ?? throw new TrapException("null reference");
+            // Unwrap the adapter if present
+            if (gcRef is GcObjectAdapter adapter)
+                return adapter.Target;
+            return gcRef;
         }
 
         /// <summary>

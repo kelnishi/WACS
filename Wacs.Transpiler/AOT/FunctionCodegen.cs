@@ -138,6 +138,24 @@ namespace Wacs.Transpiler.AOT
         /// </summary>
         private void EmitInstruction(ILGenerator il, InstructionBase inst)
         {
+            // Detect GC instructions by class type — their opcodes may be aliased
+            // after the interpreter's linking step rewrites the ByteCode.
+            if (inst.GetType().Namespace == "Wacs.Core.Instructions.GC")
+            {
+                GcEmitter.Emit(il, inst, inst.Op.xFB, _gcTypes, _moduleInst,
+                    depth =>
+                    {
+                        int i = 0;
+                        foreach (var block in _blockStack)
+                        {
+                            if (i == depth) return block.BranchTarget;
+                            i++;
+                        }
+                        throw new TranspilerException($"br_on_cast label depth {depth} exceeds block stack");
+                    });
+                return;
+            }
+
             var op = inst.Op.x00;
 
             // Exception handling
@@ -523,9 +541,13 @@ namespace Wacs.Transpiler.AOT
 
         private bool HasEmitter(InstructionBase inst)
         {
+            // Detect GC instructions by class type — opcodes may be aliased
+            if (inst.GetType().Namespace == "Wacs.Core.Instructions.GC")
+                return GcEmitter.CanEmit(inst.Op.xFB, _gcTypes);
+
             var op = inst.Op.x00;
 
-            // 0xFB prefix (GC)
+            // 0xFB prefix (GC) — fallback for non-aliased opcodes
             if (op == WasmOpCode.FB)
                 return GcEmitter.CanEmit(inst.Op.xFB, _gcTypes);
 
