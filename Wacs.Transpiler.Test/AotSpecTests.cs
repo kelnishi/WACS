@@ -431,14 +431,7 @@ namespace Wacs.Transpiler.Test
                 else
                 {
                     var expected = arg.AsValue;
-                    if (expected.IsNullRef)
-                    {
-                        if (!actual.IsNullRef)
-                            throw new TestException(
-                                $"Test failed {arc} \"{invokeAction.Field}\": " +
-                                $"Expected null ref, but got {actual}");
-                    }
-                    else if (!CompareValues(actual, expected))
+                    if (!CompareValues(actual, expected))
                     {
                         throw new TestException(
                             $"Test failed {arc} \"{invokeAction.Field}\": " +
@@ -521,7 +514,15 @@ namespace Wacs.Transpiler.Test
 
         private static bool CompareValues(Value actual, Value expected)
         {
-            if (expected.IsNullRef) return actual.IsNullRef;
+            // Match interpreter's comparison logic (Commands.cs:192):
+            // When expected is a null ref pattern (e.g., "funcref" with no value),
+            // it means "any value of that type" — null or non-null.
+            if (expected.IsNullRef)
+            {
+                if (!actual.IsNullRef && !actual.Type.Matches(expected.Type, null))
+                    return false;
+                return true;
+            }
             return actual.Equals(expected);
         }
     }
