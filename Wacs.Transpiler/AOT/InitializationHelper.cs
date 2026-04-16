@@ -28,8 +28,8 @@ namespace Wacs.Transpiler.AOT
     /// </summary>
     public class ModuleInitData
     {
-        /// <summary>Memory declarations: (minPages, maxPages) per memory.</summary>
-        public (long min, long max)[] Memories { get; set; } = Array.Empty<(long, long)>();
+        /// <summary>Memory declarations: (minPages, maxPages) per memory. maxPages=null if not declared.</summary>
+        public (long min, long? max)[] Memories { get; set; } = Array.Empty<(long, long?)>();
 
         /// <summary>Table declarations: (minSize, maxSize, elementType) per table.</summary>
         public (long min, long max, ValType elemType)[] Tables { get; set; }
@@ -213,10 +213,8 @@ namespace Wacs.Transpiler.AOT
             for (int i = 0; i < data.Memories.Length; i++)
             {
                 var (min, max) = data.Memories[i];
-                // max of 0 means "declared max is 0 pages" (can't grow)
-                // Only omit max (null) when it wasn't declared at all
                 var memType = new MemoryType(minimum: (uint)min,
-                    maximum: max < 65536 ? (uint?)max : null);
+                    maximum: max.HasValue ? (uint?)max.Value : null);
                 memories[i] = new MemoryInstance(memType);
             }
 

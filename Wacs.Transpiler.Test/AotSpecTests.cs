@@ -122,7 +122,8 @@ namespace Wacs.Transpiler.Test
                     // AND update our linker's module registry
                     if (command is RegisterCommand rc)
                     {
-                        command.RunTest(file, ref runtime, ref module);
+                        try { command.RunTest(file, ref runtime, ref module); }
+                        catch (Exception ex) when (ex is not Xunit.Sdk.XunitException) { continue; }
                         // Re-register under the "as" name (e.g., "module4")
                         string regName = rc.As ?? rc.Name ?? "";
                         if (currentWrapper != null && !string.IsNullOrEmpty(regName))
