@@ -60,7 +60,7 @@ namespace Wacs.Core.Instructions
         public static readonly InstSelect InstWithoutTypes = new();
 
         private readonly bool WithTypes;
-        private ValType[] Types = Array.Empty<ValType>();
+        public ValType[] Types { get; private set; } = Array.Empty<ValType>();
 
         public InstSelect(bool withTypes = false) : base(ByteCode.Select, -2)
             => WithTypes = withTypes;

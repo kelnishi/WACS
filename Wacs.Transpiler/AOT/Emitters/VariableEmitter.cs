@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System;
 using System.Reflection.Emit;
 using Wacs.Core.Instructions;
+using Wacs.Core.Runtime;
+using Wacs.Core.Types.Defs;
 using WasmOpCode = Wacs.Core.OpCodes.OpCode;
 
 namespace Wacs.Transpiler.AOT.Emitters
@@ -83,9 +86,16 @@ namespace Wacs.Transpiler.AOT.Emitters
                     il.Emit(OpCodes.Pop);
                     break;
                 case WasmOpCode.Select:
-                case WasmOpCode.SelectT:
-                    EmitSelect(il);
+                    EmitSelect(il, typeof(long));
                     break;
+                case WasmOpCode.SelectT:
+                {
+                    var sel = (InstSelect)inst;
+                    var tempType = sel.Types.Length > 0 && sel.Types[0].IsRefType()
+                        ? typeof(Value) : typeof(long);
+                    EmitSelect(il, tempType);
+                    break;
+                }
                 default:
                     throw new TranspilerException($"VariableEmitter: unhandled opcode {op}");
             }
@@ -125,7 +135,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// select: [val1 val2 cond] → [val1 if cond!=0, else val2]
         /// CIL: store val2 to temp, branch on cond, load val1 or val2
         /// </summary>
-        private static void EmitSelect(ILGenerator il)
+        private static void EmitSelect(ILGenerator il, Type val2Type)
         {
             // Stack: val1 val2 cond
             // Strategy: use a branch
@@ -136,8 +146,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             var condLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, condLocal);
 
-            // Store val2 in a temp
-            var val2Local = il.DeclareLocal(typeof(long)); // wide enough for any numeric
+            // Store val2 in a temp (type must match the CIL stack type)
+            var val2Local = il.DeclareLocal(val2Type);
             il.Emit(OpCodes.Stloc, val2Local);
 
             // Stack now has: val1
