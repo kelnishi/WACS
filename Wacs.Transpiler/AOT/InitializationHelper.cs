@@ -67,6 +67,24 @@ namespace Wacs.Transpiler.AOT
 
         /// <summary>Total function count (imports + locals).</summary>
         public int TotalFuncCount { get; set; }
+
+        /// <summary>
+        /// GC global initializers that can't be evaluated at transpile time.
+        /// (globalIdx, gcTypeIdx, initKind, params).
+        /// InitKind: 0=array.new(fill,len), 1=array.new_default(len), 2=struct.new(fields...)
+        /// </summary>
+        public List<GcGlobalInit> GcGlobalInits { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Describes a GC-typed global that requires runtime object creation.
+    /// </summary>
+    public class GcGlobalInit
+    {
+        public int GlobalIndex { get; set; }
+        public int TypeIndex { get; set; }
+        public int InitKind { get; set; } // 0=array.new, 1=array.new_default
+        public long[] Params { get; set; } = Array.Empty<long>(); // const args
     }
 
     /// <summary>
@@ -105,6 +123,34 @@ namespace Wacs.Transpiler.AOT
         public static int LastRegisteredId
         {
             get { lock (_lock) { return _initData.Count - 1; } }
+        }
+    }
+
+    /// <summary>
+    /// Registry of emitted GC CLR types, keyed by (initDataId, typeIndex).
+    /// Populated at transpile time, consumed at runtime by InitializeGcGlobals.
+    /// </summary>
+    public static class GcTypeRegistry
+    {
+        private static readonly Dictionary<(int initId, int typeIdx), Type> _types = new();
+        private static readonly object _lock = new();
+
+        public static void Register(int initDataId, int typeIndex, Type clrType)
+        {
+            lock (_lock) { _types[(initDataId, typeIndex)] = clrType; }
+        }
+
+        public static Type? Get(int initDataId, int typeIndex)
+        {
+            lock (_lock)
+            {
+                return _types.TryGetValue((initDataId, typeIndex), out var t) ? t : null;
+            }
+        }
+
+        public static void Reset()
+        {
+            lock (_lock) { _types.Clear(); }
         }
     }
 
@@ -193,7 +239,63 @@ namespace Wacs.Transpiler.AOT
             ctx.MemoryLimits = memoryLimits;
             ctx.DataSegmentBaseId = data.DataSegmentBaseId;
             ctx.ElemSegmentBaseId = data.ElemSegmentBaseId;
+
+            // 7. Initialize GC-typed globals (array.new, etc.)
+            InitializeGcGlobals(ctx, data, initDataId);
+
             return ctx;
+        }
+
+        /// <summary>
+        /// Create GC objects for globals whose initializers use GC constructors
+        /// (array.new, array.new_default, etc.) and store them in the globals.
+        /// </summary>
+        private static void InitializeGcGlobals(ThinContext ctx, ModuleInitData data, int initDataId)
+        {
+            foreach (var gcInit in data.GcGlobalInits)
+            {
+                var clrType = GcTypeRegistry.Get(initDataId, gcInit.TypeIndex);
+                if (clrType == null) continue;
+
+                object? gcObj = null;
+                switch (gcInit.InitKind)
+                {
+                    case 0: // array.new(fill_value, length)
+                    {
+                        int fillValue = gcInit.Params.Length > 0 ? (int)gcInit.Params[0] : 0;
+                        int length = gcInit.Params.Length > 1 ? (int)gcInit.Params[1] : 0;
+                        gcObj = Activator.CreateInstance(clrType);
+                        var fields = clrType.GetFields();
+                        // Fields[0] = elements array, Fields[1] = length
+                        var elemType = fields[0].FieldType.GetElementType()!;
+                        var arr = System.Array.CreateInstance(elemType, length);
+                        // Fill with initial value
+                        for (int i = 0; i < length; i++)
+                            arr.SetValue(Convert.ChangeType(fillValue, elemType), i);
+                        fields[0].SetValue(gcObj, arr);
+                        fields[1].SetValue(gcObj, length);
+                        break;
+                    }
+                    case 1: // array.new_default(length)
+                    {
+                        int length = gcInit.Params.Length > 0 ? (int)gcInit.Params[0] : 0;
+                        gcObj = Activator.CreateInstance(clrType);
+                        var fields = clrType.GetFields();
+                        var elemType = fields[0].FieldType.GetElementType()!;
+                        var arr = System.Array.CreateInstance(elemType, length);
+                        fields[0].SetValue(gcObj, arr);
+                        fields[1].SetValue(gcObj, length);
+                        break;
+                    }
+                }
+
+                if (gcObj != null && gcInit.GlobalIndex < ctx.Globals.Length)
+                {
+                    // Wrap as Value with GcRef
+                    var val = Emitters.GcRuntimeHelpers.WrapRef(gcObj);
+                    ctx.Globals[gcInit.GlobalIndex].Value = val;
+                }
+            }
         }
     }
 }

@@ -266,6 +266,14 @@ namespace Wacs.Transpiler.AOT
             var functionsType = typeBuilder.CreateType()!;
             var moduleClassType = moduleClassGen.CreateType();
 
+            // Register emitted GC types for runtime initialization of GC globals
+            int initDataId = moduleClassGen.InitDataId;
+            foreach (var (typeIdx, gcType) in gcTypeEmitter.EmittedTypes)
+            {
+                if (gcType.ClrType != null)
+                    GcTypeRegistry.Register(initDataId, typeIdx, gcType.ClrType);
+            }
+
             // Retrieve the actual MethodInfo objects from the baked type
             var methods = new MethodInfo[wasmFunctions.Count];
             var methodMap = new Dictionary<int, MethodInfo>();

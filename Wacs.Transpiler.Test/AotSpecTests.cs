@@ -55,6 +55,7 @@ namespace Wacs.Transpiler.Test
         {
             ModuleInit.Reset();
             InitRegistry.Reset();
+            GcTypeRegistry.Reset();
 
             _output.WriteLine($"AOT spec test: {file.TestName}");
             var env = new SpecTestEnv();
