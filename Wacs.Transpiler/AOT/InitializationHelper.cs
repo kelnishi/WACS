@@ -31,9 +31,9 @@ namespace Wacs.Transpiler.AOT
         /// <summary>Memory declarations: (minPages, maxPages) per memory. maxPages=null if not declared.</summary>
         public (long min, long? max)[] Memories { get; set; } = Array.Empty<(long, long?)>();
 
-        /// <summary>Table declarations: (minSize, maxSize, elementType) per table.</summary>
-        public (long min, long max, ValType elemType)[] Tables { get; set; }
-            = Array.Empty<(long, long, ValType)>();
+        /// <summary>Table declarations: (minSize, maxSize, elementType, initExpr) per table.</summary>
+        public (long min, long max, ValType elemType, Expression? initExpr)[] Tables { get; set; }
+            = Array.Empty<(long, long, ValType, Expression?)>();
 
         /// <summary>Global declarations: (type, mutability, initial value) per global.</summary>
         public (ValType type, Mutability mut, Value init)[] Globals { get; set; }
@@ -218,11 +218,11 @@ namespace Wacs.Transpiler.AOT
                 memories[i] = new MemoryInstance(memType);
             }
 
-            // 2. Allocate tables
+            // 2. Allocate tables (default values evaluated after globals in step 3b)
             var tables = new TableInstance[data.Tables.Length];
             for (int i = 0; i < data.Tables.Length; i++)
             {
-                var (min, max, elemType) = data.Tables[i];
+                var (min, max, elemType, _) = data.Tables[i];
                 var tableType = new TableType(elemType, new Limits(AddrType.I32, min, max));
                 tables[i] = new TableInstance(tableType, new Value(elemType));
             }
@@ -233,6 +233,20 @@ namespace Wacs.Transpiler.AOT
             {
                 var (type, mut, init) = data.Globals[i];
                 globals[i] = new GlobalInstance(new GlobalType(type, mut), init);
+            }
+
+            // 3b. Evaluate table default values (may depend on globals)
+            for (int i = 0; i < data.Tables.Length; i++)
+            {
+                var (_, _, _, initExpr) = data.Tables[i];
+                if (initExpr == null) continue;
+                var defaultVal = EvaluateTableInit(initExpr, data, globals);
+                if (!defaultVal.IsNullRef)
+                {
+                    var table = tables[i];
+                    for (int j = 0; j < table.Elements.Count; j++)
+                        table.Elements[j] = defaultVal;
+                }
             }
 
             // 4. Copy active data segments to memories
@@ -292,6 +306,46 @@ namespace Wacs.Transpiler.AOT
             InitializeGcGlobals(ctx, data, initDataId);
 
             return ctx;
+        }
+
+        /// <summary>
+        /// Evaluate a table default value expression.
+        /// Handles ref.null, ref.func, ref.i31(const), ref.i31(global.get).
+        /// </summary>
+        private static Value EvaluateTableInit(
+            Wacs.Core.Types.Expression initExpr, ModuleInitData data, GlobalInstance[] globals)
+        {
+            var stack = new Stack<Value>();
+            foreach (var inst in initExpr.Instructions)
+            {
+                if (inst is Wacs.Core.Instructions.Numeric.InstI32Const i32c)
+                    { stack.Push(new Value(i32c.Value)); continue; }
+                if (inst is Wacs.Core.Instructions.Reference.InstRefNull rn)
+                    { stack.Push(new Value(rn.RefType)); continue; }
+                if (inst is Wacs.Core.Instructions.Reference.InstRefFunc rf)
+                    { stack.Push(new Value(ValType.FuncRef, (int)rf.FunctionIndex.Value)); continue; }
+                if (inst is Wacs.Core.Instructions.InstGlobalGet gg)
+                {
+                    int idx = gg.GetIndex();
+                    if (idx < globals.Length)
+                        stack.Push(globals[idx].Value);
+                    else
+                        stack.Push(default);
+                    continue;
+                }
+                // GC instructions
+                if (inst.GetType().Namespace == "Wacs.Core.Instructions.GC")
+                {
+                    var gcOp = inst.Op.xFB;
+                    if (gcOp == Wacs.Core.OpCodes.GcCode.RefI31 && stack.Count > 0)
+                    {
+                        int val = stack.Pop().Data.Int32;
+                        stack.Push(new Value(ValType.I31, val & 0x7FFFFFFF));
+                    }
+                    continue;
+                }
+            }
+            return stack.Count > 0 ? stack.Pop() : default;
         }
 
         /// <summary>

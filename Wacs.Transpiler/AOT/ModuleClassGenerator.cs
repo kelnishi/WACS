@@ -116,14 +116,14 @@ namespace Wacs.Transpiler.AOT
             data.Memories = mems.ToArray();
 
             // Tables (imported + module-defined)
-            var tables = new List<(long min, long max, ValType elemType)>();
+            var tables = new List<(long min, long max, ValType elemType, Wacs.Core.Types.Expression? initExpr)>();
             foreach (var tbl in _wasmModule.ImportedTables)
             {
-                tables.Add((tbl.Limits.Minimum, tbl.Limits.Maximum ?? uint.MaxValue, tbl.ElementType));
+                tables.Add((tbl.Limits.Minimum, tbl.Limits.Maximum ?? uint.MaxValue, tbl.ElementType, null));
             }
             foreach (var tbl in _wasmModule.Tables)
             {
-                tables.Add((tbl.Limits.Minimum, tbl.Limits.Maximum ?? uint.MaxValue, tbl.ElementType));
+                tables.Add((tbl.Limits.Minimum, tbl.Limits.Maximum ?? uint.MaxValue, tbl.ElementType, tbl.Init));
             }
             data.Tables = tables.ToArray();
 
