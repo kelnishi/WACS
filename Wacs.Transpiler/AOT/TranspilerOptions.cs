@@ -68,6 +68,12 @@ namespace Wacs.Transpiler.AOT
 
         /// <summary>How data segments are stored in the transpiled assembly.</summary>
         public DataSegmentStorage DataStorage { get; set; } = DataSegmentStorage.CompressedResource;
+
+        /// <summary>
+        /// GC type checking capabilities to enable in transpiled assemblies.
+        /// Layer 0 (CLR inheritance) is always active. These flags enable additional layers.
+        /// </summary>
+        public TranspilerCapabilities GcTypeChecking { get; set; } = TranspilerCapabilities.None;
     }
 
     /// <summary>
