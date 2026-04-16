@@ -184,6 +184,15 @@ namespace Wacs.Transpiler.Test
             // runtime.CreateStackInvoker. The linker handles table/memory/global
             // sharing for host modules.
 
+            // Register spectest memory and table
+            var spectestMem = new byte[1 * 65536]; // 1 page, max 2
+            linker.RegisterHostMemory("spectest", "memory", spectestMem, maxPages: 2);
+            var spectestTable = new TableInstance(
+                new TableType(Wacs.Core.Types.Defs.ValType.FuncRef,
+                    new Limits(AddrType.I32, 10, 20)),
+                new Value(Wacs.Core.Types.Defs.ValType.FuncRef));
+            linker.RegisterHostTable("spectest", "table", spectestTable);
+
             // Register spectest globals
             linker.RegisterHostGlobal("spectest", "global_i32",
                 new GlobalInstance(new GlobalType(Wacs.Core.Types.Defs.ValType.I32, Mutability.Immutable),

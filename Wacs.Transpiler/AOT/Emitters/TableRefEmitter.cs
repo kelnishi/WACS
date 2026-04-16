@@ -271,15 +271,16 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             var table = ctx.Tables[tableIdx];
             int oldSize = table.Elements.Count;
-            if (!table.Grow(delta, initVal))
+            // delta is i32 but represents unsigned count per spec
+            if (!table.Grow((uint)delta, initVal))
                 return -1;
             return oldSize;
         }
 
         public static void TableFill(ThinContext ctx, int tableIdx, int dst, Value val, int len)
         {
-            if (len == 0) return;
             var table = ctx.Tables[tableIdx];
+            // Bounds check even for len=0 (spec requires trap on out-of-bounds offset)
             if (dst < 0 || (long)dst + len > table.Elements.Count)
                 throw new TrapException("out of bounds table access");
             for (int i = 0; i < len; i++)
