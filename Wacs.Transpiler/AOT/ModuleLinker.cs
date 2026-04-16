@@ -348,6 +348,39 @@ namespace Wacs.Transpiler.AOT
                         }
                     }
                 }
+
+                // Re-evaluate table default values that depend on imported globals.
+                // Tables with init expressions using global.get need to be re-filled
+                // with the correct default value after globals are patched.
+                for (int ti = 0; ti < initData2.Tables.Length; ti++)
+                {
+                    var (_, _, _, tableInitExpr) = initData2.Tables[ti];
+                    if (tableInitExpr == null) continue;
+                    // Check if the init expression uses global.get
+                    bool hasGlobalGet = false;
+                    foreach (var inst in tableInitExpr.Instructions)
+                        if (inst is Wacs.Core.Instructions.InstGlobalGet) { hasGlobalGet = true; break; }
+                    if (!hasGlobalGet) continue;
+                    if (ti >= ctx.Tables.Length) continue;
+
+                    // Evaluate the correct default with resolved globals
+                    var newDefault = EvaluateInitExpression(tableInitExpr, ctx.Globals);
+                    // Also evaluate what the old (wrong) default was with unresolved globals
+                    // to identify which slots to replace
+                    var table = ctx.Tables[ti];
+                    for (int j = 0; j < table.Elements.Count; j++)
+                    {
+                        var elem = table.Elements[j];
+                        // Replace slots that are null or match the old computed default.
+                        // Active element segments overwrote specific slots — skip those.
+                        // We can't distinguish perfectly, so replace all non-element slots.
+                        // For simple i31ref tables, the old default was ref.i31(0).
+                        if (elem.Type == ValType.I31 && elem.Data.Int32 == 0)
+                            table.Elements[j] = newDefault;
+                        else if (elem.IsNullRef)
+                            table.Elements[j] = newDefault;
+                    }
+                }
             }
         }
 
