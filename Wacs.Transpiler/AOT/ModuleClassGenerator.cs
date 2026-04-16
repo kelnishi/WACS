@@ -333,6 +333,14 @@ namespace Wacs.Transpiler.AOT
             // === Populate FuncTable ===
             EmitFuncTablePopulation(il, ctxLocal);
 
+            // === Bind delegates into table elements ===
+            // After FuncTable is populated, walk tables and replace raw funcref
+            // indices with delegate-carrying Values for cross-module call_indirect.
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Call, typeof(ThinContext).GetMethod(
+                nameof(ThinContext.BindTableDelegates),
+                BindingFlags.Public | BindingFlags.Instance)!);
+
             // Store ctx field
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldloc, ctxLocal);

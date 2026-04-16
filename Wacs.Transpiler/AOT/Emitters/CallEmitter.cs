@@ -597,14 +597,34 @@ namespace Wacs.Transpiler.AOT.Emitters
             ThinContext ctx, int tableIdx, int elemIdx, object?[] args,
             Type? expectedReturn = null)
         {
-            int funcIdx = ResolveIndirect(ctx, tableIdx, elemIdx);
+            var table = ctx.Tables[tableIdx];
+            if (elemIdx < 0 || elemIdx >= table.Elements.Count)
+                throw new TrapException($"undefined element {elemIdx}");
 
-            if (funcIdx < 0 || funcIdx >= ctx.FuncTable.Length)
-                throw new TrapException("undefined element");
-
-            var del = ctx.FuncTable[funcIdx];
-            if (del == null)
+            var r = table.Elements[elemIdx];
+            if (r.IsNullRef)
                 throw new TrapException("uninitialized element");
+
+            // Try to get delegate directly from the table element (cross-module path).
+            // Bound delegates are stored as DelegateRef in GcRef on funcref Values.
+            Delegate? del = (r.GcRef as DelegateRef)?.Target;
+
+            if (del == null)
+            {
+                // Fallback: resolve funcIdx → FuncTable lookup (same-module path)
+                int funcIdx;
+                if (ctx.Types != null)
+                    funcIdx = (int)r.GetFuncAddr(ctx.Types).Value;
+                else
+                    funcIdx = (int)r.Data.Ptr;
+
+                if (funcIdx < 0 || funcIdx >= ctx.FuncTable.Length)
+                    throw new TrapException("undefined element");
+
+                del = ctx.FuncTable[funcIdx];
+                if (del == null)
+                    throw new TrapException("uninitialized element");
+            }
 
             // Type check: verify delegate parameter count matches args.
             // Full WASM type checking compares param AND result types — we check

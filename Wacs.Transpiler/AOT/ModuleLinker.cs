@@ -222,6 +222,7 @@ namespace Wacs.Transpiler.AOT
             // Re-apply element segments that target imported (now shared) tables.
             // The Module constructor's Initialize() wrote these to placeholder tables;
             // now that we've patched the real shared tables in, re-apply them.
+            // Store bound delegates directly so cross-module call_indirect works.
             if (patchedTableIndices.Count > 0 && initDataId >= 0)
             {
                 var initData = InitRegistry.Get(initDataId);
@@ -233,8 +234,12 @@ namespace Wacs.Transpiler.AOT
                     {
                         if (elemOffset + j < table.Elements.Count && funcIndices[j] >= 0)
                         {
-                            table.Elements[elemOffset + j] = new Value(
-                                ValType.FuncRef, funcIndices[j]);
+                            int fi = funcIndices[j];
+                            var val = new Value(ValType.FuncRef, fi);
+                            // Bind the delegate directly for cross-module dispatch
+                            if (fi < ctx.FuncTable.Length && ctx.FuncTable[fi] != null)
+                                val.GcRef = new DelegateRef(ctx.FuncTable[fi]);
+                            table.Elements[elemOffset + j] = val;
                         }
                     }
                 }
