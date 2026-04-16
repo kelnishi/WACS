@@ -42,6 +42,7 @@ namespace Wacs.Transpiler.AOT
         public long Offset { get; set; }
         public byte[] Data { get; set; } = Array.Empty<byte>();
         public bool IsPassive { get; set; }
+        public Wacs.Core.Types.Expression? OffsetExpression { get; set; }
 
         /// <summary>
         /// Resource name when stored as embedded resource.
@@ -112,6 +113,7 @@ namespace Wacs.Transpiler.AOT
                 {
                     info.MemoryIndex = (int)active.MemoryIndex.Value;
                     info.Offset = EvaluateConstOffset(active.Offset);
+                    info.OffsetExpression = active.Offset;
                 }
 
                 segs.Add(info);
