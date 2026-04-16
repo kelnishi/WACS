@@ -431,14 +431,56 @@ namespace Wacs.Transpiler.AOT.Emitters
         // array.new_data/new_elem/fill/copy/init_data/init_elem: dispatch to helpers
         private static void EmitArrayNewData(ILGenerator il, InstArrayNewData inst, GcTypeEmitter gcTypes)
         {
+            var gcType = gcTypes.GetGcType(inst.TypeIndex);
+            if (gcType == null)
+                throw new TranspilerException($"array.new_data: type {inst.TypeIndex} not emitted");
+
+            // Call helper to get raw byte data
             EmitArrayHelper(il, inst.TypeIndex, inst.DataIndex, nameof(GcRuntimeHelpers.ArrayNewData), 2);
-            EmitWrapGcRef(il, inst.TypeIndex); // helper returns object, need Value
+            // Stack: [byte[]]
+            EmitWrapRawArrayInGcType(il, gcType);
         }
 
         private static void EmitArrayNewElem(ILGenerator il, InstArrayNewElem inst, GcTypeEmitter gcTypes)
         {
+            var gcType = gcTypes.GetGcType(inst.TypeIndex);
+            if (gcType == null)
+                throw new TranspilerException($"array.new_elem: type {inst.TypeIndex} not emitted");
+
+            // Call helper to get raw element data
             EmitArrayHelper(il, inst.TypeIndex, inst.ElemIndex, nameof(GcRuntimeHelpers.ArrayNewElem), 2);
-            EmitWrapGcRef(il, inst.TypeIndex); // helper returns object, need Value
+            // Stack: [object[]]
+            EmitWrapRawArrayInGcType(il, gcType);
+        }
+
+        /// <summary>
+        /// Wrap a raw array (byte[], object[], etc.) returned by a helper into the
+        /// proper emitted GC type. Creates a WasmArray_N instance and stores the
+        /// raw array in its elements field.
+        /// Stack: [raw array] → [Value (wrapped GC ref)]
+        /// </summary>
+        private static void EmitWrapRawArrayInGcType(ILGenerator il, EmittedGcType gcType)
+        {
+            var rawLocal = il.DeclareLocal(typeof(object));
+            il.Emit(OpCodes.Stloc, rawLocal);
+
+            // Create GC type instance
+            il.Emit(OpCodes.Newobj, gcType.ClrType.GetConstructor(Type.EmptyTypes)!);
+            il.Emit(OpCodes.Dup);
+
+            // Store elements — cast the raw array to the expected field type
+            il.Emit(OpCodes.Ldloc, rawLocal);
+            il.Emit(OpCodes.Castclass, gcType.Fields[0].FieldType); // cast to T[]
+            il.Emit(OpCodes.Stfld, gcType.Fields[0]); // elements
+
+            // Store length
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Ldloc, rawLocal);
+            il.Emit(OpCodes.Castclass, typeof(Array));
+            il.Emit(OpCodes.Call, typeof(Array).GetProperty("Length")!.GetGetMethod()!);
+            il.Emit(OpCodes.Stfld, gcType.Fields[1]); // length
+
+            EmitWrapGcRef(il, gcType.TypeIndex);
         }
 
         private static void EmitArrayFill(ILGenerator il, InstArrayFill inst, GcTypeEmitter gcTypes)
