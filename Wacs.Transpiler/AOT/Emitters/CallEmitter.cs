@@ -240,7 +240,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             int paramCount = site.FuncType.ParameterTypes.Arity;
             var resultTypes = site.FuncType.ResultType.Types;
 
-            // Stack: [p0, p1, ..., pN-1, elemIdx]
+            // Stack: [p0, p1, ..., pN-1, elemIdx (i32 or i64 for table64)]
+            il.Emit(OpCodes.Conv_I4); // safe: i32→i32 is no-op, i64→i32 truncates
             var elemIdxLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, elemIdxLocal);
 

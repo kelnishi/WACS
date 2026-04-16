@@ -338,6 +338,8 @@ namespace Wacs.Transpiler.AOT
             foreach (var inst in expr.Instructions)
             {
                 if (inst is InstI32Const i32) { stack.Push(i32.Value); continue; }
+                if (inst is Wacs.Core.Instructions.Numeric.InstI64Const i64c)
+                    { stack.Push((int)i64c.FetchImmediate(null!)); continue; }
                 if (inst is InstGlobalGet gg)
                 {
                     int idx = gg.GetIndex();
