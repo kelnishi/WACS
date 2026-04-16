@@ -224,13 +224,19 @@ namespace Wacs.Transpiler.AOT
             }
 
             // Re-apply data segments that target imported (now shared) memories.
+            // Uses saved data bytes since active segments were dropped after initialization.
             if (patchedMemoryIndices.Count > 0 && initDataId >= 0)
             {
                 var initData = InitRegistry.Get(initDataId);
                 foreach (var (memIdx, offset, segId) in initData.ActiveDataSegments)
                 {
                     if (!patchedMemoryIndices.Contains(memIdx)) continue;
-                    ModuleInit.CopyDataSegment(ctx.Memories, memIdx, offset, segId);
+                    if (initData.SavedDataSegments.TryGetValue(segId, out var segData))
+                    {
+                        var memory = ctx.Memories[memIdx];
+                        if (offset + segData.Length <= memory.Length)
+                            Buffer.BlockCopy(segData, 0, memory, offset, segData.Length);
+                    }
                 }
             }
 
