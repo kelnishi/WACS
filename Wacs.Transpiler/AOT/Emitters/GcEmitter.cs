@@ -581,13 +581,13 @@ namespace Wacs.Transpiler.AOT.Emitters
                 targetType = bocf.TargetType;
             }
 
-            // Stack: [ref (object)]
+            // Stack: [ref (Value)]
             // Test type, branch if match (br_on_cast) or mismatch (br_on_cast_fail)
             il.Emit(OpCodes.Dup); // keep ref on stack for both paths
             il.Emit(OpCodes.Ldc_I4, (int)targetType);
             il.Emit(OpCodes.Ldc_I4, 1); // nullable
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.RefTest), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.RefTestValue), BindingFlags.Public | BindingFlags.Static)!);
 
             var target = branchTarget(label);
             if (castFail)
@@ -602,31 +602,31 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldc_I4, (int)inst.HeapType);
             il.Emit(OpCodes.Ldc_I4, inst.IsNullable ? 1 : 0);
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.RefTest), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.RefTestValue), BindingFlags.Public | BindingFlags.Static)!);
         }
 
-        // ref.cast: pop [ref], push [ref] (or trap)
+        // ref.cast: pop [ref (Value)], push [ref (Value)] (or trap)
         private static void EmitRefCast(ILGenerator il, InstRefCast inst)
         {
             il.Emit(OpCodes.Ldc_I4, (int)inst.HeapType);
             il.Emit(OpCodes.Ldc_I4, inst.IsNullable ? 1 : 0);
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.RefCast), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.RefCastValue), BindingFlags.Public | BindingFlags.Static)!);
         }
 
-        // ref.i31: pop [i32], push [i31ref (as object)]
+        // ref.i31: pop [i32], push [i31ref (as Value)]
         private static void EmitRefI31(ILGenerator il)
         {
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.RefI31), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.RefI31Value), BindingFlags.Public | BindingFlags.Static)!);
         }
 
-        // i31.get_s / i31.get_u: pop [i31ref], push [i32]
+        // i31.get_s / i31.get_u: pop [i31ref (Value)], push [i32]
         private static void EmitI31Get(ILGenerator il, bool signed)
         {
             il.Emit(OpCodes.Ldc_I4, signed ? 1 : 0);
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.I31Get), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.I31GetValue), BindingFlags.Public | BindingFlags.Static)!);
         }
 
         // ==================================================================
@@ -750,8 +750,14 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         public static int RefTest(object val, int heapType, int nullable)
         {
-            // Simplified: check if non-null (full type checking requires TypesSpace)
             if (val == null) return nullable != 0 ? 1 : 0;
+            return 1;
+        }
+
+        /// <summary>Value-typed version for CIL stack compatibility.</summary>
+        public static int RefTestValue(Value val, int heapType, int nullable)
+        {
+            if (val.IsNullRef) return nullable != 0 ? 1 : 0;
             return 1;
         }
 
@@ -765,11 +771,26 @@ namespace Wacs.Transpiler.AOT.Emitters
             return val;
         }
 
+        /// <summary>Value-typed version for CIL stack compatibility.</summary>
+        public static Value RefCastValue(Value val, int heapType, int nullable)
+        {
+            if (val.IsNullRef)
+            {
+                if (nullable != 0) return val;
+                throw new TrapException("cast failure: null reference");
+            }
+            return val;
+        }
+
         public static object RefI31(int value)
         {
-            // i31 is a 31-bit integer stored as a tagged reference
-            // For CLR, box it
             return (object)(value & 0x7FFFFFFF);
+        }
+
+        /// <summary>Value-typed version for CIL stack compatibility.</summary>
+        public static Value RefI31Value(int value)
+        {
+            return new Value(ValType.I31, value & 0x7FFFFFFF);
         }
 
         public static int I31Get(object i31Ref, int signed)
@@ -778,7 +799,18 @@ namespace Wacs.Transpiler.AOT.Emitters
                 throw new TrapException("null i31 reference");
             int val = (int)i31Ref & 0x7FFFFFFF;
             if (signed != 0 && (val & 0x40000000) != 0)
-                val |= unchecked((int)0x80000000); // sign extend bit 30
+                val |= unchecked((int)0x80000000);
+            return val;
+        }
+
+        /// <summary>Value-typed version for CIL stack compatibility.</summary>
+        public static int I31GetValue(Value i31Ref, int signed)
+        {
+            if (i31Ref.IsNullRef)
+                throw new TrapException("null i31 reference");
+            int val = (int)i31Ref.Data.Int32 & 0x7FFFFFFF;
+            if (signed != 0 && (val & 0x40000000) != 0)
+                val |= unchecked((int)0x80000000);
             return val;
         }
 
