@@ -262,14 +262,18 @@ namespace Wacs.Transpiler.AOT
             // 0xFC prefix (extensions: sat truncation, bulk memory)
             if (op == WasmOpCode.FC)
             {
+                TrackExtStackEffect(inst, before: true);
                 ExtEmitter.Emit(il, inst, inst.Op.xFC);
+                TrackExtStackEffect(inst, before: false);
                 return;
             }
 
-            // 0xFD prefix (SIMD)
+            // 0xFD prefix (SIMD) — use generic StackDiff tracking
             if (op == WasmOpCode.FD)
             {
+                TrackGenericStackDiff(inst, before: true);
                 SimdEmitter.Emit(il, inst, inst.Op.xFD, _options, _diagnostics, _funcInst.Name);
+                TrackGenericStackDiff(inst, before: false);
                 return;
             }
 
@@ -305,12 +309,14 @@ namespace Wacs.Transpiler.AOT
                         var getInst = (InstGlobalGet)inst;
                         var globalType = ResolveGlobalType(getInst.GetIndex());
                         GlobalEmitter.EmitGlobalGet(il, getInst, globalType);
+                        _cilValidator.Push(ModuleTranspiler.MapValType(globalType));
                         return;
                     }
                     case WasmOpCode.GlobalSet:
                     {
                         var setInst = (InstGlobalSet)inst;
                         var globalType = ResolveGlobalType(setInst.GetIndex());
+                        _cilValidator.Pop(ModuleTranspiler.MapValType(globalType), "global.set");
                         GlobalEmitter.EmitGlobalSet(il, setInst, globalType);
                         return;
                     }
@@ -321,13 +327,16 @@ namespace Wacs.Transpiler.AOT
             if (MemoryEmitter.CanEmit(op))
             {
                 MemoryEmitter.Emit(il, inst, op);
+                TrackMemoryStackEffect(op);
                 return;
             }
 
             // Table and reference instructions
             if (TableRefEmitter.CanEmit(op))
             {
+                TrackTableRefStackEffect(op, inst, before: true);
                 TableRefEmitter.Emit(il, inst, op);
+                TrackTableRefStackEffect(op, inst, before: false);
                 return;
             }
 
@@ -336,7 +345,9 @@ namespace Wacs.Transpiler.AOT
             {
                 var site = CallEmitter.ResolveCallSite(
                     inst, op, _siblingFunctions, _importCount, _moduleInst, _allFunctionTypes);
+                TrackCallStackEffect(site, before: true);
                 CallEmitter.EmitCallSite(il, site, _siblingMethods, _moduleInst, _options);
+                TrackCallStackEffect(site, before: false);
                 return;
             }
 
@@ -345,6 +356,7 @@ namespace Wacs.Transpiler.AOT
             {
                 case WasmOpCode.Unreachable:
                     ControlEmitter.EmitUnreachable(il);
+                    _cilValidator.SetUnreachable();
                     break;
 
                 case WasmOpCode.Nop:
@@ -369,6 +381,7 @@ namespace Wacs.Transpiler.AOT
 
                 case WasmOpCode.If:
                 {
+                    _cilValidator.Pop(typeof(int), "if.condition");
                     int sh = (_currentInfo?.StackHeightBefore ?? 1) - 1;
                     ControlEmitter.EmitIf(il, (InstIf)inst, _blockStack, EmitInstruction,
                         sh, _moduleInst);
@@ -396,8 +409,6 @@ namespace Wacs.Transpiler.AOT
 
                 case WasmOpCode.Return:
                 {
-                    // return ≡ br to the function-level block.
-                    // Use precomputed excess from StackAnalysis.
                     EmitBlock funcBlock = null!;
                     foreach (var block in _blockStack)
                         funcBlock = block;
@@ -405,6 +416,7 @@ namespace Wacs.Transpiler.AOT
                     int excess = _currentInfo?.Excess ?? 0;
                     EmitExcessCleanup(il, excess, funcBlock);
                     il.Emit(OpCodes.Ret);
+                    _cilValidator.SetUnreachable();
                     break;
                 }
 
@@ -414,11 +426,13 @@ namespace Wacs.Transpiler.AOT
                     int excess = _currentInfo?.Excess ?? 0;
                     EmitExcessCleanup(il, excess, target);
                     il.Emit(OpCodes.Br, target.BranchTarget);
+                    _cilValidator.SetUnreachable();
                     break;
                 }
 
                 case WasmOpCode.BrIf:
                 {
+                    _cilValidator.Pop(typeof(int), "br_if.condition");
                     int excess = _currentInfo?.Excess ?? 0;
                     ControlEmitter.EmitBrIf(il, (InstBranchIf)inst, _blockStack, excess);
                     break;
@@ -426,15 +440,20 @@ namespace Wacs.Transpiler.AOT
 
                 case WasmOpCode.BrTable:
                 {
+                    _cilValidator.Pop(typeof(int), "br_table.index");
                     int excess = _currentInfo?.Excess ?? 0;
                     ControlEmitter.EmitBrTable(il, (InstBranchTable)inst, _blockStack,
                         excess, _currentInfo?.BrTableExcess);
+                    _cilValidator.SetUnreachable();
                     break;
                 }
 
                 case WasmOpCode.BrOnNull:
                 {
                     // br_on_null L: pop ref, if null branch to L (ref consumed), else push ref back
+                    _cilValidator.Pop(typeof(Value), "br_on_null.ref");
+                    // Fall-through: ref stays (dup'd then conditionally consumed)
+                    _cilValidator.Push(typeof(Value));
                     var brInst = (Wacs.Core.Instructions.Reference.InstBrOnNull)inst;
                     var target = ControlEmitter.PeekLabel(_blockStack, brInst.Label);
                     int excess = _currentInfo?.Excess ?? 0;
@@ -615,6 +634,133 @@ namespace Wacs.Transpiler.AOT
         /// Track the CIL stack effect of a numeric instruction in the validator.
         /// Constants push a typed value; unary ops pop+push; binary ops pop 2 push 1.
         /// </summary>
+        /// <summary>Track memory instruction stack effects.</summary>
+        private void TrackMemoryStackEffect(WasmOpCode op)
+        {
+            switch (op)
+            {
+                // Loads: [i32 addr] → [T]
+                case WasmOpCode.I32Load or WasmOpCode.I32Load8S or WasmOpCode.I32Load8U
+                    or WasmOpCode.I32Load16S or WasmOpCode.I32Load16U:
+                    _cilValidator.Pop(typeof(int), "mem.load addr");
+                    _cilValidator.Push(typeof(int));
+                    break;
+                case WasmOpCode.I64Load or WasmOpCode.I64Load8S or WasmOpCode.I64Load8U
+                    or WasmOpCode.I64Load16S or WasmOpCode.I64Load16U
+                    or WasmOpCode.I64Load32S or WasmOpCode.I64Load32U:
+                    _cilValidator.Pop(typeof(int), "mem.load addr");
+                    _cilValidator.Push(typeof(long));
+                    break;
+                case WasmOpCode.F32Load:
+                    _cilValidator.Pop(typeof(int), "f32.load addr");
+                    _cilValidator.Push(typeof(float));
+                    break;
+                case WasmOpCode.F64Load:
+                    _cilValidator.Pop(typeof(int), "f64.load addr");
+                    _cilValidator.Push(typeof(double));
+                    break;
+
+                // Stores: [i32 addr, T val] → []
+                case WasmOpCode.I32Store or WasmOpCode.I32Store8 or WasmOpCode.I32Store16:
+                    _cilValidator.Pop(typeof(int), "i32.store val");
+                    _cilValidator.Pop(typeof(int), "mem.store addr");
+                    break;
+                case WasmOpCode.I64Store or WasmOpCode.I64Store8 or WasmOpCode.I64Store16
+                    or WasmOpCode.I64Store32:
+                    _cilValidator.Pop(typeof(long), "i64.store val");
+                    _cilValidator.Pop(typeof(int), "mem.store addr");
+                    break;
+                case WasmOpCode.F32Store:
+                    _cilValidator.Pop(typeof(float), "f32.store val");
+                    _cilValidator.Pop(typeof(int), "mem.store addr");
+                    break;
+                case WasmOpCode.F64Store:
+                    _cilValidator.Pop(typeof(double), "f64.store val");
+                    _cilValidator.Pop(typeof(int), "mem.store addr");
+                    break;
+
+                // memory.size: [] → [i32]
+                case WasmOpCode.MemorySize:
+                    _cilValidator.Push(typeof(int));
+                    break;
+                // memory.grow: [i32 delta] → [i32 old_size]
+                case WasmOpCode.MemoryGrow:
+                    _cilValidator.Pop(typeof(int), "memory.grow delta");
+                    _cilValidator.Push(typeof(int));
+                    break;
+            }
+        }
+
+        /// <summary>Track table/ref instruction stack effects.</summary>
+        private void TrackTableRefStackEffect(WasmOpCode op, InstructionBase inst, bool before)
+        {
+            if (before)
+            {
+                switch (op)
+                {
+                    case WasmOpCode.TableGet:
+                        _cilValidator.Pop(typeof(int), "table.get idx"); break;
+                    case WasmOpCode.TableSet:
+                        _cilValidator.Pop(typeof(Value), "table.set val");
+                        _cilValidator.Pop(typeof(int), "table.set idx"); break;
+                    case WasmOpCode.RefIsNull:
+                        _cilValidator.Pop(typeof(Value), "ref.is_null"); break;
+                    case WasmOpCode.RefEq:
+                        _cilValidator.Pop(typeof(Value), "ref.eq b");
+                        _cilValidator.Pop(typeof(Value), "ref.eq a"); break;
+                    case WasmOpCode.RefAsNonNull:
+                        _cilValidator.Pop(typeof(Value), "ref.as_non_null"); break;
+                }
+            }
+            else // after
+            {
+                switch (op)
+                {
+                    case WasmOpCode.TableGet:
+                        _cilValidator.Push(typeof(Value)); break;
+                    case WasmOpCode.RefNull:
+                        _cilValidator.Push(typeof(Value)); break;
+                    case WasmOpCode.RefIsNull:
+                        _cilValidator.Push(typeof(int)); break;
+                    case WasmOpCode.RefFunc:
+                        _cilValidator.Push(typeof(Value)); break;
+                    case WasmOpCode.RefEq:
+                        _cilValidator.Push(typeof(int)); break;
+                    case WasmOpCode.RefAsNonNull:
+                        _cilValidator.Push(typeof(Value)); break;
+                }
+            }
+        }
+
+        /// <summary>Track call instruction stack effects from resolved call site.</summary>
+        private void TrackCallStackEffect(CallSite site, bool before)
+        {
+            if (before)
+            {
+                // Indirect/ref calls pop a table index or funcref
+                if (site.Strategy == CallStrategy.TableIndirect)
+                    _cilValidator.Pop(typeof(int), "call_indirect.idx");
+                else if (site.Strategy == CallStrategy.RefDispatch)
+                    _cilValidator.Pop(typeof(Value), "call_ref.funcref");
+
+                // Pop arguments in reverse order
+                for (int i = site.FuncType.ParameterTypes.Arity - 1; i >= 0; i--)
+                {
+                    var ptype = ModuleTranspiler.MapValType(site.FuncType.ParameterTypes.Types[i]);
+                    _cilValidator.Pop(ptype, $"call.param[{i}]");
+                }
+            }
+            else // after
+            {
+                // Push results
+                for (int i = 0; i < site.FuncType.ResultType.Arity; i++)
+                {
+                    var rtype = ModuleTranspiler.MapValType(site.FuncType.ResultType.Types[i]);
+                    _cilValidator.Push(rtype);
+                }
+            }
+        }
+
         private void TrackNumericStackEffect(WasmOpCode op)
         {
             switch (op)
@@ -783,6 +929,108 @@ namespace Wacs.Transpiler.AOT
                     _cilValidator.Pop(typeof(int), "i32.extend"); _cilValidator.Push(typeof(int)); break;
                 case WasmOpCode.I64Extend8S or WasmOpCode.I64Extend16S or WasmOpCode.I64Extend32S:
                     _cilValidator.Pop(typeof(long), "i64.extend"); _cilValidator.Push(typeof(long)); break;
+            }
+        }
+
+        /// <summary>Track 0xFC prefix (extension) instruction stack effects.</summary>
+        private void TrackExtStackEffect(InstructionBase inst, bool before)
+        {
+            var extOp = inst.Op.xFC;
+            if (before)
+            {
+                switch (extOp)
+                {
+                    // Bulk memory: [dst:i32, src:i32, len:i32] → []
+                    case Wacs.Core.OpCodes.ExtCode.MemoryCopy:
+                    case Wacs.Core.OpCodes.ExtCode.MemoryFill:
+                    case Wacs.Core.OpCodes.ExtCode.MemoryInit:
+                        _cilValidator.Pop(typeof(int), "bulk.len");
+                        _cilValidator.Pop(typeof(int), "bulk.src");
+                        _cilValidator.Pop(typeof(int), "bulk.dst");
+                        break;
+                    // Table bulk: [dst:i32, src:i32, len:i32] → []
+                    case Wacs.Core.OpCodes.ExtCode.TableInit:
+                    case Wacs.Core.OpCodes.ExtCode.TableCopy:
+                        _cilValidator.Pop(typeof(int), "table_bulk.len");
+                        _cilValidator.Pop(typeof(int), "table_bulk.src");
+                        _cilValidator.Pop(typeof(int), "table_bulk.dst");
+                        break;
+                    // table.fill: [dst:i32, val:Value, len:i32] → []
+                    case Wacs.Core.OpCodes.ExtCode.TableFill:
+                        _cilValidator.Pop(typeof(int), "table.fill len");
+                        _cilValidator.Pop(typeof(Value), "table.fill val");
+                        _cilValidator.Pop(typeof(int), "table.fill dst");
+                        break;
+                    // table.grow: [val:Value, delta:i32] → [i32]
+                    case Wacs.Core.OpCodes.ExtCode.TableGrow:
+                        _cilValidator.Pop(typeof(int), "table.grow delta");
+                        _cilValidator.Pop(typeof(Value), "table.grow val");
+                        break;
+                    // table.size: [] → [i32]
+                    case Wacs.Core.OpCodes.ExtCode.TableSize:
+                        break;
+                    // data.drop / elem.drop: [] → []
+                    case Wacs.Core.OpCodes.ExtCode.DataDrop:
+                    case Wacs.Core.OpCodes.ExtCode.ElemDrop:
+                        break;
+                    // sat truncation: pop one, push one (handled generically)
+                    default:
+                        TrackGenericStackDiff(inst, before: true);
+                        break;
+                }
+            }
+            else // after
+            {
+                switch (extOp)
+                {
+                    case Wacs.Core.OpCodes.ExtCode.TableGrow:
+                    case Wacs.Core.OpCodes.ExtCode.TableSize:
+                        _cilValidator.Push(typeof(int)); break;
+                    case Wacs.Core.OpCodes.ExtCode.MemoryCopy:
+                    case Wacs.Core.OpCodes.ExtCode.MemoryFill:
+                    case Wacs.Core.OpCodes.ExtCode.MemoryInit:
+                    case Wacs.Core.OpCodes.ExtCode.TableInit:
+                    case Wacs.Core.OpCodes.ExtCode.TableCopy:
+                    case Wacs.Core.OpCodes.ExtCode.TableFill:
+                    case Wacs.Core.OpCodes.ExtCode.DataDrop:
+                    case Wacs.Core.OpCodes.ExtCode.ElemDrop:
+                        break; // void result
+                    default:
+                        TrackGenericStackDiff(inst, before: false);
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Generic stack effect tracking using the instruction's StackDiff.
+        /// Used for SIMD and other instructions without detailed type tracking.
+        /// Pops/pushes with typeof(object) as a type placeholder.
+        /// </summary>
+        private void TrackGenericStackDiff(InstructionBase inst, bool before)
+        {
+            int diff = inst.StackDiff;
+            if (before)
+            {
+                // StackDiff = results - consumed. If negative, we consume more than we produce.
+                // For the "before" pass, pop consumed values.
+                // For common patterns:
+                //   diff = -1  → consumes 2, produces 1 (binary op) — pop 2
+                //   diff = 0   → consumes N, produces N — pop N (unknown)
+                //   diff = 1   → consumes 0, produces 1 (const) — pop 0
+                // We can't determine exact pops without the instruction signature,
+                // so we only track the net diff after emission.
+            }
+            else
+            {
+                // After emission, adjust the validator by the net diff.
+                // Since we Reset at instruction entry, the current height is from
+                // the pre-pass. The post-instruction height should be height + diff.
+                // We apply the diff as pops (if negative) or pushes (if positive).
+                if (diff > 0)
+                    _cilValidator.Push(typeof(object), diff);
+                else if (diff < 0)
+                    _cilValidator.Pop(-diff, "generic");
             }
         }
 
