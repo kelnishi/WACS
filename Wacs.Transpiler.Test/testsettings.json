@@ -1,7 +1,1 @@
-{
-  "JsonDirectory": "../../../../Spec.Test/generated-json",
-  "TraceExecution": false,
-  "Single": null,
-  "SkipWasts": ["comments.wast","annotations.wast","linking.wast","linking0.wast","linking3.wast"],
-  "SkipReason_linking": "assert_uninstantiable partial segment persistence: cross-engine shared-state propagation"
-}
+{"JsonDirectory":"../../../../Spec.Test/generated-json","TraceExecution":false,"Single":null,"SkipWasts":["comments.wast","annotations.wast","linking.wast","linking0.wast","linking3.wast"]}

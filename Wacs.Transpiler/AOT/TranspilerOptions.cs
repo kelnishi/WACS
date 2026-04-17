@@ -54,10 +54,13 @@ namespace Wacs.Transpiler.AOT
 
         /// <summary>
         /// When true, emit the CIL `tail.` prefix for return_call instructions.
-        /// The CLR JIT may or may not honor the prefix depending on context.
-        /// Default false — tail calls are emitted as regular calls.
+        /// WASM return_call semantics require true tail calls — without this,
+        /// recursive tail calls exhaust the CLR stack. The CLR honors tail. when
+        /// the call site meets the preconditions (matching signatures, no try
+        /// frames, immediate ret after call). Our sibling-call emission meets
+        /// these, so tail calls are enabled by default for spec compliance.
         /// </summary>
-        public bool EmitTailCallPrefix { get; set; } = false;
+        public bool EmitTailCallPrefix { get; set; } = true;
 
         /// <summary>
         /// Maximum function body size (in instructions) to attempt transpilation.
