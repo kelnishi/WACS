@@ -1054,11 +1054,40 @@ namespace Wacs.Transpiler.AOT
                 il.Emit(OpCodes.Ldnull);
                 _cilValidator.Push(typeof(object));
             }
+            else if (ModuleTranspiler.IsExnRefType(inst.RefType))
+            {
+                il.Emit(OpCodes.Ldnull);
+                _cilValidator.Push(typeof(WasmException));
+            }
             else
             {
-                il.Emit(OpCodes.Ldc_I4, (int)inst.RefType);
-                il.Emit(OpCodes.Call, typeof(Value).GetMethod(
-                    nameof(Value.Null), new[] { typeof(ValType) })!);
+                // Value-typed null ref (funcref / externref / concrete func type).
+                // Use the pre-constructed static field when available — avoids
+                // emitting `Ldc_I4 (int)ValType; Call Value.Null` which passed
+                // a large-int enum value that interacted badly with the JIT
+                // for defType variants. For other types, fall through to
+                // Value.Null(type).
+                var refType = inst.RefType;
+                FieldInfo? staticField = null;
+                if (refType == ValType.FuncRef)
+                    staticField = typeof(Value).GetField(nameof(Value.NullFuncRef));
+                else if (refType == ValType.ExternRef)
+                    staticField = typeof(Value).GetField(nameof(Value.NullExternRef));
+
+                if (staticField != null)
+                {
+                    il.Emit(OpCodes.Ldsfld, staticField);
+                }
+                else
+                {
+                    // Construct `new Value(type)` via Newobj — the ctor
+                    // handles nullable ref types uniformly (Data.Ptr =
+                    // long.MinValue, Data.Set = true) and leaves the new
+                    // Value on the stack.
+                    il.Emit(OpCodes.Ldc_I4, (int)refType);
+                    il.Emit(OpCodes.Newobj,
+                        typeof(Value).GetConstructor(new[] { typeof(ValType) })!);
+                }
                 _cilValidator.Push(typeof(Value));
             }
         }
