@@ -199,18 +199,30 @@ namespace Wacs.Transpiler.AOT.Emitters
                     break;
 
                 // === ref.test / ref.cast ===
+                // Dispatch on operand representation (doc 2 §1): GC refs are
+                // `object` on the internal stack, funcref/externref are `Value`.
+                // Both representations need to reach the RefTestValue /
+                // RefTestObject helpers with a matching argument type.
                 case GcCode.RefTest:
                 case GcCode.RefTestNull:
-                    cv?.Pop(typeof(object), "ref.test val");
-                    EmitRefTest(il, (InstRefTest)inst);
+                {
+                    var topType = cv?.Peek() ?? typeof(object);
+                    bool isObject = topType == typeof(object);
+                    cv?.Pop(isObject ? typeof(object) : typeof(Value), "ref.test val");
+                    EmitRefTest(il, (InstRefTest)inst, isObject);
                     cv?.Push(typeof(int));
                     break;
+                }
                 case GcCode.RefCast:
                 case GcCode.RefCastNull:
-                    cv?.Pop(typeof(object), "ref.cast val");
-                    EmitRefCast(il, (InstRefCast)inst);
-                    cv?.Push(typeof(object));
+                {
+                    var topType = cv?.Peek() ?? typeof(object);
+                    bool isObject = topType == typeof(object);
+                    cv?.Pop(isObject ? typeof(object) : typeof(Value), "ref.cast val");
+                    EmitRefCast(il, (InstRefCast)inst, isObject);
+                    cv?.Push(isObject ? typeof(object) : typeof(Value));
                     break;
+                }
 
                 // === br_on_cast === (unreachable here — FunctionCodegen intercepts)
                 case GcCode.BrOnCast:
@@ -733,24 +745,31 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
 
-        private static void EmitRefTest(ILGenerator il, InstRefTest inst)
+        private static void EmitRefTest(ILGenerator il, InstRefTest inst, bool isObject)
         {
-            // Stack: [object]
+            // Stack: [ref] (object for GC refs, Value for funcref/externref).
             il.Emit(OpCodes.Ldc_I4, (int)inst.HeapType);
             il.Emit(OpCodes.Ldc_I4, inst.IsNullable ? 1 : 0);
             il.Emit(OpCodes.Ldarg_0); // ThinContext for type lookup
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.RefTestObject), BindingFlags.Public | BindingFlags.Static)!);
+                isObject
+                    ? nameof(GcRuntimeHelpers.RefTestObject)
+                    : nameof(GcRuntimeHelpers.RefTestValue),
+                BindingFlags.Public | BindingFlags.Static)!);
         }
 
-        // ref.cast: pop [ref (object)], push [ref (object)] (or trap)
-        private static void EmitRefCast(ILGenerator il, InstRefCast inst)
+        // ref.cast: pop [ref], push [ref] (or trap).
+        // Operand representation preserves (object→object, Value→Value).
+        private static void EmitRefCast(ILGenerator il, InstRefCast inst, bool isObject)
         {
             il.Emit(OpCodes.Ldc_I4, (int)inst.HeapType);
             il.Emit(OpCodes.Ldc_I4, inst.IsNullable ? 1 : 0);
             il.Emit(OpCodes.Ldarg_0); // ThinContext for type lookup
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.RefCastObject), BindingFlags.Public | BindingFlags.Static)!);
+                isObject
+                    ? nameof(GcRuntimeHelpers.RefCastObject)
+                    : nameof(GcRuntimeHelpers.RefCastValue),
+                BindingFlags.Public | BindingFlags.Static)!);
         }
 
         // ref.i31: pop [i32], push [i31ref (object — boxed I31Ref)]
@@ -1039,6 +1058,22 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             int masked = value & 0x7FFFFFFF;
             return new Value(ValType.I31, masked, new I31Ref(masked));
+        }
+
+        /// <summary>
+        /// ref.cast on a Value-typed ref (funcref / externref). Traps on cast
+        /// failure per doc 1 §11.8. Nullable casts pass null through.
+        /// </summary>
+        public static Value RefCastValue(Value val, int heapType, int nullable, ThinContext ctx)
+        {
+            if (val.IsNullRef)
+            {
+                if (nullable != 0) return val;
+                throw new TrapException("cast failure: null reference");
+            }
+            if (RefTestValue(val, heapType, nullable, ctx) == 0)
+                throw new TrapException("cast failure");
+            return val;
         }
 
         public static object ArrayNewData(ThinContext ctx, int typeIdx, int dataIdx, int offset, int length)
