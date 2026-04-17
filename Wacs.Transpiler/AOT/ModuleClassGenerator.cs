@@ -162,6 +162,8 @@ namespace Wacs.Transpiler.AOT
             }
             data.Globals = globals.ToArray();
 
+            // Function type hashes populated by ModuleTranspiler which has ModuleInstance access
+
             // Active data segments
             var activeDataIndices = new List<int>();
             if (_dataEmitter != null)
