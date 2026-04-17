@@ -863,9 +863,32 @@ namespace Wacs.Transpiler.AOT.Emitters
                 return new Value(ValType.Any); // null ref
             var valType = DeriveValType(gcRef);
             Debug.Assert(valType != ValType.Nil, $"WrapRef: derived Nil type for {gcRef.GetType().Name}");
+            // HostExternRef carries its address in Data.Ptr, not via IGcRef
+            // store-index; preserve it explicitly.
+            if (gcRef is HostExternRef host)
+                return new Value(valType, host.Address, host);
             if (gcRef is IGcRef igc)
                 return new Value(valType, 0, igc);
             return new Value(valType, 0, new GcObjectAdapter(gcRef));
+        }
+
+        /// <summary>
+        /// WrapRef variant that tags the Value with an explicit target type
+        /// rather than deriving from the object's runtime class. Used at
+        /// function-return / global-set / table-set boundaries where the
+        /// declared WASM type governs the Value.Type field (a `ref.extern`
+        /// passed through `any.convert_extern` lands in an anyref-typed
+        /// context — the Value must carry ValType.Any, not ExternRef).
+        /// </summary>
+        public static Value WrapRefAs(object? gcRef, int targetType)
+        {
+            var vt = (ValType)targetType;
+            if (gcRef == null) return new Value(vt);
+            if (gcRef is HostExternRef host)
+                return new Value(vt, host.Address, host);
+            if (gcRef is IGcRef igc)
+                return new Value(vt, 0, igc);
+            return new Value(vt, 0, new GcObjectAdapter(gcRef));
         }
 
         private static ValType DeriveValType(object gcRef)
@@ -915,11 +938,16 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             if (val.IsNullRef) return null;
             var gcRef = val.GcRef;
-            if (gcRef == null) return null;
-            // Unwrap the adapter if present
-            if (gcRef is GcObjectAdapter adapter)
-                return adapter.Target;
-            return gcRef;
+            if (gcRef != null)
+            {
+                if (gcRef is GcObjectAdapter adapter) return adapter.Target;
+                return gcRef;
+            }
+            // No GcRef but non-null ref (Data.Ptr carries the address, e.g.
+            // host ref from `ref.extern N` / `ref.host N`). Intern a
+            // HostExternRef so the address survives round-trip through
+            // the object-side of the boundary and ref.eq identity holds.
+            return HostExternRef.Intern(val.Data.Ptr);
         }
 
         /// <summary>
