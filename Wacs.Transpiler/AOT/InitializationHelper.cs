@@ -136,6 +136,15 @@ namespace Wacs.Transpiler.AOT
         public int TypeIndex { get; set; }
         public int InitKind { get; set; } // 0=array.new, 1=array.new_default
         public long[] Params { get; set; } = Array.Empty<long>(); // const args
+
+        /// <summary>
+        /// Raw ValType of the array's element (as int). Non-zero when the
+        /// element is a reference/V128 type whose default Value must be
+        /// constructed with the correct null-ref encoding (e.g. FuncRef
+        /// default is Data.Ptr = long.MinValue, not zero). 0 when the
+        /// element is a scalar or we couldn't determine the type.
+        /// </summary>
+        public int ElementValType { get; set; }
     }
 
     /// <summary>
@@ -415,9 +424,22 @@ namespace Wacs.Transpiler.AOT
                         // Fields[0] = elements array, Fields[1] = length
                         var elemType = fields[0].FieldType.GetElementType()!;
                         var arr = System.Array.CreateInstance(elemType, length);
-                        // Fill with initial value
-                        for (int i = 0; i < length; i++)
-                            arr.SetValue(Convert.ChangeType(fillValue, elemType), i);
+                        // Fill with initial value. Value-typed element slots
+                        // require an explicit null-ref encoding when they
+                        // represent a ref type (default(Value) is Undefined,
+                        // not a null ref — see note in case 1).
+                        if (elemType == typeof(Value))
+                        {
+                            var fill = gcInit.ElementValType != 0
+                                ? new Value((ValType)gcInit.ElementValType, fillValue)
+                                : default(Value);
+                            for (int i = 0; i < length; i++) arr.SetValue(fill, i);
+                        }
+                        else
+                        {
+                            for (int i = 0; i < length; i++)
+                                arr.SetValue(Convert.ChangeType(fillValue, elemType), i);
+                        }
                         fields[0].SetValue(gcObj, arr);
                         fields[1].SetValue(gcObj, length);
                         break;
@@ -429,6 +451,17 @@ namespace Wacs.Transpiler.AOT
                         var fields = clrType.GetFields();
                         var elemType = fields[0].FieldType.GetElementType()!;
                         var arr = System.Array.CreateInstance(elemType, length);
+                        // For Value-typed slots, fill with the reftype's null
+                        // encoding (Data.Ptr = long.MinValue, Type = RefType).
+                        // Otherwise call_indirect on this element later reads
+                        // default(Value) whose IsRefType is false, so the
+                        // IsNullRef check skips and the Data.Ptr = 0 is
+                        // dispatched as funcIdx 0.
+                        if (elemType == typeof(Value) && gcInit.ElementValType != 0)
+                        {
+                            var nullRef = new Value((ValType)gcInit.ElementValType);
+                            for (int i = 0; i < length; i++) arr.SetValue(nullRef, i);
+                        }
                         fields[0].SetValue(gcObj, arr);
                         fields[1].SetValue(gcObj, length);
                         break;

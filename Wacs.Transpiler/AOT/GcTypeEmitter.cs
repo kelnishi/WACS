@@ -252,6 +252,7 @@ namespace Wacs.Transpiler.AOT
             if (storageType == ValType.I64) return typeof(long);
             if (storageType == ValType.F32) return typeof(float);
             if (storageType == ValType.F64) return typeof(double);
+            if (storageType == ValType.V128) return typeof(Wacs.Core.Runtime.Value);
 
             // Ref types — check if it's a concrete type index we've emitted
             if (storageType.IsDefType())
@@ -259,9 +260,33 @@ namespace Wacs.Transpiler.AOT
                 var idx = (int)storageType.Index().Value;
                 if (_emittedTypes.TryGetValue(idx, out var gcType) && gcType.TypeBuilder != null)
                     return gcType.TypeBuilder;
+                // Concrete function types flow as Value at storage boundaries
+                // (funcref representation — doc 2 §1 invariant 3).
+                return typeof(Wacs.Core.Runtime.Value);
             }
 
-            // Everything else (funcref, externref, abstract heap types) → object
+            // Non-GC-bucket reftypes (funcref / externref / exnref) flow as
+            // Value on the CIL stack (doc 2 §1 invariants 3 & 4), so array /
+            // struct slots that hold them must be Value-typed too — otherwise
+            // array.get/stelem against an object[] field silently shuffles
+            // object bits into a Value local.
+            switch (storageType)
+            {
+                case ValType.FuncRef:
+                case ValType.Func:
+                case ValType.NoFunc:
+                case ValType.NoFuncNN:
+                case ValType.ExternRef:
+                case ValType.Extern:
+                case ValType.NoExtern:
+                case ValType.NoExternNN:
+                case ValType.Exn:
+                case ValType.NoExn:
+                    return typeof(Wacs.Core.Runtime.Value);
+            }
+
+            // GC-bucket reftypes (any / eq / i31 / struct / array / none) →
+            // object on the internal CIL stack.
             return typeof(object);
         }
 
