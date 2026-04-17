@@ -111,6 +111,20 @@ namespace Wacs.Transpiler.AOT
         /// InitKind: 0=array.new(fill,len), 1=array.new_default(len), 2=struct.new(fields...)
         /// </summary>
         public List<GcGlobalInit> GcGlobalInits { get; set; } = new();
+
+        /// <summary>
+        /// Number of imported tags (doc 1 §13.1, doc 2 §5). Imports come first
+        /// in the tag index space; the linker fills these slots with the
+        /// exporter's TagInstance so reference equality = tag equality.
+        /// </summary>
+        public int ImportedTagCount { get; set; }
+
+        /// <summary>
+        /// DefType for each local tag, in tag-index order (imports excluded).
+        /// Used at Initialize time to construct TagInstance objects with
+        /// correct type info.
+        /// </summary>
+        public DefType[] LocalTagTypes { get; set; } = Array.Empty<DefType>();
     }
 
     /// <summary>
@@ -307,6 +321,19 @@ namespace Wacs.Transpiler.AOT
             ctx.ElemSegmentBaseId = data.ElemSegmentBaseId;
             ctx.InitDataId = initDataId;
             ctx.FuncTypeHashes = data.FuncTypeHashes;
+
+            // Tags (doc 2 §5). Allocate the full tag index space; imports at
+            // the front (linker fills them), locals after with freshly allocated
+            // TagInstance objects. DefType may be null in standalone mode —
+            // identity is reference-based so the field is unused by throw/catch.
+            int totalTags = data.ImportedTagCount + data.LocalTagTypes.Length;
+            if (totalTags > 0)
+            {
+                var tags = new TagInstance[totalTags];
+                for (int i = 0; i < data.LocalTagTypes.Length; i++)
+                    tags[data.ImportedTagCount + i] = new TagInstance(data.LocalTagTypes[i]!);
+                ctx.Tags = tags;
+            }
 
             // 7. Initialize GC-typed globals (array.new, etc.)
             InitializeGcGlobals(ctx, data, initDataId);

@@ -72,6 +72,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             Func<int, System.Reflection.Emit.Label>? branchTarget = null,
             CilValidator? cv = null)
         {
+            // GC ref types flow as `object` on the internal CIL stack (doc 2 §1).
             switch (op)
             {
                 // === Struct ops ===
@@ -82,33 +83,31 @@ namespace Wacs.Transpiler.AOT.Emitters
                     int fieldCount = gcType?.Fields.Length ?? 0;
                     cv?.Pop(fieldCount, "struct.new fields");
                     EmitStructNew(il, si, gcTypes, moduleInst);
-                    cv?.Push(typeof(Value)); // structref as Value
+                    cv?.Push(typeof(object));
                     break;
                 }
                 case GcCode.StructNewDefault:
                     EmitStructNewDefault(il, (InstStructNewDefault)inst, gcTypes);
-                    cv?.Push(typeof(Value)); // structref
+                    cv?.Push(typeof(object));
                     break;
                 case GcCode.StructGet:
                 case GcCode.StructGetS:
                 case GcCode.StructGetU:
                 {
-                    cv?.Pop(typeof(Value), "struct.get ref");
+                    cv?.Pop(typeof(object), "struct.get ref");
                     EmitStructGet(il, (InstStructGet)inst, gcTypes);
-                    // Result type depends on field type — scalar or Value(ref)
                     var sgi = (InstStructGet)inst;
                     var gt = gcTypes.GetGcType(sgi.TypeIndex);
                     var ft = gt?.Fields[sgi.FieldIndex].FieldType;
-                    cv?.Push(ft != null && IsScalarType(ft) ? ft : typeof(Value));
+                    // Ref-typed fields push object; scalar fields push their CLR type.
+                    cv?.Push(ft != null && IsScalarType(ft) ? ft : typeof(object));
                     break;
                 }
                 case GcCode.StructSet:
                 {
                     var ssi = (InstStructSet)inst;
-                    var gt = gcTypes.GetGcType(ssi.TypeIndex);
-                    var ft = gt?.Fields[ssi.FieldIndex].FieldType;
                     cv?.Pop(context: "struct.set val");
-                    cv?.Pop(typeof(Value), "struct.set ref");
+                    cv?.Pop(typeof(object), "struct.set ref");
                     EmitStructSet(il, ssi, gcTypes);
                     break;
                 }
@@ -118,35 +117,34 @@ namespace Wacs.Transpiler.AOT.Emitters
                     cv?.Pop(typeof(int), "array.new len");
                     cv?.Pop(context: "array.new init");
                     EmitArrayNew(il, (InstArrayNew)inst, gcTypes, moduleInst);
-                    cv?.Push(typeof(Value)); // arrayref
+                    cv?.Push(typeof(object));
                     break;
                 case GcCode.ArrayNewDefault:
                     cv?.Pop(typeof(int), "array.new_default len");
                     EmitArrayNewDefault(il, (InstArrayNewDefault)inst, gcTypes, moduleInst);
-                    cv?.Push(typeof(Value)); // arrayref
+                    cv?.Push(typeof(object));
                     break;
                 case GcCode.ArrayGet:
                 case GcCode.ArrayGetS:
                 case GcCode.ArrayGetU:
                 {
                     cv?.Pop(typeof(int), "array.get idx");
-                    cv?.Pop(typeof(Value), "array.get ref");
+                    cv?.Pop(typeof(object), "array.get ref");
                     EmitArrayGet(il, (InstArrayGet)inst, gcTypes, moduleInst);
-                    // Result: scalar or Value depending on element type
                     var agi = (InstArrayGet)inst;
                     var agt = gcTypes.GetGcType(agi.TypeIndex);
                     var eft = agt?.Fields.Length > 0 ? agt.Fields[0].FieldType.GetElementType() : null;
-                    cv?.Push(eft != null && IsScalarType(eft) ? eft : typeof(Value));
+                    cv?.Push(eft != null && IsScalarType(eft) ? eft : typeof(object));
                     break;
                 }
                 case GcCode.ArraySet:
                     cv?.Pop(context: "array.set val");
                     cv?.Pop(typeof(int), "array.set idx");
-                    cv?.Pop(typeof(Value), "array.set ref");
+                    cv?.Pop(typeof(object), "array.set ref");
                     EmitArraySet(il, (InstArraySet)inst, gcTypes, moduleInst);
                     break;
                 case GcCode.ArrayLen:
-                    cv?.Pop(typeof(Value), "array.len ref");
+                    cv?.Pop(typeof(object), "array.len ref");
                     EmitArrayLen(il);
                     cv?.Push(typeof(int));
                     break;
@@ -155,66 +153,66 @@ namespace Wacs.Transpiler.AOT.Emitters
                     var anfi = (InstArrayNewFixed)inst;
                     cv?.Pop(anfi.FixedCount, "array.new_fixed elems");
                     EmitArrayNewFixed(il, anfi, gcTypes, moduleInst);
-                    cv?.Push(typeof(Value)); // arrayref
+                    cv?.Push(typeof(object));
                     break;
                 }
                 case GcCode.ArrayNewData:
                     cv?.Pop(typeof(int), "array.new_data len");
                     cv?.Pop(typeof(int), "array.new_data offset");
                     EmitArrayNewData(il, (InstArrayNewData)inst, gcTypes);
-                    cv?.Push(typeof(Value)); // arrayref
+                    cv?.Push(typeof(object));
                     break;
                 case GcCode.ArrayNewElem:
                     cv?.Pop(typeof(int), "array.new_elem len");
                     cv?.Pop(typeof(int), "array.new_elem offset");
                     EmitArrayNewElem(il, (InstArrayNewElem)inst, gcTypes);
-                    cv?.Push(typeof(Value)); // arrayref
+                    cv?.Push(typeof(object));
                     break;
                 case GcCode.ArrayFill:
                     cv?.Pop(typeof(int), "array.fill len");
                     cv?.Pop(context: "array.fill val");
                     cv?.Pop(typeof(int), "array.fill offset");
-                    cv?.Pop(typeof(Value), "array.fill ref");
+                    cv?.Pop(typeof(object), "array.fill ref");
                     EmitArrayFill(il, (InstArrayFill)inst, gcTypes);
                     break;
                 case GcCode.ArrayCopy:
                     cv?.Pop(typeof(int), "array.copy len");
                     cv?.Pop(typeof(int), "array.copy src_off");
-                    cv?.Pop(typeof(Value), "array.copy src_ref");
+                    cv?.Pop(typeof(object), "array.copy src_ref");
                     cv?.Pop(typeof(int), "array.copy dst_off");
-                    cv?.Pop(typeof(Value), "array.copy dst_ref");
+                    cv?.Pop(typeof(object), "array.copy dst_ref");
                     EmitArrayCopy(il, (InstArrayCopy)inst, gcTypes);
                     break;
                 case GcCode.ArrayInitData:
                     cv?.Pop(typeof(int), "array.init_data len");
                     cv?.Pop(typeof(int), "array.init_data src_off");
                     cv?.Pop(typeof(int), "array.init_data dst_off");
-                    cv?.Pop(typeof(Value), "array.init_data ref");
+                    cv?.Pop(typeof(object), "array.init_data ref");
                     EmitArrayInitData(il, (InstArrayInitData)inst, gcTypes);
                     break;
                 case GcCode.ArrayInitElem:
                     cv?.Pop(typeof(int), "array.init_elem len");
                     cv?.Pop(typeof(int), "array.init_elem src_off");
                     cv?.Pop(typeof(int), "array.init_elem dst_off");
-                    cv?.Pop(typeof(Value), "array.init_elem ref");
+                    cv?.Pop(typeof(object), "array.init_elem ref");
                     EmitArrayInitElem(il, (InstArrayInitElem)inst, gcTypes);
                     break;
 
                 // === ref.test / ref.cast ===
                 case GcCode.RefTest:
                 case GcCode.RefTestNull:
-                    cv?.Pop(typeof(Value), "ref.test val");
+                    cv?.Pop(typeof(object), "ref.test val");
                     EmitRefTest(il, (InstRefTest)inst);
-                    cv?.Push(typeof(int)); // i32 result
+                    cv?.Push(typeof(int));
                     break;
                 case GcCode.RefCast:
                 case GcCode.RefCastNull:
-                    cv?.Pop(typeof(Value), "ref.cast val");
+                    cv?.Pop(typeof(object), "ref.cast val");
                     EmitRefCast(il, (InstRefCast)inst);
-                    cv?.Push(typeof(Value)); // casted ref
+                    cv?.Push(typeof(object));
                     break;
 
-                // === br_on_cast ===
+                // === br_on_cast === (unreachable here — FunctionCodegen intercepts)
                 case GcCode.BrOnCast:
                     EmitBrOnCast(il, (InstBrOnCast)inst, branchTarget!, castFail: false);
                     break;
@@ -224,31 +222,31 @@ namespace Wacs.Transpiler.AOT.Emitters
 
                 // === Conversions ===
                 case GcCode.ExternConvertAny:
-                    cv?.Pop(typeof(Value), "extern.convert_any");
+                    cv?.Pop(typeof(object), "extern.convert_any");
                     il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                        nameof(GcRuntimeHelpers.ExternConvertAny), BindingFlags.Public | BindingFlags.Static)!);
-                    cv?.Push(typeof(Value)); // externref
+                        nameof(GcRuntimeHelpers.ExternConvertAnyObject), BindingFlags.Public | BindingFlags.Static)!);
+                    cv?.Push(typeof(object));
                     break;
                 case GcCode.AnyConvertExtern:
-                    cv?.Pop(typeof(Value), "any.convert_extern");
+                    cv?.Pop(typeof(object), "any.convert_extern");
                     il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                        nameof(GcRuntimeHelpers.AnyConvertExtern), BindingFlags.Public | BindingFlags.Static)!);
-                    cv?.Push(typeof(Value)); // anyref
+                        nameof(GcRuntimeHelpers.AnyConvertExternObject), BindingFlags.Public | BindingFlags.Static)!);
+                    cv?.Push(typeof(object));
                     break;
 
                 // === i31 ===
                 case GcCode.RefI31:
                     cv?.Pop(typeof(int), "ref.i31");
                     EmitRefI31(il);
-                    cv?.Push(typeof(Value)); // i31ref
+                    cv?.Push(typeof(object));
                     break;
                 case GcCode.I31GetS:
-                    cv?.Pop(typeof(Value), "i31.get_s");
+                    cv?.Pop(typeof(object), "i31.get_s");
                     EmitI31Get(il, signed: true);
                     cv?.Push(typeof(int));
                     break;
                 case GcCode.I31GetU:
-                    cv?.Pop(typeof(Value), "i31.get_u");
+                    cv?.Pop(typeof(object), "i31.get_u");
                     EmitI31Get(il, signed: false);
                     cv?.Push(typeof(int));
                     break;
@@ -272,11 +270,18 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             int fieldCount = structDef.Arity;
 
-            // Spill fields from stack (reverse order — last field is on top)
+            // Spill fields from stack (reverse order — last field is on top).
+            // Ref-typed fields: the stack has object (internal CIL stack
+            // convention). Declare the temp as object and Castclass on reload.
+            // Scalar / Value fields: declare with the field's CLR type directly.
             var temps = new LocalBuilder[fieldCount];
+            var needsCast = new bool[fieldCount];
             for (int i = fieldCount - 1; i >= 0; i--)
             {
-                temps[i] = il.DeclareLocal(gcType.Fields[i].FieldType);
+                var ft = gcType.Fields[i].FieldType;
+                bool gcRef = !IsScalarType(ft) && ft != typeof(Value);
+                temps[i] = il.DeclareLocal(gcRef ? typeof(object) : ft);
+                needsCast[i] = gcRef;
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
 
@@ -288,6 +293,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             {
                 il.Emit(OpCodes.Dup);
                 il.Emit(OpCodes.Ldloc, temps[i]);
+                if (needsCast[i])
+                    il.Emit(OpCodes.Castclass, gcType.Fields[i].FieldType);
                 il.Emit(OpCodes.Stfld, gcType.Fields[i]);
             }
 
@@ -339,11 +346,17 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (gcType == null)
                 throw new TranspilerException($"struct.set: type {inst.TypeIndex} not emitted");
 
-            // Stack: [structref (Value), value]
-            var valLocal = il.DeclareLocal(gcType.Fields[inst.FieldIndex].FieldType);
+            // Stack: [structref (object), value]. Ref-typed values arrive as
+            // object on the internal stack — spill to object and Castclass
+            // on reload so Stfld matches the field's declared type.
+            var ft = gcType.Fields[inst.FieldIndex].FieldType;
+            bool gcRefField = !IsScalarType(ft) && ft != typeof(Value);
+            var valLocal = il.DeclareLocal(gcRefField ? typeof(object) : ft);
             il.Emit(OpCodes.Stloc, valLocal);
             EmitUnwrapGcRef(il, gcType.ClrType);
             il.Emit(OpCodes.Ldloc, valLocal);
+            if (gcRefField)
+                il.Emit(OpCodes.Castclass, ft);
             il.Emit(OpCodes.Stfld, gcType.Fields[inst.FieldIndex]);
         }
 
@@ -356,9 +369,14 @@ namespace Wacs.Transpiler.AOT.Emitters
                 throw new TranspilerException($"array.new: type {inst.TypeIndex} not emitted");
 
             // Stack: [initVal, length]
+            var elemClrType = gcType.Fields[0].FieldType.GetElementType()!;
+            bool gcRefElem = !IsScalarType(elemClrType) && elemClrType != typeof(Value);
+
             var lenLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, lenLocal);
-            var initLocal = il.DeclareLocal(gcType.Fields[0].FieldType.GetElementType()!);
+            // init value on stack is object for GC-ref elements; spill as object
+            // and Castclass on reload.
+            var initLocal = il.DeclareLocal(gcRefElem ? typeof(object) : elemClrType);
             il.Emit(OpCodes.Stloc, initLocal);
 
             // Create instance
@@ -367,7 +385,7 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             // arr.elements = new T[length]
             il.Emit(OpCodes.Ldloc, lenLocal);
-            il.Emit(OpCodes.Newarr, gcType.Fields[0].FieldType.GetElementType()!);
+            il.Emit(OpCodes.Newarr, elemClrType);
             il.Emit(OpCodes.Stfld, gcType.Fields[0]); // elements
 
             il.Emit(OpCodes.Dup);
@@ -376,8 +394,8 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             // TODO: fill with init value
 
-            // Wrap the CLR object reference into a Value struct.
-            // The CIL stack has WasmArray_N (an IGcRef). Method signatures use Value.
+            // Internal stack convention: GC-ref arrays remain as object
+            // (doc 2 §1). EmitWrapGcRef is a no-op per doc 2 §1.
             EmitWrapGcRef(il, inst.TypeIndex);
         }
 
@@ -451,8 +469,11 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (gcType == null)
                 throw new TranspilerException($"array.set: type {inst.TypeIndex} not emitted");
 
-            // Stack: [arrayref (Value), index, value]
-            var valLocal = il.DeclareLocal(gcType.Fields[0].FieldType.GetElementType()!);
+            // Stack: [arrayref (object), index, value]. Ref-typed value arrives
+            // as object — spill and Castclass on reload.
+            var elemClrType = gcType.Fields[0].FieldType.GetElementType()!;
+            bool gcRefElem = !IsScalarType(elemClrType) && elemClrType != typeof(Value);
+            var valLocal = il.DeclareLocal(gcRefElem ? typeof(object) : elemClrType);
             il.Emit(OpCodes.Stloc, valLocal);
             var idxLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, idxLocal);
@@ -460,16 +481,17 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldfld, gcType.Fields[0]); // elements array
             il.Emit(OpCodes.Ldloc, idxLocal);
             il.Emit(OpCodes.Ldloc, valLocal);
-            il.Emit(OpCodes.Stelem, gcType.Fields[0].FieldType.GetElementType()!);
+            if (gcRefElem)
+                il.Emit(OpCodes.Castclass, elemClrType);
+            il.Emit(OpCodes.Stelem, elemClrType);
         }
 
-        // array.len: pop [arrayref], push length
+        // array.len: pop [arrayref (object)], push length
         private static void EmitArrayLen(ILGenerator il)
         {
-            // All array types have a 'length' field at Fields[1]
-            // But we don't know the type here. Use a helper.
+            // The ref is an object on the internal stack; helper reads `length`.
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.ArrayLen), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.ArrayLenObject), BindingFlags.Public | BindingFlags.Static)!);
         }
 
         // array.new_fixed X N: pop N values, create array directly
@@ -484,11 +506,17 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             var elemClrType = gcType.Fields[0].FieldType.GetElementType()!;
 
-            // Spill N values from CIL stack using the actual element type
+            // Spill N values from CIL stack. Scalar elements use their CLR
+            // type directly; Value-typed elements (funcref/externref/v128) use
+            // Value; GC-ref elements arrive as object on the stack, so spill
+            // to object and Castclass on reload.
+            bool scalar = IsScalarType(elemClrType);
+            bool gcRef = !scalar && elemClrType != typeof(Value);
+            Type tempType = scalar ? elemClrType : (gcRef ? typeof(object) : typeof(Value));
             var temps = new LocalBuilder[n];
             for (int i = n - 1; i >= 0; i--)
             {
-                temps[i] = il.DeclareLocal(IsScalarType(elemClrType) ? elemClrType : typeof(Value));
+                temps[i] = il.DeclareLocal(tempType);
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
 
@@ -506,6 +534,8 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Dup);
                 il.Emit(OpCodes.Ldc_I4, i);
                 il.Emit(OpCodes.Ldloc, temps[i]);
+                if (gcRef)
+                    il.Emit(OpCodes.Castclass, elemClrType);
                 il.Emit(OpCodes.Stelem, elemClrType);
             }
 
@@ -575,44 +605,43 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         private static void EmitArrayFill(ILGenerator il, InstArrayFill inst, GcTypeEmitter gcTypes)
         {
-            // Stack: [arrayref, offset, val, len]
+            // Stack: [arrayref (object), offset, val, len]
             var len = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, len);
             var val = il.DeclareLocal(typeof(Value)); il.Emit(OpCodes.Stloc, val);
             var off = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, off);
-            var arr = il.DeclareLocal(typeof(Value)); il.Emit(OpCodes.Stloc, arr);
+            var arr = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Stloc, arr);
             il.Emit(OpCodes.Ldloc, arr);
             il.Emit(OpCodes.Ldloc, off);
             il.Emit(OpCodes.Ldloc, val);
             il.Emit(OpCodes.Ldloc, len);
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.ArrayFill), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.ArrayFillObject), BindingFlags.Public | BindingFlags.Static)!);
         }
 
         private static void EmitArrayCopy(ILGenerator il, InstArrayCopy inst, GcTypeEmitter gcTypes)
         {
-            // Stack: [dstref, dstoff, srcref, srcoff, len]
-            // Store as Value structs (not object) to avoid boxing corrupted refs
+            // Stack: [dstref (object), dstoff, srcref (object), srcoff, len]
             var len = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, len);
             var srcoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, srcoff);
-            var srcref = il.DeclareLocal(typeof(Value)); il.Emit(OpCodes.Stloc, srcref);
+            var srcref = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Stloc, srcref);
             var dstoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, dstoff);
-            var dstref = il.DeclareLocal(typeof(Value)); il.Emit(OpCodes.Stloc, dstref);
+            var dstref = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Stloc, dstref);
             il.Emit(OpCodes.Ldloc, dstref);
             il.Emit(OpCodes.Ldloc, dstoff);
             il.Emit(OpCodes.Ldloc, srcref);
             il.Emit(OpCodes.Ldloc, srcoff);
             il.Emit(OpCodes.Ldloc, len);
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.ArrayCopyValues), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.ArrayCopyObject), BindingFlags.Public | BindingFlags.Static)!);
         }
 
         private static void EmitArrayInitData(ILGenerator il, InstArrayInitData inst, GcTypeEmitter gcTypes)
         {
-            // Stack: [arrayref, dstoff, srcoff, len]
+            // Stack: [arrayref (object), dstoff, srcoff, len]
             var len = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, len);
             var srcoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, srcoff);
             var dstoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, dstoff);
-            var arr = il.DeclareLocal(typeof(Value)); il.Emit(OpCodes.Stloc, arr);
+            var arr = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Stloc, arr);
             il.Emit(OpCodes.Ldarg_0); // ctx
             il.Emit(OpCodes.Ldloc, arr);
             il.Emit(OpCodes.Ldloc, dstoff);
@@ -620,7 +649,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldloc, srcoff);
             il.Emit(OpCodes.Ldloc, len);
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.ArrayInitData), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.ArrayInitDataObject), BindingFlags.Public | BindingFlags.Static)!);
         }
 
         private static void EmitArrayInitElem(ILGenerator il, InstArrayInitElem inst, GcTypeEmitter gcTypes)
@@ -628,7 +657,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             var len = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, len);
             var srcoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, srcoff);
             var dstoff = il.DeclareLocal(typeof(int)); il.Emit(OpCodes.Stloc, dstoff);
-            var arr = il.DeclareLocal(typeof(Value)); il.Emit(OpCodes.Stloc, arr);
+            var arr = il.DeclareLocal(typeof(object)); il.Emit(OpCodes.Stloc, arr);
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldloc, arr);
             il.Emit(OpCodes.Ldloc, dstoff);
@@ -636,7 +665,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldloc, srcoff);
             il.Emit(OpCodes.Ldloc, len);
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.ArrayInitElem), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.ArrayInitElemObject), BindingFlags.Public | BindingFlags.Static)!);
         }
 
         // Helper for array.new_data/new_elem pattern: pop [offset, length], call helper
@@ -653,7 +682,10 @@ namespace Wacs.Transpiler.AOT.Emitters
                 helperName, BindingFlags.Public | BindingFlags.Static)!);
         }
 
-        // br_on_cast / br_on_cast_fail
+        // br_on_cast / br_on_cast_fail — this path is unreachable because
+        // FunctionCodegen intercepts InstBrOnCast/InstBrOnCastFail before
+        // GcEmitter.Emit is called. Kept for completeness; the live path is
+        // FunctionCodegen.EmitBrOnCastWithExcess.
         private static void EmitBrOnCast(ILGenerator il, InstructionBase inst,
             Func<int, System.Reflection.Emit.Label> branchTarget, bool castFail)
         {
@@ -671,56 +703,61 @@ namespace Wacs.Transpiler.AOT.Emitters
                 targetType = bocf.TargetType;
             }
 
-            // Stack: [ref (Value)]
-            // Test type, branch if match (br_on_cast) or mismatch (br_on_cast_fail)
-            il.Emit(OpCodes.Dup); // keep ref on stack for both paths
+            // Stack: [ref (object)]. Save, test, conditionally branch with ref restored.
+            var refLocal = il.DeclareLocal(typeof(object));
+            il.Emit(OpCodes.Stloc, refLocal);
+            il.Emit(OpCodes.Ldloc, refLocal);
             il.Emit(OpCodes.Ldc_I4, (int)targetType);
             il.Emit(OpCodes.Ldc_I4, targetType.IsNullable() ? 1 : 0);
             il.Emit(OpCodes.Ldarg_0); // ThinContext
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.RefTestValue), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.RefTestObject), BindingFlags.Public | BindingFlags.Static)!);
 
-            var target = branchTarget(label);
+            var skipLabel = il.DefineLabel();
             if (castFail)
-                il.Emit(OpCodes.Brfalse, target); // branch if test FAILS
+                il.Emit(OpCodes.Brtrue, skipLabel); // test passed → don't branch
             else
-                il.Emit(OpCodes.Brtrue, target);  // branch if test SUCCEEDS
+                il.Emit(OpCodes.Brfalse, skipLabel); // test failed → don't branch
+            il.Emit(OpCodes.Ldloc, refLocal);
+            il.Emit(OpCodes.Br, branchTarget(label));
+            il.MarkLabel(skipLabel);
+            il.Emit(OpCodes.Ldloc, refLocal);
         }
 
 
         private static void EmitRefTest(ILGenerator il, InstRefTest inst)
         {
-            // Stack: [Value]
+            // Stack: [object]
             il.Emit(OpCodes.Ldc_I4, (int)inst.HeapType);
             il.Emit(OpCodes.Ldc_I4, inst.IsNullable ? 1 : 0);
             il.Emit(OpCodes.Ldarg_0); // ThinContext for type lookup
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.RefTestValue), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.RefTestObject), BindingFlags.Public | BindingFlags.Static)!);
         }
 
-        // ref.cast: pop [ref (Value)], push [ref (Value)] (or trap)
+        // ref.cast: pop [ref (object)], push [ref (object)] (or trap)
         private static void EmitRefCast(ILGenerator il, InstRefCast inst)
         {
             il.Emit(OpCodes.Ldc_I4, (int)inst.HeapType);
             il.Emit(OpCodes.Ldc_I4, inst.IsNullable ? 1 : 0);
             il.Emit(OpCodes.Ldarg_0); // ThinContext for type lookup
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.RefCastValue), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.RefCastObject), BindingFlags.Public | BindingFlags.Static)!);
         }
 
-        // ref.i31: pop [i32], push [i31ref (as Value)]
+        // ref.i31: pop [i32], push [i31ref (object — boxed I31Ref)]
         private static void EmitRefI31(ILGenerator il)
         {
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.RefI31Value), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.RefI31Object), BindingFlags.Public | BindingFlags.Static)!);
         }
 
-        // i31.get_s / i31.get_u: pop [i31ref (Value)], push [i32]
+        // i31.get_s / i31.get_u: pop [i31ref (object)], push [i32]
         private static void EmitI31Get(ILGenerator il, bool signed)
         {
             il.Emit(OpCodes.Ldc_I4, signed ? 1 : 0);
             il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.I31GetValue), BindingFlags.Public | BindingFlags.Static)!);
+                nameof(GcRuntimeHelpers.I31GetObject), BindingFlags.Public | BindingFlags.Static)!);
         }
 
         // ==================================================================
@@ -745,26 +782,22 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         /// <summary>
-        /// Wrap a CLR GC object reference (IGcRef) on the CIL stack into a Value.
-        /// Stack: [object ref] → [Value]
+        /// GC refs flow as `object` on the internal CIL stack (doc 2 §1).
+        /// This is a no-op — newly constructed objects stay on the stack as-is.
+        /// Retained as a documentation hook at call sites.
         /// </summary>
         private static void EmitWrapGcRef(ILGenerator il, int typeIndex)
         {
-            // Stack has the CLR object implementing IGcRef.
-            // Call GcRuntimeHelpers.WrapRef(object) → Value
-            il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.WrapRef), BindingFlags.Public | BindingFlags.Static)!);
         }
 
         /// <summary>
-        /// Unwrap a Value on the CIL stack to a typed CLR GC object reference.
-        /// Stack: [Value] → [typed object ref]
+        /// Cast the object on the stack to the typed CLR GC class reference.
+        /// GC refs already flow as object (doc 2 §1); no Value→object unwrap.
+        /// `Castclass` passes null through unchanged, matching WASM null-ref
+        /// semantics for operations that tolerate null (cast to nullable).
         /// </summary>
         private static void EmitUnwrapGcRef(ILGenerator il, Type targetClrType)
         {
-            // Call GcRuntimeHelpers.UnwrapRef(Value) → object, then cast
-            il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                nameof(GcRuntimeHelpers.UnwrapRef), BindingFlags.Public | BindingFlags.Static)!);
             il.Emit(OpCodes.Castclass, targetClrType);
         }
     }
@@ -833,44 +866,11 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         /// <summary>
-        /// Check if an object reference is null, including boxed Value structs
-        /// representing WASM null references.
-        /// </summary>
-        private static bool IsNullRef(object? obj)
-        {
-            if (obj == null) return true;
-            if (obj is Value v && v.IsNullRef) return true;
-            return false;
-        }
-
-        /// <summary>
-        /// Unwrap a Value to the underlying emitted GC object, handling GcObjectAdapter.
-        /// </summary>
-        private static object UnwrapArrayRef(Value arrayRef)
-        {
-            if (arrayRef.IsNullRef) throw new TrapException("null array reference");
-            var gcRef = arrayRef.GcRef ?? throw new TrapException("null array reference");
-            return gcRef is GcObjectAdapter adapter ? adapter.Target : gcRef;
-        }
-
-        public static int ArrayLen(Value arrayRef)
-        {
-            var target = UnwrapArrayRef(arrayRef);
-            var field = target.GetType().GetField("length");
-            if (field == null)
-                throw new TrapException("not an array type");
-            return (int)field.GetValue(target)!;
-        }
-
-        public static int RefTest(object val, int heapType, int nullable)
-        {
-            if (val == null) return nullable != 0 ? 1 : 0;
-            return 1;
-        }
-
-        /// <summary>
         /// Test if a Value matches a heap type. Layer 0: CLR inheritance + abstract types.
         /// heapType encoding: negative = abstract (HeapType enum), non-negative = concrete type index.
+        /// Retained because <see cref="RefTestObject"/> dispatches through a
+        /// synthetic Value, and <see cref="RefCastValue"/> / br_on_cast's Value
+        /// path call this directly (doc 2 §1: funcref/externref stay as Value).
         /// </summary>
         // Mask to extract raw type index from ValType (strips Ref/Nullable bits)
         private const int ValTypeIndexMask = ~(0x4000_0000 | 0x2000_0000); // ~NullableRef
@@ -992,116 +992,15 @@ namespace Wacs.Transpiler.AOT.Emitters
             return null;
         }
 
-        public static object RefCast(object val, int heapType, int nullable)
-        {
-            if (val == null)
-            {
-                if (nullable != 0) return null!;
-                throw new TrapException("cast failure: null reference");
-            }
-            return val;
-        }
-
-        /// <summary>Cast a Value to a heap type, trapping on failure.</summary>
-        public static Value RefCastValue(Value val, int heapType, int nullable, ThinContext ctx)
-        {
-            if (val.IsNullRef)
-            {
-                if (nullable != 0) return val;
-                throw new TrapException("cast failure: null reference");
-            }
-            if (RefTestValue(val, heapType, nullable, ctx) == 0)
-                throw new TrapException("cast failure");
-            return val;
-        }
-
-        public static object RefI31(int value)
-        {
-            return (object)(value & 0x7FFFFFFF);
-        }
-
-        /// <summary>Value-typed version for CIL stack compatibility.</summary>
+        /// <summary>
+        /// Build a <see cref="Value"/> wrapping an i31 ref, for constant-expression
+        /// evaluation at transpile / init time (doc 1 §2.4). The runtime
+        /// ref.i31 instruction goes through <see cref="RefI31Object"/>.
+        /// </summary>
         public static Value RefI31Value(int value)
         {
             int masked = value & 0x7FFFFFFF;
             return new Value(ValType.I31, masked, new I31Ref(masked));
-        }
-
-        public static int I31Get(object i31Ref, int signed)
-        {
-            if (i31Ref == null)
-                throw new TrapException("null i31 reference");
-            int val = (int)i31Ref & 0x7FFFFFFF;
-            if (signed != 0 && (val & 0x40000000) != 0)
-                val |= unchecked((int)0x80000000);
-            return val;
-        }
-
-        /// <summary>Value-typed version for CIL stack compatibility.</summary>
-        public static int I31GetValue(Value i31Ref, int signed)
-        {
-            if (i31Ref.IsNullRef)
-                throw new TrapException("null i31 reference");
-            int val = (int)i31Ref.Data.Int32 & 0x7FFFFFFF;
-            if (signed != 0 && (val & 0x40000000) != 0)
-                val |= unchecked((int)0x80000000);
-            return val;
-        }
-
-        /// <summary>extern.convert_any: anyref → externref. Re-tags type, preserving data.</summary>
-        public static Value ExternConvertAny(Value val)
-        {
-            if (val.IsNullRef)
-                return new Value(ValType.ExternRef);
-            var result = val;
-            result.Type = val.Type.IsNullable() ? ValType.ExternRef : ValType.Extern;
-            Debug.Assert(result.Type != ValType.Nil, "ExternConvertAny produced Nil type");
-            return result;
-        }
-
-        /// <summary>any.convert_extern: externref → anyref. Recovers internal type from GcRef.</summary>
-        public static Value AnyConvertExtern(Value val)
-        {
-            if (val.IsNullRef)
-                return new Value(ValType.Any);
-            bool nullable = val.Type.IsNullable();
-            var gcRef = val.GcRef;
-            if (gcRef is I31Ref)
-            {
-                val.Type = nullable ? ValType.I31 : ValType.I31NN;
-                return val;
-            }
-            if (gcRef != null)
-            {
-                object target = gcRef is GcObjectAdapter adapter ? adapter.Target : gcRef;
-                var catField = target.GetType().GetField("TypeCategory",
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                if (catField != null)
-                {
-                    int cat = (int)catField.GetValue(null)!;
-                    val.Type = cat switch
-                    {
-                        0 => nullable ? ValType.Struct : ValType.StructNN,
-                        1 => nullable ? ValType.Array : ValType.ArrayNN,
-                        _ => nullable ? ValType.Any : ValType.AnyNN,
-                    };
-                    return val;
-                }
-            }
-            // Opaque external reference → anyref
-            val.Type = nullable ? ValType.Any : ValType.AnyNN;
-            return val;
-        }
-
-        public static object ArrayNewFixed(Value[] values, ThinContext ctx, int typeIdx)
-        {
-            // Create array instance and populate from values
-            var gcType = ctx.Module?.Types[(TypeIdx)typeIdx];
-            // For now, return a simple wrapper
-            var arr = new object[values.Length];
-            for (int i = 0; i < values.Length; i++)
-                arr[i] = values[i].GcRef!;
-            return arr;
         }
 
         public static object ArrayNewData(ThinContext ctx, int typeIdx, int dataIdx, int offset, int length)
@@ -1269,20 +1168,6 @@ namespace Wacs.Transpiler.AOT.Emitters
             return instance;
         }
 
-        public static void ArrayFill(Value arrayRef, int offset, Value value, int length)
-        {
-            var target = UnwrapArrayRef(arrayRef);
-            var elementsField = target.GetType().GetField("elements");
-            if (elementsField == null) throw new TrapException("not an array type");
-            var elements = (System.Array)elementsField.GetValue(target)!;
-            if (offset + length > elements.Length)
-                throw new TrapException("out of bounds array access");
-            var elemType = elements.GetType().GetElementType()!;
-            var fillVal = ConvertValueToElement(value, elemType);
-            for (int i = 0; i < length; i++)
-                elements.SetValue(fillVal, offset + i);
-        }
-
         /// <summary>Convert a WASM Value to the CLR element type for array storage.</summary>
         private static object ConvertValueToElement(Value val, Type elemType)
         {
@@ -1303,46 +1188,123 @@ namespace Wacs.Transpiler.AOT.Emitters
             return val; // fallback
         }
 
-        public static void ArrayCopy(object dstRef, int dstOff, object srcRef, int srcOff, int length)
+        // =========================================================================
+        // Object-based helpers for the split-stack model (doc 1 §2.1, doc 2 §§1, 3).
+        // GC refs flow as plain `object` on the internal CIL stack; these helpers
+        // consume and produce `object` directly. The boundary helpers WrapRef /
+        // UnwrapRef above are called only at signature / storage / call / exception
+        // boundaries, not between GC ops.
+        // =========================================================================
+
+        /// <summary>Unwrap adapter to reach the underlying CLR object.</summary>
+        private static object? Peel(object? obj)
+            => obj is GcObjectAdapter a ? a.Target : obj;
+
+        /// <summary>ref.test on an object-typed ref. See doc 1 §11.8.</summary>
+        public static int RefTestObject(object? val, int heapType, int nullable, ThinContext ctx)
         {
-            if (IsNullRef(dstRef) || IsNullRef(srcRef)) throw new TrapException("null array reference");
-            // Unwrap GcObjectAdapter if present
-            var dstTarget = dstRef is GcObjectAdapter da ? da.Target : dstRef;
-            var srcTarget = srcRef is GcObjectAdapter sa ? sa.Target : srcRef;
-            var dstField = dstTarget.GetType().GetField("elements");
-            var srcField = srcTarget.GetType().GetField("elements");
-            if (dstField == null || srcField == null) throw new TrapException("not an array type");
-            var dst = (System.Array)dstField.GetValue(dstTarget)!;
-            var src = (System.Array)srcField.GetValue(srcTarget)!;
-            if (length == 0) return;
-            System.Array.Copy(src, srcOff, dst, dstOff, length);
+            if (val == null) return nullable != 0 ? 1 : 0;
+            // Build a synthetic Value so we can reuse the layered type-test logic
+            // in RefTestValue (CLR inheritance → structural hash → abstract types).
+            var v = WrapRef(val);
+            return RefTestValue(v, heapType, nullable, ctx);
         }
 
-        /// <summary>
-        /// Array copy taking Value structs directly to avoid boxing null refs
-        /// into invalid CLR object references.
-        /// </summary>
-        public static void ArrayCopyValues(Value dstRef, int dstOff, Value srcRef, int srcOff, int length)
+        /// <summary>ref.cast on an object-typed ref. See doc 1 §11.8.</summary>
+        public static object? RefCastObject(object? val, int heapType, int nullable, ThinContext ctx)
         {
-            // Null check must happen before any early exit (spec requires trap)
-            var dst = UnwrapArrayRef(dstRef);
-            var src = UnwrapArrayRef(srcRef);
+            if (val == null)
+            {
+                if (nullable != 0) return null;
+                throw new TrapException("cast failure: null reference");
+            }
+            if (RefTestObject(val, heapType, nullable, ctx) == 0)
+                throw new TrapException("cast failure");
+            return val;
+        }
+
+        /// <summary>ref.i31: box an int into an object. Uses I31Ref so ref.eq /
+        /// cross-engine handoff preserve identity semantics.</summary>
+        public static object RefI31Object(int value)
+        {
+            int masked = value & 0x7FFFFFFF;
+            return new I31Ref(masked);
+        }
+
+        /// <summary>i31.get_s / i31.get_u on an object-typed i31 ref.</summary>
+        public static int I31GetObject(object? i31Ref, int signed)
+        {
+            if (i31Ref == null)
+                throw new TrapException("null i31 reference");
+            var peeled = Peel(i31Ref);
+            int val;
+            if (peeled is I31Ref ir)
+                val = ir.Value & 0x7FFFFFFF;
+            else if (peeled is int boxed)
+                val = boxed & 0x7FFFFFFF;
+            else
+                throw new TrapException("not an i31 reference");
+            if (signed != 0 && (val & 0x40000000) != 0)
+                val |= unchecked((int)0x80000000);
+            return val;
+        }
+
+        /// <summary>array.len on an object-typed array ref.</summary>
+        public static int ArrayLenObject(object? arrayRef)
+        {
+            if (arrayRef == null) throw new TrapException("null array reference");
+            var target = Peel(arrayRef)!;
+            var field = target.GetType().GetField("length");
+            if (field == null)
+            {
+                // Interpreter array: fall back to StoreArray.Length.
+                if (target is Wacs.Core.Runtime.StoreArray sa) return sa.Length;
+                throw new TrapException("not an array type");
+            }
+            return (int)field.GetValue(target)!;
+        }
+
+        /// <summary>array.fill on an object-typed array ref; value remains a Value
+        /// because WASM element types include ref-types plus packed / scalar kinds
+        /// and the Value form handles all variants uniformly in one helper.</summary>
+        public static void ArrayFillObject(object? arrayRef, int offset, Value value, int length)
+        {
+            if (arrayRef == null) throw new TrapException("null array reference");
+            var target = Peel(arrayRef)!;
+            var elementsField = target.GetType().GetField("elements");
+            if (elementsField == null) throw new TrapException("not an array type");
+            var elements = (System.Array)elementsField.GetValue(target)!;
+            if ((long)(uint)offset + (long)(uint)length > elements.Length)
+                throw new TrapException("out of bounds array access");
+            var elemType = elements.GetType().GetElementType()!;
+            var fillVal = ConvertValueToElement(value, elemType);
+            for (int i = 0; i < length; i++)
+                elements.SetValue(fillVal, offset + i);
+        }
+
+        /// <summary>array.copy with object-typed refs.</summary>
+        public static void ArrayCopyObject(object? dstRef, int dstOff, object? srcRef, int srcOff, int length)
+        {
+            if (dstRef == null || srcRef == null) throw new TrapException("null array reference");
+            var dst = Peel(dstRef)!;
+            var src = Peel(srcRef)!;
             var dstField = dst.GetType().GetField("elements");
             var srcField = src.GetType().GetField("elements");
             if (dstField == null || srcField == null) throw new TrapException("not an array type");
             var dstArr = (System.Array)dstField.GetValue(dst)!;
             var srcArr = (System.Array)srcField.GetValue(src)!;
-            // Bounds check: offset+length must be in bounds even for length=0
             if (dstOff + length > dstArr.Length || srcOff + length > srcArr.Length)
                 throw new TrapException("out of bounds array access");
             if (length == 0) return;
             System.Array.Copy(srcArr, srcOff, dstArr, dstOff, length);
         }
 
-        public static void ArrayInitData(ThinContext ctx, Value arrayRef, int dstOff,
+        /// <summary>array.init_data with object-typed array ref.</summary>
+        public static void ArrayInitDataObject(ThinContext ctx, object? arrayRef, int dstOff,
             int dataIdx, int srcOff, int length)
         {
-            var target = UnwrapArrayRef(arrayRef);
+            if (arrayRef == null) throw new TrapException("null array reference");
+            var target = Peel(arrayRef)!;
             byte[]? segData = null;
             if (ctx.Store != null && ctx.Module != null)
             {
@@ -1354,8 +1316,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                 int segId = ctx.DataSegmentBaseId + dataIdx;
                 segData = ModuleInit.GetDataSegmentData(segId);
             }
-            if (segData == null)
-                throw new TrapException("data segment not found");
+            if (segData == null) throw new TrapException("data segment not found");
             var field = target.GetType().GetField("elements");
             if (field == null) throw new TrapException("not an array type");
             var elements = (System.Array)field.GetValue(target)!;
@@ -1379,10 +1340,12 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
         }
 
-        public static void ArrayInitElem(ThinContext ctx, Value arrayRef, int dstOff,
+        /// <summary>array.init_elem with object-typed array ref.</summary>
+        public static void ArrayInitElemObject(ThinContext ctx, object? arrayRef, int dstOff,
             int elemIdx, int srcOff, int length)
         {
-            var target = UnwrapArrayRef(arrayRef);
+            if (arrayRef == null) throw new TrapException("null array reference");
+            var target = Peel(arrayRef)!;
             Value[]? values = null;
             if (ctx.Store != null && ctx.Module != null)
             {
@@ -1395,8 +1358,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                 int segId = ctx.ElemSegmentBaseId + elemIdx;
                 values = ModuleInit.GetElemSegment(segId);
             }
-            if (values == null)
-                throw new TrapException("element segment not found");
+            if (values == null) throw new TrapException("element segment not found");
             var field = target.GetType().GetField("elements");
             if (field == null) throw new TrapException("not an array type");
             var elements = (System.Array)field.GetValue(target)!;
@@ -1408,6 +1370,31 @@ namespace Wacs.Transpiler.AOT.Emitters
             {
                 elements.SetValue(ExtractElemValue(values[srcOff + i], elemType), dstOff + i);
             }
+        }
+
+        /// <summary>any.convert_extern on object. Re-tagging is implicit at
+        /// internal-stack level — object carries no WASM type label. The
+        /// boundary wrap on return / storage sets the correct Value.Type.</summary>
+        public static object? AnyConvertExternObject(object? val) => val;
+
+        /// <summary>extern.convert_any on object. Symmetric to above.</summary>
+        public static object? ExternConvertAnyObject(object? val) => val;
+
+        /// <summary>ref.is_null on an object-typed ref. Emitters can also
+        /// inline as `ldnull; ceq`; this helper exists for uniformity with
+        /// other ref ops.</summary>
+        public static int IsNullRefObject(object? val) => val == null ? 1 : 0;
+
+        /// <summary>ref.eq for two object-typed refs. Null+null → 1;
+        /// reference equality on non-null peeled targets otherwise.</summary>
+        public static int RefEqObject(object? a, object? b)
+        {
+            if (a == null && b == null) return 1;
+            if (a == null || b == null) return 0;
+            var pa = Peel(a);
+            var pb = Peel(b);
+            if (pa is I31Ref ia && pb is I31Ref ib) return ia.Value == ib.Value ? 1 : 0;
+            return ReferenceEquals(pa, pb) ? 1 : 0;
         }
     }
 }

@@ -54,11 +54,39 @@ namespace Wacs.Transpiler.AOT
         // Control flow state
         private readonly Stack<EmitBlock> _blockStack = new();
         private LocalBuilder[] _locals = null!;
-        private Type[] _paramClrTypes = null!; // CIL types for WASM params (for validator)
+        // Internal CIL types for WASM params as seen on the internal stack after
+        // shadow-local routing (doc 2 §15). GC-ref params: typeof(object);
+        // others: same as the CIL arg type.
+        private Type[] _paramClrTypes = null!;
+        // Shadow locals (doc 2 §15) for GC-ref params: object-typed CIL locals
+        // populated at function entry from Value args. `local.get`/`local.set`
+        // of a ref-typed param reads/writes the shadow local, never the arg.
+        // Index i corresponds to WASM param i; null when the param is not a
+        // GC ref (scalar, v128, funcref, externref).
+        private LocalBuilder?[] _paramShadowLocals = null!;
         private ILGenerator _il = null!;
         private StackAnalysis _stackAnalysis = null!;
         private InstructionInfo? _currentInfo; // precomputed info for current instruction
         private CilValidator _cilValidator = null!;
+
+        // Nesting depth of CLR exception blocks (BeginExceptionBlock). Branches
+        // whose target lies outside the current try-region must emit Leave
+        // instead of Br (doc 2 §14). Each try_table that wraps the current
+        // instruction increments this; EndExceptionBlock decrements.
+        private int _tryDepth;
+
+        // True when the function body contains any `try_table`. Forces result
+        // shuttle allocation for every label with arity > 0: Leave empties the
+        // eval stack, so cross-try branches must rendezvous through locals.
+        // Cheap to over-allocate (cold IL) versus prohibitively complex to
+        // prove per-label reachability from inside a try region.
+        private bool _functionHasTryTable;
+
+        // Module-bound wrappers that disambiguate concrete type indices.
+        // Without the module, concrete func types would be misclassified as
+        // GC refs (doc 2 §1 invariant 3).
+        private Type InternalType(ValType t) => ModuleTranspiler.MapValTypeInternal(t, _moduleInst);
+        private bool IsGcRef(ValType t) => ModuleTranspiler.IsGcRefType(t, _moduleInst);
 
         public FunctionCodegen(
             MethodBuilder method,
@@ -78,7 +106,7 @@ namespace Wacs.Transpiler.AOT
             _paramCount = funcInst.Type.ParameterTypes.Arity;
             _paramClrTypes = new Type[_paramCount];
             for (int i = 0; i < _paramCount; i++)
-                _paramClrTypes[i] = ModuleTranspiler.MapValType(funcInst.Type.ParameterTypes.Types[i]);
+                _paramClrTypes[i] = InternalType(funcInst.Type.ParameterTypes.Types[i]);
             _importCount = importCount;
             _moduleInst = funcInst.Module;
             _gcTypes = gcTypes;
@@ -102,6 +130,10 @@ namespace Wacs.Transpiler.AOT
                 return false;
             }
 
+            // Scan for try_table anywhere in the body. Its presence requires
+            // all labels to use shuttle locals (doc 2 §14, stage 3 WI-4).
+            _functionHasTryTable = ContainsTryTable(_funcInst.Body.Instructions);
+
             // Pre-pass: compute stack heights and reachability (mirrors interpreter Link)
             _stackAnalysis = new StackAnalysis();
             _stackAnalysis.Analyze(
@@ -114,12 +146,33 @@ namespace Wacs.Transpiler.AOT
             // CIL stack validator — tracks type stack during emission
             _cilValidator = new CilValidator(_method.Name);
 
-            // Declare CIL locals for WASM locals (parameters are CIL args, not locals)
+            // Declare CIL locals for WASM locals (parameters are CIL args, not locals).
+            // Ref types use the INTERNAL representation (doc 1 §2.1, §4.2):
+            // GC refs are typed as object in locals so struct.get / array.get / etc.
+            // can consume them directly; funcref / externref / v128 stay as Value.
             var wasmLocals = _funcInst.Locals;
             _locals = new LocalBuilder[wasmLocals.Length];
             for (int i = 0; i < wasmLocals.Length; i++)
             {
-                _locals[i] = _il.DeclareLocal(ModuleTranspiler.MapValType(wasmLocals[i]));
+                _locals[i] = _il.DeclareLocal(InternalType(wasmLocals[i]));
+            }
+
+            // Shadow locals for ref-typed params (doc 2 §15). For each GC-ref
+            // param, allocate an object-typed local and initialize it from the
+            // incoming Value arg by unwrapping once at entry. Body reads/writes
+            // the shadow local; the original arg is not re-read after this.
+            _paramShadowLocals = new LocalBuilder?[_paramCount];
+            var paramWasmTypes = _funcInst.Type.ParameterTypes.Types;
+            for (int i = 0; i < _paramCount; i++)
+            {
+                if (!IsGcRef(paramWasmTypes[i])) continue;
+                var shadow = _il.DeclareLocal(typeof(object));
+                _paramShadowLocals[i] = shadow;
+                _il.Emit(OpCodes.Ldarg, i + 1); // +1 for ThinContext
+                _il.Emit(OpCodes.Call, typeof(Emitters.GcRuntimeHelpers).GetMethod(
+                    nameof(Emitters.GcRuntimeHelpers.UnwrapRef),
+                    BindingFlags.Public | BindingFlags.Static)!);
+                _il.Emit(OpCodes.Stloc, shadow);
             }
 
             // Stack guard: trap before CLR StackOverflow kills the process.
@@ -129,11 +182,24 @@ namespace Wacs.Transpiler.AOT
 
             // The function body is an implicit block — br 0 at function level
             // targets the function return. Push a function-level block.
+            // Result types use INTERNAL representation (doc 1 §4.2): labels
+            // carry GC refs as object; the return boundary wraps to Value.
             var funcEndLabel = _il.DefineLabel();
             var funcResultTypes = _funcInst.Type.ResultType.Types;
             var funcResultClrTypes = new Type[funcResultTypes.Length];
             for (int i = 0; i < funcResultTypes.Length; i++)
-                funcResultClrTypes[i] = ModuleTranspiler.MapValType(funcResultTypes[i]);
+                funcResultClrTypes[i] = InternalType(funcResultTypes[i]);
+
+            // If the function contains try_table, br 0 (or br_table 0, etc.)
+            // from inside the try emits Leave which empties the stack —
+            // allocate shuttle locals so the return operands survive.
+            LocalBuilder[]? funcResultLocals = null;
+            if (_functionHasTryTable && funcResultTypes.Length > 0)
+            {
+                funcResultLocals = new LocalBuilder[funcResultTypes.Length];
+                for (int i = 0; i < funcResultTypes.Length; i++)
+                    funcResultLocals[i] = _il.DeclareLocal(funcResultClrTypes[i]);
+            }
 
             _blockStack.Push(new EmitBlock
             {
@@ -141,7 +207,9 @@ namespace Wacs.Transpiler.AOT
                 Kind = WasmOpCode.Block,
                 StackHeight = 0,
                 LabelArity = _funcInst.Type.ResultType.Arity,
-                ResultClrTypes = funcResultClrTypes
+                ResultClrTypes = funcResultClrTypes,
+                ResultLocals = funcResultLocals,
+                OpeningTryDepth = 0
             });
 
             // Emit instructions
@@ -152,6 +220,26 @@ namespace Wacs.Transpiler.AOT
 
             _blockStack.Pop();
             _il.MarkLabel(funcEndLabel);
+
+            // If shuttle locals were allocated for the function-level block
+            // (try_table present), reload results from them. Fall-through from
+            // the function body already stored into them via EmitExcessCleanup.
+            if (funcResultLocals != null)
+            {
+                for (int i = 0; i < funcResultLocals.Length; i++)
+                    _il.Emit(OpCodes.Ldloc, funcResultLocals[i]);
+            }
+
+            // Boundary: at function return, ref-typed results are on the internal
+            // stack as object; the signature returns Value. Wrap single-result
+            // ref returns here. Multi-result returns go through byref out-params
+            // (EmitStind), which handle their own wrapping per-slot.
+            if (funcResultTypes.Length == 1 && IsGcRef(funcResultTypes[0]))
+            {
+                _il.Emit(OpCodes.Call, typeof(Emitters.GcRuntimeHelpers).GetMethod(
+                    nameof(Emitters.GcRuntimeHelpers.WrapRef),
+                    BindingFlags.Public | BindingFlags.Static)!);
+            }
 
             // Emit a trailing ret so that branches to funcEndLabel have a
             // valid terminator. The function End instruction also emits ret
@@ -221,20 +309,27 @@ namespace Wacs.Transpiler.AOT
 
             var op = inst.Op.x00;
 
-            // Exception handling
+            // Exception handling (doc 1 §13, doc 2 §14).
             if (ExceptionEmitter.CanEmit(op))
             {
                 switch (op)
                 {
                     case WasmOpCode.Throw:
                         ExceptionEmitter.EmitThrow(il, (InstThrow)inst, _moduleInst);
+                        // throw is an unconditional terminator.
+                        _cilValidator.SetUnreachable();
                         break;
                     case WasmOpCode.ThrowRef:
+                        // Pop exnref (WasmException on internal stack, doc 1 §2.1).
+                        _cilValidator.Pop(typeof(WasmException), "throw_ref");
                         ExceptionEmitter.EmitThrowRef(il);
+                        _cilValidator.SetUnreachable();
                         break;
                     case WasmOpCode.TryTable:
                         ExceptionEmitter.EmitTryTable(il, (InstTryTable)inst, _blockStack,
-                            EmitInstruction, _moduleInst);
+                            EmitInstruction, _moduleInst,
+                            inc => _tryDepth += inc,
+                            dec => _tryDepth -= dec);
                         break;
                 }
                 return;
@@ -294,7 +389,8 @@ namespace Wacs.Transpiler.AOT
             // Variable/parametric instructions (locals, drop, select)
             if (VariableEmitter.CanEmit(op))
             {
-                VariableEmitter.Emit(il, inst, op, _paramCount, _locals, _paramClrTypes, _cilValidator);
+                VariableEmitter.Emit(il, inst, op, _paramCount, _locals,
+                    _paramClrTypes, _paramShadowLocals, _cilValidator);
                 return;
             }
 
@@ -307,16 +403,16 @@ namespace Wacs.Transpiler.AOT
                     {
                         var getInst = (InstGlobalGet)inst;
                         var globalType = ResolveGlobalType(getInst.GetIndex());
-                        GlobalEmitter.EmitGlobalGet(il, getInst, globalType);
-                        _cilValidator.Push(ModuleTranspiler.MapValType(globalType));
+                        GlobalEmitter.EmitGlobalGet(il, getInst, globalType, _moduleInst);
+                        _cilValidator.Push(InternalType(globalType));
                         return;
                     }
                     case WasmOpCode.GlobalSet:
                     {
                         var setInst = (InstGlobalSet)inst;
                         var globalType = ResolveGlobalType(setInst.GetIndex());
-                        _cilValidator.Pop(ModuleTranspiler.MapValType(globalType), "global.set");
-                        GlobalEmitter.EmitGlobalSet(il, setInst, globalType);
+                        _cilValidator.Pop(InternalType(globalType), "global.set");
+                        GlobalEmitter.EmitGlobalSet(il, setInst, globalType, _moduleInst);
                         return;
                     }
                 }
@@ -327,6 +423,77 @@ namespace Wacs.Transpiler.AOT
             {
                 MemoryEmitter.Emit(il, inst, op);
                 TrackMemoryStackEffect(op);
+                return;
+            }
+
+            // ref.is_null / ref.eq / ref.as_non_null: intercept and dispatch on
+            // operand representation (object for GC refs, Value for funcref /
+            // externref). Doc 2 §1. The dispatch happens here — not in
+            // TableRefEmitter — so we can use CilValidator.Peek for typing.
+            if (op == WasmOpCode.RefIsNull || op == WasmOpCode.RefEq || op == WasmOpCode.RefAsNonNull)
+            {
+                EmitRefObjectAware(il, op);
+                return;
+            }
+
+            // ref.null needs the target heap type to choose representation.
+            if (op == WasmOpCode.RefNull)
+            {
+                EmitRefNullTyped(il, (Wacs.Core.Instructions.Reference.InstRefNull)inst);
+                return;
+            }
+
+            // table.get / table.set: boundary-wrap for GC-ref tables.
+            // Table storage is always Value; the internal stack uses object
+            // for GC refs (doc 2 §3).
+            if (op == WasmOpCode.TableGet)
+            {
+                var tg = (InstTableGet)inst;
+                var elemType = ResolveTableElementType(tg.TableIndex);
+                _cilValidator.Pop(context: "table.get idx"); // i32 or i64
+                TableRefEmitter.Emit(il, inst, op); // emits helper returning Value
+                if (IsGcRef(elemType))
+                {
+                    il.Emit(OpCodes.Call, typeof(Emitters.GcRuntimeHelpers).GetMethod(
+                        nameof(Emitters.GcRuntimeHelpers.UnwrapRef),
+                        BindingFlags.Public | BindingFlags.Static)!);
+                    _cilValidator.Push(typeof(object));
+                }
+                else
+                {
+                    _cilValidator.Push(typeof(Value));
+                }
+                return;
+            }
+            if (op == WasmOpCode.TableSet)
+            {
+                var ts = (InstTableSet)inst;
+                var elemType = ResolveTableElementType(ts.TableIndex);
+                bool isGc = IsGcRef(elemType);
+
+                // Stack (bottom→top): [idx, val]. val is object for GC tables,
+                // Value otherwise. Spill both to temps of correct types, then
+                // reload in the order the helper expects, wrapping val for GC.
+                _cilValidator.Pop(isGc ? typeof(object) : typeof(Value), "table.set val");
+                _cilValidator.Pop(context: "table.set idx"); // i32 or i64
+
+                var valLocal = il.DeclareLocal(isGc ? typeof(object) : typeof(Value));
+                il.Emit(OpCodes.Stloc, valLocal);
+                var idxLocal = il.DeclareLocal(typeof(int));
+                il.Emit(OpCodes.Stloc, idxLocal);
+                il.Emit(OpCodes.Ldarg_0); // ctx
+                il.Emit(OpCodes.Ldc_I4, ts.TableIndex);
+                il.Emit(OpCodes.Ldloc, idxLocal);
+                il.Emit(OpCodes.Ldloc, valLocal);
+                if (isGc)
+                {
+                    il.Emit(OpCodes.Call, typeof(Emitters.GcRuntimeHelpers).GetMethod(
+                        nameof(Emitters.GcRuntimeHelpers.WrapRef),
+                        BindingFlags.Public | BindingFlags.Static)!);
+                }
+                il.Emit(OpCodes.Call, typeof(Emitters.TableRefHelpers).GetMethod(
+                    nameof(Emitters.TableRefHelpers.TableSet),
+                    BindingFlags.Public | BindingFlags.Static)!);
                 return;
             }
 
@@ -366,7 +533,7 @@ namespace Wacs.Transpiler.AOT
                 {
                     int sh = _currentInfo?.StackHeightBefore ?? 0;
                     ControlEmitter.EmitBlock(il, (InstBlock)inst, _blockStack, EmitInstruction,
-                        sh, _moduleInst);
+                        sh, _moduleInst, _tryDepth, _functionHasTryTable);
                     break;
                 }
 
@@ -374,7 +541,7 @@ namespace Wacs.Transpiler.AOT
                 {
                     int sh = _currentInfo?.StackHeightBefore ?? 0;
                     ControlEmitter.EmitLoop(il, (InstLoop)inst, _blockStack, EmitInstruction,
-                        sh, _moduleInst);
+                        sh, _moduleInst, _tryDepth);
                     break;
                 }
 
@@ -382,7 +549,7 @@ namespace Wacs.Transpiler.AOT
                 {
                     int sh = (_currentInfo?.StackHeightBefore ?? 1) - 1;
                     ControlEmitter.EmitIf(il, (InstIf)inst, _blockStack, EmitInstruction,
-                        sh, _moduleInst);
+                        sh, _moduleInst, _tryDepth, _functionHasTryTable);
                     break;
                 }
 
@@ -400,7 +567,11 @@ namespace Wacs.Transpiler.AOT
                         EmitBlock funcBlock = null!;
                         foreach (var block in _blockStack)
                             funcBlock = block;
-                        il.Emit(OpCodes.Br, funcBlock.BranchTarget);
+                        // If funcBlock owns shuttle locals, store results there
+                        // before branching so the label merges with an empty
+                        // stack (doc 2 §§2, 14).
+                        EmitExcessCleanup(il, 0, funcBlock);
+                        BranchBridge.EmitBranch(il, funcBlock, _tryDepth);
                     }
                     // Non-function End is handled by the block/loop/if emitters.
                     break;
@@ -413,6 +584,8 @@ namespace Wacs.Transpiler.AOT
 
                     int excess = _currentInfo?.Excess ?? 0;
                     EmitExcessCleanup(il, excess, funcBlock);
+                    // Return from inside a try is OK: Ret unwinds the frame
+                    // and the CLR handles pending try-region exit.
                     il.Emit(OpCodes.Ret);
                     _cilValidator.SetUnreachable();
                     break;
@@ -423,7 +596,7 @@ namespace Wacs.Transpiler.AOT
                     var target = ControlEmitter.PeekLabel(_blockStack, ((InstBranch)inst).Label);
                     int excess = _currentInfo?.Excess ?? 0;
                     EmitExcessCleanup(il, excess, target);
-                    il.Emit(OpCodes.Br, target.BranchTarget);
+                    BranchBridge.EmitBranch(il, target, _tryDepth);
                     _cilValidator.SetUnreachable();
                     break;
                 }
@@ -448,54 +621,89 @@ namespace Wacs.Transpiler.AOT
 
                 case WasmOpCode.BrOnNull:
                 {
-                    // br_on_null L: pop ref, if null branch to L (ref consumed), else push ref back
-                    // Save to local to avoid Dup of Value struct (managed ref field causes CIL merge issues)
+                    // br_on_null L: pop ref, if null branch to L (ref consumed),
+                    // else push ref back.
+                    //
+                    // Representation dispatch (doc 2 §1):
+                    //   object / WasmException — plain CLR references, can Dup
+                    //     at merge points. Inline: Dup; Brfalse skip; (null
+                    //     path: Pop; excess+branch); mark skip.
+                    //   Value (funcref/externref/v128) — struct containing a
+                    //     managed ref. Merge-point restricted (doc 2 §1);
+                    //     spill to local, test via RefIsNull helper.
                     var brInst = (Wacs.Core.Instructions.Reference.InstBrOnNull)inst;
                     var target = ControlEmitter.PeekLabel(_blockStack, brInst.Label);
                     int excess = _currentInfo?.Excess ?? 0;
+                    var top = _cilValidator.Peek();
+                    bool isPlainRef = top == typeof(object) || top == typeof(WasmException);
 
-                    var refLocal = il.DeclareLocal(typeof(Value));
-                    il.Emit(OpCodes.Stloc, refLocal);
-                    il.Emit(OpCodes.Ldloc, refLocal);
-                    il.Emit(OpCodes.Call, typeof(Emitters.TableRefHelpers).GetMethod(
-                        nameof(Emitters.TableRefHelpers.RefIsNull),
-                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!);
-                    var skipLabel = il.DefineLabel();
-                    il.Emit(OpCodes.Brfalse, skipLabel); // not null → skip
-
-                    // null path: branch to label (ref consumed)
-                    EmitExcessCleanup(il, excess, target);
-                    il.Emit(OpCodes.Br, target.BranchTarget);
-
-                    il.MarkLabel(skipLabel);
-                    // non-null path: push ref back
-                    il.Emit(OpCodes.Ldloc, refLocal);
+                    if (isPlainRef)
+                    {
+                        var skip = il.DefineLabel();
+                        il.Emit(OpCodes.Dup);
+                        il.Emit(OpCodes.Brtrue, skip);
+                        il.Emit(OpCodes.Pop); // discard the null we just duped
+                        EmitExcessCleanup(il, excess, target);
+                        BranchBridge.EmitBranch(il, target, _tryDepth);
+                        il.MarkLabel(skip);
+                        // non-null path: original ref still on stack.
+                    }
+                    else
+                    {
+                        var refLocal = il.DeclareLocal(typeof(Value));
+                        il.Emit(OpCodes.Stloc, refLocal);
+                        il.Emit(OpCodes.Ldloc, refLocal);
+                        il.Emit(OpCodes.Call, typeof(Emitters.TableRefHelpers).GetMethod(
+                            nameof(Emitters.TableRefHelpers.RefIsNull),
+                            BindingFlags.Public | BindingFlags.Static)!);
+                        var skip = il.DefineLabel();
+                        il.Emit(OpCodes.Brfalse, skip); // not null → skip
+                        EmitExcessCleanup(il, excess, target);
+                        BranchBridge.EmitBranch(il, target, _tryDepth);
+                        il.MarkLabel(skip);
+                        il.Emit(OpCodes.Ldloc, refLocal);
+                    }
                     break;
                 }
 
                 case WasmOpCode.BrOnNonNull:
                 {
-                    // br_on_non_null L: pop ref, if non-null branch to L (ref on stack), else consume
+                    // br_on_non_null L: pop ref, if non-null branch to L (ref
+                    // on stack), else consume. Same representation dispatch
+                    // as BrOnNull.
                     var brInst = (Wacs.Core.Instructions.Reference.InstBrOnNonNull)inst;
                     var target = ControlEmitter.PeekLabel(_blockStack, brInst.Label);
                     int excess = _currentInfo?.Excess ?? 0;
+                    var top = _cilValidator.Peek();
+                    bool isPlainRef = top == typeof(object) || top == typeof(WasmException);
 
-                    var refLocal = il.DeclareLocal(typeof(Value));
-                    il.Emit(OpCodes.Stloc, refLocal);
-                    il.Emit(OpCodes.Ldloc, refLocal);
-                    il.Emit(OpCodes.Call, typeof(Emitters.TableRefHelpers).GetMethod(
-                        nameof(Emitters.TableRefHelpers.RefIsNull),
-                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!);
-                    var skipLabel = il.DefineLabel();
-                    il.Emit(OpCodes.Brtrue, skipLabel); // null → skip
-
-                    // non-null path: push ref, clean excess, branch
-                    il.Emit(OpCodes.Ldloc, refLocal);
-                    EmitExcessCleanup(il, excess, target);
-                    il.Emit(OpCodes.Br, target.BranchTarget);
-
-                    il.MarkLabel(skipLabel);
-                    // null path: ref already consumed (saved to local, not reloaded)
+                    if (isPlainRef)
+                    {
+                        var skip = il.DefineLabel();
+                        il.Emit(OpCodes.Dup);
+                        il.Emit(OpCodes.Brfalse, skip);
+                        // non-null path: original ref still on stack, branch.
+                        EmitExcessCleanup(il, excess, target);
+                        BranchBridge.EmitBranch(il, target, _tryDepth);
+                        il.MarkLabel(skip);
+                        // null path: Pop the duped null.
+                        il.Emit(OpCodes.Pop);
+                    }
+                    else
+                    {
+                        var refLocal = il.DeclareLocal(typeof(Value));
+                        il.Emit(OpCodes.Stloc, refLocal);
+                        il.Emit(OpCodes.Ldloc, refLocal);
+                        il.Emit(OpCodes.Call, typeof(Emitters.TableRefHelpers).GetMethod(
+                            nameof(Emitters.TableRefHelpers.RefIsNull),
+                            BindingFlags.Public | BindingFlags.Static)!);
+                        var skip = il.DefineLabel();
+                        il.Emit(OpCodes.Brtrue, skip); // null → skip
+                        il.Emit(OpCodes.Ldloc, refLocal);
+                        EmitExcessCleanup(il, excess, target);
+                        BranchBridge.EmitBranch(il, target, _tryDepth);
+                        il.MarkLabel(skip);
+                    }
                     break;
                 }
 
@@ -503,6 +711,28 @@ namespace Wacs.Transpiler.AOT
                     throw new TranspilerException(
                         $"FunctionCodegen: no emitter for opcode {inst.Op.GetMnemonic()} (0x{(byte)op:X2})");
             }
+        }
+
+        /// <summary>
+        /// Recursively check if the function body contains `try_table`. When
+        /// true, all labels must use shuttle locals because cross-try branches
+        /// emit `Leave` which empties the CIL eval stack (doc 2 §14).
+        /// </summary>
+        private static bool ContainsTryTable(IEnumerable<InstructionBase> instructions)
+        {
+            foreach (var inst in instructions)
+            {
+                if (inst is InstTryTable) return true;
+                if (inst is IBlockInstruction blockInst)
+                {
+                    for (int i = 0; i < blockInst.Count; i++)
+                    {
+                        var block = blockInst.GetBlock(i);
+                        if (ContainsTryTable(block.Instructions)) return true;
+                    }
+                }
+            }
+            return false;
         }
 
         /// <summary>
@@ -603,45 +833,154 @@ namespace Wacs.Transpiler.AOT
 
         /// <summary>
         /// Emit br_on_cast / br_on_cast_fail with proper excess cleanup.
-        /// Stack: [ref (Value)]
+        /// Stack: [ref] — object for GC refs (doc 2 §1); Value for funcref/externref.
         /// br_on_cast: if ref matches targetType, branch (carry ref); else fall through (ref on stack)
         /// br_on_cast_fail: if ref doesn't match, branch (carry ref); else fall through (ref on stack)
+        ///
+        /// Object operands Dup at the merge point (safe per doc 2 §1);
+        /// Value operands spill to a local to avoid the merge-point Dup issue.
         /// </summary>
         private void EmitBrOnCastWithExcess(ILGenerator il, int labelDepth,
             ValType targetType, bool castFail)
         {
             var target = ControlEmitter.PeekLabel(_blockStack, labelDepth);
             int excess = _currentInfo?.Excess ?? 0;
+            bool isObjectRef = _cilValidator.Peek() == typeof(object);
 
-            // Save ref to local to avoid Dup of Value struct (managed ref field
-            // causes CIL verification issues at branch merge points).
+            if (isObjectRef)
+            {
+                // Dup, test (consumes the duped ref), branch on result; the
+                // original ref remains on the stack for both paths.
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, (int)targetType);
+                il.Emit(OpCodes.Ldc_I4, targetType.IsNullable() ? 1 : 0);
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Call, typeof(Emitters.GcRuntimeHelpers).GetMethod(
+                    nameof(Emitters.GcRuntimeHelpers.RefTestObject),
+                    BindingFlags.Public | BindingFlags.Static)!);
+
+                var skip = il.DefineLabel();
+                il.Emit(castFail ? OpCodes.Brtrue : OpCodes.Brfalse, skip);
+                EmitExcessCleanup(il, excess, target);
+                BranchBridge.EmitBranch(il, target, _tryDepth);
+                il.MarkLabel(skip);
+                // Fall-through: original ref still on stack.
+                return;
+            }
+
+            // Value operand: spill to local to bypass merge-point Dup issue.
             var refLocal = il.DeclareLocal(typeof(Value));
             il.Emit(OpCodes.Stloc, refLocal);
-
-            // Test the type
             il.Emit(OpCodes.Ldloc, refLocal);
             il.Emit(OpCodes.Ldc_I4, (int)targetType);
             il.Emit(OpCodes.Ldc_I4, targetType.IsNullable() ? 1 : 0);
-            il.Emit(OpCodes.Ldarg_0); // ThinContext
+            il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Call, typeof(Emitters.GcRuntimeHelpers).GetMethod(
                 nameof(Emitters.GcRuntimeHelpers.RefTestValue),
-                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!);
+                BindingFlags.Public | BindingFlags.Static)!);
 
             var skipLabel = il.DefineLabel();
-            if (castFail)
-                il.Emit(OpCodes.Brtrue, skipLabel); // test passed → don't branch
-            else
-                il.Emit(OpCodes.Brfalse, skipLabel); // test failed → don't branch
-
-            // Branch path: load ref, clean excess, branch
+            il.Emit(castFail ? OpCodes.Brtrue : OpCodes.Brfalse, skipLabel);
             il.Emit(OpCodes.Ldloc, refLocal);
             EmitExcessCleanup(il, excess, target);
-            il.Emit(OpCodes.Br, target.BranchTarget);
-
+            BranchBridge.EmitBranch(il, target, _tryDepth);
             il.MarkLabel(skipLabel);
-            // Fall-through: load ref back onto stack
             il.Emit(OpCodes.Ldloc, refLocal);
         }
+
+        /// <summary>
+        /// Emit ref.is_null / ref.eq / ref.as_non_null with operand-type
+        /// dispatch. GC refs (object on stack) use inline IL; funcref /
+        /// externref (Value on stack) use the Value-based helpers.
+        /// Doc 2 §1 establishes the dual representation.
+        /// </summary>
+        private void EmitRefObjectAware(ILGenerator il, WasmOpCode op)
+        {
+            var topType = _cilValidator.Peek();
+            bool isObject = topType == typeof(object);
+
+            switch (op)
+            {
+                case WasmOpCode.RefIsNull:
+                    _cilValidator.Pop(isObject ? typeof(object) : typeof(Value), "ref.is_null");
+                    if (isObject)
+                    {
+                        il.Emit(OpCodes.Ldnull);
+                        il.Emit(OpCodes.Ceq);
+                    }
+                    else
+                    {
+                        il.Emit(OpCodes.Call, typeof(Emitters.TableRefHelpers).GetMethod(
+                            nameof(Emitters.TableRefHelpers.RefIsNull),
+                            BindingFlags.Public | BindingFlags.Static)!);
+                    }
+                    _cilValidator.Push(typeof(int));
+                    break;
+
+                case WasmOpCode.RefEq:
+                    // Both operands share the same stack type by WASM validation
+                    // (both anyref / both funcref / etc.).
+                    _cilValidator.Pop(isObject ? typeof(object) : typeof(Value), "ref.eq b");
+                    _cilValidator.Pop(isObject ? typeof(object) : typeof(Value), "ref.eq a");
+                    il.Emit(OpCodes.Call, typeof(Emitters.GcRuntimeHelpers).GetMethod(
+                        isObject
+                            ? nameof(Emitters.GcRuntimeHelpers.RefEqObject)
+                            : nameof(Emitters.TableRefHelpers.RefEq),
+                        BindingFlags.Public | BindingFlags.Static,
+                        null,
+                        isObject
+                            ? new[] { typeof(object), typeof(object) }
+                            : new[] { typeof(Value), typeof(Value) },
+                        null)!);
+                    _cilValidator.Push(typeof(int));
+                    break;
+
+                case WasmOpCode.RefAsNonNull:
+                    _cilValidator.Pop(isObject ? typeof(object) : typeof(Value), "ref.as_non_null");
+                    if (isObject)
+                    {
+                        // Inline null check: dup; brtrue skip; trap; mark skip.
+                        var okLabel = il.DefineLabel();
+                        il.Emit(OpCodes.Dup);
+                        il.Emit(OpCodes.Brtrue, okLabel);
+                        il.Emit(OpCodes.Ldstr, "null reference");
+                        il.Emit(OpCodes.Newobj,
+                            typeof(TrapException).GetConstructor(new[] { typeof(string) })!);
+                        il.Emit(OpCodes.Throw);
+                        il.MarkLabel(okLabel);
+                    }
+                    else
+                    {
+                        il.Emit(OpCodes.Call, typeof(Emitters.TableRefHelpers).GetMethod(
+                            nameof(Emitters.TableRefHelpers.RefAsNonNull),
+                            BindingFlags.Public | BindingFlags.Static)!);
+                    }
+                    _cilValidator.Push(isObject ? typeof(object) : typeof(Value));
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Emit ref.null with representation chosen by heap type.
+        /// GC ref types push null (object); funcref/externref push Value.Null.
+        /// Doc 1 §2.5.
+        /// </summary>
+        private void EmitRefNullTyped(ILGenerator il, Wacs.Core.Instructions.Reference.InstRefNull inst)
+        {
+            if (IsGcRef(inst.RefType))
+            {
+                il.Emit(OpCodes.Ldnull);
+                _cilValidator.Push(typeof(object));
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldc_I4, (int)inst.RefType);
+                il.Emit(OpCodes.Call, typeof(Value).GetMethod(
+                    nameof(Value.Null), new[] { typeof(ValType) })!);
+                _cilValidator.Push(typeof(Value));
+            }
+        }
+
 
         /// <summary>
         /// Track the CIL stack effect of a numeric instruction in the validator.
@@ -706,7 +1045,10 @@ namespace Wacs.Transpiler.AOT
             }
         }
 
-        /// <summary>Track table/ref instruction stack effects.</summary>
+        /// <summary>Track table/ref instruction stack effects. Ref-type
+        /// interactions with representation (GC ref object vs funcref/externref
+        /// Value) are handled by intercepting emitters in EmitInstruction —
+        /// this only tracks table.get/set (via table type) and ref.func.</summary>
         private void TrackTableRefStackEffect(WasmOpCode op, InstructionBase inst, bool before)
         {
             if (before)
@@ -716,15 +1058,12 @@ namespace Wacs.Transpiler.AOT
                     case WasmOpCode.TableGet:
                         _cilValidator.Pop(context: "table.get idx"); break; // i32 or i64
                     case WasmOpCode.TableSet:
-                        _cilValidator.Pop(typeof(Value), "table.set val");
+                    {
+                        var ti = (Wacs.Core.Instructions.InstTableSet)inst;
+                        var elemType = ResolveTableElementType(ti.TableIndex);
+                        _cilValidator.Pop(InternalType(elemType), "table.set val");
                         _cilValidator.Pop(context: "table.set idx"); break; // i32 or i64
-                    case WasmOpCode.RefIsNull:
-                        _cilValidator.Pop(typeof(Value), "ref.is_null"); break;
-                    case WasmOpCode.RefEq:
-                        _cilValidator.Pop(typeof(Value), "ref.eq b");
-                        _cilValidator.Pop(typeof(Value), "ref.eq a"); break;
-                    case WasmOpCode.RefAsNonNull:
-                        _cilValidator.Pop(typeof(Value), "ref.as_non_null"); break;
+                    }
                 }
             }
             else // after
@@ -732,22 +1071,46 @@ namespace Wacs.Transpiler.AOT
                 switch (op)
                 {
                     case WasmOpCode.TableGet:
-                        _cilValidator.Push(typeof(Value)); break;
-                    case WasmOpCode.RefNull:
-                        _cilValidator.Push(typeof(Value)); break;
-                    case WasmOpCode.RefIsNull:
-                        _cilValidator.Push(typeof(int)); break;
+                    {
+                        var ti = (Wacs.Core.Instructions.InstTableGet)inst;
+                        var elemType = ResolveTableElementType(ti.TableIndex);
+                        _cilValidator.Push(InternalType(elemType));
+                        break;
+                    }
                     case WasmOpCode.RefFunc:
-                        _cilValidator.Push(typeof(Value)); break;
-                    case WasmOpCode.RefEq:
-                        _cilValidator.Push(typeof(int)); break;
-                    case WasmOpCode.RefAsNonNull:
+                        // funcref stays as Value (doc 2 §1 invariant 3).
                         _cilValidator.Push(typeof(Value)); break;
                 }
             }
         }
 
-        /// <summary>Track call instruction stack effects from resolved call site.</summary>
+        /// <summary>Resolve a table's element ValType from its module index.
+        /// Used by track-stack-effect to pick the internal CIL representation
+        /// for table.get / table.set values.</summary>
+        private ValType ResolveTableElementType(int tableIdx)
+        {
+            // Tables are indexed with imports first, then local tables.
+            int importedTableCount = 0;
+            foreach (var import in _moduleInst.Repr.Imports)
+            {
+                if (import.Desc is Wacs.Core.Module.ImportDesc.TableDesc td)
+                {
+                    if (importedTableCount == tableIdx)
+                        return td.TableDef.ElementType;
+                    importedTableCount++;
+                }
+            }
+            int localIdx = tableIdx - importedTableCount;
+            if (localIdx >= 0 && localIdx < _moduleInst.Repr.Tables.Count)
+                return _moduleInst.Repr.Tables[localIdx].ElementType;
+            return ValType.FuncRef; // fallback
+        }
+
+        /// <summary>Track call instruction stack effects from resolved call site.
+        /// Pops/pushes use INTERNAL types (object for GC refs, Value for
+        /// funcref/externref/v128) matching the internal CIL stack. The
+        /// wrap-to-Value at the call-site boundary is handled inside
+        /// CallEmitter (doc 2 §3).</summary>
         private void TrackCallStackEffect(CallSite site, bool before)
         {
             if (before)
@@ -761,7 +1124,7 @@ namespace Wacs.Transpiler.AOT
                 // Pop arguments in reverse order
                 for (int i = site.FuncType.ParameterTypes.Arity - 1; i >= 0; i--)
                 {
-                    var ptype = ModuleTranspiler.MapValType(site.FuncType.ParameterTypes.Types[i]);
+                    var ptype = InternalType(site.FuncType.ParameterTypes.Types[i]);
                     _cilValidator.Pop(ptype, $"call.param[{i}]");
                 }
             }
@@ -770,7 +1133,7 @@ namespace Wacs.Transpiler.AOT
                 // Push results
                 for (int i = 0; i < site.FuncType.ResultType.Arity; i++)
                 {
-                    var rtype = ModuleTranspiler.MapValType(site.FuncType.ResultType.Types[i]);
+                    var rtype = InternalType(site.FuncType.ResultType.Types[i]);
                     _cilValidator.Push(rtype);
                 }
             }

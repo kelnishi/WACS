@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Reflection;
 using System.Reflection.Emit;
 using Wacs.Core.Instructions;
 using Wacs.Core.Runtime;
@@ -54,7 +55,10 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// <param name="op">The opcode</param>
         /// <param name="paramCount">Number of WASM function parameters</param>
         /// <param name="locals">Array of CIL local builders (for WASM locals, not params)</param>
-        /// <param name="paramTypes">CIL types for WASM params (for validator)</param>
+        /// <param name="paramTypes">CIL types for WASM params seen on the
+        /// internal stack (i.e., object for GC refs, Value for funcref/externref/v128).</param>
+        /// <param name="paramShadowLocals">Shadow locals (doc 2 §15) for GC-ref params;
+        /// null entries indicate the param uses the direct CIL arg slot.</param>
         /// <param name="cv">CIL stack validator (optional)</param>
         public static void Emit(
             ILGenerator il,
@@ -63,6 +67,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             int paramCount,
             LocalBuilder[] locals,
             Type[]? paramTypes = null,
+            LocalBuilder?[]? paramShadowLocals = null,
             CilValidator? cv = null)
         {
             switch (op)
@@ -70,8 +75,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                 case WasmOpCode.LocalGet:
                 {
                     int idx = ((InstLocalGet)inst).GetIndex();
-                    EmitLocalGet(il, idx, paramCount);
-                    // Validator: push the type of the local/param
+                    EmitLocalGet(il, idx, paramCount, paramShadowLocals);
                     if (cv != null)
                     {
                         var clrType = idx < paramCount
@@ -84,7 +88,6 @@ namespace Wacs.Transpiler.AOT.Emitters
                 case WasmOpCode.LocalSet:
                 {
                     int idx = ((InstLocalSet)inst).GetIndex();
-                    // Validator: pop the value being stored
                     if (cv != null)
                     {
                         var clrType = idx < paramCount
@@ -92,15 +95,14 @@ namespace Wacs.Transpiler.AOT.Emitters
                             : locals[idx - paramCount].LocalType;
                         cv.Pop(clrType, "local.set");
                     }
-                    EmitLocalSet(il, idx, paramCount);
+                    EmitLocalSet(il, idx, paramCount, paramShadowLocals);
                     break;
                 }
                 case WasmOpCode.LocalTee:
                 {
                     int idx = ((InstLocalTee)inst).GetIndex();
-                    // Validator: peek (value stays on stack after tee)
                     il.Emit(OpCodes.Dup);
-                    EmitLocalSet(il, idx, paramCount);
+                    EmitLocalSet(il, idx, paramCount, paramShadowLocals);
                     break;
                 }
                 case WasmOpCode.Drop:
@@ -110,22 +112,34 @@ namespace Wacs.Transpiler.AOT.Emitters
                 case WasmOpCode.Select:
                 case WasmOpCode.SelectT:
                 {
-                    // Check if this is a typed select with ref types
-                    var sel = inst as InstSelect;
-                    if (sel?.Types.Length > 0 && sel.Types[0].IsRefType())
+                    // Select must match both operand types. In the split-stack
+                    // model GC refs flow as object (doc 2 §1), so a ref select
+                    // may see either Value (funcref/externref/v128) or object
+                    // (GC ref) on the CIL stack. Dispatch on the peeked type
+                    // of the second operand (the first pop is the condition).
+                    cv?.Pop(typeof(int), "select.cond");
+                    var topType = cv?.Peek() ?? typeof(Value);
+                    if (topType == typeof(object))
                     {
-                        // Ref-typed select: use a runtime helper to avoid CIL verification
-                        // issues with Value structs (containing managed refs) at branch merge points.
-                        // Note: after interpreter Link, both Select and SelectT use OpCode.Select.
-                        cv?.Pop(typeof(int), "select.cond");
+                        // GC ref select → object-based helper.
                         il.Emit(OpCodes.Call, typeof(SelectHelpers).GetMethod(
-                            nameof(SelectHelpers.SelectValue),
-                            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!);
+                            nameof(SelectHelpers.SelectObject),
+                            BindingFlags.Public | BindingFlags.Static)!);
                     }
                     else
                     {
-                        cv?.Pop(typeof(int), "select.cond");
-                        EmitSelect(il, typeof(long));
+                        var sel = inst as InstSelect;
+                        if (sel?.Types.Length > 0 && sel.Types[0].IsRefType())
+                        {
+                            // Funcref / externref / v128 select — Value helper.
+                            il.Emit(OpCodes.Call, typeof(SelectHelpers).GetMethod(
+                                nameof(SelectHelpers.SelectValue),
+                                BindingFlags.Public | BindingFlags.Static)!);
+                        }
+                        else
+                        {
+                            EmitSelect(il, typeof(long));
+                        }
                     }
                     break;
                 }
@@ -135,28 +149,44 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         /// <summary>
-        /// WASM local index 0..paramCount-1 → CIL arg 1..paramCount (arg 0 = ThinContext)
-        /// WASM local index paramCount..N → CIL local 0..N-paramCount
+        /// WASM local index 0..paramCount-1 → CIL arg 1..paramCount (arg 0 = ThinContext),
+        /// unless a shadow local exists for the index (GC-ref params routed through
+        /// object-typed shadow locals per doc 2 §15).
+        /// WASM local index paramCount..N → CIL local 0..N-paramCount.
         /// </summary>
-        private static void EmitLocalGet(ILGenerator il, int wasmIdx, int paramCount)
+        private static void EmitLocalGet(ILGenerator il, int wasmIdx, int paramCount,
+            LocalBuilder?[]? paramShadowLocals)
         {
             if (wasmIdx < paramCount)
             {
-                // WASM param → CIL arg (offset by 1 for ThinContext)
-                il.Emit(OpCodes.Ldarg, wasmIdx + 1);
+                if (paramShadowLocals != null && paramShadowLocals[wasmIdx] != null)
+                {
+                    il.Emit(OpCodes.Ldloc, paramShadowLocals[wasmIdx]!);
+                }
+                else
+                {
+                    il.Emit(OpCodes.Ldarg, wasmIdx + 1);
+                }
             }
             else
             {
-                // WASM local → CIL local
                 il.Emit(OpCodes.Ldloc, wasmIdx - paramCount);
             }
         }
 
-        private static void EmitLocalSet(ILGenerator il, int wasmIdx, int paramCount)
+        private static void EmitLocalSet(ILGenerator il, int wasmIdx, int paramCount,
+            LocalBuilder?[]? paramShadowLocals)
         {
             if (wasmIdx < paramCount)
             {
-                il.Emit(OpCodes.Starg, wasmIdx + 1);
+                if (paramShadowLocals != null && paramShadowLocals[wasmIdx] != null)
+                {
+                    il.Emit(OpCodes.Stloc, paramShadowLocals[wasmIdx]!);
+                }
+                else
+                {
+                    il.Emit(OpCodes.Starg, wasmIdx + 1);
+                }
             }
             else
             {
@@ -211,6 +241,11 @@ namespace Wacs.Transpiler.AOT.Emitters
     {
         /// <summary>select for Value: [val1, val2, cond] → val1 if cond!=0, else val2</summary>
         public static Value SelectValue(Value val1, Value val2, int cond)
+            => cond != 0 ? val1 : val2;
+
+        /// <summary>select for object (GC refs, doc 2 §1):
+        /// [val1, val2, cond] → val1 if cond!=0, else val2.</summary>
+        public static object? SelectObject(object? val1, object? val2, int cond)
             => cond != 0 ? val1 : val2;
     }
 }

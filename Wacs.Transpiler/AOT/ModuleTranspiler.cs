@@ -568,29 +568,66 @@ namespace Wacs.Transpiler.AOT
         /// internally on the CIL stack and in locals, avoiding Value boxing overhead.
         /// Funcref/externref stay as Value since they use Data.Ptr (not GcRef).
         /// Function signatures always use MapValType (Value at boundaries).
+        /// Concrete type indices (defType) are disambiguated via
+        /// <paramref name="moduleInst"/> — function types resolve to funcref
+        /// representation; struct/array types resolve to GC ref.
         /// </summary>
-        internal static Type MapValTypeInternal(ValType type)
+        internal static Type MapValTypeInternal(ValType type, ModuleInstance? moduleInst = null)
         {
-            if (IsGcRefType(type)) return typeof(object);
+            if (IsExnRefType(type)) return typeof(WasmException);
+            if (IsGcRefType(type, moduleInst)) return typeof(object);
             return MapValType(type);
         }
 
         /// <summary>
-        /// Returns true for GC reference types that should use typeof(object)
-        /// on the internal CIL evaluation stack. These types store their data
-        /// in Value.GcRef (managed reference), not Value.Data.Ptr.
-        /// Funcref/externref are NOT included — they use Data.Ptr.
+        /// Returns true for exnref types — the internal CIL representation
+        /// is the CLR WasmException reference itself (doc 1 §2.1, §13).
         /// </summary>
-        internal static bool IsGcRefType(ValType type)
+        internal static bool IsExnRefType(ValType type)
+            => type == ValType.Exn || type == ValType.NoExn;
+
+        /// <summary>
+        /// Returns true for GC reference types that should use typeof(object)
+        /// on the internal CIL evaluation stack (doc 2 §1 invariant 1). These
+        /// types store their data as a managed CLR reference, not as Value.Data.Ptr.
+        /// Funcref/externref and concrete function types are NOT included —
+        /// they stay as Value (doc 2 §1 invariant 3).
+        /// </summary>
+        internal static bool IsGcRefType(ValType type, ModuleInstance? moduleInst = null)
         {
             if (!type.IsRefType()) return false;
-            // Exclude funcref, externref, and their bottom types
-            return type switch
+            // Exclude funcref, externref, exnref, and their bottom types —
+            // those have their own representations (doc 2 §1 invariants 3 & 4).
+            switch (type)
             {
-                ValType.FuncRef or ValType.Func or ValType.NoFunc or ValType.NoFuncNN => false,
-                ValType.ExternRef or ValType.Extern or ValType.NoExtern or ValType.NoExternNN => false,
-                _ => true // any, eq, i31, struct, array, none, concrete types
-            };
+                case ValType.FuncRef:
+                case ValType.Func:
+                case ValType.NoFunc:
+                case ValType.NoFuncNN:
+                case ValType.ExternRef:
+                case ValType.Extern:
+                case ValType.NoExtern:
+                case ValType.NoExternNN:
+                case ValType.Exn:
+                case ValType.NoExn:
+                    return false;
+            }
+            // Concrete type index (defType): disambiguate by expansion kind.
+            // Function types flow as Value (funcref encoding); struct/array
+            // types flow as object.
+            if (type.IsDefType() && moduleInst?.Types != null)
+            {
+                var idx = type.Index();
+                if (moduleInst.Types.Contains(idx))
+                {
+                    var expansion = moduleInst.Types[idx].Expansion;
+                    if (expansion is FunctionType) return false;
+                }
+            }
+            // any, eq, i31, struct, array, none, and (without module) assume
+            // GC ref for safety — callers with access to module context should
+            // always pass it to disambiguate concrete types.
+            return true;
         }
     }
 }
