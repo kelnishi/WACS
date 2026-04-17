@@ -221,16 +221,21 @@ namespace Wacs.Transpiler.AOT.Emitters
                     break;
 
                 // === Conversions ===
+                // `extern.convert_any` changes an anyref's type label to externref
+                // (doc 1 §11.11). Crosses representations: anyref (object on internal
+                // stack) → externref (Value). Wrap with ExternRef type tag.
                 case GcCode.ExternConvertAny:
                     cv?.Pop(typeof(object), "extern.convert_any");
                     il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                        nameof(GcRuntimeHelpers.ExternConvertAnyObject), BindingFlags.Public | BindingFlags.Static)!);
-                    cv?.Push(typeof(object));
+                        nameof(GcRuntimeHelpers.ExternConvertAnyWrap), BindingFlags.Public | BindingFlags.Static)!);
+                    cv?.Push(typeof(Value));
                     break;
+                // `any.convert_extern` is the reverse: externref (Value) → anyref
+                // (object). Unwrap the Value's GcRef onto the internal stack.
                 case GcCode.AnyConvertExtern:
-                    cv?.Pop(typeof(object), "any.convert_extern");
+                    cv?.Pop(typeof(Value), "any.convert_extern");
                     il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                        nameof(GcRuntimeHelpers.AnyConvertExternObject), BindingFlags.Public | BindingFlags.Static)!);
+                        nameof(GcRuntimeHelpers.UnwrapRef), BindingFlags.Public | BindingFlags.Static)!);
                     cv?.Push(typeof(object));
                     break;
 
@@ -851,14 +856,18 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         /// <summary>
-        /// Unwrap a Value to get the underlying CLR GC object.
-        /// Returns the IGcRef as object for casting.
+        /// Unwrap a Value (the storage / signature form) to the underlying CLR
+        /// object that sits on the internal CIL stack (doc 2 §3). Null Value
+        /// maps to null object — the transpiler emits explicit trap instructions
+        /// (ref.as_non_null, struct.get, array.get, call_ref, throw_ref, …)
+        /// where a null ref is illegal; this helper is a pure boundary
+        /// conversion and MUST NOT trap on its own.
         /// </summary>
-        public static object UnwrapRef(Value val)
+        public static object? UnwrapRef(Value val)
         {
-            if (val.IsNullRef)
-                throw new TrapException("null reference");
-            var gcRef = val.GcRef ?? throw new TrapException("null reference");
+            if (val.IsNullRef) return null;
+            var gcRef = val.GcRef;
+            if (gcRef == null) return null;
             // Unwrap the adapter if present
             if (gcRef is GcObjectAdapter adapter)
                 return adapter.Target;
@@ -1375,10 +1384,18 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// <summary>any.convert_extern on object. Re-tagging is implicit at
         /// internal-stack level — object carries no WASM type label. The
         /// boundary wrap on return / storage sets the correct Value.Type.</summary>
-        public static object? AnyConvertExternObject(object? val) => val;
-
-        /// <summary>extern.convert_any on object. Symmetric to above.</summary>
-        public static object? ExternConvertAnyObject(object? val) => val;
+        /// <summary>
+        /// extern.convert_any: anyref (object on internal stack) → externref
+        /// (Value). Wraps with ExternRef type tag regardless of the payload's
+        /// category — the spec defines this as a label change, not a content
+        /// inspection (doc 1 §11.11).
+        /// </summary>
+        public static Value ExternConvertAnyWrap(object? val)
+        {
+            if (val == null) return new Value(ValType.ExternRef);
+            if (val is IGcRef igc) return new Value(ValType.ExternRef, 0, igc);
+            return new Value(ValType.ExternRef, 0, new GcObjectAdapter(val));
+        }
 
         /// <summary>ref.is_null on an object-typed ref. Emitters can also
         /// inline as `ldnull; ceq`; this helper exists for uniformity with
