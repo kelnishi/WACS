@@ -1163,13 +1163,82 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (elemClrType.IsValueType) return ConvertValueToElement(val, elemClrType);
             // Reference type: unwrap to CLR object
             if (val.IsNullRef) return null;
-            // GC refs (struct/array/i31): extract the CLR object from GcRef
             var gcRef = val.GcRef;
-            if (gcRef is GcObjectAdapter adapter) return adapter.Target;
-            if (gcRef != null) return gcRef;
+            object? target = gcRef is GcObjectAdapter adapter ? adapter.Target : gcRef;
+
+            // If the target is already the right CLR type, use it directly
+            if (target != null && elemClrType.IsInstanceOfType(target))
+                return target;
+
+            // Convert interpreter GC types to emitted CLR types
+            if (target is Wacs.Core.Runtime.StoreArray sa)
+                return ConvertStoreArray(sa, elemClrType);
+            if (target is Wacs.Core.Runtime.GC.StoreStruct ss)
+                return ConvertStoreStruct(ss, elemClrType);
+
             // Funcref/externref: no GcRef, box the entire Value as-is
-            // (the array.get path will unbox it back)
-            return (object)val;
+            if (target == null) return (object)val;
+            return target;
+        }
+
+        /// <summary>Convert an interpreter StoreArray to an emitted CLR array type.</summary>
+        private static object? ConvertStoreArray(Wacs.Core.Runtime.StoreArray sa, Type targetClrType)
+        {
+            // Create an instance of the emitted CLR type and copy element data
+            var instance = System.Activator.CreateInstance(targetClrType);
+            if (instance == null) return null;
+
+            var elemField = targetClrType.GetField("elements");
+            var lenField = targetClrType.GetField("length");
+            if (elemField == null) return instance;
+
+            int len = sa.Length;
+            var elemType = elemField.FieldType.GetElementType()!;
+            var arr = System.Array.CreateInstance(elemType, len);
+
+            // Copy data from StoreArray's Value[] to the typed CLR array
+            for (int i = 0; i < len; i++)
+            {
+                var v = sa[i];
+                if (elemType.IsValueType)
+                    arr.SetValue(ConvertValueToElement(v, elemType), i);
+                else if (!v.IsNullRef)
+                {
+                    var inner = v.GcRef is GcObjectAdapter a ? a.Target : v.GcRef;
+                    if (inner is Wacs.Core.Runtime.StoreArray innerSa)
+                        arr.SetValue(ConvertStoreArray(innerSa, elemType), i);
+                    else
+                        arr.SetValue(inner, i);
+                }
+            }
+
+            elemField.SetValue(instance, arr);
+            lenField?.SetValue(instance, len);
+            return instance;
+        }
+
+        /// <summary>Convert an interpreter StoreStruct to an emitted CLR struct type.</summary>
+        private static object? ConvertStoreStruct(Wacs.Core.Runtime.GC.StoreStruct ss, Type targetClrType)
+        {
+            var instance = System.Activator.CreateInstance(targetClrType);
+            if (instance == null) return null;
+
+            var fields = targetClrType.GetFields(BindingFlags.Public | BindingFlags.Instance);
+            for (int i = 0; i < fields.Length; i++)
+            {
+                Value v;
+                try { v = ss[(FieldIdx)(uint)i]; }
+                catch { break; }
+                var ft = fields[i].FieldType;
+                if (ft.IsValueType)
+                    fields[i].SetValue(instance, ConvertValueToElement(v, ft));
+                else if (!v.IsNullRef && v.GcRef != null)
+                {
+                    var inner = v.GcRef is GcObjectAdapter a ? a.Target : v.GcRef;
+                    fields[i].SetValue(instance, inner);
+                }
+            }
+            return instance;
         }
 
         public static void ArrayFill(Value arrayRef, int offset, Value value, int length)
