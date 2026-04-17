@@ -694,8 +694,10 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// <summary>
         /// Wrap a CLR GC object into a Value. The object must implement IGcRef.
         /// </summary>
-        public static Value WrapRef(object gcRef)
+        public static Value WrapRef(object? gcRef)
         {
+            if (gcRef == null)
+                return new Value(ValType.Any); // null ref
             var valType = DeriveValType(gcRef);
             if (gcRef is IGcRef igc)
                 return new Value(valType, 0, igc);
@@ -1073,12 +1075,15 @@ namespace Wacs.Transpiler.AOT.Emitters
         private static object? ExtractElemValue(Value val, Type elemClrType)
         {
             if (elemClrType.IsValueType) return ConvertValueToElement(val, elemClrType);
-            // Reference type: unwrap GcRef
+            // Reference type: unwrap to CLR object
             if (val.IsNullRef) return null;
+            // GC refs (struct/array/i31): extract the CLR object from GcRef
             var gcRef = val.GcRef;
             if (gcRef is GcObjectAdapter adapter) return adapter.Target;
             if (gcRef != null) return gcRef;
-            return null;
+            // Funcref/externref: no GcRef, box the entire Value as-is
+            // (the array.get path will unbox it back)
+            return (object)val;
         }
 
         public static void ArrayFill(Value arrayRef, int offset, Value value, int length)
@@ -1212,10 +1217,14 @@ namespace Wacs.Transpiler.AOT.Emitters
             var field = target.GetType().GetField("elements");
             if (field == null) throw new TrapException("not an array type");
             var elements = (System.Array)field.GetValue(target)!;
-            if (dstOff + length > elements.Length || srcOff + length > values.Length)
-                throw new TrapException("out of bounds");
+            var elemType = elements.GetType().GetElementType()!;
+            if ((long)(uint)dstOff + (long)(uint)length > elements.Length
+                || (long)(uint)srcOff + (long)(uint)length > values.Length)
+                throw new TrapException("out of bounds table access");
             for (int i = 0; i < length; i++)
-                elements.SetValue(values[srcOff + i], dstOff + i);
+            {
+                elements.SetValue(ExtractElemValue(values[srcOff + i], elemType), dstOff + i);
+            }
         }
     }
 }
