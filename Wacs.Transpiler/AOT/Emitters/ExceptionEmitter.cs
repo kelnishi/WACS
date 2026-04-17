@@ -18,6 +18,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using Wacs.Core.Instructions;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
@@ -25,8 +26,41 @@ using WasmOpCode = Wacs.Core.OpCodes.OpCode;
 
 namespace Wacs.Transpiler.AOT.Emitters
 {
+    /// <summary>
+    /// Emits CIL for WASM exception instructions using CLR native exception
+    /// handling. Implements doc 1 §13 and doc 2 §§5, 14.
+    ///
+    /// Key design points:
+    ///
+    /// * Tag identity is `TagInstance` reference equality (doc 2 §5). Each
+    ///   tag is fetched via `ctx.Tags[tagidx]`; the linker wires imported
+    ///   tags to share the exporter's TagInstance.
+    /// * `throw` constructs `new WasmException(TagInstance, Value[])` and
+    ///   throws — no Store/AllocateExn round-trip.
+    /// * `try_table` uses `BeginExceptionBlock` / `BeginCatchBlock(WasmException)`
+    ///   with inline tag-ref comparison; mismatched catches Rethrow.
+    /// * Catch dispatch unpacks exception fields back to the internal CIL
+    ///   stack representation (doc 1 §2.1): scalars as typed primitives,
+    ///   GC refs as object (via UnwrapRef), funcref/externref/v128 as Value.
+    /// * `exnref` (from catch_ref / catch_all_ref) is the `WasmException`
+    ///   object itself on the internal stack.
+    /// * Branches out of try-regions must use `Leave` — that's tracked by
+    ///   the caller (FunctionCodegen._tryDepth, doc 2 §14).
+    /// </summary>
     internal static class ExceptionEmitter
     {
+        private static readonly FieldInfo TagsField =
+            typeof(ThinContext).GetField(nameof(ThinContext.Tags))!;
+
+        private static readonly MethodInfo WasmException_get_Tag =
+            typeof(WasmException).GetProperty(nameof(WasmException.Tag))!.GetGetMethod()!;
+
+        private static readonly MethodInfo WasmException_get_Fields =
+            typeof(WasmException).GetProperty(nameof(WasmException.Fields))!.GetGetMethod()!;
+
+        private static readonly ConstructorInfo WasmException_ctor =
+            typeof(WasmException).GetConstructor(new[] { typeof(TagInstance), typeof(Value[]) })!;
+
         public static bool CanEmit(WasmOpCode op)
         {
             return op == WasmOpCode.Throw
@@ -35,28 +69,27 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         /// <summary>
-        /// Emit throw: pop N field values, create WasmException, throw.
-        /// Spec: throw x → create exn{tag, fields}, throw_ref
+        /// Emit `throw $tag`: gather N field values from the CIL stack, wrap
+        /// each to Value, build Value[], Newobj WasmException, Throw.
+        /// Doc 1 §13.3.
         /// </summary>
         public static void EmitThrow(ILGenerator il, InstThrow inst, ModuleInstance moduleInst)
         {
             int tagIdx = inst.TagIndex;
+            var fieldTypes = ResolveTagFieldTypes(moduleInst, (TagIdx)tagIdx);
+            int fieldCount = fieldTypes.Length;
 
-            // Resolve the tag's type to know how many fields to pop
-            int fieldCount = ResolveTagFieldCount(moduleInst, (TagIdx)tagIdx);
-
-            // Spill fields from CIL stack into Value[]
+            // Spill each field from the stack into a temp of its internal type
+            // (object for GC ref, typed scalar otherwise, Value for v128/func/externref).
             var fieldTemps = new LocalBuilder[fieldCount];
             for (int i = fieldCount - 1; i >= 0; i--)
             {
-                fieldTemps[i] = il.DeclareLocal(typeof(Value));
-                // Fields are on CIL stack as typed values — box to Value
-                // Actually they could be int/long/float/double or Value depending on type
-                // For simplicity, assume all are already Value or can be boxed
+                var internalType = ModuleTranspiler.MapValTypeInternal(fieldTypes[i], moduleInst);
+                fieldTemps[i] = il.DeclareLocal(internalType);
                 il.Emit(OpCodes.Stloc, fieldTemps[i]);
             }
 
-            // Build Value[] fields
+            // Build Value[] — each slot holds a Value with the correct tag and data.
             il.Emit(OpCodes.Ldc_I4, fieldCount);
             il.Emit(OpCodes.Newarr, typeof(Value));
             for (int i = 0; i < fieldCount; i++)
@@ -64,133 +97,135 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Dup);
                 il.Emit(OpCodes.Ldc_I4, i);
                 il.Emit(OpCodes.Ldloc, fieldTemps[i]);
+                EmitConvertToValueForStorage(il, fieldTypes[i], moduleInst);
                 il.Emit(OpCodes.Stelem, typeof(Value));
             }
+
+            // Now: stack has Value[]. Fetch TagInstance from ctx.Tags[tagIdx],
+            // push fields, Newobj WasmException, Throw.
             var fieldsLocal = il.DeclareLocal(typeof(Value[]));
             il.Emit(OpCodes.Stloc, fieldsLocal);
-
-            // Create and throw WasmException
-            il.Emit(OpCodes.Ldarg_0); // ctx
+            il.Emit(OpCodes.Ldarg_0);            // ThinContext
+            il.Emit(OpCodes.Ldfld, TagsField);    // TagInstance[]
             il.Emit(OpCodes.Ldc_I4, tagIdx);
+            il.Emit(OpCodes.Ldelem_Ref);          // TagInstance
             il.Emit(OpCodes.Ldloc, fieldsLocal);
-            il.Emit(OpCodes.Call, typeof(ExceptionHelpers).GetMethod(
-                nameof(ExceptionHelpers.CreateAndThrow), BindingFlags.Public | BindingFlags.Static)!);
+            il.Emit(OpCodes.Newobj, WasmException_ctor);
+            il.Emit(OpCodes.Throw);
         }
 
         /// <summary>
-        /// Emit throw_ref: pop exnref (Value), extract ExnInstance, throw WasmException.
-        /// Spec: throw_ref → pop exnref, trap if null, unwind to handler.
+        /// Emit `throw_ref`: pop exnref (WasmException on internal stack),
+        /// null check → trap, else Throw. Doc 1 §13.4.
         /// </summary>
         public static void EmitThrowRef(ILGenerator il)
         {
-            // Stack: [Value (exnref)]
-            il.Emit(OpCodes.Call, typeof(ExceptionHelpers).GetMethod(
-                nameof(ExceptionHelpers.ThrowRef), BindingFlags.Public | BindingFlags.Static)!);
+            // Stack: [WasmException]. Dup for null check so we can throw the
+            // original on success.
+            var okLabel = il.DefineLabel();
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Brtrue, okLabel);
+            il.Emit(OpCodes.Ldstr, "null exception reference");
+            il.Emit(OpCodes.Newobj,
+                typeof(TrapException).GetConstructor(new[] { typeof(string) })!);
+            il.Emit(OpCodes.Throw);
+            il.MarkLabel(okLabel);
+            il.Emit(OpCodes.Throw);
         }
 
         /// <summary>
-        /// Emit try_table: CIL try/catch wrapping the body, with tag-based dispatch.
+        /// Emit try_table via CLR structured EH. See doc 1 §13.5 and doc 2 §14.
         ///
-        /// CIL structure:
-        ///   .try { body; leave END }
-        ///   catch WasmException {
-        ///     stloc exn;
-        ///     // Check each catch clause, store fields, leave to DISPATCH_N
-        ///     rethrow  // no clause matched
-        ///   }
-        ///   DISPATCH_0: load fields, br catchLabel0
-        ///   DISPATCH_1: load fields, br catchLabel1
-        ///   ...
-        ///   END:
+        /// Structure:
+        ///   BeginExceptionBlock
+        ///     (body)
+        ///     Leave endLabel
+        ///   BeginCatchBlock(WasmException)
+        ///     Stloc exnLocal
+        ///     for each clause: if match → Leave dispatch_i
+        ///     Rethrow  (no match)
+        ///   EndExceptionBlock
+        ///   dispatch_i:
+        ///     unpack fields + exnref per clause mode
+        ///     Br enclosing_catch_label
+        ///   endLabel:
         /// </summary>
         public static void EmitTryTable(
             ILGenerator il,
             InstTryTable inst,
             Stack<EmitBlock> blockStack,
             EmitInstructionDelegate emitInstruction,
-            ModuleInstance moduleInst)
+            ModuleInstance moduleInst,
+            Action<int> incTryDepth,
+            Action<int> decTryDepth)
         {
             var catches = inst.Catches;
             var endLabel = il.DefineLabel();
 
-            // The try_table introduces a block label (like block) — branch to end
+            // try_table introduces a block label at this depth.
             blockStack.Push(new EmitBlock
             {
                 BranchTarget = endLabel,
                 Kind = WasmOpCode.Block
             });
 
-            // Define dispatch labels (one per catch clause, outside the try/catch)
             var dispatchLabels = new System.Reflection.Emit.Label[catches.Length];
             for (int i = 0; i < catches.Length; i++)
                 dispatchLabels[i] = il.DefineLabel();
 
-            // Local for caught exception
             var exnLocal = il.DeclareLocal(typeof(WasmException));
-            // Local for matched clause index
-            var clauseLocal = il.DeclareLocal(typeof(int));
 
-            // === .try ===
             il.BeginExceptionBlock();
+            incTryDepth(1);
 
-            // Emit body
+            // Emit body. Branches out of the try-region pick Leave vs Br via
+            // the caller's _tryDepth tracking (doc 2 §14).
             var block = inst.GetBlock(0);
             foreach (var child in block.Instructions)
                 emitInstruction(il, child);
 
-            // Normal exit: leave to END (implicit from BeginExceptionBlock/EndExceptionBlock)
             il.Emit(OpCodes.Leave, endLabel);
 
-            // === catch (WasmException) ===
             il.BeginCatchBlock(typeof(WasmException));
             il.Emit(OpCodes.Stloc, exnLocal);
 
-            // Check each catch clause in order
+            // Clause dispatch. Tag match = reference equality on TagInstance.
             for (int i = 0; i < catches.Length; i++)
             {
                 var handler = catches[i];
                 switch (handler.Mode)
                 {
-                    case CatchFlags.None: // catch tagidx labelidx
-                    case CatchFlags.CatchRef: // catch_ref tagidx labelidx
+                    case CatchFlags.None:
+                    case CatchFlags.CatchRef:
                     {
-                        // Check if exn.Tag matches module.TagAddrs[handler.X]
-                        il.Emit(OpCodes.Ldarg_0); // ctx
+                        // Compare exn.Tag == ctx.Tags[expected]
                         il.Emit(OpCodes.Ldloc, exnLocal);
+                        il.Emit(OpCodes.Callvirt, WasmException_get_Tag);
+                        il.Emit(OpCodes.Ldarg_0);
+                        il.Emit(OpCodes.Ldfld, TagsField);
                         il.Emit(OpCodes.Ldc_I4, (int)handler.X.Value);
-                        il.Emit(OpCodes.Call, typeof(ExceptionHelpers).GetMethod(
-                            nameof(ExceptionHelpers.TagMatches), BindingFlags.Public | BindingFlags.Static)!);
+                        il.Emit(OpCodes.Ldelem_Ref);
+                        il.Emit(OpCodes.Ceq);
                         var nextClause = il.DefineLabel();
                         il.Emit(OpCodes.Brfalse, nextClause);
-
-                        // Match! Store clause index, leave to dispatch
-                        il.Emit(OpCodes.Ldc_I4, i);
-                        il.Emit(OpCodes.Stloc, clauseLocal);
                         il.Emit(OpCodes.Leave, dispatchLabels[i]);
-
                         il.MarkLabel(nextClause);
                         break;
                     }
-                    case CatchFlags.CatchAll: // catch_all labelidx
-                    case CatchFlags.CatchAllRef: // catch_all_ref labelidx
-                    {
-                        // Always matches
-                        il.Emit(OpCodes.Ldc_I4, i);
-                        il.Emit(OpCodes.Stloc, clauseLocal);
+                    case CatchFlags.CatchAll:
+                    case CatchFlags.CatchAllRef:
                         il.Emit(OpCodes.Leave, dispatchLabels[i]);
                         break;
-                    }
                 }
             }
 
-            // No clause matched — rethrow
+            // No clause matched → propagate.
             il.Emit(OpCodes.Rethrow);
-
-            // === end try/catch ===
             il.EndExceptionBlock();
+            decTryDepth(1);
 
-            // === Dispatch labels (outside try/catch) ===
-            // Each dispatch: push fields (and optionally exnref), branch to catch label
+            // Dispatch labels sit outside the try/catch. Each pushes the
+            // target label's expected operands onto the internal stack.
             for (int i = 0; i < catches.Length; i++)
             {
                 il.MarkLabel(dispatchLabels[i]);
@@ -200,36 +235,28 @@ namespace Wacs.Transpiler.AOT.Emitters
                 switch (handler.Mode)
                 {
                     case CatchFlags.None:
-                    {
-                        // Push exception fields to CIL stack
-                        int fieldCount = ResolveTagFieldCount(moduleInst, handler.X);
-                        EmitPushFieldsTyped(il, exnLocal, fieldCount);
+                        EmitPushFieldsFromExn(il, exnLocal, handler.X, moduleInst);
                         break;
-                    }
                     case CatchFlags.CatchRef:
-                    {
-                        int fieldCount = ResolveTagFieldCount(moduleInst, handler.X);
-                        EmitPushFieldsTyped(il, exnLocal, fieldCount);
-                        EmitPushExnRef(il, exnLocal);
+                        EmitPushFieldsFromExn(il, exnLocal, handler.X, moduleInst);
+                        il.Emit(OpCodes.Ldloc, exnLocal); // exnref (WasmException)
                         break;
-                    }
                     case CatchFlags.CatchAll:
                         break;
                     case CatchFlags.CatchAllRef:
-                        EmitPushExnRef(il, exnLocal);
+                        il.Emit(OpCodes.Ldloc, exnLocal); // exnref only
                         break;
                 }
 
-                // Branch to the catch label (resolve from block stack)
-                // The label depth is relative to the try_table's enclosing context
-                // Since we pushed the try_table block, depth 0 = try_table end,
-                // depth 1 = enclosing block, etc.
+                // Branch to the target catch label (resolve from block stack).
+                // Depth 0 = try_table's own end (we pushed that); higher depths
+                // walk outward.
                 int idx = 0;
-                foreach (var block2 in blockStack)
+                foreach (var target in blockStack)
                 {
                     if (idx == labelDepth)
                     {
-                        il.Emit(OpCodes.Br, block2.BranchTarget);
+                        il.Emit(OpCodes.Br, target.BranchTarget);
                         break;
                     }
                     idx++;
@@ -240,21 +267,46 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.MarkLabel(endLabel);
         }
 
-        private static int ResolveTagFieldCount(ModuleInstance moduleInst, TagIdx tagIdx)
+        /// <summary>
+        /// Push exception fields from exn.Fields[] onto the internal CIL stack,
+        /// converting each Value to its internal representation:
+        /// scalars → typed primitive; GC ref → object (via UnwrapRef);
+        /// funcref/externref/v128 → Value passthrough.
+        /// </summary>
+        private static void EmitPushFieldsFromExn(ILGenerator il, LocalBuilder exnLocal,
+            TagIdx tagIdx, ModuleInstance moduleInst)
         {
-            // Imported tags come before local tags in the index space.
-            // Check imports first, then local tags.
+            var fieldTypes = ResolveTagFieldTypes(moduleInst, tagIdx);
+            if (fieldTypes.Length == 0) return;
+
+            // Cache the fields array in a local.
+            il.Emit(OpCodes.Ldloc, exnLocal);
+            il.Emit(OpCodes.Callvirt, WasmException_get_Fields);
+            var fieldsLocal = il.DeclareLocal(typeof(Value[]));
+            il.Emit(OpCodes.Stloc, fieldsLocal);
+
+            for (int f = 0; f < fieldTypes.Length; f++)
+            {
+                il.Emit(OpCodes.Ldloc, fieldsLocal);
+                il.Emit(OpCodes.Ldc_I4, f);
+                il.Emit(OpCodes.Ldelem, typeof(Value));
+                EmitConvertFromValueToInternal(il, fieldTypes[f], moduleInst);
+            }
+        }
+
+        /// <summary>
+        /// Resolve the tag's declared field types (i.e., the function type's
+        /// parameter types). Works for local and imported tags.
+        /// </summary>
+        private static ValType[] ResolveTagFieldTypes(ModuleInstance moduleInst, TagIdx tagIdx)
+        {
             int importedTagCount = 0;
             foreach (var import in moduleInst.Repr.Imports)
-            {
-                if (import.Desc is Wacs.Core.Module.ImportDesc.TagDesc)
-                    importedTagCount++;
-            }
+                if (import.Desc is Wacs.Core.Module.ImportDesc.TagDesc) importedTagCount++;
 
-            TypeIdx typeIdx;
+            FunctionType? ft = null;
             if ((int)tagIdx.Value < importedTagCount)
             {
-                // Imported tag — get type from import desc
                 int ti = 0;
                 foreach (var import in moduleInst.Repr.Imports)
                 {
@@ -262,89 +314,90 @@ namespace Wacs.Transpiler.AOT.Emitters
                     {
                         if (ti == (int)tagIdx.Value)
                         {
-                            var ft = moduleInst.Types[td.TagDef.TypeIndex].Expansion as FunctionType;
-                            return ft?.ParameterTypes.Arity ?? 0;
+                            ft = moduleInst.Types[td.TagDef.TypeIndex].Expansion as FunctionType;
+                            break;
                         }
                         ti++;
                     }
                 }
-                return 0;
+            }
+            else
+            {
+                int localIdx = (int)tagIdx.Value - importedTagCount;
+                var tag = moduleInst.Repr.Tags[localIdx];
+                ft = moduleInst.Types[tag.TypeIndex].Expansion as FunctionType;
             }
 
-            // Local tag
-            int localIdx = (int)tagIdx.Value - importedTagCount;
-            var tag = moduleInst.Repr.Tags[localIdx];
-            var tagType = moduleInst.Types[tag.TypeIndex].Expansion as FunctionType;
-            return tagType?.ParameterTypes.Arity ?? 0;
+            return ft?.ParameterTypes.Types ?? Array.Empty<ValType>();
         }
 
         /// <summary>
-        /// Push N exception fields to the CIL stack as Value.
-        /// The field count is known at emit time from the tag definition.
+        /// Convert a value on the stack (in internal representation for its WASM
+        /// type) to a Value suitable for Value[] storage. Mirrors the boundary
+        /// wrap used for global.set / table.set / call args (doc 2 §3).
         /// </summary>
-        private static void EmitPushFieldsTyped(ILGenerator il, LocalBuilder exnLocal, int fieldCount)
+        private static void EmitConvertToValueForStorage(ILGenerator il, ValType type, ModuleInstance moduleInst)
         {
-            if (fieldCount == 0) return;
-
-            // Get the fields array
-            il.Emit(OpCodes.Ldloc, exnLocal);
-            il.Emit(OpCodes.Callvirt, typeof(WasmException).GetProperty(nameof(WasmException.Fields))!.GetGetMethod()!);
-            var fieldsLocal = il.DeclareLocal(typeof(Value[]));
-            il.Emit(OpCodes.Stloc, fieldsLocal);
-
-            // Push each field individually
-            for (int f = 0; f < fieldCount; f++)
+            switch (type)
             {
-                il.Emit(OpCodes.Ldloc, fieldsLocal);
-                il.Emit(OpCodes.Ldc_I4, f);
-                il.Emit(OpCodes.Ldelem, typeof(Value));
+                case ValType.I32:
+                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(int) })!);
+                    return;
+                case ValType.I64:
+                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(long) })!);
+                    return;
+                case ValType.F32:
+                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(float) })!);
+                    return;
+                case ValType.F64:
+                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(double) })!);
+                    return;
             }
+            if (ModuleTranspiler.IsGcRefType(type, moduleInst))
+            {
+                il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                    nameof(GcRuntimeHelpers.WrapRef), BindingFlags.Public | BindingFlags.Static)!);
+                return;
+            }
+            // funcref/externref/v128: already a Value on the stack.
         }
 
-        private static void EmitPushExnRef(ILGenerator il, LocalBuilder exnLocal)
+        /// <summary>
+        /// Convert a Value on the stack to the internal representation for its
+        /// WASM type. Mirrors global.get / table.get / call result unwrap.
+        /// </summary>
+        private static void EmitConvertFromValueToInternal(ILGenerator il, ValType type, ModuleInstance moduleInst)
         {
-            il.Emit(OpCodes.Ldloc, exnLocal);
-            il.Emit(OpCodes.Callvirt, typeof(WasmException).GetProperty(nameof(WasmException.ExnRef))!.GetGetMethod()!);
-        }
-    }
-
-    public static class ExceptionHelpers
-    {
-        public static void CreateAndThrow(ThinContext ctx, int tagIdx, Value[] fields)
-        {
-            if (ctx.Module == null || ctx.Store == null)
-                throw new TrapException("throw requires runtime context");
-            var tagAddr = ctx.Module.TagAddrs[(TagIdx)tagIdx];
-            // AllocateExn expects Stack<Value> with top = first field
-            var fieldStack = new Stack<Value>();
-            for (int i = fields.Length - 1; i >= 0; i--)
-                fieldStack.Push(fields[i]);
-            var ea = ctx.Store.AllocateExn(tagAddr, fieldStack);
-            var exn = ctx.Store[ea];
-            var exnRef = new Value(ValType.Exn, exn);
-            throw new WasmException(tagAddr, fields, exnRef);
-        }
-
-        public static void ThrowRef(Value exnRefVal)
-        {
-            if (exnRefVal.IsNullRef)
-                throw new TrapException("null exception reference");
-            var exn = exnRefVal.GcRef as ExnInstance;
-            if (exn == null)
-                throw new TrapException("invalid exception reference");
-            throw new WasmException(exn.Tag, exn.Fields.ToArray(), exnRefVal);
-        }
-
-        public static bool TagMatches(ThinContext ctx, WasmException wex, int tagIdx)
-        {
-            if (ctx.Module == null) return false;
-            var expected = ctx.Module.TagAddrs[(TagIdx)tagIdx];
-            return wex.Tag.Equals(expected);
-        }
-
-        public static Value[] GetFields(WasmException wex)
-        {
-            return wex.Fields;
+            switch (type)
+            {
+                case ValType.I32:
+                case ValType.I64:
+                case ValType.F32:
+                case ValType.F64:
+                {
+                    var local = il.DeclareLocal(typeof(Value));
+                    il.Emit(OpCodes.Stloc, local);
+                    il.Emit(OpCodes.Ldloca, local);
+                    il.Emit(OpCodes.Ldflda, typeof(Value).GetField(nameof(Value.Data))!);
+                    var field = type switch
+                    {
+                        ValType.I32 => typeof(DUnion).GetField(nameof(DUnion.Int32))!,
+                        ValType.I64 => typeof(DUnion).GetField(nameof(DUnion.Int64))!,
+                        ValType.F32 => typeof(DUnion).GetField(nameof(DUnion.Float32))!,
+                        ValType.F64 => typeof(DUnion).GetField(nameof(DUnion.Float64))!,
+                        _ => throw new InvalidOperationException()
+                    };
+                    il.Emit(OpCodes.Ldfld, field);
+                    return;
+                }
+            }
+            if (ModuleTranspiler.IsGcRefType(type, moduleInst))
+            {
+                il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                    nameof(GcRuntimeHelpers.UnwrapRef), BindingFlags.Public | BindingFlags.Static)!);
+                return;
+            }
+            // funcref/externref/v128: leave Value on the stack.
         }
     }
 }

@@ -55,6 +55,13 @@ namespace Wacs.Transpiler.AOT
         /// </summary>
         public Dictionary<string, (int globalIdx, GlobalInstance global)> ExportedGlobals { get; } = new();
 
+        /// <summary>
+        /// Exported tags by name (doc 2 §5). Importing modules receive the
+        /// exporter's TagInstance — reference equality is preserved.
+        /// Populated from the WASM export section.
+        /// </summary>
+        public Dictionary<string, (int tagIdx, Wacs.Core.Runtime.Types.TagInstance tag)> ExportedTags { get; } = new();
+
         public LinkedModule(string name, ThinContext context, TranspilationResult result)
         {
             Name = name;
@@ -187,6 +194,7 @@ namespace Wacs.Transpiler.AOT
             int memImportIdx = 0;
             int tableImportIdx = 0;
             int globalImportIdx = 0;
+            int tagImportIdx = 0;
             var patchedTableIndices = new HashSet<int>();
             var patchedMemoryIndices = new HashSet<int>();
 
@@ -220,6 +228,18 @@ namespace Wacs.Transpiler.AOT
                         if (TryResolveGlobal(import.ModuleName, import.Name, out var global))
                             ctx.Globals[globalImportIdx] = global;
                         globalImportIdx++;
+                        break;
+                    }
+                    case Wacs.Core.Module.ImportDesc.TagDesc:
+                    {
+                        // Share the exporter's TagInstance so reference equality
+                        // gives tag equality across modules (doc 2 §5).
+                        if (tagImportIdx < ctx.Tags.Length &&
+                            TryResolveTag(import.ModuleName, import.Name, out var tag))
+                        {
+                            ctx.Tags[tagImportIdx] = tag;
+                        }
+                        tagImportIdx++;
                         break;
                     }
                 }
@@ -470,6 +490,24 @@ namespace Wacs.Transpiler.AOT
             return false;
         }
 
+        /// <summary>
+        /// Resolve an imported tag to the exporter's TagInstance (doc 2 §5).
+        /// Returns true and the exporter's tag when a module named moduleName
+        /// exports a tag by fieldName.
+        /// </summary>
+        private bool TryResolveTag(string moduleName, string fieldName,
+            out Wacs.Core.Runtime.Types.TagInstance tag)
+        {
+            if (_modules.TryGetValue(moduleName, out var mod) &&
+                mod.ExportedTags.TryGetValue(fieldName, out var exported))
+            {
+                tag = exported.tag;
+                return true;
+            }
+            tag = null!;
+            return false;
+        }
+
         private bool TryResolveGlobal(string moduleName, string fieldName, out GlobalInstance global)
         {
             if (_hostGlobals.TryGetValue((moduleName, fieldName), out global!))
@@ -512,6 +550,13 @@ namespace Wacs.Transpiler.AOT
                         int idx = (int)gd.GlobalIndex.Value;
                         if (idx < linked.Context.Globals.Length)
                             linked.ExportedGlobals[export.Name] = (idx, linked.Context.Globals[idx]);
+                        break;
+                    }
+                    case Wacs.Core.Module.ExportDesc.TagDesc tgd:
+                    {
+                        int idx = (int)tgd.TagIndex.Value;
+                        if (idx < linked.Context.Tags.Length && linked.Context.Tags[idx] != null)
+                            linked.ExportedTags[export.Name] = (idx, linked.Context.Tags[idx]);
                         break;
                     }
                     case Wacs.Core.Module.ExportDesc.FuncDesc:

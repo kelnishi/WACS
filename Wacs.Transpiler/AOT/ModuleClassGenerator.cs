@@ -226,6 +226,19 @@ namespace Wacs.Transpiler.AOT
             data.DataSegmentBaseId = _dataSegmentBaseId;
             data.ElemSegmentBaseId = _elemSegmentBaseId;
 
+            // Tags (doc 1 §13.1, doc 2 §5). Imports are filled by the linker;
+            // local tags get fresh TagInstance objects at Initialize time —
+            // reference identity is enough for transpiler throw/catch matching.
+            // DefType is captured best-effort for interpreter interop; it is
+            // not read by the transpiler's own emission or dispatch paths.
+            data.ImportedTagCount = _wasmModule.ImportedTags.Count;
+            data.LocalTagTypes = new DefType[_wasmModule.Tags.Count];
+            // DefType population requires a materialized ModuleInstance
+            // (TypesSpace walks the recursive group). We leave entries null
+            // here; Initialize constructs TagInstance with null! DefType when
+            // needed. The linker replaces imported tag slots with the
+            // exporter's fully-typed TagInstance before any throw/catch runs.
+
             _initDataId = InitRegistry.Register(data);
         }
 

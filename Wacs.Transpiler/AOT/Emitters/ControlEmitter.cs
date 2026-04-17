@@ -68,6 +68,36 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// (scalar-only blocks, void blocks).
         /// </summary>
         public LocalBuilder[]? ResultLocals;
+
+        /// <summary>
+        /// The CLR try-region nesting depth at the point this block was pushed.
+        /// Branches from a deeper try-depth to this block's BranchTarget must
+        /// emit `Leave` instead of `Br` (doc 2 §14). When the current emit
+        /// try-depth equals this value, `Br` is sufficient.
+        /// </summary>
+        public int OpeningTryDepth;
+    }
+
+    /// <summary>
+    /// Helpers for emitting branches that respect CLR try-region rules.
+    /// Doc 2 §14: when a branch's source lies inside a try block (or catch
+    /// handler) but the target lies outside, the CLR requires `Leave` rather
+    /// than `Br`. <see cref="EmitBlock.OpeningTryDepth"/> records the depth
+    /// at which the target was introduced; <paramref name="currentTryDepth"/>
+    /// is the depth where the branch is emitted.
+    ///
+    /// Known limitation: `Leave` empties the eval stack. Branches that carry
+    /// values directly on the stack (labels without <see cref="EmitBlock.ResultLocals"/>)
+    /// are not correct through `Leave`. Such a case requires shuttle locals
+    /// — a follow-up pass will force shuttle allocation for cross-try targets.
+    /// </summary>
+    internal static class BranchBridge
+    {
+        public static OpCode BranchOpFor(EmitBlock target, int currentTryDepth)
+            => currentTryDepth > target.OpeningTryDepth ? OpCodes.Leave : OpCodes.Br;
+
+        public static void EmitBranch(ILGenerator il, EmitBlock target, int currentTryDepth)
+            => il.Emit(BranchOpFor(target, currentTryDepth), target.BranchTarget);
     }
 
     internal static class LabelShuttle
@@ -151,22 +181,25 @@ namespace Wacs.Transpiler.AOT.Emitters
             Stack<EmitBlock> blockStack,
             EmitInstructionDelegate emitInstruction,
             int stackHeight = 0,
-            ModuleInstance? moduleInst = null)
+            ModuleInstance? moduleInst = null,
+            int tryDepth = 0,
+            bool forceShuttle = false)
         {
             var (paramArity, resultArity, _, resultClrTypes) =
                 moduleInst != null
                     ? ResolveBlockArities(inst.BlockType, moduleInst)
                     : (0, inst.BlockType == ValType.Empty ? 0 : 1,
                        Array.Empty<Type>(),
-                       inst.BlockType == ValType.Empty ? Array.Empty<Type>() : new[] { ModuleTranspiler.MapValType(inst.BlockType) });
+                       inst.BlockType == ValType.Empty ? Array.Empty<Type>() : new[] { ModuleTranspiler.MapValTypeInternal(inst.BlockType) });
 
             var endLabel = il.DefineLabel();
 
-            // Allocate result locals for labels carrying Value types.
-            // The CLR verifier rejects Value structs at label merge points;
-            // shuttling through locals sidesteps the restriction entirely.
+            // Allocate result locals for labels carrying Value types OR when
+            // the caller forces shuttle (a try_table elsewhere in the function;
+            // cross-try branches emit Leave which empties the eval stack —
+            // locals guarantee rendezvous regardless, per doc 2 §14).
             LocalBuilder[]? resultLocals = null;
-            if (LabelShuttle.NeedsLocals(resultClrTypes))
+            if (resultArity > 0 && (LabelShuttle.NeedsLocals(resultClrTypes) || forceShuttle))
             {
                 resultLocals = new LocalBuilder[resultArity];
                 for (int i = 0; i < resultArity; i++)
@@ -180,7 +213,8 @@ namespace Wacs.Transpiler.AOT.Emitters
                 StackHeight = stackHeight - paramArity,
                 LabelArity = resultArity,
                 ResultClrTypes = resultClrTypes,
-                ResultLocals = resultLocals
+                ResultLocals = resultLocals,
+                OpeningTryDepth = tryDepth
             });
 
             // Emit block body
@@ -259,7 +293,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             Stack<EmitBlock> blockStack,
             EmitInstructionDelegate emitInstruction,
             int stackHeight = 0,
-            ModuleInstance? moduleInst = null)
+            ModuleInstance? moduleInst = null,
+            int tryDepth = 0)
         {
             var (paramArity, _, paramClrTypes, _) =
                 moduleInst != null
@@ -275,7 +310,8 @@ namespace Wacs.Transpiler.AOT.Emitters
                 Kind = WasmOpCode.Loop,
                 StackHeight = stackHeight - paramArity,
                 LabelArity = paramArity, // Loop labels carry params on backward branch
-                ResultClrTypes = paramClrTypes
+                ResultClrTypes = paramClrTypes,
+                OpeningTryDepth = tryDepth
             });
 
             var block = inst.GetBlock(0);
@@ -296,20 +332,23 @@ namespace Wacs.Transpiler.AOT.Emitters
             Stack<EmitBlock> blockStack,
             EmitInstructionDelegate emitInstruction,
             int stackHeight = 0,
-            ModuleInstance? moduleInst = null)
+            ModuleInstance? moduleInst = null,
+            int tryDepth = 0,
+            bool forceShuttle = false)
         {
             var (paramArity, resultArity, _, resultClrTypes) =
                 moduleInst != null
                     ? ResolveBlockArities(inst.BlockType, moduleInst)
                     : (0, inst.BlockType == ValType.Empty ? 0 : 1,
                        Array.Empty<Type>(),
-                       inst.BlockType == ValType.Empty ? Array.Empty<Type>() : new[] { ModuleTranspiler.MapValType(inst.BlockType) });
+                       inst.BlockType == ValType.Empty ? Array.Empty<Type>() : new[] { ModuleTranspiler.MapValTypeInternal(inst.BlockType) });
 
             var endLabel = il.DefineLabel();
 
-            // Allocate result locals for Value-carrying labels (see EmitBlock for rationale)
+            // Allocate result locals for Value-carrying labels OR when the
+            // caller forces shuttle (see EmitBlock for rationale).
             LocalBuilder[]? resultLocals = null;
-            if (LabelShuttle.NeedsLocals(resultClrTypes))
+            if (resultArity > 0 && (LabelShuttle.NeedsLocals(resultClrTypes) || forceShuttle))
             {
                 resultLocals = new LocalBuilder[resultArity];
                 for (int i = 0; i < resultArity; i++)
@@ -323,7 +362,8 @@ namespace Wacs.Transpiler.AOT.Emitters
                 StackHeight = stackHeight - paramArity,
                 LabelArity = resultArity,
                 ResultClrTypes = resultClrTypes,
-                ResultLocals = resultLocals
+                ResultLocals = resultLocals,
+                OpeningTryDepth = tryDepth
             });
 
             bool hasElse = inst.Count == 2;
@@ -685,17 +725,22 @@ namespace Wacs.Transpiler.AOT.Emitters
                 var funcType = moduleInst.Types.ResolveBlockType(blockType);
                 if (funcType != null)
                 {
+                    // Internal representation: GC refs flow as object on the
+                    // CIL stack (doc 1 §2.1, doc 2 §1). Block-result shuttle
+                    // locals therefore use typeof(object) for GC refs, which
+                    // obviates the merge-point restriction entirely — most
+                    // GC-ref labels no longer need the shuttle mechanism.
                     var paramClr = funcType.ParameterTypes.Types
-                        .Select(t => ModuleTranspiler.MapValType(t)).ToArray();
+                        .Select(t => ModuleTranspiler.MapValTypeInternal(t, moduleInst)).ToArray();
                     var resultClr = funcType.ResultType.Types
-                        .Select(t => ModuleTranspiler.MapValType(t)).ToArray();
+                        .Select(t => ModuleTranspiler.MapValTypeInternal(t, moduleInst)).ToArray();
                     return (funcType.ParameterTypes.Arity, funcType.ResultType.Arity,
                         paramClr, resultClr);
                 }
             }
 
             // Simple value type: 0 params, 1 result
-            return (0, 1, Array.Empty<Type>(), new[] { ModuleTranspiler.MapValType(blockType) });
+            return (0, 1, Array.Empty<Type>(), new[] { ModuleTranspiler.MapValTypeInternal(blockType, moduleInst) });
         }
 
         /// <summary>

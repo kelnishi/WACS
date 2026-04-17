@@ -137,19 +137,19 @@ namespace Wacs.Transpiler.AOT.Emitters
             switch (site.Strategy)
             {
                 case CallStrategy.DirectSibling:
-                    EmitDirectCall(il, site, siblingMethods, options);
+                    EmitDirectCall(il, site, siblingMethods, moduleInst, options);
                     break;
 
                 case CallStrategy.ImportDispatch:
-                    EmitImportCall(il, site);
+                    EmitImportCall(il, site, moduleInst);
                     break;
 
                 case CallStrategy.TableIndirect:
-                    EmitIndirectCall(il, site);
+                    EmitIndirectCall(il, site, moduleInst);
                     break;
 
                 case CallStrategy.RefDispatch:
-                    EmitRefCall(il, site);
+                    EmitRefCall(il, site, moduleInst);
                     break;
             }
         }
@@ -157,10 +157,12 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// <summary>
         /// DirectSibling: insert ThinContext under params, call MethodBuilder directly.
         /// For multi-value returns: declare locals for out params, pass ldloca, destructure after.
+        /// Boundary wrap (doc 2 §3): spill GC-ref args as object, wrap to Value
+        /// before call; unwrap result Value → object after call.
         /// </summary>
         private static void EmitDirectCall(
             ILGenerator il, CallSite site, MethodBuilder[] siblingMethods,
-            TranspilerOptions? options)
+            ModuleInstance moduleInst, TranspilerOptions? options)
         {
             var targetMethod = siblingMethods[site.LocalFuncIndex];
             int paramCount = site.FuncType.ParameterTypes.Arity;
@@ -174,26 +176,35 @@ namespace Wacs.Transpiler.AOT.Emitters
                 && (options?.EmitTailCallPrefix ?? false)
                 && outParamCount == 0;
 
-            // Spill WASM params from CIL stack
+            // Spill WASM params from CIL stack using INTERNAL types so GC refs
+            // arrive as object; wrap to Value during the push below.
             var paramTypes = site.FuncType.ParameterTypes.Types;
             var temps = new LocalBuilder[paramCount];
             for (int i = paramCount - 1; i >= 0; i--)
             {
-                temps[i] = il.DeclareLocal(ModuleTranspiler.MapValType(paramTypes[i]));
+                temps[i] = il.DeclareLocal(ModuleTranspiler.MapValTypeInternal(paramTypes[i], moduleInst));
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
 
-            // Declare locals for out results
+            // Declare locals for out results. Signature uses Value at boundary.
             var outLocals = new LocalBuilder[outParamCount];
             for (int r = 0; r < outParamCount; r++)
             {
                 outLocals[r] = il.DeclareLocal(ModuleTranspiler.MapValType(resultTypes[r + 1]));
             }
 
-            // Push: ctx, params, &out0, &out1, ...
+            // Push: ctx, params (wrapping ref temps to Value for signature), &out0, &out1, ...
             il.Emit(OpCodes.Ldarg_0);
             for (int i = 0; i < paramCount; i++)
+            {
                 il.Emit(OpCodes.Ldloc, temps[i]);
+                if (ModuleTranspiler.IsGcRefType(paramTypes[i], moduleInst))
+                {
+                    il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                        nameof(GcRuntimeHelpers.WrapRef),
+                        BindingFlags.Public | BindingFlags.Static)!);
+                }
+            }
             for (int r = 0; r < outParamCount; r++)
                 il.Emit(OpCodes.Ldloca, outLocals[r]);
 
@@ -208,11 +219,25 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
             else
             {
-                // Result 0 is now on the CIL stack (CLR return value).
-                // Push out results onto CIL stack in order: result1, result2, ...
+                // Result 0 is now on the CIL stack (CLR return value, as Value
+                // for ref types). Unwrap to object for GC-ref results.
+                if (resultTypes.Length > 0 && ModuleTranspiler.IsGcRefType(resultTypes[0], moduleInst))
+                {
+                    il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                        nameof(GcRuntimeHelpers.UnwrapRef),
+                        BindingFlags.Public | BindingFlags.Static)!);
+                }
+                // Push out results (multi-return): Value stored in out locals
+                // is loaded and unwrapped if GC ref.
                 for (int r = 0; r < outParamCount; r++)
                 {
                     il.Emit(OpCodes.Ldloc, outLocals[r]);
+                    if (ModuleTranspiler.IsGcRefType(resultTypes[r + 1], moduleInst))
+                    {
+                        il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                            nameof(GcRuntimeHelpers.UnwrapRef),
+                            BindingFlags.Public | BindingFlags.Static)!);
+                    }
                 }
             }
         }
@@ -226,16 +251,19 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// ImportDispatch: load typed delegate from ctx.ImportDelegates[idx], invoke directly.
         /// No Value[] marshaling, no OpStack. Delegate signature matches WASM function type.
         /// </summary>
-        private static void EmitImportCall(ILGenerator il, CallSite site)
+        private static void EmitImportCall(ILGenerator il, CallSite site, ModuleInstance moduleInst)
         {
-            EmitTypedDelegateCall(il, site, ImportDelegatesField, site.FuncIdx);
+            EmitTypedDelegateCall(il, site, ImportDelegatesField, site.FuncIdx, moduleInst);
         }
 
         /// <summary>
         /// TableIndirect: pack params into object[], call InvokeIndirect, unbox result.
         /// Uses DynamicInvoke for type-safe dispatch that properly traps on type mismatches.
+        /// Boundary wrap (doc 2 §3): GC-ref args spilled as object and wrapped
+        /// into Value before boxing, so the object[] slot holds a boxed Value
+        /// (matching the interpreter's DynamicInvoke type expectation).
         /// </summary>
-        private static void EmitIndirectCall(ILGenerator il, CallSite site)
+        private static void EmitIndirectCall(ILGenerator il, CallSite site, ModuleInstance moduleInst)
         {
             int paramCount = site.FuncType.ParameterTypes.Arity;
             var resultTypes = site.FuncType.ResultType.Types;
@@ -245,16 +273,19 @@ namespace Wacs.Transpiler.AOT.Emitters
             var elemIdxLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, elemIdxLocal);
 
-            // Spill params and pack into object[]
+            // Spill params using INTERNAL types (object for GC refs).
             var paramTypes = site.FuncType.ParameterTypes.Types;
             var temps = new LocalBuilder[paramCount];
             for (int i = paramCount - 1; i >= 0; i--)
             {
-                temps[i] = il.DeclareLocal(ModuleTranspiler.MapValType(paramTypes[i]));
+                temps[i] = il.DeclareLocal(ModuleTranspiler.MapValTypeInternal(paramTypes[i], moduleInst));
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
 
-            // Build object[] args
+            // Build object[] args. Elements are boxed Value (for refs/v128) or
+            // boxed primitives (for scalars). GC-ref temps are wrapped to Value
+            // then boxed (not stored as raw CLR objects) so the consumer can
+            // unbox uniformly.
             il.Emit(OpCodes.Ldc_I4, paramCount);
             il.Emit(OpCodes.Newarr, typeof(object));
             for (int i = 0; i < paramCount; i++)
@@ -262,7 +293,17 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Dup);
                 il.Emit(OpCodes.Ldc_I4, i);
                 il.Emit(OpCodes.Ldloc, temps[i]);
-                il.Emit(OpCodes.Box, ModuleTranspiler.MapValType(paramTypes[i]));
+                if (ModuleTranspiler.IsGcRefType(paramTypes[i], moduleInst))
+                {
+                    il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                        nameof(GcRuntimeHelpers.WrapRef),
+                        BindingFlags.Public | BindingFlags.Static)!);
+                    il.Emit(OpCodes.Box, typeof(Value));
+                }
+                else
+                {
+                    il.Emit(OpCodes.Box, ModuleTranspiler.MapValType(paramTypes[i]));
+                }
                 il.Emit(OpCodes.Stelem_Ref);
             }
             var argsLocal = il.DeclareLocal(typeof(object[]));
@@ -292,13 +333,15 @@ namespace Wacs.Transpiler.AOT.Emitters
                 nameof(CallHelpers.InvokeIndirect), BindingFlags.Public | BindingFlags.Static)!);
 
             // Unbox result
-            EmitUnboxResult(il, resultTypes);
+            EmitUnboxResult(il, resultTypes, moduleInst);
         }
 
         /// <summary>
         /// RefDispatch: pack params into object[], call InvokeRef, unbox result.
+        /// funcref stays as Value throughout (doc 2 §1 invariant 3); GC-ref
+        /// args wrap at boundary before boxing.
         /// </summary>
-        private static void EmitRefCall(ILGenerator il, CallSite site)
+        private static void EmitRefCall(ILGenerator il, CallSite site, ModuleInstance moduleInst)
         {
             int paramCount = site.FuncType.ParameterTypes.Arity;
             var resultTypes = site.FuncType.ResultType.Types;
@@ -311,11 +354,12 @@ namespace Wacs.Transpiler.AOT.Emitters
             var temps = new LocalBuilder[paramCount];
             for (int i = paramCount - 1; i >= 0; i--)
             {
-                temps[i] = il.DeclareLocal(ModuleTranspiler.MapValType(paramTypes[i]));
+                temps[i] = il.DeclareLocal(ModuleTranspiler.MapValTypeInternal(paramTypes[i], moduleInst));
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
 
-            // Build object[] args
+            // Build object[] args. GC-ref params wrap to Value before boxing;
+            // scalars/Value params box directly.
             il.Emit(OpCodes.Ldc_I4, paramCount);
             il.Emit(OpCodes.Newarr, typeof(object));
             for (int i = 0; i < paramCount; i++)
@@ -323,7 +367,17 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Dup);
                 il.Emit(OpCodes.Ldc_I4, i);
                 il.Emit(OpCodes.Ldloc, temps[i]);
-                il.Emit(OpCodes.Box, ModuleTranspiler.MapValType(paramTypes[i]));
+                if (ModuleTranspiler.IsGcRefType(paramTypes[i], moduleInst))
+                {
+                    il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                        nameof(GcRuntimeHelpers.WrapRef),
+                        BindingFlags.Public | BindingFlags.Static)!);
+                    il.Emit(OpCodes.Box, typeof(Value));
+                }
+                else
+                {
+                    il.Emit(OpCodes.Box, ModuleTranspiler.MapValType(paramTypes[i]));
+                }
                 il.Emit(OpCodes.Stelem_Ref);
             }
             var argsLocal = il.DeclareLocal(typeof(object[]));
@@ -337,13 +391,15 @@ namespace Wacs.Transpiler.AOT.Emitters
                 nameof(CallHelpers.InvokeRef), BindingFlags.Public | BindingFlags.Static)!);
 
             // Unbox result
-            EmitUnboxResult(il, resultTypes);
+            EmitUnboxResult(il, resultTypes, moduleInst);
         }
 
         /// <summary>
         /// Unbox the object? result from DynamicInvoke to the expected CIL stack type.
+        /// GC-ref results are unboxed as Value, then unwrapped to object so they
+        /// land on the internal stack in object form (doc 2 §3).
         /// </summary>
-        private static void EmitUnboxResult(ILGenerator il, ValType[] resultTypes)
+        private static void EmitUnboxResult(ILGenerator il, ValType[] resultTypes, ModuleInstance moduleInst)
         {
             if (resultTypes.Length == 0)
             {
@@ -353,21 +409,31 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             var resultClrType = ModuleTranspiler.MapValType(resultTypes[0]);
             il.Emit(OpCodes.Unbox_Any, resultClrType);
+            if (ModuleTranspiler.IsGcRefType(resultTypes[0], moduleInst))
+            {
+                il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                    nameof(GcRuntimeHelpers.UnwrapRef),
+                    BindingFlags.Public | BindingFlags.Static)!);
+            }
         }
 
         /// <summary>
         /// Emit a typed delegate invocation from a delegate array field.
+        /// Boundary wrap (doc 2 §3): GC-ref args spilled as object, wrapped to
+        /// Value before Invoke (delegate signature is Value for refs); ref
+        /// result Value → object after Invoke.
         /// </summary>
-        private static void EmitTypedDelegateCall(ILGenerator il, CallSite site, FieldInfo arrayField, int index)
+        private static void EmitTypedDelegateCall(ILGenerator il, CallSite site, FieldInfo arrayField, int index, ModuleInstance moduleInst)
         {
             int paramCount = site.FuncType.ParameterTypes.Arity;
             var paramTypes = site.FuncType.ParameterTypes.Types;
+            var resultTypes = site.FuncType.ResultType.Types;
 
-            // Spill params
+            // Spill params using INTERNAL types (object for GC refs).
             var temps = new LocalBuilder[paramCount];
             for (int i = paramCount - 1; i >= 0; i--)
             {
-                temps[i] = il.DeclareLocal(ModuleTranspiler.MapValType(paramTypes[i]));
+                temps[i] = il.DeclareLocal(ModuleTranspiler.MapValTypeInternal(paramTypes[i], moduleInst));
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
 
@@ -377,16 +443,32 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldc_I4, index);
             il.Emit(OpCodes.Ldelem_Ref);
 
-            // Cast to typed Func<>/Action<>
+            // Cast to typed Func<>/Action<> (signature uses Value for refs).
             var delegateType = BuildDelegateType(site.FuncType);
             il.Emit(OpCodes.Castclass, delegateType);
 
-            // Push params
+            // Push params, wrapping GC refs to Value for signature match.
             for (int i = 0; i < paramCount; i++)
+            {
                 il.Emit(OpCodes.Ldloc, temps[i]);
+                if (ModuleTranspiler.IsGcRefType(paramTypes[i], moduleInst))
+                {
+                    il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                        nameof(GcRuntimeHelpers.WrapRef),
+                        BindingFlags.Public | BindingFlags.Static)!);
+                }
+            }
 
             // Invoke
             il.Emit(OpCodes.Callvirt, delegateType.GetMethod("Invoke")!);
+
+            // Unwrap Value → object for GC-ref result.
+            if (resultTypes.Length > 0 && ModuleTranspiler.IsGcRefType(resultTypes[0], moduleInst))
+            {
+                il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                    nameof(GcRuntimeHelpers.UnwrapRef),
+                    BindingFlags.Public | BindingFlags.Static)!);
+            }
         }
 
         /// <summary>
