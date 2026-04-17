@@ -118,8 +118,16 @@ namespace Wacs.Transpiler.AOT.Emitters
                     // (GC ref) on the CIL stack. Dispatch on the peeked type
                     // of the second operand (the first pop is the condition).
                     cv?.Pop(typeof(int), "select.cond");
-                    var topType = cv?.Peek() ?? typeof(Value);
-                    if (topType == typeof(object))
+                    // Pop both operand values from the validator up-front so
+                    // the stack tracking matches the actual CIL stack (select
+                    // consumes 3, produces 1). Then push the result type.
+                    var val2Type = cv?.Peek() ?? typeof(Value);
+                    cv?.Pop(context: "select.val2");
+                    var val1Type = cv?.Peek() ?? val2Type;
+                    cv?.Pop(context: "select.val1");
+                    // Prefer the more specific known type for the result.
+                    var resultType = val1Type == typeof(object) ? val2Type : val1Type;
+                    if (resultType == typeof(object))
                     {
                         // GC ref select → object-based helper.
                         il.Emit(OpCodes.Call, typeof(SelectHelpers).GetMethod(
@@ -138,9 +146,13 @@ namespace Wacs.Transpiler.AOT.Emitters
                         }
                         else
                         {
-                            EmitSelect(il, typeof(long));
+                            // Scalar select. Use the actual operand type —
+                            // both operands share the same type by WASM
+                            // validation.
+                            EmitSelect(il, resultType);
                         }
                     }
+                    cv?.Push(resultType);
                     break;
                 }
                 default:
