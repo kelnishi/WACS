@@ -225,6 +225,42 @@ namespace Wacs.Transpiler.AOT
                 }
             }
 
+            // Re-evaluate table default expressions that depend on imported globals.
+            // During Initialize(), imported globals weren't resolved yet, so table
+            // defaults using global.get on imports evaluated to the wrong value.
+            // Re-evaluate with resolved globals and replace only slots that still
+            // have the old (wrong) default, preserving active element segments.
+            if (initDataId >= 0)
+            {
+                var initData = InitRegistry.Get(initDataId);
+                for (int i = 0; i < initData.Tables.Length; i++)
+                {
+                    var (_, _, _, initExpr) = initData.Tables[i];
+                    if (initExpr == null) continue;
+
+                    // Compute the new default with resolved globals
+                    var newDefault = InitializationHelper.EvaluateTableDefault(
+                        initExpr, ctx.Globals);
+
+                    // Compute what Initialize() produced with unresolved globals
+                    var oldDefault = InitializationHelper.EvaluateTableDefault(
+                        initExpr, initData.Globals.Length > 0
+                            ? BuildLocalGlobals(initData) : System.Array.Empty<GlobalInstance>());
+
+                    // If the defaults differ, an imported global changed the result
+                    if (newDefault.Data.Ptr != oldDefault.Data.Ptr || newDefault.Type != oldDefault.Type)
+                    {
+                        var table = ctx.Tables[i];
+                        for (int j = 0; j < table.Elements.Count; j++)
+                        {
+                            var elem = table.Elements[j];
+                            if (elem.Type == oldDefault.Type && elem.Data.Ptr == oldDefault.Data.Ptr)
+                                table.Elements[j] = newDefault;
+                        }
+                    }
+                }
+            }
+
             // Re-apply data segments that target imported (now shared) memories.
             // Uses saved data bytes since active segments were dropped after initialization.
             if (patchedMemoryIndices.Count > 0 && initDataId >= 0)
@@ -349,38 +385,8 @@ namespace Wacs.Transpiler.AOT
                     }
                 }
 
-                // Re-evaluate table default values that depend on imported globals.
-                // Tables with init expressions using global.get need to be re-filled
-                // with the correct default value after globals are patched.
-                for (int ti = 0; ti < initData2.Tables.Length; ti++)
-                {
-                    var (_, _, _, tableInitExpr) = initData2.Tables[ti];
-                    if (tableInitExpr == null) continue;
-                    // Check if the init expression uses global.get
-                    bool hasGlobalGet = false;
-                    foreach (var inst in tableInitExpr.Instructions)
-                        if (inst is Wacs.Core.Instructions.InstGlobalGet) { hasGlobalGet = true; break; }
-                    if (!hasGlobalGet) continue;
-                    if (ti >= ctx.Tables.Length) continue;
-
-                    // Evaluate the correct default with resolved globals
-                    var newDefault = EvaluateInitExpression(tableInitExpr, ctx.Globals);
-                    // Also evaluate what the old (wrong) default was with unresolved globals
-                    // to identify which slots to replace
-                    var table = ctx.Tables[ti];
-                    for (int j = 0; j < table.Elements.Count; j++)
-                    {
-                        var elem = table.Elements[j];
-                        // Replace slots that are null or match the old computed default.
-                        // Active element segments overwrote specific slots — skip those.
-                        // We can't distinguish perfectly, so replace all non-element slots.
-                        // For simple i31ref tables, the old default was ref.i31(0).
-                        if (elem.Type == ValType.I31 && elem.Data.Int32 == 0)
-                            table.Elements[j] = newDefault;
-                        else if (elem.IsNullRef)
-                            table.Elements[j] = newDefault;
-                    }
-                }
+                // Table default re-evaluation is handled earlier in ResolveImports
+                // (after global import resolution, before element segment re-apply).
             }
         }
 
@@ -517,5 +523,19 @@ namespace Wacs.Transpiler.AOT
             }
         }
 
+        /// <summary>
+        /// Build the local-only globals array (without imports) to reconstruct
+        /// what Initialize() produced before import resolution.
+        /// </summary>
+        private static GlobalInstance[] BuildLocalGlobals(ModuleInitData initData)
+        {
+            var globals = new GlobalInstance[initData.Globals.Length];
+            for (int i = 0; i < initData.Globals.Length; i++)
+            {
+                var (type, mut, init) = initData.Globals[i];
+                globals[i] = new GlobalInstance(new GlobalType(type, mut), init);
+            }
+            return globals;
+        }
     }
 }

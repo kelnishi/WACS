@@ -489,6 +489,10 @@ namespace Wacs.Transpiler.Test
             catch (Wacs.Core.Runtime.Exceptions.WasmRuntimeException) { }
             catch (DivideByZeroException) { }
             catch (OverflowException) { }
+            catch (System.Reflection.TargetInvocationException tie)
+                when (tie.InnerException is TrapException
+                    or Wacs.Core.Runtime.Exceptions.WasmRuntimeException
+                    or DivideByZeroException or OverflowException) { }
             catch (TestException) { throw; }
             catch (Exception ex)
             {
