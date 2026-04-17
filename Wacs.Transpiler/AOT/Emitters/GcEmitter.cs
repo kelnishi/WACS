@@ -231,11 +231,13 @@ namespace Wacs.Transpiler.AOT.Emitters
                     cv?.Push(typeof(Value));
                     break;
                 // `any.convert_extern` is the reverse: externref (Value) → anyref
-                // (object). Unwrap the Value's GcRef onto the internal stack.
+                // (object). Uses a dedicated unwrap so host externrefs (Value
+                // with Data.Ptr but no GcRef) preserve their address via
+                // HostExternRef rather than collapsing to null.
                 case GcCode.AnyConvertExtern:
                     cv?.Pop(typeof(Value), "any.convert_extern");
                     il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
-                        nameof(GcRuntimeHelpers.UnwrapRef), BindingFlags.Public | BindingFlags.Static)!);
+                        nameof(GcRuntimeHelpers.AnyConvertExternUnwrap), BindingFlags.Public | BindingFlags.Static)!);
                     cv?.Push(typeof(object));
                     break;
 
@@ -829,6 +831,13 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         private static ValType DeriveValType(object gcRef)
         {
+            // Core-type refs carry their own WASM type identity.
+            if (gcRef is I31Ref) return ValType.I31;
+            if (gcRef is HostExternRef) return ValType.ExternRef;
+            if (gcRef is VecRef) return ValType.V128;
+
+            // Emitted GC types (struct/array) expose a static TypeCategory
+            // field: 0 = struct, 1 = array.
             var catField = gcRef.GetType().GetField("TypeCategory",
                 BindingFlags.Public | BindingFlags.Static);
             if (catField != null)
@@ -1389,12 +1398,62 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// (Value). Wraps with ExternRef type tag regardless of the payload's
         /// category — the spec defines this as a label change, not a content
         /// inspection (doc 1 §11.11).
+        ///
+        /// If the payload is a <see cref="HostExternRef"/>, unwrap it so the
+        /// round-trip externref→anyref→externref preserves the original
+        /// Data.Ptr encoding.
         /// </summary>
         public static Value ExternConvertAnyWrap(object? val)
         {
             if (val == null) return new Value(ValType.ExternRef);
+            if (val is HostExternRef h) return new Value(ValType.ExternRef, h.Address);
             if (val is IGcRef igc) return new Value(ValType.ExternRef, 0, igc);
             return new Value(ValType.ExternRef, 0, new GcObjectAdapter(val));
+        }
+
+        /// <summary>
+        /// any.convert_extern: externref (Value) → anyref (object on internal
+        /// stack). The runtime payload must be preserved across the boundary
+        /// so ref.eq and back-conversion via extern.convert_any work.
+        ///
+        /// - Null externref → null.
+        /// - Externref with a `GcRef` (i31 / struct / array / IGcRef) → peel
+        ///   and return the underlying CLR object.
+        /// - Externref with only `Data.Ptr` (host-provided via `ref.extern N`
+        ///   in tests) → wrap in <see cref="HostExternRef"/> so the Ptr
+        ///   survives the Value→object transition.
+        /// </summary>
+        public static object? AnyConvertExternUnwrap(Value val)
+        {
+            if (val.IsNullRef) return null;
+            var gcRef = val.GcRef;
+            if (gcRef != null)
+            {
+                if (gcRef is GcObjectAdapter a) return a.Target;
+                return gcRef;
+            }
+            // Host externref with Data.Ptr only. Intern so repeated conversions
+            // of the same externref yield the same CLR instance — needed for
+            // ref.eq identity semantics on the anyref side.
+            return HostExternRef.Intern(val.Data.Ptr);
+        }
+
+        /// <summary>
+        /// Carries a host externref's address across the Value↔object boundary
+        /// when the Value has no <see cref="Value.GcRef"/>. Interned per
+        /// address so reference equality corresponds to externref equality.
+        /// </summary>
+        public sealed class HostExternRef : IGcRef
+        {
+            private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, HostExternRef>
+                _cache = new();
+
+            public readonly long Address;
+            private HostExternRef(long address) { Address = address; }
+            public RefIdx StoreIndex => default(PtrIdx);
+
+            public static HostExternRef Intern(long address)
+                => _cache.GetOrAdd(address, a => new HostExternRef(a));
         }
 
         /// <summary>ref.is_null on an object-typed ref. Emitters can also
