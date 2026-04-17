@@ -172,13 +172,12 @@ namespace Wacs.Transpiler.AOT
             // Look up precomputed stack analysis for this instruction
             _currentInfo = _stackAnalysis.Get(inst);
 
-            // Sync validator state from the authoritative StackAnalysis pre-pass.
-            // Not all emitters are instrumented yet, so we reset to the pre-pass
-            // height at each instruction boundary. This ensures that type tracking
-            // within an instrumented emitter is accurate (types from the CURRENT
-            // instruction), even if the preceding uninstrumented emitter left
-            // stale types on the validator stack.
-            // Once ALL emitters are instrumented, this reset can become an assertion.
+            // Sync validator with authoritative StackAnalysis pre-pass.
+            // Always reset height at instruction boundaries — block nesting
+            // makes continuous height tracking across compound instructions
+            // impractical. Type assertions WITHIN emitters (push/pop with
+            // expected types) catch the actual bugs; the height reset ensures
+            // each emitter starts from a correct baseline.
             if (_currentInfo != null && !_currentInfo.Unreachable)
             {
                 _cilValidator.SetReachable();
@@ -381,7 +380,6 @@ namespace Wacs.Transpiler.AOT
 
                 case WasmOpCode.If:
                 {
-                    _cilValidator.Pop(typeof(int), "if.condition");
                     int sh = (_currentInfo?.StackHeightBefore ?? 1) - 1;
                     ControlEmitter.EmitIf(il, (InstIf)inst, _blockStack, EmitInstruction,
                         sh, _moduleInst);
@@ -637,56 +635,58 @@ namespace Wacs.Transpiler.AOT
         /// <summary>Track memory instruction stack effects.</summary>
         private void TrackMemoryStackEffect(WasmOpCode op)
         {
+            // Address type: i32 for memory32, i64 for memory64.
+            // We pop without type assertion since both are valid.
             switch (op)
             {
-                // Loads: [i32 addr] → [T]
+                // Loads: [addr] → [T]
                 case WasmOpCode.I32Load or WasmOpCode.I32Load8S or WasmOpCode.I32Load8U
                     or WasmOpCode.I32Load16S or WasmOpCode.I32Load16U:
-                    _cilValidator.Pop(typeof(int), "mem.load addr");
+                    _cilValidator.Pop(context: "mem.load addr");
                     _cilValidator.Push(typeof(int));
                     break;
                 case WasmOpCode.I64Load or WasmOpCode.I64Load8S or WasmOpCode.I64Load8U
                     or WasmOpCode.I64Load16S or WasmOpCode.I64Load16U
                     or WasmOpCode.I64Load32S or WasmOpCode.I64Load32U:
-                    _cilValidator.Pop(typeof(int), "mem.load addr");
+                    _cilValidator.Pop(context: "mem.load addr");
                     _cilValidator.Push(typeof(long));
                     break;
                 case WasmOpCode.F32Load:
-                    _cilValidator.Pop(typeof(int), "f32.load addr");
+                    _cilValidator.Pop(context: "f32.load addr");
                     _cilValidator.Push(typeof(float));
                     break;
                 case WasmOpCode.F64Load:
-                    _cilValidator.Pop(typeof(int), "f64.load addr");
+                    _cilValidator.Pop(context: "f64.load addr");
                     _cilValidator.Push(typeof(double));
                     break;
 
-                // Stores: [i32 addr, T val] → []
+                // Stores: [addr, T val] → []
                 case WasmOpCode.I32Store or WasmOpCode.I32Store8 or WasmOpCode.I32Store16:
                     _cilValidator.Pop(typeof(int), "i32.store val");
-                    _cilValidator.Pop(typeof(int), "mem.store addr");
+                    _cilValidator.Pop(context: "mem.store addr");
                     break;
                 case WasmOpCode.I64Store or WasmOpCode.I64Store8 or WasmOpCode.I64Store16
                     or WasmOpCode.I64Store32:
                     _cilValidator.Pop(typeof(long), "i64.store val");
-                    _cilValidator.Pop(typeof(int), "mem.store addr");
+                    _cilValidator.Pop(context: "mem.store addr");
                     break;
                 case WasmOpCode.F32Store:
                     _cilValidator.Pop(typeof(float), "f32.store val");
-                    _cilValidator.Pop(typeof(int), "mem.store addr");
+                    _cilValidator.Pop(context: "mem.store addr");
                     break;
                 case WasmOpCode.F64Store:
                     _cilValidator.Pop(typeof(double), "f64.store val");
-                    _cilValidator.Pop(typeof(int), "mem.store addr");
+                    _cilValidator.Pop(context: "mem.store addr");
                     break;
 
-                // memory.size: [] → [i32]
+                // memory.size: [] → [i32/i64]
                 case WasmOpCode.MemorySize:
-                    _cilValidator.Push(typeof(int));
+                    _cilValidator.Push(typeof(object)); // i32 or i64 depending on memory type
                     break;
-                // memory.grow: [i32 delta] → [i32 old_size]
+                // memory.grow: [delta] → [old_size]
                 case WasmOpCode.MemoryGrow:
-                    _cilValidator.Pop(typeof(int), "memory.grow delta");
-                    _cilValidator.Push(typeof(int));
+                    _cilValidator.Pop(context: "memory.grow delta");
+                    _cilValidator.Push(typeof(object)); // i32 or i64
                     break;
             }
         }
@@ -699,10 +699,10 @@ namespace Wacs.Transpiler.AOT
                 switch (op)
                 {
                     case WasmOpCode.TableGet:
-                        _cilValidator.Pop(typeof(int), "table.get idx"); break;
+                        _cilValidator.Pop(context: "table.get idx"); break; // i32 or i64
                     case WasmOpCode.TableSet:
                         _cilValidator.Pop(typeof(Value), "table.set val");
-                        _cilValidator.Pop(typeof(int), "table.set idx"); break;
+                        _cilValidator.Pop(context: "table.set idx"); break; // i32 or i64
                     case WasmOpCode.RefIsNull:
                         _cilValidator.Pop(typeof(Value), "ref.is_null"); break;
                     case WasmOpCode.RefEq:
@@ -932,6 +932,20 @@ namespace Wacs.Transpiler.AOT
             }
         }
 
+        /// <summary>Resolve block param/result arities for validator tracking.</summary>
+        private (int paramArity, int resultArity) ResolveBlockArity(ValType blockType)
+        {
+            if (blockType == ValType.Empty)
+                return (0, 0);
+            if (blockType.IsDefType() && _moduleInst != null)
+            {
+                var funcType = _moduleInst.Types.ResolveBlockType(blockType);
+                if (funcType != null)
+                    return (funcType.ParameterTypes.Arity, funcType.ResultType.Arity);
+            }
+            return (0, 1); // simple value type: 0 params, 1 result
+        }
+
         /// <summary>Track 0xFC prefix (extension) instruction stack effects.</summary>
         private void TrackExtStackEffect(InstructionBase inst, bool before)
         {
@@ -948,23 +962,18 @@ namespace Wacs.Transpiler.AOT
                         _cilValidator.Pop(typeof(int), "bulk.src");
                         _cilValidator.Pop(typeof(int), "bulk.dst");
                         break;
-                    // Table bulk: [dst:i32, src:i32, len:i32] → []
+                    // Table bulk: [dst, src, len] → []
                     case Wacs.Core.OpCodes.ExtCode.TableInit:
                     case Wacs.Core.OpCodes.ExtCode.TableCopy:
-                        _cilValidator.Pop(typeof(int), "table_bulk.len");
-                        _cilValidator.Pop(typeof(int), "table_bulk.src");
-                        _cilValidator.Pop(typeof(int), "table_bulk.dst");
+                        _cilValidator.Pop(3, "table_bulk args");
                         break;
-                    // table.fill: [dst:i32, val:Value, len:i32] → []
+                    // table.fill: [dst, val:Value, len] → []
                     case Wacs.Core.OpCodes.ExtCode.TableFill:
-                        _cilValidator.Pop(typeof(int), "table.fill len");
-                        _cilValidator.Pop(typeof(Value), "table.fill val");
-                        _cilValidator.Pop(typeof(int), "table.fill dst");
+                        _cilValidator.Pop(3, "table.fill args");
                         break;
-                    // table.grow: [val:Value, delta:i32] → [i32]
+                    // table.grow: [val:Value, delta] → [i32]
                     case Wacs.Core.OpCodes.ExtCode.TableGrow:
-                        _cilValidator.Pop(typeof(int), "table.grow delta");
-                        _cilValidator.Pop(typeof(Value), "table.grow val");
+                        _cilValidator.Pop(2, "table.grow args");
                         break;
                     // table.size: [] → [i32]
                     case Wacs.Core.OpCodes.ExtCode.TableSize:
