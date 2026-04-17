@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Diagnostics;
 using System.Reflection;
 using System.Reflection.Emit;
 using Wacs.Core.Instructions;
@@ -699,6 +700,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (gcRef == null)
                 return new Value(ValType.Any); // null ref
             var valType = DeriveValType(gcRef);
+            Debug.Assert(valType != ValType.Nil, $"WrapRef: derived Nil type for {gcRef.GetType().Name}");
             if (gcRef is IGcRef igc)
                 return new Value(valType, 0, igc);
             return new Value(valType, 0, new GcObjectAdapter(gcRef));
@@ -942,6 +944,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                 return new Value(ValType.ExternRef);
             var result = val;
             result.Type = val.Type.IsNullable() ? ValType.ExternRef : ValType.Extern;
+            Debug.Assert(result.Type != ValType.Nil, "ExternConvertAny produced Nil type");
             return result;
         }
 
