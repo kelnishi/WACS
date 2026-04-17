@@ -529,5 +529,36 @@ namespace Wacs.Transpiler.AOT
                 _ => typeof(Value)
             };
         }
+
+        /// <summary>
+        /// Maps a WASM value type to its internal CIL representation.
+        /// GC ref types (struct, array, i31, eq, any, none) use typeof(object)
+        /// internally on the CIL stack and in locals, avoiding Value boxing overhead.
+        /// Funcref/externref stay as Value since they use Data.Ptr (not GcRef).
+        /// Function signatures always use MapValType (Value at boundaries).
+        /// </summary>
+        internal static Type MapValTypeInternal(ValType type)
+        {
+            if (IsGcRefType(type)) return typeof(object);
+            return MapValType(type);
+        }
+
+        /// <summary>
+        /// Returns true for GC reference types that should use typeof(object)
+        /// on the internal CIL evaluation stack. These types store their data
+        /// in Value.GcRef (managed reference), not Value.Data.Ptr.
+        /// Funcref/externref are NOT included — they use Data.Ptr.
+        /// </summary>
+        internal static bool IsGcRefType(ValType type)
+        {
+            if (!type.IsRefType()) return false;
+            // Exclude funcref, externref, and their bottom types
+            return type switch
+            {
+                ValType.FuncRef or ValType.Func or ValType.NoFunc or ValType.NoFuncNN => false,
+                ValType.ExternRef or ValType.Extern or ValType.NoExtern or ValType.NoExternNN => false,
+                _ => true // any, eq, i31, struct, array, none, concrete types
+            };
+        }
     }
 }
