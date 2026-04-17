@@ -168,6 +168,19 @@ namespace Wacs.Transpiler.AOT
             // after the interpreter's linking step rewrites the ByteCode.
             if (inst.GetType().Namespace == "Wacs.Core.Instructions.GC")
             {
+                // Handle br_on_cast/fail here (not in GcEmitter) because we need
+                // block stack + excess info for the shuttle mechanism.
+                if (inst is Wacs.Core.Instructions.GC.InstBrOnCast boc)
+                {
+                    EmitBrOnCastWithExcess(il, boc.Label, boc.TargetType, castFail: false);
+                    return;
+                }
+                if (inst is Wacs.Core.Instructions.GC.InstBrOnCastFail bocf)
+                {
+                    EmitBrOnCastWithExcess(il, bocf.Label, bocf.TargetType, castFail: true);
+                    return;
+                }
+
                 GcEmitter.Emit(il, inst, inst.Op.xFB, _gcTypes, _moduleInst,
                     depth =>
                     {
@@ -520,6 +533,57 @@ namespace Wacs.Transpiler.AOT
             }
         }
 
+
+        /// <summary>
+        /// Emit br_on_cast / br_on_cast_fail with proper excess cleanup.
+        /// Stack: [ref (Value)]
+        /// br_on_cast: if ref matches targetType, branch (carry ref); else fall through (ref on stack)
+        /// br_on_cast_fail: if ref doesn't match, branch (carry ref); else fall through (ref on stack)
+        /// </summary>
+        private void EmitBrOnCastWithExcess(ILGenerator il, int labelDepth,
+            ValType targetType, bool castFail)
+        {
+            var target = ControlEmitter.PeekLabel(_blockStack, labelDepth);
+            int excess = _currentInfo?.Excess ?? 0;
+
+            // Dup the ref, test the type
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Ldc_I4, (int)targetType);
+            il.Emit(OpCodes.Ldc_I4, targetType.IsNullable() ? 1 : 0);
+            il.Emit(OpCodes.Ldarg_0); // ThinContext
+            il.Emit(OpCodes.Call, typeof(Emitters.GcRuntimeHelpers).GetMethod(
+                nameof(Emitters.GcRuntimeHelpers.RefTestValue),
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!);
+
+            if (excess > 0)
+            {
+                // Need shuttle: save test result, conditionally do excess cleanup + branch
+                var testLocal = il.DeclareLocal(typeof(int));
+                il.Emit(OpCodes.Stloc, testLocal);
+
+                var skipLabel = il.DefineLabel();
+                il.Emit(OpCodes.Ldloc, testLocal);
+                if (castFail)
+                    il.Emit(OpCodes.Brtrue, skipLabel); // test passed → don't branch (skip)
+                else
+                    il.Emit(OpCodes.Brfalse, skipLabel); // test failed → don't branch (skip)
+
+                // Branch path: ref is on stack as carried value, clean excess, branch
+                EmitExcessCleanup(il, excess, target);
+                il.Emit(OpCodes.Br, target.BranchTarget);
+
+                il.MarkLabel(skipLabel);
+                // Fall-through: ref still on stack from the Dup
+            }
+            else
+            {
+                // Simple case: no excess, just branch directly
+                if (castFail)
+                    il.Emit(OpCodes.Brfalse, target.BranchTarget);
+                else
+                    il.Emit(OpCodes.Brtrue, target.BranchTarget);
+            }
+        }
 
         private static void EmitStind(ILGenerator il, ValType type)
         {

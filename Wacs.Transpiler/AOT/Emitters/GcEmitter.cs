@@ -998,44 +998,87 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
             else
             {
-                // Standalone: resolve via ModuleInit registry
                 int segId = ctx.DataSegmentBaseId + dataIdx;
                 segData = ModuleInit.GetDataSegmentData(segId);
             }
             if (segData == null)
                 throw new TrapException("data segment not found");
-            if (offset + length > segData.Length)
-                throw new TrapException("out of bounds data access");
-            var result = new byte[length];
+
+            // Determine element type and size from the GC type registry
+            var clrType = ctx.InitDataId >= 0 ? GcTypeRegistry.Get(ctx.InitDataId, typeIdx) : null;
+            Type elemType = typeof(byte);
+            if (clrType != null)
+            {
+                var elemField = clrType.GetField("elements");
+                if (elemField != null)
+                    elemType = elemField.FieldType.GetElementType() ?? typeof(byte);
+            }
+            int elemSize = elemType == typeof(byte) || elemType == typeof(sbyte) ? 1
+                : elemType == typeof(short) || elemType == typeof(ushort) ? 2
+                : elemType == typeof(int) || elemType == typeof(float) ? 4
+                : elemType == typeof(long) || elemType == typeof(double) ? 8
+                : 1;
+
+            long srcBytes = (long)(uint)offset + (long)(uint)length * elemSize;
+            if (srcBytes > segData.Length)
+                throw new TrapException("out of bounds memory access");
+
+            var result = System.Array.CreateInstance(elemType, length);
             if (length > 0)
-                System.Buffer.BlockCopy(segData, offset, result, 0, length);
+                System.Buffer.BlockCopy(segData, offset, result, 0, length * elemSize);
             return result;
         }
 
         public static object ArrayNewElem(ThinContext ctx, int typeIdx, int elemIdx, int offset, int length)
         {
+            // Determine the CLR element type for the array
+            Type elemClrType = typeof(object);
+            var clrType = ctx.InitDataId >= 0 ? GcTypeRegistry.Get(ctx.InitDataId, typeIdx) : null;
+            if (clrType != null)
+            {
+                var elemField = clrType.GetField("elements");
+                if (elemField != null)
+                    elemClrType = elemField.FieldType.GetElementType() ?? typeof(object);
+            }
+
             if (ctx.Store != null && ctx.Module != null)
             {
                 var elemAddr = ctx.Module.ElemAddrs[(ElemIdx)elemIdx];
                 var elem = ctx.Store[elemAddr];
-                if (offset + length > elem.Elements.Count)
-                    throw new TrapException("out of bounds element access");
-                var result = new object[length];
+                if ((long)(uint)offset + (long)(uint)length > elem.Elements.Count)
+                    throw new TrapException("out of bounds table access");
+                var result = System.Array.CreateInstance(elemClrType, length);
                 for (int i = 0; i < length; i++)
-                    result[i] = elem.Elements[offset + i];
+                {
+                    var v = elem.Elements[offset + i];
+                    result.SetValue(ExtractElemValue(v, elemClrType), i);
+                }
                 return result;
             }
-            // Standalone: resolve via ModuleInit registry
             int segId = ctx.ElemSegmentBaseId + elemIdx;
             var values = ModuleInit.GetElemSegment(segId);
             if (values == null)
                 throw new TrapException("element segment not found");
-            if (offset + length > values.Length)
-                throw new TrapException("out of bounds element access");
-            var result2 = new object[length];
+            if ((long)(uint)offset + (long)(uint)length > values.Length)
+                throw new TrapException("out of bounds table access");
+            var result2 = System.Array.CreateInstance(elemClrType, length);
             for (int i = 0; i < length; i++)
-                result2[i] = values[offset + i];
+            {
+                result2.SetValue(ExtractElemValue(values[offset + i], elemClrType), i);
+            }
             return result2;
+        }
+
+        /// <summary>Extract a Value into the appropriate CLR element for array storage.</summary>
+        private static object? ExtractElemValue(Value val, Type elemClrType)
+        {
+            if (elemClrType.IsValueType) return ConvertValueToElement(val, elemClrType);
+            // Reference type: unwrap GcRef
+            if (val.IsNullRef) return null;
+            var gcRef = val.GcRef;
+            if (gcRef is GcObjectAdapter adapter) return adapter.Target;
+            if (gcRef != null) return gcRef;
+            return null;
         }
 
         public static void ArrayFill(Value arrayRef, int offset, Value value, int length)
@@ -1046,8 +1089,30 @@ namespace Wacs.Transpiler.AOT.Emitters
             var elements = (System.Array)elementsField.GetValue(target)!;
             if (offset + length > elements.Length)
                 throw new TrapException("out of bounds array access");
+            var elemType = elements.GetType().GetElementType()!;
+            var fillVal = ConvertValueToElement(value, elemType);
             for (int i = 0; i < length; i++)
-                elements.SetValue(value, offset + i);
+                elements.SetValue(fillVal, offset + i);
+        }
+
+        /// <summary>Convert a WASM Value to the CLR element type for array storage.</summary>
+        private static object ConvertValueToElement(Value val, Type elemType)
+        {
+            if (elemType == typeof(byte) || elemType == typeof(sbyte))
+                return Convert.ChangeType(val.Data.Int32 & 0xFF, elemType);
+            if (elemType == typeof(short) || elemType == typeof(ushort))
+                return Convert.ChangeType(val.Data.Int32 & 0xFFFF, elemType);
+            if (elemType == typeof(int)) return val.Data.Int32;
+            if (elemType == typeof(long)) return val.Data.Int64;
+            if (elemType == typeof(float)) return val.Data.Float32;
+            if (elemType == typeof(double)) return val.Data.Float64;
+            // Reference-typed elements: unwrap to CLR object
+            if (val.GcRef != null)
+            {
+                if (val.GcRef is GcObjectAdapter adapter) return adapter.Target;
+                return val.GcRef;
+            }
+            return val; // fallback
         }
 
         public static void ArrayCopy(object dstRef, int dstOff, object srcRef, int srcOff, int length)
@@ -1106,10 +1171,24 @@ namespace Wacs.Transpiler.AOT.Emitters
             var field = target.GetType().GetField("elements");
             if (field == null) throw new TrapException("not an array type");
             var elements = (System.Array)field.GetValue(target)!;
-            if (dstOff + length > elements.Length || srcOff + length > segData.Length)
-                throw new TrapException("out of bounds");
+            var elemType = elements.GetType().GetElementType()!;
+            int elemSize = System.Runtime.InteropServices.Marshal.SizeOf(elemType);
+            long srcBytes = (long)(uint)srcOff + (long)(uint)length * elemSize;
+            if ((long)(uint)dstOff + (long)(uint)length > elements.Length || srcBytes > segData.Length)
+                throw new TrapException("out of bounds memory access");
             for (int i = 0; i < length; i++)
-                elements.SetValue(segData[srcOff + i], dstOff + i);
+            {
+                int byteOff = srcOff + i * elemSize;
+                object val = elemSize switch
+                {
+                    1 => segData[byteOff],
+                    2 => BitConverter.ToInt16(segData, byteOff),
+                    4 => BitConverter.ToInt32(segData, byteOff),
+                    8 => BitConverter.ToInt64(segData, byteOff),
+                    _ => segData[byteOff]
+                };
+                elements.SetValue(Convert.ChangeType(val, elemType), dstOff + i);
+            }
         }
 
         public static void ArrayInitElem(ThinContext ctx, Value arrayRef, int dstOff,
