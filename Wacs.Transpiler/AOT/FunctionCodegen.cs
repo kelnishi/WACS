@@ -344,10 +344,14 @@ namespace Wacs.Transpiler.AOT
             // impractical. Type assertions WITHIN emitters (push/pop with
             // expected types) catch the actual bugs; the height reset ensures
             // each emitter starts from a correct baseline.
+            //
+            // Order matters: call Reset BEFORE clearing the unreachable flag
+            // so Reset can observe that the prior position was unreachable
+            // (dead-code types must not leak past an instruction boundary).
             if (_currentInfo != null && !_currentInfo.Unreachable)
             {
-                _cilValidator.SetReachable();
                 _cilValidator.Reset(_currentInfo.StackHeightBefore);
+                _cilValidator.SetReachable();
             }
             else if (_currentInfo?.Unreachable == true)
             {
