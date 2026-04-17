@@ -340,15 +340,30 @@ the triage inputs for the equivalence-gate pass.
    changed from `typeof(int)` to untyped pops for memory64 / table64
    indices (i32 or i64 depending on addr type).
 
-**Suite state after session 3:**
+**Suite state after session 4:**
 
-    456 passed / 17 failed / 473 total    (237 wast files × 2 test classes,
+    460 passed / 13 failed / 473 total    (237 wast files × 2 test classes,
                                            minus SkipWasts: comments,
                                            annotations, linking{,0,3}, i31)
 
     Session 1 baseline: 449/473.
     Session 2 delivered: 453/473 (+4).
     Session 3 delivered: 456/473 (+3).
+    Session 4 delivered: 460/473 (+4).
+
+**Session 4 additions:**
+
+15. FunctionCodegen ctor ordering — `_moduleInst` was assigned *after*
+    `_paramClrTypes` was populated via `InternalType`. `IsGcRefType`
+    needs `_moduleInst` to disambiguate defType params (function types
+    flow as Value; GC composites as object). With moduleInst=null, any
+    `(ref null $fn)` param fell through to "assume GC" → object — but
+    the CIL signature (via `MapValType`) still declared Value. At
+    `ref.is_null` the validator peeked object, took the Ldnull/Ceq
+    path, and emitted ceq against a Value on the stack →
+    InvalidProgramException at JIT time. Fix: assign `_moduleInst`
+    before the loop. Unlocks br_on_null, br_on_non_null, ref_is_null,
+    ref_as_non_null.
 
 **Session 3 additions:**
 
