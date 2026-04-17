@@ -135,12 +135,21 @@ namespace Wacs.Transpiler.AOT
 
             foreach (var table in Tables)
             {
+                // Only bind delegates in tables that hold funcrefs
+                var ht = table.Type.ElementType.GetHeapType();
+                if (ht != Wacs.Core.Types.Defs.HeapType.Func
+                    && ht != Wacs.Core.Types.Defs.HeapType.NoFunc
+                    && table.Type.ElementType != ValType.FuncRef)
+                    continue;
+
                 for (int i = 0; i < table.Elements.Count; i++)
                 {
                     var elem = table.Elements[i];
                     if (elem.IsNullRef) continue;
                     // Skip elements that already have a delegate bound (from another module)
                     if (elem.GcRef is Delegate) continue;
+                    // Skip non-funcref elements (GC refs, i31, etc.)
+                    if (elem.Type != ValType.FuncRef) continue;
 
                     // Extract funcIdx from the raw funcref Value
                     int funcIdx = (int)elem.Data.Ptr;
