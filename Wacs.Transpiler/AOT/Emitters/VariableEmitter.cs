@@ -108,17 +108,25 @@ namespace Wacs.Transpiler.AOT.Emitters
                     il.Emit(OpCodes.Pop);
                     break;
                 case WasmOpCode.Select:
-                    // Validator: pop [val1, val2, i32], push [val]
-                    cv?.Pop(typeof(int), "select.cond");
-                    EmitSelect(il, typeof(long));
-                    break;
                 case WasmOpCode.SelectT:
                 {
-                    var sel = (InstSelect)inst;
-                    var tempType = sel.Types.Length > 0 && sel.Types[0].IsRefType()
-                        ? typeof(Value) : typeof(long);
-                    cv?.Pop(typeof(int), "select_t.cond");
-                    EmitSelect(il, tempType);
+                    // Check if this is a typed select with ref types
+                    var sel = inst as InstSelect;
+                    if (sel?.Types.Length > 0 && sel.Types[0].IsRefType())
+                    {
+                        // Ref-typed select: use a runtime helper to avoid CIL verification
+                        // issues with Value structs (containing managed refs) at branch merge points.
+                        // Note: after interpreter Link, both Select and SelectT use OpCode.Select.
+                        cv?.Pop(typeof(int), "select.cond");
+                        il.Emit(OpCodes.Call, typeof(SelectHelpers).GetMethod(
+                            nameof(SelectHelpers.SelectValue),
+                            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!);
+                    }
+                    else
+                    {
+                        cv?.Pop(typeof(int), "select.cond");
+                        EmitSelect(il, typeof(long));
+                    }
                     break;
                 }
                 default:
@@ -190,5 +198,19 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             il.MarkLabel(lblEnd);
         }
+    }
+
+    /// <summary>
+    /// Runtime helpers for select with Value structs.
+    /// Value contains a managed reference field (IGcRef? GcRef) which
+    /// causes CIL verification issues when the struct is on the
+    /// evaluation stack at branch merge points. Using a method call
+    /// avoids the merge entirely.
+    /// </summary>
+    public static class SelectHelpers
+    {
+        /// <summary>select for Value: [val1, val2, cond] → val1 if cond!=0, else val2</summary>
+        public static Value SelectValue(Value val1, Value val2, int cond)
+            => cond != 0 ? val1 : val2;
     }
 }
