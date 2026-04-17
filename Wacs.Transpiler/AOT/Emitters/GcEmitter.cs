@@ -925,6 +925,12 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         private static bool TestConcreteType(Value val, int typeIndex, ThinContext ctx)
         {
+            // Function type check: funcref values use Data.Ptr, not GcRef
+            if (val.Type == ValType.FuncRef)
+                return TestFuncType(val, typeIndex, ctx);
+
+
+            // GC struct/array type check
             var gcRef = val.GcRef;
             if (gcRef == null) return false;
             object target = gcRef is GcObjectAdapter adapter ? adapter.Target : gcRef;
@@ -939,19 +945,41 @@ namespace Wacs.Transpiler.AOT.Emitters
                 return true;
 
             // Layer 1: Structural hash equivalence (equi-recursive type canonicalization)
-            // Walk the actual object's CLR type hierarchy, checking structural hash at each level
-            int? targetHash = GetStructuralHash(targetClrType);
-            if (targetHash == null) return false;
+            int? targetHash2 = GetStructuralHash(targetClrType);
+            if (targetHash2 == null) return false;
 
             var checkType = target.GetType();
             while (checkType != null && checkType != typeof(object))
             {
                 int? checkHash = GetStructuralHash(checkType);
-                if (checkHash != null && checkHash.Value == targetHash.Value)
+                if (checkHash != null && checkHash.Value == targetHash2.Value)
                     return true;
                 checkType = checkType.BaseType;
             }
 
+            return false;
+        }
+
+        /// <summary>Test if a funcref's function type matches a concrete type index.</summary>
+        private static bool TestFuncType(Value val, int typeIndex, ThinContext ctx)
+        {
+            if (ctx.FuncTypeHashes == null) return false;
+            int funcIdx = (int)val.Data.Ptr;
+            if (funcIdx < 0 || funcIdx >= ctx.FuncTypeHashes.Length)
+                return false;
+            int actualHash = ctx.FuncTypeHashes[funcIdx];
+
+            // Look up the target type's hash from the module's type definitions
+            if (ctx.Module?.Types != null && ctx.Module.Types.Contains((TypeIdx)typeIndex))
+            {
+                var targetDefType = ctx.Module.Types[(TypeIdx)typeIndex];
+                // Check if target is a function type
+                if (targetDefType.Expansion is FunctionType)
+                {
+                    int targetHash = targetDefType.GetHashCode();
+                    return actualHash == targetHash;
+                }
+            }
             return false;
         }
 

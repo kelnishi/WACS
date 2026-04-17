@@ -105,6 +105,11 @@ namespace Wacs.Transpiler.AOT
         // Needed by ref.test, ref.cast, br_on_cast, call_indirect type checks.
         public TypesSpace? Types;
 
+        // FuncTypeHashes: structural hash of each function's type, indexed by
+        // module function index. Used by ref.test/ref.cast on funcref values
+        // to check function type identity without requiring the interpreter Store.
+        public int[]? FuncTypeHashes;
+
         /// <summary>
         /// Construct a ThinContext for standalone use (no WasmRuntime).
         /// </summary>

@@ -40,6 +40,9 @@ namespace Wacs.Transpiler.AOT
         public (ValType type, Mutability mut, Value init)[] Globals { get; set; }
             = Array.Empty<(ValType, Mutability, Value)>();
 
+        /// <summary>Structural hash per function index, for function type identity checks.</summary>
+        public int[]? FuncTypeHashes { get; set; }
+
         /// <summary>Active data segments: (memIdx, offset, segmentId) per segment.</summary>
         public (int memIdx, int offset, int segId)[] ActiveDataSegments { get; set; }
             = Array.Empty<(int, int, int)>();
@@ -303,6 +306,7 @@ namespace Wacs.Transpiler.AOT
             ctx.DataSegmentBaseId = data.DataSegmentBaseId;
             ctx.ElemSegmentBaseId = data.ElemSegmentBaseId;
             ctx.InitDataId = initDataId;
+            ctx.FuncTypeHashes = data.FuncTypeHashes;
 
             // 7. Initialize GC-typed globals (array.new, etc.)
             InitializeGcGlobals(ctx, data, initDataId);

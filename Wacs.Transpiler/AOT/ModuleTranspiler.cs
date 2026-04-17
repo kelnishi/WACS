@@ -262,8 +262,36 @@ namespace Wacs.Transpiler.AOT
             var functionsType = typeBuilder.CreateType()!;
             var moduleClassType = moduleClassGen.CreateType();
 
-            // Register emitted GC types for runtime initialization of GC globals
+            // Populate function type hashes for runtime ref.cast/ref.test on funcrefs.
+            // Each function's hash is the DefType.GetHashCode() (SubType.ComputedHash)
+            // for equi-recursive type comparison.
             int initDataId = moduleClassGen.InitDataId;
+            if (initDataId >= 0)
+            {
+                var initData = InitRegistry.Get(initDataId);
+                int importedFuncCount = moduleInst.Repr.ImportedFunctions.Count;
+                int localFuncCount = moduleInst.Repr.Funcs.Count;
+                int totalFuncs = importedFuncCount + localFuncCount;
+                if (totalFuncs > 0)
+                {
+                    initData.FuncTypeHashes = new int[totalFuncs];
+                    int fi = 0;
+                    foreach (var import in moduleInst.Repr.ImportedFunctions)
+                    {
+                        if (moduleInst.Types.Contains(import.TypeIndex))
+                            initData.FuncTypeHashes[fi] = moduleInst.Types[import.TypeIndex].GetHashCode();
+                        fi++;
+                    }
+                    foreach (var func in moduleInst.Repr.Funcs)
+                    {
+                        if (moduleInst.Types.Contains(func.TypeIndex))
+                            initData.FuncTypeHashes[fi] = moduleInst.Types[func.TypeIndex].GetHashCode();
+                        fi++;
+                    }
+                }
+            }
+
+            // Register emitted GC types for runtime initialization of GC globals
             foreach (var (typeIdx, gcType) in gcTypeEmitter.EmittedTypes)
             {
                 if (gcType.ClrType != null)
