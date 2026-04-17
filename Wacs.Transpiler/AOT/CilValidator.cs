@@ -117,17 +117,22 @@ namespace Wacs.Transpiler.AOT
         /// Called at each instruction boundary — the pre-pass height
         /// is authoritative (backed by WASM validation).
         ///
-        /// If the existing stack already has this height, preserve types
-        /// (the prior instruction's pushes are the real CIL types flowing
-        /// forward). If it doesn't match, populate with placeholders —
-        /// real types are re-established by the next emitter.
+        /// If the prior position was reachable AND the existing stack already
+        /// has this height, preserve types (the prior instruction's pushes
+        /// are the real CIL types flowing forward — representation-sensitive
+        /// emitters like `ref.is_null` / `select` `Peek()` this to dispatch).
+        ///
+        /// Otherwise — mismatched height, or the prior position was
+        /// unreachable (types on the stack are dead-code polymorphic and
+        /// must not leak past the instruction boundary) — repopulate with
+        /// placeholder `object` entries. Subsequent emitters re-establish
+        /// real types.
         /// </summary>
         public void Reset(int height)
         {
-            if (_typeStack.Count == height)
+            if (!_unreachable && _typeStack.Count == height)
             {
-                // Height already matches — preserve the types flowing forward.
-                _unreachable = false;
+                // Prior reachable position matches — preserve the types flowing forward.
                 return;
             }
             _typeStack.Clear();
