@@ -54,12 +54,16 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// <param name="op">The opcode</param>
         /// <param name="paramCount">Number of WASM function parameters</param>
         /// <param name="locals">Array of CIL local builders (for WASM locals, not params)</param>
+        /// <param name="paramTypes">CIL types for WASM params (for validator)</param>
+        /// <param name="cv">CIL stack validator (optional)</param>
         public static void Emit(
             ILGenerator il,
             InstructionBase inst,
             WasmOpCode op,
             int paramCount,
-            LocalBuilder[] locals)
+            LocalBuilder[] locals,
+            Type[]? paramTypes = null,
+            CilValidator? cv = null)
         {
             switch (op)
             {
@@ -67,25 +71,45 @@ namespace Wacs.Transpiler.AOT.Emitters
                 {
                     int idx = ((InstLocalGet)inst).GetIndex();
                     EmitLocalGet(il, idx, paramCount);
+                    // Validator: push the type of the local/param
+                    if (cv != null)
+                    {
+                        var clrType = idx < paramCount
+                            ? (paramTypes != null && idx < paramTypes.Length ? paramTypes[idx] : typeof(object))
+                            : locals[idx - paramCount].LocalType;
+                        cv.Push(clrType);
+                    }
                     break;
                 }
                 case WasmOpCode.LocalSet:
                 {
                     int idx = ((InstLocalSet)inst).GetIndex();
+                    // Validator: pop the value being stored
+                    if (cv != null)
+                    {
+                        var clrType = idx < paramCount
+                            ? (paramTypes != null && idx < paramTypes.Length ? paramTypes[idx] : typeof(object))
+                            : locals[idx - paramCount].LocalType;
+                        cv.Pop(clrType, "local.set");
+                    }
                     EmitLocalSet(il, idx, paramCount);
                     break;
                 }
                 case WasmOpCode.LocalTee:
                 {
                     int idx = ((InstLocalTee)inst).GetIndex();
+                    // Validator: peek (value stays on stack after tee)
                     il.Emit(OpCodes.Dup);
                     EmitLocalSet(il, idx, paramCount);
                     break;
                 }
                 case WasmOpCode.Drop:
+                    cv?.Pop(context: "drop");
                     il.Emit(OpCodes.Pop);
                     break;
                 case WasmOpCode.Select:
+                    // Validator: pop [val1, val2, i32], push [val]
+                    cv?.Pop(typeof(int), "select.cond");
                     EmitSelect(il, typeof(long));
                     break;
                 case WasmOpCode.SelectT:
@@ -93,6 +117,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                     var sel = (InstSelect)inst;
                     var tempType = sel.Types.Length > 0 && sel.Types[0].IsRefType()
                         ? typeof(Value) : typeof(long);
+                    cv?.Pop(typeof(int), "select_t.cond");
                     EmitSelect(il, tempType);
                     break;
                 }
