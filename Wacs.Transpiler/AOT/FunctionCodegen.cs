@@ -57,6 +57,7 @@ namespace Wacs.Transpiler.AOT
         private ILGenerator _il = null!;
         private StackAnalysis _stackAnalysis = null!;
         private InstructionInfo? _currentInfo; // precomputed info for current instruction
+        private CilValidator _cilValidator = null!;
 
         public FunctionCodegen(
             MethodBuilder method,
@@ -105,6 +106,9 @@ namespace Wacs.Transpiler.AOT
 
             // Emit pass: generate CIL using precomputed metadata
             _il = _method.GetILGenerator();
+
+            // CIL stack validator — tracks type stack during emission
+            _cilValidator = new CilValidator(_method.Name);
 
             // Declare CIL locals for WASM locals (parameters are CIL args, not locals)
             var wasmLocals = _funcInst.Locals;
@@ -163,6 +167,23 @@ namespace Wacs.Transpiler.AOT
         {
             // Look up precomputed stack analysis for this instruction
             _currentInfo = _stackAnalysis.Get(inst);
+
+            // Cross-check: CIL validator stack height should match StackAnalysis pre-pass.
+            // Divergence means the emitter changed the stack in a way the pre-pass didn't predict.
+            if (_currentInfo != null && !_currentInfo.Unreachable)
+            {
+                _cilValidator.SetReachable();
+                if (_cilValidator.Height != _currentInfo.StackHeightBefore)
+                {
+                    _cilValidator.Reset(_currentInfo.StackHeightBefore);
+                    // Mismatch is informational for now — the pre-pass is authoritative.
+                    // Once the validator tracks all instructions, we can make this an error.
+                }
+            }
+            else if (_currentInfo?.Unreachable == true)
+            {
+                _cilValidator.SetUnreachable();
+            }
 
             // Detect GC instructions by class type — their opcodes may be aliased
             // after the interpreter's linking step rewrites the ByteCode.
