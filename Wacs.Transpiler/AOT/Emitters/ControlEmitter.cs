@@ -183,21 +183,19 @@ namespace Wacs.Transpiler.AOT.Emitters
                 ResultLocals = resultLocals
             });
 
-            // Emit block body and track whether the natural end is reachable.
-            // Unconditional terminators (return, br, unreachable) end the path;
-            // a shuttle+Br after them would be dead code with invalid stack state.
+            // Emit block body
             var block = inst.GetBlock(0);
-            bool bodyEndReachable = true;
             foreach (var child in block.Instructions)
             {
                 emitInstruction(il, child);
-                bodyEndReachable = !IsUnconditionalTerminator(child);
             }
+            bool bodyEndReachable = BodyEndIsReachable(block.Instructions);
 
             blockStack.Pop();
 
-            // Fall-through end of body: shuttle stack values to result locals
-            // (so the label merge point never sees Value on the eval stack).
+            // When resultLocals is used, the label merge must only see EMPTY eval stack.
+            // If the body's natural end is reachable with Value results on stack,
+            // shuttle them into locals and Br to the label. Otherwise skip (dead code).
             if (resultLocals != null && bodyEndReachable)
             {
                 for (int i = resultArity - 1; i >= 0; i--)
@@ -218,6 +216,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// <summary>
         /// Is this an unconditional terminator that ends the current path?
         /// Determines whether emission should continue after this instruction.
+        /// Skips over structural markers like End which don't terminate execution.
         /// </summary>
         private static bool IsUnconditionalTerminator(InstructionBase inst)
         {
@@ -230,6 +229,25 @@ namespace Wacs.Transpiler.AOT.Emitters
                 || op == WasmOpCode.ReturnCallRef)
                 return true;
             return false;
+        }
+
+        /// <summary>
+        /// Does the block body's natural fall-through reach its end? A body where
+        /// the last non-end instruction is an unconditional terminator has no
+        /// reachable fall-through at the closing brace.
+        /// </summary>
+        private static bool BodyEndIsReachable(Wacs.Core.InstructionSequence seq)
+        {
+            for (int i = seq.Count - 1; i >= 0; i--)
+            {
+                var inst = seq[i]!;
+                var op = inst.Op.x00;
+                // Skip structural markers that don't execute
+                if (op == WasmOpCode.End || op == WasmOpCode.Else)
+                    continue;
+                return !IsUnconditionalTerminator(inst);
+            }
+            return true; // empty body — trivially reachable
         }
 
         /// <summary>
@@ -319,12 +337,10 @@ namespace Wacs.Transpiler.AOT.Emitters
 
                 // if-true body
                 var ifBlock = inst.GetBlock(0);
-                bool ifEndReachable = true;
                 foreach (var child in ifBlock.Instructions)
-                {
                     emitInstruction(il, child);
-                    ifEndReachable = !IsUnconditionalTerminator(child);
-                }
+                bool ifEndReachable = BodyEndIsReachable(ifBlock.Instructions);
+
                 // End of if-true body: shuttle to locals if reachable, then Br
                 if (ifEndReachable)
                 {
@@ -339,12 +355,10 @@ namespace Wacs.Transpiler.AOT.Emitters
                 // else body
                 il.MarkLabel(elseLabel);
                 var elseBlock = inst.GetBlock(1);
-                bool elseEndReachable = true;
                 foreach (var child in elseBlock.Instructions)
-                {
                     emitInstruction(il, child);
-                    elseEndReachable = !IsUnconditionalTerminator(child);
-                }
+                bool elseEndReachable = BodyEndIsReachable(elseBlock.Instructions);
+
                 // End of else body: shuttle to locals if reachable (fall-through to endLabel)
                 if (resultLocals != null && elseEndReachable)
                 {
@@ -360,12 +374,10 @@ namespace Wacs.Transpiler.AOT.Emitters
 
                 // if-true body only
                 var ifBlock = inst.GetBlock(0);
-                bool ifEndReachable = true;
                 foreach (var child in ifBlock.Instructions)
-                {
                     emitInstruction(il, child);
-                    ifEndReachable = !IsUnconditionalTerminator(child);
-                }
+                bool ifEndReachable = BodyEndIsReachable(ifBlock.Instructions);
+
                 // End of if-true body: shuttle to locals if reachable
                 if (resultLocals != null && ifEndReachable)
                 {

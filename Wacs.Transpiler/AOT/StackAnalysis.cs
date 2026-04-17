@@ -82,7 +82,17 @@ namespace Wacs.Transpiler.AOT
     /// </summary>
     public class StackAnalysis
     {
-        private readonly Dictionary<InstructionBase, InstructionInfo> _info = new();
+        // Per-site info: singleton instructions (InstReturn.Inst, InstDrop.Inst, etc.)
+        // are shared across call sites in the interpreter, so a Dictionary<Inst, Info>
+        // keyed by reference identity collapses their per-site data. We use per-inst
+        // FIFO queues instead — each Get() dequeues one entry, yielding distinct info
+        // for each emission site. Analysis visits and emission traverse in the same
+        // order, so the sequence aligns.
+        private readonly Dictionary<InstructionBase, Queue<InstructionInfo>> _infoByInst = new();
+        // Analysis-internal direct lookup (for per-site block instructions during
+        // sub-block processing — these aren't singletons so identity keys work).
+        private readonly Dictionary<InstructionBase, InstructionInfo> _blockInfoForAnalysis = new();
+
         private readonly Stack<AnalysisBlock> _blockStack = new();
         private int _stackHeight;
         private bool _unreachable;
@@ -91,12 +101,15 @@ namespace Wacs.Transpiler.AOT
         private int _importCount;
 
         /// <summary>
-        /// Look up precomputed info for an instruction.
-        /// Returns null if the instruction wasn't analyzed (shouldn't happen).
+        /// Look up precomputed info for an instruction. Each call consumes one
+        /// entry from a per-instance queue so singleton instructions (InstReturn.Inst,
+        /// InstDrop.Inst) get distinct info per emission site.
         /// </summary>
         public InstructionInfo? Get(InstructionBase inst)
         {
-            return _info.TryGetValue(inst, out var info) ? info : null;
+            if (_infoByInst.TryGetValue(inst, out var queue) && queue.Count > 0)
+                return queue.Dequeue();
+            return null;
         }
 
         /// <summary>
@@ -116,7 +129,8 @@ namespace Wacs.Transpiler.AOT
             _stackHeight = 0;
             _unreachable = false;
             _blockStack.Clear();
-            _info.Clear();
+            _infoByInst.Clear();
+            _blockInfoForAnalysis.Clear();
 
             // Push the implicit function-level block
             _blockStack.Push(new AnalysisBlock
@@ -150,7 +164,10 @@ namespace Wacs.Transpiler.AOT
                 Unreachable = _unreachable,
                 Excess = 0
             };
-            _info[inst] = info;
+            if (!_infoByInst.TryGetValue(inst, out var queue))
+                _infoByInst[inst] = queue = new Queue<InstructionInfo>();
+            queue.Enqueue(info);
+            _blockInfoForAnalysis[inst] = info;
 
             // GC instructions detected by namespace
             if (inst.GetType().Namespace == "Wacs.Core.Instructions.GC")
@@ -296,11 +313,9 @@ namespace Wacs.Transpiler.AOT
                     {
                         var brInst = (InstBrOnNonNull)inst;
                         var target = PeekLabel(brInst.Label);
-                        // br_on_non_null.StackDiff = -1, already applied.
-                        // On the non-null path: ref stays (label arity includes it).
-                        // The excess is relative to what's on the stack after StackDiff.
-                        // But on the branch path, the ref is kept (+1 vs the StackDiff).
-                        // Actual branch height = _stackHeight + 1 (ref not consumed on branch path)
+                        // br_on_non_null: StackDiff=-1 already applied (fall-through consumed ref).
+                        // On branch path, the ref is KEPT as carried value → height = post-diff + 1.
+                        // excess = (_stackHeight + 1) - target.TargetStack.
                         int branchPathHeight = _stackHeight + 1;
                         info.Excess = branchPathHeight - target.TargetStack;
                     }
@@ -354,7 +369,7 @@ namespace Wacs.Transpiler.AOT
             _blockStack.Pop();
             _unreachable = false;
 
-            _stackHeight = (_info[inst]?.StackHeightBefore ?? _stackHeight)
+            _stackHeight = ((_blockInfoForAnalysis.TryGetValue(inst, out var __bi) ? __bi.StackHeightBefore : (int?)null) ?? _stackHeight)
                 - paramArity + resultArity;
         }
 
@@ -377,7 +392,7 @@ namespace Wacs.Transpiler.AOT
             _blockStack.Pop();
             _unreachable = false;
 
-            _stackHeight = (_info[inst]?.StackHeightBefore ?? _stackHeight)
+            _stackHeight = ((_blockInfoForAnalysis.TryGetValue(inst, out var __bi) ? __bi.StackHeightBefore : (int?)null) ?? _stackHeight)
                 - paramArity + resultArity;
         }
 
