@@ -1197,9 +1197,12 @@ namespace Wacs.Transpiler.AOT
         {
             if (before)
             {
-                // Indirect/ref calls pop a table index or funcref
+                // Indirect/ref calls pop a table index or funcref. Table
+                // index is i32 for table32 or i64 for table64 — untyped
+                // pop for height-only tracking (CallEmitter handles the
+                // actual Conv_I4 / Conv_I8 per table type).
                 if (site.Strategy == CallStrategy.TableIndirect)
-                    _cilValidator.Pop(typeof(int), "call_indirect.idx");
+                    _cilValidator.Pop(context: "call_indirect.idx");
                 else if (site.Strategy == CallStrategy.RefDispatch)
                     _cilValidator.Pop(typeof(Value), "call_ref.funcref");
 
@@ -1414,13 +1417,13 @@ namespace Wacs.Transpiler.AOT
             {
                 switch (extOp)
                 {
-                    // Bulk memory: [dst:i32, src:i32, len:i32] → []
+                    // Bulk memory: [dst, src, len] → []. Types can be i32
+                    // (memory32) or i64 (memory64) depending on memidx; we
+                    // pop untyped for height-only tracking.
                     case Wacs.Core.OpCodes.ExtCode.MemoryCopy:
                     case Wacs.Core.OpCodes.ExtCode.MemoryFill:
                     case Wacs.Core.OpCodes.ExtCode.MemoryInit:
-                        _cilValidator.Pop(typeof(int), "bulk.len");
-                        _cilValidator.Pop(typeof(int), "bulk.src");
-                        _cilValidator.Pop(typeof(int), "bulk.dst");
+                        _cilValidator.Pop(3, "bulk args");
                         break;
                     // Table bulk: [dst, src, len] → []
                     case Wacs.Core.OpCodes.ExtCode.TableInit:
@@ -1481,21 +1484,25 @@ namespace Wacs.Transpiler.AOT
             int diff = inst.StackDiff;
             if (before)
             {
-                // StackDiff = results - consumed. If negative, we consume more than we produce.
-                // For the "before" pass, pop consumed values.
-                // For common patterns:
-                //   diff = -1  → consumes 2, produces 1 (binary op) — pop 2
-                //   diff = 0   → consumes N, produces N — pop N (unknown)
-                //   diff = 1   → consumes 0, produces 1 (const) — pop 0
-                // We can't determine exact pops without the instruction signature,
-                // so we only track the net diff after emission.
+                // Strategy: we don't know the per-op signature for SIMD / FC /
+                // similar prefix opcodes without an explicit table. Rather than
+                // attempt typed pops (which desync and produce bogus validator
+                // errors), clear the current type stack to placeholders. The
+                // post-emit Push below repopulates the correct height.
+                int h = _cilValidator.Height;
+                _cilValidator.Reset(h);
+                // Reset preserves types when heights match + reachable; force
+                // a placeholder rewrite by bumping to a mismatched height then
+                // back. Cleaner: directly clear via a new 0→h cycle.
+                _cilValidator.Reset(0);
+                _cilValidator.Reset(h);
             }
             else
             {
                 // After emission, adjust the validator by the net diff.
-                // Since we Reset at instruction entry, the current height is from
-                // the pre-pass. The post-instruction height should be height + diff.
-                // We apply the diff as pops (if negative) or pushes (if positive).
+                // Since Reset at instruction entry normalized to height
+                // (all placeholders), we apply diff to match the post-inst
+                // height the next instruction's StackAnalysis expects.
                 if (diff > 0)
                     _cilValidator.Push(typeof(object), diff);
                 else if (diff < 0)
