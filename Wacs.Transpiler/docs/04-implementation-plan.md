@@ -307,23 +307,34 @@ All failures are against baseline structural changes from stages 1–3; none
 block further work. The refactor itself is structurally complete — these are
 the triage inputs for the equivalence-gate pass.
 
-### Triage plan (next session)
+### Triage progress
 
-1. **Fix `gc/extern.wast` host crash first** — the InvalidProgramException
-   indicates emitted IL that the CLR JIT rejects outright. Likely culprit:
-   `any.convert_extern` / `extern.convert_any` emission paths now emit object
-   helpers without proper stack-type alignment. Resolving this uncovers the
-   rest of the spec-suite state.
+**Fixed (stage 4 session 1):**
+
+1. `gc/extern.wast` InvalidProgramException — `any.convert_extern` and
+   `extern.convert_any` are boundary conversions (externref↔anyref, i.e.
+   Value↔object on internal stack). Previous emission popped `typeof(object)`
+   for `any.convert_extern` while the actual CIL stack had Value; verifier
+   rejected. Fix: emit `UnwrapRef` / `ExternConvertAnyWrap` to align with
+   each side's representation. Also fixed `GcRuntimeHelpers.UnwrapRef` to
+   return `null` on null Value (pure boundary helper — trapping on null
+   is the caller's responsibility for ref.as_non_null, struct.get, etc.).
+   Test run completion: 50 tests → 286 tests before a later abort.
+
+**Remaining (triage plan, next session):**
+
+1. **Another host crash** exists between `gc/extern.wast` and the next
+   aborted test. Likely another InvalidProgramException. Isolate by
+   running each remaining `gc/*` test in turn.
 
 2. **`br_on_null` "null reference" trap** — despite the stage-3 fix to
    `EmitRefNullTyped` (module-aware classification), the nullable-null
-   assertion still traps. Trace: test harness reaches it, so emission
-   compiles; the trap is runtime. Walk the function body for that case
-   against doc 1 §12 and doc 2 §1 to find the representation mismatch.
+   assertion still traps.
 
-3. **`gc/array_init_elem`**, **`gc/br_on_cast`/`br_on_cast_fail`** — stage 1
-   object-path regressions. The simplified `br_on_cast` of stage 3 may have
-   introduced the issue, or a latent wrap/unwrap mismatch surfaces.
+3. **`gc/array_init_elem`**, **`gc/br_on_cast`/`br_on_cast_fail`,
+   gc/array` line 278 (`get`)** — nested array.get of ref elements
+   pattern. Likely representation mismatch in array-of-ref element
+   emission.
 
 4. **TranspileModule failures on memory_*, call_indirect, simd_***, table_init**
    — these are module-translation failures (not runtime), likely `CilValidator`
