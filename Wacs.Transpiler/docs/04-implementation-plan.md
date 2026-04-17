@@ -340,18 +340,57 @@ the triage inputs for the equivalence-gate pass.
    changed from `typeof(int)` to untyped pops for memory64 / table64
    indices (i32 or i64 depending on addr type).
 
-**Suite state after session 4:**
+**Suite state after session 4 (GC bucket):**
 
-    460 passed / 13 failed / 473 total    (237 wast files × 2 test classes,
+    463 passed / 10 failed / 473 total    (237 wast files × 2 test classes,
                                            minus SkipWasts: comments,
                                            annotations, linking{,0,3}, i31)
 
     Session 1 baseline: 449/473.
     Session 2 delivered: 453/473 (+4).
     Session 3 delivered: 456/473 (+3).
-    Session 4 delivered: 460/473 (+4).
+    Session 4 delivered: 463/473 (+7).
 
 **Session 4 additions:**
+
+16. `GcTypeEmitter.MapStorageType` — non-GC-bucket reftypes (funcref /
+    externref / exnref / concrete function types / V128) now map to
+    typeof(Value) for array and struct slots, matching how those values
+    flow on the internal CIL stack (doc 2 §1 invariants 3 & 4). The
+    prior typeof(object) mapping caused array.get on a funcref element
+    to ldelem an object and stloc it into a Value local — unverifiable
+    IL that silently wrote zero bits, so downstream call_indirect saw
+    Type=Undefined and dispatched funcIdx 0 instead of trapping
+    "uninitialized element". Also fixes V128 array/struct fields.
+
+17. `InitializeGcGlobals` case 1 — array.new_default now seeds
+    Value-typed slots with `new Value(ElementValType)` so null refs
+    carry their reftype tag (and Data.Ptr=long.MinValue); default(Value)
+    would have Type=Undefined and `IsNullRef` would miss it. Requires
+    a new `GcGlobalInit.ElementValType` field populated by
+    ModuleTranspiler from moduleInst.Types after the module class is
+    generated.
+
+18. `ExternConvertAnyWrap` overload resolution — `new Value(ValType,
+    h.Address)` with long-typed Address was resolving to
+    `Value(ValType, object)` (the only matching overload via boxing),
+    which unboxes the arg as `(int)` and throws
+    InvalidCastException Int64→Int32 for host externref round-trip.
+    Use the explicit `(ValType, long, IGcRef?)` overload. Unlocks
+    gc/extern.wast externalize(ref.host N).
+
+19. Elem segment initializers — `EvaluateElemExpr` became a real
+    stack machine supporting i{32,64}.const, f{32,64}.const, ref.null,
+    ref.func, ref.i31, and the GC constructors array.new /
+    array.new_default / array.new_fixed. GC constructors instantiate
+    the emitted CLR class (via `gcTypeEmitter.GetEmittedType`) and
+    wrap in a GcObjectAdapter so `ExtractElemValue` hands the
+    instance straight to `ArrayNewElem` at runtime. Previously complex
+    expressions fell through to `new Value(ValType.Any)` (null), so
+    array.new_elem against a non-trivial elem segment produced an
+    array of nulls. Requires moving elem-segment registration to
+    after `gcTypeEmitter.EmitTypes()` so emitted types are resolvable.
+    Unlocks gc/array.wast (module 8).
 
 15. FunctionCodegen ctor ordering — `_moduleInst` was assigned *after*
     `_paramClrTypes` was populated via `InternalType`. `IsGcRefType`
