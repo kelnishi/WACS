@@ -327,7 +327,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (gcType == null)
                 throw new TranspilerException($"struct.get: type {inst.TypeIndex} not emitted");
 
-            // Stack: [structref (Value)]
+            // Stack: [structref (object)]
+            EmitNullGuard(il, "null structure reference");
             EmitUnwrapGcRef(il, gcType.ClrType);
             var fieldType = gcType.Fields[inst.FieldIndex].FieldType;
             il.Emit(OpCodes.Ldfld, gcType.Fields[inst.FieldIndex]);
@@ -360,6 +361,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             bool gcRefField = !IsScalarType(ft) && ft != typeof(Value);
             var valLocal = il.DeclareLocal(gcRefField ? typeof(object) : ft);
             il.Emit(OpCodes.Stloc, valLocal);
+            EmitNullGuard(il, "null structure reference");
             EmitUnwrapGcRef(il, gcType.ClrType);
             il.Emit(OpCodes.Ldloc, valLocal);
             if (gcRefField)
@@ -437,15 +439,13 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (gcType == null)
                 throw new TranspilerException($"array.get: type {inst.TypeIndex} not emitted");
 
-            // Stack: [arrayref, index]
-            // arrayref might be Value (from function params/returns) or raw CLR object
-            // (from a preceding array.get that returned a ref element).
-            // We handle both by checking the array type and using Castclass.
+            // Stack: [arrayref (object), index]
             var idxLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, idxLocal);
 
-            // Unwrap Value to CLR object if the stack has Value
-            // For nested gets, the stack might already have a CLR object
+            // Null-guard (doc 1 §11.6: array.get traps on null). Then cast to
+            // the typed emitted CLR class so Ldfld / Ldelem have the right type.
+            EmitNullGuard(il, "null array reference");
             EmitUnwrapGcRef(il, gcType.ClrType);
 
             il.Emit(OpCodes.Ldfld, gcType.Fields[0]); // elements array
@@ -484,6 +484,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Stloc, valLocal);
             var idxLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, idxLocal);
+            EmitNullGuard(il, "null array reference");
             EmitUnwrapGcRef(il, gcType.ClrType);
             il.Emit(OpCodes.Ldfld, gcType.Fields[0]); // elements array
             il.Emit(OpCodes.Ldloc, idxLocal);
@@ -786,6 +787,25 @@ namespace Wacs.Transpiler.AOT.Emitters
                 || t == typeof(byte) || t == typeof(sbyte)
                 || t == typeof(short) || t == typeof(ushort)
                 || t == typeof(Value);
+        }
+
+        /// <summary>
+        /// Emit: if (top of stack is null) throw TrapException(message); else
+        /// leave the top intact. Used before struct.get / array.get / etc.
+        /// to convert a would-be NullReferenceException into a WASM trap
+        /// per doc 1 §11.6 / §11.7 (struct.get and array.get trap on null).
+        /// Expects `typeof(object)` (or assignment-compatible) on the stack.
+        /// </summary>
+        private static void EmitNullGuard(ILGenerator il, string message)
+        {
+            var ok = il.DefineLabel();
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Brtrue, ok);
+            il.Emit(OpCodes.Ldstr, message);
+            il.Emit(OpCodes.Newobj,
+                typeof(TrapException).GetConstructor(new[] { typeof(string) })!);
+            il.Emit(OpCodes.Throw);
+            il.MarkLabel(ok);
         }
 
         /// <summary>
