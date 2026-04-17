@@ -319,29 +319,55 @@ the triage inputs for the equivalence-gate pass.
    each side's representation. Also fixed `GcRuntimeHelpers.UnwrapRef` to
    return `null` on null Value (pure boundary helper — trapping on null
    is the caller's responsibility for ref.as_non_null, struct.get, etc.).
-   Test run completion: 50 tests → 286 tests before a later abort.
 
-**Remaining (triage plan, next session):**
+2. Multi-result return functions emitted invalid IL — the main path
+   never stored results[1..N-1] through the byref out-params declared
+   in `CreateMethodStub`. `EmitMultiResultReturn` spills top N-1 to
+   temps, stores through out-param byrefs (wrapping object→Value for
+   ref types), and leaves result[0] for Ret.
 
-1. **Another host crash** exists between `gc/extern.wast` and the next
-   aborted test. Likely another InvalidProgramException. Isolate by
-   running each remaining `gc/*` test in turn.
+3. `CilValidator.Reset` leaked dead-code types across unreachable
+   boundaries. After `return` inside a block, the validator's
+   `[int32]` would reach the enclosing `call_ref` and collide with
+   its `typeof(Value)` expectation. Fix: preserve types only when the
+   prior position was reachable; clear + placeholder otherwise. Also
+   ordered `Reset` before `SetReachable` in the dispatch so Reset sees
+   the `_unreachable` flag correctly.
 
-2. **`br_on_null` "null reference" trap** — despite the stage-3 fix to
-   `EmitRefNullTyped` (module-aware classification), the nullable-null
-   assertion still traps.
+4. `TrackGenericStackDiff` (SIMD / FC prefix ops) left stale types on
+   the validator between ops. Now resets to placeholders before each
+   generic-diff op. Also `TrackTableRefStackEffect` / `TrackExtStackEffect`
+   changed from `typeof(int)` to untyped pops for memory64 / table64
+   indices (i32 or i64 depending on addr type).
 
-3. **`gc/array_init_elem`**, **`gc/br_on_cast`/`br_on_cast_fail`,
-   gc/array` line 278 (`get`)** — nested array.get of ref elements
-   pattern. Likely representation mismatch in array-of-ref element
-   emission.
+**Suite state after session 1:**
 
-4. **TranspileModule failures on memory_*, call_indirect, simd_***, table_init**
-   — these are module-translation failures (not runtime), likely `CilValidator`
-   assertions firing. Each one points to a specific representation-sensitive
-   emitter site per doc 3 Tier B.
+    449 passed / 24 failed / 473 total    (237 wast files × 2 test classes,
+                                           minus SkipWasts: comments,
+                                           annotations, linking{,0,3}, i31)
 
-Each fix must point to a doc section. No one-off hacks (doc 4 working discipline).
+No more test-run aborts. All 9 TranspileModule CilValidator failures
+fixed. All 24 remaining failures are runtime-level (RunWastAotTranspiled)
+and fall into two buckets:
+
+1. `InvalidProgramException` — the CLR JIT rejects the emitted IL.
+   Affected: br_on_{null,non_null} nullable-null, ref_{is,as}_non_null,
+   gc/type-subtyping, instance, memory_grow, throw{,_ref}, try_table.
+   Several involve function signatures with concrete defType refs.
+
+2. Semantic mismatches — emission succeeds, runtime returns wrong
+   value. Affected: gc/array{,_init_elem}, gc/br_on_cast{,_fail},
+   gc/extern, gc/ref_test, gc/struct, gc/ref_cast, and others.
+
+**Unresolved host crash:**
+
+`gc/i31.wast` crashes the test host (SIGSEGV) before any transpiler
+code logs. The crash precedes `FunctionCodegen.TryEmit` — likely in
+Wacs.Core's WASM parser or validator for i31 + global-init-expression.
+Added to SkipWasts pending separate investigation.
+
+Each remaining failure must be triaged against docs 1-3. No one-off
+hacks.
 
 
 
