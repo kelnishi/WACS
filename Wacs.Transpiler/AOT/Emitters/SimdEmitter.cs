@@ -722,12 +722,13 @@ namespace Wacs.Transpiler.AOT.Emitters
                 _ => throw new TranspilerException($"Unknown SIMD lane load: {op}")
             };
 
-            // Stack: [Value(v128), addr (i32)]
-            var addrLocal = il.DeclareLocal(typeof(int));
-            il.Emit(OpCodes.Stloc, addrLocal);
+            // WASM spec: v128.loadN_lane : [i32 addr, v128 vec] → [v128]
+            // Stack (bottom→top): [addr, Value(v128)]. v128 is on top.
             var vecLocal = il.DeclareLocal(typeof(V128));
             EmitUnboxV128(il);
             il.Emit(OpCodes.Stloc, vecLocal);
+            var addrLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Stloc, addrLocal);
 
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, MemoriesField);
