@@ -919,7 +919,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// Adapter that wraps a plain CLR object as IGcRef.
         /// Used for emitted GC types that don't implement IGcRef directly.
         /// </summary>
-        private class GcObjectAdapter : IGcRef
+        internal class GcObjectAdapter : IGcRef
         {
             public readonly object Target;
             public GcObjectAdapter(object target) => Target = target;

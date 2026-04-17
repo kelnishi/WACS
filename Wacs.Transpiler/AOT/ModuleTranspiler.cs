@@ -179,21 +179,6 @@ namespace Wacs.Transpiler.AOT
                 if (s == 0) dataSegmentBaseId = id;
             }
 
-            // Register element segments for standalone table.init
-            int elemSegmentBaseId = -1;
-            for (int e = 0; e < moduleInst.Repr.Elements.Length; e++)
-            {
-                var elem = moduleInst.Repr.Elements[e];
-                var values = new Value[elem.Initializers.Length];
-                for (int i = 0; i < elem.Initializers.Length; i++)
-                {
-                    var expr = elem.Initializers[i];
-                    values[i] = EvaluateElemExpr(expr);
-                }
-                int id = ModuleInit.RegisterElemSegment(values);
-                if (e == 0) elemSegmentBaseId = id;
-            }
-
             // === Pass 0a: Generate typed interfaces for exports and imports ===
             var interfaceGen = new InterfaceGenerator(
                 moduleBuilder, $"{_namespace}.{moduleName}",
@@ -203,6 +188,24 @@ namespace Wacs.Transpiler.AOT
             // === Pass 0b: Emit CLR types for WASM struct/array definitions ===
             var gcTypeEmitter = new GcTypeEmitter(moduleBuilder, $"{_namespace}.{moduleName}", moduleInst.Types);
             gcTypeEmitter.EmitTypes();
+
+            // Register element segments for standalone table.init.
+            // Deferred until AFTER gcTypeEmitter.EmitTypes so the evaluator can
+            // look up emitted CLR types when an initializer constructs GC
+            // objects (array.new / array.new_fixed / array.new_default).
+            int elemSegmentBaseId = -1;
+            for (int e = 0; e < moduleInst.Repr.Elements.Length; e++)
+            {
+                var elem = moduleInst.Repr.Elements[e];
+                var values = new Value[elem.Initializers.Length];
+                for (int i = 0; i < elem.Initializers.Length; i++)
+                {
+                    var expr = elem.Initializers[i];
+                    values[i] = EvaluateElemExpr(expr, gcTypeEmitter);
+                }
+                int id = ModuleInit.RegisterElemSegment(values);
+                if (e == 0) elemSegmentBaseId = id;
+            }
 
             // === Pass 1: Create method stubs ===
             var methodBuilders = new MethodBuilder[wasmFunctions.Count];
@@ -446,31 +449,142 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Ret);
         }
 
-        /// <summary>Evaluate a const expression from an element segment initializer.</summary>
-        private static Value EvaluateElemExpr(Wacs.Core.Types.Expression expr)
+        /// <summary>
+        /// Evaluate a const expression from an element segment initializer.
+        /// Handles the subset of const expressions that the spec allows here:
+        /// i{32,64}.const, f{32,64}.const, ref.null, ref.func, ref.i31,
+        /// array.new, array.new_default, array.new_fixed. GC constructors
+        /// produce a Value whose GcRef is a GcObjectAdapter wrapping an
+        /// instance of the emitted CLR type, so <see cref="Emitters.GcRuntimeHelpers.ExtractElemValue"/>
+        /// can unwrap it at runtime without re-running the expression.
+        /// </summary>
+        private static Value EvaluateElemExpr(
+            Wacs.Core.Types.Expression expr,
+            GcTypeEmitter? gcTypeEmitter)
         {
-            // Simple stack-based evaluator for element segment const expressions
-            int i32val = 0;
+            var stack = new System.Collections.Generic.Stack<Value>();
             foreach (var inst in expr.Instructions)
             {
                 switch (inst)
                 {
-                    case Wacs.Core.Instructions.Reference.InstRefFunc rf:
-                        return new Value(ValType.FuncRef, (int)rf.FunctionIndex.Value);
-                    case Wacs.Core.Instructions.Reference.InstRefNull rn:
-                        return new Value(rn.RefType);
                     case Wacs.Core.Instructions.Numeric.InstI32Const ic:
-                        i32val = ic.Value;
+                        stack.Push(new Value(ic.Value));
+                        continue;
+                    case Wacs.Core.Instructions.Numeric.InstI64Const lc:
+                        stack.Push(new Value(lc.FetchImmediate(null!)));
+                        continue;
+                    case Wacs.Core.Instructions.Numeric.InstF32Const fc:
+                        stack.Push(new Value(fc.FetchImmediate(null!)));
+                        continue;
+                    case Wacs.Core.Instructions.Numeric.InstF64Const dc:
+                        stack.Push(new Value(dc.FetchImmediate(null!)));
+                        continue;
+                    case Wacs.Core.Instructions.Reference.InstRefFunc rf:
+                        stack.Push(new Value(ValType.FuncRef, (int)rf.FunctionIndex.Value));
+                        continue;
+                    case Wacs.Core.Instructions.Reference.InstRefNull rn:
+                        stack.Push(new Value(rn.RefType));
                         continue;
                     case Wacs.Core.Instructions.GC.InstRefI31:
-                        return GcRuntimeHelpers.RefI31Value(i32val);
+                    {
+                        int v = (int)stack.Pop().Data.Int32;
+                        stack.Push(GcRuntimeHelpers.RefI31Value(v));
+                        continue;
+                    }
+                    case Wacs.Core.Instructions.GC.InstArrayNew an:
+                    {
+                        int length = stack.Pop().Data.Int32;
+                        var initVal = stack.Pop();
+                        stack.Push(BuildArrayInstance(gcTypeEmitter, an.TypeIndex, length, initVal, fillAll: true));
+                        continue;
+                    }
+                    case Wacs.Core.Instructions.GC.InstArrayNewDefault adef:
+                    {
+                        int length = stack.Pop().Data.Int32;
+                        stack.Push(BuildArrayInstance(gcTypeEmitter, adef.TypeIndex, length, default, fillAll: false));
+                        continue;
+                    }
+                    case Wacs.Core.Instructions.GC.InstArrayNewFixed afix:
+                    {
+                        int n = afix.FixedCount;
+                        var elems = new Value[n];
+                        for (int k = n - 1; k >= 0; k--) elems[k] = stack.Pop();
+                        stack.Push(BuildArrayInstanceFixed(gcTypeEmitter, afix.TypeIndex, elems));
+                        continue;
+                    }
                 }
             }
-            // Unhandled expression — return a null ref so the element is at least
-            // safe to read (rather than ValType.Nil which breaks type checks).
-            // Complex expressions (struct.new, array.new in elem segments) need
-            // the interpreter to evaluate them — the transpiler can't do it standalone.
-            return new Value(ValType.Any);
+            // Fall through: return the top of the stack if present. If the
+            // expression was entirely unhandled, yield a null any-ref so
+            // downstream reads don't produce malformed Values.
+            return stack.Count > 0 ? stack.Pop() : new Value(ValType.Any);
+        }
+
+        /// <summary>
+        /// Instantiate the emitted CLR array class for <paramref name="typeIdx"/>
+        /// and populate with scalar / ref elements. <paramref name="fillAll"/> picks
+        /// between array.new (fill with initVal) and array.new_default (leave zero).
+        /// </summary>
+        private static Value BuildArrayInstance(
+            GcTypeEmitter? gcTypeEmitter, int typeIdx, int length, Value initVal, bool fillAll)
+        {
+            if (gcTypeEmitter == null) return new Value(ValType.Any);
+            var clrType = gcTypeEmitter.GetEmittedType(typeIdx);
+            if (clrType == null) return new Value(ValType.Any);
+
+            var instance = Activator.CreateInstance(clrType);
+            var elemField = clrType.GetField("elements");
+            var lenField = clrType.GetField("length");
+            if (instance == null || elemField == null) return new Value(ValType.Any);
+
+            var elemType = elemField.FieldType.GetElementType()!;
+            var arr = Array.CreateInstance(elemType, length);
+            if (fillAll)
+            {
+                for (int i = 0; i < length; i++)
+                    arr.SetValue(ElementFromValue(initVal, elemType), i);
+            }
+            elemField.SetValue(instance, arr);
+            lenField?.SetValue(instance, length);
+            return new Value((ValType)typeIdx | ValType.Ref, 0, new Emitters.GcRuntimeHelpers.GcObjectAdapter(instance));
+        }
+
+        private static Value BuildArrayInstanceFixed(
+            GcTypeEmitter? gcTypeEmitter, int typeIdx, Value[] elems)
+        {
+            if (gcTypeEmitter == null) return new Value(ValType.Any);
+            var clrType = gcTypeEmitter.GetEmittedType(typeIdx);
+            if (clrType == null) return new Value(ValType.Any);
+
+            var instance = Activator.CreateInstance(clrType);
+            var elemField = clrType.GetField("elements");
+            var lenField = clrType.GetField("length");
+            if (instance == null || elemField == null) return new Value(ValType.Any);
+
+            var elemType = elemField.FieldType.GetElementType()!;
+            var arr = Array.CreateInstance(elemType, elems.Length);
+            for (int i = 0; i < elems.Length; i++)
+                arr.SetValue(ElementFromValue(elems[i], elemType), i);
+            elemField.SetValue(instance, arr);
+            lenField?.SetValue(instance, elems.Length);
+            return new Value((ValType)typeIdx | ValType.Ref, 0, new Emitters.GcRuntimeHelpers.GcObjectAdapter(instance));
+        }
+
+        /// <summary>Convert a Value (from the const-eval stack) to the target array
+        /// element CLR type. Mirrors the inlined conversions in the runtime helper.</summary>
+        private static object? ElementFromValue(Value val, Type elemType)
+        {
+            if (elemType == typeof(byte) || elemType == typeof(sbyte))
+                return Convert.ChangeType(val.Data.Int32 & 0xFF, elemType);
+            if (elemType == typeof(short) || elemType == typeof(ushort))
+                return Convert.ChangeType(val.Data.Int32 & 0xFFFF, elemType);
+            if (elemType == typeof(int)) return val.Data.Int32;
+            if (elemType == typeof(long)) return val.Data.Int64;
+            if (elemType == typeof(float)) return val.Data.Float32;
+            if (elemType == typeof(double)) return val.Data.Float64;
+            if (val.GcRef != null)
+                return val.GcRef is Emitters.GcRuntimeHelpers.GcObjectAdapter a ? a.Target : val.GcRef;
+            return null;
         }
 
         private static void EmitBoxToValue(ILGenerator il, ValType type)
