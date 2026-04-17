@@ -54,6 +54,7 @@ namespace Wacs.Transpiler.AOT
         // Control flow state
         private readonly Stack<EmitBlock> _blockStack = new();
         private LocalBuilder[] _locals = null!;
+        private Type[] _paramClrTypes = null!; // CIL types for WASM params (for validator)
         private ILGenerator _il = null!;
         private StackAnalysis _stackAnalysis = null!;
         private InstructionInfo? _currentInfo; // precomputed info for current instruction
@@ -75,6 +76,9 @@ namespace Wacs.Transpiler.AOT
             _siblingFunctions = siblingFunctions;
             _siblingMethods = siblingMethods;
             _paramCount = funcInst.Type.ParameterTypes.Arity;
+            _paramClrTypes = new Type[_paramCount];
+            for (int i = 0; i < _paramCount; i++)
+                _paramClrTypes[i] = ModuleTranspiler.MapValType(funcInst.Type.ParameterTypes.Types[i]);
             _importCount = importCount;
             _moduleInst = funcInst.Module;
             _gcTypes = gcTypes;
@@ -168,17 +172,17 @@ namespace Wacs.Transpiler.AOT
             // Look up precomputed stack analysis for this instruction
             _currentInfo = _stackAnalysis.Get(inst);
 
-            // Cross-check: CIL validator stack height should match StackAnalysis pre-pass.
-            // Divergence means the emitter changed the stack in a way the pre-pass didn't predict.
+            // Sync validator state from the authoritative StackAnalysis pre-pass.
+            // Not all emitters are instrumented yet, so we reset to the pre-pass
+            // height at each instruction boundary. This ensures that type tracking
+            // within an instrumented emitter is accurate (types from the CURRENT
+            // instruction), even if the preceding uninstrumented emitter left
+            // stale types on the validator stack.
+            // Once ALL emitters are instrumented, this reset can become an assertion.
             if (_currentInfo != null && !_currentInfo.Unreachable)
             {
                 _cilValidator.SetReachable();
-                if (_cilValidator.Height != _currentInfo.StackHeightBefore)
-                {
-                    _cilValidator.Reset(_currentInfo.StackHeightBefore);
-                    // Mismatch is informational for now — the pre-pass is authoritative.
-                    // Once the validator tracks all instructions, we can make this an error.
-                }
+                _cilValidator.Reset(_currentInfo.StackHeightBefore);
             }
             else if (_currentInfo?.Unreachable == true)
             {
@@ -212,7 +216,7 @@ namespace Wacs.Transpiler.AOT
                             i++;
                         }
                         throw new TranspilerException($"br_on_cast label depth {depth} exceeds block stack");
-                    });
+                    }, _cilValidator);
                 return;
             }
 
@@ -251,7 +255,7 @@ namespace Wacs.Transpiler.AOT
                     }
                     throw new TranspilerException($"br_on_cast label depth {depth} exceeds block stack");
                 };
-                GcEmitter.Emit(il, inst, inst.Op.xFB, _gcTypes, _moduleInst, branchResolver);
+                GcEmitter.Emit(il, inst, inst.Op.xFB, _gcTypes, _moduleInst, branchResolver, _cilValidator);
                 return;
             }
 
@@ -280,13 +284,14 @@ namespace Wacs.Transpiler.AOT
             if (NumericEmitter.CanEmit(op))
             {
                 NumericEmitter.Emit(il, inst, op);
+                TrackNumericStackEffect(op);
                 return;
             }
 
             // Variable/parametric instructions (locals, drop, select)
             if (VariableEmitter.CanEmit(op))
             {
-                VariableEmitter.Emit(il, inst, op, _paramCount, _locals);
+                VariableEmitter.Emit(il, inst, op, _paramCount, _locals, _paramClrTypes, _cilValidator);
                 return;
             }
 
@@ -603,6 +608,181 @@ namespace Wacs.Transpiler.AOT
                     il.Emit(OpCodes.Brfalse, target.BranchTarget);
                 else
                     il.Emit(OpCodes.Brtrue, target.BranchTarget);
+            }
+        }
+
+        /// <summary>
+        /// Track the CIL stack effect of a numeric instruction in the validator.
+        /// Constants push a typed value; unary ops pop+push; binary ops pop 2 push 1.
+        /// </summary>
+        private void TrackNumericStackEffect(WasmOpCode op)
+        {
+            switch (op)
+            {
+                // Constants: push typed value
+                case WasmOpCode.I32Const: _cilValidator.Push(typeof(int)); break;
+                case WasmOpCode.I64Const: _cilValidator.Push(typeof(long)); break;
+                case WasmOpCode.F32Const: _cilValidator.Push(typeof(float)); break;
+                case WasmOpCode.F64Const: _cilValidator.Push(typeof(double)); break;
+
+                // i32 test (eqz): i32 → i32
+                case WasmOpCode.I32Eqz:
+                    _cilValidator.Pop(typeof(int), "i32.eqz"); _cilValidator.Push(typeof(int)); break;
+                // i64 test (eqz): i64 → i32
+                case WasmOpCode.I64Eqz:
+                    _cilValidator.Pop(typeof(long), "i64.eqz"); _cilValidator.Push(typeof(int)); break;
+
+                // i32 binary: [i32, i32] → [i32]
+                case WasmOpCode.I32Eq or WasmOpCode.I32Ne
+                    or WasmOpCode.I32LtS or WasmOpCode.I32LtU
+                    or WasmOpCode.I32GtS or WasmOpCode.I32GtU
+                    or WasmOpCode.I32LeS or WasmOpCode.I32LeU
+                    or WasmOpCode.I32GeS or WasmOpCode.I32GeU
+                    or WasmOpCode.I32Add or WasmOpCode.I32Sub
+                    or WasmOpCode.I32Mul or WasmOpCode.I32DivS
+                    or WasmOpCode.I32DivU or WasmOpCode.I32RemS
+                    or WasmOpCode.I32RemU or WasmOpCode.I32And
+                    or WasmOpCode.I32Or or WasmOpCode.I32Xor
+                    or WasmOpCode.I32Shl or WasmOpCode.I32ShrS
+                    or WasmOpCode.I32ShrU or WasmOpCode.I32Rotl
+                    or WasmOpCode.I32Rotr:
+                    _cilValidator.Pop(typeof(int), "i32.binop");
+                    _cilValidator.Pop(typeof(int), "i32.binop");
+                    _cilValidator.Push(typeof(int));
+                    break;
+
+                // i32 unary: [i32] → [i32]
+                case WasmOpCode.I32Clz or WasmOpCode.I32Ctz or WasmOpCode.I32Popcnt:
+                    _cilValidator.Pop(typeof(int), "i32.unop");
+                    _cilValidator.Push(typeof(int));
+                    break;
+
+                // i64 binary: [i64, i64] → [i64]
+                case WasmOpCode.I64Add or WasmOpCode.I64Sub
+                    or WasmOpCode.I64Mul or WasmOpCode.I64DivS
+                    or WasmOpCode.I64DivU or WasmOpCode.I64RemS
+                    or WasmOpCode.I64RemU or WasmOpCode.I64And
+                    or WasmOpCode.I64Or or WasmOpCode.I64Xor
+                    or WasmOpCode.I64Shl or WasmOpCode.I64ShrS
+                    or WasmOpCode.I64ShrU or WasmOpCode.I64Rotl
+                    or WasmOpCode.I64Rotr:
+                    _cilValidator.Pop(typeof(long), "i64.binop");
+                    _cilValidator.Pop(typeof(long), "i64.binop");
+                    _cilValidator.Push(typeof(long));
+                    break;
+
+                // i64 compare: [i64, i64] → [i32]
+                case WasmOpCode.I64Eq or WasmOpCode.I64Ne
+                    or WasmOpCode.I64LtS or WasmOpCode.I64LtU
+                    or WasmOpCode.I64GtS or WasmOpCode.I64GtU
+                    or WasmOpCode.I64LeS or WasmOpCode.I64LeU
+                    or WasmOpCode.I64GeS or WasmOpCode.I64GeU:
+                    _cilValidator.Pop(typeof(long), "i64.relop");
+                    _cilValidator.Pop(typeof(long), "i64.relop");
+                    _cilValidator.Push(typeof(int));
+                    break;
+
+                // i64 unary: [i64] → [i64]
+                case WasmOpCode.I64Clz or WasmOpCode.I64Ctz or WasmOpCode.I64Popcnt:
+                    _cilValidator.Pop(typeof(long), "i64.unop");
+                    _cilValidator.Push(typeof(long));
+                    break;
+
+                // f32 binary: [f32, f32] → [f32]
+                case WasmOpCode.F32Add or WasmOpCode.F32Sub
+                    or WasmOpCode.F32Mul or WasmOpCode.F32Div
+                    or WasmOpCode.F32Min or WasmOpCode.F32Max
+                    or WasmOpCode.F32Copysign:
+                    _cilValidator.Pop(typeof(float), "f32.binop");
+                    _cilValidator.Pop(typeof(float), "f32.binop");
+                    _cilValidator.Push(typeof(float));
+                    break;
+
+                // f32 compare: [f32, f32] → [i32]
+                case WasmOpCode.F32Eq or WasmOpCode.F32Ne
+                    or WasmOpCode.F32Lt or WasmOpCode.F32Gt
+                    or WasmOpCode.F32Le or WasmOpCode.F32Ge:
+                    _cilValidator.Pop(typeof(float), "f32.relop");
+                    _cilValidator.Pop(typeof(float), "f32.relop");
+                    _cilValidator.Push(typeof(int));
+                    break;
+
+                // f32 unary: [f32] → [f32]
+                case WasmOpCode.F32Abs or WasmOpCode.F32Neg
+                    or WasmOpCode.F32Ceil or WasmOpCode.F32Floor
+                    or WasmOpCode.F32Trunc or WasmOpCode.F32Nearest
+                    or WasmOpCode.F32Sqrt:
+                    _cilValidator.Pop(typeof(float), "f32.unop");
+                    _cilValidator.Push(typeof(float));
+                    break;
+
+                // f64 binary: [f64, f64] → [f64]
+                case WasmOpCode.F64Add or WasmOpCode.F64Sub
+                    or WasmOpCode.F64Mul or WasmOpCode.F64Div
+                    or WasmOpCode.F64Min or WasmOpCode.F64Max
+                    or WasmOpCode.F64Copysign:
+                    _cilValidator.Pop(typeof(double), "f64.binop");
+                    _cilValidator.Pop(typeof(double), "f64.binop");
+                    _cilValidator.Push(typeof(double));
+                    break;
+
+                // f64 compare: [f64, f64] → [i32]
+                case WasmOpCode.F64Eq or WasmOpCode.F64Ne
+                    or WasmOpCode.F64Lt or WasmOpCode.F64Gt
+                    or WasmOpCode.F64Le or WasmOpCode.F64Ge:
+                    _cilValidator.Pop(typeof(double), "f64.relop");
+                    _cilValidator.Pop(typeof(double), "f64.relop");
+                    _cilValidator.Push(typeof(int));
+                    break;
+
+                // f64 unary: [f64] → [f64]
+                case WasmOpCode.F64Abs or WasmOpCode.F64Neg
+                    or WasmOpCode.F64Ceil or WasmOpCode.F64Floor
+                    or WasmOpCode.F64Trunc or WasmOpCode.F64Nearest
+                    or WasmOpCode.F64Sqrt:
+                    _cilValidator.Pop(typeof(double), "f64.unop");
+                    _cilValidator.Push(typeof(double));
+                    break;
+
+                // Conversions
+                case WasmOpCode.I32WrapI64:
+                    _cilValidator.Pop(typeof(long), "i32.wrap"); _cilValidator.Push(typeof(int)); break;
+                case WasmOpCode.I64ExtendI32S or WasmOpCode.I64ExtendI32U:
+                    _cilValidator.Pop(typeof(int), "i64.extend"); _cilValidator.Push(typeof(long)); break;
+                case WasmOpCode.I32TruncF32S or WasmOpCode.I32TruncF32U:
+                    _cilValidator.Pop(typeof(float), "i32.trunc_f32"); _cilValidator.Push(typeof(int)); break;
+                case WasmOpCode.I32TruncF64S or WasmOpCode.I32TruncF64U:
+                    _cilValidator.Pop(typeof(double), "i32.trunc_f64"); _cilValidator.Push(typeof(int)); break;
+                case WasmOpCode.I64TruncF32S or WasmOpCode.I64TruncF32U:
+                    _cilValidator.Pop(typeof(float), "i64.trunc_f32"); _cilValidator.Push(typeof(long)); break;
+                case WasmOpCode.I64TruncF64S or WasmOpCode.I64TruncF64U:
+                    _cilValidator.Pop(typeof(double), "i64.trunc_f64"); _cilValidator.Push(typeof(long)); break;
+                case WasmOpCode.F32ConvertI32S or WasmOpCode.F32ConvertI32U:
+                    _cilValidator.Pop(typeof(int), "f32.convert_i32"); _cilValidator.Push(typeof(float)); break;
+                case WasmOpCode.F32ConvertI64S or WasmOpCode.F32ConvertI64U:
+                    _cilValidator.Pop(typeof(long), "f32.convert_i64"); _cilValidator.Push(typeof(float)); break;
+                case WasmOpCode.F64ConvertI32S or WasmOpCode.F64ConvertI32U:
+                    _cilValidator.Pop(typeof(int), "f64.convert_i32"); _cilValidator.Push(typeof(double)); break;
+                case WasmOpCode.F64ConvertI64S or WasmOpCode.F64ConvertI64U:
+                    _cilValidator.Pop(typeof(long), "f64.convert_i64"); _cilValidator.Push(typeof(double)); break;
+                case WasmOpCode.F32DemoteF64:
+                    _cilValidator.Pop(typeof(double), "f32.demote"); _cilValidator.Push(typeof(float)); break;
+                case WasmOpCode.F64PromoteF32:
+                    _cilValidator.Pop(typeof(float), "f64.promote"); _cilValidator.Push(typeof(double)); break;
+                case WasmOpCode.I32ReinterpretF32:
+                    _cilValidator.Pop(typeof(float), "i32.reinterpret"); _cilValidator.Push(typeof(int)); break;
+                case WasmOpCode.I64ReinterpretF64:
+                    _cilValidator.Pop(typeof(double), "i64.reinterpret"); _cilValidator.Push(typeof(long)); break;
+                case WasmOpCode.F32ReinterpretI32:
+                    _cilValidator.Pop(typeof(int), "f32.reinterpret"); _cilValidator.Push(typeof(float)); break;
+                case WasmOpCode.F64ReinterpretI64:
+                    _cilValidator.Pop(typeof(long), "f64.reinterpret"); _cilValidator.Push(typeof(double)); break;
+
+                // Sign extension
+                case WasmOpCode.I32Extend8S or WasmOpCode.I32Extend16S:
+                    _cilValidator.Pop(typeof(int), "i32.extend"); _cilValidator.Push(typeof(int)); break;
+                case WasmOpCode.I64Extend8S or WasmOpCode.I64Extend16S or WasmOpCode.I64Extend32S:
+                    _cilValidator.Pop(typeof(long), "i64.extend"); _cilValidator.Push(typeof(long)); break;
             }
         }
 
