@@ -438,7 +438,11 @@ namespace Wacs.Transpiler.AOT
                         return GcRuntimeHelpers.RefI31Value(i32val);
                 }
             }
-            return new Value(ValType.Nil); // fallback
+            // Unhandled expression — return a null ref so the element is at least
+            // safe to read (rather than ValType.Nil which breaks type checks).
+            // Complex expressions (struct.new, array.new in elem segments) need
+            // the interpreter to evaluate them — the transpiler can't do it standalone.
+            return new Value(ValType.Any);
         }
 
         private static void EmitBoxToValue(ILGenerator il, ValType type)
