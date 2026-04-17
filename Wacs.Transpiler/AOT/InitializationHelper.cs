@@ -314,8 +314,19 @@ namespace Wacs.Transpiler.AOT
         /// Evaluate a table default value expression.
         /// Handles ref.null, ref.func, ref.i31(const), ref.i31(global.get).
         /// </summary>
+        /// <summary>
+        /// Evaluate a table default expression with resolved globals (including imports).
+        /// Called by the linker after import resolution to fix table defaults that
+        /// reference imported globals.
+        /// </summary>
+        public static Value EvaluateTableDefault(
+            Wacs.Core.Types.Expression initExpr, GlobalInstance[] globals)
+        {
+            return EvaluateTableInit(initExpr, null, globals);
+        }
+
         private static Value EvaluateTableInit(
-            Wacs.Core.Types.Expression initExpr, ModuleInitData data, GlobalInstance[] globals)
+            Wacs.Core.Types.Expression initExpr, ModuleInitData? data, GlobalInstance[] globals)
         {
             var stack = new Stack<Value>();
             foreach (var inst in initExpr.Instructions)
