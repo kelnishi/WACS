@@ -230,15 +230,23 @@ namespace Wacs.Transpiler.AOT
                     _il.Emit(OpCodes.Ldloc, funcResultLocals[i]);
             }
 
-            // Boundary: at function return, ref-typed results are on the internal
-            // stack as object; the signature returns Value. Wrap single-result
-            // ref returns here. Multi-result returns go through byref out-params
-            // (EmitStind), which handle their own wrapping per-slot.
-            if (funcResultTypes.Length == 1 && IsGcRef(funcResultTypes[0]))
+            // Boundary: at function return, wrap ref-typed results to Value
+            // for the signature boundary (doc 1 §3.2, doc 2 §3) and, for
+            // multi-result functions, store results r1..r_{N-1} through the
+            // byref out-params declared in CreateMethodStub. Single-result
+            // ref returns just wrap inline before Ret.
+            if (funcResultTypes.Length == 1)
             {
-                _il.Emit(OpCodes.Call, typeof(Emitters.GcRuntimeHelpers).GetMethod(
-                    nameof(Emitters.GcRuntimeHelpers.WrapRef),
-                    BindingFlags.Public | BindingFlags.Static)!);
+                if (IsGcRef(funcResultTypes[0]))
+                {
+                    _il.Emit(OpCodes.Call, typeof(Emitters.GcRuntimeHelpers).GetMethod(
+                        nameof(Emitters.GcRuntimeHelpers.WrapRef),
+                        BindingFlags.Public | BindingFlags.Static)!);
+                }
+            }
+            else if (funcResultTypes.Length > 1)
+            {
+                EmitMultiResultReturn(funcResultTypes);
             }
 
             // Emit a trailing ret so that branches to funcEndLabel have a
@@ -249,6 +257,76 @@ namespace Wacs.Transpiler.AOT
             _il.Emit(OpCodes.Ret);
 
             return true;
+        }
+
+        /// <summary>
+        /// Shuttle multi-value results from the CIL stack to the method's
+        /// byref out-params and leave result[0] on the stack for the return.
+        ///
+        /// The method signature (CreateMethodStub) is:
+        ///   result[0] Method(ThinContext ctx, param0..paramN-1,
+        ///                    result[1]* out, result[2]* out, …)
+        ///
+        /// At entry, stack is [r0, r1, …, r_{M-1}] with r_{M-1} on top. We
+        /// spill r1..r_{M-1} into object/typed locals (internal representation),
+        /// then for each r_i (i≥1) load the out-param byref + the spilled
+        /// value (wrapping object→Value for ref types) and Stind through the
+        /// byref. r0 is left on the stack, wrapped if it is a ref type.
+        /// </summary>
+        private void EmitMultiResultReturn(ValType[] funcResultTypes)
+        {
+            int n = funcResultTypes.Length;
+
+            // Spill the top (n-1) results to temps (reverse order — top first).
+            var temps = new LocalBuilder[n];
+            for (int i = n - 1; i >= 1; i--)
+            {
+                var internalType = InternalType(funcResultTypes[i]);
+                temps[i] = _il.DeclareLocal(internalType);
+                _il.Emit(OpCodes.Stloc, temps[i]);
+            }
+            // r0 remains on the stack. Wrap if ref.
+            if (IsGcRef(funcResultTypes[0]))
+            {
+                _il.Emit(OpCodes.Call, typeof(Emitters.GcRuntimeHelpers).GetMethod(
+                    nameof(Emitters.GcRuntimeHelpers.WrapRef),
+                    BindingFlags.Public | BindingFlags.Static)!);
+            }
+
+            // Store r1..r_{n-1} through out-params. Out-param i sits at CIL
+            // arg index (1 + paramCount + (i-1)) = paramCount + i. Paramcount
+            // excludes the ThinContext.
+            for (int i = 1; i < n; i++)
+            {
+                _il.Emit(OpCodes.Ldarg, _paramCount + i);
+                _il.Emit(OpCodes.Ldloc, temps[i]);
+                if (IsGcRef(funcResultTypes[i]))
+                {
+                    _il.Emit(OpCodes.Call, typeof(Emitters.GcRuntimeHelpers).GetMethod(
+                        nameof(Emitters.GcRuntimeHelpers.WrapRef),
+                        BindingFlags.Public | BindingFlags.Static)!);
+                }
+                EmitStindForSignature(_il, funcResultTypes[i]);
+            }
+        }
+
+        /// <summary>
+        /// Emit the Stind.* variant matching the signature representation of
+        /// <paramref name="type"/>. Scalars use their size-specific Stind;
+        /// everything else (Value-typed ref, v128, exnref at boundary) uses
+        /// `Stobj Value` since <see cref="ModuleTranspiler.MapValType"/>
+        /// maps those to <c>Value</c>.
+        /// </summary>
+        private static void EmitStindForSignature(ILGenerator il, ValType type)
+        {
+            switch (type)
+            {
+                case ValType.I32: il.Emit(OpCodes.Stind_I4); break;
+                case ValType.I64: il.Emit(OpCodes.Stind_I8); break;
+                case ValType.F32: il.Emit(OpCodes.Stind_R4); break;
+                case ValType.F64: il.Emit(OpCodes.Stind_R8); break;
+                default: il.Emit(OpCodes.Stobj, typeof(Value)); break;
+            }
         }
 
         /// <summary>
