@@ -340,11 +340,36 @@ the triage inputs for the equivalence-gate pass.
    changed from `typeof(int)` to untyped pops for memory64 / table64
    indices (i32 or i64 depending on addr type).
 
-**Suite state after session 1:**
+**Suite state after session 2:**
 
-    449 passed / 24 failed / 473 total    (237 wast files × 2 test classes,
+    453 passed / 20 failed / 473 total    (237 wast files × 2 test classes,
                                            minus SkipWasts: comments,
                                            annotations, linking{,0,3}, i31)
+
+    Session 1 baseline: 449/473. Session 2 fixes: +4.
+
+**Session 2 additions:**
+
+5. `GcRuntimeHelpers.AnyConvertExternUnwrap` + `HostExternRef` —
+   previously `UnwrapRef` on a host externref (Value with Data.Ptr but
+   no GcRef, as produced by `ref.extern N` in test harness) returned
+   null, collapsing a non-null externref to null anyref. Dedicated
+   unwrap wraps such Values in an interned HostExternRef (IGcRef)
+   so the address survives Value↔object boundary and back via
+   `ExternConvertAnyWrap`.
+
+6. `DeriveValType` — tagged I31Ref → ValType.I31, HostExternRef →
+   ValType.ExternRef, VecRef → ValType.V128. Previously all three
+   fell through to ValType.Any, which caused `ref.cast i31ref` on a
+   boundary-wrapped I31Ref to fail because `RefTestValue`'s abstract
+   arm checks `val.Type == ValType.I31`.
+
+7. `EmitNullGuard` helper + null-guards at struct.get/set and
+   array.get/set. WASM traps these ops on a null reference; our
+   emission was relying on CLR's implicit NullReferenceException,
+   which the assert_trap test predicate can't match. Now emits an
+   explicit `Dup; Brtrue ok; throw TrapException; mark ok` sequence.
+
 
 No more test-run aborts. All 9 TranspileModule CilValidator failures
 fixed. All 24 remaining failures are runtime-level (RunWastAotTranspiled)
