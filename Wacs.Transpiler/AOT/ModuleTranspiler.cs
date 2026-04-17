@@ -261,6 +261,21 @@ namespace Wacs.Transpiler.AOT
                 allFunctionTypes);
             moduleClassGen.Generate();
 
+            // Resolve array element ValType for each GC global init so
+            // array.new_default can seed Value[] slots with proper null refs
+            // (default(Value) has Type=Undefined and reads as a live non-null
+            // funcref at runtime, breaking call_indirect trap semantics).
+            if (moduleClassGen.InitDataId >= 0)
+            {
+                var idata = InitRegistry.Get(moduleClassGen.InitDataId);
+                foreach (var gi in idata.GcGlobalInits)
+                {
+                    if (!moduleInst.Types.Contains((TypeIdx)gi.TypeIndex)) continue;
+                    if (moduleInst.Types[(TypeIdx)gi.TypeIndex].Expansion is ArrayType at)
+                        gi.ElementValType = (int)at.ElementType.StorageType;
+                }
+            }
+
             // Finalize the types
             var functionsType = typeBuilder.CreateType()!;
             var moduleClassType = moduleClassGen.CreateType();
