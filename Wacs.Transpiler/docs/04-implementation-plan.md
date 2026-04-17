@@ -340,13 +340,48 @@ the triage inputs for the equivalence-gate pass.
    changed from `typeof(int)` to untyped pops for memory64 / table64
    indices (i32 or i64 depending on addr type).
 
-**Suite state after session 2:**
+**Suite state after session 3:**
 
-    453 passed / 20 failed / 473 total    (237 wast files × 2 test classes,
+    456 passed / 17 failed / 473 total    (237 wast files × 2 test classes,
                                            minus SkipWasts: comments,
                                            annotations, linking{,0,3}, i31)
 
-    Session 1 baseline: 449/473. Session 2 fixes: +4.
+    Session 1 baseline: 449/473.
+    Session 2 delivered: 453/473 (+4).
+    Session 3 delivered: 456/473 (+3).
+
+**Session 3 additions:**
+
+8. `ref.test` / `ref.cast` dispatch on operand representation. Previously
+   always routed to RefTestObject / RefCastObject, but funcref / externref
+   operands are on the stack as Value. Restored RefCastValue and added
+   Peek-based dispatch, fixing gc/ref_test.wast.
+
+9. `any.convert_extern` / `extern.convert_any` host-ref identity. UnwrapRef
+   was returning null for a non-null Value with only Data.Ptr (host ref
+   from `ref.extern N` / `ref.host N`). Added HostExternRef interning so
+   the address survives the Value↔object round-trip. WrapRef preserves
+   Data.Ptr when wrapping a HostExternRef.
+
+10. `WrapRefAs` — explicit target-type wrap at function-return boundary.
+    An anyref-returning function now yields Value.Type=Any even when the
+    underlying object is a HostExternRef (which DeriveValType would tag
+    as ExternRef).
+
+11. DeriveValType — explicit recognition of I31Ref / HostExternRef /
+    VecRef rather than falling through to ValType.Any.
+
+12. `select` validator accounting. Was only popping cond (1 value); select
+    actually consumes 3 and produces 1. Drift caused downstream dispatch
+    to see placeholder `typeof(object)` and misroute scalar selects into
+    SelectObject. Pop all three, push the result type.
+
+13. `EmitSelect` scalar variant used `typeof(long)` unconditionally for
+    the val2 temp. Fixed to use the operand's actual CIL type.
+
+14. `EmitRefNullTyped` — switched to `Newobj Value..ctor(ValType)` for
+    defType refs (was Ldc_I4+Call Value.Null), using the static field
+    for the common FuncRef/ExternRef cases. Also handles exnref.
 
 **Session 2 additions:**
 
