@@ -449,25 +449,27 @@ namespace Wacs.Transpiler.AOT
                 case WasmOpCode.BrOnNull:
                 {
                     // br_on_null L: pop ref, if null branch to L (ref consumed), else push ref back
-                    _cilValidator.Pop(typeof(Value), "br_on_null.ref");
-                    // Fall-through: ref stays (dup'd then conditionally consumed)
-                    _cilValidator.Push(typeof(Value));
+                    // Save to local to avoid Dup of Value struct (managed ref field causes CIL merge issues)
                     var brInst = (Wacs.Core.Instructions.Reference.InstBrOnNull)inst;
                     var target = ControlEmitter.PeekLabel(_blockStack, brInst.Label);
                     int excess = _currentInfo?.Excess ?? 0;
 
-                    il.Emit(OpCodes.Dup);
+                    var refLocal = il.DeclareLocal(typeof(Value));
+                    il.Emit(OpCodes.Stloc, refLocal);
+                    il.Emit(OpCodes.Ldloc, refLocal);
                     il.Emit(OpCodes.Call, typeof(Emitters.TableRefHelpers).GetMethod(
                         nameof(Emitters.TableRefHelpers.RefIsNull),
                         System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!);
                     var skipLabel = il.DefineLabel();
                     il.Emit(OpCodes.Brfalse, skipLabel); // not null → skip
-                    il.Emit(OpCodes.Pop); // consume ref (null case)
 
+                    // null path: branch to label (ref consumed)
                     EmitExcessCleanup(il, excess, target);
                     il.Emit(OpCodes.Br, target.BranchTarget);
 
                     il.MarkLabel(skipLabel);
+                    // non-null path: push ref back
+                    il.Emit(OpCodes.Ldloc, refLocal);
                     break;
                 }
 
@@ -478,20 +480,22 @@ namespace Wacs.Transpiler.AOT
                     var target = ControlEmitter.PeekLabel(_blockStack, brInst.Label);
                     int excess = _currentInfo?.Excess ?? 0;
 
-                    il.Emit(OpCodes.Dup);
+                    var refLocal = il.DeclareLocal(typeof(Value));
+                    il.Emit(OpCodes.Stloc, refLocal);
+                    il.Emit(OpCodes.Ldloc, refLocal);
                     il.Emit(OpCodes.Call, typeof(Emitters.TableRefHelpers).GetMethod(
                         nameof(Emitters.TableRefHelpers.RefIsNull),
                         System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!);
                     var skipLabel = il.DefineLabel();
                     il.Emit(OpCodes.Brtrue, skipLabel); // null → skip
 
-                    // non-null path: ref is on stack, clean excess then branch
-                    // (excess was computed for the branch path which includes the ref)
+                    // non-null path: push ref, clean excess, branch
+                    il.Emit(OpCodes.Ldloc, refLocal);
                     EmitExcessCleanup(il, excess, target);
                     il.Emit(OpCodes.Br, target.BranchTarget);
 
                     il.MarkLabel(skipLabel);
-                    il.Emit(OpCodes.Pop); // consume ref (null case, no branch)
+                    // null path: ref already consumed (saved to local, not reloaded)
                     break;
                 }
 
@@ -589,8 +593,13 @@ namespace Wacs.Transpiler.AOT
             var target = ControlEmitter.PeekLabel(_blockStack, labelDepth);
             int excess = _currentInfo?.Excess ?? 0;
 
-            // Dup the ref, test the type
-            il.Emit(OpCodes.Dup);
+            // Save ref to local to avoid Dup of Value struct (managed ref field
+            // causes CIL verification issues at branch merge points).
+            var refLocal = il.DeclareLocal(typeof(Value));
+            il.Emit(OpCodes.Stloc, refLocal);
+
+            // Test the type
+            il.Emit(OpCodes.Ldloc, refLocal);
             il.Emit(OpCodes.Ldc_I4, (int)targetType);
             il.Emit(OpCodes.Ldc_I4, targetType.IsNullable() ? 1 : 0);
             il.Emit(OpCodes.Ldarg_0); // ThinContext
@@ -598,34 +607,20 @@ namespace Wacs.Transpiler.AOT
                 nameof(Emitters.GcRuntimeHelpers.RefTestValue),
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!);
 
-            if (excess > 0)
-            {
-                // Need shuttle: save test result, conditionally do excess cleanup + branch
-                var testLocal = il.DeclareLocal(typeof(int));
-                il.Emit(OpCodes.Stloc, testLocal);
-
-                var skipLabel = il.DefineLabel();
-                il.Emit(OpCodes.Ldloc, testLocal);
-                if (castFail)
-                    il.Emit(OpCodes.Brtrue, skipLabel); // test passed → don't branch (skip)
-                else
-                    il.Emit(OpCodes.Brfalse, skipLabel); // test failed → don't branch (skip)
-
-                // Branch path: ref is on stack as carried value, clean excess, branch
-                EmitExcessCleanup(il, excess, target);
-                il.Emit(OpCodes.Br, target.BranchTarget);
-
-                il.MarkLabel(skipLabel);
-                // Fall-through: ref still on stack from the Dup
-            }
+            var skipLabel = il.DefineLabel();
+            if (castFail)
+                il.Emit(OpCodes.Brtrue, skipLabel); // test passed → don't branch
             else
-            {
-                // Simple case: no excess, just branch directly
-                if (castFail)
-                    il.Emit(OpCodes.Brfalse, target.BranchTarget);
-                else
-                    il.Emit(OpCodes.Brtrue, target.BranchTarget);
-            }
+                il.Emit(OpCodes.Brfalse, skipLabel); // test failed → don't branch
+
+            // Branch path: load ref, clean excess, branch
+            il.Emit(OpCodes.Ldloc, refLocal);
+            EmitExcessCleanup(il, excess, target);
+            il.Emit(OpCodes.Br, target.BranchTarget);
+
+            il.MarkLabel(skipLabel);
+            // Fall-through: load ref back onto stack
+            il.Emit(OpCodes.Ldloc, refLocal);
         }
 
         /// <summary>
