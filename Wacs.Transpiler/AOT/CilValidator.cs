@@ -16,21 +16,24 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using Wacs.Core.Runtime;
-using Wacs.Core.Types.Defs;
 
 namespace Wacs.Transpiler.AOT
 {
     /// <summary>
-    /// Lightweight CIL evaluation stack type tracker.
-    /// Shadows IL emission to catch type mismatches at transpile time
-    /// instead of discovering them as InvalidProgramException at runtime.
+    /// CIL evaluation stack type checker for transpiled WASM functions.
     ///
-    /// Mirrors the WASM validation principle: verify once at load time,
-    /// execute safely thereafter.
+    /// WASM validation guarantees the stack is well-typed at every point.
+    /// The CIL stack is a type-narrowing transformation — if the WASM
+    /// validates, the CIL types are determined. This validator catches
+    /// bugs in the mechanical translation (wrong type mapping, missing
+    /// conversion, incorrect operand order) by asserting CLR types
+    /// within emitter scopes.
     ///
-    /// Usage: call Push/Pop/AssertHeight during IL emission. In debug builds,
-    /// mismatches throw TranspilerException immediately, pointing to the
-    /// exact instruction that broke the stack contract.
+    /// Stack HEIGHT is authoritative from StackAnalysis (which mirrors
+    /// the interpreter's Link phase / WASM validation). The validator
+    /// resets to the pre-pass height at each instruction boundary.
+    /// TYPE assertions fire within emitter scope where exact types are
+    /// known from the WASM instruction semantics.
     /// </summary>
     internal class CilValidator
     {
@@ -44,33 +47,33 @@ namespace Wacs.Transpiler.AOT
         }
 
         public int Height => _typeStack.Count;
-        public bool Enabled { get; set; } = true;
 
         /// <summary>Record a value pushed onto the CIL stack.</summary>
         public void Push(Type clrType)
         {
-            if (!Enabled || _unreachable) return;
+            if (_unreachable) return;
             _typeStack.Push(clrType);
         }
 
         /// <summary>Record N values pushed with the same type.</summary>
         public void Push(Type clrType, int count)
         {
-            if (!Enabled || _unreachable) return;
+            if (_unreachable) return;
             for (int i = 0; i < count; i++)
                 _typeStack.Push(clrType);
         }
 
         /// <summary>
         /// Record a value popped from the CIL stack.
-        /// If expectedType is non-null, asserts the stack top matches.
+        /// If expectedType is non-null, asserts the stack top is compatible.
         /// </summary>
         public Type Pop(Type? expectedType = null, string context = "")
         {
-            if (!Enabled || _unreachable) return expectedType ?? typeof(void);
+            if (_unreachable) return expectedType ?? typeof(void);
 
             if (_typeStack.Count == 0)
             {
+                // Stack underflow within an emitter scope — real bug.
                 Fail($"stack underflow{Ctx(context)}");
                 return expectedType ?? typeof(void);
             }
@@ -85,10 +88,10 @@ namespace Wacs.Transpiler.AOT
             return actual;
         }
 
-        /// <summary>Pop N values from the stack.</summary>
+        /// <summary>Pop N values from the stack (untyped).</summary>
         public void Pop(int count, string context = "")
         {
-            if (!Enabled || _unreachable) return;
+            if (_unreachable) return;
             for (int i = 0; i < count; i++)
                 Pop(context: context);
         }
@@ -96,50 +99,38 @@ namespace Wacs.Transpiler.AOT
         /// <summary>Assert the stack has exactly the expected height.</summary>
         public void AssertHeight(int expected, string context = "")
         {
-            if (!Enabled || _unreachable) return;
+            if (_unreachable) return;
             if (_typeStack.Count != expected)
             {
                 Fail($"stack height{Ctx(context)}: expected {expected} but have {_typeStack.Count}");
             }
         }
 
-        /// <summary>Assert the stack has at least this many values.</summary>
-        public void AssertMinHeight(int min, string context = "")
-        {
-            if (!Enabled || _unreachable) return;
-            if (_typeStack.Count < min)
-            {
-                Fail($"stack underflow{Ctx(context)}: need {min} values but have {_typeStack.Count}");
-            }
-        }
-
-        /// <summary>Mark the stack as unreachable (after unconditional branch/trap).</summary>
+        /// <summary>Mark as unreachable (after unconditional branch/trap).</summary>
         public void SetUnreachable() => _unreachable = true;
 
-        /// <summary>Restore reachability (at block end or else branch).</summary>
+        /// <summary>Restore reachability.</summary>
         public void SetReachable() => _unreachable = false;
 
-        /// <summary>Reset the stack to a specific height (at block boundaries).</summary>
+        /// <summary>
+        /// Reset to a known height from StackAnalysis pre-pass.
+        /// Called at each instruction boundary — the pre-pass height
+        /// is authoritative (backed by WASM validation).
+        /// </summary>
         public void Reset(int height)
         {
             _typeStack.Clear();
-            // We can't recover exact types, but we can track height
             for (int i = 0; i < height; i++)
                 _typeStack.Push(typeof(object)); // placeholder
             _unreachable = false;
         }
 
-        /// <summary>Map a WASM ValType to the expected CIL stack type.</summary>
-        public static Type MapType(ValType type) => ModuleTranspiler.MapValType(type);
-
         private static bool IsAssignable(Type actual, Type expected)
         {
             if (actual == expected) return true;
-            // Value is assignable to/from Value (ref types on stack)
-            if (actual == typeof(Value) && expected == typeof(Value)) return true;
-            // object placeholder is compatible with anything (from Reset)
+            // Placeholder from Reset is compatible with anything
             if (actual == typeof(object) || expected == typeof(object)) return true;
-            // Numeric widening: int can satisfy long slots in some CIL patterns
+            // Numeric widening (CIL i32 can widen to i64)
             if (actual == typeof(int) && expected == typeof(long)) return true;
             return false;
         }
@@ -148,8 +139,6 @@ namespace Wacs.Transpiler.AOT
         {
             var fullMsg = $"CIL validation failed in {_functionName}: {message}";
             Debug.Fail(fullMsg);
-            // In debug builds, stop immediately. In release, log but continue
-            // to avoid breaking production on edge cases we haven't seen.
 #if DEBUG
             throw new TranspilerException(fullMsg);
 #endif
