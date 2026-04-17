@@ -60,8 +60,11 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         /// <summary>
         /// Emit global.get — push the global's value onto the CIL stack.
+        /// GC-ref globals unwrap Value → object at the boundary (doc 2 §3);
+        /// scalar globals extract the typed primitive; funcref / externref / v128
+        /// stay as Value.
         /// </summary>
-        public static void EmitGlobalGet(ILGenerator il, InstGlobalGet inst, ValType globalType)
+        public static void EmitGlobalGet(ILGenerator il, InstGlobalGet inst, ValType globalType, ModuleInstance? moduleInst = null)
         {
             int idx = inst.GetIndex();
 
@@ -72,30 +75,32 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldelem_Ref);                 // GlobalInstance
             il.Emit(OpCodes.Callvirt, ValueGetter);       // Value (struct returned)
 
-            // For ref types, leave Value on stack. For numerics, extract typed value.
             if (globalType == ValType.I32 || globalType == ValType.I64 ||
                 globalType == ValType.F32 || globalType == ValType.F64)
             {
                 EmitExtractTypedValue(il, globalType);
             }
-            // else: Value stays on CIL stack for ref types
+            else if (ModuleTranspiler.IsGcRefType(globalType, moduleInst))
+            {
+                // GC ref: unwrap to object (doc 2 §3 boundary).
+                il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                    nameof(GcRuntimeHelpers.UnwrapRef), BindingFlags.Public | BindingFlags.Static)!);
+            }
+            // else: Value stays on CIL stack for funcref / externref / v128.
         }
 
         /// <summary>
         /// Emit global.set — pop a typed value from CIL stack and store to global.
+        /// GC-ref globals wrap object → Value before storing (doc 2 §3).
         /// </summary>
-        public static void EmitGlobalSet(ILGenerator il, InstGlobalSet inst, ValType globalType)
+        public static void EmitGlobalSet(ILGenerator il, InstGlobalSet inst, ValType globalType, ModuleInstance? moduleInst = null)
         {
             int idx = inst.GetIndex();
-
-            // We need: GlobalInstance on stack, then Value on stack, then call setter.
-            // But the typed value is already on top of the CIL stack.
-            // Spill it to a temp, load the GlobalInstance, construct Value, call setter.
 
             if (globalType == ValType.I32 || globalType == ValType.I64 ||
                 globalType == ValType.F32 || globalType == ValType.F64)
             {
-                // Numeric: spill typed value, construct Value, store
+                // Numeric: spill typed value, construct Value, store.
                 var temp = il.DeclareLocal(ModuleTranspiler.MapValType(globalType));
                 il.Emit(OpCodes.Stloc, temp);
 
@@ -108,9 +113,25 @@ namespace Wacs.Transpiler.AOT.Emitters
                 EmitConstructValue(il, globalType);
                 il.Emit(OpCodes.Callvirt, ValueSetter);
             }
+            else if (ModuleTranspiler.IsGcRefType(globalType, moduleInst))
+            {
+                // GC ref: object on stack → wrap to Value → store.
+                var temp = il.DeclareLocal(typeof(object));
+                il.Emit(OpCodes.Stloc, temp);
+
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, GlobalsField);
+                il.Emit(OpCodes.Ldc_I4, idx);
+                il.Emit(OpCodes.Ldelem_Ref);
+
+                il.Emit(OpCodes.Ldloc, temp);
+                il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                    nameof(GcRuntimeHelpers.WrapRef), BindingFlags.Public | BindingFlags.Static)!);
+                il.Emit(OpCodes.Callvirt, ValueSetter);
+            }
             else
             {
-                // Ref type: Value is already on stack
+                // Funcref / externref / v128: Value already on stack.
                 var temp = il.DeclareLocal(typeof(Value));
                 il.Emit(OpCodes.Stloc, temp);
 

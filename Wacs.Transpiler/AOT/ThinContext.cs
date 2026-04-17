@@ -82,6 +82,14 @@ namespace Wacs.Transpiler.AOT
         // Indexed by globalidx. Mutable globals are written through GlobalInstance.Value.
         public GlobalInstance[] Globals;
 
+        // === Tags ===
+        // Indexed by tagidx (imports first, then local tags).
+        // TagInstance is a reference type — reference equality IS tag equality.
+        // Imported tags share the exporter's TagInstance (wired by the linker).
+        // Used by throw (identity of thrown exception) and try_table catch clauses
+        // (compare caught exception's tag to the expected one).
+        public TagInstance[] Tags = System.Array.Empty<TagInstance>();
+
         // === Function dispatch ===
         // ImportDelegates: typed delegates for imported functions.
         // Filled by the implementor at load time. Each delegate's signature matches

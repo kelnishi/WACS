@@ -21,31 +21,32 @@ namespace Wacs.Transpiler.AOT
     /// <summary>
     /// CLR exception type for WASM exceptions thrown by transpiled code.
     ///
-    /// WASM exceptions carry a tag address (identifying the exception type)
-    /// and field values (the exception payload). This type bridges between
-    /// WASM's structured exception model and CIL's throw/catch mechanism.
+    /// WASM exception identity is based on tag identity — the tag that threw
+    /// the exception is what matches in catch clauses. We use the core
+    /// TagInstance as the identity: reference equality IS tag equality.
+    /// Imported tags share the same TagInstance as the exporter (the linker
+    /// wires the same object into both modules' Tags arrays).
     ///
-    /// Spec: An exception instance is {tag: tagaddr, fields: val*}.
-    /// throw creates the instance and initiates unwinding.
-    /// try_table catch clauses match on tag and extract fields.
+    /// This type bridges WASM's structured exception model to the CLR's native
+    /// try/catch. CLR handles unwinding; catches filter by tag reference.
+    ///
+    /// Spec: exception instance is {tag, fields}. throw constructs the instance
+    /// and initiates unwinding. try_table catch clauses match on tag and push
+    /// fields as the block's labeled values.
     /// </summary>
     public class WasmException : Exception
     {
-        /// <summary>Tag address identifying the exception type.</summary>
-        public TagAddr Tag { get; }
+        /// <summary>Tag identity. Reference equality → tag equality.</summary>
+        public TagInstance Tag { get; }
 
         /// <summary>Exception field values (the payload).</summary>
         public Value[] Fields { get; }
 
-        /// <summary>The exnref Value for catch_ref/catch_all_ref clauses.</summary>
-        public Value ExnRef { get; }
-
-        public WasmException(TagAddr tag, Value[] fields, Value exnRef)
-            : base($"wasm exception tag={tag.Value}")
+        public WasmException(TagInstance tag, Value[] fields)
+            : base("wasm exception")
         {
             Tag = tag;
             Fields = fields;
-            ExnRef = exnRef;
         }
     }
 }
