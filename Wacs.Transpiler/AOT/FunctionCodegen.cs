@@ -239,8 +239,13 @@ namespace Wacs.Transpiler.AOT
             {
                 if (IsGcRef(funcResultTypes[0]))
                 {
+                    // Wrap with the declared result type so the returned
+                    // Value.Type matches (e.g. anyref-returning fn yields
+                    // Value with Type=Any, not the derived type of the
+                    // actual object).
+                    _il.Emit(OpCodes.Ldc_I4, (int)funcResultTypes[0]);
                     _il.Emit(OpCodes.Call, typeof(Emitters.GcRuntimeHelpers).GetMethod(
-                        nameof(Emitters.GcRuntimeHelpers.WrapRef),
+                        nameof(Emitters.GcRuntimeHelpers.WrapRefAs),
                         BindingFlags.Public | BindingFlags.Static)!);
                 }
             }
