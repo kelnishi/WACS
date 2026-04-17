@@ -552,14 +552,34 @@ namespace Wacs.Transpiler.AOT
         /// Saves the label's carried values (arity), pops excess, restores carried.
         /// Uses the precomputed excess count from StackAnalysis.
         /// </summary>
+        /// <summary>
+        /// Prepare the stack for a branch to target:
+        /// - If target owns ResultLocals, store carried values there (stack has target.LabelArity
+        ///   values above `excess` dead values; store carried, pop excess). Caller then emits Br
+        ///   with empty stack.
+        /// - Otherwise, shuttle carried values past excess on the stack (leave values on stack
+        ///   for the Br to carry).
+        /// </summary>
         private static void EmitExcessCleanup(ILGenerator il, int excess, EmitBlock target)
         {
+            int arity = target.LabelArity;
+
+            // When target uses ResultLocals, always route through them
+            // (even excess=0 — the values must land in locals, not on stack).
+            if (target.ResultLocals != null && arity > 0)
+            {
+                for (int i = arity - 1; i >= 0; i--)
+                    il.Emit(OpCodes.Stloc, target.ResultLocals[i]);
+                for (int i = 0; i < excess; i++)
+                    il.Emit(OpCodes.Pop);
+                return;
+            }
+
             if (excess <= 0) return;
 
-            int arity = target.LabelArity;
             if (arity > 0)
             {
-                // Shuttle carried values past excess
+                // Shuttle carried values past excess using temp locals
                 var carriedLocals = new LocalBuilder[arity];
                 for (int i = 0; i < arity; i++)
                 {

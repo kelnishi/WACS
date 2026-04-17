@@ -53,6 +53,52 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// <summary>CLR types of the label's result values. Used to create correctly-typed
         /// shuttle locals when br_if needs to rearrange stack values.</summary>
         public Type[] ResultClrTypes = System.Array.Empty<Type>();
+
+        /// <summary>
+        /// Result locals for labels carrying Value types. When non-null, all paths
+        /// reaching BranchTarget must store their carried values here BEFORE Br,
+        /// and the code after MarkLabel(BranchTarget) loads from these locals.
+        ///
+        /// The CLR verifier rejects programs where Value structs (containing managed
+        /// reference fields like IGcRef?) sit on the CIL evaluation stack at a label
+        /// merge point. Shuttling through locals guarantees the stack is empty at
+        /// the label merge, sidestepping the restriction.
+        ///
+        /// Length matches LabelArity. Null for labels that don't carry Value results
+        /// (scalar-only blocks, void blocks).
+        /// </summary>
+        public LocalBuilder[]? ResultLocals;
+    }
+
+    internal static class LabelShuttle
+    {
+        /// <summary>
+        /// Should this label carry its values through locals instead of the eval stack?
+        /// True when any carried type is Value (ref types, V128) — the CLR verifier
+        /// rejects such structs at label merge points.
+        /// </summary>
+        public static bool NeedsLocals(Type[] carriedTypes)
+        {
+            foreach (var t in carriedTypes)
+                if (t == typeof(Wacs.Core.Runtime.Value)) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Emit the branch-to-label sequence: store stack values to target's
+        /// ResultLocals (if any), then Br to the target label.
+        /// Handles the case where ResultLocals is null (Br with values on stack).
+        /// </summary>
+        public static void EmitBranchToLabel(ILGenerator il, EmitBlock target)
+        {
+            if (target.ResultLocals != null)
+            {
+                // Store carried values to result locals (reverse — top of stack first)
+                for (int i = target.LabelArity - 1; i >= 0; i--)
+                    il.Emit(OpCodes.Stloc, target.ResultLocals[i]);
+            }
+            il.Emit(OpCodes.Br, target.BranchTarget);
+        }
     }
 
     /// <summary>
@@ -115,24 +161,75 @@ namespace Wacs.Transpiler.AOT.Emitters
                        inst.BlockType == ValType.Empty ? Array.Empty<Type>() : new[] { ModuleTranspiler.MapValType(inst.BlockType) });
 
             var endLabel = il.DefineLabel();
+
+            // Allocate result locals for labels carrying Value types.
+            // The CLR verifier rejects Value structs at label merge points;
+            // shuttling through locals sidesteps the restriction entirely.
+            LocalBuilder[]? resultLocals = null;
+            if (LabelShuttle.NeedsLocals(resultClrTypes))
+            {
+                resultLocals = new LocalBuilder[resultArity];
+                for (int i = 0; i < resultArity; i++)
+                    resultLocals[i] = il.DeclareLocal(resultClrTypes[i]);
+            }
+
             blockStack.Push(new EmitBlock
             {
                 BranchTarget = endLabel,
                 Kind = WasmOpCode.Block,
                 StackHeight = stackHeight - paramArity,
                 LabelArity = resultArity,
-                ResultClrTypes = resultClrTypes
+                ResultClrTypes = resultClrTypes,
+                ResultLocals = resultLocals
             });
 
-            // Emit block body
+            // Emit block body and track whether the natural end is reachable.
+            // Unconditional terminators (return, br, unreachable) end the path;
+            // a shuttle+Br after them would be dead code with invalid stack state.
             var block = inst.GetBlock(0);
+            bool bodyEndReachable = true;
             foreach (var child in block.Instructions)
             {
                 emitInstruction(il, child);
+                bodyEndReachable = !IsUnconditionalTerminator(child);
             }
 
             blockStack.Pop();
+
+            // Fall-through end of body: shuttle stack values to result locals
+            // (so the label merge point never sees Value on the eval stack).
+            if (resultLocals != null && bodyEndReachable)
+            {
+                for (int i = resultArity - 1; i >= 0; i--)
+                    il.Emit(OpCodes.Stloc, resultLocals[i]);
+                il.Emit(OpCodes.Br, endLabel);
+            }
+
             il.MarkLabel(endLabel);
+
+            // After the label: load result locals onto the stack.
+            if (resultLocals != null)
+            {
+                for (int i = 0; i < resultArity; i++)
+                    il.Emit(OpCodes.Ldloc, resultLocals[i]);
+            }
+        }
+
+        /// <summary>
+        /// Is this an unconditional terminator that ends the current path?
+        /// Determines whether emission should continue after this instruction.
+        /// </summary>
+        private static bool IsUnconditionalTerminator(InstructionBase inst)
+        {
+            var op = inst.Op.x00;
+            if (op == WasmOpCode.Return || op == WasmOpCode.Br
+                || op == WasmOpCode.Unreachable)
+                return true;
+            // return_call* opcodes are in the tail call family — they don't return
+            if (op == WasmOpCode.ReturnCall || op == WasmOpCode.ReturnCallIndirect
+                || op == WasmOpCode.ReturnCallRef)
+                return true;
+            return false;
         }
 
         /// <summary>
@@ -192,13 +289,23 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             var endLabel = il.DefineLabel();
 
+            // Allocate result locals for Value-carrying labels (see EmitBlock for rationale)
+            LocalBuilder[]? resultLocals = null;
+            if (LabelShuttle.NeedsLocals(resultClrTypes))
+            {
+                resultLocals = new LocalBuilder[resultArity];
+                for (int i = 0; i < resultArity; i++)
+                    resultLocals[i] = il.DeclareLocal(resultClrTypes[i]);
+            }
+
             blockStack.Push(new EmitBlock
             {
                 BranchTarget = endLabel,
                 Kind = WasmOpCode.If,
                 StackHeight = stackHeight - paramArity,
                 LabelArity = resultArity,
-                ResultClrTypes = resultClrTypes
+                ResultClrTypes = resultClrTypes,
+                ResultLocals = resultLocals
             });
 
             bool hasElse = inst.Count == 2;
@@ -212,35 +319,71 @@ namespace Wacs.Transpiler.AOT.Emitters
 
                 // if-true body
                 var ifBlock = inst.GetBlock(0);
+                bool ifEndReachable = true;
                 foreach (var child in ifBlock.Instructions)
                 {
                     emitInstruction(il, child);
+                    ifEndReachable = !IsUnconditionalTerminator(child);
                 }
-                il.Emit(OpCodes.Br, endLabel);
+                // End of if-true body: shuttle to locals if reachable, then Br
+                if (ifEndReachable)
+                {
+                    if (resultLocals != null)
+                    {
+                        for (int i = resultArity - 1; i >= 0; i--)
+                            il.Emit(OpCodes.Stloc, resultLocals[i]);
+                    }
+                    il.Emit(OpCodes.Br, endLabel);
+                }
 
                 // else body
                 il.MarkLabel(elseLabel);
                 var elseBlock = inst.GetBlock(1);
+                bool elseEndReachable = true;
                 foreach (var child in elseBlock.Instructions)
                 {
                     emitInstruction(il, child);
+                    elseEndReachable = !IsUnconditionalTerminator(child);
+                }
+                // End of else body: shuttle to locals if reachable (fall-through to endLabel)
+                if (resultLocals != null && elseEndReachable)
+                {
+                    for (int i = resultArity - 1; i >= 0; i--)
+                        il.Emit(OpCodes.Stloc, resultLocals[i]);
+                    il.Emit(OpCodes.Br, endLabel);
                 }
             }
             else
             {
-                // condition is on stack
+                // condition is on stack — no results possible on false path (void if)
                 il.Emit(OpCodes.Brfalse, endLabel);
 
                 // if-true body only
                 var ifBlock = inst.GetBlock(0);
+                bool ifEndReachable = true;
                 foreach (var child in ifBlock.Instructions)
                 {
                     emitInstruction(il, child);
+                    ifEndReachable = !IsUnconditionalTerminator(child);
+                }
+                // End of if-true body: shuttle to locals if reachable
+                if (resultLocals != null && ifEndReachable)
+                {
+                    for (int i = resultArity - 1; i >= 0; i--)
+                        il.Emit(OpCodes.Stloc, resultLocals[i]);
+                    il.Emit(OpCodes.Br, endLabel);
                 }
             }
 
             blockStack.Pop();
             il.MarkLabel(endLabel);
+
+            // After the label: load result locals onto stack
+            if (resultLocals != null)
+            {
+                for (int i = 0; i < resultArity; i++)
+                    il.Emit(OpCodes.Ldloc, resultLocals[i]);
+            }
         }
 
         /// <summary>
@@ -257,9 +400,14 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             var target = PeekLabel(blockStack, inst.Label);
 
-            if (excess > 0)
+            // When target has ResultLocals, the label merge expects an EMPTY eval stack
+            // (values loaded by the label owner). We must store carried values to the
+            // target's ResultLocals before Br, not leave them on the stack.
+            bool useTargetLocals = target.ResultLocals != null;
+            int arity = target.LabelArity;
+
+            if (excess > 0 || useTargetLocals)
             {
-                // Save condition, conditionally rearrange stack on branch path.
                 // CIL stack (top→bottom): [condition, carried..., excess..., label_stack...]
                 var condLocal = il.DeclareLocal(typeof(int));
                 il.Emit(OpCodes.Stloc, condLocal);
@@ -268,20 +416,35 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Ldloc, condLocal);
                 il.Emit(OpCodes.Brfalse, fallThrough);
 
-                // Branch path: shuttle carried values past excess
-                int arity = target.LabelArity;
-                var carriedLocals = new LocalBuilder[arity];
-                for (int i = 0; i < arity; i++)
+                // Branch path: shuttle carried values to target locals (if any), pop excess, branch.
+                if (useTargetLocals)
                 {
-                    var clrType = i < target.ResultClrTypes.Length
-                        ? target.ResultClrTypes[i] : typeof(int);
-                    carriedLocals[i] = il.DeclareLocal(clrType);
-                    il.Emit(OpCodes.Stloc, carriedLocals[i]);
+                    for (int i = arity - 1; i >= 0; i--)
+                        il.Emit(OpCodes.Stloc, target.ResultLocals![i]);
                 }
-                for (int i = 0; i < excess; i++)
-                    il.Emit(OpCodes.Pop);
-                for (int i = arity - 1; i >= 0; i--)
-                    il.Emit(OpCodes.Ldloc, carriedLocals[i]);
+                else
+                {
+                    // Use temp locals to preserve carried values past the excess pop
+                    var carriedLocals = new LocalBuilder[arity];
+                    for (int i = 0; i < arity; i++)
+                    {
+                        var clrType = i < target.ResultClrTypes.Length
+                            ? target.ResultClrTypes[i] : typeof(int);
+                        carriedLocals[i] = il.DeclareLocal(clrType);
+                        il.Emit(OpCodes.Stloc, carriedLocals[i]);
+                    }
+                    for (int i = 0; i < excess; i++)
+                        il.Emit(OpCodes.Pop);
+                    for (int i = arity - 1; i >= 0; i--)
+                        il.Emit(OpCodes.Ldloc, carriedLocals[i]);
+                }
+
+                // If useTargetLocals and excess > 0, pop the excess after storing carried.
+                if (useTargetLocals)
+                {
+                    for (int i = 0; i < excess; i++)
+                        il.Emit(OpCodes.Pop);
+                }
 
                 il.Emit(OpCodes.Br, target.BranchTarget);
                 il.MarkLabel(fallThrough);
@@ -304,6 +467,25 @@ namespace Wacs.Transpiler.AOT.Emitters
         public static void EmitBrTable(ILGenerator il, InstBranchTable inst,
             Stack<EmitBlock> blockStack, int excess = 0, int[]? perTargetExcess = null)
         {
+            // Determine if any target uses ResultLocals. All targets of br_table share
+            // the same label arity, but their ResultLocals may differ (different blocks).
+            // If any target needs locals, emit per-target trampolines that store to
+            // each target's specific locals before Br.
+            bool anyTargetUsesLocals = false;
+            for (int i = 0; i < inst.LabelCount; i++)
+            {
+                if (PeekLabel(blockStack, inst.GetLabel(i)).ResultLocals != null)
+                { anyTargetUsesLocals = true; break; }
+            }
+            if (!anyTargetUsesLocals)
+                anyTargetUsesLocals = PeekLabel(blockStack, inst.DefaultLabel).ResultLocals != null;
+
+            if (anyTargetUsesLocals)
+            {
+                EmitBrTableThroughLocals(il, inst, blockStack, excess, perTargetExcess);
+                return;
+            }
+
             if (perTargetExcess != null)
             {
                 // Multi-depth targets: emit per-target trampolines.
@@ -391,6 +573,89 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             il.Emit(OpCodes.Switch, labels);
             il.Emit(OpCodes.Br, defaultTarget);
+        }
+
+        /// <summary>
+        /// br_table variant when targets carry Value results through locals.
+        /// Emits per-target trampolines that store carried values to each
+        /// target's specific ResultLocals before Br.
+        /// </summary>
+        private static void EmitBrTableThroughLocals(ILGenerator il, InstBranchTable inst,
+            Stack<EmitBlock> blockStack, int excess, int[]? perTargetExcess)
+        {
+            var defTarget = PeekLabel(blockStack, inst.DefaultLabel);
+            int arity = defTarget.LabelArity;
+
+            // Save index and carried values to temp locals
+            var indexLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Stloc, indexLocal);
+
+            var carriedLocals = new LocalBuilder[arity];
+            for (int i = 0; i < arity; i++)
+            {
+                var clrType = i < defTarget.ResultClrTypes.Length
+                    ? defTarget.ResultClrTypes[i] : typeof(int);
+                carriedLocals[i] = il.DeclareLocal(clrType);
+                il.Emit(OpCodes.Stloc, carriedLocals[i]);
+            }
+
+            // Per-target trampolines
+            var trampolines = new Label[inst.LabelCount];
+            for (int i = 0; i < inst.LabelCount; i++)
+                trampolines[i] = il.DefineLabel();
+            var defTrampoline = il.DefineLabel();
+
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Switch, trampolines);
+            il.Emit(OpCodes.Br, defTrampoline);
+
+            // Each trampoline: pop excess, route carried values to target's locals or stack, br
+            for (int i = 0; i < inst.LabelCount; i++)
+            {
+                il.MarkLabel(trampolines[i]);
+                var t = PeekLabel(blockStack, inst.GetLabel(i));
+                int ex = perTargetExcess != null ? perTargetExcess[i] : excess;
+                for (int j = 0; j < ex; j++)
+                    il.Emit(OpCodes.Pop);
+
+                // Deliver carried values: to target's ResultLocals if present, else onto stack
+                if (t.ResultLocals != null)
+                {
+                    // carriedLocals were stored top-first (i=0 is top). Target locals
+                    // are indexed the same way. Load from carriedLocals, store to target locals.
+                    for (int j = 0; j < arity; j++)
+                    {
+                        il.Emit(OpCodes.Ldloc, carriedLocals[j]);
+                        il.Emit(OpCodes.Stloc, t.ResultLocals[j]);
+                    }
+                }
+                else
+                {
+                    for (int j = arity - 1; j >= 0; j--)
+                        il.Emit(OpCodes.Ldloc, carriedLocals[j]);
+                }
+                il.Emit(OpCodes.Br, t.BranchTarget);
+            }
+
+            // Default trampoline
+            il.MarkLabel(defTrampoline);
+            int defEx = perTargetExcess != null ? perTargetExcess[inst.LabelCount] : excess;
+            for (int j = 0; j < defEx; j++)
+                il.Emit(OpCodes.Pop);
+            if (defTarget.ResultLocals != null)
+            {
+                for (int j = 0; j < arity; j++)
+                {
+                    il.Emit(OpCodes.Ldloc, carriedLocals[j]);
+                    il.Emit(OpCodes.Stloc, defTarget.ResultLocals[j]);
+                }
+            }
+            else
+            {
+                for (int j = arity - 1; j >= 0; j--)
+                    il.Emit(OpCodes.Ldloc, carriedLocals[j]);
+            }
+            il.Emit(OpCodes.Br, defTarget.BranchTarget);
         }
 
         /// <summary>
