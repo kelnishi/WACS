@@ -69,74 +69,149 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// </summary>
         public static void Emit(ILGenerator il, InstructionBase inst, GcCode op,
             GcTypeEmitter gcTypes, ModuleInstance moduleInst,
-            Func<int, System.Reflection.Emit.Label>? branchTarget = null)
+            Func<int, System.Reflection.Emit.Label>? branchTarget = null,
+            CilValidator? cv = null)
         {
             switch (op)
             {
                 // === Struct ops ===
                 case GcCode.StructNew:
-                    EmitStructNew(il, (InstStructNew)inst, gcTypes, moduleInst);
+                {
+                    var si = (InstStructNew)inst;
+                    var gcType = gcTypes.GetGcType(si.TypeIndex);
+                    int fieldCount = gcType?.Fields.Length ?? 0;
+                    cv?.Pop(fieldCount, "struct.new fields");
+                    EmitStructNew(il, si, gcTypes, moduleInst);
+                    cv?.Push(typeof(Value)); // structref as Value
                     break;
+                }
                 case GcCode.StructNewDefault:
                     EmitStructNewDefault(il, (InstStructNewDefault)inst, gcTypes);
+                    cv?.Push(typeof(Value)); // structref
                     break;
                 case GcCode.StructGet:
                 case GcCode.StructGetS:
                 case GcCode.StructGetU:
+                {
+                    cv?.Pop(typeof(Value), "struct.get ref");
                     EmitStructGet(il, (InstStructGet)inst, gcTypes);
+                    // Result type depends on field type — scalar or Value(ref)
+                    var sgi = (InstStructGet)inst;
+                    var gt = gcTypes.GetGcType(sgi.TypeIndex);
+                    var ft = gt?.Fields[sgi.FieldIndex].FieldType;
+                    cv?.Push(ft != null && IsScalarType(ft) ? ft : typeof(Value));
                     break;
+                }
                 case GcCode.StructSet:
-                    EmitStructSet(il, (InstStructSet)inst, gcTypes);
+                {
+                    var ssi = (InstStructSet)inst;
+                    var gt = gcTypes.GetGcType(ssi.TypeIndex);
+                    var ft = gt?.Fields[ssi.FieldIndex].FieldType;
+                    cv?.Pop(context: "struct.set val");
+                    cv?.Pop(typeof(Value), "struct.set ref");
+                    EmitStructSet(il, ssi, gcTypes);
                     break;
+                }
 
                 // === Array ops ===
                 case GcCode.ArrayNew:
+                    cv?.Pop(typeof(int), "array.new len");
+                    cv?.Pop(context: "array.new init");
                     EmitArrayNew(il, (InstArrayNew)inst, gcTypes, moduleInst);
+                    cv?.Push(typeof(Value)); // arrayref
                     break;
                 case GcCode.ArrayNewDefault:
+                    cv?.Pop(typeof(int), "array.new_default len");
                     EmitArrayNewDefault(il, (InstArrayNewDefault)inst, gcTypes, moduleInst);
+                    cv?.Push(typeof(Value)); // arrayref
                     break;
                 case GcCode.ArrayGet:
                 case GcCode.ArrayGetS:
                 case GcCode.ArrayGetU:
+                {
+                    cv?.Pop(typeof(int), "array.get idx");
+                    cv?.Pop(typeof(Value), "array.get ref");
                     EmitArrayGet(il, (InstArrayGet)inst, gcTypes, moduleInst);
+                    // Result: scalar or Value depending on element type
+                    var agi = (InstArrayGet)inst;
+                    var agt = gcTypes.GetGcType(agi.TypeIndex);
+                    var eft = agt?.Fields.Length > 0 ? agt.Fields[0].FieldType.GetElementType() : null;
+                    cv?.Push(eft != null && IsScalarType(eft) ? eft : typeof(Value));
                     break;
+                }
                 case GcCode.ArraySet:
+                    cv?.Pop(context: "array.set val");
+                    cv?.Pop(typeof(int), "array.set idx");
+                    cv?.Pop(typeof(Value), "array.set ref");
                     EmitArraySet(il, (InstArraySet)inst, gcTypes, moduleInst);
                     break;
                 case GcCode.ArrayLen:
+                    cv?.Pop(typeof(Value), "array.len ref");
                     EmitArrayLen(il);
+                    cv?.Push(typeof(int));
                     break;
                 case GcCode.ArrayNewFixed:
-                    EmitArrayNewFixed(il, (InstArrayNewFixed)inst, gcTypes, moduleInst);
+                {
+                    var anfi = (InstArrayNewFixed)inst;
+                    cv?.Pop(anfi.FixedCount, "array.new_fixed elems");
+                    EmitArrayNewFixed(il, anfi, gcTypes, moduleInst);
+                    cv?.Push(typeof(Value)); // arrayref
                     break;
+                }
                 case GcCode.ArrayNewData:
+                    cv?.Pop(typeof(int), "array.new_data len");
+                    cv?.Pop(typeof(int), "array.new_data offset");
                     EmitArrayNewData(il, (InstArrayNewData)inst, gcTypes);
+                    cv?.Push(typeof(Value)); // arrayref
                     break;
                 case GcCode.ArrayNewElem:
+                    cv?.Pop(typeof(int), "array.new_elem len");
+                    cv?.Pop(typeof(int), "array.new_elem offset");
                     EmitArrayNewElem(il, (InstArrayNewElem)inst, gcTypes);
+                    cv?.Push(typeof(Value)); // arrayref
                     break;
                 case GcCode.ArrayFill:
+                    cv?.Pop(typeof(int), "array.fill len");
+                    cv?.Pop(context: "array.fill val");
+                    cv?.Pop(typeof(int), "array.fill offset");
+                    cv?.Pop(typeof(Value), "array.fill ref");
                     EmitArrayFill(il, (InstArrayFill)inst, gcTypes);
                     break;
                 case GcCode.ArrayCopy:
+                    cv?.Pop(typeof(int), "array.copy len");
+                    cv?.Pop(typeof(int), "array.copy src_off");
+                    cv?.Pop(typeof(Value), "array.copy src_ref");
+                    cv?.Pop(typeof(int), "array.copy dst_off");
+                    cv?.Pop(typeof(Value), "array.copy dst_ref");
                     EmitArrayCopy(il, (InstArrayCopy)inst, gcTypes);
                     break;
                 case GcCode.ArrayInitData:
+                    cv?.Pop(typeof(int), "array.init_data len");
+                    cv?.Pop(typeof(int), "array.init_data src_off");
+                    cv?.Pop(typeof(int), "array.init_data dst_off");
+                    cv?.Pop(typeof(Value), "array.init_data ref");
                     EmitArrayInitData(il, (InstArrayInitData)inst, gcTypes);
                     break;
                 case GcCode.ArrayInitElem:
+                    cv?.Pop(typeof(int), "array.init_elem len");
+                    cv?.Pop(typeof(int), "array.init_elem src_off");
+                    cv?.Pop(typeof(int), "array.init_elem dst_off");
+                    cv?.Pop(typeof(Value), "array.init_elem ref");
                     EmitArrayInitElem(il, (InstArrayInitElem)inst, gcTypes);
                     break;
 
                 // === ref.test / ref.cast ===
                 case GcCode.RefTest:
                 case GcCode.RefTestNull:
+                    cv?.Pop(typeof(Value), "ref.test val");
                     EmitRefTest(il, (InstRefTest)inst);
+                    cv?.Push(typeof(int)); // i32 result
                     break;
                 case GcCode.RefCast:
                 case GcCode.RefCastNull:
+                    cv?.Pop(typeof(Value), "ref.cast val");
                     EmitRefCast(il, (InstRefCast)inst);
+                    cv?.Push(typeof(Value)); // casted ref
                     break;
 
                 // === br_on_cast ===
@@ -149,25 +224,33 @@ namespace Wacs.Transpiler.AOT.Emitters
 
                 // === Conversions ===
                 case GcCode.ExternConvertAny:
-                    // extern.convert_any: anyref → externref
+                    cv?.Pop(typeof(Value), "extern.convert_any");
                     il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
                         nameof(GcRuntimeHelpers.ExternConvertAny), BindingFlags.Public | BindingFlags.Static)!);
+                    cv?.Push(typeof(Value)); // externref
                     break;
                 case GcCode.AnyConvertExtern:
-                    // any.convert_extern: externref → anyref
+                    cv?.Pop(typeof(Value), "any.convert_extern");
                     il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
                         nameof(GcRuntimeHelpers.AnyConvertExtern), BindingFlags.Public | BindingFlags.Static)!);
+                    cv?.Push(typeof(Value)); // anyref
                     break;
 
                 // === i31 ===
                 case GcCode.RefI31:
+                    cv?.Pop(typeof(int), "ref.i31");
                     EmitRefI31(il);
+                    cv?.Push(typeof(Value)); // i31ref
                     break;
                 case GcCode.I31GetS:
+                    cv?.Pop(typeof(Value), "i31.get_s");
                     EmitI31Get(il, signed: true);
+                    cv?.Push(typeof(int));
                     break;
                 case GcCode.I31GetU:
+                    cv?.Pop(typeof(Value), "i31.get_u");
                     EmitI31Get(il, signed: false);
+                    cv?.Push(typeof(int));
                     break;
 
                 default:
