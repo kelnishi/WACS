@@ -1489,7 +1489,11 @@ namespace Wacs.Transpiler.AOT.Emitters
         public static Value ExternConvertAnyWrap(object? val)
         {
             if (val == null) return new Value(ValType.ExternRef);
-            if (val is HostExternRef h) return new Value(ValType.ExternRef, h.Address);
+            // Note: the three-arg ctor takes (ValType, long address, IGcRef?)
+            // — important here because HostExternRef.Address is long. Using
+            // `new Value(ValType.ExternRef, h.Address)` would resolve to
+            // Value(ValType, object) and unbox as `(int)` → InvalidCastException.
+            if (val is HostExternRef h) return new Value(ValType.ExternRef, h.Address, null);
             if (val is IGcRef igc) return new Value(ValType.ExternRef, 0, igc);
             return new Value(ValType.ExternRef, 0, new GcObjectAdapter(val));
         }
