@@ -103,12 +103,12 @@ namespace Wacs.Transpiler.AOT
             _funcInst = funcInst;
             _siblingFunctions = siblingFunctions;
             _siblingMethods = siblingMethods;
+            _moduleInst = funcInst.Module;
             _paramCount = funcInst.Type.ParameterTypes.Arity;
             _paramClrTypes = new Type[_paramCount];
             for (int i = 0; i < _paramCount; i++)
                 _paramClrTypes[i] = InternalType(funcInst.Type.ParameterTypes.Types[i]);
             _importCount = importCount;
-            _moduleInst = funcInst.Module;
             _gcTypes = gcTypes;
             _allFunctionTypes = allFunctionTypes;
             _options = options;
