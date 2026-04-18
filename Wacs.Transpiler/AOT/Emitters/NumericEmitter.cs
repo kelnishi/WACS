@@ -474,7 +474,13 @@ namespace Wacs.Transpiler.AOT.Emitters
                 case WasmOpCode.F64ConvertI32S:    il.Emit(OpCodes.Conv_R8); break;
                 case WasmOpCode.F64ConvertI32U:    il.Emit(OpCodes.Conv_R_Un); il.Emit(OpCodes.Conv_R8); break;
                 case WasmOpCode.F64ConvertI64S:    il.Emit(OpCodes.Conv_R8); break;
-                case WasmOpCode.F64ConvertI64U:    il.Emit(OpCodes.Conv_R_Un); il.Emit(OpCodes.Conv_R8); break;
+                case WasmOpCode.F64ConvertI64U:
+                    // Same x64/ARM64 rounding divergence as F32ConvertI64U near
+                    // the f64 mantissa boundary — route through the interpreter's
+                    // spec-exact round-to-nearest-even implementation.
+                    il.Emit(OpCodes.Call, typeof(FloatConversion).GetMethod(
+                        nameof(FloatConversion.ULongToDouble))!);
+                    break;
                 case WasmOpCode.F64PromoteF32:
                     il.Emit(OpCodes.Conv_R8);
                     il.Emit(OpCodes.Call, typeof(NanHelpers).GetMethod(
