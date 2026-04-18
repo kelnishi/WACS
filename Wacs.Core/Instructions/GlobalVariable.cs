@@ -15,7 +15,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using Wacs.Core.Instructions.Transpiler;
+using Wacs.Core.Instructions.SuperInstruction;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types;
@@ -28,10 +28,11 @@ namespace Wacs.Core.Instructions
     public class InstGlobalGet : InstructionBase, IContextConstInstruction, IVarInstruction, ITypedValueProducer<Value>
     {
         public InstGlobalGet() : base(ByteCode.GlobalGet, +1) { }
-        
-        private GlobalIdx Index;
 
-        public GlobalIdx GetIndex() => Index;
+        private GlobalIdx Index;
+        public int GetIndex() => (int)Index.Value;
+
+        public GlobalIdx GetGlobalIdx() => Index;
 
         public int LinkStackDiff => StackDiff;
         
@@ -129,10 +130,11 @@ namespace Wacs.Core.Instructions
     public class InstGlobalSet : InstructionBase, IContextConstInstruction, IVarInstruction, INodeConsumer<Value>
     {
         public InstGlobalSet() : base(ByteCode.GlobalSet, -1) { }
-        
-        private GlobalIdx Index;
 
-        public GlobalIdx GetIndex() => Index;
+        private GlobalIdx Index;
+        public int GetIndex() => (int)Index.Value;
+
+        public GlobalIdx GetGlobalIdx() => Index;
 
         public int LinkStackDiff => StackDiff;
         

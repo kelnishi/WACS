@@ -30,6 +30,7 @@ namespace Wacs.Core.Instructions.GC
     {
         public InstStructNew() : base(ByteCode.StructNew) { }
         private TypeIdx X;
+        public int TypeIndex => (int)X.Value;
         
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructnewx
@@ -110,6 +111,7 @@ namespace Wacs.Core.Instructions.GC
     {
         public InstStructNewDefault() : base(ByteCode.StructNewDefault, +1) { }
         private TypeIdx X;
+        public int TypeIndex => (int)X.Value;
         
         /// <summary>
         /// https://webassembly.github.io/gc/core/bikeshed/index.html#-hrefsyntax-instr-structmathsfstructnewx
@@ -172,8 +174,11 @@ namespace Wacs.Core.Instructions.GC
         private readonly PackedExt Sx;
         private TypeIdx X;
         private FieldIdx Y;
+        public int TypeIndex => (int)X.Value;
+        public int FieldIndex => (int)Y.Value;
+        public PackedExt SignExtension => Sx;
 
-        public InstStructGet(PackedExt sx) : base(GetOp(sx)) 
+        public InstStructGet(PackedExt sx) : base(GetOp(sx))
             => Sx = sx;
 
         private static ByteCode GetOp(PackedExt sx) => sx switch
@@ -275,9 +280,11 @@ namespace Wacs.Core.Instructions.GC
     public class InstStructSet : InstructionBase
     {
         public InstStructSet() : base(ByteCode.StructSet, -2) { }
-        
+
         private TypeIdx X;
         private FieldIdx Y;
+        public int TypeIndex => (int)X.Value;
+        public int FieldIndex => (int)Y.Value;
         
         public override void Validate(IWasmValidationContext context)
         {

@@ -39,8 +39,10 @@ namespace Wacs.Core.Runtime
         private readonly Dictionary<string, ModuleInstance> _registeredModules = new();
 
         private readonly ExecContext Context;
+        public ExecContext ExecContext => Context;
 
         private readonly Store Store;
+        public Store RuntimeStore => Store;
 
         //Cached instructions for module initialization
         private readonly InstElemDrop _dropInst;
@@ -363,8 +365,8 @@ namespace Wacs.Core.Runtime
                 }
                 finally
                 {
-                    if (TranspileModules)
-                        TranspileModule(moduleInstance);
+                    if (SuperInstruction)
+                        ApplySuperInstructions(moduleInstance);
 
                     LinkModule(moduleInstance);
 

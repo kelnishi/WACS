@@ -13,7 +13,8 @@
 // limitations under the License.
 
 using System;
-using Wacs.Core.Instructions.Transpiler;
+using Wacs.Core.Compilation;
+using Wacs.Core.Instructions.SuperInstruction;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types.Defs;
@@ -60,11 +61,13 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32((int)result);
         }
 
+        [OpSource(OpCode.I32Extend8S)]
         private static uint ExecuteI32Extend8S(uint value) =>
             ((value & ByteSign) != 0)
                 ? (I32ByteExtend | value)
                 : (ByteMask & value);
 
+        [OpSource(OpCode.I32Extend16S)]
         private static uint ExecuteI32Extend16S(uint value) =>
             (value & ShortSign) != 0
                 ? I32ShortExtend | value

@@ -28,6 +28,7 @@ namespace Wacs.Core.Instructions.Numeric
         private readonly ExecuteDelegate _execute;
         private readonly ValidationDelegate _validate;
         private LaneIdx X;
+        public byte LaneIndex => X;
 
         private InstLaneOp(ByteCode op, ExecuteDelegate execute, ValidationDelegate validate, int stackDiff) : base(op, stackDiff)
             => (_execute, _validate) = (execute, validate);

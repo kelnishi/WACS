@@ -29,6 +29,9 @@ namespace Wacs.Core.Instructions
         protected readonly int WidthTByteSize;
 
         protected MemArg M;
+        public long MemOffset => M.Offset;
+        public int MemIndex => (int)M.M.Value;
+        public int LoadWidth => WidthTByteSize;
 
         protected InstMemoryLoad(ValType type, BitWidth width, ByteCode opcode) : base(opcode)
         {
@@ -36,7 +39,7 @@ namespace Wacs.Core.Instructions
             WidthT = width;
             WidthTByteSize = WidthT.ByteSize();
         }
-        
+
         public int LinkStackDiff => StackDiff;
 
         /// <summary>
@@ -88,6 +91,9 @@ namespace Wacs.Core.Instructions
         private readonly BitWidth WidthT;
         protected readonly int WidthTByteSize;
         protected MemArg M;
+        public long MemOffset => M.Offset;
+        public int MemIndex => (int)M.M.Value;
+        public int StoreWidth => WidthTByteSize;
 
         public InstMemoryStore(ValType type, BitWidth widthT, ByteCode opcode) : base(opcode, -2)
         {
@@ -95,7 +101,7 @@ namespace Wacs.Core.Instructions
             WidthT = widthT;
             WidthTByteSize = WidthT.ByteSize();
         }
-        
+
         public int LinkStackDiff => StackDiff;
 
         /// <summary>

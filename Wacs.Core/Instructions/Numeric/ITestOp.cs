@@ -13,7 +13,8 @@
 // limitations under the License.
 
 using System;
-using Wacs.Core.Instructions.Transpiler;
+using Wacs.Core.Compilation;
+using Wacs.Core.Instructions.SuperInstruction;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types.Defs;
@@ -48,6 +49,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.6.1.4. t.testop
+        [OpSource(OpCode.I32Eqz)]
         private static int ExecuteI32Eqz(int i) => i == 0 ? 1 : 0;
     }
 
@@ -77,6 +79,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
 
+        [OpSource(OpCode.I64Eqz)]
         private static int ExecuteI64Eqz(long i) => i == 0 ? 1 : 0;
     }
 }

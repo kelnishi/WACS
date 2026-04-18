@@ -311,20 +311,19 @@ namespace Wacs.Core.Runtime
                 int savedInstructionPointer = Context.InstructionPointer;
                 Context.InstructionPointer = ExecContext.AbortSequence;
 
-                if (options.SynchronousExecution)
-                {
-                    Context.Invoke(funcAddr);
-                }
-                else
-                {
-                    var task = Context.InvokeAsync(funcAddr);
-                    task.Wait();
-                }
-
                 Context.steps = 0;
                 bool fastPath = options.UseFastPath();
                 try
                 {
+                    if (options.SynchronousExecution)
+                    {
+                        Context.Invoke(funcAddr);
+                    }
+                    else
+                    {
+                        var task = Context.InvokeAsync(funcAddr);
+                        task.Wait();
+                    }
                     if (fastPath)
                     {
                         Task thread = ProcessThreadAsync(options.GasLimit);

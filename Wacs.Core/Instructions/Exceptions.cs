@@ -127,8 +127,9 @@ namespace Wacs.Core.Instructions
     public class InstThrow : InstructionBase
     {
         public InstThrow() : base(ByteCode.Throw) { }
-        
+
         private TagIdx X;
+        public int TagIndex => (int)X.Value;
 
         public override void Validate(IWasmValidationContext context)
         {

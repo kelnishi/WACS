@@ -15,7 +15,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
-using Wacs.Core.Instructions.Transpiler;
+using Wacs.Core.Instructions.SuperInstruction;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -118,6 +118,8 @@ namespace Wacs.Core.Instructions.SIMD
         private readonly BitWidth WidthT;
         private readonly int WidthTByteSize;
         private MemArg M;
+        public long MemOffset => M.Offset;
+        public int MemIndex => (int)M.M.Value;
 
         public InstMemoryLoadMxN(BitWidth width, int count) : base(GetOp(count, width))
         {
@@ -244,6 +246,8 @@ namespace Wacs.Core.Instructions.SIMD
         private readonly BitWidth WidthN;
 
         private MemArg M;
+        public long MemOffset => M.Offset;
+        public int MemIndex => (int)M.M.Value;
         public InstMemoryLoadSplat(BitWidth width) : base(GetOp(width))
             => WidthN = width;
 
@@ -351,6 +355,9 @@ namespace Wacs.Core.Instructions.SIMD
         private readonly BitWidth WidthN;
 
         private MemArg M;
+        public long MemOffset => M.Offset;
+        public int MemIndex => (int)M.M.Value;
+        public int LoadWidth => WidthN.ByteSize();
         public InstMemoryLoadZero(BitWidth width) : base(GetOp(width))
             => WidthN = width;
 
@@ -452,6 +459,9 @@ namespace Wacs.Core.Instructions.SIMD
         private MemArg M;
 
         private LaneIdx X;
+        public long MemOffset => M.Offset;
+        public int MemIndex => (int)M.M.Value;
+        public byte LaneIndex => X;
         public InstMemoryLoadLane(BitWidth width) : base(GetOp(width),-1) 
             => WidthN = width;
 
@@ -561,6 +571,9 @@ namespace Wacs.Core.Instructions.SIMD
         private MemArg M;
 
         private LaneIdx X;
+        public long MemOffset => M.Offset;
+        public int MemIndex => (int)M.M.Value;
+        public byte LaneIndex => X;
         public InstMemoryStoreLane(BitWidth width) : base(GetOp(width), -2)
             => WidthN = width;
 

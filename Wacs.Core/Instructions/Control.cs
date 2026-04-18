@@ -19,7 +19,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using FluentValidation;
-using Wacs.Core.Instructions.Transpiler;
+using Wacs.Core.Instructions.SuperInstruction;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
@@ -470,6 +470,7 @@ namespace Wacs.Core.Instructions
 
         private LabelIdx L;
         private BlockTarget? LinkedLabel;
+        public int Label => (int)L.Value;
 
         // @Spec 3.3.8.6. br l
         public override void Validate(IWasmValidationContext context)
@@ -576,9 +577,10 @@ namespace Wacs.Core.Instructions
     public sealed class InstBranchIf : InstructionBase, IBranchInstruction, IComplexLinkBehavior, INodeConsumer<int>
     {
         public InstBranchIf() : base(ByteCode.BrIf,-1) { }
-        
-        public LabelIdx L;
+
+        private LabelIdx L;
         private BlockTarget? LinkedLabel;
+        public int Label => (int)L.Value;
 
         public int LinkStackDiff => StackDiff;
 
@@ -655,6 +657,10 @@ namespace Wacs.Core.Instructions
         private LabelIdx Ln; //Default m
 
         private LabelIdx[] Ls = null!;
+
+        public int DefaultLabel => (int)Ln.Value;
+        public int LabelCount => Ls.Length;
+        public int GetLabel(int index) => (int)Ls[index].Value;
 
         public int LinkStackDiff { get; set; }
 
@@ -955,6 +961,9 @@ namespace Wacs.Core.Instructions
         private TableIdx X;
 
         private TypeIdx Y;
+
+        public int TableIndex => (int)X.Value;
+        public int TypeIndex => (int)Y.Value;
 
         public InstCallIndirect() : base(ByteCode.CallIndirect)
         {

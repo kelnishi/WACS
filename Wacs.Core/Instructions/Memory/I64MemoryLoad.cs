@@ -14,7 +14,7 @@
 
 using System;
 using System.Runtime.InteropServices;
-using Wacs.Core.Instructions.Transpiler;
+using Wacs.Core.Instructions.SuperInstruction;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -212,7 +212,7 @@ namespace Wacs.Core.Instructions.Memory
     
     public class InstI64Load32S : InstMemoryLoad, INodeComputer<long, long>
     {
-        public InstI64Load32S() : base(ValType.I64, BitWidth.S32, OpCode.I64Load16S) {}
+        public InstI64Load32S() : base(ValType.I64, BitWidth.S32, OpCode.I64Load32S) {}
 
         public Func<ExecContext, long, long> GetFunc => FetchFromMemory;
 
@@ -250,7 +250,7 @@ namespace Wacs.Core.Instructions.Memory
     
     public class InstI64Load32U : InstMemoryLoad, INodeComputer<long, ulong>
     {
-        public InstI64Load32U() : base(ValType.I64, BitWidth.U32, OpCode.I64Load16U) {}
+        public InstI64Load32U() : base(ValType.I64, BitWidth.U32, OpCode.I64Load32U) {}
 
         public Func<ExecContext, long, ulong> GetFunc => FetchFromMemory;
 

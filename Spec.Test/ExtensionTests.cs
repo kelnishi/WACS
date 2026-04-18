@@ -28,7 +28,7 @@ namespace Spec.Test
         public void TailCallFactorial()
         {
             var runtime = new WasmRuntime();
-            runtime.TranspileModules = false;
+            runtime.SuperInstruction = false;
             
             using var fileStream = new FileStream("../../../engine/tailcalls.wasm", FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
@@ -46,7 +46,7 @@ namespace Spec.Test
         public void TailCallFactorialTranspiled()
         {
             var runtime = new WasmRuntime();
-            runtime.TranspileModules = true;
+            runtime.SuperInstruction = true;
             
             using var fileStream = new FileStream("../../../engine/tailcalls.wasm", FileMode.Open);
             var module = BinaryModuleParser.ParseWasm(fileStream);
