@@ -340,18 +340,44 @@ the triage inputs for the equivalence-gate pass.
    changed from `typeof(int)` to untyped pops for memory64 / table64
    indices (i32 or i64 depending on addr type).
 
-**Suite state after session 4 (GC bucket + funcref subtyping + return_call):**
+**Suite state after session 4 (GC + subtyping + return_call + exn):**
 
-    467 passed / 6 failed / 473 total     (237 wast files × 2 test classes,
+    470 passed / 3 failed / 473 total     (237 wast files × 2 test classes,
                                            minus SkipWasts: comments,
                                            annotations, linking{,0,3}, i31)
 
     Session 1 baseline: 449/473.
     Session 2 delivered: 453/473 (+4).
     Session 3 delivered: 456/473 (+3).
-    Session 4 delivered: 467/473 (+11).
+    Session 4 delivered: 470/473 (+14).
 
 **Session 4 additions:**
+
+22. `try_table` — four bugs converged to InvalidProgramException on
+    throw/throw_ref/try_table:
+    (a) catch-dispatch labelidx resolved inside try_table's own scope
+    instead of its outer scope (start idx at -1 in the blockStack
+    walk, mirroring the interpreter's L+1);
+    (b) redundant explicit `Leave endLabel` on top of
+    BeginCatchBlock's auto-Leave produced two leaves in the try
+    region — drop the explicit one and emit `Br endLabel` right after
+    EndExceptionBlock to skip the dispatch-label region on normal
+    exit;
+    (c) params/results weren't shuttled: CLR requires empty stack on
+    try entry, and the auto-Leave clears any results left on body
+    fall-through — spill params before BeginExceptionBlock, stash
+    results before the auto-Leave, reload both in their respective
+    regions;
+    (d) catch dispatch emitted a raw `Br` with unpacked fields on
+    the stack, but target blocks with a try_table elsewhere in the
+    function force-allocate shuttle locals — route through
+    `LabelShuttle.EmitBranchToLabel`.
+    Plus: `(return)` inside such a function routes through the
+    function-level shuttle via `BranchBridge` (not raw Ret) so the
+    emitted Ret sees the value. And `TranspiledModuleWrapper.CreateExportHandler`
+    unwraps TargetInvocationException so cross-module throws surface
+    as WasmException at the catching module's catch. Unlocks
+    throw.wast, throw_ref.wast, try_table.wast.
 
 21. `return_call_ref` / `return_call_indirect` — dispatched through the
     DynamicInvoke helper path, which neither preserves CLR tail-call
