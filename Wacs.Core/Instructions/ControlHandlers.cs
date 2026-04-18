@@ -142,10 +142,20 @@ namespace Wacs.Core.Instructions
         {
             var addr = ctx.Frame.Module.FuncAddrs[(FuncIdx)funcIdx];
             var target = ctx.Store[addr];
-            if (target is FunctionInstance wasmFunc)
-                ControlHandlers.InvokeWasm(ctx, wasmFunc);
-            else
-                target.Invoke(ctx);
+            try
+            {
+                if (target is FunctionInstance wasmFunc)
+                    ControlHandlers.InvokeWasm(ctx, wasmFunc);
+                else
+                    target.Invoke(ctx);
+            }
+            catch (Wacs.Core.Compilation.WasmException we)
+            {
+                // Tail-call: the caller's frame is semantically popped before the
+                // callee runs. Bump SkipFrames so the caller's try_tables don't catch.
+                we.SkipFrames++;
+                throw;
+            }
             pc = int.MaxValue;
         }
 
@@ -215,10 +225,18 @@ namespace Wacs.Core.Instructions
             var funcInst = ctx.Store[refVal.GetFuncAddr(ctx.Frame.Module.Types)];
             if (!funcInst.Type.Matches((FunctionType)ftExpect.Expansion, ctx.Frame.Module.Types))
                 throw new TrapException("return_call_ref: type mismatch");
-            if (funcInst is FunctionInstance wasmFn)
-                ControlHandlers.InvokeWasm(ctx, wasmFn);
-            else
-                funcInst.Invoke(ctx);
+            try
+            {
+                if (funcInst is FunctionInstance wasmFn)
+                    ControlHandlers.InvokeWasm(ctx, wasmFn);
+                else
+                    funcInst.Invoke(ctx);
+            }
+            catch (Wacs.Core.Compilation.WasmException we)
+            {
+                we.SkipFrames++;
+                throw;
+            }
             pc = int.MaxValue;
         }
 
@@ -243,10 +261,18 @@ namespace Wacs.Core.Instructions
             }
             if (!funcInst.Type.Matches(ftExpect.Unroll.Body, ctx.Frame.Module.Types))
                 throw new TrapException("return_call_indirect: indirect call type mismatch");
-            if (funcInst is FunctionInstance wasmFn)
-                ControlHandlers.InvokeWasm(ctx, wasmFn);
-            else
-                funcInst.Invoke(ctx);
+            try
+            {
+                if (funcInst is FunctionInstance wasmFn)
+                    ControlHandlers.InvokeWasm(ctx, wasmFn);
+                else
+                    funcInst.Invoke(ctx);
+            }
+            catch (Wacs.Core.Compilation.WasmException we)
+            {
+                we.SkipFrames++;
+                throw;
+            }
             pc = int.MaxValue;
         }
 
