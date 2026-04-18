@@ -33,7 +33,6 @@
   <ItemGroup>
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
     <PackageReference Include="JetBrains.Profiler.Api" Version="1.4.8" />
-    <PackageReference Include="runtime.osx-arm64.Microsoft.DotNet.ILCompiler" Version="8.0.11" />
   </ItemGroup>
 
 </Project>
