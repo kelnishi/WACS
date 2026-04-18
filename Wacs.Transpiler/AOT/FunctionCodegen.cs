@@ -449,12 +449,23 @@ namespace Wacs.Transpiler.AOT
                 return;
             }
 
-            // 0xFD prefix (SIMD) — use generic StackDiff tracking
+            // 0xFD prefix (SIMD) — pop the exact consumed arity and push the
+            // typed result so the validator keeps types for items BELOW the
+            // SIMD op intact. TrackGenericStackDiff would Reset the whole
+            // stack to Object placeholders, which breaks downstream
+            // representation-sensitive dispatch (e.g. `select` then peeks
+            // Object and picks SelectObject for an i32 operand).
             if (op == WasmOpCode.FD)
             {
-                TrackGenericStackDiff(inst, before: true);
-                SimdEmitter.Emit(il, inst, inst.Op.xFD, _options, _diagnostics, _funcInst.Name);
-                TrackGenericStackDiff(inst, before: false);
+                var simdOp = inst.Op.xFD;
+                bool isSimdStore = IsSimdStore(simdOp);
+                int outputCount = isSimdStore ? 0 : 1;
+                int inputCount = outputCount - inst.StackDiff;
+                for (int i = 0; i < inputCount; i++)
+                    _cilValidator.Pop(context: "simd input");
+                SimdEmitter.Emit(il, inst, simdOp, _options, _diagnostics, _funcInst.Name);
+                if (outputCount > 0)
+                    _cilValidator.Push(SimdResultType(simdOp));
                 return;
             }
 
@@ -1526,6 +1537,54 @@ namespace Wacs.Transpiler.AOT
         /// Used for SIMD and other instructions without detailed type tracking.
         /// Pops/pushes with typeof(object) as a type placeholder.
         /// </summary>
+        /// <summary>
+        /// True for SIMD opcodes that consume a value and store it without
+        /// producing a stack result (V128 stores / store-lanes).
+        /// </summary>
+        private static bool IsSimdStore(Wacs.Core.OpCodes.SimdCode op) =>
+            op == Wacs.Core.OpCodes.SimdCode.V128Store
+            || op == Wacs.Core.OpCodes.SimdCode.V128Store8Lane
+            || op == Wacs.Core.OpCodes.SimdCode.V128Store16Lane
+            || op == Wacs.Core.OpCodes.SimdCode.V128Store32Lane
+            || op == Wacs.Core.OpCodes.SimdCode.V128Store64Lane;
+
+        /// <summary>
+        /// CIL stack type produced by a SIMD opcode. Most SIMD ops produce a
+        /// V128 (carried as Value on the internal stack), but lane-extract and
+        /// bitmask / all-true / any-true ops produce a typed scalar.
+        /// </summary>
+        private static Type SimdResultType(Wacs.Core.OpCodes.SimdCode op)
+        {
+            switch (op)
+            {
+                case Wacs.Core.OpCodes.SimdCode.V128AnyTrue:
+                case Wacs.Core.OpCodes.SimdCode.I8x16AllTrue:
+                case Wacs.Core.OpCodes.SimdCode.I16x8AllTrue:
+                case Wacs.Core.OpCodes.SimdCode.I32x4AllTrue:
+                case Wacs.Core.OpCodes.SimdCode.I64x2AllTrue:
+                case Wacs.Core.OpCodes.SimdCode.I8x16Bitmask:
+                case Wacs.Core.OpCodes.SimdCode.I16x8Bitmask:
+                case Wacs.Core.OpCodes.SimdCode.I32x4Bitmask:
+                case Wacs.Core.OpCodes.SimdCode.I64x2Bitmask:
+                case Wacs.Core.OpCodes.SimdCode.I8x16ExtractLaneS:
+                case Wacs.Core.OpCodes.SimdCode.I8x16ExtractLaneU:
+                case Wacs.Core.OpCodes.SimdCode.I16x8ExtractLaneS:
+                case Wacs.Core.OpCodes.SimdCode.I16x8ExtractLaneU:
+                case Wacs.Core.OpCodes.SimdCode.I32x4ExtractLane:
+                    return typeof(int);
+                case Wacs.Core.OpCodes.SimdCode.I64x2ExtractLane:
+                    return typeof(long);
+                case Wacs.Core.OpCodes.SimdCode.F32x4ExtractLane:
+                    return typeof(float);
+                case Wacs.Core.OpCodes.SimdCode.F64x2ExtractLane:
+                    return typeof(double);
+                default:
+                    // All other SIMD ops produce a V128 (represented as Value
+                    // on the CIL stack).
+                    return typeof(Value);
+            }
+        }
+
         private void TrackGenericStackDiff(InstructionBase inst, bool before)
         {
             int diff = inst.StackDiff;
