@@ -24,7 +24,18 @@
 - Public getters on ~20 instruction classes, `IFunctionInstance.Invoke`
   on the interface, `Store.ReplaceFunction`, and runtime accessors so
   `WACS.Transpiler` can drive transpilation from outside the assembly.
-- No behavior change for existing consumers — additive only.
+- New `WasmRuntime.TryGetExported{Memory,Table,Global,Tag}` /
+  `GetExported{Memory,Table,Global,Tag}` accessors, mirroring the
+  existing `TryGetExportedFunction` shape so host code can resolve any
+  exported entity without reflecting into internals. Resolves #63.
+- **Rename (breaking):** The interpreter super-instruction flag
+  `WasmRuntime.TranspileModules` → `WasmRuntime.SuperInstruction`, the
+  method `TranspileModule` → `ApplySuperInstructions`, and the
+  `Wacs.Core.Runtime.Transpiler` / `Wacs.Core.Instructions.Transpiler`
+  namespaces → `...SuperInstruction`. `FunctionTranspiler.TranspileFunction`
+  is now `SuperInstructionRewriter.Rewrite`. This disambiguates from the
+  new `WACS.Transpiler` AOT package.
+- No behavior change for existing consumers beyond the rename — additive otherwise.
 
 ## [0.7.4] Performance
 ### Link-time optimization
