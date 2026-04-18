@@ -5,49 +5,61 @@ on:
     tags:
       - 'WACS-v*.*.*'
       - 'WASIp1-v*.*.*'
+      - 'WACS-Transpiler-v*.*.*'
 
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        project:
+        include:
           - path: Wacs.Core
             package_name: WACS
+            tag_prefix: WACS-v
           - path: Wacs.WASIp1
             package_name: WACS.WASIp1
+            tag_prefix: WASIp1-v
+          - path: Wacs.Transpiler
+            package_name: WACS.Transpiler
+            tag_prefix: WACS-Transpiler-v
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v1
+        uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '6.x' # Set to your .NET version
+          dotnet-version: '8.0.x'
 
-      - name: Determine if package should be built
-        id: check_changes
+      - name: Gate on tag prefix
+        id: gate
         run: |
-          if git diff --name-only HEAD^ HEAD | grep -q "${{ matrix.project.path }}"; then
+          if [[ "${GITHUB_REF_NAME}" == ${{ matrix.tag_prefix }}* ]]; then
             echo "build=true" >> $GITHUB_ENV
           else
             echo "build=false" >> $GITHUB_ENV
           fi
 
-      - name: Build project
+      - name: Restore
         if: env.build == 'true'
-        run: dotnet build ${{ matrix.project.path }} --configuration Release --no-restore
+        run: dotnet restore ${{ matrix.path }}
 
-      - name: Pack project
+      - name: Build
         if: env.build == 'true'
-        run: dotnet pack ${{ matrix.project.path }} --configuration Release --no-build -o output
+        run: dotnet build ${{ matrix.path }} --configuration Release --no-restore
+
+      - name: Pack
+        if: env.build == 'true'
+        run: dotnet pack ${{ matrix.path }} --configuration Release --no-build -o output
 
       - name: Push to NuGet
         if: env.build == 'true'
-        run: dotnet nuget push "output/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+        run: dotnet nuget push "output/*.nupkg" --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
 
       - name: Push to GitHub Packages
         if: env.build == 'true'
-        run: dotnet nuget push "output/*.nupkg" --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --api-key ${{secrets.GITHUB_TOKEN}}
-          
+        run: dotnet nuget push "output/*.nupkg" --skip-duplicate --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --api-key ${{ secrets.GITHUB_TOKEN }}

@@ -55,3 +55,6 @@ jobs:
 
       - name: Run Tests
         run: dotnet test --configuration Release --no-build --verbosity normal Spec.Test/Spec.Test.csproj
+
+      - name: Run Transpiler Tests
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.Transpiler.Test/Wacs.Transpiler.Test.csproj
