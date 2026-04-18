@@ -201,6 +201,10 @@ namespace Wacs.Compilation
             sb.AppendLine("using Wacs.Core.Runtime.Types;");
             // GlobalIdx / FuncIdx / etc. live here — needed whenever a handler body casts an index.
             sb.AppendLine("using Wacs.Core.Types;");
+            // Handler bodies may qualify sibling helper methods as `ControlHandlers.Xyz` etc.;
+            // the generator copies them into GeneratedDispatcher, which lives in
+            // Wacs.Core.Compilation, so those short names only resolve via this using.
+            sb.AppendLine("using Wacs.Core.Instructions;");
             sb.AppendLine();
             sb.AppendLine("namespace Wacs.Core.Compilation");
             sb.AppendLine("{");

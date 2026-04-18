@@ -52,6 +52,14 @@ namespace Wacs.Core.Compilation
             // ByteCode→ushort (primary << 8 | secondary) then narrows, giving the
             // *secondary* byte (zero for non-prefix ops). Hit-and-run bug ask me how I know.
             OpCode primary = op;
+
+            // Block-structure markers are elided from the annotated stream: once Link has
+            // stamped branch targets onto the block instances, block/loop/end contribute
+            // nothing executable. Skip emit entirely. (If/else are NOT elided — they carry
+            // conditional-jump semantics; handle those with the rest of control flow.)
+            if (primary == OpCode.Block || primary == OpCode.Loop || primary == OpCode.End)
+                return;
+
             buf.Add((byte)primary);
             switch (primary)
             {
@@ -97,6 +105,11 @@ namespace Wacs.Core.Compilation
                     break;
                 case OpCode.GlobalSet:
                     WriteU32(buf, (uint)((InstGlobalSet)inst).GetIndex());
+                    break;
+
+                // ---- call: u32 function index ----
+                case OpCode.Call:
+                    WriteU32(buf, ((InstCall)inst).X.Value);
                     break;
 
                 // ---- No-immediate ops: drop, select, return, and every numeric opcode ----
