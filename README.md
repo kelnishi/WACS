@@ -4,9 +4,10 @@
 [![License](https://img.shields.io/github/license/kelnishi/WACS)](LICENSE)
 [![NuGet](https://img.shields.io/nuget/v/WACS)](https://www.nuget.org/packages/WACS)
 [![Downloads](https://img.shields.io/nuget/dt/WACS)](https://www.nuget.org/packages/WACS)
+[![NuGet (Transpiler)](https://img.shields.io/nuget/vpre/WACS.Transpiler?label=WACS.Transpiler)](https://www.nuget.org/packages/WACS.Transpiler)
 
 ## Overview
-Latest changes: [0.7.4](https://github.com/kelnishi/WACS/tree/main/CHANGELOG.md)
+Latest changes: [0.8.0](https://github.com/kelnishi/WACS/tree/main/CHANGELOG.md)
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including Godot and AOT environments like Unity's IL2CPP.
 
@@ -93,6 +94,23 @@ The easiest way to use WACS is to add the package from NuGet
 dotnet add package WACS
 dotnet add package WACS.WASIp1
 ````
+
+### AOT Transpiler (preview)
+
+`WACS.Transpiler` is a companion package that ahead-of-time transpiles a
+`.wasm` module into a .NET assembly. Installs as a [dotnet global
+tool](https://learn.microsoft.com/en-us/dotnet/core/tools/global-tools),
+backed by the same WACS runtime:
+
+```bash
+dotnet tool install -g WACS.Transpiler --prerelease
+wasm-transpile -i module.wasm -o module.dll
+```
+
+See [`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the full
+flag surface, library API, and v0.1-preview known limitations.
+
+### From source
 
 If you prefer to build WACS from source, you can clone the repo and build it with the .NET SDK:
 
