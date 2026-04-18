@@ -30,11 +30,20 @@ namespace Wacs.Core.Compilation
         /// <summary>Function signature — used by the invocation glue to marshal args/results.</summary>
         public readonly FunctionType Signature;
 
-        public CompiledFunction(byte[] bytecode, int localsCount, FunctionType signature)
+        /// <summary>
+        /// Exception-handler sidecar table. Empty for functions without try_table. On
+        /// throw, the runtime scans this table for an entry whose pc-range covers the
+        /// current pc; the innermost match (scanned reverse-order) wins.
+        /// </summary>
+        public readonly HandlerEntry[] HandlerTable;
+
+        public CompiledFunction(byte[] bytecode, int localsCount, FunctionType signature,
+                                HandlerEntry[] handlerTable)
         {
             Bytecode = bytecode;
             LocalsCount = localsCount;
             Signature = signature;
+            HandlerTable = handlerTable;
         }
     }
 }
