@@ -50,7 +50,7 @@ namespace Wacs.Transpiler.AOT
             public ConstraintException(string message) : base(message) { }
         }
 
-        public static void Emit(TranspilationResult result, string programClassName, string exportName)
+        public static Type Emit(TranspilationResult result, string programClassName, string exportName)
         {
             if (result.ModuleClass == null)
                 throw new ConstraintException("module has no generated Module class; nothing to invoke");
@@ -98,8 +98,12 @@ namespace Wacs.Transpiler.AOT
             // modules remain open until the assembly is persisted.
             var moduleBuilder = result.ModuleBuilder;
 
+            var ns = result.ModuleClass.Namespace;
+            var fullName = string.IsNullOrEmpty(ns)
+                ? programClassName
+                : $"{ns}.{programClassName}";
             var programType = moduleBuilder.DefineType(
-                programClassName,
+                fullName,
                 TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.Abstract,
                 typeof(object));
 
@@ -164,14 +168,13 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ret);
 
-            programType.CreateType();
-
             // Note: AssemblyBuilder.SetEntryPoint is not available on .NET 8's
             // AssemblyBuilderAccess.Run path. For v0.1-preview the emitted Main
             // is always a public static method on the saved assembly — users
             // invoke it reflectively (Assembly.LoadFrom + GetType(Program)
             // + GetMethod("Main").Invoke). A follow-up can use
             // System.Reflection.Metadata to stamp the PE entry-point post-hoc.
+            return programType.CreateType();
         }
 
         private static bool IsScalar(ValType t) =>
