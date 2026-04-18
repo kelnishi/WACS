@@ -36,13 +36,15 @@ for wast in $(ls "$TESTS_DIR"); do
   if [ ! -f "$TESTS_DIR/$wast/$(ls "$TESTS_DIR/$wast" 2>/dev/null | head -1)" ] && [ ! -d "$TESTS_DIR/$wast" ]; then
     :
   fi
-  if [ -d "$TESTS_DIR/$wast" ]; then
-    echo "[$i/$TOTAL] $wast: SKIP (directory)"; SKIP=$((SKIP+1)); echo "SKIP $wast (dir)" >> "$REPORT"; continue
-  fi
+  # Each spec entry in generated-json is a directory named "<name>.wast"
+  # containing .wasm + .json files. Skip anything that doesn't look like that.
   case "$wast" in
     *.wast) ;;
     *) echo "[$i/$TOTAL] $wast: SKIP (non-wast)"; SKIP=$((SKIP+1)); echo "SKIP $wast (non-wast)" >> "$REPORT"; continue;;
   esac
+  if [ ! -d "$TESTS_DIR/$wast" ]; then
+    echo "[$i/$TOTAL] $wast: SKIP (missing)"; SKIP=$((SKIP+1)); echo "SKIP $wast (missing)" >> "$REPORT"; continue
+  fi
 
   cat > "$SETTINGS_OUT" <<EOF
 {

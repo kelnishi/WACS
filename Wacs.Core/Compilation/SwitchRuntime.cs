@@ -74,8 +74,15 @@ namespace Wacs.Core.Compilation
             var code = func.Bytecode;
             var handlers = func.HandlerTable;
             int pc = 0;
+            int pcBeforeDispatch = 0;
             while (pc < code.Length)
             {
+                // Snapshot pc before fetch/dispatch. Handler-range checks on throw use
+                // this — the in-range semantics is "throw's opcode was inside the
+                // try_table's body," not "pc after the throw advanced past its
+                // immediates is inside." A throw-as-last-instruction before End would
+                // miss otherwise.
+                pcBeforeDispatch = pc;
                 try
                 {
                     byte primary = code[pc++];
@@ -97,61 +104,115 @@ namespace Wacs.Core.Compilation
                         throw new NotSupportedException(
                             $"Opcode 0x{op:X4} has no [OpSource]/[OpHandler] coverage.");
                 }
-                catch (WasmException we) when (handlers.Length > 0 &&
-                                                TryResumeWithHandler(ctx, handlers, ref pc, we.Exn))
+                catch (WasmException we)
                 {
-                    // The filter ran the handler lookup; if it matched, we fall into this
-                    // catch block having already mutated pc and the stack. Just continue.
+                    // Catch unconditionally (not via a filter) because C# filters evaluate
+                    // during first-pass unwinding, before the callee's InvokeWasm finally
+                    // restores ctx.Frame. That would leave the wrong module's TagAddrs
+                    // visible during tag comparison. Catching here guarantees we run only
+                    // after every intermediate finally has executed.
+                    if (!TryHandleOrSkip(we, ctx, handlers, ref pc, pcBeforeDispatch))
+                        throw;
                 }
             }
         }
 
         /// <summary>
-        /// Scans <paramref name="handlers"/> in reverse (inner try_table wins) for an
-        /// entry whose pc-range covers <paramref name="pc"/> and whose kind/tag matches
-        /// <paramref name="exn"/>. On match, pushes exception values per the catch kind,
-        /// shifts the stack, updates <paramref name="pc"/>, and returns true.
+        /// Decide whether this frame handles a propagating <see cref="WasmException"/>.
+        /// If the throw is still shedding caller frames (<see cref="WasmException.SkipFrames"/>
+        /// &gt; 0), decrement and return false so the exception bypasses this frame's
+        /// handlers — return_call semantics: the caller's try_tables are already popped
+        /// by the tail call. Otherwise consult the handler table normally.
+        /// </summary>
+        private static bool TryHandleOrSkip(WasmException we, ExecContext ctx, HandlerEntry[] handlers,
+                                             ref int pc, int pcForRangeCheck)
+        {
+            if (we.SkipFrames > 0)
+            {
+                we.SkipFrames--;
+                return false;
+            }
+            return handlers.Length > 0
+                && TryResumeWithHandler(ctx, handlers, ref pc, we.Exn, pcForRangeCheck);
+        }
+
+        /// <summary>
+        /// Walk the handler table searching for a matching catch clause. The spec's
+        /// semantics are: try the innermost enclosing <c>try_table</c> first, checking
+        /// its catches in declaration order; if none matches, fall through to the next
+        /// enclosing <c>try_table</c>.
+        ///
+        /// <para>The flat <c>HandlerEntry[]</c> is in emission order (outer try_tables
+        /// first, catches within a try_table in declaration order). Each try_table has
+        /// a unique <see cref="HandlerEntry.StartPc"/>. The outer loop picks the
+        /// largest <c>StartPc</c> still containing <paramref name="pcForRangeCheck"/>
+        /// (= innermost not-yet-tried try_table); the inner loop then checks its
+        /// catches in natural order. Move one try_table outward on a miss.</para>
         /// </summary>
         private static bool TryResumeWithHandler(ExecContext ctx, HandlerEntry[] handlers,
-                                                  ref int pc, ExnInstance exn)
+                                                  ref int pc, ExnInstance exn, int pcForRangeCheck)
         {
-            uint upc = (uint)pc;
-            for (int i = handlers.Length - 1; i >= 0; i--)
+            uint upc = (uint)pcForRangeCheck;
+            uint lastStart = uint.MaxValue;
+
+            while (true)
             {
-                var h = handlers[i];
-                if (upc < h.StartPc || upc >= h.EndPc) continue;
-
-                var kind = (CatchFlags)h.Kind;
-                bool matches = kind switch
+                // Find innermost (largest StartPc) try_table covering pc, with StartPc
+                // strictly less than the one we just finished checking.
+                uint candidateStart = 0;
+                bool hasCandidate = false;
+                for (int i = 0; i < handlers.Length; i++)
                 {
-                    CatchFlags.CatchAll or CatchFlags.CatchAllRef => true,
-                    CatchFlags.None or CatchFlags.CatchRef =>
-                        ctx.Frame.Module.TagAddrs[(TagIdx)h.TagIdx].Equals(exn.Tag),
-                    _ => false,
-                };
-                if (!matches) continue;
-
-                // Push the exception's carried values per the catch kind.
-                switch (kind)
-                {
-                    case CatchFlags.None:
-                        ctx.OpStack.PushResults(exn.Fields);
-                        break;
-                    case CatchFlags.CatchRef:
-                        ctx.OpStack.PushResults(exn.Fields);
-                        ctx.OpStack.PushValue(new Value(ValType.Exn, exn));
-                        break;
-                    case CatchFlags.CatchAll:
-                        break;
-                    case CatchFlags.CatchAllRef:
-                        ctx.OpStack.PushValue(new Value(ValType.Exn, exn));
-                        break;
+                    var h = handlers[i];
+                    if (upc < h.StartPc || upc >= h.EndPc) continue;
+                    if (h.StartPc >= lastStart) continue;
+                    if (!hasCandidate || h.StartPc > candidateStart)
+                    {
+                        candidateStart = h.StartPc;
+                        hasCandidate = true;
+                    }
                 }
-                ctx.OpStack.ShiftResults((int)h.Arity, (int)h.ResultsHeight);
-                pc = (int)h.HandlerPc;
-                return true;
+                if (!hasCandidate) return false;
+
+                // Scan this try_table's catches in declaration order.
+                for (int i = 0; i < handlers.Length; i++)
+                {
+                    var h = handlers[i];
+                    if (h.StartPc != candidateStart) continue;
+
+                    var kind = (CatchFlags)h.Kind;
+                    bool matches = kind switch
+                    {
+                        CatchFlags.CatchAll or CatchFlags.CatchAllRef => true,
+                        CatchFlags.None or CatchFlags.CatchRef =>
+                            ctx.Frame.Module.TagAddrs[(TagIdx)h.TagIdx].Equals(exn.Tag),
+                        _ => false,
+                    };
+                    if (!matches) continue;
+
+                    switch (kind)
+                    {
+                        case CatchFlags.None:
+                            ctx.OpStack.PushResults(exn.Fields);
+                            break;
+                        case CatchFlags.CatchRef:
+                            ctx.OpStack.PushResults(exn.Fields);
+                            ctx.OpStack.PushValue(new Value(ValType.Exn, exn));
+                            break;
+                        case CatchFlags.CatchAll:
+                            break;
+                        case CatchFlags.CatchAllRef:
+                            ctx.OpStack.PushValue(new Value(ValType.Exn, exn));
+                            break;
+                    }
+                    ctx.OpStack.ShiftResults((int)h.Arity, (int)h.ResultsHeight);
+                    pc = (int)h.HandlerPc;
+                    return true;
+                }
+
+                // No catch in this try_table matched — try the next-outer try_table.
+                lastStart = candidateStart;
             }
-            return false;
         }
 
         /// <summary>

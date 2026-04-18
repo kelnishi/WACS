@@ -8,6 +8,7 @@
 
 using System;
 using System.Runtime.ExceptionServices;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
@@ -50,6 +51,14 @@ namespace Wacs.Core.Runtime
                 // re-raise the original exception.
                 FlushCallStackForSwitch();
                 ExceptionDispatchInfo.Throw(exc);
+            }
+            catch (WasmException we)
+            {
+                // A WASM exception escaped every frame's try_table — surface it the
+                // way the polymorphic path does, as UnhandledWasmException, so the
+                // spec-test harness (which catches that type) sees a consistent view.
+                FlushCallStackForSwitch();
+                throw new UnhandledWasmException($"Unhandled exception {we.Exn}");
             }
             catch (Exception exc) when (exc is not AggregateException)
             {
