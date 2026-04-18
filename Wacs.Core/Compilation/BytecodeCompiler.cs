@@ -13,6 +13,7 @@ using System.Runtime.CompilerServices;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Memory;
 using Wacs.Core.Instructions.Numeric;
+using Wacs.Core.Instructions.Reference;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 
@@ -121,8 +122,18 @@ namespace Wacs.Core.Compilation
                 OpCode.Call => 4,
                 // call_indirect: typeIdx:u32 + tableIdx:u32.
                 OpCode.CallIndirect => 8,
+                // return_call: funcIdx:u32.
+                OpCode.ReturnCall => 4,
+                // return_call_indirect: typeIdx:u32 + tableIdx:u32.
+                OpCode.ReturnCallIndirect => 8,
+                // ref.null: encoded ValType as s32 (flags + optional heap type index).
+                OpCode.RefNull => 4,
+                // ref.func: funcIdx:u32.
+                OpCode.RefFunc => 4,
                 // Branches: three u32 values — (target_pc, results_height, arity).
                 OpCode.Br or OpCode.BrIf => 12,
+                // Conditional branches on ref-null share the same triple format.
+                OpCode.BrOnNull or OpCode.BrOnNonNull => 12,
                 // If: u32 else_pc (jump target when cond==0; pc falls through otherwise).
                 OpCode.If => 4,
                 // Else: u32 end_pc (unconditional jump out of the then-branch).
@@ -288,6 +299,25 @@ namespace Wacs.Core.Compilation
                     writePos = WriteU32(buf, writePos, (uint)ci.TableIndex);
                     break;
                 }
+                case OpCode.ReturnCall:
+                    writePos = WriteU32(buf, writePos, ((InstReturnCall)inst).X.Value);
+                    break;
+                case OpCode.ReturnCallIndirect:
+                {
+                    var rci = (InstReturnCallIndirect)inst;
+                    writePos = WriteU32(buf, writePos, (uint)rci.TypeIndex);
+                    writePos = WriteU32(buf, writePos, (uint)rci.TableIndex);
+                    break;
+                }
+
+                // ---- reference ops with immediates ----
+                case OpCode.RefNull:
+                    // ValType is an int-backed enum; write its underlying bits.
+                    writePos = WriteS32(buf, writePos, (int)((InstRefNull)inst).RefType);
+                    break;
+                case OpCode.RefFunc:
+                    writePos = WriteU32(buf, writePos, ((InstRefFunc)inst).FunctionIndex.Value);
+                    break;
 
                 // ---- memory loads/stores (full + narrow): [memIdx:u32][offset:u64] ----
                 case OpCode.I32Load:
@@ -345,6 +375,14 @@ namespace Wacs.Core.Compilation
                     break;
                 case OpCode.BrIf:
                     writePos = WriteBranch(buf, writePos, ((InstBranchIf)inst).LinkedLabel!,
+                                           streamOffset, blockLocalIdx, blockEndLocalIdx);
+                    break;
+                case OpCode.BrOnNull:
+                    writePos = WriteBranch(buf, writePos, ((InstBrOnNull)inst).LinkedLabel!,
+                                           streamOffset, blockLocalIdx, blockEndLocalIdx);
+                    break;
+                case OpCode.BrOnNonNull:
+                    writePos = WriteBranch(buf, writePos, ((InstBrOnNonNull)inst).LinkedLabel!,
                                            streamOffset, blockLocalIdx, blockEndLocalIdx);
                     break;
 
