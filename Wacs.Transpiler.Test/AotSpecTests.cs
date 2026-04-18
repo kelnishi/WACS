@@ -62,7 +62,6 @@ namespace Wacs.Transpiler.Test
         private static readonly HashSet<string> KnownFailingWastPaths = new(StringComparer.Ordinal)
         {
             "call_indirect.wast",
-            "conversions.wast",
             "if.wast",
             "gc/struct.wast",
         };
