@@ -10,6 +10,10 @@ on:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    permissions:
+      # Required for NuGet Trusted Publishing via GitHub OIDC.
+      id-token: write
+      contents: read
     strategy:
       matrix:
         include:
@@ -56,9 +60,16 @@ jobs:
         if: env.build == 'true'
         run: dotnet pack ${{ matrix.path }} --configuration Release --no-build -o output
 
+      - name: NuGet Trusted Publishing login
+        if: env.build == 'true'
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: kelnishi
+
       - name: Push to NuGet
         if: env.build == 'true'
-        run: dotnet nuget push "output/*.nupkg" --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+        run: dotnet nuget push "output/*.nupkg" --skip-duplicate --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
 
       - name: Push to GitHub Packages
         if: env.build == 'true'
