@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
@@ -6,14 +6,47 @@
         <Nullable>enable</Nullable>
         <LangVersion>9</LangVersion>
         <TargetFramework>net8.0</TargetFramework>
+        <RootNamespace>Wacs.Transpiler</RootNamespace>
+        <AssemblyName>Wacs.Transpiler</AssemblyName>
+        <StartupObject>Wacs.Transpiler.Cli.Program</StartupObject>
+
+        <!-- Package identity -->
+        <PackageId>WACS.Transpiler</PackageId>
+        <Title>WACS Transpiler</Title>
+        <Version>0.1.0-preview.1</Version>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Copyright>(c) 2025 Kelvin Nishikawa</Copyright>
+        <Description>Ahead-of-time WebAssembly-to-.NET IL transpiler for WACS. Installs the `wasm-transpile` CLI tool.</Description>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageTags>wasm;webassembly;transpiler;aot;wacs;dotnet-tool</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+        <!-- dotnet tool -->
+        <PackAsTool>true</PackAsTool>
+        <ToolCommandName>wasm-transpile</ToolCommandName>
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.13.0" />
+        <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="CommandLineParser" Version="2.9.1" />
+        <PackageReference Include="Lokad.ILPack" Version="0.3.1" />
     </ItemGroup>
 
 </Project>
