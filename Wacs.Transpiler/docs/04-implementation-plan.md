@@ -342,18 +342,36 @@ the triage inputs for the equivalence-gate pass.
 
 **Suite state after session 4:**
 
-    471 passed / 2 failed / 473 total     (237 wast files × 2 test classes,
+    473 passed / 0 failed / 473 total     (237 wast files × 2 test classes,
                                            minus SkipWasts: comments,
                                            annotations, linking{,0,3}, i31)
 
     Session 1 baseline: 449/473.
     Session 2 delivered: 453/473 (+4).
     Session 3 delivered: 456/473 (+3).
-    Session 4 delivered: 471/473 (+15).
-
-    Remaining: relaxed-simd/i32x4_relaxed_trunc, simd/simd_boolean.
+    Session 4 delivered: 473/473 (+17) — GREEN.
 
 **Session 4 additions:**
+
+24. SIMD suite completion — two fixes close out the bucket:
+    (a) `TrackGenericStackDiff` (for 0xFD SIMD ops) was resetting the
+    entire validator stack to Object placeholders and repopulating
+    only `StackDiff` entries, so types for items BELOW the SIMD op
+    were wiped. Downstream `select` then saw Object/Object and chose
+    SelectObject for a really-i32 operand, producing
+    InvalidProgramException. Replaced with arity-aware tracking: pop
+    the exact consumed arity and push a typed result (i32 for
+    any_true / all_true / bitmask / i32 extract_lane, the respective
+    scalar types for f32/f64/i64 extract_lane, Value for all
+    V128-producing ops).
+    (b) `I32x4RelaxedTruncF64x2UZero` NaN → 0 (was UINT_MAX). The
+    relaxed-simd spec test's f64x2_u_zero-NaN case allows all zeros
+    OR lanes 2/3 = UINT_MAX (modeling hardware that doesn't clear
+    the upper half). Scalar code can't reproduce the second option,
+    so match the first by mapping NaN and below-UINT_MIN to 0.
+    Unlocks simd/simd_boolean.wast and
+    relaxed-simd/i32x4_relaxed_trunc.wast — finishes the suite at
+    473/473.
 
 23. `instance.wast` (generative instantiation, doc 1 §1.3) — the
     AotSpecTests harness silently ignored `module_definition` /
