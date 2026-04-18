@@ -268,6 +268,15 @@ namespace Wacs.Transpiler.AOT.Emitters
             int paramCount = site.FuncType.ParameterTypes.Arity;
             var resultTypes = site.FuncType.ResultType.Types;
 
+            // return_call_indirect tail path: see EmitRefCall for the rationale.
+            if (site.IsTailCall)
+            {
+                var typedDelType = ThinContext.BuildDelegateTypeForFunc(site.FuncType);
+                if (typedDelType != null && TryEmitTailInvoke(il, site, typedDelType,
+                    isRef: false, moduleInst))
+                    return;
+            }
+
             // Stack: [p0, p1, ..., pN-1, elemIdx (i32 or i64 for table64)]
             il.Emit(OpCodes.Conv_I4); // safe: i32→i32 is no-op, i64→i32 truncates
             var elemIdxLocal = il.DeclareLocal(typeof(int));
@@ -337,6 +346,17 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
                 nameof(CallHelpers.InvokeIndirect), BindingFlags.Public | BindingFlags.Static)!);
 
+            // return_call_indirect terminates the caller (doc 1 §6.2). We
+            // can't use the CLR `tail.` prefix through DynamicInvoke, but
+            // semantic correctness only requires that execution not fall
+            // through to subsequent IL: unbox the result and emit ret.
+            if (site.IsTailCall)
+            {
+                EmitUnboxResult(il, resultTypes, moduleInst);
+                il.Emit(OpCodes.Ret);
+                return;
+            }
+
             // Unbox result
             EmitUnboxResult(il, resultTypes, moduleInst);
         }
@@ -346,10 +366,112 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// funcref stays as Value throughout (doc 2 §1 invariant 3); GC-ref
         /// args wrap at boundary before boxing.
         /// </summary>
+        /// <summary>
+        /// Emit a typed tail-call path for return_call_ref / return_call_indirect.
+        /// Spills args to locals typed to match the target delegate, resolves the
+        /// delegate via a helper, castclass to the typed delegate, then
+        /// <c>tail. callvirt Invoke</c> + <c>ret</c>. Returns false when the signature
+        /// is too wide for Action/Func (>16 params) — caller falls back to the
+        /// DynamicInvoke path (which isn't tail-call capable).
+        /// </summary>
+        private static bool TryEmitTailInvoke(
+            ILGenerator il, CallSite site, Type typedDelType, bool isRef,
+            ModuleInstance moduleInst)
+        {
+            int paramCount = site.FuncType.ParameterTypes.Arity;
+            var resultTypes = site.FuncType.ResultType.Types;
+            // Multi-return tail calls would need CLR support for matching
+            // out-param signatures on both sides — not supported yet.
+            if (resultTypes.Length > 1) return false;
+
+            var paramTypes = site.FuncType.ParameterTypes.Types;
+            var argLocals = new LocalBuilder[paramCount];
+
+            if (isRef)
+            {
+                // Stack: [p0, ..., pN-1, funcref (Value)]
+                var funcRefLocal = il.DeclareLocal(typeof(Value));
+                il.Emit(OpCodes.Stloc, funcRefLocal);
+
+                // Spill params in reverse (stack top first).
+                for (int i = paramCount - 1; i >= 0; i--)
+                {
+                    argLocals[i] = il.DeclareLocal(
+                        ModuleTranspiler.MapValTypeInternal(paramTypes[i], moduleInst));
+                    il.Emit(OpCodes.Stloc, argLocals[i]);
+                }
+
+                // Resolve delegate: ctx + funcref → Delegate
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldloc, funcRefLocal);
+                il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
+                    nameof(CallHelpers.ResolveRefDelegate),
+                    BindingFlags.Public | BindingFlags.Static)!);
+            }
+            else
+            {
+                // Stack: [p0, ..., pN-1, elemIdx (i32 or i64)]
+                il.Emit(OpCodes.Conv_I4);
+                var elemIdxLocal = il.DeclareLocal(typeof(int));
+                il.Emit(OpCodes.Stloc, elemIdxLocal);
+
+                for (int i = paramCount - 1; i >= 0; i--)
+                {
+                    argLocals[i] = il.DeclareLocal(
+                        ModuleTranspiler.MapValTypeInternal(paramTypes[i], moduleInst));
+                    il.Emit(OpCodes.Stloc, argLocals[i]);
+                }
+
+                // Resolve delegate: ctx + tableIdx + elemIdx + expectedTypeIdx → Delegate
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldc_I4, site.TableIdx);
+                il.Emit(OpCodes.Ldloc, elemIdxLocal);
+                il.Emit(OpCodes.Ldc_I4, site.TypeIdx);
+                il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
+                    nameof(CallHelpers.ResolveIndirectDelegate),
+                    BindingFlags.Public | BindingFlags.Static)!);
+            }
+
+            il.Emit(OpCodes.Castclass, typedDelType);
+
+            // Push typed args. GC-ref params flow as object internally; wrap
+            // to Value at the signature boundary (MapValType = Value for refs).
+            for (int i = 0; i < paramCount; i++)
+            {
+                il.Emit(OpCodes.Ldloc, argLocals[i]);
+                if (ModuleTranspiler.IsGcRefType(paramTypes[i], moduleInst))
+                {
+                    il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                        nameof(GcRuntimeHelpers.WrapRef),
+                        BindingFlags.Public | BindingFlags.Static)!);
+                }
+            }
+
+            var invokeMethod = typedDelType.GetMethod("Invoke")!;
+            il.Emit(OpCodes.Tailcall);
+            il.Emit(OpCodes.Callvirt, invokeMethod);
+            il.Emit(OpCodes.Ret);
+            return true;
+        }
+
         private static void EmitRefCall(ILGenerator il, CallSite site, ModuleInstance moduleInst)
         {
             int paramCount = site.FuncType.ParameterTypes.Arity;
             var resultTypes = site.FuncType.ResultType.Types;
+
+            // return_call_ref tail path: resolve the delegate via helper,
+            // castclass to the typed delegate, tail. callvirt Invoke, ret.
+            // Bypasses InvokeRef's DynamicInvoke (which would both allocate
+            // and block the CLR's tail-call optimization). Falls through
+            // to the generic DynamicInvoke path when no typed delegate can
+            // be built (>16 params or an unusual signature).
+            if (site.IsTailCall)
+            {
+                var typedDelType = ThinContext.BuildDelegateTypeForFunc(site.FuncType);
+                if (typedDelType != null && TryEmitTailInvoke(il, site, typedDelType,
+                    isRef: true, moduleInst))
+                    return;
+            }
 
             // Stack: [p0, ..., pN-1, funcref (Value)]
             var funcRefLocal = il.DeclareLocal(typeof(Value));
@@ -394,6 +516,15 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldloc, argsLocal);
             il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
                 nameof(CallHelpers.InvokeRef), BindingFlags.Public | BindingFlags.Static)!);
+
+            if (site.IsTailCall)
+            {
+                // return_call_ref terminates the caller (doc 1 §6.2) — unbox
+                // and ret so subsequent IL doesn't fall through.
+                EmitUnboxResult(il, resultTypes, moduleInst);
+                il.Emit(OpCodes.Ret);
+                return;
+            }
 
             // Unbox result
             EmitUnboxResult(il, resultTypes, moduleInst);
@@ -849,6 +980,92 @@ namespace Wacs.Transpiler.AOT.Emitters
                 return (int)funcRef.GetFuncAddr(ctx.Types).Value;
 
             return (int)funcRef.Data.Ptr;
+        }
+
+        /// <summary>
+        /// Resolve a funcref Value to its bound CLR Delegate for typed dispatch.
+        /// Used by return_call_ref's tail-call emission so the call site can
+        /// castclass the result to the typed delegate and <c>tail. callvirt Invoke</c>
+        /// directly (no DynamicInvoke overhead, no extra stack frame for the helper
+        /// to hold).
+        /// </summary>
+        public static Delegate ResolveRefDelegate(ThinContext ctx, Value funcRef)
+        {
+            if (funcRef.IsNullRef)
+                throw new TrapException("null function reference");
+            var del = (funcRef.GcRef as DelegateRef)?.Target;
+            if (del != null) return del;
+            int funcIdx = ctx.Types != null
+                ? (int)funcRef.GetFuncAddr(ctx.Types).Value
+                : (int)funcRef.Data.Ptr;
+            if (funcIdx < 0 || funcIdx >= ctx.FuncTable.Length)
+                throw new TrapException("undefined element");
+            var tableDel = ctx.FuncTable[funcIdx];
+            if (tableDel == null)
+                throw new TrapException("uninitialized element");
+            return tableDel;
+        }
+
+        /// <summary>
+        /// Resolve a table element to its bound CLR Delegate, with a WASM-level
+        /// sub-supertype check against <paramref name="expectedTypeIdx"/>. Used by
+        /// return_call_indirect's tail-call emission (see <see cref="ResolveRefDelegate"/>).
+        /// </summary>
+        public static Delegate ResolveIndirectDelegate(
+            ThinContext ctx, int tableIdx, int elemIdx, int expectedTypeIdx)
+        {
+            var table = ctx.Tables[tableIdx];
+            if (elemIdx < 0 || elemIdx >= table.Elements.Count)
+                throw new TrapException($"undefined element {elemIdx}");
+            var r = table.Elements[elemIdx];
+            if (r.IsNullRef) throw new TrapException("uninitialized element");
+
+            int resolvedFuncIdx = ctx.Types != null
+                ? (int)r.GetFuncAddr(ctx.Types).Value
+                : (int)r.Data.Ptr;
+
+            // WASM-level sub-supertype check (doc 1 §6.2).
+            if (expectedTypeIdx >= 0)
+            {
+                int expectedHash;
+                if (ctx.Module?.Types != null && ctx.Module.Types.Contains((TypeIdx)expectedTypeIdx))
+                    expectedHash = ctx.Module.Types[(TypeIdx)expectedTypeIdx].GetHashCode();
+                else if (ctx.TypeHashes != null && expectedTypeIdx < ctx.TypeHashes.Length)
+                    expectedHash = ctx.TypeHashes[expectedTypeIdx];
+                else
+                    expectedHash = 0;
+
+                if (expectedHash != 0)
+                {
+                    bool ok = false;
+                    if (ctx.FuncTypeSuperHashes != null
+                        && resolvedFuncIdx >= 0 && resolvedFuncIdx < ctx.FuncTypeSuperHashes.Length
+                        && ctx.FuncTypeSuperHashes[resolvedFuncIdx] != null)
+                    {
+                        var chain = ctx.FuncTypeSuperHashes[resolvedFuncIdx];
+                        for (int i = 0; i < chain.Length; i++)
+                            if (chain[i] == expectedHash) { ok = true; break; }
+                    }
+                    else if (ctx.FuncTypeHashes != null
+                        && resolvedFuncIdx >= 0 && resolvedFuncIdx < ctx.FuncTypeHashes.Length)
+                    {
+                        ok = ctx.FuncTypeHashes[resolvedFuncIdx] == expectedHash;
+                    }
+                    else
+                    {
+                        ok = true;
+                    }
+                    if (!ok) throw new TrapException("indirect call type mismatch");
+                }
+            }
+
+            var del = (r.GcRef as DelegateRef)?.Target;
+            if (del != null) return del;
+            if (resolvedFuncIdx < 0 || resolvedFuncIdx >= ctx.FuncTable.Length)
+                throw new TrapException("undefined element");
+            var tableDel = ctx.FuncTable[resolvedFuncIdx];
+            if (tableDel == null) throw new TrapException("uninitialized element");
+            return tableDel;
         }
 
         /// <summary>
