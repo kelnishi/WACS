@@ -79,6 +79,26 @@ namespace Wacs.Core.Instructions
         private static void Else(ref int pc, [Imm] uint endPc)
             => pc = (int)endPc;
 
+        // 0x0E br_table — indirect branch via an inline jump table. Stream layout:
+        //   [opcode][count:u32][triple × count (indexed)][default triple] ; triple = 12 bytes.
+        // Pop the i32 selector. If in [0, count), take triple i; otherwise take the default
+        // (which sits at slot `count`). Each triple drives the same ShiftResults + pc jump
+        // as plain br.
+        [OpHandler(OpCode.BrTable)]
+        private static void BrTable(ExecContext ctx, System.ReadOnlySpan<byte> code, ref int pc)
+        {
+            uint count = StreamReader.ReadU32(code, ref pc);
+            int i = ctx.OpStack.PopI32();
+            int entryIdx = ((uint)i < count) ? i : (int)count;
+            // pc now points at the first byte of triple[0]. Skip to triple[entryIdx].
+            int triplePc = pc + entryIdx * 12;
+            uint targetPc      = StreamReader.ReadU32(code, ref triplePc);
+            uint resultsHeight = StreamReader.ReadU32(code, ref triplePc);
+            uint arity         = StreamReader.ReadU32(code, ref triplePc);
+            ctx.OpStack.ShiftResults((int)arity, (int)resultsHeight);
+            pc = (int)targetPc;
+        }
+
         // 0x0F return — terminates the current function body.
         // Pushing pc past the end of the stream exits SwitchRuntime.Run's while loop
         // cleanly, leaving whatever result values the producer already put on the

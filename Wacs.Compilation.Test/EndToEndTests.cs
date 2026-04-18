@@ -280,5 +280,86 @@ namespace Wacs.Compilation.Test
             Assert.Single(results);
             Assert.Equal(expected, results[0].Data.Int32);
         }
+
+        /// <summary>
+        /// (func (export "classify") (param i32) (result i32)
+        ///   (block (block (block
+        ///     local.get 0
+        ///     br_table 0 1 2  ;; 0 → exit innermost (returns 100), 1 → middle (200), default 2 → outer (300)
+        ///   )) i32.const 100 return )
+        ///   end i32.const 200 return
+        ///   end i32.const 300 return
+        /// )
+        /// Classic br_table dispatch: three nested blocks, table selects which to exit.
+        /// </summary>
+        private static readonly byte[] BrTableModule =
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type (i32) -> i32
+            0x01, 0x06, 0x01, 0x60, 0x01, 0x7F, 0x01, 0x7F,
+            // Func
+            0x03, 0x02, 0x01, 0x00,
+            // Export "classify"
+            0x07, 0x0C, 0x01, 0x08, (byte)'c', (byte)'l', (byte)'a', (byte)'s', (byte)'s', (byte)'i', (byte)'f', (byte)'y', 0x00, 0x00,
+            // Code body:
+            //   00                  locals (1 byte)
+            //   02 40               outer block (2)
+            //   02 40               middle block (2)
+            //   02 40               inner block (2)
+            //   20 00               local.get 0 (2)
+            //   0E 02 00 01 02      br_table [0 1] default 2 (5)
+            //   0B                  end (inner) (1)
+            //   41 E4 00            i32.const 100 (3)
+            //   0F                  return (1)
+            //   0B                  end (middle) (1)
+            //   41 C8 01            i32.const 200 (3)
+            //   0F                  return (1)
+            //   0B                  end (outer) (1)
+            //   41 AC 02            i32.const 300 (3)
+            //   0F                  return (1)
+            //   0B                  end (func) (1)
+            // 30 body bytes; body-size 0x1E; section body = 1+1+30 = 32; section size 0x20.
+            0x0A, 0x20, 0x01, 0x1E,
+            0x00,
+            0x02, 0x40,
+            0x02, 0x40,
+            0x02, 0x40,
+            0x20, 0x00,
+            0x0E, 0x02, 0x00, 0x01, 0x02,
+            0x0B,
+            0x41, 0xE4, 0x00,
+            0x0F,
+            0x0B,
+            0x41, 0xC8, 0x01,
+            0x0F,
+            0x0B,
+            0x41, 0xAC, 0x02,
+            0x0F,
+            0x0B,
+        };
+
+        [Theory]
+        [InlineData(0, 100)]
+        [InlineData(1, 200)]
+        [InlineData(2, 300)]
+        [InlineData(42, 300)]   // out-of-range → default
+        [InlineData(-1, 300)]   // negative also out-of-range
+        public void BrTable_dispatches_by_index(int selector, int expected)
+        {
+            var runtime = new WasmRuntime();
+            using var ms = new MemoryStream(BrTableModule);
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("m", moduleInst);
+
+            var addr = runtime.GetExportedFunction(("m", "classify"));
+            var funcInst = (FunctionInstance)runtime.RuntimeStore[addr];
+
+            var ctx = new ExecContext(runtime.RuntimeStore);
+            var results = SwitchRuntime.Invoke(ctx, funcInst, new Value(ValType.I32, selector));
+
+            Assert.Single(results);
+            Assert.Equal(expected, results[0].Data.Int32);
+        }
     }
 }

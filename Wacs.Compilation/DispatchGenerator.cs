@@ -151,6 +151,12 @@ namespace Wacs.Compilation
             {
                 return new ParamInfo(p.Name, type, ParamKind.Ctx);
             }
+            // ReadOnlySpan<byte> code — the raw bytecode span. Useful for variable-length
+            // immediates (br_table) where the handler wants to read ad-hoc.
+            if (isHandler && type == "System.ReadOnlySpan<byte>")
+            {
+                return new ParamInfo(p.Name, type, ParamKind.Code);
+            }
             // [Imm] → Immediate (must be [OpHandler]).
             if (isHandler)
             {
@@ -308,6 +314,7 @@ namespace Wacs.Compilation
             {
                 ParamKind.Ctx       => $"ExecContext {p.Name}",
                 ParamKind.RefPc     => $"ref int {p.Name}",
+                ParamKind.Code      => $"System.ReadOnlySpan<byte> {p.Name}",
                 _                   => $"{p.Type} {p.Name}",
             });
             string paramList = string.Join(", ", localSigParts);
@@ -320,6 +327,7 @@ namespace Wacs.Compilation
             {
                 ParamKind.Ctx   => "ctx",
                 ParamKind.RefPc => "ref pc",
+                ParamKind.Code  => "code",
                 _               => p.Name,
             }));
 
@@ -396,7 +404,7 @@ namespace Wacs.Compilation
             _ => null,
         };
 
-        private enum ParamKind { Stack, Immediate, Ctx, RefPc }
+        private enum ParamKind { Stack, Immediate, Ctx, RefPc, Code }
 
         private sealed class DispatchEntry
         {
