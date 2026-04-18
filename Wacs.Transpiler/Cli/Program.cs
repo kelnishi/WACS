@@ -7,13 +7,16 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using CommandLine;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Transpiler.AOT;
+using Wacs.WASIp1;
 
 namespace Wacs.Transpiler.Cli
 {
@@ -51,9 +54,10 @@ namespace Wacs.Transpiler.Cli
                 return ExitUsage;
             }
 
-            if (opts.Run && !opts.EmitMain)
+            bool hasHostBindings = opts.Wasi || opts.Bind.Any();
+            if (opts.Run && !opts.EmitMain && !hasHostBindings)
             {
-                Console.Error.WriteLine("error: --run requires --emit-main");
+                Console.Error.WriteLine("error: --run requires --emit-main, --wasi, or --bind");
                 return ExitUsage;
             }
 
@@ -88,16 +92,53 @@ namespace Wacs.Transpiler.Cli
             Module module;
             WasmRuntime runtime;
             ModuleInstance moduleInst;
+            var hostBindings = new List<IBindable>();
+            var disposables = new List<IDisposable>();
             try
             {
                 using var fileStream = new FileStream(input, FileMode.Open, FileAccess.Read);
                 module = BinaryModuleParser.ParseWasm(fileStream);
                 runtime = new WasmRuntime();
+
+                // --wasi is a shortcut that reuses the --bind machinery with
+                // a curated WASI argv. Otherwise, load the assemblies named
+                // by --bind, activate every IBindable with a parameterless
+                // ctor, and hand them to the runtime.
+                if (opts.Wasi)
+                {
+                    // Use the CLI-derived argv (wasm filename as argv[0],
+                    // then positional --run trailing args) instead of the
+                    // process-wide GetCommandLineArgs() that
+                    // Wasi.DefaultConfiguration() picks up.
+                    var wasiCfg = Wasi.DefaultConfiguration();
+                    wasiCfg.Arguments = new List<string> { Path.GetFileName(input) };
+                    wasiCfg.Arguments.AddRange(opts.Args);
+                    var wasiBinding = new Wasi(wasiCfg);
+                    hostBindings.Add(wasiBinding);
+                    disposables.Add(wasiBinding);
+                }
+
+                foreach (var asmPath in opts.Bind)
+                {
+                    var loaded = BindingLoader.LoadFromAssembly(asmPath);
+                    foreach (var b in loaded)
+                    {
+                        hostBindings.Add(b);
+                        if (b is IDisposable d) disposables.Add(d);
+                    }
+                    if (opts.Verbose)
+                        Console.WriteLine($"bind          {asmPath} → {loaded.Count} binding(s)");
+                }
+
+                foreach (var b in hostBindings)
+                    b.BindToRuntime(runtime);
+
                 moduleInst = runtime.InstantiateModule(module);
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"error: failed to parse/instantiate module: {ex.Message}");
+                foreach (var d in disposables) d.Dispose();
                 return ExitTranspileFailure;
             }
 
@@ -137,7 +178,12 @@ namespace Wacs.Transpiler.Cli
             // interfere with reflective dispatch on the live types.
             int runExit = ExitOk;
             if (opts.Run)
-                runExit = InvokeEmittedMain(programType!, opts);
+            {
+                if (hasHostBindings)
+                    runExit = HostedRunner.Run(result, runtime, moduleInst, opts.EntryPoint, opts.Verbose);
+                else
+                    runExit = InvokeEmittedMain(programType!, opts);
+            }
 
             try
             {
@@ -172,6 +218,7 @@ namespace Wacs.Transpiler.Cli
                 Console.WriteLine($"wrote {output} ({result.TranspiledCount} functions, {timer.ElapsedMilliseconds}ms)");
             }
 
+            foreach (var d in disposables) d.Dispose();
             return runExit;
         }
 

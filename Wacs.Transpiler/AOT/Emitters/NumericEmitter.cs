@@ -19,6 +19,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
+using Wacs.Core.Utilities;
 using WasmOpCode = Wacs.Core.OpCodes.OpCode;
 
 namespace Wacs.Transpiler.AOT.Emitters
@@ -455,7 +456,14 @@ namespace Wacs.Transpiler.AOT.Emitters
                 case WasmOpCode.F32ConvertI32S:    il.Emit(OpCodes.Conv_R4); break;
                 case WasmOpCode.F32ConvertI32U:    il.Emit(OpCodes.Conv_R_Un); il.Emit(OpCodes.Conv_R4); break;
                 case WasmOpCode.F32ConvertI64S:    il.Emit(OpCodes.Conv_R4); break;
-                case WasmOpCode.F32ConvertI64U:    il.Emit(OpCodes.Conv_R_Un); il.Emit(OpCodes.Conv_R4); break;
+                case WasmOpCode.F32ConvertI64U:
+                    // CLR's Conv_R_Un + Conv_R4 rounds x64 vs ARM64 differently
+                    // near the f32 mantissa boundary (~2^24 bits of precision).
+                    // Route through the interpreter's manual round-to-nearest-even
+                    // implementation for spec-exact bit patterns on all platforms.
+                    il.Emit(OpCodes.Call, typeof(FloatConversion).GetMethod(
+                        nameof(FloatConversion.ULongToFloat))!);
+                    break;
                 case WasmOpCode.F32DemoteF64:
                     il.Emit(OpCodes.Conv_R4);
                     // ARM64 conv.r4 may not set the quiet NaN bit.
@@ -466,7 +474,13 @@ namespace Wacs.Transpiler.AOT.Emitters
                 case WasmOpCode.F64ConvertI32S:    il.Emit(OpCodes.Conv_R8); break;
                 case WasmOpCode.F64ConvertI32U:    il.Emit(OpCodes.Conv_R_Un); il.Emit(OpCodes.Conv_R8); break;
                 case WasmOpCode.F64ConvertI64S:    il.Emit(OpCodes.Conv_R8); break;
-                case WasmOpCode.F64ConvertI64U:    il.Emit(OpCodes.Conv_R_Un); il.Emit(OpCodes.Conv_R8); break;
+                case WasmOpCode.F64ConvertI64U:
+                    // Same x64/ARM64 rounding divergence as F32ConvertI64U near
+                    // the f64 mantissa boundary — route through the interpreter's
+                    // spec-exact round-to-nearest-even implementation.
+                    il.Emit(OpCodes.Call, typeof(FloatConversion).GetMethod(
+                        nameof(FloatConversion.ULongToDouble))!);
+                    break;
                 case WasmOpCode.F64PromoteF32:
                     il.Emit(OpCodes.Conv_R8);
                     il.Emit(OpCodes.Call, typeof(NanHelpers).GetMethod(
