@@ -72,8 +72,12 @@ namespace Wacs.Transpiler.Cli
         public string MainClass { get; set; } = "Program";
 
         [Option("run",
-            HelpText = "After transpile (requires --emit-main), invoke the emitted Program.Main in-process with any trailing positional args.")]
+            HelpText = "After transpile, invoke in-process. With --emit-main, runs the emitted Program.Main and forwards trailing positional args. With --wasi, instead invokes the module's entry export (default _start) with WASI bound — trailing args become WASI argv.")]
         public bool Run { get; set; }
+
+        [Option("wasi",
+            HelpText = "Bind Wacs.WASIp1 preview1 imports before running. Lets --run execute modules with wasi_snapshot_preview1 imports (fd_write, args_get, clock_time_get, …) by forwarding each import through the interpreter's host bindings. Trailing positional args populate argv.")]
+        public bool Wasi { get; set; }
 
         [Value(0, MetaName = "args",
             HelpText = "Positional arguments forwarded to Program.Main when --run is set.")]

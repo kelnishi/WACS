@@ -7,6 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using CommandLine;
@@ -14,6 +15,7 @@ using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Transpiler.AOT;
+using Wacs.WASIp1;
 
 namespace Wacs.Transpiler.Cli
 {
@@ -51,9 +53,9 @@ namespace Wacs.Transpiler.Cli
                 return ExitUsage;
             }
 
-            if (opts.Run && !opts.EmitMain)
+            if (opts.Run && !opts.EmitMain && !opts.Wasi)
             {
-                Console.Error.WriteLine("error: --run requires --emit-main");
+                Console.Error.WriteLine("error: --run requires --emit-main or --wasi");
                 return ExitUsage;
             }
 
@@ -88,16 +90,30 @@ namespace Wacs.Transpiler.Cli
             Module module;
             WasmRuntime runtime;
             ModuleInstance moduleInst;
+            Wasi? wasi = null;
             try
             {
                 using var fileStream = new FileStream(input, FileMode.Open, FileAccess.Read);
                 module = BinaryModuleParser.ParseWasm(fileStream);
                 runtime = new WasmRuntime();
+
+                // Bind WASI preview1 host functions before instantiation so the
+                // module's imports resolve to Wacs.WASIp1 bindings.
+                if (opts.Wasi)
+                {
+                    var argList = new List<string> { Path.GetFileName(input) };
+                    argList.AddRange(opts.Args);
+                    var config = WasiRunner.BuildDefaultConfiguration(argList);
+                    wasi = new Wasi(config);
+                    wasi.BindToRuntime(runtime);
+                }
+
                 moduleInst = runtime.InstantiateModule(module);
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"error: failed to parse/instantiate module: {ex.Message}");
+                wasi?.Dispose();
                 return ExitTranspileFailure;
             }
 
@@ -137,7 +153,12 @@ namespace Wacs.Transpiler.Cli
             // interfere with reflective dispatch on the live types.
             int runExit = ExitOk;
             if (opts.Run)
-                runExit = InvokeEmittedMain(programType!, opts);
+            {
+                if (opts.Wasi)
+                    runExit = WasiRunner.Run(result, runtime, moduleInst, opts.EntryPoint, opts.Verbose);
+                else
+                    runExit = InvokeEmittedMain(programType!, opts);
+            }
 
             try
             {
@@ -172,6 +193,7 @@ namespace Wacs.Transpiler.Cli
                 Console.WriteLine($"wrote {output} ({result.TranspiledCount} functions, {timer.ElapsedMilliseconds}ms)");
             }
 
+            wasi?.Dispose();
             return runExit;
         }
 
