@@ -63,7 +63,6 @@ namespace Wacs.Transpiler.Test
         {
             "call_indirect.wast",
             "if.wast",
-            "gc/struct.wast",
         };
 
         private static bool IsKnownFailing(WastJson file)

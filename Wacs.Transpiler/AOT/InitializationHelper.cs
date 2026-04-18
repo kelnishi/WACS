@@ -491,6 +491,36 @@ namespace Wacs.Transpiler.AOT
                         fields[1].SetValue(gcObj, length);
                         break;
                     }
+                    case 2: // struct.new(fields...)
+                    {
+                        gcObj = Activator.CreateInstance(clrType);
+                        var fieldInfos = GetStructFields(clrType);
+                        for (int f = 0; f < fieldInfos.Length && f < gcInit.Params.Length; f++)
+                        {
+                            var fi = fieldInfos[f];
+                            fi.SetValue(gcObj, CoerceStructFieldValue(fi.FieldType, gcInit.Params[f]));
+                        }
+                        break;
+                    }
+                    case 3: // struct.new_default — zero/default all fields
+                    {
+                        gcObj = Activator.CreateInstance(clrType);
+                        // Activator already zero-initialized the fields;
+                        // just need to set any Value-typed ref slots to the
+                        // proper null-ref encoding (Data.Ptr = long.MinValue).
+                        var fieldInfos = GetStructFields(clrType);
+                        foreach (var fi in fieldInfos)
+                        {
+                            if (fi.FieldType == typeof(Value))
+                            {
+                                // Without explicit per-field reftype metadata,
+                                // default(Value) is the safest initial state;
+                                // spec-correct null-ref tagging happens when a
+                                // struct.get reads the slot anyway.
+                            }
+                        }
+                        break;
+                    }
                 }
 
                 if (gcObj != null && gcInit.GlobalIndex < ctx.Globals.Length)
@@ -503,6 +533,48 @@ namespace Wacs.Transpiler.AOT
                     field?.SetValue(ctx.Globals[gcInit.GlobalIndex], val);
                 }
             }
+        }
+
+        /// <summary>
+        /// Returns just the WASM struct fields (named field_0, field_1, …) from
+        /// an emitted WasmStruct_N class, skipping auxiliary fields like
+        /// StructuralHash / _storeIndex. Ordered by the numeric suffix so the
+        /// result matches WASM declaration order regardless of the CLR's field
+        /// enumeration order.
+        /// </summary>
+        private static System.Reflection.FieldInfo[] GetStructFields(Type clrType)
+        {
+            var list = new System.Collections.Generic.List<(int idx, System.Reflection.FieldInfo fi)>();
+            foreach (var fi in clrType.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            {
+                if (fi.Name.StartsWith("field_", StringComparison.Ordinal)
+                    && int.TryParse(fi.Name.Substring("field_".Length), out var n))
+                    list.Add((n, fi));
+            }
+            list.Sort((a, b) => a.idx.CompareTo(b.idx));
+            var result = new System.Reflection.FieldInfo[list.Count];
+            for (int i = 0; i < list.Count; i++) result[i] = list[i].fi;
+            return result;
+        }
+
+        /// <summary>
+        /// Convert a constant param (stored as long) into the CLR type of a
+        /// struct field. Packed WASM types (i8 / i16) map to byte / short and
+        /// are truncated from the 32-bit literal. Ref types left as default
+        /// when params only carry scalar constants.
+        /// </summary>
+        private static object? CoerceStructFieldValue(Type clrFieldType, long value)
+        {
+            if (clrFieldType == typeof(byte)) return (byte)(value & 0xFF);
+            if (clrFieldType == typeof(short)) return (short)(value & 0xFFFF);
+            if (clrFieldType == typeof(int)) return (int)value;
+            if (clrFieldType == typeof(long)) return value;
+            if (clrFieldType == typeof(float)) return BitConverter.Int32BitsToSingle((int)value);
+            if (clrFieldType == typeof(double)) return BitConverter.Int64BitsToDouble(value);
+            // Ref / V128 fields: params only carry scalar const initializers,
+            // so ref-typed fields in global struct.new constants aren't
+            // currently exercised. Leave the Activator-provided default.
+            return null;
         }
     }
 }
