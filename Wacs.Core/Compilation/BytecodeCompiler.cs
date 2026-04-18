@@ -9,6 +9,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.OpCodes;
@@ -21,13 +22,16 @@ namespace Wacs.Core.Compilation
     /// consumed by <see cref="SwitchRuntime"/>. Runs once per function at instantiation time;
     /// the produced <see cref="CompiledFunction"/> is reusable across invocations.
     ///
-    /// Current coverage matches the set of opcodes the generated dispatcher handles:
-    /// numeric (no immediates), t.const (fixed-width constant), local/global access
-    /// (u32 index), drop, select. Unrecognized opcodes throw
-    /// <see cref="NotSupportedException"/> — expand coverage by teaching both this compiler
-    /// and the dispatcher about the new opcode in tandem.
+    /// Two passes:
+    /// <list type="number">
+    ///   <item>Sizing — compute per-instruction byte footprint into <c>streamOffset[]</c> and
+    ///   build maps from each <c>BlockTarget</c> to its local array index (for loop targets)
+    ///   and to its matching <c>End</c>'s local index (for block/if targets).</item>
+    ///   <item>Emit — write opcodes + immediates, resolving branch targets via the maps
+    ///   built in pass 1.</item>
+    /// </list>
     ///
-    /// AOT-safe: no reflection, no dynamic code. Pure byte-writing.
+    /// AOT-safe: pure byte writes, no reflection.
     /// </summary>
     public static class BytecodeCompiler
     {
@@ -36,98 +40,175 @@ namespace Wacs.Core.Compilation
             FunctionType signature,
             int localsCount)
         {
-            var buf = new List<byte>(linked.Length * 2);
-            foreach (var inst in linked)
+            // --- Pass 1: sizing + block maps -------------------------------------------------
+            var streamOffset = new int[linked.Length + 1];
+            // ReferenceEqualityComparer<T>.Instance was added in .NET 5; the netstandard2.1
+            // target doesn't ship it, so use a tiny reference-identity polyfill.
+            var blockLocalIdx = new Dictionary<BlockTarget, int>(RefEq<BlockTarget>.Instance);
+            var blockEndLocalIdx = new Dictionary<BlockTarget, int>(RefEq<BlockTarget>.Instance);
+            var labelStack = new Stack<BlockTarget>();
+            int running = 0;
+            for (int i = 0; i < linked.Length; i++)
             {
-                EmitInstruction(buf, inst);
+                streamOffset[i] = running;
+                var inst = linked[i];
+                if (inst is BlockTarget bt)
+                {
+                    blockLocalIdx[bt] = i;
+                    labelStack.Push(bt);
+                }
+                else if (inst is InstEnd)
+                {
+                    if (labelStack.Count > 0) blockEndLocalIdx[labelStack.Pop()] = i;
+                }
+                running += SizeOf(inst);
             }
-            return new CompiledFunction(buf.ToArray(), localsCount, signature);
+            streamOffset[linked.Length] = running;
+
+            // --- Pass 2: emit ----------------------------------------------------------------
+            var buf = new byte[running];
+            int writePos = 0;
+            for (int i = 0; i < linked.Length; i++)
+            {
+                writePos = Emit(buf, writePos, linked[i], streamOffset, blockLocalIdx, blockEndLocalIdx);
+            }
+
+            return new CompiledFunction(buf, localsCount, signature);
         }
 
-        private static void EmitInstruction(List<byte> buf, InstructionBase inst)
+        /// <summary>Byte footprint of <paramref name="inst"/> in the annotated stream.</summary>
+        private static int SizeOf(InstructionBase inst)
+        {
+            OpCode primary = inst.Op;
+            // Block-structure markers are elided from the stream (Link already stamped
+            // branch targets onto the block instances; nothing to execute).
+            if (primary == OpCode.Block || primary == OpCode.Loop || primary == OpCode.End)
+                return 0;
+
+            // Prefix ops need their secondary byte too.
+            int hdr = (primary == OpCode.FB || primary == OpCode.FC || primary == OpCode.FD ||
+                      primary == OpCode.FE || primary == OpCode.FF) ? 2 : 1;
+
+            int imm = primary switch
+            {
+                // Constants: inline the value at fixed width.
+                OpCode.I32Const => 4,
+                OpCode.I64Const => 8,
+                OpCode.F32Const => 4,
+                OpCode.F64Const => 8,
+                // Variable + call: u32 index.
+                OpCode.LocalGet or OpCode.LocalSet or OpCode.LocalTee => 4,
+                OpCode.GlobalGet or OpCode.GlobalSet => 4,
+                OpCode.Call => 4,
+                // Branches: three u32 values — (target_pc, restore_stack, arity).
+                OpCode.Br => 12,
+                // No-immediate ops (drop/select/return/unreachable/nop/numeric).
+                _ => 0,
+            };
+            return hdr + imm;
+        }
+
+        private static int Emit(
+            byte[] buf, int writePos,
+            InstructionBase inst,
+            int[] streamOffset,
+            IReadOnlyDictionary<BlockTarget, int> blockLocalIdx,
+            IReadOnlyDictionary<BlockTarget, int> blockEndLocalIdx)
         {
             var op = inst.Op;
-            // ByteCode has an implicit conversion to OpCode returning its `x00` field —
-            // which is the primary byte. Don't write `(byte)op` here: that goes through
-            // ByteCode→ushort (primary << 8 | secondary) then narrows, giving the
-            // *secondary* byte (zero for non-prefix ops). Hit-and-run bug ask me how I know.
             OpCode primary = op;
 
-            // Block-structure markers are elided from the annotated stream: once Link has
-            // stamped branch targets onto the block instances, block/loop/end contribute
-            // nothing executable. Skip emit entirely. (If/else are NOT elided — they carry
-            // conditional-jump semantics; handle those with the rest of control flow.)
             if (primary == OpCode.Block || primary == OpCode.Loop || primary == OpCode.End)
-                return;
+                return writePos;
 
-            buf.Add((byte)primary);
+            buf[writePos++] = (byte)primary;
             switch (primary)
             {
-                case OpCode.FB: buf.Add((byte)op.xFB); break;
-                case OpCode.FC: buf.Add((byte)op.xFC); break;
-                case OpCode.FD: buf.Add((byte)op.xFD); break;
-                case OpCode.FE: buf.Add((byte)op.xFE); break;
-                case OpCode.FF: buf.Add((byte)op.xFF); break;
+                case OpCode.FB: buf[writePos++] = (byte)op.xFB; break;
+                case OpCode.FC: buf[writePos++] = (byte)op.xFC; break;
+                case OpCode.FD: buf[writePos++] = (byte)op.xFD; break;
+                case OpCode.FE: buf[writePos++] = (byte)op.xFE; break;
+                case OpCode.FF: buf[writePos++] = (byte)op.xFF; break;
             }
 
-            // Immediates per opcode. Order matters — the dispatcher reads them in the same
-            // left-to-right order (matching [Imm] parameter order on the handler).
             switch (primary)
             {
-                // ---- t.const: one fixed-width constant ----
+                // ---- t.const ----
                 case OpCode.I32Const:
-                    WriteS32(buf, ((InstI32Const)inst).Value);
-                    break;
+                    writePos = WriteS32(buf, writePos, ((InstI32Const)inst).Value); break;
                 case OpCode.I64Const:
-                    WriteS64(buf, ((InstI64Const)inst).Value);
-                    break;
+                    writePos = WriteS64(buf, writePos, ((InstI64Const)inst).Value); break;
                 case OpCode.F32Const:
-                    WriteS32(buf, BitConverter.SingleToInt32Bits(((InstF32Const)inst).Value));
-                    break;
+                    writePos = WriteS32(buf, writePos, BitConverter.SingleToInt32Bits(((InstF32Const)inst).Value)); break;
                 case OpCode.F64Const:
-                    WriteS64(buf, BitConverter.DoubleToInt64Bits(((InstF64Const)inst).Value));
-                    break;
+                    writePos = WriteS64(buf, writePos, BitConverter.DoubleToInt64Bits(((InstF64Const)inst).Value)); break;
 
-                // ---- local.get/set/tee: u32 local index ----
+                // ---- local/global ----
                 case OpCode.LocalGet:
-                    WriteU32(buf, (uint)((InstLocalGet)inst).GetIndex());
-                    break;
+                    writePos = WriteU32(buf, writePos, (uint)((InstLocalGet)inst).GetIndex()); break;
                 case OpCode.LocalSet:
-                    WriteU32(buf, (uint)((InstLocalSet)inst).GetIndex());
-                    break;
+                    writePos = WriteU32(buf, writePos, (uint)((InstLocalSet)inst).GetIndex()); break;
                 case OpCode.LocalTee:
-                    WriteU32(buf, (uint)((InstLocalTee)inst).GetIndex());
-                    break;
-
-                // ---- global.get/set: u32 global index ----
+                    writePos = WriteU32(buf, writePos, (uint)((InstLocalTee)inst).GetIndex()); break;
                 case OpCode.GlobalGet:
-                    WriteU32(buf, (uint)((InstGlobalGet)inst).GetIndex());
-                    break;
+                    writePos = WriteU32(buf, writePos, (uint)((InstGlobalGet)inst).GetIndex()); break;
                 case OpCode.GlobalSet:
-                    WriteU32(buf, (uint)((InstGlobalSet)inst).GetIndex());
-                    break;
+                    writePos = WriteU32(buf, writePos, (uint)((InstGlobalSet)inst).GetIndex()); break;
 
-                // ---- call: u32 function index ----
+                // ---- call ----
                 case OpCode.Call:
-                    WriteU32(buf, ((InstCall)inst).X.Value);
+                    writePos = WriteU32(buf, writePos, ((InstCall)inst).X.Value); break;
+
+                // ---- branches ----
+                case OpCode.Br:
+                    writePos = WriteBranch(buf, writePos, ((InstBranch)inst).LinkedLabel!,
+                                           streamOffset, blockLocalIdx, blockEndLocalIdx);
                     break;
 
-                // ---- No-immediate ops: drop, select, return, and every numeric opcode ----
+                // ---- No-immediate ----
+                case OpCode.Unreachable:
+                case OpCode.Nop:
                 case OpCode.Drop:
                 case OpCode.Select:
                 case OpCode.Return:
                     break;
 
                 default:
-                    // Numeric binops/unops/relops/testops carry no immediates. If the opcode
-                    // has an [OpSource] numeric handler, we're done. Otherwise the compiler
-                    // has outpaced the dispatcher and should refuse the build.
-                    if (IsNumericStackOnly(primary))
-                        break;
+                    if (IsNumericStackOnly(primary)) break;
                     throw new NotSupportedException(
                         $"BytecodeCompiler cannot yet emit opcode {op} (primary 0x{(byte)primary:X2}). " +
                         "Add a case here and a matching [OpSource]/[OpHandler] on the dispatcher side.");
             }
+
+            return writePos;
+        }
+
+        /// <summary>
+        /// Writes the branch-target triple: target_pc, results_height, arity. For Loop labels
+        /// the target is the block's own stream position (re-enter the loop body); for Block
+        /// and If labels it's the position past the matching End.
+        ///
+        /// <c>results_height</c> is the final OpStack height after the branch completes —
+        /// the label's entry height plus its arity. It's precomputed here so the handler
+        /// can pass it straight to <c>OpStack.ShiftResults</c> without an add at runtime.
+        /// </summary>
+        private static int WriteBranch(
+            byte[] buf, int writePos,
+            BlockTarget target,
+            int[] streamOffset,
+            IReadOnlyDictionary<BlockTarget, int> blockLocalIdx,
+            IReadOnlyDictionary<BlockTarget, int> blockEndLocalIdx)
+        {
+            int targetIdx = ((OpCode)target.Op) == OpCode.Loop
+                ? blockLocalIdx[target]
+                : blockEndLocalIdx[target];
+            int arity = target.Label.Arity;
+            uint targetPc      = (uint)streamOffset[targetIdx];
+            uint resultsHeight = (uint)(target.Label.StackHeight + arity);
+            writePos = WriteU32(buf, writePos, targetPc);
+            writePos = WriteU32(buf, writePos, resultsHeight);
+            writePos = WriteU32(buf, writePos, (uint)arity);
+            return writePos;
         }
 
         /// <summary>
@@ -136,31 +217,36 @@ namespace Wacs.Core.Compilation
         /// </summary>
         private static bool IsNumericStackOnly(OpCode op)
         {
-            // Spec ranges: 0x45..0xC4 is the numeric block (const excluded — we handled above).
-            // Also i32/i64 sign-extension ops 0xC0..0xC4 sit at the top of that range.
             byte b = (byte)op;
             return b >= 0x45 && b <= 0xC4;
         }
 
-        private static void WriteS32(List<byte> buf, int value)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int WriteS32(byte[] buf, int pos, int value)
         {
-            Span<byte> scratch = stackalloc byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(scratch, value);
-            buf.Add(scratch[0]); buf.Add(scratch[1]); buf.Add(scratch[2]); buf.Add(scratch[3]);
+            BinaryPrimitives.WriteInt32LittleEndian(buf.AsSpan(pos, 4), value);
+            return pos + 4;
         }
 
-        private static void WriteU32(List<byte> buf, uint value)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int WriteU32(byte[] buf, int pos, uint value)
         {
-            Span<byte> scratch = stackalloc byte[4];
-            BinaryPrimitives.WriteUInt32LittleEndian(scratch, value);
-            buf.Add(scratch[0]); buf.Add(scratch[1]); buf.Add(scratch[2]); buf.Add(scratch[3]);
+            BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(pos, 4), value);
+            return pos + 4;
         }
 
-        private static void WriteS64(List<byte> buf, long value)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int WriteS64(byte[] buf, int pos, long value)
         {
-            Span<byte> scratch = stackalloc byte[8];
-            BinaryPrimitives.WriteInt64LittleEndian(scratch, value);
-            for (int i = 0; i < 8; i++) buf.Add(scratch[i]);
+            BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), value);
+            return pos + 8;
+        }
+
+        private sealed class RefEq<T> : IEqualityComparer<T> where T : class
+        {
+            public static readonly RefEq<T> Instance = new RefEq<T>();
+            public bool Equals(T x, T y) => ReferenceEquals(x, y);
+            public int GetHashCode(T obj) => RuntimeHelpers.GetHashCode(obj);
         }
     }
 }

@@ -64,5 +64,67 @@ namespace Wacs.Compilation.Test
             Assert.Single(results);
             Assert.Equal(5, results[0].Data.Int32);
         }
+
+        /// <summary>
+        /// Minimal WASM module exporting "block_ret":
+        /// <code>
+        /// (func (export "block_ret") (result i32)
+        ///   (block (result i32)
+        ///     i32.const 7
+        ///     br 0       ;; branch to end of the block, carrying i32 on the stack
+        ///     i32.const 99  ;; dead
+        ///   )
+        /// )
+        /// </code>
+        /// Exercises br carrying a result value across a block exit.
+        /// </summary>
+        private static readonly byte[] BrBlockModule =
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type: () -> i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // Func 0 of type 0
+            0x03, 0x02, 0x01, 0x00,
+            // Export "block_ret" -> func 0
+            0x07, 0x0D, 0x01, 0x09, (byte)'b', (byte)'l', (byte)'o', (byte)'c', (byte)'k', (byte)'_', (byte)'r', (byte)'e', (byte)'t', 0x00, 0x00,
+            // Code:
+            //   body: 0 locals, block i32 { i32.const 7; br 0; i32.const 99 }; end
+            //     0x00        = locals vec count
+            //     0x02 0x7F   = block (result i32)
+            //     0x41 0x07   = i32.const 7
+            //     0x0C 0x00   = br 0
+            //     0x41 0x63   = i32.const 99  (99 = 0x63, single-byte LEB128 s32)
+            //     0x0B        = end (block)
+            //     0x0B        = end (func)
+            //   → 11 body bytes; body-size prefix 0x0B; 1 (count) + 1 (size) + 11 = 13 section body bytes; section size 0x0D.
+            0x0A, 0x0D, 0x01, 0x0B, 0x00,
+            0x02, 0x7F,
+            0x41, 0x07,
+            0x0C, 0x00,
+            0x41, 0x63,
+            0x0B,
+            0x0B,
+        };
+
+        [Fact]
+        public void Br_exits_block_with_result()
+        {
+            var runtime = new WasmRuntime();
+            using var ms = new MemoryStream(BrBlockModule);
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("m", moduleInst);
+
+            var addr = runtime.GetExportedFunction(("m", "block_ret"));
+            var funcInst = (FunctionInstance)runtime.RuntimeStore[addr];
+
+            var ctx = new ExecContext(runtime.RuntimeStore);
+            var results = SwitchRuntime.Invoke(ctx, funcInst);
+
+            Assert.Single(results);
+            // br 0 from inside the block exits carrying the top i32 (7); the i32.const 99
+            // after the br is dead code and never pushed.
+            Assert.Equal(7, results[0].Data.Int32);
+        }
     }
 }
