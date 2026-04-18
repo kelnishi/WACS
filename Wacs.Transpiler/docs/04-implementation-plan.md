@@ -591,24 +591,13 @@ Re-enable the full spec test suite and use it as the equivalence check against t
 
 ---
 
-## Stage 5 — Performance and polish
+## Stage 5 — Performance and polish (iceboxed)
 
-### Goal
-
-Opportunistic improvements once correctness is solid.
-
-### Candidates
-
-- Inline `Castclass` sites where the source is provably of the target type (skip the check).
-- Avoid redundant null checks when a value was just produced by a non-null operation.
-- Specialize `call_indirect` when the table has a single function type.
-- Specialize `ref.test` when the target is a final concrete type (only layer 0 needed).
-- Reduce redundant `WrapRef` / `UnwrapRef` at chained boundaries (e.g., `table.get` immediately followed by `table.set` of the same slot).
-
-### Exit criteria
-
-- Benchmark regressions vs interpreter are documented.
-- Each optimization has a measurement and an off-switch.
+Moved to [doc 5 — performance & polish icebox](./05-icebox-performance.md).
+Correctness is solid; stage 4 exit criteria are met (473/473). Optimization
+candidates (castclass elision, null-check elision, `call_indirect` and
+`ref.test` specialization, boundary wrap/unwrap peephole) live in doc 5
+and ship opportunistically — not on a schedule.
 
 ---
 
@@ -621,7 +610,7 @@ Opportunistic improvements once correctness is solid.
 | 2 | 1–2 | stage 1 |
 | 3 | 1 | stage 2 |
 | 4 | 1+ | stage 3 |
-| 5 | open | stage 4 |
+| 5 | iceboxed — doc 5 | stage 4 |
 
 Each session re-reads docs 1–3 as the starting context. The plan itself (this doc) is re-read and updated when a stage reveals a pattern that needs refinement.
 
