@@ -705,10 +705,25 @@ namespace Wacs.Transpiler.AOT
                 var funcType = _allFunctionTypes[_importCount + i];
 
                 // Multi-return funcs use out-params on the static method, which
-                // don't fit Action<>/Func<>. Leave their FuncTable slot null;
-                // call_indirect to such a slot would trap, but direct call IL
-                // (CallEmitter) invokes the static method directly and is fine.
-                if (funcType.ResultType.Types.Length > 1) continue;
+                // don't fit Action<>/Func<>. Leave their FuncTable slot null
+                // and register the MethodInfo with MultiReturnMethodRegistry so
+                // InvokeIndirectMulti can dispatch via reflection when a
+                // call_indirect / call_ref hits a multi-return target.
+                // Direct call IL (CallEmitter) still invokes the static method
+                // directly and remains unaffected.
+                if (funcType.ResultType.Types.Length > 1)
+                {
+                    // MultiReturnMethodRegistry.Register(initDataId, funcIdx, mb)
+                    il.Emit(OpCodes.Ldc_I4, _initDataId);
+                    il.Emit(OpCodes.Ldc_I4, _importCount + i);
+                    il.Emit(OpCodes.Ldtoken, mb);
+                    il.Emit(OpCodes.Call, typeof(MethodBase).GetMethod(
+                        nameof(MethodBase.GetMethodFromHandle), new[] { typeof(RuntimeMethodHandle) })!);
+                    il.Emit(OpCodes.Castclass, typeof(MethodInfo));
+                    il.Emit(OpCodes.Call, typeof(MultiReturnMethodRegistry).GetMethod(
+                        nameof(MultiReturnMethodRegistry.Register))!);
+                    continue;
+                }
 
                 // Build the delegate type without ctx (what call_indirect expects)
                 var delegateType = CallEmitter.BuildDelegateType(funcType);
