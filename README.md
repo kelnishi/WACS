@@ -95,7 +95,7 @@ dotnet add package WACS
 dotnet add package WACS.WASIp1
 ````
 
-### AOT Transpiler (preview)
+### AOT Transpiler
 
 `WACS.Transpiler` is a companion package that ahead-of-time transpiles a
 `.wasm` module into a .NET assembly. Installs as a [dotnet global
@@ -103,12 +103,12 @@ tool](https://learn.microsoft.com/en-us/dotnet/core/tools/global-tools),
 backed by the same WACS runtime:
 
 ```bash
-dotnet tool install -g WACS.Transpiler --prerelease
+dotnet tool install -g WACS.Transpiler
 wasm-transpile -i module.wasm -o module.dll
 ```
 
 See [`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the full
-flag surface, library API, and v0.1-preview known limitations.
+flag surface, library API, and v0.1 known limitations.
 
 ### From source
 
@@ -329,10 +329,10 @@ ahead-of-time, producing native CLR methods the JIT can optimize like any other 
   under `--max-fn-size`) falls back to the Wacs.Core interpreter for that function only, so the module still runs.
 - **CLI + library.** Installed as a dotnet global tool (`wasm-transpile`) for one-shot `.wasm → .dll` builds, and
   exposed as `Wacs.Transpiler.AOT.ModuleTranspiler` for programmatic use inside a host. See
-  [`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the full flag surface and v0.1-preview constraints
+  [`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the full flag surface and v0.1 known limitations
   (e.g. standalone cross-process `.dll` execution is slated for v0.2).
 
-The transpiler currently passes 469/473 on the WebAssembly 3.0 spec test suite (the interpreter is spec-complete on the same suite; the four remaining AOT gaps are narrow multi-return and GC-coercion cases tracked for v0.2).
+The transpiler is spec-equivalent to the interpreter on the WebAssembly 3.0 test suite (473/473), verified on macOS ARM64 and Linux x64.
 
 Optimization is an ongoing process and I have a few other strategies yet to implement.
 
