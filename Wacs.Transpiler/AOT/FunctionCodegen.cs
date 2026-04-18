@@ -682,15 +682,16 @@ namespace Wacs.Transpiler.AOT
 
                     int excess = _currentInfo?.Excess ?? 0;
                     EmitExcessCleanup(il, excess, funcBlock);
-                    // When the function-level block uses shuttle locals
-                    // (allocated whenever the function contains a try_table —
-                    // cross-try branches emit Leave which clears the stack),
-                    // the return value was just stashed into those locals.
-                    // Route through funcEndLabel where the reload + Ret
-                    // epilogue lives so the emitted Ret sees the return value
-                    // on the stack. Otherwise (no shuttle) a direct Ret is
-                    // correct and matches the CLR's try-frame unwind behavior.
-                    if (funcBlock.ResultLocals != null)
+                    // Route through funcEndLabel where the multi-result spill
+                    // + Ret epilogue lives when the function returns more than
+                    // one value — a direct Ret would only consume r0 and leave
+                    // r1..r_{N-1} on the stack, producing invalid IL. Shuttle
+                    // locals (allocated whenever the function contains a
+                    // try_table) also require the epilogue because cross-try
+                    // branches emit Leave which empties the stack. Otherwise
+                    // (single-result, no shuttle), a direct Ret matches the
+                    // CLR's try-frame unwind behavior.
+                    if (funcBlock.ResultLocals != null || _funcInst.Type.ResultType.Types.Length > 1)
                     {
                         BranchBridge.EmitBranch(il, funcBlock, _tryDepth);
                     }

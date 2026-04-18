@@ -63,7 +63,6 @@ namespace Wacs.Transpiler.Test
         {
             "call_indirect.wast",
             "conversions.wast",
-            "func.wast",
             "if.wast",
             "gc/struct.wast",
         };
