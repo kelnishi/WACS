@@ -119,6 +119,214 @@ namespace Wacs.Core.Runtime
             return Context.Store[addr];
         }
 
+        // ==================================================================
+        // Exported entity accessors (doc 1 §4.6, spec "resolution").
+        //
+        // Each exportable kind (Function / Memory / Table / Global / Tag) has
+        // matching overloads:
+        //   TryGetExported{Kind}(string entity, out T)
+        //   TryGetExported{Kind}((string module, string entity), out T)
+        //   GetExported{Kind}((string module, string entity)) -> T  (throws)
+        //
+        // Function returns FuncAddr (use CreateInvoker / GetFunction to
+        // invoke or fetch the IFunctionInstance). The other kinds return
+        // the *Instance type directly — they're immediately usable to read
+        // memory bytes, inspect globals, etc., so there's no reason to route
+        // callers through the Store indexer. See issue #63.
+        // ==================================================================
+
+        public bool TryGetExportedMemory(string entity, out MemoryInstance memory)
+        {
+            var addrs = _moduleInstances.SelectMany(m => m.Exports)
+                .Where(e => e.Name == entity)
+                .Select(e => e.Value)
+                .OfType<ExternalValue.Memory>()
+                .Select(m => m.Address)
+                .ToList();
+            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            {
+                memory = Context.Store[addrs[^1]];
+                return true;
+            }
+            memory = null!;
+            return false;
+        }
+
+        public bool TryGetExportedMemory((string module, string entity) id, out MemoryInstance memory)
+        {
+            if (GetBoundEntity(id) is MemAddr addr && Context.Store.Contains(addr))
+            {
+                memory = Context.Store[addr];
+                return true;
+            }
+            var addrs = _moduleInstances
+                .Where(m => m.Name == id.module)
+                .SelectMany(m => m.Exports)
+                .Where(e => e.Name == id.entity)
+                .Select(e => e.Value)
+                .OfType<ExternalValue.Memory>()
+                .Select(m => m.Address)
+                .ToList();
+            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            {
+                memory = Context.Store[addrs[^1]];
+                return true;
+            }
+            memory = null!;
+            return false;
+        }
+
+        public MemoryInstance GetExportedMemory((string module, string entity) id)
+        {
+            if (TryGetExportedMemory(id, out var memory)) return memory;
+            throw new UnboundEntityException(
+                $"Memory {id} was not exported from any modules currently loaded in the runtime.");
+        }
+
+        public bool TryGetExportedTable(string entity, out TableInstance table)
+        {
+            var addrs = _moduleInstances.SelectMany(m => m.Exports)
+                .Where(e => e.Name == entity)
+                .Select(e => e.Value)
+                .OfType<ExternalValue.Table>()
+                .Select(t => t.Address)
+                .ToList();
+            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            {
+                table = Context.Store[addrs[^1]];
+                return true;
+            }
+            table = null!;
+            return false;
+        }
+
+        public bool TryGetExportedTable((string module, string entity) id, out TableInstance table)
+        {
+            if (GetBoundEntity(id) is TableAddr addr && Context.Store.Contains(addr))
+            {
+                table = Context.Store[addr];
+                return true;
+            }
+            var addrs = _moduleInstances
+                .Where(m => m.Name == id.module)
+                .SelectMany(m => m.Exports)
+                .Where(e => e.Name == id.entity)
+                .Select(e => e.Value)
+                .OfType<ExternalValue.Table>()
+                .Select(t => t.Address)
+                .ToList();
+            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            {
+                table = Context.Store[addrs[^1]];
+                return true;
+            }
+            table = null!;
+            return false;
+        }
+
+        public TableInstance GetExportedTable((string module, string entity) id)
+        {
+            if (TryGetExportedTable(id, out var table)) return table;
+            throw new UnboundEntityException(
+                $"Table {id} was not exported from any modules currently loaded in the runtime.");
+        }
+
+        public bool TryGetExportedGlobal(string entity, out GlobalInstance global)
+        {
+            var addrs = _moduleInstances.SelectMany(m => m.Exports)
+                .Where(e => e.Name == entity)
+                .Select(e => e.Value)
+                .OfType<ExternalValue.Global>()
+                .Select(g => g.Address)
+                .ToList();
+            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            {
+                global = Context.Store[addrs[^1]];
+                return true;
+            }
+            global = null!;
+            return false;
+        }
+
+        public bool TryGetExportedGlobal((string module, string entity) id, out GlobalInstance global)
+        {
+            if (GetBoundEntity(id) is GlobalAddr addr && Context.Store.Contains(addr))
+            {
+                global = Context.Store[addr];
+                return true;
+            }
+            var addrs = _moduleInstances
+                .Where(m => m.Name == id.module)
+                .SelectMany(m => m.Exports)
+                .Where(e => e.Name == id.entity)
+                .Select(e => e.Value)
+                .OfType<ExternalValue.Global>()
+                .Select(g => g.Address)
+                .ToList();
+            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            {
+                global = Context.Store[addrs[^1]];
+                return true;
+            }
+            global = null!;
+            return false;
+        }
+
+        public GlobalInstance GetExportedGlobal((string module, string entity) id)
+        {
+            if (TryGetExportedGlobal(id, out var global)) return global;
+            throw new UnboundEntityException(
+                $"Global {id} was not exported from any modules currently loaded in the runtime.");
+        }
+
+        public bool TryGetExportedTag(string entity, out TagInstance tag)
+        {
+            var addrs = _moduleInstances.SelectMany(m => m.Exports)
+                .Where(e => e.Name == entity)
+                .Select(e => e.Value)
+                .OfType<ExternalValue.Tag>()
+                .Select(t => t.Address)
+                .ToList();
+            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            {
+                tag = Context.Store[addrs[^1]];
+                return true;
+            }
+            tag = null!;
+            return false;
+        }
+
+        public bool TryGetExportedTag((string module, string entity) id, out TagInstance tag)
+        {
+            if (GetBoundEntity(id) is TagAddr addr && Context.Store.Contains(addr))
+            {
+                tag = Context.Store[addr];
+                return true;
+            }
+            var addrs = _moduleInstances
+                .Where(m => m.Name == id.module)
+                .SelectMany(m => m.Exports)
+                .Where(e => e.Name == id.entity)
+                .Select(e => e.Value)
+                .OfType<ExternalValue.Tag>()
+                .Select(t => t.Address)
+                .ToList();
+            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            {
+                tag = Context.Store[addrs[^1]];
+                return true;
+            }
+            tag = null!;
+            return false;
+        }
+
+        public TagInstance GetExportedTag((string module, string entity) id)
+        {
+            if (TryGetExportedTag(id, out var tag)) return tag;
+            throw new UnboundEntityException(
+                $"Tag {id} was not exported from any modules currently loaded in the runtime.");
+        }
+
         /// <summary>
         /// Replace the function at the given address with a different implementation.
         /// Used by the AOT transpiler to swap interpreter-backed functions with transpiled versions.
