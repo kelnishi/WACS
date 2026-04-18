@@ -26,6 +26,10 @@ namespace Wacs.Core.Instructions.SIMD
         private static V128 V128Load(ExecContext ctx, [Imm] uint memIdx, [Imm] ulong offset, uint addr)
             => MemoryMarshal.Read<V128>(MemoryHandlers.MemSlice(ctx, memIdx, addr, offset, 16, "v128.load"));
 
+        // 0xFD 0C v128.const — push the 16-byte literal from the stream.
+        [OpHandler(SimdCode.V128Const)]
+        private static V128 V128Const([Imm] V128 value) => value;
+
         // 0xFD 0B v128.store — pop val (top), pop addr, write 16 bytes.
         [OpHandler(SimdCode.V128Store)]
         private static void V128Store(ExecContext ctx, [Imm] uint memIdx, [Imm] ulong offset, uint addr, V128 val)

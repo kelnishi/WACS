@@ -9,6 +9,8 @@
 using System;
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using Wacs.Core.Runtime;
 
 namespace Wacs.Core.Compilation
 {
@@ -80,6 +82,14 @@ namespace Wacs.Core.Compilation
             long bits = BinaryPrimitives.ReadInt64LittleEndian(code.Slice(pc));
             pc += 8;
             return BitConverter.Int64BitsToDouble(bits);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static V128 ReadV128(ReadOnlySpan<byte> code, ref int pc)
+        {
+            V128 v = MemoryMarshal.Read<V128>(code.Slice(pc, 16));
+            pc += 16;
+            return v;
         }
     }
 }

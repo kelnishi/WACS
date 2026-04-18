@@ -416,6 +416,7 @@ namespace Wacs.Compilation
             "float"  => "ReadF32",
             "double" => "ReadF64",
             "byte"   => "ReadU8",
+            "Wacs.Core.Runtime.V128" => "ReadV128",
             _ => null,
         };
 
