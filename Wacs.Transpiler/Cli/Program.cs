@@ -29,6 +29,7 @@ namespace Wacs.Transpiler.Cli
         private const int ExitUsage = 1;
         private const int ExitTranspileFailure = 2;
         private const int ExitEmitMainConstraint = 3;
+        private const int ExitRunFailure = 4;
 
         public static int Main(string[] args)
         {
@@ -47,6 +48,12 @@ namespace Wacs.Transpiler.Cli
             if (!File.Exists(input))
             {
                 Console.Error.WriteLine($"error: input file not found: {input}");
+                return ExitUsage;
+            }
+
+            if (opts.Run && !opts.EmitMain)
+            {
+                Console.Error.WriteLine("error: --run requires --emit-main");
                 return ExitUsage;
             }
 
@@ -106,11 +113,12 @@ namespace Wacs.Transpiler.Cli
                 return ExitTranspileFailure;
             }
 
+            Type? programType = null;
             if (opts.EmitMain)
             {
                 try
                 {
-                    MainEntryEmitter.Emit(result, opts.MainClass, opts.EntryPoint);
+                    programType = MainEntryEmitter.Emit(result, opts.MainClass, opts.EntryPoint);
                 }
                 catch (MainEntryEmitter.ConstraintException ex)
                 {
@@ -123,6 +131,13 @@ namespace Wacs.Transpiler.Cli
                     return ExitTranspileFailure;
                 }
             }
+
+            // Invoke the in-process Main before SaveAssembly if --run is set;
+            // SaveAssembly runs Lokad.ILPack over the dynamic module, which can
+            // interfere with reflective dispatch on the live types.
+            int runExit = ExitOk;
+            if (opts.Run)
+                runExit = InvokeEmittedMain(programType!, opts);
 
             try
             {
@@ -156,7 +171,32 @@ namespace Wacs.Transpiler.Cli
             {
                 Console.WriteLine($"wrote {output} ({result.TranspiledCount} functions, {timer.ElapsedMilliseconds}ms)");
             }
-            return ExitOk;
+
+            return runExit;
+        }
+
+        private static int InvokeEmittedMain(Type programType, CliOptions opts)
+        {
+            var main = programType.GetMethod("Main",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            if (main == null)
+            {
+                Console.Error.WriteLine($"error: --run: no static Main(string[]) on '{programType.FullName}'");
+                return ExitRunFailure;
+            }
+            var forwarded = System.Linq.Enumerable.ToArray(opts.Args);
+            if (opts.Verbose)
+                Console.WriteLine($"run           {programType.FullName}.Main({string.Join(" ", forwarded)})");
+            try
+            {
+                var rc = main.Invoke(null, new object?[] { forwarded });
+                return rc is int i ? i : ExitOk;
+            }
+            catch (System.Reflection.TargetInvocationException tie)
+            {
+                Console.Error.WriteLine($"error: --run: {tie.InnerException?.Message ?? tie.Message}");
+                return ExitRunFailure;
+            }
         }
 
         private static TranspilerOptions BuildTranspilerOptions(CliOptions opts)

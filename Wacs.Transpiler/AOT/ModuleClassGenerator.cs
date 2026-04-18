@@ -700,6 +700,12 @@ namespace Wacs.Transpiler.AOT
                 var mb = _methodBuilders[i];
                 var funcType = _allFunctionTypes[_importCount + i];
 
+                // Multi-return funcs use out-params on the static method, which
+                // don't fit Action<>/Func<>. Leave their FuncTable slot null;
+                // call_indirect to such a slot would trap, but direct call IL
+                // (CallEmitter) invokes the static method directly and is fine.
+                if (funcType.ResultType.Types.Length > 1) continue;
+
                 // Build the delegate type without ctx (what call_indirect expects)
                 var delegateType = CallEmitter.BuildDelegateType(funcType);
                 if (delegateType == null) continue;
