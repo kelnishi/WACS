@@ -6,6 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using System.Collections.Generic;
 using CommandLine;
 
 namespace Wacs.Transpiler.Cli
@@ -76,8 +77,12 @@ namespace Wacs.Transpiler.Cli
         public bool Run { get; set; }
 
         [Option("wasi",
-            HelpText = "Bind Wacs.WASIp1 preview1 imports before running. Lets --run execute modules with wasi_snapshot_preview1 imports (fd_write, args_get, clock_time_get, …) by forwarding each import through the interpreter's host bindings. Trailing positional args populate argv.")]
+            HelpText = "Shortcut for `--bind <path-to-Wacs.WASIp1.dll>`. Binds WASI preview1 imports before running. Trailing positional args populate argv.")]
         public bool Wasi { get; set; }
+
+        [Option("bind", Separator = ',',
+            HelpText = "Path(s) to assemblies containing IBindable host libraries. The transpiler reflects each assembly, activates every concrete IBindable type with a parameterless ctor, and wires them into the runtime before transpilation. Repeat or comma-separate for multiple assemblies. Works with any library following the IBindable pattern (WASI, custom game hosts, etc.).")]
+        public IEnumerable<string> Bind { get; set; } = System.Array.Empty<string>();
 
         [Value(0, MetaName = "args",
             HelpText = "Positional arguments forwarded to Program.Main when --run is set.")]

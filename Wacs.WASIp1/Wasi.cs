@@ -15,11 +15,13 @@
 //  */
 
 using System;
+using System.IO;
+using System.Linq;
 using Wacs.Core.Runtime;
 
 namespace Wacs.WASIp1
 {
-    public class Wasi : IDisposable
+    public class Wasi : IBindable, IDisposable
     {
         private readonly Clock _clock;
         private readonly WasiConfiguration _config;
@@ -32,6 +34,15 @@ namespace Wacs.WASIp1
         private readonly Sock _sock;
         private readonly State _state;
 
+        /// <summary>
+        /// Standard-defaults ctor for host discovery via <see cref="IBindable"/>.
+        /// Attaches stdio to the current process, inherits host environment
+        /// variables, and treats the process's current directory as the WASI
+        /// root with no preopens. Callers that need a tighter configuration
+        /// should use <see cref="Wasi(WasiConfiguration)"/> directly.
+        /// </summary>
+        public Wasi() : this(DefaultConfiguration()) { }
+
         public Wasi(WasiConfiguration config)
         {
             _config = config;
@@ -43,6 +54,29 @@ namespace Wacs.WASIp1
             _random = new Random();
             _sock = new Sock(_state);
             _fs = new FileSystem(config, _state);
+        }
+
+        /// <summary>
+        /// Standard-defaults WASI configuration — stdio attached to the
+        /// current process, host environment variables inherited, and the
+        /// process's current directory as the WASI root. No preopened
+        /// directories; callers that need filesystem access should extend
+        /// <see cref="WasiConfiguration.PreopenedDirectories"/>.
+        /// </summary>
+        public static WasiConfiguration DefaultConfiguration()
+        {
+            return new WasiConfiguration
+            {
+                StandardInput = Console.OpenStandardInput(),
+                StandardOutput = Console.OpenStandardOutput(),
+                StandardError = Console.OpenStandardError(),
+                Arguments = Environment.GetCommandLineArgs().Skip(1).ToList(),
+                EnvironmentVariables = Environment.GetEnvironmentVariables()
+                    .Cast<System.Collections.DictionaryEntry>()
+                    .ToDictionary(de => de.Key.ToString()!,
+                                  de => de.Value?.ToString() ?? string.Empty),
+                HostRootDirectory = Directory.GetCurrentDirectory(),
+            };
         }
 
         public void BindToRuntime(WasmRuntime runtime)
