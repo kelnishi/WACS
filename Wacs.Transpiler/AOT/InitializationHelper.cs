@@ -43,6 +43,28 @@ namespace Wacs.Transpiler.AOT
         /// <summary>Structural hash per function index, for function type identity checks.</summary>
         public int[]? FuncTypeHashes { get; set; }
 
+        /// <summary>
+        /// Per-function ordered list of structural hashes: the function's own
+        /// declared type hash, then every transitive supertype hash. Populated
+        /// only when the module uses declared subtyping (sub &lt;super&gt; ...);
+        /// consumers fall back to <see cref="FuncTypeHashes"/> for the direct
+        /// match when this is null. Used by <c>ref.test</c> / <c>ref.cast</c>
+        /// on funcref to decide subtype relationships without the interpreter
+        /// TypesSpace at runtime (doc 1 §11.8).
+        /// </summary>
+        public int[][]? FuncTypeSuperHashes { get; set; }
+
+        /// <summary>
+        /// Structural hash per module-declared type, indexed by type index.
+        /// Used by <c>ref.test</c> / <c>ref.cast</c> on funcref to resolve
+        /// the target type's hash in standalone mode (no TypesSpace).
+        /// </summary>
+        public int[]? TypeHashes { get; set; }
+
+        /// <summary>Parallel to <see cref="TypeHashes"/>: whether the declared
+        /// type at this index is a function type.</summary>
+        public bool[]? TypeIsFunc { get; set; }
+
         /// <summary>Active data segments: (memIdx, offset, segmentId) per segment.</summary>
         public (int memIdx, int offset, int segId)[] ActiveDataSegments { get; set; }
             = Array.Empty<(int, int, int)>();
@@ -330,6 +352,9 @@ namespace Wacs.Transpiler.AOT
             ctx.ElemSegmentBaseId = data.ElemSegmentBaseId;
             ctx.InitDataId = initDataId;
             ctx.FuncTypeHashes = data.FuncTypeHashes;
+            ctx.FuncTypeSuperHashes = data.FuncTypeSuperHashes;
+            ctx.TypeHashes = data.TypeHashes;
+            ctx.TypeIsFunc = data.TypeIsFunc;
 
             // Tags (doc 2 §5). Allocate the full tag index space; imports at
             // the front (linker fills them), locals after with freshly allocated

@@ -329,6 +329,11 @@ namespace Wacs.Transpiler.AOT.Emitters
                     nameof(Type.GetTypeFromHandle), new[] { typeof(RuntimeTypeHandle) })!);
             }
 
+            // Push expected WASM type idx so InvokeIndirect can verify
+            // sub-supertype match against the function's declared type
+            // (doc 1 §6.2). -1 when the site didn't carry one.
+            il.Emit(OpCodes.Ldc_I4, site.TypeIdx);
+
             il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
                 nameof(CallHelpers.InvokeIndirect), BindingFlags.Public | BindingFlags.Static)!);
 
@@ -678,7 +683,8 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// </summary>
         public static object? InvokeIndirect(
             ThinContext ctx, int tableIdx, int elemIdx, object?[] args,
-            Type? expectedReturn = null)
+            Type? expectedReturn = null,
+            int expectedTypeIdx = -1)
         {
             var table = ctx.Tables[tableIdx];
             if (elemIdx < 0 || elemIdx >= table.Elements.Count)
@@ -688,23 +694,64 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (r.IsNullRef)
                 throw new TrapException("uninitialized element");
 
+            // Resolve funcIdx once so we can check the WASM-declared type
+            // (including sub-supertypes) before dispatching. The delegate's
+            // CLR signature alone is lossy: two WASM func types may lower
+            // to the same CLR delegate shape yet not be subtype-related.
+            int resolvedFuncIdx = -1;
+            if (ctx.Types != null)
+                resolvedFuncIdx = (int)r.GetFuncAddr(ctx.Types).Value;
+            else
+                resolvedFuncIdx = (int)r.Data.Ptr;
+
+            // WASM type-equivalence check (doc 1 §6.2): declared type of the
+            // callee must be a subtype of the call_indirect's type operand.
+            // Skip when the call site didn't carry a type idx (call_ref path
+            // routes here without one).
+            if (expectedTypeIdx >= 0)
+            {
+                int expectedHash;
+                if (ctx.Module?.Types != null && ctx.Module.Types.Contains((TypeIdx)expectedTypeIdx))
+                    expectedHash = ctx.Module.Types[(TypeIdx)expectedTypeIdx].GetHashCode();
+                else if (ctx.TypeHashes != null && expectedTypeIdx < ctx.TypeHashes.Length)
+                    expectedHash = ctx.TypeHashes[expectedTypeIdx];
+                else
+                    expectedHash = 0; // can't check — skip
+
+                if (expectedHash != 0)
+                {
+                    bool ok = false;
+                    if (ctx.FuncTypeSuperHashes != null
+                        && resolvedFuncIdx >= 0 && resolvedFuncIdx < ctx.FuncTypeSuperHashes.Length
+                        && ctx.FuncTypeSuperHashes[resolvedFuncIdx] != null)
+                    {
+                        var chain = ctx.FuncTypeSuperHashes[resolvedFuncIdx];
+                        for (int i = 0; i < chain.Length; i++)
+                            if (chain[i] == expectedHash) { ok = true; break; }
+                    }
+                    else if (ctx.FuncTypeHashes != null
+                        && resolvedFuncIdx >= 0 && resolvedFuncIdx < ctx.FuncTypeHashes.Length)
+                    {
+                        ok = ctx.FuncTypeHashes[resolvedFuncIdx] == expectedHash;
+                    }
+                    else
+                    {
+                        ok = true; // no metadata — defer to CLR signature check below
+                    }
+                    if (!ok) throw new TrapException("indirect call type mismatch");
+                }
+            }
+
             // Try to get delegate directly from the table element (cross-module path).
             // Bound delegates are stored as DelegateRef in GcRef on funcref Values.
             Delegate? del = (r.GcRef as DelegateRef)?.Target;
 
             if (del == null)
             {
-                // Fallback: resolve funcIdx → FuncTable lookup (same-module path)
-                int funcIdx;
-                if (ctx.Types != null)
-                    funcIdx = (int)r.GetFuncAddr(ctx.Types).Value;
-                else
-                    funcIdx = (int)r.Data.Ptr;
-
-                if (funcIdx < 0 || funcIdx >= ctx.FuncTable.Length)
+                if (resolvedFuncIdx < 0 || resolvedFuncIdx >= ctx.FuncTable.Length)
                     throw new TrapException("undefined element");
 
-                del = ctx.FuncTable[funcIdx];
+                del = ctx.FuncTable[resolvedFuncIdx];
                 if (del == null)
                     throw new TrapException("uninitialized element");
             }
