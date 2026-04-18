@@ -332,7 +332,7 @@ ahead-of-time, producing native CLR methods the JIT can optimize like any other 
   [`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the full flag surface and v0.1-preview constraints
   (e.g. standalone cross-process `.dll` execution is slated for v0.2).
 
-The transpiler is spec-equivalent to the interpreter on the WebAssembly 3.0 test suite (473/473).
+The transpiler currently passes 469/473 on the WebAssembly 3.0 spec test suite (the interpreter is spec-complete on the same suite; the four remaining AOT gaps are narrow multi-return and GC-coercion cases tracked for v0.2).
 
 Optimization is an ongoing process and I have a few other strategies yet to implement.
 
