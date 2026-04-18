@@ -152,6 +152,8 @@ namespace Wacs.Core.Compilation
                 OpCode.MemorySize or OpCode.MemoryGrow => 4,
                 // table.get / table.set: tableIdx:u32.
                 OpCode.TableGet or OpCode.TableSet => 4,
+                // FB-prefixed GC ops — secondary byte selects the layout.
+                OpCode.FB => SizeOfGc(inst.Op.xFB),
                 // FC-prefixed bulk memory + table ops — secondary byte selects the layout.
                 OpCode.FC => SizeOfExt(inst.Op.xFC),
                 // FD-prefixed SIMD ops — secondary byte selects the layout.
@@ -180,6 +182,17 @@ namespace Wacs.Core.Compilation
         {
             // Standard SIMD ops with no immediates (arithmetic, unary, test, etc.).
             // Listed as they're added to the dispatcher; callers downstream will Emit.
+            _ => 0,
+        };
+
+        /// <summary>
+        /// Immediate byte count for 0xFB-prefixed GC opcodes. i31 ops take no immediates;
+        /// struct/array/cast ops take type-index and field-index immediates that will be
+        /// handled as they're wired in.
+        /// </summary>
+        private static int SizeOfGc(GcCode code) => code switch
+        {
+            GcCode.RefI31 or GcCode.I31GetS or GcCode.I31GetU => 0,
             _ => 0,
         };
 
@@ -395,6 +408,13 @@ namespace Wacs.Core.Compilation
                     break;
                 case OpCode.TableSet:
                     writePos = WriteU32(buf, writePos, (uint)((InstTableSet)inst).TableIndex);
+                    break;
+
+                // ---- FB-prefixed: GC ops (i31/struct/array/cast) --------
+                // For the current slice (i31 ops only) there are no immediates — the
+                // 2-byte opcode header is the whole payload. Future struct/array/cast
+                // ops will extend this with their own helper.
+                case OpCode.FB:
                     break;
 
                 // ---- FC-prefixed: bulk memory + table ops --------
