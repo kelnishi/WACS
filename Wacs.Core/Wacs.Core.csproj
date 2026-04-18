@@ -33,6 +33,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Test project needs access to internals like BlockTarget, InstBranch.LinkedLabel etc.
+         for targeted white-box assertions on the compile pipeline. -->
+    <InternalsVisibleTo Include="Wacs.Compilation.Test" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Net.Compilers.Toolset" Version="4.3.1">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

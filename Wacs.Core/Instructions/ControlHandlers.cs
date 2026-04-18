@@ -9,6 +9,7 @@
 using Wacs.Core.Compilation;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
@@ -24,6 +25,29 @@ namespace Wacs.Core.Instructions
     /// </summary>
     internal static class ControlHandlers
     {
+        // 0x00 unreachable — trap.
+        [OpHandler(OpCode.Unreachable)]
+        private static void Unreachable()
+            => throw new TrapException("unreachable");
+
+        // 0x01 nop — do nothing. Kept as an explicit handler (instead of elision in the
+        // compiler) so the op still occupies a byte in the stream — useful for debugging
+        // and benchmarking (you can see the cost of one fetch+dispatch cycle).
+        [OpHandler(OpCode.Nop)]
+        private static void Nop() { }
+
+        // 0x0C br — unconditional branch. Stream: [target_pc:u32][results_height:u32][arity:u32].
+        // results_height is the final OpStack height after the branch (label entry height +
+        // arity). ShiftResults preserves the top `arity` values, truncates in between, and
+        // leaves exactly results_height entries on the stack.
+        [OpHandler(OpCode.Br)]
+        private static void Br(ExecContext ctx, ref int pc,
+                               [Imm] uint targetPc, [Imm] uint resultsHeight, [Imm] uint arity)
+        {
+            ctx.OpStack.ShiftResults((int)arity, (int)resultsHeight);
+            pc = (int)targetPc;
+        }
+
         // 0x0F return — terminates the current function body.
         // Pushing pc past the end of the stream exits SwitchRuntime.Run's while loop
         // cleanly, leaving whatever result values the producer already put on the

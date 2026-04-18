@@ -275,20 +275,38 @@ namespace Wacs.Compilation.Test
         // -----------------------------------------------------------------------------
 
         [Fact]
-        public void Unknown_opcode_throws()
+        public void Unreachable_traps()
         {
             var ctx = FreshContext();
-            // 0x00 (Unreachable) has no [OpSource] coverage yet — expect NotSupported.
-            Assert.Throws<System.NotSupportedException>(() =>
-                SwitchRuntime.Run(ctx, new byte[] { 0x00 }));
+            Assert.Throws<TrapException>(() =>
+                SwitchRuntime.Run(ctx, new byte[] { (byte)OpCode.Unreachable }));
         }
 
         [Fact]
-        public void HandledOpcodeCount_includes_phase2_additions()
+        public void Nop_is_a_noop()
         {
-            // 102 numeric [OpSource] + 4 const + 5 variable + 2 parametric + return + call = 115 minimum.
-            Assert.True(GeneratedDispatcher.HandledOpcodeCount >= 115,
-                $"Expected ≥115 covered ops; got {GeneratedDispatcher.HandledOpcodeCount}.");
+            var ctx = FreshContext();
+            ctx.OpStack.PushI32(11);
+            SwitchRuntime.Run(ctx, new byte[] { (byte)OpCode.Nop, (byte)OpCode.Nop });
+            Assert.Equal(11, ctx.OpStack.PopI32());
+        }
+
+        [Fact]
+        public void Unknown_opcode_throws()
+        {
+            var ctx = FreshContext();
+            // 0xBF is in a gap between the numeric range and the reference opcodes — no
+            // [OpSource]/[OpHandler] coverage, dispatcher should surface NotSupported.
+            Assert.Throws<System.NotSupportedException>(() =>
+                SwitchRuntime.Run(ctx, new byte[] { 0xBF }));
+        }
+
+        [Fact]
+        public void HandledOpcodeCount_includes_phase3a_additions()
+        {
+            // 102 numeric + 4 const + 5 variable + 2 parametric + return + call + unreachable + nop = 117.
+            Assert.True(GeneratedDispatcher.HandledOpcodeCount >= 117,
+                $"Expected ≥117 covered ops; got {GeneratedDispatcher.HandledOpcodeCount}.");
         }
     }
 }
