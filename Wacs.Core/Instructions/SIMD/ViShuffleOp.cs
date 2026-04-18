@@ -24,7 +24,8 @@ namespace Wacs.Core.Instructions
         public InstShuffleOp() : base(ByteCode.I8x16Shuffle, -1) { }
         
         private V128 X;
-        
+        public V128 LaneIndices => X;
+
         public override void Validate(IWasmValidationContext context)
         {
             for (int i = 0; i < 16; ++i)

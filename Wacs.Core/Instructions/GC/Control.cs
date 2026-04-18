@@ -25,13 +25,16 @@ namespace Wacs.Core.Instructions.GC
     public class InstBrOnCast : InstructionBase
     {
         public InstBrOnCast() : base(ByteCode.BrOnCast) { }
-        
+
         public CastFlags Flags;
         public LabelIdx L;
         private BlockTarget? LinkedLabel;
 
         private ValType Rt1;
         private ValType Rt2;
+        public int Label => (int)L.Value;
+        public ValType SourceType => Rt1;
+        public ValType TargetType => Rt2;
         
         public override void Validate(IWasmValidationContext context)
         {
@@ -96,13 +99,16 @@ namespace Wacs.Core.Instructions.GC
     public class InstBrOnCastFail : InstructionBase
     {
         public InstBrOnCastFail() : base(ByteCode.BrOnCastFail) { }
-        
+
         public CastFlags Flags;
         public LabelIdx L;
         private BlockTarget? LinkedLabel;
 
         private ValType Rt1;
         private ValType Rt2;
+        public int Label => (int)L.Value;
+        public ValType SourceType => Rt1;
+        public ValType TargetType => Rt2;
 
         public override void Validate(IWasmValidationContext context)
         {

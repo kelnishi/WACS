@@ -4,8 +4,8 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>9</LangVersion>
-    <AssemblyVersion>0.7.5</AssemblyVersion>
-    <Version>0.7.5</Version>
+    <AssemblyVersion>0.8.0</AssemblyVersion>
+    <Version>0.8.0</Version>
     <Authors>Kelvin Nishikawa</Authors>
     <Description>A Pure C# WebAssembly Interpreter</Description>
     <TrimUnusedDependencies>true</TrimUnusedDependencies>
@@ -14,7 +14,7 @@
     <Title>Wacs</Title>
     <AssemblyName>Wacs.Core</AssemblyName>
     <PackageId>WACS</PackageId>
-    <Copyright>(c) 2024 Kelvin Nishikawa</Copyright>
+    <Copyright>(c) 2025 Kelvin Nishikawa</Copyright>
     <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
     <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
@@ -28,6 +28,17 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Wacs.Compilation\Wacs.Compilation.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Net.Compilers.Toolset" Version="4.3.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  
   <ItemGroup>
     <None Include="README.md">
       <Pack>true</Pack>

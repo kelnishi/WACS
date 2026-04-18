@@ -4,9 +4,10 @@
 [![License](https://img.shields.io/github/license/kelnishi/WACS)](LICENSE)
 [![NuGet](https://img.shields.io/nuget/v/WACS)](https://www.nuget.org/packages/WACS)
 [![Downloads](https://img.shields.io/nuget/dt/WACS)](https://www.nuget.org/packages/WACS)
+[![NuGet (Transpiler)](https://img.shields.io/nuget/vpre/WACS.Transpiler?label=WACS.Transpiler)](https://www.nuget.org/packages/WACS.Transpiler)
 
 ## Overview
-Latest changes: [0.7.5](https://github.com/kelnishi/WACS/tree/main/CHANGELOG.md)
+Latest changes: [0.8.0](https://github.com/kelnishi/WACS/tree/main/CHANGELOG.md)
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including Godot and AOT environments like Unity's IL2CPP.
 
@@ -93,6 +94,23 @@ The easiest way to use WACS is to add the package from NuGet
 dotnet add package WACS
 dotnet add package WACS.WASIp1
 ````
+
+### AOT Transpiler (preview)
+
+`WACS.Transpiler` is a companion package that ahead-of-time transpiles a
+`.wasm` module into a .NET assembly. Installs as a [dotnet global
+tool](https://learn.microsoft.com/en-us/dotnet/core/tools/global-tools),
+backed by the same WACS runtime:
+
+```bash
+dotnet tool install -g WACS.Transpiler --prerelease
+wasm-transpile -i module.wasm -o module.dll
+```
+
+See [`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the full
+flag surface, library API, and v0.1-preview known limitations.
+
+### From source
 
 If you prefer to build WACS from source, you can clone the repo and build it with the .NET SDK:
 
@@ -253,7 +271,7 @@ WACS uses a split stack that separates operands and control. This enables us to 
 - Precomputed block labels. We can ditch the control frame's label stack entirely!
 - Modern C# ObjectPools and ArrayPools minimize unavoidable allocation
 
-### In-Memory Transpiling
+### Super-Instruction Threading (interpreter)
 Here's where we break WASM semantics and go off-road to claw back some performance.
 A linear list of WASM instructions can be inverted into an expression tree. The WAT text format supports both the linear
 and the tree structure; they are conceptually equivalent. We'll use this similarity by applying the transform to the binary AST.
@@ -265,29 +283,56 @@ Take for example, this sequence:
 > i32.add       <- Pops 7, Pops 5, Pushes 12 onto the stack
 
 For a sequence representing `5+7`, this is performing potentially 8+ function calls, multiple Value.ctors, memory bounds checks, etc.
-All this, not even including the actual computation (+). Knowing this, we have an alternative. 
+All this, not even including the actual computation (+). Knowing this, we have an alternative.
 
-**Expression Tree Compilation**
+**Expression Tree Rewriting**
 
 ```
        i32.add
      /         \
 i32.const 5  i32.const 7
 ```
-If enabled, WACS will do a linear pass through the instruction sequences and roll up interdependent instructions into directed acyclic graphs.
+When enabled (`runtime.SuperInstruction = true`), WACS does a linear pass through the instruction sequences and rolls up interdependent instructions into directed acyclic graphs.
 Instructions are replaced with functionally equivalent expression trees `InstAggregate`. The new aggregate instructions are *in-memory*
 and are implemented with pre-built relational functions. Ultimately, these instructions are compiled by the dotnet build process into bytecode
-to be run by the runtime. Thus, at runtime aggregate wasm instruction sequences map to pre-compiled implementations (*semi-transpiled*).
+to be run by the runtime. The rewriter lives in `Wacs.Core.Runtime.SuperInstruction` (`SuperInstructionRewriter.Rewrite`) with
+the synthetic instructions in `Wacs.Core.Instructions.SuperInstruction`.
 
-How does this differ from executing the wasm instructions linearly with the WACS VM? 
+How does this differ from executing the wasm instructions linearly with the WACS VM?
 - No OpStack manipulation
 - Values are passed directly without casting or boxing
 - The CLR's implementation can use hardware more effectively (use registers instead of heap memory)
 - Avoids instruction fetching and dispatch
 
 In my testing, this leads to roughly 60% higher instruction processing throughput (128Mips -> 210Mips). These gains are situational however.
-Linking of the instructions into a tree cannot 100% be determined across block boundaries. So in these cases, the transpiler just passes
+Linking of the instructions into a tree cannot 100% be determined across block boundaries. So in these cases, the rewriter just passes
 the sequence through unaltered. So WASM code with lots of function calls or branches will see less benefit.
+
+### AOT Transpiler (`WACS.Transpiler`)
+Super-instruction threading squeezes more out of the interpreter, but each WASM instruction still goes through a dispatch
+layer. The `WACS.Transpiler` package takes the next step: it *compiles* the module into a real .NET assembly at
+ahead-of-time, producing native CLR methods the JIT can optimize like any other managed code.
+
+**Architecture**
+
+- **IL emission.** For every local WASM function, the transpiler walks the parsed instruction stream and emits CIL
+  directly into a `TypeBuilder`, so the JIT sees ordinary static methods — no interpreter, no OpStack, no value boxing.
+- **Typed CLR shapes.** Module exports/imports surface as generated C# interfaces with WASM-qualified names
+  (`long FacSsa(long)`), and `ref`/GC types are emitted as native CLR classes with typed fields rather than boxed
+  `Value[]` wrappers.
+- **Dual SIMD paths.** `v128` ops have two implementations — a spec-compliant scalar reference path (`--simd scalar`,
+  the default) and a `System.Runtime.Intrinsics`-backed path (`--simd intrinsics`). A third mode (`--simd interpreter`)
+  falls back to the scalar SIMD in `Wacs.Core`.
+- **Transpile-time validation.** A `CilValidator` verifies stack balance, typing, and branch targets *as IL is emitted*,
+  so any invalid module trips at transpile time rather than as a runtime `InvalidProgramException`.
+- **Mixed-mode execution.** Transpilation is opportunistic: any function the transpiler declines (e.g. very large bodies
+  under `--max-fn-size`) falls back to the Wacs.Core interpreter for that function only, so the module still runs.
+- **CLI + library.** Installed as a dotnet global tool (`wasm-transpile`) for one-shot `.wasm → .dll` builds, and
+  exposed as `Wacs.Transpiler.AOT.ModuleTranspiler` for programmatic use inside a host. See
+  [`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the full flag surface and v0.1-preview constraints
+  (e.g. standalone cross-process `.dll` execution is slated for v0.2).
+
+The transpiler currently passes 469/473 on the WebAssembly 3.0 spec test suite (the interpreter is spec-complete on the same suite; the four remaining AOT gaps are narrow multi-return and GC-coercion cases tracked for v0.2).
 
 Optimization is an ongoing process and I have a few other strategies yet to implement.
 

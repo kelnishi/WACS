@@ -1,5 +1,48 @@
 # Changelog
 
+## WACS.Transpiler [0.1.0-preview.1] First preview
+
+- New NuGet package: `WACS.Transpiler`. Installs as a dotnet global tool
+  (command: `wasm-transpile`). Ahead-of-time transpiles a `.wasm` module
+  into a .NET assembly.
+- CLI surface mirrors `TranspilerOptions`: `--simd`, `--no-tail-calls`,
+  `--max-fn-size`, `--data-storage`, `--gc-checking`.
+- `--emit-main` / `--entry-point` / `--main-class` bundle a host
+  `Program.Main` into the output assembly for modules with no imports
+  and scalar exports.
+- `--run` invokes the emitted `Program.Main` in-process after
+  transpiling, forwarding any trailing positional args — handy for IDE
+  run configurations that want to transpile-and-execute in one step.
+- Library surface: `Wacs.Transpiler.AOT.ModuleTranspiler.Transpile(...)`
+  and `TranspilationResult.SaveAssembly(path)` for programmatic use.
+- WebAssembly 3.0 spec coverage: 469/473 passing on the AOT path
+  (known gaps in this preview: 3 multi-return invocation cases in
+  `call_indirect.wast`, `func.wast`, `if.wast`, and one GC struct
+  coercion case in `gc/struct.wast`). The interpreter remains
+  spec-complete on the same suite.
+- Known limitations: saved `.dll` is intended for in-process use in
+  this preview — cross-process standalone execution (init-data embedded
+  into the assembly) is a v0.2 milestone. See
+  `Wacs.Transpiler/README.md` for details.
+
+## [0.8.0] Public transpiler surface
+
+- Public getters on ~20 instruction classes, `IFunctionInstance.Invoke`
+  on the interface, `Store.ReplaceFunction`, and runtime accessors so
+  `WACS.Transpiler` can drive transpilation from outside the assembly.
+- New `WasmRuntime.TryGetExported{Memory,Table,Global,Tag}` /
+  `GetExported{Memory,Table,Global,Tag}` accessors, mirroring the
+  existing `TryGetExportedFunction` shape so host code can resolve any
+  exported entity without reflecting into internals. Resolves #63.
+- **Rename (breaking):** The interpreter super-instruction flag
+  `WasmRuntime.TranspileModules` → `WasmRuntime.SuperInstruction`, the
+  method `TranspileModule` → `ApplySuperInstructions`, and the
+  `Wacs.Core.Runtime.Transpiler` / `Wacs.Core.Instructions.Transpiler`
+  namespaces → `...SuperInstruction`. `FunctionTranspiler.TranspileFunction`
+  is now `SuperInstructionRewriter.Rewrite`. This disambiguates from the
+  new `WACS.Transpiler` AOT package.
+- No behavior change for existing consumers beyond the rename — additive otherwise.
+
 ## [0.7.5] Fix rollup
 - Fix to indirect calls
 - Fix to reentrant calls

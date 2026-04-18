@@ -88,3 +88,6 @@ riderModule.iml
 
 .DS_Store
 Spec.Test/TestResults/**
+
+# Template files from Wacs.Compilation project
+Wacs.Compilation/Sample*.cs.txt
