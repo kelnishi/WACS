@@ -196,6 +196,15 @@ namespace Wacs.Core.Compilation
             GcCode.RefI31 or GcCode.I31GetS or GcCode.I31GetU => 0,
             // ref.test / ref.cast (+ null variants): heap type encoded as i32 ValType bits.
             GcCode.RefTest or GcCode.RefTestNull or GcCode.RefCast or GcCode.RefCastNull => 4,
+            // struct.new / struct.new_default: typeIdx:u32.
+            GcCode.StructNew or GcCode.StructNewDefault => 4,
+            // struct.get / struct.get_s / struct.get_u / struct.set: typeIdx + fieldIdx.
+            GcCode.StructGet or GcCode.StructGetS or GcCode.StructGetU or GcCode.StructSet => 8,
+            // array.new / array.new_default / array.get / array.get_s / array.get_u / array.set: typeIdx.
+            GcCode.ArrayNew or GcCode.ArrayNewDefault
+                or GcCode.ArrayGet or GcCode.ArrayGetS or GcCode.ArrayGetU or GcCode.ArraySet => 4,
+            // array.len: no immediate.
+            GcCode.ArrayLen => 0,
             _ => 0,
         };
 
@@ -294,6 +303,46 @@ namespace Wacs.Core.Compilation
                 case GcCode.RefCast:
                 case GcCode.RefCastNull:
                     writePos = WriteS32(buf, writePos, (int)((InstRefCast)inst).HeapType);
+                    break;
+                // ---- struct ----
+                case GcCode.StructNew:
+                    writePos = WriteU32(buf, writePos, (uint)((InstStructNew)inst).TypeIndex);
+                    break;
+                case GcCode.StructNewDefault:
+                    writePos = WriteU32(buf, writePos, (uint)((InstStructNewDefault)inst).TypeIndex);
+                    break;
+                case GcCode.StructGet:
+                case GcCode.StructGetS:
+                case GcCode.StructGetU:
+                {
+                    var sg = (InstStructGet)inst;
+                    writePos = WriteU32(buf, writePos, (uint)sg.TypeIndex);
+                    writePos = WriteU32(buf, writePos, (uint)sg.FieldIndex);
+                    break;
+                }
+                case GcCode.StructSet:
+                {
+                    var ss = (InstStructSet)inst;
+                    writePos = WriteU32(buf, writePos, (uint)ss.TypeIndex);
+                    writePos = WriteU32(buf, writePos, (uint)ss.FieldIndex);
+                    break;
+                }
+                // ---- array ----
+                case GcCode.ArrayNew:
+                    writePos = WriteU32(buf, writePos, (uint)((InstArrayNew)inst).TypeIndex);
+                    break;
+                case GcCode.ArrayNewDefault:
+                    writePos = WriteU32(buf, writePos, (uint)((InstArrayNewDefault)inst).TypeIndex);
+                    break;
+                case GcCode.ArrayGet:
+                case GcCode.ArrayGetS:
+                case GcCode.ArrayGetU:
+                    writePos = WriteU32(buf, writePos, (uint)((InstArrayGet)inst).TypeIndex);
+                    break;
+                case GcCode.ArraySet:
+                    writePos = WriteU32(buf, writePos, (uint)((InstArraySet)inst).TypeIndex);
+                    break;
+                case GcCode.ArrayLen:
                     break;
                 default:
                     throw new NotSupportedException(

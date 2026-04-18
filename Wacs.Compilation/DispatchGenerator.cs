@@ -200,6 +200,7 @@ namespace Wacs.Compilation
             sb.AppendLine("#nullable disable");
             sb.AppendLine("using System;");
             sb.AppendLine("using System.Buffers.Binary;");
+            sb.AppendLine("using System.Collections.Generic;");
             sb.AppendLine("using System.Runtime.InteropServices;");
             sb.AppendLine("using Wacs.Core.OpCodes;");
             sb.AppendLine("using Wacs.Core.Runtime;");
