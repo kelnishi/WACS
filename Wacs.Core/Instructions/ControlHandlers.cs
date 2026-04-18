@@ -185,6 +185,43 @@ namespace Wacs.Core.Instructions
             funcInst.Invoke(ctx);
         }
 
+        // 0x14 call_ref — indirect call through a typed funcref (no table). Stream:
+        // [typeIdx:u32]. Pops the funcref, type-checks, dispatches. Traps on null.
+        [OpHandler(OpCode.CallRef)]
+        private static void CallRef(ExecContext ctx, [Imm] uint typeIdx, Value refVal)
+        {
+            if (refVal.IsNullRef)
+                throw new TrapException("call_ref: null reference");
+            var ftExpect = ctx.Frame.Module.Types[(TypeIdx)typeIdx];
+            var funcInst = ctx.Store[refVal.GetFuncAddr(ctx.Frame.Module.Types)];
+            if (!funcInst.Type.Matches((FunctionType)ftExpect.Expansion, ctx.Frame.Module.Types))
+                throw new TrapException("call_ref: type mismatch");
+            if (funcInst is FunctionInstance wasmFn)
+            {
+                ControlHandlers.InvokeWasm(ctx, wasmFn);
+                return;
+            }
+            funcInst.Invoke(ctx);
+        }
+
+        // 0x15 return_call_ref — tail-call variant. Same caveat as other tail calls:
+        // behaviorally correct, not stack-optimized under managed recursion.
+        [OpHandler(OpCode.ReturnCallRef)]
+        private static void ReturnCallRef(ExecContext ctx, ref int pc, [Imm] uint typeIdx, Value refVal)
+        {
+            if (refVal.IsNullRef)
+                throw new TrapException("return_call_ref: null reference");
+            var ftExpect = ctx.Frame.Module.Types[(TypeIdx)typeIdx];
+            var funcInst = ctx.Store[refVal.GetFuncAddr(ctx.Frame.Module.Types)];
+            if (!funcInst.Type.Matches((FunctionType)ftExpect.Expansion, ctx.Frame.Module.Types))
+                throw new TrapException("return_call_ref: type mismatch");
+            if (funcInst is FunctionInstance wasmFn)
+                ControlHandlers.InvokeWasm(ctx, wasmFn);
+            else
+                funcInst.Invoke(ctx);
+            pc = int.MaxValue;
+        }
+
         // 0x13 return_call_indirect — tail-call variant of call_indirect. Same caveat as
         // return_call: semantically correct, not stack-optimized.
         [OpHandler(OpCode.ReturnCallIndirect)]

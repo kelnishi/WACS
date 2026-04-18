@@ -92,19 +92,25 @@ namespace Wacs.Core.Instructions
             }
         }
 
-        // 0xFC 0F table.grow — pop n (count), pop val (init ref); grow. Push old size or -1.
+        // 0xFC 0F table.grow — pop n (count), pop val (init ref); grow. Push old size or
+        // -1. Result type matches the table's address type (i32 for 32-bit, i64 for 64-bit).
         [OpHandler(ExtCode.TableGrow)]
-        private static int TableGrow(ExecContext ctx, [Imm] uint tableIdx, Value initVal, uint n)
+        private static Value TableGrow(ExecContext ctx, [Imm] uint tableIdx, Value initVal, uint n)
         {
             var tab = ctx.Store.GetMutableTable(ctx.Frame.Module.TableAddrs[(TableIdx)tableIdx]);
-            int oldSize = tab.Elements.Count;
-            return tab.Grow(n, initVal) ? oldSize : -1;
+            var at = tab.Type.Limits.AddressType;
+            long oldSize = tab.Elements.Count;
+            return tab.Grow(n, initVal) ? new Value(at, oldSize) : new Value(at, -1L);
         }
 
-        // 0xFC 10 table.size — push the current element count as i32.
+        // 0xFC 10 table.size — push the current element count. Result type matches the
+        // table's address type.
         [OpHandler(ExtCode.TableSize)]
-        private static int TableSize(ExecContext ctx, [Imm] uint tableIdx)
-            => ctx.Store[ctx.Frame.Module.TableAddrs[(TableIdx)tableIdx]].Elements.Count;
+        private static Value TableSize(ExecContext ctx, [Imm] uint tableIdx)
+        {
+            var tab = ctx.Store[ctx.Frame.Module.TableAddrs[(TableIdx)tableIdx]];
+            return new Value(tab.Type.Limits.AddressType, (long)tab.Elements.Count);
+        }
 
         // 0xFC 11 table.fill — pop n, val, d; fill table[d..d+n] with val.
         [OpHandler(ExtCode.TableFill)]

@@ -70,7 +70,7 @@ namespace Wacs.Core.Instructions.Numeric
         private static int ExecuteF32Eq(float i1, float i2) => i1 == i2 ? 1 : 0;
         [OpSource(OpCode.F32Ne)]
         private static int ExecuteF32Ne(float i1, float i2) => i1 != i2 ? 1 : 0;
-        [OpSource(OpCode.F32Le)]
+        [OpSource(OpCode.F32Lt)]
         private static int ExecuteF32Lt(float i1, float i2) => float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 < i2 ? 1 : 0;
         [OpSource(OpCode.F32Gt)]
         private static int ExecuteF32Gt(float i1, float i2) => float.IsNaN(i1) || float.IsNaN(i2) ? 0 : i1 > i2 ? 1 : 0;

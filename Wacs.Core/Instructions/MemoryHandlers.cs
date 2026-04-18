@@ -229,19 +229,24 @@ namespace Wacs.Core.Instructions
 
         // ---- Size/Grow -----------------------------------------------------------------
 
-        // 0x3F memory.size — push current size in 64 KiB pages.
+        // 0x3F memory.size — push current size in 64 KiB pages. Result type matches the
+        // memory's address type: i32 for 32-bit memories, i64 for memory64.
         [OpHandler(OpCode.MemorySize)]
-        private static int MemorySize(ExecContext ctx, [Imm] uint memIdx)
-            => (int)ctx.Store[ctx.Frame.Module.MemAddrs[(MemIdx)memIdx]].Size;
-
-        // 0x40 memory.grow — pop N; grow memory by N pages. Push old size (in pages) on
-        // success, or -1 on failure (size cap exceeded, allocation failed).
-        [OpHandler(OpCode.MemoryGrow)]
-        private static int MemoryGrow(ExecContext ctx, [Imm] uint memIdx, int n)
+        private static Value MemorySize(ExecContext ctx, [Imm] uint memIdx)
         {
             var mem = ctx.Store[ctx.Frame.Module.MemAddrs[(MemIdx)memIdx]];
-            int oldSize = (int)mem.Size;
-            return mem.Grow(n) ? oldSize : -1;
+            return new Value(mem.Type.Limits.AddressType, mem.Size);
+        }
+
+        // 0x40 memory.grow — pop N (address-type-sized); grow memory by N pages. Push old
+        // size on success, or -1 on failure. Result type matches the memory's address type.
+        [OpHandler(OpCode.MemoryGrow)]
+        private static Value MemoryGrow(ExecContext ctx, [Imm] uint memIdx, int n)
+        {
+            var mem = ctx.Store[ctx.Frame.Module.MemAddrs[(MemIdx)memIdx]];
+            var at = mem.Type.Limits.AddressType;
+            long oldSize = mem.Size;
+            return mem.Grow(n) ? new Value(at, oldSize) : new Value(at, -1L);
         }
     }
 }
