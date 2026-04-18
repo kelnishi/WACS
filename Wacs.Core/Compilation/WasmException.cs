@@ -21,15 +21,6 @@ namespace Wacs.Core.Compilation
     {
         public readonly ExnInstance Exn;
 
-        /// <summary>
-        /// Number of enclosing caller frames whose try_tables must be skipped when
-        /// unwinding. <c>return_call</c> and friends (tail calls) increment this so the
-        /// caller's handlers — semantically already popped off the frame stack —
-        /// don't catch the callee's throw. Each <see cref="SwitchRuntime.Run"/> frame
-        /// decrements before its own handler lookup.
-        /// </summary>
-        public int SkipFrames;
-
         public WasmException(ExnInstance exn) : base("wasm exception")
         {
             Exn = exn;
