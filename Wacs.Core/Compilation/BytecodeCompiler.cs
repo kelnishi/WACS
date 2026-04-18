@@ -655,11 +655,22 @@ namespace Wacs.Core.Compilation
             IReadOnlyDictionary<BlockTarget, int> blockLocalIdx,
             IReadOnlyDictionary<BlockTarget, int> blockEndLocalIdx)
         {
-            int targetIdx = ((OpCode)target.Op) == OpCode.Loop
-                ? blockLocalIdx[target]
-                : blockEndLocalIdx[target];
             int arity = target.Label.Arity;
-            uint targetPc      = (uint)streamOffset[targetIdx];
+            uint targetPc;
+            if (target is InstExpressionProxy)
+            {
+                // A branch resolved to the synthetic function-body wrapper — equivalent
+                // to `return`. Jump past end-of-stream (handled as int.MaxValue in the
+                // Run loop; same sentinel the Return handler uses).
+                targetPc = int.MaxValue;
+            }
+            else
+            {
+                int targetIdx = ((OpCode)target.Op) == OpCode.Loop
+                    ? blockLocalIdx[target]
+                    : blockEndLocalIdx[target];
+                targetPc = (uint)streamOffset[targetIdx];
+            }
             uint resultsHeight = (uint)(target.Label.StackHeight + arity);
             writePos = WriteU32(buf, writePos, targetPc);
             writePos = WriteU32(buf, writePos, resultsHeight);
