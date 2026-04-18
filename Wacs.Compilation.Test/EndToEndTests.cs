@@ -564,6 +564,90 @@ namespace Wacs.Compilation.Test
             0x0B,
         };
 
+        /// <summary>
+        /// <code>
+        /// (module
+        ///   (type $sig (func (result i32)))
+        ///   (func $fn0 (type $sig) i32.const 10)
+        ///   (func $fn1 (type $sig) i32.const 20)
+        ///   (table 2 funcref)
+        ///   (elem (i32.const 0) $fn0 $fn1)
+        ///   (func (export "pick") (param i32) (result i32)
+        ///     local.get 0
+        ///     call_indirect (type $sig)))
+        /// </code>
+        /// Exercises call_indirect dispatch through a funcref table: pick(0) = 10,
+        /// pick(1) = 20, pick(2) traps.
+        /// </summary>
+        private static readonly byte[] CallIndirectModule =
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types — type0: () -> i32, type1: (i32) -> i32
+            0x01, 0x0A, 0x02,
+            0x60, 0x00, 0x01, 0x7F,              // type 0
+            0x60, 0x01, 0x7F, 0x01, 0x7F,        // type 1
+            // Function section: 3 funcs — [type0, type0, type1]
+            0x03, 0x04, 0x03, 0x00, 0x00, 0x01,
+            // Table section: 1 table, funcref, min 2
+            0x04, 0x04, 0x01, 0x70, 0x00, 0x02,
+            // Export section: "pick" (func 2)
+            0x07, 0x08, 0x01, 0x04, (byte)'p', (byte)'i', (byte)'c', (byte)'k', 0x00, 0x02,
+            // Element section: active segment, table 0, offset i32.const 0, funcs [0, 1]
+            //   01 (count=1)
+            //   00 (flags = active + table 0)
+            //   41 00 0B (offset expr: i32.const 0; end)
+            //   02 (func count)
+            //   00 01 (func indices)
+            0x09, 0x08, 0x01, 0x00, 0x41, 0x00, 0x0B, 0x02, 0x00, 0x01,
+            // Code section: 3 bodies
+            //   fn0: 04 bytes body: 00 41 0A 0B   → size prefix 04
+            //   fn1: 04 bytes body: 00 41 14 0B   → size prefix 04
+            //   pick: 07 bytes body: 00 20 00 11 00 00 0B   → size prefix 07
+            // Section body: 1 (count) + (1+4) + (1+4) + (1+7) = 19 = 0x13
+            0x0A, 0x13, 0x03,
+            0x04, 0x00, 0x41, 0x0A, 0x0B,
+            0x04, 0x00, 0x41, 0x14, 0x0B,
+            0x07, 0x00, 0x20, 0x00, 0x11, 0x00, 0x00, 0x0B,
+        };
+
+        [Theory]
+        [InlineData(0, 10)]
+        [InlineData(1, 20)]
+        public void CallIndirect_dispatches_via_funcref_table(int selector, int expected)
+        {
+            var runtime = new WasmRuntime();
+            using var ms = new MemoryStream(CallIndirectModule);
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("m", moduleInst);
+
+            var addr = runtime.GetExportedFunction(("m", "pick"));
+            var funcInst = (FunctionInstance)runtime.RuntimeStore[addr];
+
+            var ctx = new ExecContext(runtime.RuntimeStore);
+            var results = SwitchRuntime.Invoke(ctx, funcInst, new Value(ValType.I32, selector));
+
+            Assert.Single(results);
+            Assert.Equal(expected, results[0].Data.Int32);
+        }
+
+        [Fact]
+        public void CallIndirect_traps_on_out_of_bounds()
+        {
+            var runtime = new WasmRuntime();
+            using var ms = new MemoryStream(CallIndirectModule);
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("m", moduleInst);
+
+            var addr = runtime.GetExportedFunction(("m", "pick"));
+            var funcInst = (FunctionInstance)runtime.RuntimeStore[addr];
+
+            var ctx = new ExecContext(runtime.RuntimeStore);
+            Assert.Throws<TrapException>(() =>
+                SwitchRuntime.Invoke(ctx, funcInst, new Value(ValType.I32, 5)));
+        }
+
         [Fact]
         public void TableSize_returns_declared_min()
         {

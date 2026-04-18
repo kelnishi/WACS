@@ -133,6 +133,42 @@ namespace Wacs.Core.Instructions
             target.Invoke(ctx);
         }
 
+        // 0x11 call_indirect — indirect call through a table. Stream:
+        // [opcode][typeIdx:u32][tableIdx:u32]. Pops i32 selector, resolves the table
+        // slot to a funcref, type-checks against the expected signature, dispatches.
+        [OpHandler(OpCode.CallIndirect)]
+        private static void CallIndirect(ExecContext ctx, [Imm] uint typeIdx, [Imm] uint tableIdx, uint idx)
+        {
+            var tab = ctx.Store[ctx.Frame.Module.TableAddrs[(TableIdx)tableIdx]];
+            if (idx >= (uint)tab.Elements.Count)
+                throw new TrapException($"call_indirect: undefined element ({idx} >= {tab.Elements.Count})");
+
+            var reference = tab.Elements[(int)idx];
+            if (reference.IsNullRef)
+                throw new TrapException("call_indirect: null reference");
+
+            var ftExpect = ctx.Frame.Module.Types[(TypeIdx)typeIdx];
+            var funcAddr = reference.GetFuncAddr(ctx.Frame.Module.Types);
+            var funcInst = ctx.Store[funcAddr];
+
+            // Type check: defensive — WASM modules must validate at instantiation, but a
+            // table slot can be written post-instantiation via table.set, so recheck here.
+            if (funcInst is FunctionInstance ftAct &&
+                !ftAct.DefType.Matches(ftExpect, ctx.Frame.Module.Types))
+            {
+                throw new TrapException("call_indirect: indirect call type mismatch");
+            }
+            if (!funcInst.Type.Matches(ftExpect.Unroll.Body, ctx.Frame.Module.Types))
+                throw new TrapException("call_indirect: indirect call type mismatch");
+
+            if (funcInst is FunctionInstance wasmFn)
+            {
+                ControlHandlers.InvokeWasm(ctx, wasmFn);
+                return;
+            }
+            funcInst.Invoke(ctx);
+        }
+
         internal static void InvokeWasm(ExecContext ctx, FunctionInstance func)
         {
             // ---- 1. Compiled form: field cache on the FunctionInstance -----------------
