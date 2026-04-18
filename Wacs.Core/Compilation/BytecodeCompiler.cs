@@ -11,6 +11,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Wacs.Core.Instructions;
+using Wacs.Core.Instructions.Memory;
 using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
@@ -126,6 +127,11 @@ namespace Wacs.Core.Compilation
                 OpCode.Else => 4,
                 // BrTable: u32 count + (count+1) × 12-byte triple (indexed + default).
                 OpCode.BrTable => 4 + 12 * (((InstBranchTable)inst).LabelCount + 1),
+                // Memory load/store: memIdx:u32 + offset:u64.
+                OpCode.I32Load or OpCode.I64Load or OpCode.F32Load or OpCode.F64Load => 12,
+                OpCode.I32Store or OpCode.I64Store or OpCode.F32Store or OpCode.F64Store => 12,
+                // memory.size / memory.grow: memIdx:u32.
+                OpCode.MemorySize or OpCode.MemoryGrow => 4,
                 // No-immediate ops (drop/select/return/unreachable/nop/numeric).
                 _ => 0,
             };
@@ -184,6 +190,35 @@ namespace Wacs.Core.Compilation
                 // ---- call ----
                 case OpCode.Call:
                     writePos = WriteU32(buf, writePos, ((InstCall)inst).X.Value); break;
+
+                // ---- memory loads/stores: [memIdx:u32][offset:u64] ----
+                case OpCode.I32Load:
+                case OpCode.I64Load:
+                case OpCode.F32Load:
+                case OpCode.F64Load:
+                {
+                    var load = (InstMemoryLoad)inst;
+                    writePos = WriteU32(buf, writePos, (uint)load.MemIndex);
+                    writePos = WriteS64(buf, writePos, load.MemOffset);
+                    break;
+                }
+                case OpCode.I32Store:
+                case OpCode.I64Store:
+                case OpCode.F32Store:
+                case OpCode.F64Store:
+                {
+                    var store = (InstMemoryStore)inst;
+                    writePos = WriteU32(buf, writePos, (uint)store.MemIndex);
+                    writePos = WriteS64(buf, writePos, store.MemOffset);
+                    break;
+                }
+                // ---- memory.size / memory.grow: [memIdx:u32] ----
+                case OpCode.MemorySize:
+                    writePos = WriteU32(buf, writePos, (uint)((InstMemorySize)inst).MemIndex);
+                    break;
+                case OpCode.MemoryGrow:
+                    writePos = WriteU32(buf, writePos, (uint)((InstMemoryGrow)inst).MemIndex);
+                    break;
 
                 // ---- branches ----
                 case OpCode.Br:
