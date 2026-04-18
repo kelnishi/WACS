@@ -358,7 +358,7 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// Build CLR delegate type for a WASM function type (without ThinContext param).
         /// </summary>
-        private static Type? BuildDelegateTypeForFunc(FunctionType funcType)
+        public static Type? BuildDelegateTypeForFunc(FunctionType funcType)
         {
             var paramClrTypes = funcType.ParameterTypes.Types
                 .Select(t => MapValType(t)).ToArray();
