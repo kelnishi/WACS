@@ -346,11 +346,27 @@ namespace Wacs.Transpiler.AOT.Emitters
             var fieldType = gcType.Fields[inst.FieldIndex].FieldType;
             il.Emit(OpCodes.Ldfld, gcType.Fields[inst.FieldIndex]);
 
-            // Handle packed field sign extension
+            // Packed-field extension. CIL Ldfld on byte leaves a zero-extended
+            // int; Ldfld on short leaves a sign-extended int. struct.get_s /
+            // struct.get_u override that with the WASM-requested extension.
             if (inst.SignExtension == PackedExt.Signed)
             {
-                il.Emit(OpCodes.Conv_I1);
-                il.Emit(OpCodes.Conv_I4);
+                if (fieldType == typeof(byte))
+                {
+                    il.Emit(OpCodes.Conv_I1);
+                    il.Emit(OpCodes.Conv_I4);
+                }
+                else if (fieldType == typeof(short))
+                {
+                    il.Emit(OpCodes.Conv_I2);
+                    il.Emit(OpCodes.Conv_I4);
+                }
+            }
+            else if (inst.SignExtension == PackedExt.Unsigned)
+            {
+                if (fieldType == typeof(short))
+                    il.Emit(OpCodes.Conv_U2);
+                // byte field is already zero-extended by Ldfld — nothing to do.
             }
 
             if (!IsScalarType(fieldType))

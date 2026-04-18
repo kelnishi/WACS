@@ -130,15 +130,39 @@ namespace Wacs.Transpiler.AOT
         /// </summary>
         public void Reset(int height)
         {
-            if (!_unreachable && _typeStack.Count == height)
+            if (_unreachable)
             {
-                // Prior reachable position matches — preserve the types flowing forward.
+                // Dead-code polymorphic types must not leak past the instruction
+                // boundary; repopulate with placeholders.
+                _typeStack.Clear();
+                for (int i = 0; i < height; i++)
+                    _typeStack.Push(typeof(object));
+                _unreachable = false;
                 return;
             }
-            _typeStack.Clear();
-            for (int i = 0; i < height; i++)
-                _typeStack.Push(typeof(object)); // placeholder
-            _unreachable = false;
+            if (_typeStack.Count == height)
+            {
+                // Exact match — preserve types flowing forward.
+                return;
+            }
+            if (_typeStack.Count > height)
+            {
+                // Prior emitters pushed and those top items were consumed (e.g.
+                // the if's condition under a block with pre-existing stack
+                // items). Truncate from the top — bottom types still reflect
+                // the CIL stack.
+                while (_typeStack.Count > height)
+                    _typeStack.Pop();
+                return;
+            }
+            // Prior emitters produced fewer items than the current height
+            // requires (e.g. control flow merged in values from a block whose
+            // result types weren't tracked). Pad the top with placeholders so
+            // bottom known types are preserved; subsequent Peek()s on the top
+            // see `object`, which select / ref.is_null already treat as "use
+            // the safe helper path".
+            while (_typeStack.Count < height)
+                _typeStack.Push(typeof(object));
         }
 
         /// <summary>Peek the top of the type stack without popping. Returns
