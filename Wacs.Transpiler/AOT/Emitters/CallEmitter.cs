@@ -318,33 +318,49 @@ namespace Wacs.Transpiler.AOT.Emitters
             var argsLocal = il.DeclareLocal(typeof(object[]));
             il.Emit(OpCodes.Stloc, argsLocal);
 
-            // Call InvokeIndirect(ctx, tableIdx, elemIdx, args, expectedReturn)
+            bool multiReturn = resultTypes.Length > 1;
+
+            // Call InvokeIndirect(ctx, tableIdx, elemIdx, args, expectedReturn, expectedTypeIdx)
+            // or InvokeIndirectMulti(ctx, tableIdx, elemIdx, args, resultCount, expectedTypeIdx)
+            // for multi-return functions (delegate dispatch can't represent
+            // byref out-params, so those fall back to MethodInfo invocation
+            // via MultiReturnMethodRegistry).
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldc_I4, site.TableIdx);
             il.Emit(OpCodes.Ldloc, elemIdxLocal);
             il.Emit(OpCodes.Ldloc, argsLocal);
 
-            // Push expected return type for type checking
-            if (resultTypes.Length > 0)
+            if (multiReturn)
             {
-                il.Emit(OpCodes.Ldtoken, ModuleTranspiler.MapValType(resultTypes[0]));
-                il.Emit(OpCodes.Call, typeof(Type).GetMethod(
-                    nameof(Type.GetTypeFromHandle), new[] { typeof(RuntimeTypeHandle) })!);
+                il.Emit(OpCodes.Ldc_I4, resultTypes.Length);
+                il.Emit(OpCodes.Ldc_I4, site.TypeIdx);
+                il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
+                    nameof(CallHelpers.InvokeIndirectMulti), BindingFlags.Public | BindingFlags.Static)!);
             }
             else
             {
-                il.Emit(OpCodes.Ldtoken, typeof(void));
-                il.Emit(OpCodes.Call, typeof(Type).GetMethod(
-                    nameof(Type.GetTypeFromHandle), new[] { typeof(RuntimeTypeHandle) })!);
+                // Push expected return type for type checking
+                if (resultTypes.Length > 0)
+                {
+                    il.Emit(OpCodes.Ldtoken, ModuleTranspiler.MapValType(resultTypes[0]));
+                    il.Emit(OpCodes.Call, typeof(Type).GetMethod(
+                        nameof(Type.GetTypeFromHandle), new[] { typeof(RuntimeTypeHandle) })!);
+                }
+                else
+                {
+                    il.Emit(OpCodes.Ldtoken, typeof(void));
+                    il.Emit(OpCodes.Call, typeof(Type).GetMethod(
+                        nameof(Type.GetTypeFromHandle), new[] { typeof(RuntimeTypeHandle) })!);
+                }
+
+                // Push expected WASM type idx so InvokeIndirect can verify
+                // sub-supertype match against the function's declared type
+                // (doc 1 §6.2). -1 when the site didn't carry one.
+                il.Emit(OpCodes.Ldc_I4, site.TypeIdx);
+
+                il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
+                    nameof(CallHelpers.InvokeIndirect), BindingFlags.Public | BindingFlags.Static)!);
             }
-
-            // Push expected WASM type idx so InvokeIndirect can verify
-            // sub-supertype match against the function's declared type
-            // (doc 1 §6.2). -1 when the site didn't carry one.
-            il.Emit(OpCodes.Ldc_I4, site.TypeIdx);
-
-            il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
-                nameof(CallHelpers.InvokeIndirect), BindingFlags.Public | BindingFlags.Static)!);
 
             // return_call_indirect terminates the caller (doc 1 §6.2). We
             // can't use the CLR `tail.` prefix through DynamicInvoke, but
@@ -352,13 +368,19 @@ namespace Wacs.Transpiler.AOT.Emitters
             // through to subsequent IL: unbox the result and emit ret.
             if (site.IsTailCall)
             {
-                EmitUnboxResult(il, resultTypes, moduleInst);
+                if (multiReturn)
+                    EmitUnboxResultArray(il, resultTypes, moduleInst);
+                else
+                    EmitUnboxResult(il, resultTypes, moduleInst);
                 il.Emit(OpCodes.Ret);
                 return;
             }
 
             // Unbox result
-            EmitUnboxResult(il, resultTypes, moduleInst);
+            if (multiReturn)
+                EmitUnboxResultArray(il, resultTypes, moduleInst);
+            else
+                EmitUnboxResult(il, resultTypes, moduleInst);
         }
 
         /// <summary>
@@ -550,6 +572,32 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
                     nameof(GcRuntimeHelpers.UnwrapRef),
                     BindingFlags.Public | BindingFlags.Static)!);
+            }
+        }
+
+        /// <summary>
+        /// Unpack a multi-return result array (object?[] on the stack, length =
+        /// resultTypes.Length) into N typed values on the CIL stack. Stored to a
+        /// local so each element can be loaded and unboxed in WASM stack order
+        /// (result[0] deepest, result[N-1] on top).
+        /// </summary>
+        private static void EmitUnboxResultArray(ILGenerator il, ValType[] resultTypes, ModuleInstance moduleInst)
+        {
+            var arrLocal = il.DeclareLocal(typeof(object[]));
+            il.Emit(OpCodes.Stloc, arrLocal);
+            for (int i = 0; i < resultTypes.Length; i++)
+            {
+                il.Emit(OpCodes.Ldloc, arrLocal);
+                il.Emit(OpCodes.Ldc_I4, i);
+                il.Emit(OpCodes.Ldelem_Ref);
+                var clr = ModuleTranspiler.MapValType(resultTypes[i]);
+                il.Emit(OpCodes.Unbox_Any, clr);
+                if (ModuleTranspiler.IsGcRefType(resultTypes[i], moduleInst))
+                {
+                    il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                        nameof(GcRuntimeHelpers.UnwrapRef),
+                        BindingFlags.Public | BindingFlags.Static)!);
+                }
             }
         }
 
@@ -887,43 +935,97 @@ namespace Wacs.Transpiler.AOT.Emitters
                     throw new TrapException("uninitialized element");
             }
 
-            // Type check: verify delegate parameter count matches args.
-            // Full WASM type checking compares param AND result types — we check
-            // param count here and catch type mismatches from DynamicInvoke below.
-            var invokeMethod = del.GetType().GetMethod("Invoke");
-            if (invokeMethod != null)
-            {
-                var delParams = invokeMethod.GetParameters();
-                if (delParams.Length != args.Length)
-                    throw new TrapException("indirect call type mismatch");
-
-                // Check parameter types match
-                for (int i = 0; i < args.Length; i++)
-                {
-                    if (args[i] != null && !delParams[i].ParameterType.IsInstanceOfType(args[i]))
-                        throw new TrapException("indirect call type mismatch");
-                }
-
-                // Check return type matches caller's expectation
-                if (expectedReturn != null && invokeMethod.ReturnType != expectedReturn)
-                    throw new TrapException("indirect call type mismatch");
-                if (expectedReturn == null && invokeMethod.ReturnType != typeof(void))
-                    throw new TrapException("indirect call type mismatch");
-                if (expectedReturn != null && expectedReturn != typeof(void) && invokeMethod.ReturnType == typeof(void))
-                    throw new TrapException("indirect call type mismatch");
-            }
-
+            // WASM validation guaranteed type compatibility at this call
+            // site (argc + types checked at module validation, plus the
+            // subtype hash check above). Skip per-call reflection and call
+            // through a cached typed wrapper — `Delegate.DynamicInvoke` is
+            // a known hot spot (fib/fac/runaway via call_indirect ran ~46
+            // minutes on CI because every indirect call went through
+            // reflection). The wrapper is JIT-compiled once per delegate
+            // type: unbox each boxed arg, call the typed Invoke directly,
+            // box the result.
+            var invoker = TypedDelegateInvoker.GetOrBuild(del.GetType());
             try
             {
-                return del.DynamicInvoke(args);
+                return invoker(del, args);
             }
-            catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
+            catch (InvalidCastException)
             {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
-                return null; // unreachable
+                throw new TrapException("indirect call type mismatch");
             }
-            catch (Exception ex) when (ex is System.Reflection.TargetParameterCountException
-                or System.ArgumentException or System.InvalidCastException)
+        }
+
+        /// <summary>
+        /// Multi-return variant of InvokeIndirect. Dispatches to a
+        /// MethodInfo registered in MultiReturnMethodRegistry (the target
+        /// function's FuncTable slot is null because Action/Func can't
+        /// represent byref out-params). Invokes with `ctx + args + out-slots`
+        /// and returns all N results packed in an object[] so the caller can
+        /// unbox each one in place.
+        /// </summary>
+        public static object?[] InvokeIndirectMulti(
+            ThinContext ctx, int tableIdx, int elemIdx, object?[] args,
+            int resultCount, int expectedTypeIdx = -1)
+        {
+            var table = ctx.Tables[tableIdx];
+            if (elemIdx < 0 || elemIdx >= table.Elements.Count)
+                throw new TrapException($"undefined element {elemIdx}");
+            var r = table.Elements[elemIdx];
+            if (r.IsNullRef)
+                throw new TrapException("uninitialized element");
+
+            int resolvedFuncIdx = ctx.Types != null
+                ? (int)r.GetFuncAddr(ctx.Types).Value
+                : (int)r.Data.Ptr;
+
+            if (expectedTypeIdx >= 0)
+            {
+                int expectedHash;
+                if (ctx.Module?.Types != null && ctx.Module.Types.Contains((TypeIdx)expectedTypeIdx))
+                    expectedHash = ctx.Module.Types[(TypeIdx)expectedTypeIdx].GetHashCode();
+                else if (ctx.TypeHashes != null && expectedTypeIdx < ctx.TypeHashes.Length)
+                    expectedHash = ctx.TypeHashes[expectedTypeIdx];
+                else
+                    expectedHash = 0;
+
+                if (expectedHash != 0)
+                {
+                    bool ok = false;
+                    if (ctx.FuncTypeSuperHashes != null
+                        && resolvedFuncIdx >= 0 && resolvedFuncIdx < ctx.FuncTypeSuperHashes.Length
+                        && ctx.FuncTypeSuperHashes[resolvedFuncIdx] != null)
+                    {
+                        var chain = ctx.FuncTypeSuperHashes[resolvedFuncIdx];
+                        for (int i = 0; i < chain.Length; i++)
+                            if (chain[i] == expectedHash) { ok = true; break; }
+                    }
+                    else if (ctx.FuncTypeHashes != null
+                        && resolvedFuncIdx >= 0 && resolvedFuncIdx < ctx.FuncTypeHashes.Length)
+                    {
+                        ok = ctx.FuncTypeHashes[resolvedFuncIdx] == expectedHash;
+                    }
+                    else
+                    {
+                        ok = true;
+                    }
+                    if (!ok) throw new TrapException("indirect call type mismatch");
+                }
+            }
+
+            var invoker = MultiReturnMethodRegistry.Get(ctx.InitDataId, resolvedFuncIdx);
+            if (invoker == null)
+                throw new TrapException("uninitialized element");
+
+            // The invoker is a DynamicMethod-compiled adapter that calls the
+            // target's static method directly. Pre-reflection mi.Invoke was
+            // ~100x slower, which meant call_indirect.wast took 46+ minutes
+            // in CI on Linux x64 tight loops; the JIT-compiled path brings
+            // it back into the seconds range.
+            try
+            {
+                return invoker(ctx, args);
+            }
+            catch (InvalidCastException)
             {
                 throw new TrapException("indirect call type mismatch");
             }
@@ -952,17 +1054,14 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (del == null)
                 throw new TrapException("uninitialized element");
 
+            // Same typed-wrapper fast path as InvokeIndirect — avoids
+            // DynamicInvoke's reflection overhead in call_ref hot loops.
+            var invoker = TypedDelegateInvoker.GetOrBuild(del.GetType());
             try
             {
-                return del.DynamicInvoke(args);
+                return invoker(del, args);
             }
-            catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
-            {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
-                return null; // unreachable
-            }
-            catch (Exception ex) when (ex is System.Reflection.TargetParameterCountException
-                or System.ArgumentException or System.InvalidCastException)
+            catch (InvalidCastException)
             {
                 throw new TrapException("indirect call type mismatch");
             }

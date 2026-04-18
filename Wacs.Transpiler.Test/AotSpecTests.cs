@@ -61,11 +61,6 @@ namespace Wacs.Transpiler.Test
         //                                instead of the unwrap helper.
         private static readonly HashSet<string> KnownFailingWastPaths = new(StringComparer.Ordinal)
         {
-            "call_indirect.wast",
-            "conversions.wast",
-            "func.wast",
-            "if.wast",
-            "gc/struct.wast",
         };
 
         private static bool IsKnownFailing(WastJson file)
@@ -91,6 +86,7 @@ namespace Wacs.Transpiler.Test
             ModuleInit.Reset();
             InitRegistry.Reset();
             GcTypeRegistry.Reset();
+            MultiReturnMethodRegistry.Reset();
 
             _output.WriteLine($"AOT spec test: {file.TestName}");
             var env = new SpecTestEnv();

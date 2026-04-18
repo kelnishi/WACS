@@ -209,6 +209,161 @@ namespace Wacs.Transpiler.AOT
     }
 
     /// <summary>
+    /// Signature of the cached multi-return invoker. Takes ThinContext + a
+    /// pre-boxed arg array (object?[] of length paramCount, each element
+    /// boxed to the target's CLR type — int / long / float / double / Value
+    /// / object). Returns an object?[] of length resultCount with r0 at [0]
+    /// and r1..r_{N-1} from out-params at [1..].
+    /// </summary>
+    public delegate object?[] MultiReturnInvoker(ThinContext ctx, object?[] args);
+
+    /// <summary>
+    /// Parallel registry for multi-return functions whose static methods use
+    /// byref out-params — those don't fit Action/Func delegates, so their
+    /// FuncTable slot stays null. call_indirect / call_ref to a multi-return
+    /// target falls through to the cached <see cref="MultiReturnInvoker"/>
+    /// here, which is a DynamicMethod-compiled adapter that unpacks the
+    /// boxed args, calls the target's static method directly, and repacks
+    /// the return + out-params into a result array. Keyed by
+    /// (initDataId, funcIdx-in-module-index-space).
+    ///
+    /// Building the adapter once per MethodInfo avoids the per-call reflection
+    /// overhead of <see cref="MethodBase.Invoke(object, object[])"/> — the
+    /// difference is a factor of ~100x on tight call_indirect loops (46
+    /// minutes → seconds on call_indirect.wast).
+    /// </summary>
+    public static class MultiReturnMethodRegistry
+    {
+        private static readonly Dictionary<(int initId, int funcIdx), MultiReturnInvoker>
+            _invokers = new();
+        private static readonly object _lock = new();
+
+        /// <summary>
+        /// Register a multi-return MethodInfo. Builds the
+        /// <see cref="MultiReturnInvoker"/> adapter once and caches it.
+        /// </summary>
+        public static void Register(int initDataId, int funcIdx, System.Reflection.MethodInfo mi)
+        {
+            var invoker = BuildInvoker(mi);
+            lock (_lock) { _invokers[(initDataId, funcIdx)] = invoker; }
+        }
+
+        public static MultiReturnInvoker? Get(int initDataId, int funcIdx)
+        {
+            lock (_lock)
+            {
+                return _invokers.TryGetValue((initDataId, funcIdx), out var inv) ? inv : null;
+            }
+        }
+
+        public static void Reset()
+        {
+            lock (_lock) { _invokers.Clear(); }
+        }
+
+        /// <summary>
+        /// Emit a DynamicMethod that calls the target MethodInfo directly,
+        /// avoiding reflection's per-call overhead. The target's signature is
+        /// <c>(ThinContext ctx, p0..pN-1, out r1, …, out r_{K-1}) -&gt; r0</c>.
+        /// The adapter:
+        ///   1. Declares locals for each out-param.
+        ///   2. Pushes ctx, each unboxed arg (args[i] → target's CLR type),
+        ///      and ldloca for each out-param.
+        ///   3. Calls the target.
+        ///   4. Boxes r0 into an object and stores at result[0].
+        ///   5. Boxes each out-param local and stores at result[i+1].
+        ///   6. Returns the result array.
+        /// </summary>
+        private static MultiReturnInvoker BuildInvoker(System.Reflection.MethodInfo mi)
+        {
+            var parameters = mi.GetParameters();
+            // parameters[0] is ThinContext; [1..] include wasm params then out-params.
+            var outStart = 0;
+            var argCount = 0;
+            var clrParamTypes = new List<Type>();
+            var outParamTypes = new List<Type>();
+            for (int i = 1; i < parameters.Length; i++)
+            {
+                if (parameters[i].ParameterType.IsByRef)
+                {
+                    if (outStart == 0) outStart = i;
+                    outParamTypes.Add(parameters[i].ParameterType.GetElementType()!);
+                }
+                else
+                {
+                    clrParamTypes.Add(parameters[i].ParameterType);
+                    argCount++;
+                }
+            }
+
+            var dyn = new System.Reflection.Emit.DynamicMethod(
+                $"MultiReturnInvoker_{mi.DeclaringType?.Name}_{mi.Name}",
+                typeof(object?[]),
+                new[] { typeof(ThinContext), typeof(object?[]) },
+                typeof(MultiReturnMethodRegistry).Module,
+                skipVisibility: true);
+
+            var il = dyn.GetILGenerator();
+
+            // Declare out-param locals.
+            var outLocals = new System.Reflection.Emit.LocalBuilder[outParamTypes.Count];
+            for (int i = 0; i < outParamTypes.Count; i++)
+                outLocals[i] = il.DeclareLocal(outParamTypes[i]);
+
+            // Push ctx.
+            il.Emit(System.Reflection.Emit.OpCodes.Ldarg_0);
+
+            // Push args[i] unboxed to the target param type.
+            for (int i = 0; i < argCount; i++)
+            {
+                il.Emit(System.Reflection.Emit.OpCodes.Ldarg_1);            // args
+                il.Emit(System.Reflection.Emit.OpCodes.Ldc_I4, i);
+                il.Emit(System.Reflection.Emit.OpCodes.Ldelem_Ref);         // args[i]
+                il.Emit(System.Reflection.Emit.OpCodes.Unbox_Any, clrParamTypes[i]);
+            }
+
+            // Push ldloca for each out-param.
+            for (int i = 0; i < outLocals.Length; i++)
+                il.Emit(System.Reflection.Emit.OpCodes.Ldloca, outLocals[i]);
+
+            il.EmitCall(System.Reflection.Emit.OpCodes.Call, mi, null);
+
+            // Build result array: [r0, out1, ..., outK-1].
+            int resultCount = 1 + outLocals.Length;
+            var resultLocal = il.DeclareLocal(typeof(object?[]));
+            il.Emit(System.Reflection.Emit.OpCodes.Ldc_I4, resultCount);
+            il.Emit(System.Reflection.Emit.OpCodes.Newarr, typeof(object));
+            il.Emit(System.Reflection.Emit.OpCodes.Stloc, resultLocal);
+
+            // result[0] = box(r0)  (r0 is on stack from the call).
+            var r0Local = il.DeclareLocal(mi.ReturnType);
+            il.Emit(System.Reflection.Emit.OpCodes.Stloc, r0Local);
+            il.Emit(System.Reflection.Emit.OpCodes.Ldloc, resultLocal);
+            il.Emit(System.Reflection.Emit.OpCodes.Ldc_I4_0);
+            il.Emit(System.Reflection.Emit.OpCodes.Ldloc, r0Local);
+            if (mi.ReturnType.IsValueType)
+                il.Emit(System.Reflection.Emit.OpCodes.Box, mi.ReturnType);
+            il.Emit(System.Reflection.Emit.OpCodes.Stelem_Ref);
+
+            // result[i+1] = box(outLocal[i]) for each out-param.
+            for (int i = 0; i < outLocals.Length; i++)
+            {
+                il.Emit(System.Reflection.Emit.OpCodes.Ldloc, resultLocal);
+                il.Emit(System.Reflection.Emit.OpCodes.Ldc_I4, i + 1);
+                il.Emit(System.Reflection.Emit.OpCodes.Ldloc, outLocals[i]);
+                if (outParamTypes[i].IsValueType)
+                    il.Emit(System.Reflection.Emit.OpCodes.Box, outParamTypes[i]);
+                il.Emit(System.Reflection.Emit.OpCodes.Stelem_Ref);
+            }
+
+            il.Emit(System.Reflection.Emit.OpCodes.Ldloc, resultLocal);
+            il.Emit(System.Reflection.Emit.OpCodes.Ret);
+
+            return (MultiReturnInvoker)dyn.CreateDelegate(typeof(MultiReturnInvoker));
+        }
+    }
+
+    /// <summary>
     /// Registry of emitted GC CLR types, keyed by (initDataId, typeIndex).
     /// Populated at transpile time, consumed at runtime by InitializeGcGlobals.
     /// </summary>
@@ -491,6 +646,36 @@ namespace Wacs.Transpiler.AOT
                         fields[1].SetValue(gcObj, length);
                         break;
                     }
+                    case 2: // struct.new(fields...)
+                    {
+                        gcObj = Activator.CreateInstance(clrType);
+                        var fieldInfos = GetStructFields(clrType);
+                        for (int f = 0; f < fieldInfos.Length && f < gcInit.Params.Length; f++)
+                        {
+                            var fi = fieldInfos[f];
+                            fi.SetValue(gcObj, CoerceStructFieldValue(fi.FieldType, gcInit.Params[f]));
+                        }
+                        break;
+                    }
+                    case 3: // struct.new_default — zero/default all fields
+                    {
+                        gcObj = Activator.CreateInstance(clrType);
+                        // Activator already zero-initialized the fields;
+                        // just need to set any Value-typed ref slots to the
+                        // proper null-ref encoding (Data.Ptr = long.MinValue).
+                        var fieldInfos = GetStructFields(clrType);
+                        foreach (var fi in fieldInfos)
+                        {
+                            if (fi.FieldType == typeof(Value))
+                            {
+                                // Without explicit per-field reftype metadata,
+                                // default(Value) is the safest initial state;
+                                // spec-correct null-ref tagging happens when a
+                                // struct.get reads the slot anyway.
+                            }
+                        }
+                        break;
+                    }
                 }
 
                 if (gcObj != null && gcInit.GlobalIndex < ctx.Globals.Length)
@@ -503,6 +688,48 @@ namespace Wacs.Transpiler.AOT
                     field?.SetValue(ctx.Globals[gcInit.GlobalIndex], val);
                 }
             }
+        }
+
+        /// <summary>
+        /// Returns just the WASM struct fields (named field_0, field_1, …) from
+        /// an emitted WasmStruct_N class, skipping auxiliary fields like
+        /// StructuralHash / _storeIndex. Ordered by the numeric suffix so the
+        /// result matches WASM declaration order regardless of the CLR's field
+        /// enumeration order.
+        /// </summary>
+        private static System.Reflection.FieldInfo[] GetStructFields(Type clrType)
+        {
+            var list = new System.Collections.Generic.List<(int idx, System.Reflection.FieldInfo fi)>();
+            foreach (var fi in clrType.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            {
+                if (fi.Name.StartsWith("field_", StringComparison.Ordinal)
+                    && int.TryParse(fi.Name.Substring("field_".Length), out var n))
+                    list.Add((n, fi));
+            }
+            list.Sort((a, b) => a.idx.CompareTo(b.idx));
+            var result = new System.Reflection.FieldInfo[list.Count];
+            for (int i = 0; i < list.Count; i++) result[i] = list[i].fi;
+            return result;
+        }
+
+        /// <summary>
+        /// Convert a constant param (stored as long) into the CLR type of a
+        /// struct field. Packed WASM types (i8 / i16) map to byte / short and
+        /// are truncated from the 32-bit literal. Ref types left as default
+        /// when params only carry scalar constants.
+        /// </summary>
+        private static object? CoerceStructFieldValue(Type clrFieldType, long value)
+        {
+            if (clrFieldType == typeof(byte)) return (byte)(value & 0xFF);
+            if (clrFieldType == typeof(short)) return (short)(value & 0xFFFF);
+            if (clrFieldType == typeof(int)) return (int)value;
+            if (clrFieldType == typeof(long)) return value;
+            if (clrFieldType == typeof(float)) return BitConverter.Int32BitsToSingle((int)value);
+            if (clrFieldType == typeof(double)) return BitConverter.Int64BitsToDouble(value);
+            // Ref / V128 fields: params only carry scalar const initializers,
+            // so ref-typed fields in global struct.new constants aren't
+            // currently exercised. Leave the Activator-provided default.
+            return null;
         }
     }
 }

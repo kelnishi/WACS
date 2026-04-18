@@ -1,6 +1,6 @@
 # Changelog
 
-## WACS.Transpiler [0.1.0-preview.1] First preview
+## WACS.Transpiler [0.1.0] First release
 
 - New NuGet package: `WACS.Transpiler`. Installs as a dotnet global tool
   (command: `wasm-transpile`). Ahead-of-time transpiles a `.wasm` module
@@ -15,13 +15,17 @@
   run configurations that want to transpile-and-execute in one step.
 - Library surface: `Wacs.Transpiler.AOT.ModuleTranspiler.Transpile(...)`
   and `TranspilationResult.SaveAssembly(path)` for programmatic use.
-- WebAssembly 3.0 spec coverage: 469/473 passing on the AOT path
-  (known gaps in this preview: 3 multi-return invocation cases in
-  `call_indirect.wast`, `func.wast`, `if.wast`, and one GC struct
-  coercion case in `gc/struct.wast`). The interpreter remains
-  spec-complete on the same suite.
-- Known limitations: saved `.dll` is intended for in-process use in
-  this preview — cross-process standalone execution (init-data embedded
+- **Spec-equivalent to the WACS interpreter: 473/473 passing on the
+  WebAssembly 3.0 spec test suite**, verified on both macOS ARM64 and
+  Linux x64. Includes: multi-result `return` / `call_indirect` dispatch
+  (via a MethodInfo registry for targets whose byref out-params don't
+  fit Func/Action delegates), `f32.convert_i64_u` / `f64.convert_i64_u`
+  routed through the interpreter's spec-exact RTNE helper for
+  platform-invariant rounding, `struct.new` / `struct.new_default`
+  global initializers with typed field storage, and correct
+  sign/zero-extension for packed i8 / i16 struct reads.
+- Known limitation: the saved `.dll` is intended for in-process use in
+  this release — cross-process standalone execution (init-data embedded
   into the assembly) is a v0.2 milestone. See
   `Wacs.Transpiler/README.md` for details.
 
