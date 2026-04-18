@@ -11,6 +11,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Wacs.Core.Instructions;
+using Wacs.Core.Instructions.GC;
 using Wacs.Core.Instructions.Memory;
 using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.Instructions.Reference;
@@ -193,6 +194,8 @@ namespace Wacs.Core.Compilation
         private static int SizeOfGc(GcCode code) => code switch
         {
             GcCode.RefI31 or GcCode.I31GetS or GcCode.I31GetU => 0,
+            // ref.test / ref.cast (+ null variants): heap type encoded as i32 ValType bits.
+            GcCode.RefTest or GcCode.RefTestNull or GcCode.RefCast or GcCode.RefCastNull => 4,
             _ => 0,
         };
 
@@ -267,6 +270,34 @@ namespace Wacs.Core.Compilation
                 default:
                     throw new NotSupportedException(
                         $"BytecodeCompiler cannot yet emit ExtCode.{code} (0xFC 0x{(byte)code:X2}).");
+            }
+            return writePos;
+        }
+
+        /// <summary>
+        /// Emits 0xFB-prefixed GC ops. i31 ops have no immediates; ref.test/cast carry a
+        /// 4-byte heap-type immediate. Struct/array ops with typeIdx (+fieldIdx) will be
+        /// added as they're wired.
+        /// </summary>
+        private static int EmitGc(byte[] buf, int writePos, GcCode code, InstructionBase inst)
+        {
+            switch (code)
+            {
+                case GcCode.RefI31:
+                case GcCode.I31GetS:
+                case GcCode.I31GetU:
+                    break;
+                case GcCode.RefTest:
+                case GcCode.RefTestNull:
+                    writePos = WriteS32(buf, writePos, (int)((InstRefTest)inst).HeapType);
+                    break;
+                case GcCode.RefCast:
+                case GcCode.RefCastNull:
+                    writePos = WriteS32(buf, writePos, (int)((InstRefCast)inst).HeapType);
+                    break;
+                default:
+                    throw new NotSupportedException(
+                        $"BytecodeCompiler cannot yet emit GcCode.{code} (0xFB 0x{(byte)code:X2}).");
             }
             return writePos;
         }
@@ -411,10 +442,8 @@ namespace Wacs.Core.Compilation
                     break;
 
                 // ---- FB-prefixed: GC ops (i31/struct/array/cast) --------
-                // For the current slice (i31 ops only) there are no immediates — the
-                // 2-byte opcode header is the whole payload. Future struct/array/cast
-                // ops will extend this with their own helper.
                 case OpCode.FB:
+                    writePos = EmitGc(buf, writePos, op.xFB, inst);
                     break;
 
                 // ---- FC-prefixed: bulk memory + table ops --------
