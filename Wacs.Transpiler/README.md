@@ -4,23 +4,23 @@ An ahead-of-time transpiler that compiles WebAssembly modules to .NET
 assemblies (`.dll`), built on top of [WACS](https://www.nuget.org/packages/WACS).
 Ships as the `wasm-transpile` .NET CLI tool.
 
-The generated assembly passes 469/473 on the WebAssembly 3.0 spec test
-suite — the same suite WACS is spec-complete against — but runs natively
-via the CLR's JIT instead of the interpreter's expression-tree dispatch.
-(The four remaining cases are narrow multi-return / GC-coercion gaps
-called out in the v0.1 preview limitations below.)
+The generated assembly is spec-equivalent to the WACS interpreter —
+473/473 on the WebAssembly 3.0 spec test suite, verified on both macOS
+ARM64 and Linux x64 — but runs natively via the CLR's JIT instead of
+the interpreter's expression-tree dispatch.
 
-> **v0.1 preview**: the saved `.dll` currently depends on process-local
-> init state and is intended for programmatic (same-process) use and
-> inspection — cross-process standalone execution lands in v0.2. See
-> [Known Limitations](#v01-preview-known-limitations).
+> **v0.1 known limitation**: the saved `.dll` currently depends on
+> process-local init state and is intended for programmatic
+> (same-process) use and inspection — cross-process standalone
+> execution lands in v0.2. See
+> [Known Limitations](#v01-known-limitations).
 
 ## Installation
 
 Install the CLI tool globally:
 
 ```bash
-dotnet tool install -g WACS.Transpiler --prerelease
+dotnet tool install -g WACS.Transpiler
 ```
 
 Verify:
@@ -65,7 +65,7 @@ wasm-transpile -i add.wasm -o add.dll --emit-main --entry-point add
 # now load + call Program.Main reflectively, or wrap in a dotnet host
 ```
 
-v0.1-preview constraints:
+v0.1 `--emit-main` constraints:
 - Module must have no imports.
 - The export named by `--entry-point` (default `_start`) must take scalar
   `i32`/`i64`/`f32`/`f64` params and return void or a single scalar.
@@ -121,7 +121,7 @@ var result = addMethod!.Invoke(module, new object[] { 2, 3 });
 Console.WriteLine(result);  // 5
 ```
 
-## v0.1-preview Known Limitations
+## v0.1 Known Limitations
 
 - **Cross-process execution of the saved `.dll` is not yet supported.** The
   emitted assembly depends on runtime state (a per-process
