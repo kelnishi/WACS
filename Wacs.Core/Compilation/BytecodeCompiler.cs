@@ -154,6 +154,11 @@ namespace Wacs.Core.Compilation
                 OpCode.TableGet or OpCode.TableSet => 4,
                 // FC-prefixed bulk memory + table ops — secondary byte selects the layout.
                 OpCode.FC => SizeOfExt(inst.Op.xFC),
+                // FD-prefixed SIMD ops — secondary byte selects the layout.
+                // Most arithmetic SIMD ops take no immediates. v128.load/store take memarg
+                // (12 bytes); v128.const takes 16 bytes; lane ops take 1 byte; shuffle
+                // takes 16 bytes. For the initial slice we only cover no-immediate ops.
+                OpCode.FD => SizeOfSimd(inst.Op.xFD),
                 // No-immediate ops (drop/select/return/unreachable/nop/numeric).
                 _ => 0,
             };
@@ -165,6 +170,19 @@ namespace Wacs.Core.Compilation
         /// subcodes; callers downstream will fail at the Emit step with a clear message
         /// rather than silently producing an undersized stream.
         /// </summary>
+        /// <summary>
+        /// Immediate byte count for 0xFD-prefixed SIMD opcodes. Most arithmetic ops have no
+        /// immediates (the operands come off the OpStack). Memory variants, v128.const,
+        /// lane/shuffle ops have immediates; those return 0 here until they're wired up and
+        /// will fail at Emit time with a clear message.
+        /// </summary>
+        private static int SizeOfSimd(SimdCode code) => code switch
+        {
+            // Standard SIMD ops with no immediates (arithmetic, unary, test, etc.).
+            // Listed as they're added to the dispatcher; callers downstream will Emit.
+            _ => 0,
+        };
+
         private static int SizeOfExt(ExtCode code) => code switch
         {
             // Bulk memory.
@@ -237,6 +255,22 @@ namespace Wacs.Core.Compilation
                     throw new NotSupportedException(
                         $"BytecodeCompiler cannot yet emit ExtCode.{code} (0xFC 0x{(byte)code:X2}).");
             }
+            return writePos;
+        }
+
+        /// <summary>
+        /// Emits 0xFD-prefixed SIMD ops. Most arithmetic/test/unary ops have no immediates —
+        /// the secondary byte is the whole payload. Memory (v128.load/store) and v128.const
+        /// variants will need their own cases once they're added to SizeOfSimd.
+        /// </summary>
+        private static int EmitSimd(byte[] buf, int writePos, SimdCode code, InstructionBase inst)
+        {
+            // Arithmetic, unary, relational, test, and other pure-stack ops: nothing after
+            // the 2-byte opcode header. Size is already accounted for. The handler reads
+            // operands off the OpStack via the [OpHandler]-marked ExecuteX body.
+            //
+            // Ops with immediates (memarg, v128.const, lane index, shuffle mask) will
+            // dispatch here too; add their cases as we wire them up.
             return writePos;
         }
 
@@ -366,6 +400,11 @@ namespace Wacs.Core.Compilation
                 // ---- FC-prefixed: bulk memory + table ops --------
                 case OpCode.FC:
                     writePos = EmitExt(buf, writePos, op.xFC, inst);
+                    break;
+
+                // ---- FD-prefixed: SIMD ops --------
+                case OpCode.FD:
+                    writePos = EmitSimd(buf, writePos, op.xFD, inst);
                     break;
 
                 // ---- branches ----

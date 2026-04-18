@@ -382,6 +382,8 @@ namespace Wacs.Compilation
             "double" => "PopF64",
             // Type-agnostic stack values (Value struct) — used by variable + parametric ops.
             "Wacs.Core.Runtime.Value" => "PopAny",
+            // V128 — 128-bit SIMD value.
+            "Wacs.Core.Runtime.V128" => "PopV128",
             _ => null,
         };
 
@@ -394,6 +396,7 @@ namespace Wacs.Compilation
             "float"  => "PushF32",
             "double" => "PushF64",
             "Wacs.Core.Runtime.Value" => "PushValue",
+            "Wacs.Core.Runtime.V128" => "PushV128",
             _ => null,
         };
 
