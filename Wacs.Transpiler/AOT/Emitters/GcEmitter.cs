@@ -14,6 +14,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using Wacs.Core.Instructions;
@@ -1045,27 +1046,53 @@ namespace Wacs.Transpiler.AOT.Emitters
             return false;
         }
 
-        /// <summary>Test if a funcref's function type matches a concrete type index.</summary>
+        /// <summary>
+        /// Test if a funcref's function type is a subtype of (or equal to)
+        /// the declared type at <paramref name="typeIndex"/>. Uses the
+        /// pre-computed supertype-hash chain when present so subtyping
+        /// works without consulting the interpreter TypesSpace — falls
+        /// back to direct hash equality via <see cref="ThinContext.FuncTypeHashes"/>
+        /// when the chain hasn't been populated (older assemblies).
+        /// </summary>
         private static bool TestFuncType(Value val, int typeIndex, ThinContext ctx)
         {
             if (ctx.FuncTypeHashes == null) return false;
             int funcIdx = (int)val.Data.Ptr;
             if (funcIdx < 0 || funcIdx >= ctx.FuncTypeHashes.Length)
                 return false;
-            int actualHash = ctx.FuncTypeHashes[funcIdx];
 
-            // Look up the target type's hash from the module's type definitions
+            // Resolve target type's hash. Prefer the module's own TypesSpace
+            // when available (mixed-mode); otherwise fall back to the
+            // transpile-time-baked TypeHashes / TypeIsFunc tables so the
+            // standalone runtime path doesn't need the interpreter.
+            int targetHash;
             if (ctx.Module?.Types != null && ctx.Module.Types.Contains((TypeIdx)typeIndex))
             {
                 var targetDefType = ctx.Module.Types[(TypeIdx)typeIndex];
-                // Check if target is a function type
-                if (targetDefType.Expansion is FunctionType)
-                {
-                    int targetHash = targetDefType.GetHashCode();
-                    return actualHash == targetHash;
-                }
+                if (!(targetDefType.Expansion is FunctionType)) return false;
+                targetHash = targetDefType.GetHashCode();
             }
-            return false;
+            else if (ctx.TypeHashes != null && typeIndex >= 0 && typeIndex < ctx.TypeHashes.Length)
+            {
+                if (ctx.TypeIsFunc != null && !ctx.TypeIsFunc[typeIndex]) return false;
+                targetHash = ctx.TypeHashes[typeIndex];
+            }
+            else
+            {
+                return false;
+            }
+
+            // Subtype check: walk the supertype chain for this function.
+            // If the chain isn't populated fall back to direct equality
+            // (previous behaviour).
+            var chain = ctx.FuncTypeSuperHashes?[funcIdx];
+            if (chain != null)
+            {
+                for (int i = 0; i < chain.Length; i++)
+                    if (chain[i] == targetHash) return true;
+                return false;
+            }
+            return ctx.FuncTypeHashes[funcIdx] == targetHash;
         }
 
         private static int? GetStructuralHash(Type clrType)

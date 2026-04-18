@@ -118,6 +118,26 @@ namespace Wacs.Transpiler.AOT
         // to check function type identity without requiring the interpreter Store.
         public int[]? FuncTypeHashes;
 
+        // FuncTypeSuperHashes: ordered hashes of each function's declared
+        // type plus every transitive supertype (depth-first). Used by
+        // ref.test/ref.cast on funcref to check function-type subtyping
+        // (doc 1 §11.8) without requiring the interpreter TypesSpace.
+        // `null` or empty entries fall back to the direct-match path.
+        public int[][]? FuncTypeSuperHashes;
+
+        // TypeHashes: structural hash per module-declared type, indexed by
+        // type index. Used to resolve a concrete type index at runtime to
+        // its hash in standalone mode (no interpreter TypesSpace). The
+        // corresponding FuncTypeSuperHashes entry is then scanned for a
+        // match during ref.test/ref.cast subtype checks.
+        public int[]? TypeHashes;
+
+        // TypeIsFunc: parallel to TypeHashes — true when the declared type
+        // at this index expands to a FunctionType (so funcref ref.cast
+        // against it is valid). Used to reject casts against non-function
+        // concrete types in the funcref path (doc 1 §11.8).
+        public bool[]? TypeIsFunc;
+
         /// <summary>
         /// Construct a ThinContext for standalone use (no WasmRuntime).
         /// </summary>

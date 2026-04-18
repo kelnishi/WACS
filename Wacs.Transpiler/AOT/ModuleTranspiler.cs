@@ -290,20 +290,46 @@ namespace Wacs.Transpiler.AOT
                 int importedFuncCount = moduleInst.Repr.ImportedFunctions.Count;
                 int localFuncCount = moduleInst.Repr.Funcs.Count;
                 int totalFuncs = importedFuncCount + localFuncCount;
+                // Bake per-type metadata (hashes + function-type flag) so
+                // ref.test/ref.cast on funcref can resolve target types in
+                // standalone mode. Indexed by declared type index.
+                int typeCount = 0;
+                while (moduleInst.Types.Contains((TypeIdx)typeCount)) typeCount++;
+                if (typeCount > 0)
+                {
+                    initData.TypeHashes = new int[typeCount];
+                    initData.TypeIsFunc = new bool[typeCount];
+                    for (int t = 0; t < typeCount; t++)
+                    {
+                        var dt = moduleInst.Types[(TypeIdx)t];
+                        initData.TypeHashes[t] = dt.GetHashCode();
+                        initData.TypeIsFunc[t] = dt.Expansion is FunctionType;
+                    }
+                }
+
                 if (totalFuncs > 0)
                 {
                     initData.FuncTypeHashes = new int[totalFuncs];
+                    initData.FuncTypeSuperHashes = new int[totalFuncs][];
                     int fi = 0;
                     foreach (var import in moduleInst.Repr.ImportedFunctions)
                     {
                         if (moduleInst.Types.Contains(import.TypeIndex))
-                            initData.FuncTypeHashes[fi] = moduleInst.Types[import.TypeIndex].GetHashCode();
+                        {
+                            var dt = moduleInst.Types[import.TypeIndex];
+                            initData.FuncTypeHashes[fi] = dt.GetHashCode();
+                            initData.FuncTypeSuperHashes[fi] = BuildSuperTypeHashChain(dt);
+                        }
                         fi++;
                     }
                     foreach (var func in moduleInst.Repr.Funcs)
                     {
                         if (moduleInst.Types.Contains(func.TypeIndex))
-                            initData.FuncTypeHashes[fi] = moduleInst.Types[func.TypeIndex].GetHashCode();
+                        {
+                            var dt = moduleInst.Types[func.TypeIndex];
+                            initData.FuncTypeHashes[fi] = dt.GetHashCode();
+                            initData.FuncTypeSuperHashes[fi] = BuildSuperTypeHashChain(dt);
+                        }
                         fi++;
                     }
                 }
@@ -462,6 +488,33 @@ namespace Wacs.Transpiler.AOT
             }
 
             il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// Walk the supertype chain of <paramref name="dt"/> (depth-first,
+        /// self first) and collect the StableHash of every transitive
+        /// supertype. Used by <c>ref.test</c>/<c>ref.cast</c> on funcref
+        /// to decide subtype relationships at runtime when the interpreter
+        /// TypesSpace isn't available (doc 1 §11.8).
+        /// </summary>
+        private static int[] BuildSuperTypeHashChain(Wacs.Core.Types.DefType dt)
+        {
+            var chain = new List<int> { dt.GetHashCode() };
+            var seen = new HashSet<int> { dt.GetHashCode() };
+            var worklist = new Stack<Wacs.Core.Types.DefType>();
+            if (dt.SuperTypes != null)
+                foreach (var sup in dt.SuperTypes) worklist.Push(sup);
+            while (worklist.Count > 0)
+            {
+                var s = worklist.Pop();
+                if (s == null) continue;
+                int h = s.GetHashCode();
+                if (!seen.Add(h)) continue;
+                chain.Add(h);
+                if (s.SuperTypes != null)
+                    foreach (var ss in s.SuperTypes) worklist.Push(ss);
+            }
+            return chain.ToArray();
         }
 
         /// <summary>
