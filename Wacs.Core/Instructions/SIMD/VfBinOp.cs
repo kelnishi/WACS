@@ -166,6 +166,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.F64x2Add)]
         private static void ExecuteF64x2Add(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
@@ -177,6 +178,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.F64x2Sub)]
         private static void ExecuteF64x2Sub(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
@@ -188,6 +190,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.F64x2Mul)]
         private static void ExecuteF64x2Mul(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
@@ -199,6 +202,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.F64x2Div)]
         private static void ExecuteF64x2Div(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();

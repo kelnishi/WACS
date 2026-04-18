@@ -73,6 +73,7 @@ namespace Wacs.Core.Instructions.Numeric
         //i32x4.dot
 
         // Execute methods
+        [OpHandler(SimdCode.I8x16Add)]
         private static void ExecuteI8x16Add(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
@@ -98,6 +99,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.I8x16Sub)]
         private static void ExecuteI8x16Sub(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
@@ -124,6 +126,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
 
+        [OpHandler(SimdCode.I16x8Add)]
         private static void ExecuteI16x8Add(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
@@ -141,6 +144,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.I16x8Sub)]
         private static void ExecuteI16x8Sub(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
@@ -186,6 +190,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.I64x2Add)]
         private static void ExecuteI64x2Add(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
@@ -197,6 +202,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.I64x2Sub)]
         private static void ExecuteI64x2Sub(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
