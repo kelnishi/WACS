@@ -535,5 +535,52 @@ namespace Wacs.Compilation.Test
             Assert.Single(results);
             Assert.Equal(1, results[0].Data.Int32);
         }
+
+        /// <summary>
+        /// Table size smoke test — exercises the 0xFC-prefixed table.size op.
+        /// <code>
+        /// (module (table 5 funcref) (func (export "tsize") (result i32) table.size 0))
+        /// </code>
+        /// </summary>
+        private static readonly byte[] TableSizeModule =
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type () -> i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // Func 0
+            0x03, 0x02, 0x01, 0x00,
+            // Table: funcref, min 5
+            0x04, 0x04, 0x01, 0x70, 0x00, 0x05,
+            // Export "tsize"
+            0x07, 0x09, 0x01, 0x05, (byte)'t', (byte)'s', (byte)'i', (byte)'z', (byte)'e', 0x00, 0x00,
+            // Code body:
+            //   00          locals
+            //   FC 10 00    table.size 0
+            //   0B          end
+            // 5 body bytes; body-size 0x05; section body = 7; section size 0x07.
+            0x0A, 0x07, 0x01, 0x05,
+            0x00,
+            0xFC, 0x10, 0x00,
+            0x0B,
+        };
+
+        [Fact]
+        public void TableSize_returns_declared_min()
+        {
+            var runtime = new WasmRuntime();
+            using var ms = new MemoryStream(TableSizeModule);
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("m", moduleInst);
+
+            var addr = runtime.GetExportedFunction(("m", "tsize"));
+            var funcInst = (FunctionInstance)runtime.RuntimeStore[addr];
+
+            var ctx = new ExecContext(runtime.RuntimeStore);
+            var results = SwitchRuntime.Invoke(ctx, funcInst);
+
+            Assert.Single(results);
+            Assert.Equal(5, results[0].Data.Int32);
+        }
     }
 }
