@@ -137,6 +137,8 @@ namespace Wacs.Core.Compilation
                 OpCode.I64Store8 or OpCode.I64Store16 or OpCode.I64Store32 => 12,
                 // memory.size / memory.grow: memIdx:u32.
                 OpCode.MemorySize or OpCode.MemoryGrow => 4,
+                // table.get / table.set: tableIdx:u32.
+                OpCode.TableGet or OpCode.TableSet => 4,
                 // FC-prefixed bulk memory + table ops — secondary byte selects the layout.
                 OpCode.FC => SizeOfExt(inst.Op.xFC),
                 // No-immediate ops (drop/select/return/unreachable/nop/numeric).
@@ -157,6 +159,13 @@ namespace Wacs.Core.Compilation
             ExtCode.DataDrop   => 4,   // dataIdx:u32
             ExtCode.MemoryCopy => 8,   // dstIdx:u32 + srcIdx:u32
             ExtCode.MemoryFill => 4,   // memIdx:u32
+            // Tables.
+            ExtCode.TableInit  => 8,   // elemIdx:u32 + tableIdx:u32
+            ExtCode.ElemDrop   => 4,   // elemIdx:u32
+            ExtCode.TableCopy  => 8,   // dstIdx:u32 + srcIdx:u32
+            ExtCode.TableGrow  => 4,   // tableIdx:u32
+            ExtCode.TableSize  => 4,   // tableIdx:u32
+            ExtCode.TableFill  => 4,   // tableIdx:u32
             _ => 0,
         };
 
@@ -183,6 +192,33 @@ namespace Wacs.Core.Compilation
                 }
                 case ExtCode.MemoryFill:
                     writePos = WriteU32(buf, writePos, (uint)((InstMemoryFill)inst).MemoryIndex);
+                    break;
+                // ---- Tables ----
+                case ExtCode.TableInit:
+                {
+                    var ti = (InstTableInit)inst;
+                    writePos = WriteU32(buf, writePos, (uint)ti.ElemIndex);
+                    writePos = WriteU32(buf, writePos, (uint)ti.TableIndex);
+                    break;
+                }
+                case ExtCode.ElemDrop:
+                    writePos = WriteU32(buf, writePos, (uint)((InstElemDrop)inst).ElemIndex);
+                    break;
+                case ExtCode.TableCopy:
+                {
+                    var tc = (InstTableCopy)inst;
+                    writePos = WriteU32(buf, writePos, (uint)tc.DstTableIndex);
+                    writePos = WriteU32(buf, writePos, (uint)tc.SrcTableIndex);
+                    break;
+                }
+                case ExtCode.TableGrow:
+                    writePos = WriteU32(buf, writePos, (uint)((InstTableGrow)inst).TableIndex);
+                    break;
+                case ExtCode.TableSize:
+                    writePos = WriteU32(buf, writePos, (uint)((InstTableSize)inst).TableIndex);
+                    break;
+                case ExtCode.TableFill:
+                    writePos = WriteU32(buf, writePos, (uint)((InstTableFill)inst).TableIndex);
                     break;
                 default:
                     throw new NotSupportedException(
@@ -280,7 +316,15 @@ namespace Wacs.Core.Compilation
                     writePos = WriteU32(buf, writePos, (uint)((InstMemoryGrow)inst).MemIndex);
                     break;
 
-                // ---- FC-prefixed: bulk memory + (future) table ops --------
+                // ---- table.get / table.set: [tableIdx:u32] ----
+                case OpCode.TableGet:
+                    writePos = WriteU32(buf, writePos, (uint)((InstTableGet)inst).TableIndex);
+                    break;
+                case OpCode.TableSet:
+                    writePos = WriteU32(buf, writePos, (uint)((InstTableSet)inst).TableIndex);
+                    break;
+
+                // ---- FC-prefixed: bulk memory + table ops --------
                 case OpCode.FC:
                     writePos = EmitExt(buf, writePos, op.xFC, inst);
                     break;
