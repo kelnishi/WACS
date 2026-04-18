@@ -204,6 +204,8 @@ namespace Wacs.Compilation
             sb.AppendLine("using Wacs.Core.OpCodes;");
             sb.AppendLine("using Wacs.Core.Runtime;");
             sb.AppendLine("using Wacs.Core.Runtime.Exceptions;");
+            // I31Ref (GC proposal) lives here — needed by the i31 handlers.
+            sb.AppendLine("using Wacs.Core.Runtime.GC;");
             // TrapException sits in Runtime.Types despite living in the Runtime/Exceptions folder.
             sb.AppendLine("using Wacs.Core.Runtime.Types;");
             // GlobalIdx / FuncIdx / etc. live here — needed whenever a handler body casts an index.

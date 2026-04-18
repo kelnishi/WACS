@@ -48,7 +48,7 @@ namespace Wacs.Core.Instructions.GC
             context.Assert(context.OpStack.Peek().IsI32,
                 $"Instruction {Op.GetMnemonic()} failed. Wrong operand type at top of stack {context.OpStack.Peek().Type}.");
             long i = context.OpStack.PopI32();
-            
+
             if ((i & SignBit31) != 0)
             {
                 i = (long)(SignExtendBits | unchecked((ulong)i));
