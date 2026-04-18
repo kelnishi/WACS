@@ -70,12 +70,54 @@ v0.1 `--emit-main` constraints:
 - The export named by `--entry-point` (default `_start`) must take scalar
   `i32`/`i64`/`f32`/`f64` params and return void or a single scalar.
 
-### `--wasi`: transpile and run WASI preview1 modules
+### `--bind`: link against any WACS host library
+
+The transpiler can link against any assembly that exposes host
+bindings through the `Wacs.Core.Runtime.IBindable` interface:
+
+```csharp
+// In your library:
+public class MyGameHost : IBindable {
+    public void BindToRuntime(WasmRuntime runtime) {
+        runtime.BindHostFunction<Action<int>>(("env", "play_sound"), id => /*…*/);
+        runtime.BindHostFunction<Func<int,int>>(("env", "random_up_to"), n => /*…*/);
+    }
+}
+```
+
+Build the library (a standard .NET assembly), then pass it to
+`wasm-transpile` with `--bind`:
+
+```bash
+wasm-transpile -i game.wasm \
+  -o game.dll \
+  --bind ./MyGameHost.dll \
+  --entry-point _start \
+  --run
+```
+
+The transpiler loads the assembly, reflects every concrete `IBindable`
+with a parameterless constructor, activates each one, and wires them
+into the runtime before instantiating the module. Repeat or
+comma-separate `--bind` for multiple assemblies — WASI, a scripting
+shim, and a telemetry sink can all be linked in at once.
+
+Constraints for auto-discovery:
+- Each binding class needs a **parameterless constructor**. Bindings
+  that require configuration should either provide sensible defaults
+  in the parameterless ctor (`Wacs.WASIp1.Wasi()` does this) or be
+  driven from the library API below.
+- `IBindable`s that also implement `IDisposable` are disposed after
+  the run. Good for file handles, network sockets, etc.
+- The transpiler itself doesn't care which CLR-side types the host
+  uses — match what `runtime.BindHostFunction<TDelegate>` accepts.
+
+### `--wasi`: shortcut for WASI preview1
 
 For modules that import `wasi_snapshot_preview1` (anything compiled
-against a C/Rust/Go/Zig `wasi-libc` / `wasi` target), use `--wasi` to
-bind `WACS.WASIp1` before transpilation and invoke an entry-point
-export in-process. Trailing positional args become WASI `argv`.
+against a C/Rust/Go/Zig `wasi-libc` / `wasi` target), `--wasi` is a
+shortcut that's equivalent to `--bind <path-to-Wacs.WASIp1.dll>` with
+the CLI's trailing positional args exposed as WASI `argv`.
 
 ```bash
 wasm-transpile -i coremark.wasm \
@@ -88,10 +130,9 @@ wasm-transpile -i coremark.wasm \
 What happens:
 1. Before instantiation, `Wacs.WASIp1.Wasi` is constructed with a
    default configuration (stdio attached, host env inherited,
-   `Directory.GetCurrentDirectory()` as the root) and bound to the
-   interpreter's `WasmRuntime`.
-2. The module is transpiled with its WASI imports resolved against
-   those bindings.
+   `Directory.GetCurrentDirectory()` as the root, argv =
+   `[wasm-filename, …trailing-args]`) and bound to the runtime.
+2. The module is transpiled with its WASI imports resolved.
 3. A `DispatchProxy` implementing the generated `IImports` interface
    forwards every import method call through the interpreter's
    `runtime.CreateStackInvoker`, so WASI syscalls go through the
@@ -103,20 +144,10 @@ What happens:
 5. The named export (default `_start`) is invoked directly on the
    generated Module class.
 
-`--wasi` can be used with or without `--emit-main`. Without it, the
-module executes immediately in-process. With it, the emitted
-`Program.Main` is built too — but `--run` still goes through the
-WASI path.
-
-### Other framework libraries
-
-`--wasi` is a special case of a more general pattern: bind host
-functions to the runtime before transpilation. For custom host
-bindings (not WASI), use the library path below with your own
-`BindHostFunction` calls and build an `ImportDispatcher` proxy the
-same way `Wacs.Transpiler.Cli.WasiRunner` does. The CLI's `--wasi`
-flag covers the WASI-only case; anything richer is a library
-integration.
+`--wasi` and `--bind` can be combined (e.g. WASI + a custom
+telemetry host), and both work with or without `--emit-main`. When
+`--emit-main` is also set, the emitted `Program.Main` is built but
+`--run` still goes through the hosted path.
 
 ## Library Usage
 

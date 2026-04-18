@@ -935,43 +935,21 @@ namespace Wacs.Transpiler.AOT.Emitters
                     throw new TrapException("uninitialized element");
             }
 
-            // Type check: verify delegate parameter count matches args.
-            // Full WASM type checking compares param AND result types — we check
-            // param count here and catch type mismatches from DynamicInvoke below.
-            var invokeMethod = del.GetType().GetMethod("Invoke");
-            if (invokeMethod != null)
-            {
-                var delParams = invokeMethod.GetParameters();
-                if (delParams.Length != args.Length)
-                    throw new TrapException("indirect call type mismatch");
-
-                // Check parameter types match
-                for (int i = 0; i < args.Length; i++)
-                {
-                    if (args[i] != null && !delParams[i].ParameterType.IsInstanceOfType(args[i]))
-                        throw new TrapException("indirect call type mismatch");
-                }
-
-                // Check return type matches caller's expectation
-                if (expectedReturn != null && invokeMethod.ReturnType != expectedReturn)
-                    throw new TrapException("indirect call type mismatch");
-                if (expectedReturn == null && invokeMethod.ReturnType != typeof(void))
-                    throw new TrapException("indirect call type mismatch");
-                if (expectedReturn != null && expectedReturn != typeof(void) && invokeMethod.ReturnType == typeof(void))
-                    throw new TrapException("indirect call type mismatch");
-            }
-
+            // WASM validation guaranteed type compatibility at this call
+            // site (argc + types checked at module validation, plus the
+            // subtype hash check above). Skip per-call reflection and call
+            // through a cached typed wrapper — `Delegate.DynamicInvoke` is
+            // a known hot spot (fib/fac/runaway via call_indirect ran ~46
+            // minutes on CI because every indirect call went through
+            // reflection). The wrapper is JIT-compiled once per delegate
+            // type: unbox each boxed arg, call the typed Invoke directly,
+            // box the result.
+            var invoker = TypedDelegateInvoker.GetOrBuild(del.GetType());
             try
             {
-                return del.DynamicInvoke(args);
+                return invoker(del, args);
             }
-            catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
-            {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
-                return null; // unreachable
-            }
-            catch (Exception ex) when (ex is System.Reflection.TargetParameterCountException
-                or System.ArgumentException or System.InvalidCastException)
+            catch (InvalidCastException)
             {
                 throw new TrapException("indirect call type mismatch");
             }
@@ -1034,40 +1012,23 @@ namespace Wacs.Transpiler.AOT.Emitters
                 }
             }
 
-            var mi = MultiReturnMethodRegistry.Get(ctx.InitDataId, resolvedFuncIdx);
-            if (mi == null)
+            var invoker = MultiReturnMethodRegistry.Get(ctx.InitDataId, resolvedFuncIdx);
+            if (invoker == null)
                 throw new TrapException("uninitialized element");
 
-            // Static method signature: (ThinContext ctx, p0..pN-1, out r1, …, out r_{K-1})
-            // First result r0 is the return value; r1..r_{K-1} come back via
-            // out-params. Total CLR args: 1 (ctx) + args.Length + (resultCount - 1).
-            int outCount = resultCount - 1;
-            var invokeArgs = new object?[1 + args.Length + outCount];
-            invokeArgs[0] = ctx;
-            for (int i = 0; i < args.Length; i++) invokeArgs[1 + i] = args[i];
-            // out slots default to null — reflection fills them.
-
-            object? r0;
+            // The invoker is a DynamicMethod-compiled adapter that calls the
+            // target's static method directly. Pre-reflection mi.Invoke was
+            // ~100x slower, which meant call_indirect.wast took 46+ minutes
+            // in CI on Linux x64 tight loops; the JIT-compiled path brings
+            // it back into the seconds range.
             try
             {
-                r0 = mi.Invoke(null, invokeArgs);
+                return invoker(ctx, args);
             }
-            catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
-            {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
-                return null!; // unreachable
-            }
-            catch (Exception ex) when (ex is System.Reflection.TargetParameterCountException
-                or System.ArgumentException or System.InvalidCastException)
+            catch (InvalidCastException)
             {
                 throw new TrapException("indirect call type mismatch");
             }
-
-            var results = new object?[resultCount];
-            results[0] = r0;
-            for (int i = 0; i < outCount; i++)
-                results[1 + i] = invokeArgs[1 + args.Length + i];
-            return results;
         }
 
         /// <summary>
@@ -1093,17 +1054,14 @@ namespace Wacs.Transpiler.AOT.Emitters
             if (del == null)
                 throw new TrapException("uninitialized element");
 
+            // Same typed-wrapper fast path as InvokeIndirect — avoids
+            // DynamicInvoke's reflection overhead in call_ref hot loops.
+            var invoker = TypedDelegateInvoker.GetOrBuild(del.GetType());
             try
             {
-                return del.DynamicInvoke(args);
+                return invoker(del, args);
             }
-            catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
-            {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
-                return null; // unreachable
-            }
-            catch (Exception ex) when (ex is System.Reflection.TargetParameterCountException
-                or System.ArgumentException or System.InvalidCastException)
+            catch (InvalidCastException)
             {
                 throw new TrapException("indirect call type mismatch");
             }
