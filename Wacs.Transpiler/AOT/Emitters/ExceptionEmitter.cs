@@ -162,11 +162,44 @@ namespace Wacs.Transpiler.AOT.Emitters
             var catches = inst.Catches;
             var endLabel = il.DefineLabel();
 
+            // Resolve the try_table's block type so params / results can be
+            // shuttled through locals. The CLR requires an empty eval stack
+            // on entry to a try region, so any params the try_table declares
+            // must be spilled before BeginExceptionBlock and reloaded inside.
+            // Results live on the eval stack at body's natural exit, but the
+            // try-region's auto-Leave (inserted by BeginCatchBlock /
+            // EndExceptionBlock) clears it — so we stash into locals before
+            // leaving and reload at endLabel.
+            var (paramArity, resultArity, paramClrTypes, resultClrTypes) =
+                ControlEmitter.ResolveBlockArities(inst.BlockType, moduleInst);
+
+            LocalBuilder[]? paramLocals = null;
+            if (paramArity > 0)
+            {
+                paramLocals = new LocalBuilder[paramArity];
+                for (int i = paramArity - 1; i >= 0; i--)
+                {
+                    paramLocals[i] = il.DeclareLocal(paramClrTypes[i]);
+                    il.Emit(OpCodes.Stloc, paramLocals[i]);
+                }
+            }
+
+            LocalBuilder[]? resultLocals = null;
+            if (resultArity > 0)
+            {
+                resultLocals = new LocalBuilder[resultArity];
+                for (int i = 0; i < resultArity; i++)
+                    resultLocals[i] = il.DeclareLocal(resultClrTypes[i]);
+            }
+
             // try_table introduces a block label at this depth.
             blockStack.Push(new EmitBlock
             {
                 BranchTarget = endLabel,
-                Kind = WasmOpCode.Block
+                Kind = WasmOpCode.Block,
+                LabelArity = resultArity,
+                ResultClrTypes = resultClrTypes,
+                ResultLocals = resultLocals,
             });
 
             var dispatchLabels = new System.Reflection.Emit.Label[catches.Length];
@@ -178,13 +211,35 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.BeginExceptionBlock();
             incTryDepth(1);
 
+            // Reload params now that we're inside the try region (entered
+            // with an empty eval stack per CLR rules).
+            if (paramLocals != null)
+            {
+                for (int i = 0; i < paramArity; i++)
+                    il.Emit(OpCodes.Ldloc, paramLocals[i]);
+            }
+
             // Emit body. Branches out of the try-region pick Leave vs Br via
-            // the caller's _tryDepth tracking (doc 2 §14).
+            // the caller's _tryDepth tracking (doc 2 §14). Do NOT emit a
+            // manual Leave here: BeginCatchBlock/EndExceptionBlock auto-emit
+            // a Leave targeting the exception block's end. Our endLabel sits
+            // past the dispatch-label region (so normal fall-through bypasses
+            // the dispatch code); we bridge with a Br right after
+            // EndExceptionBlock below.
             var block = inst.GetBlock(0);
             foreach (var child in block.Instructions)
                 emitInstruction(il, child);
 
-            il.Emit(OpCodes.Leave, endLabel);
+            // If the body's natural end is reachable, shuttle its results to
+            // locals so the auto-Leave can clear the eval stack. Skip when
+            // the body ended unreachably (last-in terminator) — no residual
+            // values to stash.
+            bool bodyEndReachable = ControlEmitter.BodyEndIsReachable(block.Instructions);
+            if (resultLocals != null && bodyEndReachable)
+            {
+                for (int i = resultArity - 1; i >= 0; i--)
+                    il.Emit(OpCodes.Stloc, resultLocals[i]);
+            }
 
             il.BeginCatchBlock(typeof(WasmException));
             il.Emit(OpCodes.Stloc, exnLocal);
@@ -224,6 +279,12 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.EndExceptionBlock();
             decTryDepth(1);
 
+            // Normal try-exit falls through here (auto-Leave from
+            // BeginCatchBlock/EndExceptionBlock). The dispatch labels below
+            // are only reached via explicit Leave from inside the catch, so
+            // skip over them for the normal-exit path.
+            il.Emit(OpCodes.Br, endLabel);
+
             // Dispatch labels sit outside the try/catch. Each pushes the
             // target label's expected operands onto the internal stack.
             for (int i = 0; i < catches.Length; i++)
@@ -248,15 +309,23 @@ namespace Wacs.Transpiler.AOT.Emitters
                         break;
                 }
 
-                // Branch to the target catch label (resolve from block stack).
-                // Depth 0 = try_table's own end (we pushed that); higher depths
-                // walk outward.
-                int idx = 0;
+                // Branch to the target catch label. The catch clause's labelidx
+                // is resolved in try_table's *outer* scope per doc 1 §13.2, so
+                // labelDepth=0 means the block immediately enclosing the
+                // try_table — not try_table itself. try_table is still on
+                // blockStack (so branches inside the body target its end);
+                // skip it here by indexing labelDepth+1 instead.
+                int idx = -1;
                 foreach (var target in blockStack)
                 {
                     if (idx == labelDepth)
                     {
-                        il.Emit(OpCodes.Br, target.BranchTarget);
+                        // Use the shuttle-aware branch emitter so values land
+                        // in the target block's ResultLocals (when present)
+                        // before the raw Br — otherwise the label's merge
+                        // point sees a non-empty eval stack and the JIT
+                        // rejects the method.
+                        LabelShuttle.EmitBranchToLabel(il, target);
                         break;
                     }
                     idx++;
@@ -265,6 +334,15 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             blockStack.Pop();
             il.MarkLabel(endLabel);
+
+            // Reload result locals (if allocated) onto the stack so the
+            // enclosing code sees the try_table's results. Mirrors the
+            // pattern used by EmitBlock.
+            if (resultLocals != null)
+            {
+                for (int i = 0; i < resultArity; i++)
+                    il.Emit(OpCodes.Ldloc, resultLocals[i]);
+            }
         }
 
         /// <summary>
