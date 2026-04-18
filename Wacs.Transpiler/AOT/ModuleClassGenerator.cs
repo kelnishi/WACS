@@ -281,9 +281,13 @@ namespace Wacs.Transpiler.AOT
                             gcTypeIdx = ((Wacs.Core.Instructions.GC.InstArrayNewDefault)inst).TypeIndex;
                             initKind = 1;
                             break;
-                        case Wacs.Core.OpCodes.GcCode.ArrayNewFixed:
-                            gcTypeIdx = ((Wacs.Core.Instructions.GC.InstArrayNewFixed)inst).TypeIndex;
+                        case Wacs.Core.OpCodes.GcCode.StructNew:
+                            gcTypeIdx = ((Wacs.Core.Instructions.GC.InstStructNew)inst).TypeIndex;
                             initKind = 2;
+                            break;
+                        case Wacs.Core.OpCodes.GcCode.StructNewDefault:
+                            gcTypeIdx = ((Wacs.Core.Instructions.GC.InstStructNewDefault)inst).TypeIndex;
+                            initKind = 3;
                             break;
                     }
                 }
