@@ -209,6 +209,39 @@ namespace Wacs.Transpiler.AOT
     }
 
     /// <summary>
+    /// Parallel registry for multi-return functions whose static methods use
+    /// byref out-params — those don't fit Action/Func delegates, so their
+    /// FuncTable slot stays null. InvokeIndirect falls back to invoking the
+    /// MethodInfo directly with an allocated out-param array when a
+    /// call_indirect / call_ref hits a multi-return target. Keyed by
+    /// (initDataId, funcIdx-in-module-index-space).
+    /// </summary>
+    public static class MultiReturnMethodRegistry
+    {
+        private static readonly Dictionary<(int initId, int funcIdx), System.Reflection.MethodInfo>
+            _methods = new();
+        private static readonly object _lock = new();
+
+        public static void Register(int initDataId, int funcIdx, System.Reflection.MethodInfo mi)
+        {
+            lock (_lock) { _methods[(initDataId, funcIdx)] = mi; }
+        }
+
+        public static System.Reflection.MethodInfo? Get(int initDataId, int funcIdx)
+        {
+            lock (_lock)
+            {
+                return _methods.TryGetValue((initDataId, funcIdx), out var m) ? m : null;
+            }
+        }
+
+        public static void Reset()
+        {
+            lock (_lock) { _methods.Clear(); }
+        }
+    }
+
+    /// <summary>
     /// Registry of emitted GC CLR types, keyed by (initDataId, typeIndex).
     /// Populated at transpile time, consumed at runtime by InitializeGcGlobals.
     /// </summary>
