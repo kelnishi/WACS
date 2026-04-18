@@ -2,9 +2,10 @@
 ![wasm wast spec](https://github.com/kelnishi/WACS/actions/workflows/ci.yml/badge.svg?branch=main) 
 ![Platform](https://img.shields.io/badge/platform-.NET%20Standard%202.1-blue)
 [![License](https://img.shields.io/github/license/kelnishi/WACS)](LICENSE)
-[![NuGet](https://img.shields.io/nuget/v/WACS)](https://www.nuget.org/packages/WACS)
-[![Downloads](https://img.shields.io/nuget/dt/WACS)](https://www.nuget.org/packages/WACS)
-[![NuGet (Transpiler)](https://img.shields.io/nuget/vpre/WACS.Transpiler?label=WACS.Transpiler)](https://www.nuget.org/packages/WACS.Transpiler)
+[![NuGet](https://img.shields.io/nuget/v/WACS?label=WACS)](https://www.nuget.org/packages/WACS)
+[![NuGet (WASIp1)](https://img.shields.io/nuget/v/WACS.WASIp1?label=WACS.WASIp1)](https://www.nuget.org/packages/WACS.WASIp1)
+[![NuGet (Transpiler)](https://img.shields.io/nuget/v/WACS.Transpiler?label=WACS.Transpiler)](https://www.nuget.org/packages/WACS.Transpiler)
+[![Downloads](https://img.shields.io/nuget/dt/WACS?label=WACS%20downloads)](https://www.nuget.org/packages/WACS)
 
 ## Overview
 Latest changes: [0.8.0](https://github.com/kelnishi/WACS/tree/main/CHANGELOG.md)

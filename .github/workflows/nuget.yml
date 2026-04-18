@@ -14,10 +14,6 @@ jobs:
       # Required for NuGet Trusted Publishing via GitHub OIDC.
       id-token: write
       contents: read
-      # Required for `dotnet nuget push` to GitHub Packages — an explicit
-      # `permissions:` block drops the default `packages: write` that
-      # GITHUB_TOKEN would otherwise carry.
-      packages: write
     strategy:
       matrix:
         include:
@@ -74,7 +70,3 @@ jobs:
       - name: Push to NuGet
         if: env.build == 'true'
         run: dotnet nuget push "output/*.nupkg" --skip-duplicate --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
-
-      - name: Push to GitHub Packages
-        if: env.build == 'true'
-        run: dotnet nuget push "output/*.nupkg" --skip-duplicate --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --api-key ${{ secrets.GITHUB_TOKEN }}
