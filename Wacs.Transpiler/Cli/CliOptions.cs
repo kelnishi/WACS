@@ -70,5 +70,13 @@ namespace Wacs.Transpiler.Cli
         [Option("main-class", Default = "Program",
             HelpText = "When --emit-main is set, the name of the emitted Program class.")]
         public string MainClass { get; set; } = "Program";
+
+        [Option("run",
+            HelpText = "After transpile (requires --emit-main), invoke the emitted Program.Main in-process with any trailing positional args.")]
+        public bool Run { get; set; }
+
+        [Value(0, MetaName = "args",
+            HelpText = "Positional arguments forwarded to Program.Main when --run is set.")]
+        public System.Collections.Generic.IEnumerable<string> Args { get; set; } = System.Array.Empty<string>();
     }
 }
