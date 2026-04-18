@@ -340,18 +340,29 @@ the triage inputs for the equivalence-gate pass.
    changed from `typeof(int)` to untyped pops for memory64 / table64
    indices (i32 or i64 depending on addr type).
 
-**Suite state after session 4 (GC bucket):**
+**Suite state after session 4 (GC bucket + funcref subtyping):**
 
-    463 passed / 10 failed / 473 total    (237 wast files × 2 test classes,
+    465 passed / 8 failed / 473 total     (237 wast files × 2 test classes,
                                            minus SkipWasts: comments,
                                            annotations, linking{,0,3}, i31)
 
     Session 1 baseline: 449/473.
     Session 2 delivered: 453/473 (+4).
     Session 3 delivered: 456/473 (+3).
-    Session 4 delivered: 463/473 (+7).
+    Session 4 delivered: 465/473 (+9).
 
 **Session 4 additions:**
+
+20. Funcref subtyping — `ref.test` / `ref.cast` on funcref and
+    `call_indirect`'s WASM-level type check used direct hash equality
+    against the target type, rejecting declared subtyping (`sub $s ...`).
+    Added `ThinContext.FuncTypeSuperHashes` (per-function chain: self
+    hash + every transitive supertype hash) and `TypeHashes` /
+    `TypeIsFunc` (lookup by declared type index). `TestFuncType` scans
+    the chain for the target hash; `CallHelpers.InvokeIndirect` gains
+    `expectedTypeIdx` and verifies the callee's declared type is a
+    subtype of the call site's type operand before dispatching.
+    Unlocks gc/type-subtyping.wast and type-rec.wast.
 
 16. `GcTypeEmitter.MapStorageType` — non-GC-bucket reftypes (funcref /
     externref / exnref / concrete function types / V128) now map to
