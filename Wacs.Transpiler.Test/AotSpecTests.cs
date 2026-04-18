@@ -118,24 +118,81 @@ namespace Wacs.Transpiler.Test
                         continue;
                     }
 
+                    // module_definition: parse + save the module so subsequent
+                    // module_instance commands can instantiate it. No
+                    // transpilation yet — instances are transpiled separately
+                    // so each gets its own ctx (doc 1 §1.3: instantiation is
+                    // generative). The underlying runtime.InstantiateModule
+                    // also hasn't been called yet for this variant.
+                    if (command is ModuleDefinition)
+                    {
+                        try { command.RunTest(file, ref runtime, ref module); }
+                        catch (Exception ex) when (ex is not Xunit.Sdk.XunitException)
+                        {
+                            _output.WriteLine($"      module_definition failed: {ex.Message}");
+                        }
+                        continue;
+                    }
+
+                    // module_instance: instantiate a saved definition (fresh
+                    // interpreter ModuleInstance) AND transpile it as a
+                    // separate wrapper so it has a distinct ThinContext —
+                    // tags/globals/tables/memories of different instances of
+                    // the same module must NOT alias.
+                    if (command is ModuleInstanceCommand mic)
+                    {
+                        try { command.RunTest(file, ref runtime, ref module); }
+                        catch (Exception ex) when (ex is not Xunit.Sdk.XunitException)
+                        {
+                            currentWrapper = null;
+                            skipReason = $"module_instance failed: {ex.GetType().Name}: {ex.Message}";
+                            _output.WriteLine($"      Skipped: {skipReason}");
+                            continue;
+                        }
+                        var (wrapper, reason) = TranspileAndLink(
+                            linker, runtime, mic.Instance ?? "", wrappers);
+                        if (wrapper != null)
+                        {
+                            currentWrapper = wrapper;
+                            wrappers[mic.Instance ?? ""] = wrapper;
+                            totalTranspiled += wrapper.Result.TranspiledCount;
+                            _output.WriteLine($"      Instanced: {wrapper.Result.TranspiledCount} functions as {mic.Instance}");
+                        }
+                        else
+                        {
+                            skipReason = reason;
+                            _output.WriteLine($"      Skipped: {reason}");
+                        }
+                        continue;
+                    }
+
                     // Register commands: register the module name with the interpreter
                     // AND update our linker's module registry
                     if (command is RegisterCommand rc)
                     {
                         try { command.RunTest(file, ref runtime, ref module); }
                         catch (Exception ex) when (ex is not Xunit.Sdk.XunitException) { continue; }
-                        // Re-register under the "as" name (e.g., "module4")
+                        // Source wrapper: prefer the wrapper already recorded
+                        // under the source name (e.g. the instance named by
+                        // `register $I1 as I1`) so we don't clobber it with a
+                        // later currentWrapper from an unrelated module.
+                        string srcName = rc.Name ?? "";
+                        TranspiledModuleWrapper? src = null;
+                        if (!string.IsNullOrEmpty(srcName) && wrappers.TryGetValue(srcName, out var byName))
+                            src = byName;
+                        src ??= currentWrapper;
+
                         string regName = rc.As ?? rc.Name ?? "";
-                        if (currentWrapper != null && !string.IsNullOrEmpty(regName))
+                        if (src != null && !string.IsNullOrEmpty(regName))
                         {
-                            wrappers[regName] = currentWrapper;
+                            wrappers[regName] = src;
                             // Also re-register in the linker so import resolution
                             // can find the module by its registered name
-                            var ctx = ExtractContext(currentWrapper);
+                            var ctx = ExtractContext(src);
                             if (ctx != null)
                             {
                                 var moduleInst = runtime.GetModule(rc.Name);
-                                linker.Register(regName, ctx, currentWrapper.Result, moduleInst.Repr);
+                                linker.Register(regName, ctx, src.Result, moduleInst.Repr);
                             }
                         }
                         continue;
