@@ -270,7 +270,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// the last non-end instruction is an unconditional terminator has no
         /// reachable fall-through at the closing brace.
         /// </summary>
-        private static bool BodyEndIsReachable(Wacs.Core.InstructionSequence seq)
+        internal static bool BodyEndIsReachable(Wacs.Core.InstructionSequence seq)
         {
             for (int i = seq.Count - 1; i >= 0; i--)
             {
