@@ -119,6 +119,8 @@ namespace Wacs.Core.Compilation
                 OpCode.LocalGet or OpCode.LocalSet or OpCode.LocalTee => 4,
                 OpCode.GlobalGet or OpCode.GlobalSet => 4,
                 OpCode.Call => 4,
+                // call_indirect: typeIdx:u32 + tableIdx:u32.
+                OpCode.CallIndirect => 8,
                 // Branches: three u32 values — (target_pc, results_height, arity).
                 OpCode.Br or OpCode.BrIf => 12,
                 // If: u32 else_pc (jump target when cond==0; pc falls through otherwise).
@@ -279,6 +281,13 @@ namespace Wacs.Core.Compilation
                 // ---- call ----
                 case OpCode.Call:
                     writePos = WriteU32(buf, writePos, ((InstCall)inst).X.Value); break;
+                case OpCode.CallIndirect:
+                {
+                    var ci = (InstCallIndirect)inst;
+                    writePos = WriteU32(buf, writePos, (uint)ci.TypeIndex);
+                    writePos = WriteU32(buf, writePos, (uint)ci.TableIndex);
+                    break;
+                }
 
                 // ---- memory loads/stores (full + narrow): [memIdx:u32][offset:u64] ----
                 case OpCode.I32Load:
@@ -383,6 +392,9 @@ namespace Wacs.Core.Compilation
                 case OpCode.Drop:
                 case OpCode.Select:
                 case OpCode.Return:
+                case OpCode.RefIsNull:
+                case OpCode.RefEq:
+                case OpCode.RefAsNonNull:
                     break;
 
                 default:
