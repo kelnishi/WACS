@@ -14,6 +14,10 @@ jobs:
       # Required for NuGet Trusted Publishing via GitHub OIDC.
       id-token: write
       contents: read
+      # Required for `dotnet nuget push` to GitHub Packages — an explicit
+      # `permissions:` block drops the default `packages: write` that
+      # GITHUB_TOKEN would otherwise carry.
+      packages: write
     strategy:
       matrix:
         include:
