@@ -217,6 +217,10 @@ namespace Wacs.Compilation
             // the generator copies them into GeneratedDispatcher, which lives in
             // Wacs.Core.Compilation, so those short names only resolve via this using.
             sb.AppendLine("using Wacs.Core.Instructions;");
+            // Sibling handler classes in sub-namespaces — SIMD, GC — get explicit usings so
+            // `VMemoryHandlers.WriteV128` / `StructArrayHandlers.X` resolve.
+            sb.AppendLine("using Wacs.Core.Instructions.SIMD;");
+            sb.AppendLine("using Wacs.Core.Instructions.GC;");
             // Numeric conversion [OpSource] bodies reference FloatConversion.LongToFloat etc.
             sb.AppendLine("using Wacs.Core.Utilities;");
             sb.AppendLine();
