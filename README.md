@@ -107,7 +107,18 @@ dotnet tool install -g WACS.Transpiler
 wasm-transpile -i module.wasm -o module.dll
 ```
 
-See [`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the full
+For WASI preview1 modules (CoreMark, anything built against `wasi-libc`):
+
+```bash
+wasm-transpile -i coremark.wasm -o coremark.dll --wasi --entry-point _start --run
+```
+
+`--wasi` binds `WACS.WASIp1` to the runtime, forwards all
+`wasi_snapshot_preview1` imports, shares memory with the interpreter
+bindings, and invokes the entry-point export in-process. For custom
+host imports (`env.sayc`, game bindings, etc.), use the library API
+with `BindHostFunction` + an `ImportDispatcher` proxy; see
+[`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the full
 flag surface, library API, and v0.1 known limitations.
 
 ### From source
