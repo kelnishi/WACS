@@ -6,7 +6,7 @@ doc in the series.
 
 This is a step-by-step walkthrough of installing the `wasm-transpile`
 CLI, transpiling a `.wasm` module into a .NET assembly, invoking it
-programmatically, and (within v0.1-preview's limits) using
+programmatically, and (within v0.1's limits) using
 `--emit-main` to bundle a host entry point into the output.
 
 ---
@@ -14,7 +14,7 @@ programmatically, and (within v0.1-preview's limits) using
 ## 1. Install
 
 ```bash
-dotnet tool install -g WACS.Transpiler --prerelease
+dotnet tool install -g WACS.Transpiler
 ```
 
 Confirm the command is on PATH:
@@ -134,7 +134,7 @@ var main = asm.GetType("Program")!.GetMethod("Main")!;
 main.Invoke(null, new object?[] { new[] { "2", "3" } }); // prints 5
 ```
 
-## 5. Known limitations (v0.1-preview)
+## 5. Known limitations (v0.1)
 
 See the package README's *Known Limitations* section for the full list.
 The two that matter most for this walkthrough:
