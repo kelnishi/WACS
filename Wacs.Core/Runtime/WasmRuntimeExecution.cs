@@ -291,6 +291,17 @@ namespace Wacs.Core.Runtime
                 var funcInst = Context.Store[funcAddr];
                 var funcType = funcInst.Type;
 
+                // Opt-in switch-runtime short-circuit: top-level WASM function invocations
+                // are redirected through the source-generated monolithic switch dispatcher.
+                // Host functions fall through to the polymorphic path — the switch runtime
+                // can't dispatch them. Nested calls also fall through for now; mixing the
+                // two dispatchers mid-call stack is possible but adds bookkeeping we don't
+                // need for the primary correctness/benchmark use cases.
+                if (UseSwitchRuntime && Context.OpStack.Count == 0 && funcInst is FunctionInstance wasmFn)
+                {
+                    return InvokeViaSwitch(wasmFn, funcType, args);
+                }
+
                 // Detect if this is a nested call by checking if stack has values
                 bool isNestedCall = Context.OpStack.Count > 0;
 
