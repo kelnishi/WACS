@@ -340,18 +340,34 @@ the triage inputs for the equivalence-gate pass.
    changed from `typeof(int)` to untyped pops for memory64 / table64
    indices (i32 or i64 depending on addr type).
 
-**Suite state after session 4 (GC + subtyping + return_call + exn):**
+**Suite state after session 4:**
 
-    470 passed / 3 failed / 473 total     (237 wast files × 2 test classes,
+    471 passed / 2 failed / 473 total     (237 wast files × 2 test classes,
                                            minus SkipWasts: comments,
                                            annotations, linking{,0,3}, i31)
 
     Session 1 baseline: 449/473.
     Session 2 delivered: 453/473 (+4).
     Session 3 delivered: 456/473 (+3).
-    Session 4 delivered: 470/473 (+14).
+    Session 4 delivered: 471/473 (+15).
+
+    Remaining: relaxed-simd/i32x4_relaxed_trunc, simd/simd_boolean.
 
 **Session 4 additions:**
+
+23. `instance.wast` (generative instantiation, doc 1 §1.3) — the
+    AotSpecTests harness silently ignored `module_definition` /
+    `module_instance` commands (they aren't `ModuleCommand`), so
+    `runtime.InstantiateModule` was never called for $M/$I1/$I2 and
+    no wrapper was created per instance. Imports in the catcher
+    resolved to null — including both tag imports — so the catch
+    clause compared null==null and matched the wrong handler. Add
+    explicit handlers: ModuleDefinition parses + saves the module;
+    ModuleInstanceCommand instantiates it and transpiles the fresh
+    instance as its own wrapper (distinct ctx). RegisterCommand now
+    prefers the wrapper already registered under the source name
+    instead of reading `currentWrapper` (which aliased the last-loaded
+    instance after back-to-back module_instance commands).
 
 22. `try_table` — four bugs converged to InvalidProgramException on
     throw/throw_ref/try_table:
