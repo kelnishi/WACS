@@ -181,6 +181,8 @@ namespace Wacs.Core.Compilation
         /// </summary>
         private static int SizeOfSimd(SimdCode code) => code switch
         {
+            // v128.load / v128.store — memarg: memIdx:u32 + offset:u64.
+            SimdCode.V128Load or SimdCode.V128Store => 12,
             // Standard SIMD ops with no immediates (arithmetic, unary, test, etc.).
             // Listed as they're added to the dispatcher; callers downstream will Emit.
             _ => 0,
@@ -358,12 +360,30 @@ namespace Wacs.Core.Compilation
         /// </summary>
         private static int EmitSimd(byte[] buf, int writePos, SimdCode code, InstructionBase inst)
         {
-            // Arithmetic, unary, relational, test, and other pure-stack ops: nothing after
-            // the 2-byte opcode header. Size is already accounted for. The handler reads
-            // operands off the OpStack via the [OpHandler]-marked ExecuteX body.
-            //
-            // Ops with immediates (memarg, v128.const, lane index, shuffle mask) will
-            // dispatch here too; add their cases as we wire them up.
+            switch (code)
+            {
+                // v128.load / v128.store — memarg (memIdx + offset). Both inherit from
+                // InstMemoryLoad / InstMemoryStore, so their MemIndex / MemOffset are
+                // public on the shared base — same emit path as scalar memory ops.
+                case SimdCode.V128Load:
+                {
+                    var load = (InstMemoryLoad)inst;
+                    writePos = WriteU32(buf, writePos, (uint)load.MemIndex);
+                    writePos = WriteS64(buf, writePos, load.MemOffset);
+                    break;
+                }
+                case SimdCode.V128Store:
+                {
+                    var store = (InstMemoryStore)inst;
+                    writePos = WriteU32(buf, writePos, (uint)store.MemIndex);
+                    writePos = WriteS64(buf, writePos, store.MemOffset);
+                    break;
+                }
+                // Arithmetic, unary, relational, test: nothing after the 2-byte opcode
+                // header. The [OpHandler]-marked ExecuteX body pops / pushes on its own.
+                default:
+                    break;
+            }
             return writePos;
         }
 
