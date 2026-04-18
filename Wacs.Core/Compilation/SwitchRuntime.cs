@@ -111,29 +111,11 @@ namespace Wacs.Core.Compilation
                     // restores ctx.Frame. That would leave the wrong module's TagAddrs
                     // visible during tag comparison. Catching here guarantees we run only
                     // after every intermediate finally has executed.
-                    if (!TryHandleOrSkip(we, ctx, handlers, ref pc, pcBeforeDispatch))
+                    if (handlers.Length == 0 ||
+                        !TryResumeWithHandler(ctx, handlers, ref pc, we.Exn, pcBeforeDispatch))
                         throw;
                 }
             }
-        }
-
-        /// <summary>
-        /// Decide whether this frame handles a propagating <see cref="WasmException"/>.
-        /// If the throw is still shedding caller frames (<see cref="WasmException.SkipFrames"/>
-        /// &gt; 0), decrement and return false so the exception bypasses this frame's
-        /// handlers — return_call semantics: the caller's try_tables are already popped
-        /// by the tail call. Otherwise consult the handler table normally.
-        /// </summary>
-        private static bool TryHandleOrSkip(WasmException we, ExecContext ctx, HandlerEntry[] handlers,
-                                             ref int pc, int pcForRangeCheck)
-        {
-            if (we.SkipFrames > 0)
-            {
-                we.SkipFrames--;
-                return false;
-            }
-            return handlers.Length > 0
-                && TryResumeWithHandler(ctx, handlers, ref pc, we.Exn, pcForRangeCheck);
         }
 
         /// <summary>

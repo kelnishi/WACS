@@ -75,6 +75,26 @@ namespace Wacs.Core.Runtime
         public Dictionary<ushort, ExecStat> Stats = new();
         public long steps;
 
+        /// <summary>
+        /// Running depth of nested <c>InvokeWasm</c> calls on the switch runtime path.
+        /// Incremented before <c>SwitchRuntime.Run</c> recurses into a callee, decremented
+        /// on return. Checked against <c>Attributes.MaxCallStack</c> so runaway recursion
+        /// surfaces as <see cref="Exceptions.WasmRuntimeException"/> before blowing the
+        /// managed stack — mirrors <see cref="PushFrame"/>'s bound on the polymorphic path.
+        /// </summary>
+        public int SwitchCallDepth;
+
+        /// <summary>
+        /// Signals a true tail-call from a return_call / return_call_ref /
+        /// return_call_indirect handler to the enclosing <c>InvokeWasm</c> loop. The
+        /// handler pops args, sets pc = int.MaxValue (to exit <c>SwitchRuntime.Run</c>
+        /// immediately), and stashes the callee here. InvokeWasm's outer loop picks it
+        /// up, tears down the current frame, and re-enters Run on the callee — without
+        /// growing the C# stack. This is what makes deeply iterative tail recursion
+        /// (count(1_000_000) in return_call.wast) terminate on a finite thread stack.
+        /// </summary>
+        public Types.FunctionInstance? TailCallPending;
+
         public ExecContext(Store store, RuntimeAttributes? attributes = default)
         {
             Store = store;

@@ -142,19 +142,19 @@ namespace Wacs.Core.Instructions
         {
             var addr = ctx.Frame.Module.FuncAddrs[(FuncIdx)funcIdx];
             var target = ctx.Store[addr];
-            try
+            if (target is FunctionInstance wasmFunc)
             {
-                if (target is FunctionInstance wasmFunc)
-                    ControlHandlers.InvokeWasm(ctx, wasmFunc);
-                else
-                    target.Invoke(ctx);
+                // True tail call: hand the callee to the enclosing InvokeWasm loop so
+                // it replaces our frame in place rather than growing C# stack. The
+                // caller's try_tables drop out of scope automatically because we exit
+                // Run immediately (pc = MAX) before any throw from the callee fires.
+                ctx.TailCallPending = wasmFunc;
             }
-            catch (Wacs.Core.Compilation.WasmException we)
+            else
             {
-                // Tail-call: the caller's frame is semantically popped before the
-                // callee runs. Bump SkipFrames so the caller's try_tables don't catch.
-                we.SkipFrames++;
-                throw;
+                // Host tail call has no TCO benefit — the host side runs on a single
+                // managed frame already. Invoke it directly.
+                target.Invoke(ctx);
             }
             pc = int.MaxValue;
         }
@@ -225,18 +225,10 @@ namespace Wacs.Core.Instructions
             var funcInst = ctx.Store[refVal.GetFuncAddr(ctx.Frame.Module.Types)];
             if (!funcInst.Type.Matches((FunctionType)ftExpect.Expansion, ctx.Frame.Module.Types))
                 throw new TrapException("return_call_ref: type mismatch");
-            try
-            {
-                if (funcInst is FunctionInstance wasmFn)
-                    ControlHandlers.InvokeWasm(ctx, wasmFn);
-                else
-                    funcInst.Invoke(ctx);
-            }
-            catch (Wacs.Core.Compilation.WasmException we)
-            {
-                we.SkipFrames++;
-                throw;
-            }
+            if (funcInst is FunctionInstance wasmFn)
+                ctx.TailCallPending = wasmFn;
+            else
+                funcInst.Invoke(ctx);
             pc = int.MaxValue;
         }
 
@@ -261,73 +253,105 @@ namespace Wacs.Core.Instructions
             }
             if (!funcInst.Type.Matches(ftExpect.Unroll.Body, ctx.Frame.Module.Types))
                 throw new TrapException("return_call_indirect: indirect call type mismatch");
-            try
-            {
-                if (funcInst is FunctionInstance wasmFn)
-                    ControlHandlers.InvokeWasm(ctx, wasmFn);
-                else
-                    funcInst.Invoke(ctx);
-            }
-            catch (Wacs.Core.Compilation.WasmException we)
-            {
-                we.SkipFrames++;
-                throw;
-            }
+            if (funcInst is FunctionInstance wasmFn)
+                ctx.TailCallPending = wasmFn;
+            else
+                funcInst.Invoke(ctx);
             pc = int.MaxValue;
         }
 
         internal static void InvokeWasm(ExecContext ctx, FunctionInstance func)
         {
-            // ---- 1. Compiled form: field cache on the FunctionInstance -----------------
-            // Field read + one null check replaces a ConcurrentDictionary lookup. The
-            // compile is deterministic, so a benign race just duplicates work; the last
-            // writer wins and either compiled form is equally valid.
-            var compiled = func.SwitchCompiled;
-            if (compiled == null)
-            {
-                compiled = BytecodeCompiler.Compile(
-                    func.Body.Instructions.Flatten().ToArray(),
-                    func.Type,
-                    localsCount: func.Type.ParameterTypes.Arity + func.Locals.Length);
-                func.SwitchCompiled = compiled;
-            }
-
-            int paramCount = func.Type.ParameterTypes.Arity;
-            int declaredCount = func.Locals.Length;
-            int totalCount = paramCount + declaredCount;
-
-            // ---- 2. Locals: pooled Value[] instead of per-call heap alloc --------------
-            // ArrayPool returns an array of AT LEAST totalCount elements; we slice into
-            // a Memory<Value> of exactly totalCount so LocalGet/Set don't see padding.
-            var rented = ArrayPool<Value>.Shared.Rent(totalCount);
-            var locals = new System.Memory<Value>(rented, 0, totalCount);
-            var span = locals.Span;
-            for (int i = paramCount - 1; i >= 0; i--)
-                span[i] = ctx.OpStack.PopAny();
-            for (int i = 0; i < declaredCount; i++)
-                span[paramCount + i] = new Value(func.Locals[i]);
-
-            // ---- 3. Frame: pooled via ExecContext._framePool ---------------------------
-            var frame = ctx.RentFrame();
-            frame.Module = func.Module;
-            frame.Locals = locals;
-
+            // Save the caller's frame *once*. The tail-call loop replaces the frame
+            // in place on each iteration but always restores to the same caller on
+            // exit — one InvokeWasm invocation, regardless of how many tail jumps.
             var savedFrame = ctx.Frame;
-            ctx.Frame = frame;
-            try
+
+            while (true)
             {
-                // Pass the CompiledFunction (not just Bytecode) so Run can consult the
-                // HandlerTable sidecar and resume WASM exceptions at matching catch
-                // clauses instead of propagating them out of the function.
-                SwitchRuntime.Run(ctx, compiled);
-            }
-            finally
-            {
-                ctx.Frame = savedFrame;
-                ctx.ReturnFrame(frame);
-                // clearArray:true to drop any GcRef references in the slots before
-                // putting the array back in the pool, keeping the GC graph tidy.
-                ArrayPool<Value>.Shared.Return(rented, clearArray: true);
+                // ---- 1. Compiled form: field cache on the FunctionInstance ------------
+                // Field read + one null check replaces a ConcurrentDictionary lookup. The
+                // compile is deterministic, so a benign race just duplicates work; the last
+                // writer wins and either compiled form is equally valid.
+                var compiled = func.SwitchCompiled;
+                if (compiled == null)
+                {
+                    compiled = BytecodeCompiler.Compile(
+                        func.Body.Instructions.Flatten().ToArray(),
+                        func.Type,
+                        localsCount: func.Type.ParameterTypes.Arity + func.Locals.Length);
+                    func.SwitchCompiled = compiled;
+                }
+
+                int paramCount = func.Type.ParameterTypes.Arity;
+                int declaredCount = func.Locals.Length;
+                int totalCount = paramCount + declaredCount;
+
+                // ---- 2. Locals: pooled Value[] instead of per-call heap alloc ---------
+                // ArrayPool returns an array of AT LEAST totalCount elements; we slice into
+                // a Memory<Value> of exactly totalCount so LocalGet/Set don't see padding.
+                var rented = ArrayPool<Value>.Shared.Rent(totalCount);
+                var locals = new System.Memory<Value>(rented, 0, totalCount);
+                var span = locals.Span;
+                for (int i = paramCount - 1; i >= 0; i--)
+                    span[i] = ctx.OpStack.PopAny();
+                for (int i = 0; i < declaredCount; i++)
+                    span[paramCount + i] = new Value(func.Locals[i]);
+
+                // ---- 3. Frame: pooled via ExecContext._framePool ----------------------
+                var frame = ctx.RentFrame();
+                frame.Module = func.Module;
+                frame.Locals = locals;
+
+                // ---- 3b. Bounded-depth check ------------------------------------------
+                // The managed C# stack is finite and small (~32 MiB on our worker thread).
+                // A runaway WASM recursion must surface as a WasmRuntimeException ("call
+                // stack exhausted") before blowing the native stack or the OpStack array —
+                // otherwise we crash the process instead of failing the test cleanly. This
+                // mirrors ExecContext.PushFrame's MaxCallStack check on the polymorphic
+                // path. Tail calls do NOT increment depth: they reuse this InvokeWasm.
+                if (ctx.SwitchCallDepth >= ctx.Attributes.MaxCallStack)
+                {
+                    ArrayPool<Value>.Shared.Return(rented, clearArray: true);
+                    ctx.ReturnFrame(frame);
+                    throw new Wacs.Core.Runtime.Exceptions.WasmRuntimeException(
+                        $"Runtime call stack exhausted {ctx.SwitchCallDepth}");
+                }
+
+                ctx.Frame = frame;
+                ctx.SwitchCallDepth++;
+                bool tailContinue = false;
+                try
+                {
+                    // Pass the CompiledFunction (not just Bytecode) so Run can consult the
+                    // HandlerTable sidecar and resume WASM exceptions at matching catch
+                    // clauses instead of propagating them out of the function.
+                    SwitchRuntime.Run(ctx, compiled);
+
+                    // A return_call handler signals a tail-dispatch by stashing the next
+                    // callee on ctx.TailCallPending and setting pc to int.MaxValue so Run
+                    // exits immediately. We loop here with the new callee, keeping the
+                    // same C# stack frame — that's how true TCO is implemented on top of
+                    // a managed recursion model. SwitchCallDepth is decremented and re-
+                    // incremented across the iteration so it stays flat across tail jumps.
+                    if (ctx.TailCallPending != null)
+                    {
+                        func = ctx.TailCallPending;
+                        ctx.TailCallPending = null;
+                        tailContinue = true;
+                    }
+                }
+                finally
+                {
+                    ctx.SwitchCallDepth--;
+                    ctx.Frame = savedFrame;
+                    ctx.ReturnFrame(frame);
+                    // clearArray:true to drop any GcRef references in the slots before
+                    // putting the array back in the pool, keeping the GC graph tidy.
+                    ArrayPool<Value>.Shared.Return(rented, clearArray: true);
+                }
+
+                if (!tailContinue) return;
             }
         }
     }
