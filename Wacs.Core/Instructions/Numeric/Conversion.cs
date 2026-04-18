@@ -15,6 +15,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using Wacs.Core.Compilation;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -107,8 +108,10 @@ namespace Wacs.Core.Instructions.Numeric
             };
         }
 
+        [OpSource(OpCode.I32WrapI64)]
         private static int ExecuteI32WrapI64(long value) => unchecked((int)value);
 
+        [OpSource(OpCode.I32TruncF32S)]
         private static int ExecuteI32TruncF32S(float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) 
@@ -122,6 +125,7 @@ namespace Wacs.Core.Instructions.Numeric
             return (int)truncated;
         }
 
+        [OpSource(OpCode.I32TruncF32U)]
         private static uint ExecuteI32TruncF32U(float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value))
@@ -135,6 +139,7 @@ namespace Wacs.Core.Instructions.Numeric
             return (uint)truncated;
         }
 
+        [OpSource(OpCode.I32TruncF64S)]
         private static int ExecuteI32TruncF64S(double value)
         {
             if (double.IsNaN(value) || double.IsInfinity(value))
@@ -148,6 +153,7 @@ namespace Wacs.Core.Instructions.Numeric
             return (int)truncated;
         }
 
+        [OpSource(OpCode.I32TruncF64U)]
         private static uint ExecuteI32TruncF64U(double value)
         {
             if (double.IsNaN(value) || double.IsInfinity(value))
@@ -161,10 +167,13 @@ namespace Wacs.Core.Instructions.Numeric
             return (uint)truncated;
         }
 
+        [OpSource(OpCode.I64ExtendI32S)]
         private static long ExecuteI64ExtendI32S(int value) => value;
 
+        [OpSource(OpCode.I64ExtendI32U)]
         private static ulong ExecuteI64ExtendI32U(uint value) => value;
 
+        [OpSource(OpCode.I64TruncF32S)]
         private static long ExecuteI64TruncF32S(float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) 
@@ -182,6 +191,7 @@ namespace Wacs.Core.Instructions.Numeric
             return (long)truncated;
         }
 
+        [OpSource(OpCode.I64TruncF32U)]
         private static ulong ExecuteI64TruncF32U(float value)
         {
             if (float.IsNaN(value) || float.IsInfinity(value)) 
@@ -197,6 +207,7 @@ namespace Wacs.Core.Instructions.Numeric
             return (ulong)truncated;
         }
 
+        [OpSource(OpCode.I64TruncF64S)]
         private static long ExecuteI64TruncF64S(double value)
         {
             if (double.IsNaN(value) || double.IsInfinity(value)) 
@@ -214,6 +225,7 @@ namespace Wacs.Core.Instructions.Numeric
             return (long)truncated;
         }
 
+        [OpSource(OpCode.I64TruncF64U)]
         private static ulong ExecuteI64TruncF64U(double value)
         {
             if (double.IsNaN(value) || double.IsInfinity(value)) 
@@ -229,36 +241,50 @@ namespace Wacs.Core.Instructions.Numeric
             return (ulong)truncated;
         }
 
+        [OpSource(OpCode.F32ConvertI32S)]
         private static float ExecuteF32ConvertI32S(int value) => value;
 
+        [OpSource(OpCode.F32ConvertI32U)]
         private static float ExecuteF32ConvertI32U(uint value) => value;
 
+        [OpSource(OpCode.F32ConvertI64S)]
         private static float ExecuteF32ConvertI64S(long value) => FloatConversion.LongToFloat(value);
 
+        [OpSource(OpCode.F32ConvertI64U)]
         private static float ExecuteF32ConvertI64U(ulong value) => FloatConversion.ULongToFloat(value);
 
+        [OpSource(OpCode.F32DemoteF64)]
         private static float ExecuteF32DemoteF64(double value) => (float)value;
 
+        [OpSource(OpCode.F64ConvertI32S)]
         private static double ExecuteF64ConvertI32S(int value) => value;
 
+        [OpSource(OpCode.F64ConvertI32U)]
         private static double ExecuteF64ConvertI32U(uint value) => value;
 
+        [OpSource(OpCode.F64ConvertI64S)]
         private static double ExecuteF64ConvertI64S(long value) => FloatConversion.LongToDouble(value);
 
+        [OpSource(OpCode.F64ConvertI64U)]
         private static double ExecuteF64ConvertI64U(ulong value) => FloatConversion.ULongToDouble(value);
 
+        [OpSource(OpCode.F64PromoteF32)]
         private static double ExecuteF64PromoteF32(float value) => value;
 
-        private static int ExecuteI32ReinterpretF32(float value) => 
+        [OpSource(OpCode.I32ReinterpretF32)]
+        private static int ExecuteI32ReinterpretF32(float value) =>
             MemoryMarshal.Cast<float, int>(MemoryMarshal.CreateSpan(ref value, 1))[0];
 
-        private static long ExecuteI64ReinterpretF64(double value) => 
+        [OpSource(OpCode.I64ReinterpretF64)]
+        private static long ExecuteI64ReinterpretF64(double value) =>
             MemoryMarshal.Cast<double, long>(MemoryMarshal.CreateSpan(ref value, 1))[0];
 
-        private static float ExecuteF32ReinterpretI32(int value) => 
+        [OpSource(OpCode.F32ReinterpretI32)]
+        private static float ExecuteF32ReinterpretI32(int value) =>
             MemoryMarshal.Cast<int, float>(MemoryMarshal.CreateSpan(ref value, 1))[0];
 
-        private static double ExecuteF64ReinterpretI64(long value) => 
+        [OpSource(OpCode.F64ReinterpretI64)]
+        private static double ExecuteF64ReinterpretI64(long value) =>
             MemoryMarshal.Cast<long, double>(MemoryMarshal.CreateSpan(ref value, 1))[0];
 
         delegate void Executor(ExecContext context);
