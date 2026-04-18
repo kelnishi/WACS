@@ -10,6 +10,8 @@ using Wacs.Core.Compilation;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Instructions.Reference
 {
@@ -40,5 +42,61 @@ namespace Wacs.Core.Instructions.Reference
         [OpHandler(OpCode.RefEq)]
         private static int RefEq(ExecContext ctx, Value v1, Value v2)
             => v1.RefEquals(v2, ctx.Frame.Module.Types) ? 1 : 0;
+
+        // 0xD0 ref.null — takes a ValType immediate (with the nullable-ref flag set,
+        // encoded as the underlying int). Pushes a null reference of that type.
+        [OpHandler(OpCode.RefNull)]
+        private static Value RefNull([Imm] int refTypeBits)
+            => Value.Null((ValType)refTypeBits);
+
+        // 0xD2 ref.func — takes a FuncIdx immediate. Pushes a funcref to that function,
+        // with the reference type refined to the function's specific def-type (needed by
+        // the GC proposal's ref.test / ref.cast precision).
+        [OpHandler(OpCode.RefFunc)]
+        private static Value RefFunc(ExecContext ctx, [Imm] uint funcIdx)
+        {
+            var a = ctx.Frame.Module.FuncAddrs[(FuncIdx)funcIdx];
+            var func = ctx.Store[a];
+            var val = new Value(ValType.FuncRef, a.Value);
+            if (func is FunctionInstance funcInst)
+                val.Type = ValType.Ref | (ValType)funcInst.DefType.DefIndex;
+            return val;
+        }
+
+        // 0xD5 br_on_null — pop ref; if null, branch (shifting label-arity results down);
+        // else push ref back and fall through. Stream: same triple format as br.
+        [OpHandler(OpCode.BrOnNull)]
+        private static void BrOnNull(ExecContext ctx, ref int pc,
+                                     [Imm] uint targetPc, [Imm] uint resultsHeight, [Imm] uint arity,
+                                     Value refVal)
+        {
+            if (refVal.IsNullRef)
+            {
+                ctx.OpStack.ShiftResults((int)arity, (int)resultsHeight);
+                pc = (int)targetPc;
+            }
+            else
+            {
+                // Fall through with the ref back on the stack.
+                ctx.OpStack.PushValue(refVal);
+            }
+        }
+
+        // 0xD6 br_on_non_null — pop ref; if non-null, push it back (it's part of the
+        // label's arity per the GC proposal) and branch; else fall through with ref
+        // discarded. Same 12-byte triple as br.
+        [OpHandler(OpCode.BrOnNonNull)]
+        private static void BrOnNonNull(ExecContext ctx, ref int pc,
+                                        [Imm] uint targetPc, [Imm] uint resultsHeight, [Imm] uint arity,
+                                        Value refVal)
+        {
+            if (!refVal.IsNullRef)
+            {
+                ctx.OpStack.PushValue(refVal);
+                ctx.OpStack.ShiftResults((int)arity, (int)resultsHeight);
+                pc = (int)targetPc;
+            }
+            // else: ref was already popped, nothing to do.
+        }
     }
 }

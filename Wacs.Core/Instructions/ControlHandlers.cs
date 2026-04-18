@@ -133,6 +133,22 @@ namespace Wacs.Core.Instructions
             target.Invoke(ctx);
         }
 
+        // 0x12 return_call — tail call. Behaviorally equivalent to `call x; return`.
+        // True tail-call optimization (reusing the current C# stack frame) would require
+        // an explicit SwitchFrame stack in SwitchRuntime; the plan flagged this. For now
+        // the implementation is correct but still grows the managed call stack.
+        [OpHandler(OpCode.ReturnCall)]
+        private static void ReturnCall(ExecContext ctx, ref int pc, [Imm] uint funcIdx)
+        {
+            var addr = ctx.Frame.Module.FuncAddrs[(FuncIdx)funcIdx];
+            var target = ctx.Store[addr];
+            if (target is FunctionInstance wasmFunc)
+                ControlHandlers.InvokeWasm(ctx, wasmFunc);
+            else
+                target.Invoke(ctx);
+            pc = int.MaxValue;
+        }
+
         // 0x11 call_indirect — indirect call through a table. Stream:
         // [opcode][typeIdx:u32][tableIdx:u32]. Pops i32 selector, resolves the table
         // slot to a funcref, type-checks against the expected signature, dispatches.
@@ -167,6 +183,34 @@ namespace Wacs.Core.Instructions
                 return;
             }
             funcInst.Invoke(ctx);
+        }
+
+        // 0x13 return_call_indirect — tail-call variant of call_indirect. Same caveat as
+        // return_call: semantically correct, not stack-optimized.
+        [OpHandler(OpCode.ReturnCallIndirect)]
+        private static void ReturnCallIndirect(ExecContext ctx, ref int pc,
+                                                [Imm] uint typeIdx, [Imm] uint tableIdx, uint idx)
+        {
+            var tab = ctx.Store[ctx.Frame.Module.TableAddrs[(TableIdx)tableIdx]];
+            if (idx >= (uint)tab.Elements.Count)
+                throw new TrapException($"return_call_indirect: undefined element ({idx} >= {tab.Elements.Count})");
+            var reference = tab.Elements[(int)idx];
+            if (reference.IsNullRef)
+                throw new TrapException("return_call_indirect: null reference");
+            var ftExpect = ctx.Frame.Module.Types[(TypeIdx)typeIdx];
+            var funcInst = ctx.Store[reference.GetFuncAddr(ctx.Frame.Module.Types)];
+            if (funcInst is FunctionInstance ftAct &&
+                !ftAct.DefType.Matches(ftExpect, ctx.Frame.Module.Types))
+            {
+                throw new TrapException("return_call_indirect: indirect call type mismatch");
+            }
+            if (!funcInst.Type.Matches(ftExpect.Unroll.Body, ctx.Frame.Module.Types))
+                throw new TrapException("return_call_indirect: indirect call type mismatch");
+            if (funcInst is FunctionInstance wasmFn)
+                ControlHandlers.InvokeWasm(ctx, wasmFn);
+            else
+                funcInst.Invoke(ctx);
+            pc = int.MaxValue;
         }
 
         internal static void InvokeWasm(ExecContext ctx, FunctionInstance func)
