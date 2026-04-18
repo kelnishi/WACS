@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using Wacs.Core.Compilation;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types.Defs;
@@ -157,6 +158,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.I32x4Add)]
         private static void ExecuteI32x4Add(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
@@ -170,6 +172,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.I32x4Sub)]
         private static void ExecuteI32x4Sub(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
@@ -222,6 +225,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.I32x4Mul)]
         private static void ExecuteI32x4Mul(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();

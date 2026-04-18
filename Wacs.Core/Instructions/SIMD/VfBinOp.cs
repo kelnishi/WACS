@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using Wacs.Core.Compilation;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Types.Defs;
@@ -39,6 +40,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F64x2PMin = new (SimdCode.F64x2PMin, ExecuteF64x2PMin, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
         public static readonly NumericInst F64x2PMax = new (SimdCode.F64x2PMax, ExecuteF64x2PMax, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
+        [OpHandler(SimdCode.F32x4Add)]
         private static void ExecuteF32x4Add(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
@@ -52,6 +54,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.F32x4Sub)]
         private static void ExecuteF32x4Sub(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
@@ -65,6 +68,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.F32x4Mul)]
         private static void ExecuteF32x4Mul(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
@@ -78,6 +82,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
+        [OpHandler(SimdCode.F32x4Div)]
         private static void ExecuteF32x4Div(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
