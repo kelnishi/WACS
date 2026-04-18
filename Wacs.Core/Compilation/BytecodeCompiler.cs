@@ -127,15 +127,68 @@ namespace Wacs.Core.Compilation
                 OpCode.Else => 4,
                 // BrTable: u32 count + (count+1) × 12-byte triple (indexed + default).
                 OpCode.BrTable => 4 + 12 * (((InstBranchTable)inst).LabelCount + 1),
-                // Memory load/store: memIdx:u32 + offset:u64.
+                // Memory load/store (all widths): memIdx:u32 + offset:u64.
                 OpCode.I32Load or OpCode.I64Load or OpCode.F32Load or OpCode.F64Load => 12,
+                OpCode.I32Load8S or OpCode.I32Load8U or OpCode.I32Load16S or OpCode.I32Load16U => 12,
+                OpCode.I64Load8S or OpCode.I64Load8U or OpCode.I64Load16S or OpCode.I64Load16U
+                    or OpCode.I64Load32S or OpCode.I64Load32U => 12,
                 OpCode.I32Store or OpCode.I64Store or OpCode.F32Store or OpCode.F64Store => 12,
+                OpCode.I32Store8 or OpCode.I32Store16 => 12,
+                OpCode.I64Store8 or OpCode.I64Store16 or OpCode.I64Store32 => 12,
                 // memory.size / memory.grow: memIdx:u32.
                 OpCode.MemorySize or OpCode.MemoryGrow => 4,
+                // FC-prefixed bulk memory + table ops — secondary byte selects the layout.
+                OpCode.FC => SizeOfExt(inst.Op.xFC),
                 // No-immediate ops (drop/select/return/unreachable/nop/numeric).
                 _ => 0,
             };
             return hdr + imm;
+        }
+
+        /// <summary>
+        /// Immediate byte count for 0xFC-prefixed opcodes. Returns 0 for not-yet-supported
+        /// subcodes; callers downstream will fail at the Emit step with a clear message
+        /// rather than silently producing an undersized stream.
+        /// </summary>
+        private static int SizeOfExt(ExtCode code) => code switch
+        {
+            // Bulk memory.
+            ExtCode.MemoryInit => 8,   // dataIdx:u32 + memIdx:u32
+            ExtCode.DataDrop   => 4,   // dataIdx:u32
+            ExtCode.MemoryCopy => 8,   // dstIdx:u32 + srcIdx:u32
+            ExtCode.MemoryFill => 4,   // memIdx:u32
+            _ => 0,
+        };
+
+        private static int EmitExt(byte[] buf, int writePos, ExtCode code, InstructionBase inst)
+        {
+            switch (code)
+            {
+                case ExtCode.MemoryInit:
+                {
+                    var mi = (InstMemoryInit)inst;
+                    writePos = WriteU32(buf, writePos, (uint)mi.DataIndex);
+                    writePos = WriteU32(buf, writePos, (uint)mi.MemoryIndex);
+                    break;
+                }
+                case ExtCode.DataDrop:
+                    writePos = WriteU32(buf, writePos, (uint)((InstDataDrop)inst).DataIndex);
+                    break;
+                case ExtCode.MemoryCopy:
+                {
+                    var mc = (InstMemoryCopy)inst;
+                    writePos = WriteU32(buf, writePos, (uint)mc.DstMemIndex);
+                    writePos = WriteU32(buf, writePos, (uint)mc.SrcMemIndex);
+                    break;
+                }
+                case ExtCode.MemoryFill:
+                    writePos = WriteU32(buf, writePos, (uint)((InstMemoryFill)inst).MemoryIndex);
+                    break;
+                default:
+                    throw new NotSupportedException(
+                        $"BytecodeCompiler cannot yet emit ExtCode.{code} (0xFC 0x{(byte)code:X2}).");
+            }
+            return writePos;
         }
 
         private static int Emit(
@@ -191,11 +244,16 @@ namespace Wacs.Core.Compilation
                 case OpCode.Call:
                     writePos = WriteU32(buf, writePos, ((InstCall)inst).X.Value); break;
 
-                // ---- memory loads/stores: [memIdx:u32][offset:u64] ----
+                // ---- memory loads/stores (full + narrow): [memIdx:u32][offset:u64] ----
                 case OpCode.I32Load:
                 case OpCode.I64Load:
                 case OpCode.F32Load:
                 case OpCode.F64Load:
+                case OpCode.I32Load8S: case OpCode.I32Load8U:
+                case OpCode.I32Load16S: case OpCode.I32Load16U:
+                case OpCode.I64Load8S: case OpCode.I64Load8U:
+                case OpCode.I64Load16S: case OpCode.I64Load16U:
+                case OpCode.I64Load32S: case OpCode.I64Load32U:
                 {
                     var load = (InstMemoryLoad)inst;
                     writePos = WriteU32(buf, writePos, (uint)load.MemIndex);
@@ -206,6 +264,8 @@ namespace Wacs.Core.Compilation
                 case OpCode.I64Store:
                 case OpCode.F32Store:
                 case OpCode.F64Store:
+                case OpCode.I32Store8: case OpCode.I32Store16:
+                case OpCode.I64Store8: case OpCode.I64Store16: case OpCode.I64Store32:
                 {
                     var store = (InstMemoryStore)inst;
                     writePos = WriteU32(buf, writePos, (uint)store.MemIndex);
@@ -218,6 +278,11 @@ namespace Wacs.Core.Compilation
                     break;
                 case OpCode.MemoryGrow:
                     writePos = WriteU32(buf, writePos, (uint)((InstMemoryGrow)inst).MemIndex);
+                    break;
+
+                // ---- FC-prefixed: bulk memory + (future) table ops --------
+                case OpCode.FC:
+                    writePos = EmitExt(buf, writePos, op.xFC, inst);
                     break;
 
                 // ---- branches ----

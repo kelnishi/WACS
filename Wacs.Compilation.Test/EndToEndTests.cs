@@ -453,6 +453,70 @@ namespace Wacs.Compilation.Test
             0x0B,
         };
 
+        /// <summary>
+        /// memory.fill + i32.load round-trip.
+        /// <code>
+        /// (module (memory 1)
+        ///   (func (export "fill_then_load") (result i32)
+        ///     i32.const 100   ;; dest
+        ///     i32.const 0x42  ;; value byte
+        ///     i32.const 4     ;; n bytes
+        ///     memory.fill
+        ///     i32.const 100
+        ///     i32.load))     ;; should read 0x42424242
+        /// </code>
+        /// </summary>
+        private static readonly byte[] MemoryFillModule =
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type () -> i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            0x03, 0x02, 0x01, 0x00,
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export "fill_then_load" (14 chars)
+            0x07, 0x12, 0x01, 0x0E, (byte)'f', (byte)'i', (byte)'l', (byte)'l', (byte)'_', (byte)'t', (byte)'h', (byte)'e', (byte)'n', (byte)'_', (byte)'l', (byte)'o', (byte)'a', (byte)'d', 0x00, 0x00,
+            // Code body:
+            //   00          locals                        (1)
+            //   41 E4 00    i32.const 100                 (3)
+            //   41 C2 00    i32.const 0x42 (66)           (3)
+            //   41 04       i32.const 4                   (2)
+            //   FC 0B 00    memory.fill mem=0             (3)
+            //   41 E4 00    i32.const 100                 (3)
+            //   28 02 00    i32.load                      (3)
+            //   0B          end                           (1)
+            // 19 body bytes; body-size 0x13; section body = 21; section size 0x15.
+            0x0A, 0x15, 0x01, 0x13,
+            0x00,
+            0x41, 0xE4, 0x00,
+            0x41, 0xC2, 0x00,
+            0x41, 0x04,
+            0xFC, 0x0B, 0x00,
+            0x41, 0xE4, 0x00,
+            0x28, 0x02, 0x00,
+            0x0B,
+        };
+
+        [Fact]
+        public void MemoryFill_writes_bytes_and_load_reads_them_back()
+        {
+            var runtime = new WasmRuntime();
+            using var ms = new MemoryStream(MemoryFillModule);
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("m", moduleInst);
+
+            var addr = runtime.GetExportedFunction(("m", "fill_then_load"));
+            var funcInst = (FunctionInstance)runtime.RuntimeStore[addr];
+
+            var ctx = new ExecContext(runtime.RuntimeStore);
+            var results = SwitchRuntime.Invoke(ctx, funcInst);
+
+            Assert.Single(results);
+            // memory.fill wrote 4 bytes of 0x42 at offset 100; i32.load reads them as an
+            // LE u32 = 0x42424242.
+            Assert.Equal(unchecked((int)0x42424242), results[0].Data.Int32);
+        }
+
         [Fact]
         public void Memory_size_returns_initial_page_count()
         {
