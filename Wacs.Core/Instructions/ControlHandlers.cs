@@ -48,6 +48,37 @@ namespace Wacs.Core.Instructions
             pc = (int)targetPc;
         }
 
+        // 0x0D br_if — conditional branch. Same stream layout as br. Pops the i32 condition
+        // first; branches only if non-zero. Falls through otherwise (pc already past its
+        // 12 bytes of immediates by the time the handler is called).
+        [OpHandler(OpCode.BrIf)]
+        private static void BrIf(ExecContext ctx, ref int pc,
+                                 [Imm] uint targetPc, [Imm] uint resultsHeight, [Imm] uint arity)
+        {
+            int cond = ctx.OpStack.PopI32();
+            if (cond != 0)
+            {
+                ctx.OpStack.ShiftResults((int)arity, (int)resultsHeight);
+                pc = (int)targetPc;
+            }
+        }
+
+        // 0x04 if — pops an i32 condition. If zero, jump to else_pc (first instruction of the
+        // else-body, or past End if the if has no else). Otherwise fall through into the
+        // then-body. Stream: [else_pc:u32].
+        [OpHandler(OpCode.If)]
+        private static void If(ExecContext ctx, ref int pc, [Imm] uint elsePc)
+        {
+            if (ctx.OpStack.PopI32() == 0)
+                pc = (int)elsePc;
+        }
+
+        // 0x05 else — unconditional jump past End. Reached only when falling through from the
+        // end of the then-body; the then-body skips this via the If handler. Stream: [end_pc:u32].
+        [OpHandler(OpCode.Else)]
+        private static void Else(ref int pc, [Imm] uint endPc)
+            => pc = (int)endPc;
+
         // 0x0F return — terminates the current function body.
         // Pushing pc past the end of the stream exits SwitchRuntime.Run's while loop
         // cleanly, leaving whatever result values the producer already put on the

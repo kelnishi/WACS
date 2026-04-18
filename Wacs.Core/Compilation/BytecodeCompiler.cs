@@ -46,16 +46,26 @@ namespace Wacs.Core.Compilation
             // target doesn't ship it, so use a tiny reference-identity polyfill.
             var blockLocalIdx = new Dictionary<BlockTarget, int>(RefEq<BlockTarget>.Instance);
             var blockEndLocalIdx = new Dictionary<BlockTarget, int>(RefEq<BlockTarget>.Instance);
+            // For each InstIf, the local index of its matching InstElse (if present). If there's
+            // no else branch the If's "cond==0" target is just the matching End.
+            var ifElseLocalIdx = new Dictionary<InstIf, int>(RefEq<InstIf>.Instance);
             var labelStack = new Stack<BlockTarget>();
             int running = 0;
             for (int i = 0; i < linked.Length; i++)
             {
                 streamOffset[i] = running;
                 var inst = linked[i];
-                if (inst is BlockTarget bt)
+                // Block/Loop/If are openers that push onto the label stack. Else is *also* a
+                // BlockTarget subclass but not an opener — it marks the pivot inside an If.
+                if (inst is IBlockInstruction && inst is BlockTarget bt)
                 {
                     blockLocalIdx[bt] = i;
                     labelStack.Push(bt);
+                }
+                else if (inst is InstElse)
+                {
+                    if (labelStack.Count > 0 && labelStack.Peek() is InstIf ifInst)
+                        ifElseLocalIdx[ifInst] = i;
                 }
                 else if (inst is InstEnd)
                 {
@@ -68,9 +78,17 @@ namespace Wacs.Core.Compilation
             // --- Pass 2: emit ----------------------------------------------------------------
             var buf = new byte[running];
             int writePos = 0;
+            // Re-seed the label stack so we can resolve Else's matching End at emit time.
+            labelStack.Clear();
             for (int i = 0; i < linked.Length; i++)
             {
-                writePos = Emit(buf, writePos, linked[i], streamOffset, blockLocalIdx, blockEndLocalIdx);
+                var inst = linked[i];
+                if (inst is IBlockInstruction && inst is BlockTarget bt2)
+                    labelStack.Push(bt2);
+                writePos = Emit(buf, writePos, inst, labelStack,
+                                streamOffset, blockLocalIdx, blockEndLocalIdx, ifElseLocalIdx);
+                if (inst is InstEnd && labelStack.Count > 0)
+                    labelStack.Pop();
             }
 
             return new CompiledFunction(buf, localsCount, signature);
@@ -100,8 +118,12 @@ namespace Wacs.Core.Compilation
                 OpCode.LocalGet or OpCode.LocalSet or OpCode.LocalTee => 4,
                 OpCode.GlobalGet or OpCode.GlobalSet => 4,
                 OpCode.Call => 4,
-                // Branches: three u32 values — (target_pc, restore_stack, arity).
-                OpCode.Br => 12,
+                // Branches: three u32 values — (target_pc, results_height, arity).
+                OpCode.Br or OpCode.BrIf => 12,
+                // If: u32 else_pc (jump target when cond==0; pc falls through otherwise).
+                OpCode.If => 4,
+                // Else: u32 end_pc (unconditional jump out of the then-branch).
+                OpCode.Else => 4,
                 // No-immediate ops (drop/select/return/unreachable/nop/numeric).
                 _ => 0,
             };
@@ -111,9 +133,11 @@ namespace Wacs.Core.Compilation
         private static int Emit(
             byte[] buf, int writePos,
             InstructionBase inst,
+            Stack<BlockTarget> labelStack,
             int[] streamOffset,
             IReadOnlyDictionary<BlockTarget, int> blockLocalIdx,
-            IReadOnlyDictionary<BlockTarget, int> blockEndLocalIdx)
+            IReadOnlyDictionary<BlockTarget, int> blockEndLocalIdx,
+            IReadOnlyDictionary<InstIf, int> ifElseLocalIdx)
         {
             var op = inst.Op;
             OpCode primary = op;
@@ -164,6 +188,31 @@ namespace Wacs.Core.Compilation
                     writePos = WriteBranch(buf, writePos, ((InstBranch)inst).LinkedLabel!,
                                            streamOffset, blockLocalIdx, blockEndLocalIdx);
                     break;
+                case OpCode.BrIf:
+                    writePos = WriteBranch(buf, writePos, ((InstBranchIf)inst).LinkedLabel!,
+                                           streamOffset, blockLocalIdx, blockEndLocalIdx);
+                    break;
+
+                // ---- if/else ----
+                case OpCode.If:
+                {
+                    var ifInst = (InstIf)inst;
+                    // "cond==0" target: first instruction AFTER the matching Else (skipping the
+                    // Else marker's 5 bytes), or past End if there's no Else at all.
+                    int elseTargetIdx = ifElseLocalIdx.TryGetValue(ifInst, out var elseIdx)
+                        ? elseIdx + 1
+                        : blockEndLocalIdx[ifInst];
+                    writePos = WriteU32(buf, writePos, (uint)streamOffset[elseTargetIdx]);
+                    break;
+                }
+                case OpCode.Else:
+                {
+                    // Fall-through Else jumps past the matching End (exit the whole If block).
+                    // The parent InstIf is on top of the label stack at this point.
+                    var ifInst = (InstIf)labelStack.Peek();
+                    writePos = WriteU32(buf, writePos, (uint)streamOffset[blockEndLocalIdx[ifInst]]);
+                    break;
+                }
 
                 // ---- No-immediate ----
                 case OpCode.Unreachable:
