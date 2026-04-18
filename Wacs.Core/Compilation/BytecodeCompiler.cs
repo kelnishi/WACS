@@ -163,6 +163,11 @@ namespace Wacs.Core.Compilation
                 OpCode.ReturnCall => 4,
                 // return_call_indirect: typeIdx:u32 + tableIdx:u32.
                 OpCode.ReturnCallIndirect => 8,
+                // call_ref / return_call_ref: typeIdx:u32.
+                OpCode.CallRef or OpCode.ReturnCallRef => 4,
+                // throw: tagIdx:u32. throw_ref: no immediate.
+                OpCode.Throw => 4,
+                OpCode.ThrowRef => 0,
                 // ref.null: encoded ValType as s32 (flags + optional heap type index).
                 OpCode.RefNull => 4,
                 // ref.func: funcIdx:u32.
@@ -314,6 +319,16 @@ namespace Wacs.Core.Compilation
                 case ExtCode.TableFill:
                     writePos = WriteU32(buf, writePos, (uint)((InstTableFill)inst).TableIndex);
                     break;
+                // ---- Sat conversions (0xFC 0x00..0x07): no immediates, 2-byte opcode. ----
+                case ExtCode.I32TruncSatF32S:
+                case ExtCode.I32TruncSatF32U:
+                case ExtCode.I32TruncSatF64S:
+                case ExtCode.I32TruncSatF64U:
+                case ExtCode.I64TruncSatF32S:
+                case ExtCode.I64TruncSatF32U:
+                case ExtCode.I64TruncSatF64S:
+                case ExtCode.I64TruncSatF64U:
+                    break;
                 default:
                     throw new NotSupportedException(
                         $"BytecodeCompiler cannot yet emit ExtCode.{code} (0xFC 0x{(byte)code:X2}).");
@@ -435,6 +450,13 @@ namespace Wacs.Core.Compilation
             var op = inst.Op;
             OpCode primary = op;
 
+            // Quirk in the existing polymorphic source: InstReturnCallRef uses
+            // ByteCode.CallRef (see TailCall.cs:436) even though its semantics are
+            // tail-call. Correct the primary byte here so the switch dispatcher
+            // routes to the ReturnCallRef handler, not the CallRef handler.
+            if (inst is InstReturnCallRef)
+                primary = OpCode.ReturnCallRef;
+
             if (primary == OpCode.Block || primary == OpCode.Loop || primary == OpCode.End
                 || primary == OpCode.TryTable)
                 return writePos;
@@ -493,6 +515,17 @@ namespace Wacs.Core.Compilation
                     writePos = WriteU32(buf, writePos, (uint)rci.TableIndex);
                     break;
                 }
+                case OpCode.CallRef:
+                    writePos = WriteU32(buf, writePos, (uint)((InstCallRef)inst).TypeIndex);
+                    break;
+                case OpCode.ReturnCallRef:
+                    writePos = WriteU32(buf, writePos, (uint)((InstReturnCallRef)inst).TypeIndex);
+                    break;
+                case OpCode.Throw:
+                    writePos = WriteU32(buf, writePos, (uint)((InstThrow)inst).TagIndex);
+                    break;
+                case OpCode.ThrowRef:
+                    break;
 
                 // ---- reference ops with immediates ----
                 case OpCode.RefNull:
