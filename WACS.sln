@@ -1,5 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
+# 
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Core", "Wacs.Core\Wacs.Core.csproj", "{7ABE1650-C85B-4175-A7A0-12B39287AD37}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Console", "Wacs.Console\Wacs.Console.csproj", "{E355AFC4-1C09-44AF-BF44-AFF1515AE359}"
@@ -9,6 +10,14 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spec.Test", "Spec.Test\Spec.Test.csproj", "{2200F588-3506-4A4B-BD86-1C8FABA5A19E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Feature.Detect", "Feature.Detect\Feature.Detect.csproj", "{AE0D7913-8AA2-4054-B7BC-0C522584272C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler", "Wacs.Transpiler\Wacs.Transpiler.csproj", "{047F4142-5620-4F5B-AFD9-344D398EBEB9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Compilation", "Wacs.Compilation\Wacs.Compilation.csproj", "{3330F8C1-1F9B-438E-B10B-BB1B34493E29}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler.Test", "Wacs.Transpiler.Test\Wacs.Transpiler.Test.csproj", "{86D77261-EBF7-4ED4-8958-57EDDC211E7F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spec.Test.Data", "Spec.Test.Data\Spec.Test.Data.csproj", "{3E47DB21-1F0F-4A1A-BF0F-C28A5C0F01BC}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -36,5 +45,21 @@ Global
 		{AE0D7913-8AA2-4054-B7BC-0C522584272C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{AE0D7913-8AA2-4054-B7BC-0C522584272C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{AE0D7913-8AA2-4054-B7BC-0C522584272C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{047F4142-5620-4F5B-AFD9-344D398EBEB9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{047F4142-5620-4F5B-AFD9-344D398EBEB9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{047F4142-5620-4F5B-AFD9-344D398EBEB9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{047F4142-5620-4F5B-AFD9-344D398EBEB9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3330F8C1-1F9B-438E-B10B-BB1B34493E29}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3330F8C1-1F9B-438E-B10B-BB1B34493E29}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3330F8C1-1F9B-438E-B10B-BB1B34493E29}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3330F8C1-1F9B-438E-B10B-BB1B34493E29}.Release|Any CPU.Build.0 = Release|Any CPU
+		{86D77261-EBF7-4ED4-8958-57EDDC211E7F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{86D77261-EBF7-4ED4-8958-57EDDC211E7F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{86D77261-EBF7-4ED4-8958-57EDDC211E7F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{86D77261-EBF7-4ED4-8958-57EDDC211E7F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3E47DB21-1F0F-4A1A-BF0F-C28A5C0F01BC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3E47DB21-1F0F-4A1A-BF0F-C28A5C0F01BC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3E47DB21-1F0F-4A1A-BF0F-C28A5C0F01BC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3E47DB21-1F0F-4A1A-BF0F-C28A5C0F01BC}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
