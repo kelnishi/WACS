@@ -224,6 +224,8 @@ namespace Wacs.Core.Compilation
         {
             // v128.load / v128.store — memarg: memIdx:u32 + offset:u64.
             SimdCode.V128Load or SimdCode.V128Store => 12,
+            // v128.const — 16-byte literal.
+            SimdCode.V128Const => 16,
             // Standard SIMD ops with no immediates (arithmetic, unary, test, etc.).
             // Listed as they're added to the dispatcher; callers downstream will Emit.
             _ => 0,
@@ -428,6 +430,12 @@ namespace Wacs.Core.Compilation
                     var store = (InstMemoryStore)inst;
                     writePos = WriteU32(buf, writePos, (uint)store.MemIndex);
                     writePos = WriteS64(buf, writePos, store.MemOffset);
+                    break;
+                }
+                case SimdCode.V128Const:
+                {
+                    var c = (Wacs.Core.Instructions.Simd.InstV128Const)inst;
+                    writePos = WriteV128(buf, writePos, c.Value);
                     break;
                 }
                 // Arithmetic, unary, relational, test: nothing after the 2-byte opcode
@@ -740,6 +748,12 @@ namespace Wacs.Core.Compilation
         {
             BinaryPrimitives.WriteInt64LittleEndian(buf.AsSpan(pos, 8), value);
             return pos + 8;
+        }
+
+        private static int WriteV128(byte[] buf, int pos, Wacs.Core.Runtime.V128 value)
+        {
+            System.Runtime.InteropServices.MemoryMarshal.Write(buf.AsSpan(pos, 16), in value);
+            return pos + 16;
         }
 
         private sealed class RefEq<T> : IEqualityComparer<T> where T : class
