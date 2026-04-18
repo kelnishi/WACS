@@ -160,6 +160,20 @@ namespace Wacs.Core.Runtime
             return frame;
         }
 
+        /// <summary>
+        /// Rent a bare pooled Frame without the ReserveFrame bookkeeping (return-label setup,
+        /// pointer tracking). Used by the switch runtime's call path which manages its own
+        /// frame lifecycle outside the polymorphic call stack.
+        /// </summary>
+        internal Frame RentFrame() => _framePool.Get();
+
+        /// <summary>Return a Frame rented via <see cref="RentFrame"/> back to the pool.</summary>
+        internal void ReturnFrame(Frame frame)
+        {
+            frame.Clear();
+            _framePool.Return(frame);
+        }
+
         public void PushFrame(Frame frame)
         {
             if (_callStack.Count >= Attributes.MaxCallStack)

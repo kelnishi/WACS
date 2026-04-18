@@ -6,6 +6,8 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using System.Buffers;
+using System.Linq;
 using Wacs.Core.Compilation;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -133,28 +135,42 @@ namespace Wacs.Core.Instructions
 
         internal static void InvokeWasm(ExecContext ctx, FunctionInstance func)
         {
-            var compiled = CompiledFunctionCache.GetOrCompile(func);
+            // ---- 1. Compiled form: field cache on the FunctionInstance -----------------
+            // Field read + one null check replaces a ConcurrentDictionary lookup. The
+            // compile is deterministic, so a benign race just duplicates work; the last
+            // writer wins and either compiled form is equally valid.
+            var compiled = func.SwitchCompiled;
+            if (compiled == null)
+            {
+                compiled = BytecodeCompiler.Compile(
+                    func.Body.Instructions.Flatten().ToArray(),
+                    func.Type,
+                    localsCount: func.Type.ParameterTypes.Arity + func.Locals.Length);
+                func.SwitchCompiled = compiled;
+            }
 
-            // Args were pushed left-to-right on the OpStack; pop right-to-left into
-            // the locals array starting at the param slot, then zero-init declared
-            // locals for the tail.
             int paramCount = func.Type.ParameterTypes.Arity;
             int declaredCount = func.Locals.Length;
-            var locals = new Value[paramCount + declaredCount];
-            for (int i = paramCount - 1; i >= 0; i--)
-            {
-                locals[i] = ctx.OpStack.PopAny();
-            }
-            for (int i = 0; i < declaredCount; i++)
-            {
-                locals[paramCount + i] = new Value(func.Locals[i]);
-            }
+            int totalCount = paramCount + declaredCount;
 
-            // Swap the frame for the duration of the call. The simple Frame construction
-            // matches what LocalGet/Set expect (Locals Memory + Module reference); we're
-            // not using the existing ObjectPool here to keep the switch path standalone.
+            // ---- 2. Locals: pooled Value[] instead of per-call heap alloc --------------
+            // ArrayPool returns an array of AT LEAST totalCount elements; we slice into
+            // a Memory<Value> of exactly totalCount so LocalGet/Set don't see padding.
+            var rented = ArrayPool<Value>.Shared.Rent(totalCount);
+            var locals = new System.Memory<Value>(rented, 0, totalCount);
+            var span = locals.Span;
+            for (int i = paramCount - 1; i >= 0; i--)
+                span[i] = ctx.OpStack.PopAny();
+            for (int i = 0; i < declaredCount; i++)
+                span[paramCount + i] = new Value(func.Locals[i]);
+
+            // ---- 3. Frame: pooled via ExecContext._framePool ---------------------------
+            var frame = ctx.RentFrame();
+            frame.Module = func.Module;
+            frame.Locals = locals;
+
             var savedFrame = ctx.Frame;
-            ctx.Frame = new Frame { Module = func.Module, Locals = locals };
+            ctx.Frame = frame;
             try
             {
                 SwitchRuntime.Run(ctx, compiled.Bytecode);
@@ -162,6 +178,10 @@ namespace Wacs.Core.Instructions
             finally
             {
                 ctx.Frame = savedFrame;
+                ctx.ReturnFrame(frame);
+                // clearArray:true to drop any GcRef references in the slots before
+                // putting the array back in the pool, keeping the GC graph tidy.
+                ArrayPool<Value>.Shared.Return(rented, clearArray: true);
             }
         }
     }
