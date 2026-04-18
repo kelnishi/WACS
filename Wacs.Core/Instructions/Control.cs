@@ -465,11 +465,13 @@ namespace Wacs.Core.Instructions
     public sealed class InstBranch : InstructionBase, IBranchInstruction
     {
         public InstBranch() : base(ByteCode.Br) { }
-        
+
         private static Stack<Value> _asideVals = new();
 
         private LabelIdx L;
-        private BlockTarget? LinkedLabel;
+        // Populated by Link() with the resolved block this branch targets. Consumed by
+        // Wacs.Core.Compilation.BytecodeCompiler when emitting the annotated-stream form.
+        internal BlockTarget? LinkedLabel;
         public int Label => (int)L.Value;
 
         // @Spec 3.3.8.6. br l
@@ -579,7 +581,8 @@ namespace Wacs.Core.Instructions
         public InstBranchIf() : base(ByteCode.BrIf,-1) { }
 
         private LabelIdx L;
-        private BlockTarget? LinkedLabel;
+        // Populated by Link(); consumed by BytecodeCompiler. See InstBranch.
+        internal BlockTarget? LinkedLabel;
         public int Label => (int)L.Value;
 
         public int LinkStackDiff => StackDiff;
@@ -651,9 +654,10 @@ namespace Wacs.Core.Instructions
     public sealed class InstBranchTable : InstructionBase, IBranchInstruction, IComplexLinkBehavior, INodeConsumer<int>
     {
         public InstBranchTable() : base(ByteCode.BrTable) { }
-        
-        private BlockTarget? LinkedLabeln;
-        private BlockTarget?[] LinkedLabels;
+
+        // Populated by Link(); consumed by BytecodeCompiler. See InstBranch.
+        internal BlockTarget? LinkedLabeln;
+        internal BlockTarget?[] LinkedLabels = null!;
         private LabelIdx Ln; //Default m
 
         private LabelIdx[] Ls = null!;
