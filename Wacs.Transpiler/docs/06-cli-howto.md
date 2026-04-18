@@ -134,7 +134,40 @@ var main = asm.GetType("Program")!.GetMethod("Main")!;
 main.Invoke(null, new object?[] { new[] { "2", "3" } }); // prints 5
 ```
 
-## 5. Known limitations (v0.1)
+## 5. `--wasi`: WASI preview1 modules
+
+For modules with `wasi_snapshot_preview1` imports (anything built
+against `wasi-libc`: C / Rust / Go / Zig targeting `wasm32-wasi`),
+`--wasi` binds `WACS.WASIp1` before transpilation and invokes the
+entry-point export in-process. Trailing positional args become WASI
+`argv`.
+
+```bash
+wasm-transpile -i coremark.wasm \
+  -o coremark.dll \
+  --wasi \
+  --entry-point _start \
+  --run 1 1 1 1
+```
+
+What you get:
+- `fd_write`, `args_get`, `args_sizes_get`, `clock_time_get`,
+  `proc_exit`, etc. are all routed to `Wacs.WASIp1`'s implementations
+  through the interpreter's host bindings.
+- The transpiled module's linear memory is swapped for the one the
+  interpreter owns, so WASI syscalls and AOT reads/writes share bytes.
+- Standard I/O is attached to the host process. The current working
+  directory is passed as the WASI root, with no preopened directories
+  by default — bind them yourself via the library API if you need
+  filesystem access.
+
+You can combine `--wasi` with `--emit-main` (the emitted `Main` is
+built but `--run` still goes through the WASI path). For custom host
+imports outside WASI, skip `--wasi` and drive transpilation from the
+library API — see the *Custom host imports* example in the package
+README.
+
+## 6. Known limitations (v0.1)
 
 See the package README's *Known Limitations* section for the full list.
 The two that matter most for this walkthrough:
@@ -146,8 +179,9 @@ The two that matter most for this walkthrough:
   embedded into the assembly yet. v0.2 will serialize init data into an
   assembly resource so the .dll becomes self-contained.
 - `--emit-main` currently supports **zero-import modules** with
-  **scalar i32/i64/f32/f64** params and a void or scalar result. WASI
-  modules, ref-typed params, and v128 params are follow-ups.
+  **scalar i32/i64/f32/f64** params and a void or scalar result. Use
+  `--wasi` for WASI modules; ref-typed params and `v128` params are
+  follow-ups.
 
 If either of these blocks your use case, please open an issue at
 <https://github.com/kelnishi/WACS>.
