@@ -10,10 +10,16 @@
 - `--emit-main` / `--entry-point` / `--main-class` bundle a host
   `Program.Main` into the output assembly for modules with no imports
   and scalar exports.
+- `--run` invokes the emitted `Program.Main` in-process after
+  transpiling, forwarding any trailing positional args — handy for IDE
+  run configurations that want to transpile-and-execute in one step.
 - Library surface: `Wacs.Transpiler.AOT.ModuleTranspiler.Transpile(...)`
   and `TranspilationResult.SaveAssembly(path)` for programmatic use.
-- Spec-equivalent to the WACS interpreter: 473/473 passing on the
-  WebAssembly 3.0 spec test suite.
+- WebAssembly 3.0 spec coverage: 469/473 passing on the AOT path
+  (known gaps in this preview: 3 multi-return invocation cases in
+  `call_indirect.wast`, `func.wast`, `if.wast`, and one GC struct
+  coercion case in `gc/struct.wast`). The interpreter remains
+  spec-complete on the same suite.
 - Known limitations: saved `.dll` is intended for in-process use in
   this preview — cross-process standalone execution (init-data embedded
   into the assembly) is a v0.2 milestone. See

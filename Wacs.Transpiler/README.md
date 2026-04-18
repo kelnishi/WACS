@@ -4,9 +4,11 @@ An ahead-of-time transpiler that compiles WebAssembly modules to .NET
 assemblies (`.dll`), built on top of [WACS](https://www.nuget.org/packages/WACS).
 Ships as the `wasm-transpile` .NET CLI tool.
 
-The generated assembly is spec-equivalent to the WACS interpreter (473/473
-on the WebAssembly 3.0 spec test suite) but runs natively via the CLR's JIT
-instead of the interpreter's expression-tree dispatch.
+The generated assembly passes 469/473 on the WebAssembly 3.0 spec test
+suite — the same suite WACS is spec-complete against — but runs natively
+via the CLR's JIT instead of the interpreter's expression-tree dispatch.
+(The four remaining cases are narrow multi-return / GC-coercion gaps
+called out in the v0.1 preview limitations below.)
 
 > **v0.1 preview**: the saved `.dll` currently depends on process-local
 > init state and is intended for programmatic (same-process) use and
