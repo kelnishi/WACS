@@ -20,7 +20,7 @@ using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
-namespace Wacs.Core.Instructions.Transpiler
+namespace Wacs.Core.Instructions.SuperInstruction
 {
     public class InstCompoundIf : BlockTarget, IBlockInstruction, IIfInstruction
     {

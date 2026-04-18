@@ -365,8 +365,8 @@ namespace Wacs.Core.Runtime
                 }
                 finally
                 {
-                    if (TranspileModules)
-                        TranspileModule(moduleInstance);
+                    if (SuperInstruction)
+                        ApplySuperInstructions(moduleInstance);
 
                     LinkModule(moduleInstance);
 

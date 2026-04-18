@@ -19,27 +19,29 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
 
-namespace Wacs.Core.Instructions.Transpiler
+namespace Wacs.Core.Instructions.SuperInstruction
 {
-    public class InstAggregate1_1<TIn,TOut> : InstructionBase, ITypedValueProducer<TOut>
+    public class InstAggregate2_1<TIn1,TIn2,TOut> : InstructionBase, ITypedValueProducer<TOut>
         where TOut : struct
     {
-        private readonly Func<ExecContext, TIn, TOut> _compute;
-        private readonly Func<ExecContext, TIn> _in1;
+        private readonly Func<ExecContext, TIn1, TIn2, TOut> _compute;
+        private readonly Func<ExecContext, TIn1> _in1;
+        private readonly Func<ExecContext, TIn2> _in2;
         private readonly Func<ExecContext, Value> _wrap;
         public int LinkStackDiff { get; set; }
         private List<InstructionBase> linkDependents = new();
-        
-        public InstAggregate1_1(ITypedValueProducer<TIn> in1, INodeComputer<TIn, TOut> compute) : base(ByteCode.Aggr1_1)
+
+        public InstAggregate2_1(ITypedValueProducer<TIn1> in1, ITypedValueProducer<TIn2> in2, INodeComputer<TIn1,TIn2,TOut> compute) : base(ByteCode.Aggr2_1)
         {
             _in1 = in1.GetFunc;
-            LinkStackDiff = Math.Min(0, in1.LinkStackDiff);
-            _compute = compute.GetFunc;
+            _in2 = in2.GetFunc;
+            LinkStackDiff = Math.Min(0, in1.LinkStackDiff) + Math.Min(0, in2.LinkStackDiff);
             
             if (compute is IComplexLinkBehavior) 
                 linkDependents.Add((compute as InstructionBase)!);
             
-            Size = in1.CalculateSize() + 1;
+            _compute = compute.GetFunc;
+            Size = in1.CalculateSize() + in2.CalculateSize() + 1;
 
             if (typeof(TOut) == typeof(int)) _wrap = new WrapValueI32((ITypedValueProducer<int>)this).GetFunc;
             else if (typeof(TOut) == typeof(uint)) _wrap = new WrapValueU32((ITypedValueProducer<uint>)this).GetFunc;
@@ -56,16 +58,15 @@ namespace Wacs.Core.Instructions.Transpiler
 
         public Func<ExecContext, TOut> GetFunc => Run;
 
-        public TOut Run(ExecContext context) => _compute(context, _in1(context));
+        public TOut Run(ExecContext context) => _compute(context, _in1(context), _in2(context));
 
         public override void Validate(IWasmValidationContext context)
         {
             context.Assert(false, "Validation of transpiled instructions not supported.");
         }
-
+        
         public override InstructionBase Link(ExecContext context, int pointer)
         {
-            //Account for our own push to the stack if we're not subordinated
             context.LinkOpStackHeight += LinkStackDiff + 1;
             
             int stack = context.LinkOpStackHeight;
@@ -74,7 +75,6 @@ namespace Wacs.Core.Instructions.Transpiler
                 dependent.Link(context, pointer);
             
             context.LinkOpStackHeight = stack;
-            
             return this;
         }
 
@@ -83,4 +83,5 @@ namespace Wacs.Core.Instructions.Transpiler
             context.OpStack.PushValue(_wrap(context));
         }
     }
+    
 }

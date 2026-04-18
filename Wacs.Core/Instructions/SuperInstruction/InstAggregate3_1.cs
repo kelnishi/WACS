@@ -19,7 +19,7 @@ using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
 
-namespace Wacs.Core.Instructions.Transpiler
+namespace Wacs.Core.Instructions.SuperInstruction
 {
     public class InstAggregate3_1<TIn1,TIn2,TIn3,TOut> : InstructionBase, ITypedValueProducer<TOut>
         where TOut : struct

@@ -14,51 +14,34 @@
 
 using System;
 using System.Collections.Generic;
-using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
 
-namespace Wacs.Core.Instructions.Transpiler
+namespace Wacs.Core.Instructions.SuperInstruction
 {
-    public class InstAggregate2_1<TIn1,TIn2,TOut> : InstructionBase, ITypedValueProducer<TOut>
-        where TOut : struct
+    public class InstAggregate2_0<TIn1,TIn2> : InstructionBase
     {
-        private readonly Func<ExecContext, TIn1, TIn2, TOut> _compute;
+        private readonly Action<ExecContext, TIn1, TIn2> _compute;
         private readonly Func<ExecContext, TIn1> _in1;
         private readonly Func<ExecContext, TIn2> _in2;
-        private readonly Func<ExecContext, Value> _wrap;
         public int LinkStackDiff { get; set; }
         private List<InstructionBase> linkDependents = new();
 
-        public InstAggregate2_1(ITypedValueProducer<TIn1> in1, ITypedValueProducer<TIn2> in2, INodeComputer<TIn1,TIn2,TOut> compute) : base(ByteCode.Aggr2_1)
+        public InstAggregate2_0(ITypedValueProducer<TIn1> in1, ITypedValueProducer<TIn2> in2, INodeConsumer<TIn1,TIn2> compute) : base(ByteCode.Aggr2_0)
         {
             _in1 = in1.GetFunc;
             _in2 = in2.GetFunc;
+            
             LinkStackDiff = Math.Min(0, in1.LinkStackDiff) + Math.Min(0, in2.LinkStackDiff);
             
             if (compute is IComplexLinkBehavior) 
                 linkDependents.Add((compute as InstructionBase)!);
             
             _compute = compute.GetFunc;
+
             Size = in1.CalculateSize() + in2.CalculateSize() + 1;
-
-            if (typeof(TOut) == typeof(int)) _wrap = new WrapValueI32((ITypedValueProducer<int>)this).GetFunc;
-            else if (typeof(TOut) == typeof(uint)) _wrap = new WrapValueU32((ITypedValueProducer<uint>)this).GetFunc;
-            else if (typeof(TOut) == typeof(long)) _wrap = new WrapValueI64((ITypedValueProducer<long>)this).GetFunc;
-            else if (typeof(TOut) == typeof(ulong)) _wrap = new WrapValueU64((ITypedValueProducer<ulong>)this).GetFunc;
-            else if (typeof(TOut) == typeof(float)) _wrap = new WrapValueF32((ITypedValueProducer<float>)this).GetFunc;
-            else if (typeof(TOut) == typeof(double)) _wrap = new WrapValueF64((ITypedValueProducer<double>)this).GetFunc;
-            else if (typeof(TOut) == typeof(V128)) _wrap = new WrapValueV128((ITypedValueProducer<V128>)this).GetFunc;
-            else if (typeof(TOut) == typeof(Value)) _wrap = new NakedValue((ITypedValueProducer<Value>)this).GetFunc;
-            else throw new InvalidDataException($"Could not bind aggregate type {typeof(TOut)}");
         }
-
-        public int CalculateSize() => Size;
-
-        public Func<ExecContext, TOut> GetFunc => Run;
-
-        public TOut Run(ExecContext context) => _compute(context, _in1(context), _in2(context));
 
         public override void Validate(IWasmValidationContext context)
         {
@@ -67,7 +50,7 @@ namespace Wacs.Core.Instructions.Transpiler
         
         public override InstructionBase Link(ExecContext context, int pointer)
         {
-            context.LinkOpStackHeight += LinkStackDiff + 1;
+            context.LinkOpStackHeight += LinkStackDiff;
             
             int stack = context.LinkOpStackHeight;
             
@@ -80,7 +63,7 @@ namespace Wacs.Core.Instructions.Transpiler
 
         public override void Execute(ExecContext context)
         {
-            context.OpStack.PushValue(_wrap(context));
+            _compute(context, _in1(context), _in2(context));
         }
     }
     

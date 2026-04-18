@@ -62,13 +62,13 @@ namespace Wacs.Transpiler.Test
         /// </summary>
         [Theory]
         [ClassData(typeof(TranspilerTestDefinitions))]
-        public void TranspileModule(WastJson file)
+        public void ApplySuperInstructions(WastJson file)
         {
             _output.WriteLine($"Transpile: {file.TestName}");
             var env = new SpecTestEnv();
             var runtime = new WasmRuntime();
             env.BindToRuntime(runtime);
-            runtime.TranspileModules = false;
+            runtime.SuperInstruction = false;
 
             int modulesTranspiled = 0;
             int totalFunctions = 0;
@@ -146,7 +146,7 @@ namespace Wacs.Transpiler.Test
                 var env = new SpecTestEnv();
                 var runtime = new WasmRuntime();
                 env.BindToRuntime(runtime);
-                runtime.TranspileModules = false;
+                runtime.SuperInstruction = false;
 
                 Module? module = null;
                 foreach (var command in testDef.Commands)

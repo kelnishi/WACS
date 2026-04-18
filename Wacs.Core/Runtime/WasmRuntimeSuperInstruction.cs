@@ -12,23 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using Wacs.Core.Runtime.Transpiler;
+using Wacs.Core.Runtime.SuperInstruction;
 using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Runtime
 {
     public partial class WasmRuntime
     {
-        public bool TranspileModules = false;
+        public bool SuperInstruction = false;
 
-        public void TranspileModule(ModuleInstance moduleInstance)
+        public void ApplySuperInstructions(ModuleInstance moduleInstance)
         {
             foreach (var funcAddr in moduleInstance.FuncAddrs)
             {
                 var instance = Store[funcAddr];
                 if (instance is FunctionInstance { Definition: { IsImport: false } } functionInstance)
                     if (functionInstance.Module == moduleInstance)
-                        FunctionTranspiler.TranspileFunction(functionInstance);
+                        SuperInstructionRewriter.Rewrite(functionInstance);
             }
         }
     }

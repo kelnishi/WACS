@@ -61,7 +61,7 @@ namespace Wacs.Transpiler.Test
             var env = new SpecTestEnv();
             var runtime = new WasmRuntime();
             env.BindToRuntime(runtime);
-            runtime.TranspileModules = false;
+            runtime.SuperInstruction = false;
 
             // Linker manages ThinContext creation and cross-module wiring
             var linker = new ModuleLinker();

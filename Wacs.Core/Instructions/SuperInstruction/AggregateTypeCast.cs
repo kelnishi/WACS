@@ -17,7 +17,7 @@ using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types.Defs;
 
-namespace Wacs.Core.Instructions.Transpiler
+namespace Wacs.Core.Instructions.SuperInstruction
 {
     
     public class InstAggregateValue<T> : InstAggregate1_0<Value>
