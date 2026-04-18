@@ -74,7 +74,50 @@ namespace Spec.Test
             env.BindToRuntime(runtime);
 
             runtime.SuperInstruction = true;
-            
+
+            Module? module = null;
+            foreach (var command in file.Commands)
+            {
+                try
+                {
+                    _output.WriteLine($"    {command}");
+                    var warnings = command.RunTest(file, ref runtime, ref module);
+                    foreach (var error in warnings)
+                    {
+                        _output.WriteLine($"Warning: {error}");
+                    }
+                }
+                catch (TestException exc)
+                {
+                    Assert.Fail(exc.Message);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Spec tests running through the source-generated monolithic-switch interpreter.
+        /// Top-level WASM function invocations route through
+        /// <c>Wacs.Core.Compilation.SwitchRuntime</c> instead of the polymorphic
+        /// <c>ProcessThreadWithOptions</c> dispatch loop. Host-function calls still use
+        /// the polymorphic path internally (the switch runtime can't compile those).
+        ///
+        /// Tests exercising opcodes without switch-runtime coverage are expected to fail
+        /// with <c>NotSupportedException</c> / <c>InvalidProgramException</c>; the point
+        /// of this test class is surfacing exactly where the coverage gaps are.
+        /// </summary>
+        [Theory]
+        [ClassData(typeof(WastJsonTestData))]
+        public void RunWastOnSwitch(WastJson.WastJson file)
+        {
+            _output.WriteLine($"Running test:{file.TestName}");
+            SpecTestEnv env = new SpecTestEnv();
+            WasmRuntime runtime = new();
+            env.BindToRuntime(runtime);
+
+            runtime.SuperInstruction = false;
+            runtime.UseSwitchRuntime = true;
+            runtime.TraceExecution = file.TraceExecution;
+
             Module? module = null;
             foreach (var command in file.Commands)
             {
