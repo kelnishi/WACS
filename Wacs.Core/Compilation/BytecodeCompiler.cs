@@ -17,6 +17,7 @@ using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.Instructions.Reference;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Compilation
 {
@@ -94,7 +95,39 @@ namespace Wacs.Core.Compilation
                     labelStack.Pop();
             }
 
-            return new CompiledFunction(buf, localsCount, signature);
+            // --- Pass 3: handler table --------------------------------------------------------
+            // For each InstTryTable, emit one HandlerEntry per catch. Entries are scanned in
+            // reverse at throw time so inner try_tables match before outer ones.
+            List<HandlerEntry>? handlers = null;
+            for (int i = 0; i < linked.Length; i++)
+            {
+                if (linked[i] is InstTryTable tt && tt.Catches is { Length: > 0 })
+                {
+                    handlers ??= new List<HandlerEntry>();
+                    uint startPc = (uint)streamOffset[i];
+                    uint endPc = (uint)streamOffset[blockEndLocalIdx[tt]];
+                    for (int k = 0; k < tt.Catches.Length; k++)
+                    {
+                        var c = tt.Catches[k];
+                        var target = tt.CatchTargets[k]!;
+                        int targetIdx = ((OpCode)target.Op) == OpCode.Loop
+                            ? blockLocalIdx[target]
+                            : blockEndLocalIdx[target];
+                        uint handlerPc = (uint)streamOffset[targetIdx];
+                        uint arity = (uint)target.Label.Arity;
+                        uint resultsHeight = (uint)(target.Label.StackHeight + arity);
+                        byte kind = (byte)c.Mode;
+                        uint tagIdx = (kind == (byte)CatchFlags.None || kind == (byte)CatchFlags.CatchRef)
+                            ? c.X.Value
+                            : uint.MaxValue;
+                        handlers.Add(new HandlerEntry(startPc, endPc, tagIdx, handlerPc,
+                                                      resultsHeight, arity, kind));
+                    }
+                }
+            }
+
+            return new CompiledFunction(buf, localsCount, signature,
+                                        handlers?.ToArray() ?? System.Array.Empty<HandlerEntry>());
         }
 
         /// <summary>Byte footprint of <paramref name="inst"/> in the annotated stream.</summary>
@@ -102,8 +135,11 @@ namespace Wacs.Core.Compilation
         {
             OpCode primary = inst.Op;
             // Block-structure markers are elided from the stream (Link already stamped
-            // branch targets onto the block instances; nothing to execute).
-            if (primary == OpCode.Block || primary == OpCode.Loop || primary == OpCode.End)
+            // branch targets onto the block instances; nothing to execute). try_table
+            // goes the same way — all its exception-handler state lives in the
+            // CompiledFunction's HandlerTable sidecar, built in pass 3.
+            if (primary == OpCode.Block || primary == OpCode.Loop || primary == OpCode.End
+                || primary == OpCode.TryTable)
                 return 0;
 
             // Prefix ops need their secondary byte too.
@@ -399,7 +435,8 @@ namespace Wacs.Core.Compilation
             var op = inst.Op;
             OpCode primary = op;
 
-            if (primary == OpCode.Block || primary == OpCode.Loop || primary == OpCode.End)
+            if (primary == OpCode.Block || primary == OpCode.Loop || primary == OpCode.End
+                || primary == OpCode.TryTable)
                 return writePos;
 
             buf[writePos++] = (byte)primary;

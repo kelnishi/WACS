@@ -253,7 +253,10 @@ namespace Wacs.Core.Instructions
             ctx.Frame = frame;
             try
             {
-                SwitchRuntime.Run(ctx, compiled.Bytecode);
+                // Pass the CompiledFunction (not just Bytecode) so Run can consult the
+                // HandlerTable sidecar and resume WASM exceptions at matching catch
+                // clauses instead of propagating them out of the function.
+                SwitchRuntime.Run(ctx, compiled);
             }
             finally
             {
