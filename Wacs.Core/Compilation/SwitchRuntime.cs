@@ -7,8 +7,10 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.Core.Instructions;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Compilation
 {
@@ -56,6 +58,27 @@ namespace Wacs.Core.Compilation
                     throw new NotSupportedException(
                         $"Opcode 0x{op:X4} has no [OpSource]/[OpHandler] coverage in GeneratedDispatcher.");
             }
+        }
+
+        /// <summary>
+        /// Top-level invocation for the switch runtime. Push <paramref name="args"/> onto
+        /// the OpStack of <paramref name="ctx"/>, run <paramref name="func"/> through the
+        /// Call-handler's standard frame setup + compile-on-demand path, then collect the
+        /// return values. Use this to exercise compiled functions from tests and from
+        /// higher-level invokers.
+        /// </summary>
+        public static Value[] Invoke(ExecContext ctx, FunctionInstance func, params Value[] args)
+        {
+            foreach (var v in args) ctx.OpStack.PushValue(v);
+            // InvokeWasm sets up the frame, pops args into locals, runs the compiled body,
+            // and restores the caller's frame on return. Results are on OpStack after it
+            // returns.
+            ControlHandlers.InvokeWasm(ctx, func);
+
+            int arity = func.Type.ResultType.Arity;
+            var results = new Value[arity];
+            for (int i = arity - 1; i >= 0; i--) results[i] = ctx.OpStack.PopAny();
+            return results;
         }
     }
 }

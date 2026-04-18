@@ -286,9 +286,9 @@ namespace Wacs.Compilation.Test
         [Fact]
         public void HandledOpcodeCount_includes_phase2_additions()
         {
-            // 102 numeric [OpSource] + 4 const + 5 variable + 2 parametric = 113 minimum.
-            Assert.True(GeneratedDispatcher.HandledOpcodeCount >= 113,
-                $"Expected ≥113 covered ops; got {GeneratedDispatcher.HandledOpcodeCount}.");
+            // 102 numeric [OpSource] + 4 const + 5 variable + 2 parametric + return + call = 115 minimum.
+            Assert.True(GeneratedDispatcher.HandledOpcodeCount >= 115,
+                $"Expected ≥115 covered ops; got {GeneratedDispatcher.HandledOpcodeCount}.");
         }
     }
 }
