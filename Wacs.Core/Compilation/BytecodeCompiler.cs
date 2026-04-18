@@ -124,6 +124,8 @@ namespace Wacs.Core.Compilation
                 OpCode.If => 4,
                 // Else: u32 end_pc (unconditional jump out of the then-branch).
                 OpCode.Else => 4,
+                // BrTable: u32 count + (count+1) × 12-byte triple (indexed + default).
+                OpCode.BrTable => 4 + 12 * (((InstBranchTable)inst).LabelCount + 1),
                 // No-immediate ops (drop/select/return/unreachable/nop/numeric).
                 _ => 0,
             };
@@ -192,6 +194,23 @@ namespace Wacs.Core.Compilation
                     writePos = WriteBranch(buf, writePos, ((InstBranchIf)inst).LinkedLabel!,
                                            streamOffset, blockLocalIdx, blockEndLocalIdx);
                     break;
+
+                case OpCode.BrTable:
+                {
+                    var bt = (InstBranchTable)inst;
+                    int count = bt.LinkedLabels.Length;
+                    writePos = WriteU32(buf, writePos, (uint)count);
+                    // Indexed entries first, then the default — matches the handler's dispatch:
+                    // `i in [0, count)` → triple i, else → triple `count`.
+                    for (int k = 0; k < count; k++)
+                    {
+                        writePos = WriteBranch(buf, writePos, bt.LinkedLabels[k]!,
+                                               streamOffset, blockLocalIdx, blockEndLocalIdx);
+                    }
+                    writePos = WriteBranch(buf, writePos, bt.LinkedLabeln!,
+                                           streamOffset, blockLocalIdx, blockEndLocalIdx);
+                    break;
+                }
 
                 // ---- if/else ----
                 case OpCode.If:
