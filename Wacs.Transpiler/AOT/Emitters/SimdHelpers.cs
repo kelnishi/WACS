@@ -1105,13 +1105,19 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         public static V128 I32x4RelaxedTruncF64x2UZero(V128 a)
         {
+            // NaN → 0 (not UINT_MAX) matches one of the two relaxed-simd
+            // spec-test options for f64x2_u_zero NaN input (see
+            // relaxed-simd/i32x4_relaxed_trunc.wast line 79–82). The
+            // alternative option the test accepts places UINT_MAX in the
+            // "zero" lanes 2/3 — reflecting hardware that doesn't clear
+            // the upper half — which we can't reproduce in scalar code.
             MV128 result = new MV128();
             for (uint i = 0; i < 2; i++)
             {
                 double d = (double)i;
-                if (double.IsNaN(a[d])) { result[i] = uint.MaxValue; continue; }
+                if (double.IsNaN(a[d])) { result[i] = 0; continue; }
                 double r = Math.Truncate(a[d]);
-                if (r < uint.MinValue) result[i] = uint.MaxValue;
+                if (r < uint.MinValue) result[i] = 0;            // saturate low → 0
                 else if (r > uint.MaxValue) result[i] = uint.MaxValue;
                 else result[i] = (uint)r;
             }
