@@ -15,7 +15,7 @@
 using System;
 using Wacs.Core.Runtime;
 
-namespace Wacs.Core.Instructions.Transpiler
+namespace Wacs.Core.Instructions.SuperInstruction
 {
     public interface InstructionBaseAnalog
     {

@@ -18,7 +18,7 @@ using Wacs.Core.Utilities;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Validation;
 
-namespace Wacs.Core.Instructions.Transpiler
+namespace Wacs.Core.Instructions.SuperInstruction
 {
     public class InstLocalGetSet : InstructionBase
     {
