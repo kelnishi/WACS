@@ -68,8 +68,17 @@ namespace Wacs.Transpiler.AOT
         /// <summary>ID into InitRegistry for this module's initialization data.</summary>
         public int InitDataId { get; set; } = -1;
 
+        /// <summary>
+        /// The still-open <see cref="ModuleBuilder"/> the transpiler wrote into,
+        /// kept live so callers can define additional types (e.g.
+        /// <see cref="MainEntryEmitter"/> for <c>--emit-main</c>) before the
+        /// assembly is persisted to disk.
+        /// </summary>
+        public ModuleBuilder ModuleBuilder { get; }
+
         public TranspilationResult(
             Assembly assembly,
+            ModuleBuilder moduleBuilder,
             Type functionsType,
             MethodInfo[] methods,
             ModuleMetadata.Manifest manifest,
@@ -83,6 +92,7 @@ namespace Wacs.Transpiler.AOT
             FunctionType[]? allFunctionTypes = null)
         {
             Assembly = assembly;
+            ModuleBuilder = moduleBuilder;
             FunctionsType = functionsType;
             Methods = methods;
             Manifest = manifest;
@@ -94,6 +104,20 @@ namespace Wacs.Transpiler.AOT
             ExportMethods = exportMethods;
             ImportMethods = importMethods;
             AllFunctionTypes = allFunctionTypes ?? Array.Empty<FunctionType>();
+        }
+
+        /// <summary>
+        /// Persist the in-memory dynamic assembly to disk as a portable .NET
+        /// assembly file. Uses Lokad.ILPack to serialize the dynamic
+        /// <see cref="System.Reflection.Emit.AssemblyBuilder"/>'s metadata and
+        /// IL into a standalone PE image that can be loaded with
+        /// <c>Assembly.LoadFrom</c>.
+        /// </summary>
+        /// <param name="path">Output path (typically ending in <c>.dll</c>).</param>
+        public void SaveAssembly(string path)
+        {
+            var gen = new Lokad.ILPack.AssemblyGenerator();
+            gen.GenerateAssembly(Assembly, path);
         }
     }
 
@@ -353,6 +377,7 @@ namespace Wacs.Transpiler.AOT
 
             var result = new TranspilationResult(
                 assemblyBuilder,
+                moduleBuilder,
                 functionsType,
                 methods,
                 manifest,
