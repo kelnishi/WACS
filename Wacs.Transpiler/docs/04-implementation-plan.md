@@ -340,18 +340,33 @@ the triage inputs for the equivalence-gate pass.
    changed from `typeof(int)` to untyped pops for memory64 / table64
    indices (i32 or i64 depending on addr type).
 
-**Suite state after session 4 (GC bucket + funcref subtyping):**
+**Suite state after session 4 (GC bucket + funcref subtyping + return_call):**
 
-    465 passed / 8 failed / 473 total     (237 wast files × 2 test classes,
+    467 passed / 6 failed / 473 total     (237 wast files × 2 test classes,
                                            minus SkipWasts: comments,
                                            annotations, linking{,0,3}, i31)
 
     Session 1 baseline: 449/473.
     Session 2 delivered: 453/473 (+4).
     Session 3 delivered: 456/473 (+3).
-    Session 4 delivered: 465/473 (+9).
+    Session 4 delivered: 467/473 (+11).
 
 **Session 4 additions:**
+
+21. `return_call_ref` / `return_call_indirect` — dispatched through the
+    DynamicInvoke helper path, which neither preserves CLR tail-call
+    semantics nor unwinds the caller's frame; `return_call_indirect`
+    additionally fell through to subsequent IL (no ret after the helper
+    call), producing InvalidProgramException for call-tab. Added
+    typed-delegate tail path: spill args to typed locals, resolve the
+    funcref → Delegate via new helpers (`ResolveRefDelegate` /
+    `ResolveIndirectDelegate`), castclass to the `Func<...>` /
+    `Action<...>` built from the WASM function type, push args, emit
+    `tail. callvirt Invoke + ret`. Falls back to the DynamicInvoke path
+    for signatures too wide for Action/Func (>16 params) or multi-value.
+    Exposes ThinContext.BuildDelegateTypeForFunc. Unlocks
+    return_call_indirect.wast (even 100000 recursion) and
+    return_call_ref.wast (count 1000).
 
 20. Funcref subtyping — `ref.test` / `ref.cast` on funcref and
     `call_indirect`'s WASM-level type check used direct hash equality
