@@ -224,7 +224,7 @@ namespace Wacs.Console
                 System.Console.Error.WriteLine($"Instantiating Module {moduleName}");
 
             if (opts.Transpile)
-                runtime.TranspileModules = true;
+                runtime.SuperInstruction = true;
             
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing, or you're like super confident.
             var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true, TimeInstantiation = opts.LogProg});

@@ -41,7 +41,7 @@ namespace Spec.Test
             SpecTestEnv env = new SpecTestEnv();
             WasmRuntime runtime = new();
             env.BindToRuntime(runtime);
-            runtime.TranspileModules = false;
+            runtime.SuperInstruction = false;
             runtime.TraceExecution = file.TraceExecution;
             
             Module? module = null;
@@ -73,7 +73,7 @@ namespace Spec.Test
             WasmRuntime runtime = new();
             env.BindToRuntime(runtime);
 
-            runtime.TranspileModules = true;
+            runtime.SuperInstruction = true;
             
             Module? module = null;
             foreach (var command in file.Commands)

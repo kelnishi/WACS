@@ -15,7 +15,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
-using Wacs.Core.Instructions.Transpiler;
+using Wacs.Core.Instructions.SuperInstruction;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;

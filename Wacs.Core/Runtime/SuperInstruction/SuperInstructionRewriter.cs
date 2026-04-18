@@ -16,15 +16,15 @@ using System.Collections.Generic;
 using System.Linq;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
-using Wacs.Core.Instructions.Transpiler;
+using Wacs.Core.Instructions.SuperInstruction;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 
-namespace Wacs.Core.Runtime.Transpiler
+namespace Wacs.Core.Runtime.SuperInstruction
 {
-    public static class FunctionTranspiler
+    public static class SuperInstructionRewriter
     {
         /// <summary>
         /// Transpiling a function will walk the instruction sequences and link their execution functions
@@ -45,7 +45,7 @@ namespace Wacs.Core.Runtime.Transpiler
         /// and reducing processing overhead.
         /// </summary>
         /// <param name="function"></param>
-        public static void TranspileFunction(FunctionInstance function)
+        public static void Rewrite(FunctionInstance function)
         {
             var expression = function.Definition.Body;
             var newSeq = OptimizeSequence(expression.Instructions);
