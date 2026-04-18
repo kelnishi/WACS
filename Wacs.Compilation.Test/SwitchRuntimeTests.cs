@@ -295,18 +295,20 @@ namespace Wacs.Compilation.Test
         public void Unknown_opcode_throws()
         {
             var ctx = FreshContext();
-            // 0xBF is in a gap between the numeric range and the reference opcodes — no
-            // [OpSource]/[OpHandler] coverage, dispatcher should surface NotSupported.
+            // 0xC5..0xCF is a genuine reserved gap in the WASM opcode space — no [OpSource]/
+            // [OpHandler] coverage, dispatcher should surface NotSupported.
             Assert.Throws<System.NotSupportedException>(() =>
-                SwitchRuntime.Run(ctx, new byte[] { 0xBF }));
+                SwitchRuntime.Run(ctx, new byte[] { 0xC5 }));
         }
 
         [Fact]
-        public void HandledOpcodeCount_includes_phase3a_additions()
+        public void HandledOpcodeCount_grows_as_phases_land()
         {
-            // 102 numeric + 4 const + 5 variable + 2 parametric + return + call + unreachable + nop = 117.
-            Assert.True(GeneratedDispatcher.HandledOpcodeCount >= 117,
-                $"Expected ≥117 covered ops; got {GeneratedDispatcher.HandledOpcodeCount}.");
+            // After phase 5a: 102 numeric + 25 conversions + 8 sat + 4 const + 5 variable
+            // + 2 parametric + 1 return + 1 call + unreachable + nop + 6 control-flow
+            // + 14 memory load/store + 2 size/grow + 4 bulk memory + 8 tables ≥ 180.
+            Assert.True(GeneratedDispatcher.HandledOpcodeCount >= 180,
+                $"Expected ≥180 covered ops; got {GeneratedDispatcher.HandledOpcodeCount}.");
         }
     }
 }

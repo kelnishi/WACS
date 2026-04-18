@@ -212,6 +212,8 @@ namespace Wacs.Compilation
             // the generator copies them into GeneratedDispatcher, which lives in
             // Wacs.Core.Compilation, so those short names only resolve via this using.
             sb.AppendLine("using Wacs.Core.Instructions;");
+            // Numeric conversion [OpSource] bodies reference FloatConversion.LongToFloat etc.
+            sb.AppendLine("using Wacs.Core.Utilities;");
             sb.AppendLine();
             sb.AppendLine("namespace Wacs.Core.Compilation");
             sb.AppendLine("{");
