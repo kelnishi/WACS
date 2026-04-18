@@ -361,5 +361,115 @@ namespace Wacs.Compilation.Test
             Assert.Single(results);
             Assert.Equal(expected, results[0].Data.Int32);
         }
+
+        /// <summary>
+        /// Memory round-trip: store 42 at address 0, load it back.
+        /// <code>
+        /// (module
+        ///   (memory 1)
+        ///   (func (export "roundtrip") (result i32)
+        ///     i32.const 0
+        ///     i32.const 42
+        ///     i32.store
+        ///     i32.const 0
+        ///     i32.load))
+        /// </code>
+        /// </summary>
+        private static readonly byte[] MemoryRoundtripModule =
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type () -> i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // Func 0
+            0x03, 0x02, 0x01, 0x00,
+            // Memory: 1 page, no max
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export "roundtrip"
+            0x07, 0x0D, 0x01, 0x09, (byte)'r', (byte)'o', (byte)'u', (byte)'n', (byte)'d', (byte)'t', (byte)'r', (byte)'i', (byte)'p', 0x00, 0x00,
+            // Code body:
+            //   00            locals
+            //   41 00         i32.const 0   (addr)
+            //   41 2A         i32.const 42  (value)
+            //   36 02 00      i32.store align=2 offset=0
+            //   41 00         i32.const 0
+            //   28 02 00      i32.load align=2 offset=0
+            //   0B            end
+            // 14 body bytes; body-size 0x0E; section body = 16; section size 0x10.
+            0x0A, 0x10, 0x01, 0x0E,
+            0x00,
+            0x41, 0x00,
+            0x41, 0x2A,
+            0x36, 0x02, 0x00,
+            0x41, 0x00,
+            0x28, 0x02, 0x00,
+            0x0B,
+        };
+
+        [Fact]
+        public void Memory_roundtrip_store_then_load()
+        {
+            var runtime = new WasmRuntime();
+            using var ms = new MemoryStream(MemoryRoundtripModule);
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("m", moduleInst);
+
+            var addr = runtime.GetExportedFunction(("m", "roundtrip"));
+            var funcInst = (FunctionInstance)runtime.RuntimeStore[addr];
+
+            var ctx = new ExecContext(runtime.RuntimeStore);
+            var results = SwitchRuntime.Invoke(ctx, funcInst);
+
+            Assert.Single(results);
+            Assert.Equal(42, results[0].Data.Int32);
+        }
+
+        /// <summary>
+        /// memory.size / memory.grow smoke test.
+        /// <code>
+        /// (module (memory 1) (func (export "size") (result i32) memory.size))
+        /// </code>
+        /// Initial size is 1 page.
+        /// </summary>
+        private static readonly byte[] MemorySizeModule =
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type () -> i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // Func 0
+            0x03, 0x02, 0x01, 0x00,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export "size"
+            0x07, 0x08, 0x01, 0x04, (byte)'s', (byte)'i', (byte)'z', (byte)'e', 0x00, 0x00,
+            // Code:
+            //   00     locals
+            //   3F 00  memory.size (reserved byte)
+            //   0B     end
+            // 4 body bytes; body-size 0x04; section body = 6; section size 0x06.
+            0x0A, 0x06, 0x01, 0x04,
+            0x00,
+            0x3F, 0x00,
+            0x0B,
+        };
+
+        [Fact]
+        public void Memory_size_returns_initial_page_count()
+        {
+            var runtime = new WasmRuntime();
+            using var ms = new MemoryStream(MemorySizeModule);
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("m", moduleInst);
+
+            var addr = runtime.GetExportedFunction(("m", "size"));
+            var funcInst = (FunctionInstance)runtime.RuntimeStore[addr];
+
+            var ctx = new ExecContext(runtime.RuntimeStore);
+            var results = SwitchRuntime.Invoke(ctx, funcInst);
+
+            Assert.Single(results);
+            Assert.Equal(1, results[0].Data.Int32);
+        }
     }
 }
