@@ -671,9 +671,22 @@ namespace Wacs.Transpiler.AOT
 
                     int excess = _currentInfo?.Excess ?? 0;
                     EmitExcessCleanup(il, excess, funcBlock);
-                    // Return from inside a try is OK: Ret unwinds the frame
-                    // and the CLR handles pending try-region exit.
-                    il.Emit(OpCodes.Ret);
+                    // When the function-level block uses shuttle locals
+                    // (allocated whenever the function contains a try_table —
+                    // cross-try branches emit Leave which clears the stack),
+                    // the return value was just stashed into those locals.
+                    // Route through funcEndLabel where the reload + Ret
+                    // epilogue lives so the emitted Ret sees the return value
+                    // on the stack. Otherwise (no shuttle) a direct Ret is
+                    // correct and matches the CLR's try-frame unwind behavior.
+                    if (funcBlock.ResultLocals != null)
+                    {
+                        BranchBridge.EmitBranch(il, funcBlock, _tryDepth);
+                    }
+                    else
+                    {
+                        il.Emit(OpCodes.Ret);
+                    }
                     _cilValidator.SetUnreachable();
                     break;
                 }

@@ -163,7 +163,19 @@ namespace Wacs.Transpiler.Test
             if (!_exportMethods.TryGetValue(clrName, out var method))
                 throw new InvalidOperationException($"Export '{exportName}' not found");
 
-            return args => method.Invoke(ModuleInstance, args);
+            // method.Invoke wraps exceptions in TargetInvocationException. For
+            // cross-module calls (e.g. exn handler in module A catches exn from
+            // module B), the caller's catch matches on the original WasmException
+            // type; unwrap + rethrow preserving the stack trace.
+            return args =>
+            {
+                try { return method.Invoke(ModuleInstance, args); }
+                catch (TargetInvocationException tie) when (tie.InnerException != null)
+                {
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(tie.InnerException);
+                    return null; // unreachable
+                }
+            };
         }
 
         private static object? ConvertFromValue(Value val, Type targetType)
