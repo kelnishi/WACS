@@ -15,6 +15,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -45,6 +46,7 @@ namespace Wacs.Core.Runtime
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void PushI32(int value)
         {
             _registers[Count].Type = ValType.I32;
@@ -52,6 +54,7 @@ namespace Wacs.Core.Runtime
             Count++;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void PushU32(uint value)
         {
             _registers[Count].Type = ValType.I32;
@@ -59,20 +62,15 @@ namespace Wacs.Core.Runtime
             Count++;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void PushI64(long value)
         {
-            try
-            {
-                _registers[Count].Type = ValType.I64;
-                _registers[Count].Data.Int64 = value;
-                Count++;
-            }
-            catch (Exception _)
-            {
-                throw;
-            }
+            _registers[Count].Type = ValType.I64;
+            _registers[Count].Data.Int64 = value;
+            Count++;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void PushU64(ulong value)
         {
             _registers[Count].Type = ValType.I64;
@@ -80,6 +78,7 @@ namespace Wacs.Core.Runtime
             Count++;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void PushF32(float value)
         {
             _registers[Count].Type = ValType.F32;
@@ -87,6 +86,7 @@ namespace Wacs.Core.Runtime
             Count++;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void PushF64(double value)
         {
             _registers[Count].Type = ValType.F64;
@@ -108,29 +108,34 @@ namespace Wacs.Core.Runtime
             PushValue(value);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void PushValue(Value value)
         {
             _registers[Count++] = value;
         }
-        
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int PopI32()
         {
             --Count;
             return _registers[Count].Data.Int32;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public uint PopU32()
         {
             --Count;
             return _registers[Count].Data.UInt32;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public long PopI64()
         {
             --Count;
             return _registers[Count].Data.Int64;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ulong PopU64()
         {
             --Count;
@@ -154,12 +159,14 @@ namespace Wacs.Core.Runtime
             return addr;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public float PopF32()
         {
             --Count;
             return _registers[Count].Data.Float32;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public double PopF64()
         {
             --Count;
@@ -214,6 +221,7 @@ namespace Wacs.Core.Runtime
             Count = 0;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Value Peek()
         {
             return _registers[Count-1];
