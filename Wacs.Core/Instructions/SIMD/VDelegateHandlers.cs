@@ -19,6 +19,11 @@ namespace Wacs.Core.Instructions.SIMD
     /// polymorphic body — same pop/push semantics via ctx.OpStack. This keeps the
     /// switch runtime close to feature-complete for SIMD without re-implementing
     /// 100+ lane-expansion bodies; correctness parity is automatic.
+    ///
+    /// Note: relaxed-simd opcodes (0x100+) are NOT wired through this file — their
+    /// SimdCode values exceed the byte range our dispatcher packs as the secondary
+    /// opcode byte, causing enum-value collisions with the core set. Those are
+    /// deferred until the dispatcher gets multi-byte secondary-opcode support.
     /// </summary>
     internal static class VDelegateHandlers
     {
