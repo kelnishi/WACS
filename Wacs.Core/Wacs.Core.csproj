@@ -78,4 +78,17 @@
     <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
   </ItemGroup>
 
+  <!-- Phase 7: threaded dispatch. InlineIL.Fody lets the generator emit
+       IL.Emit.Switch(...) calls at handler tails; Fody rewrites those at build
+       time into raw IL switch instructions so each case becomes its own
+       indirect-branch site. Both Fody and InlineIL.Fody are build-only
+       dependencies (PrivateAssets="all"): the final DLL has no runtime
+       reference to either package. AOT-compatible. Gate the generator's
+       emission on the WACS_THREADED_DISPATCH MSBuild property (default off)
+       so a standard build still produces the switch-based dispatcher. -->
+  <ItemGroup>
+    <PackageReference Include="Fody" Version="6.8.1" PrivateAssets="all" />
+    <PackageReference Include="InlineIL.Fody" Version="1.9.0" PrivateAssets="all" />
+  </ItemGroup>
+
 </Project>
