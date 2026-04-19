@@ -271,6 +271,13 @@ namespace Wacs.Compilation
             sb.AppendLine("        /// body of each opcode to completion before looping. Prefix opcodes (0xFB-0xFF)");
             sb.AppendLine("        /// delegate to per-prefix sub-methods that handle their secondary byte(s).");
             sb.AppendLine("        /// </summary>");
+            // SkipLocalsInit elides the method's .locals init flag, so the JIT doesn't emit
+            // the frame-zeroing loop at entry. Run has a ~1.6 KiB frame (many per-case locals),
+            // so the default dczva-based zero-fill is several hundred bytes of prologue. Safe
+            // here because every local is explicitly assigned before any read — the generator
+            // emits `{T} name = ...;` on first use in each case, and the method-level hoists
+            // (_pc, _pcBefore, _opStack, etc.) are all initialized immediately.
+            sb.AppendLine("        [System.Runtime.CompilerServices.SkipLocalsInit]");
             sb.AppendLine("        public static void Run(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc, ref int pcBefore)");
             sb.AppendLine("        {");
             // Hoist the OpStack and the current frame's locals out of the hot loop. OpStack

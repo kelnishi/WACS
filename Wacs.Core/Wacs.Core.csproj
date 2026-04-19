@@ -22,6 +22,11 @@
     <RepositoryType>git</RepositoryType>
     <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
     <IsAotCompatible>true</IsAotCompatible>
+    <!-- SkipLocalsInit on GeneratedDispatcher.Run requires the project to permit unsafe
+         code (the C# compiler gates the attribute to prevent accidental use). We don't
+         emit unsafe blocks — the hot-path uses only Unsafe.Add / Unsafe.ReadUnaligned,
+         which are managed intrinsics. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <PropertyGroup>
