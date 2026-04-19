@@ -226,6 +226,14 @@ namespace Wacs.Core.Compilation
             SimdCode.V128Load or SimdCode.V128Store => 12,
             // v128.const — 16-byte literal.
             SimdCode.V128Const => 16,
+            // Lane-indexed extract/replace ops — 1-byte lane index.
+            SimdCode.I8x16ExtractLaneS or SimdCode.I8x16ExtractLaneU
+                or SimdCode.I16x8ExtractLaneS or SimdCode.I16x8ExtractLaneU
+                or SimdCode.I32x4ExtractLane or SimdCode.I64x2ExtractLane
+                or SimdCode.F32x4ExtractLane or SimdCode.F64x2ExtractLane
+                or SimdCode.I8x16ReplaceLane or SimdCode.I16x8ReplaceLane
+                or SimdCode.I32x4ReplaceLane or SimdCode.I64x2ReplaceLane
+                or SimdCode.F32x4ReplaceLane or SimdCode.F64x2ReplaceLane => 1,
             // Standard SIMD ops with no immediates (arithmetic, unary, test, etc.).
             // Listed as they're added to the dispatcher; callers downstream will Emit.
             _ => 0,
@@ -436,6 +444,19 @@ namespace Wacs.Core.Compilation
                 {
                     var c = (Wacs.Core.Instructions.Simd.InstV128Const)inst;
                     writePos = WriteV128(buf, writePos, c.Value);
+                    break;
+                }
+                case SimdCode.I8x16ExtractLaneS or SimdCode.I8x16ExtractLaneU
+                    or SimdCode.I16x8ExtractLaneS or SimdCode.I16x8ExtractLaneU
+                    or SimdCode.I32x4ExtractLane or SimdCode.I64x2ExtractLane
+                    or SimdCode.F32x4ExtractLane or SimdCode.F64x2ExtractLane
+                    or SimdCode.I8x16ReplaceLane or SimdCode.I16x8ReplaceLane
+                    or SimdCode.I32x4ReplaceLane or SimdCode.I64x2ReplaceLane
+                    or SimdCode.F32x4ReplaceLane or SimdCode.F64x2ReplaceLane:
+                {
+                    // Lane ops: single-byte lane index carried on InstLaneOp.LaneIndex.
+                    var lane = ((Wacs.Core.Instructions.Numeric.InstLaneOp)inst).LaneIndex;
+                    buf[writePos++] = lane;
                     break;
                 }
                 // Arithmetic, unary, relational, test: nothing after the 2-byte opcode
@@ -752,7 +773,11 @@ namespace Wacs.Core.Compilation
 
         private static int WriteV128(byte[] buf, int pos, Wacs.Core.Runtime.V128 value)
         {
+#if NET8_0_OR_GREATER
             System.Runtime.InteropServices.MemoryMarshal.Write(buf.AsSpan(pos, 16), in value);
+#else
+            System.Runtime.InteropServices.MemoryMarshal.Write(buf.AsSpan(pos, 16), ref value);
+#endif
             return pos + 16;
         }
 
