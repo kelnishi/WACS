@@ -90,5 +90,152 @@ namespace Wacs.Core.Instructions
         [OpHandler(WacsCode.I64FusedAdd)]
         private static long I64FusedAdd(ExecContext ctx, [Imm] uint idx, [Imm] long k)
             => ctx.Frame.Locals.Span[(int)idx].Data.Int64 + k;
+
+        // --- Local-local 3-op i32 arithmetic fusions ---------------------------------
+        // Pattern: local.get $a ; local.get $b ; i32.<op>
+        // Encoding: [0xFF][code][a:u32][b:u32]
+        // Body reads both locals once and pushes the result — no intermediate stack
+        // traffic at all. Common in address arithmetic and index manipulation.
+
+        [OpHandler(WacsCode.I32LLAdd)]
+        private static int I32LLAdd(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.Int32 + locals[(int)b].Data.Int32;
+        }
+
+        [OpHandler(WacsCode.I32LLSub)]
+        private static int I32LLSub(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.Int32 - locals[(int)b].Data.Int32;
+        }
+
+        [OpHandler(WacsCode.I32LLMul)]
+        private static int I32LLMul(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return unchecked(locals[(int)a].Data.Int32 * locals[(int)b].Data.Int32);
+        }
+
+        [OpHandler(WacsCode.I32LLAnd)]
+        private static uint I32LLAnd(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.UInt32 & locals[(int)b].Data.UInt32;
+        }
+
+        [OpHandler(WacsCode.I32LLOr)]
+        private static uint I32LLOr(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.UInt32 | locals[(int)b].Data.UInt32;
+        }
+
+        [OpHandler(WacsCode.I32LLXor)]
+        private static uint I32LLXor(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.UInt32 ^ locals[(int)b].Data.UInt32;
+        }
+
+        // --- Local-local 3-op i32 relational fusions --------------------------------
+        // Pattern: local.get $a ; local.get $b ; i32.<cmp>
+        // Very common in loop bodies (`br_if $end (i32.ge_s $i $n)` and friends).
+
+        [OpHandler(WacsCode.I32LLEq)]
+        private static int I32LLEq(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.Int32 == locals[(int)b].Data.Int32 ? 1 : 0;
+        }
+
+        [OpHandler(WacsCode.I32LLNe)]
+        private static int I32LLNe(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.Int32 != locals[(int)b].Data.Int32 ? 1 : 0;
+        }
+
+        [OpHandler(WacsCode.I32LLLtS)]
+        private static int I32LLLtS(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.Int32 < locals[(int)b].Data.Int32 ? 1 : 0;
+        }
+
+        [OpHandler(WacsCode.I32LLLtU)]
+        private static int I32LLLtU(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.UInt32 < locals[(int)b].Data.UInt32 ? 1 : 0;
+        }
+
+        [OpHandler(WacsCode.I32LLGtS)]
+        private static int I32LLGtS(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.Int32 > locals[(int)b].Data.Int32 ? 1 : 0;
+        }
+
+        [OpHandler(WacsCode.I32LLGtU)]
+        private static int I32LLGtU(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.UInt32 > locals[(int)b].Data.UInt32 ? 1 : 0;
+        }
+
+        [OpHandler(WacsCode.I32LLLeS)]
+        private static int I32LLLeS(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.Int32 <= locals[(int)b].Data.Int32 ? 1 : 0;
+        }
+
+        [OpHandler(WacsCode.I32LLLeU)]
+        private static int I32LLLeU(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.UInt32 <= locals[(int)b].Data.UInt32 ? 1 : 0;
+        }
+
+        [OpHandler(WacsCode.I32LLGeS)]
+        private static int I32LLGeS(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.Int32 >= locals[(int)b].Data.Int32 ? 1 : 0;
+        }
+
+        [OpHandler(WacsCode.I32LLGeU)]
+        private static int I32LLGeU(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.UInt32 >= locals[(int)b].Data.UInt32 ? 1 : 0;
+        }
+
+        // --- Local-local 3-op i64 arithmetic fusions --------------------------------
+
+        [OpHandler(WacsCode.I64LLAdd)]
+        private static long I64LLAdd(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return locals[(int)a].Data.Int64 + locals[(int)b].Data.Int64;
+        }
+
+        [OpHandler(WacsCode.I64LLMul)]
+        private static long I64LLMul(ExecContext ctx, [Imm] uint a, [Imm] uint b)
+        {
+            var locals = ctx.Frame.Locals.Span;
+            return unchecked(locals[(int)a].Data.Int64 * locals[(int)b].Data.Int64);
+        }
+
+        // --- Local + i64.extend_i32_s 2-op fusion -----------------------------------
+        // Pattern: local.get $a ; i64.extend_i32_s
+        // Encoding: [0xFF][0x70][a:u32] = 6 bytes. Original: 5 + 1 = 6 bytes.
+        // No byte savings but saves one dispatch — per-iteration in sum/fac.
+
+        [OpHandler(WacsCode.I64ExtendI32SL)]
+        private static long I64ExtendI32SL(ExecContext ctx, [Imm] uint a)
+            => (long)ctx.Frame.Locals.Span[(int)a].Data.Int32;
     }
 }
