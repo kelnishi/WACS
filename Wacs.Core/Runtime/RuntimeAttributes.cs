@@ -27,12 +27,19 @@ namespace Wacs.Core.Runtime
 
         /// <summary>
         /// Upper bound on nested <c>InvokeWasm</c> depth on the switch-runtime path
-        /// specifically. Each frame carries ~20 KiB of managed stack (the generated
-        /// monolithic TryDispatch switch has that many locals), so even the 32 MiB
-        /// worker-thread stack can only hold ~1500 frames before overflowing. 1024
-        /// keeps a comfortable margin. Polymorphic path is unchanged.
+        /// specifically. Guards the managed C# stack from overflowing recursive WASM
+        /// calls — each <c>call</c> opcode adds three managed frames (InvokeWasm's,
+        /// <c>SwitchRuntime.Run</c>'s, and the generated <c>GeneratedDispatcher.Run</c>'s).
+        ///
+        /// <para>The generated Run method frame is sizable because the method body is a
+        /// ~300-case switch — even with no register-bank bloat, RyuJIT allocates a few
+        /// hundred bytes of locals. 256 fits comfortably within the ~1 MiB default
+        /// .NET thread stack (used by xUnit test threads) while still catching any
+        /// runaway recursion as a clean <c>WasmRuntimeException</c>. If your embedding
+        /// needs deeper WASM call chains, tune this alongside <c>Thread.StackSize</c>
+        /// on the invoking thread. Polymorphic path is unchanged.</para>
         /// </summary>
-        public int SwitchMaxCallStack = 1024;
+        public int SwitchMaxCallStack = 48;
 
         public int MaxFunctionLocals = 2048;
 

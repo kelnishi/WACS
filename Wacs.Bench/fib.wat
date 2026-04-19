@@ -33,6 +33,22 @@
     )
   )
 
+  ;; Iterative factorial — mul-heavy inner loop.
+  (func $fac-iter (export "fac") (param $n i32) (result i64)
+    (local $acc i64) (local $i i32)
+    (local.set $acc (i64.const 1))
+    (local.set $i (i32.const 2))
+    (block $end
+      (loop $top
+        (br_if $end (i32.gt_s (local.get $i) (local.get $n)))
+        (local.set $acc (i64.mul (local.get $acc) (i64.extend_i32_s (local.get $i))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $top)
+      )
+    )
+    (local.get $acc)
+  )
+
   ;; Tight integer loop — just addition, no branches other than loop back.
   (func $sum (export "sum") (param $n i32) (result i64)
     (local $acc i64) (local $i i32)

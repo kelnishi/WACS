@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -18,14 +19,39 @@ using Microsoft.CodeAnalysis.Text;
 namespace Wacs.Compilation
 {
     /// <summary>
-    /// Source generator for the monolithic-switch WebAssembly interpreter. Consumes methods
-    /// marked with <c>[OpSource]</c> (stack-only pure ops) or <c>[OpHandler]</c> (any op,
-    /// including those with immediates or control-flow side effects) and emits
-    /// <c>Wacs.Core.Compilation.GeneratedDispatcher.TryDispatch</c> — a single switch over
-    /// the opcode ushort that runs each handler with its operands popped off the OpStack
-    /// and its immediates read inline from the annotated bytecode stream.
+    /// Source generator for the monolithic-switch WebAssembly interpreter.
     ///
-    /// AOT-safe: no runtime reflection. All introspection happens in the generator at build time.
+    /// <para>Each method marked <c>[OpSource]</c> (stack-only numeric op) or <c>[OpHandler]</c>
+    /// (any op including those with immediates or control-flow side effects) contributes a
+    /// <c>case</c> to the generated <c>GeneratedDispatcher.Run</c> method. Inside that case
+    /// we emit — inline, no wrappers:</para>
+    /// <list type="number">
+    ///   <item>Immediate reads from the annotated bytecode stream (one <c>StreamReader.ReadX</c>
+    ///         call per <c>[Imm]</c> parameter, in declaration order; advances <c>pc</c>).</item>
+    ///   <item>Stack pops into named locals matching the parameter names (reverse param order,
+    ///         direct <c>ctx.OpStack.PopX()</c> calls — the handler body can reference them
+    ///         by the same names it declared).</item>
+    ///   <item>The handler body, with <c>return &lt;expr&gt;;</c> rewritten to <c>{ __r = &lt;expr&gt;;
+    ///         goto __end_N; }</c> for non-void handlers, and <c>return;</c> rewritten to
+    ///         <c>goto __end_N;</c> for void handlers.</item>
+    ///   <item>A per-case label <c>__end_N:</c> followed by the result push (non-void only)
+    ///         and <c>continue;</c> to return to the dispatch loop.</item>
+    /// </list>
+    /// <para>Rationale: every layer of function call — even an inlined <c>static __Op(...)</c>
+    /// local function — demands a call frame in the IL and is IL the polymorphic dispatcher
+    /// doesn't emit. The whole point of source-generating this dispatcher is to emit ONLY
+    /// the instruction's semantics and nothing else.</para>
+    ///
+    /// <para>Dispatch structure: a single <c>while (pc &lt; code.Length)</c> loop at the top of
+    /// <c>Run</c>, one <c>switch</c> on the primary byte, primary-only opcodes inlined in
+    /// that switch. The five prefix opcodes (<c>0xFB..0xFF</c>) delegate to per-prefix
+    /// sub-methods (<c>DispatchFB</c>, <c>DispatchFC</c>, ...) — they handle a single op and
+    /// return. The benchmark-hot primaries stay in a single frame; SIMD/GC/atomics pay a
+    /// call per op, which is tolerable since they aren't the hot path.</para>
+    ///
+    /// <para>AOT-safe: all introspection (attribute lookup, parameter classification) happens
+    /// in the generator at build time. The emitted code uses no reflection, emit, or late
+    /// binding. Roslyn lowers it to plain IL like any other C#.</para>
     /// </summary>
     [Generator]
     public class DispatchGenerator : IIncrementalGenerator
@@ -65,7 +91,6 @@ namespace Wacs.Compilation
         {
             if (node is not MethodDeclarationSyntax m) return false;
             if (m.AttributeLists.Count == 0) return false;
-            // Quick textual prefilter — avoids semantic model work on the 99% of methods that don't apply.
             foreach (var list in m.AttributeLists)
                 foreach (var attr in list.Attributes)
                 {
@@ -97,7 +122,7 @@ namespace Wacs.Compilation
             if (arg.Kind != TypedConstantKind.Enum || arg.Type == null || arg.Value == null) return null;
 
             int rawValue = System.Convert.ToInt32(arg.Value);
-            uint opKey = ComputeOpcodeKey(arg.Type.Name, rawValue);
+            string enumTypeName = arg.Type.Name;
             string enumName = arg.Type.ToDisplayString();
             string enumMember = arg.Type.GetMembers()
                 .OfType<IFieldSymbol>()
@@ -114,50 +139,40 @@ namespace Wacs.Compilation
                 ? "void"
                 : symbol.ReturnType.ToDisplayString();
 
+            // Body text: for expression-bodied methods we keep just the expression; for
+            // block bodies we keep the raw { ... } text. Both go through the same return-
+            // rewriter at emit time.
             string bodyText;
-            if (method.Body != null)
+            bool bodyIsExpression;
+            if (method.ExpressionBody != null)
+            {
+                bodyText = method.ExpressionBody.Expression.ToFullString().Trim();
+                bodyIsExpression = true;
+            }
+            else if (method.Body != null)
             {
                 bodyText = method.Body.ToFullString();
-            }
-            else if (method.ExpressionBody != null)
-            {
-                // Expression-bodied method: the expression IS the body. For non-void returns,
-                // wrap as `{ return expr; }`; for void returns, wrap as `{ expr; }` (the
-                // expression must be a statement-type expression such as an invocation).
-                string expr = method.ExpressionBody.Expression.ToFullString().Trim();
-                bodyText = returnType == "void"
-                    ? "{ " + expr + "; }"
-                    : "{ return " + expr + "; }";
+                bodyIsExpression = false;
             }
             else
             {
                 return null;
             }
 
-            return new DispatchEntry(opKey, symbol.Name, enumName, enumMember,
-                                     parameters.ToImmutable(), returnType, bodyText, isHandler);
+            return new DispatchEntry(enumTypeName, rawValue, symbol.Name, enumName, enumMember,
+                                     parameters.ToImmutable(), returnType, bodyText, bodyIsExpression,
+                                     isHandler);
         }
 
         private static ParamInfo ClassifyParam(IParameterSymbol p, bool isHandler)
         {
             string type = p.Type.ToDisplayString();
-            // ref int pc — only legal on [OpHandler].
             if (isHandler && p.RefKind == RefKind.Ref && p.Type.SpecialType == SpecialType.System_Int32 && p.Name == "pc")
-            {
                 return new ParamInfo(p.Name, type, ParamKind.RefPc);
-            }
-            // ExecContext — only legal on [OpHandler].
             if (isHandler && type == "Wacs.Core.Runtime.ExecContext")
-            {
                 return new ParamInfo(p.Name, type, ParamKind.Ctx);
-            }
-            // ReadOnlySpan<byte> code — the raw bytecode span. Useful for variable-length
-            // immediates (br_table) where the handler wants to read ad-hoc.
             if (isHandler && type == "System.ReadOnlySpan<byte>")
-            {
                 return new ParamInfo(p.Name, type, ParamKind.Code);
-            }
-            // [Imm] → Immediate (must be [OpHandler]).
             if (isHandler)
             {
                 foreach (var a in p.GetAttributes())
@@ -166,43 +181,29 @@ namespace Wacs.Compilation
                         return new ParamInfo(p.Name, type, ParamKind.Immediate);
                 }
             }
-            // Default: Stack (popped value).
             return new ParamInfo(p.Name, type, ParamKind.Stack);
-        }
-
-        private static uint ComputeOpcodeKey(string enumTypeName, int value)
-        {
-            // Key layout: (primary << 16) | (secondary & 0xFFFF). Primary-only ops
-            // (single-byte opcodes) go in the upper 8 bits of the primary slot so the
-            // switch key matches the first stream byte shifted into place. Relaxed-SIMD
-            // opcodes (0x100+) overflow a single byte — keeping the secondary as a full
-            // u16 lets the whole SimdCode enum fit without truncation collisions.
-            uint v = (uint)value & 0xFFFFu;
-            return enumTypeName switch
-            {
-                "OpCode"   => (uint)(((uint)(byte)value) << 16),
-                "GcCode"   => (0xFBu << 16) | (uint)(byte)value,
-                "ExtCode"  => (0xFCu << 16) | (uint)(byte)value,
-                "SimdCode" => (0xFDu << 16) | v,
-                "AtomCode" => (0xFEu << 16) | (uint)(byte)value,
-                "WacsCode" => (0xFFu << 16) | (uint)(byte)value,
-                _ => ((uint)(byte)value) << 16,
-            };
         }
 
         private static void Emit(SourceProductionContext spc, ImmutableArray<DispatchEntry> entries)
         {
-            var deduped = new Dictionary<uint, DispatchEntry>();
+            // Dedup by (enum, value) — if a handler is declared twice with the same key,
+            // keep the first. Primary ops and prefix ops can collide on rawValue but not
+            // on enum type, so the dedup key is the pair.
+            var deduped = new Dictionary<string, DispatchEntry>();
             foreach (var e in entries)
             {
                 if (e == null) continue;
-                if (!deduped.ContainsKey(e.OpKey)) deduped[e.OpKey] = e;
+                var key = e.EnumTypeName + ":" + e.RawValue;
+                if (!deduped.ContainsKey(key)) deduped[key] = e;
             }
-            var ordered = deduped.Values.OrderBy(e => e.OpKey).ToList();
+            var ordered = deduped.Values.ToList();
 
             var sb = new StringBuilder();
             sb.AppendLine("// <auto-generated/>");
             sb.AppendLine("#nullable disable");
+            // CS0164: label defined but never used (bodies without `return` leave their __end_N label unused).
+            // CS0162: unreachable code (bodies ending with `throw` leave the trailing goto unreachable).
+            sb.AppendLine("#pragma warning disable 164, 162");
             sb.AppendLine("using System;");
             sb.AppendLine("using System.Buffers.Binary;");
             sb.AppendLine("using System.Collections.Generic;");
@@ -210,33 +211,23 @@ namespace Wacs.Compilation
             sb.AppendLine("using Wacs.Core.OpCodes;");
             sb.AppendLine("using Wacs.Core.Runtime;");
             sb.AppendLine("using Wacs.Core.Runtime.Exceptions;");
-            // I31Ref (GC proposal) lives here — needed by the i31 handlers.
             sb.AppendLine("using Wacs.Core.Runtime.GC;");
-            // TrapException sits in Runtime.Types despite living in the Runtime/Exceptions folder.
             sb.AppendLine("using Wacs.Core.Runtime.Types;");
-            // GlobalIdx / FuncIdx / etc. live here — needed whenever a handler body casts an index.
             sb.AppendLine("using Wacs.Core.Types;");
-            // ValType (used by ref.null and elsewhere) lives in the Defs sub-namespace.
             sb.AppendLine("using Wacs.Core.Types.Defs;");
-            // Handler bodies may qualify sibling helper methods as `ControlHandlers.Xyz` etc.;
-            // the generator copies them into GeneratedDispatcher, which lives in
-            // Wacs.Core.Compilation, so those short names only resolve via this using.
             sb.AppendLine("using Wacs.Core.Instructions;");
-            // Sibling handler classes in sub-namespaces — SIMD, GC — get explicit usings so
-            // `VMemoryHandlers.WriteV128` / `StructArrayHandlers.X` resolve.
             sb.AppendLine("using Wacs.Core.Instructions.SIMD;");
             sb.AppendLine("using Wacs.Core.Instructions.GC;");
-            // Numeric conversion [OpSource] bodies reference FloatConversion.LongToFloat etc.
             sb.AppendLine("using Wacs.Core.Utilities;");
             sb.AppendLine();
             sb.AppendLine("namespace Wacs.Core.Compilation");
             sb.AppendLine("{");
             sb.AppendLine("    public static partial class GeneratedDispatcher");
             sb.AppendLine("    {");
-            // Mirror bit-manipulation constants that live as `private const` inside the instruction
-            // classes. Copying the bodies verbatim into this partial class would otherwise fail to
-            // resolve these identifiers. Values are identical to the originals — if they're ever
-            // changed, update this block to match.
+            // Mirror bit-manipulation constants that live as `private const` inside the
+            // instruction classes. Bodies copied verbatim into this partial class reference
+            // these by unqualified name — this block keeps the names resolvable. Values are
+            // identical to the originals; update in lockstep if ever changed.
             sb.AppendLine("        // Mirrored from InstF32BinOp");
             sb.AppendLine("        private const uint F32SignMask = 0x8000_0000u;");
             sb.AppendLine("        private const uint F32NotSignMask = ~F32SignMask;");
@@ -257,39 +248,95 @@ namespace Wacs.Compilation
             sb.AppendLine("        private const ulong WordExtend = 0xFFFF_FFFF_8000_0000ul;");
             sb.AppendLine("        private const ulong WordMask = 0xFFFF_FFFFul;");
             sb.AppendLine();
-            sb.AppendLine("        /// <summary>");
-            sb.AppendLine("        /// Dispatches <paramref name=\"op\"/> — key layout is (primary &lt;&lt; 16) | secondary. The");
-            sb.AppendLine("        /// secondary is a full u16 so relaxed-SIMD opcodes (0x100+) don't collide with the core");
-            sb.AppendLine("        /// FD set when packed. Each handler reads its own immediates inline from <paramref name=\"code\"/>");
-            sb.AppendLine("        /// starting at <paramref name=\"pc\"/>, advancing it as it consumes bytes.");
-            sb.AppendLine("        /// </summary>");
-            // Split the flat set of opcodes by prefix byte. Each prefix group gets
-            // its own TryDispatchX method — giving RyuJIT a smaller switch table per
-            // method to reason about, rather than one monolithic 300+-case switch
-            // that blows past its internal budget thresholds. The outer TryDispatch
-            // routes to one of them based on the top 8 bits of the op key.
-            var byPrefix = ordered.GroupBy(e => (byte)(e.OpKey >> 16))
-                                  .OrderBy(g => g.Key)
-                                  .ToList();
 
-            sb.AppendLine("        public static bool TryDispatch(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc, uint op)");
-            sb.AppendLine("        {");
-            sb.AppendLine("            byte primary = (byte)(op >> 16);");
-            sb.AppendLine("            switch (primary)");
-            sb.AppendLine("            {");
-            foreach (var g in byPrefix)
+            // Group entries by prefix. Primary ops (OpCode enum) inline into Run; the rest
+            // go to a per-prefix sub-method.
+            var primaryOps = ordered.Where(e => e.EnumTypeName == "OpCode").ToList();
+            var prefixGroups = new[]
             {
-                sb.AppendLine($"                case 0x{g.Key:X2}: return TryDispatch_{g.Key:X2}(ctx, code, ref pc, op);");
+                ("GcCode",   (byte)0xFB),
+                ("ExtCode",  (byte)0xFC),
+                ("SimdCode", (byte)0xFD),
+                ("AtomCode", (byte)0xFE),
+                ("WacsCode", (byte)0xFF),
+            };
+
+            // Emit Run — the top-level dispatch method. While-loop + primary-byte switch +
+            // prefix cases that delegate to sub-methods. pcBefore is stored on ExecContext
+            // and updated each iteration so the exception-handler range check in
+            // SwitchRuntime can reconstruct the pc of the throwing op (pc itself has
+            // already advanced past the op's bytes by the time the throw propagates).
+            sb.AppendLine("        /// <summary>");
+            sb.AppendLine("        /// Dispatch loop. Reads the primary byte, switches on it, and runs the inlined");
+            sb.AppendLine("        /// body of each opcode to completion before looping. Prefix opcodes (0xFB-0xFF)");
+            sb.AppendLine("        /// delegate to per-prefix sub-methods that handle their secondary byte(s).");
+            sb.AppendLine("        /// </summary>");
+            sb.AppendLine("        public static void Run(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc, ref int pcBefore)");
+            sb.AppendLine("        {");
+            // Hoist the OpStack and the current frame's locals out of the hot loop. OpStack
+            // is a readonly field (bound at ExecContext construction), so it's trivially safe.
+            // Frame.Locals is fixed for the duration of THIS Run invocation — Call opcodes
+            // recurse into nested InvokeWasm which saves+restores ctx.Frame around the inner
+            // Run, so our hoisted span is never observed stale from within our own switch.
+            sb.AppendLine("            var _opStack = ctx.OpStack;");
+            sb.AppendLine("            var _localsSpan = ctx.Frame.Locals.Span;");
+            // Hoist pc and pcBefore from the caller's refs into method-local ints. Two wins:
+            //   1) Eliminates JIT aliasing-conservatism: with two <c>ref int</c> parameters,
+            //      a write to pcBefore forces pc to reload through memory on every iteration.
+            //      Locals live in registers and the write becomes a reg-to-reg mov.
+            //   2) Call-immediate reads (<c>StreamReader.ReadX(code, ref _pc)</c>) still spill
+            //      the local for the call, but that only happens in cases with immediates —
+            //      not every iteration's fetch/branch/pop/push.
+            // The try/finally writes back on both normal and abnormal exit so the caller
+            // sees final pc / pcBefore values (needed for exception-handler range checks).
+            sb.AppendLine("            int _pc = pc;");
+            sb.AppendLine("            int _pcBefore = pcBefore;");
+            // Hoist the span's raw byte reference + length so the per-iteration fetch can
+            // use Unsafe.Add (no bounds check) — the while-loop guard already ensures
+            // _pc &lt; _codeLen at the read site. GetReference is an intrinsic that lowers
+            // to a single pointer read; stays AOT-safe.
+            sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(code);");
+            sb.AppendLine("            int _codeLen = code.Length;");
+            sb.AppendLine("            try");
+            sb.AppendLine("            {");
+            sb.AppendLine("                while (_pc < _codeLen)");
+            sb.AppendLine("                {");
+            sb.AppendLine("                    _pcBefore = _pc;");
+            sb.AppendLine("                    byte primary = System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, _pc);");
+            sb.AppendLine("                    _pc++;");
+            sb.AppendLine("                    switch (primary)");
+            sb.AppendLine("                    {");
+            int caseCounter = 0;
+            foreach (var e in primaryOps.OrderBy(e => e.RawValue))
+            {
+                EmitCase(sb, e, "                        ", ref caseCounter, singleByteKey: true, inLoop: true, pcVar: "_pc");
             }
-            sb.AppendLine("                default: return false;");
+            foreach (var (_, pb) in prefixGroups)
+            {
+                sb.AppendLine($"                        case 0x{pb:X2}: Dispatch{pb:X2}(ctx, code, ref _pc); continue;");
+            }
+            sb.AppendLine("                        default:");
+            sb.AppendLine("                            throw new NotSupportedException(");
+            sb.AppendLine("                                $\"Opcode 0x{primary:X2} at pc={_pc - 1} has no [OpSource]/[OpHandler] coverage.\");");
+            sb.AppendLine("                    }");
+            sb.AppendLine("                }");
+            sb.AppendLine("            }");
+            sb.AppendLine("            finally");
+            sb.AppendLine("            {");
+            sb.AppendLine("                pc = _pc;");
+            sb.AppendLine("                pcBefore = _pcBefore;");
             sb.AppendLine("            }");
             sb.AppendLine("        }");
             sb.AppendLine();
 
-            foreach (var g in byPrefix)
+            // Per-prefix sub-methods. Each reads its secondary byte (or u16 for SIMD) and
+            // dispatches a single op. Returns control to Run's loop after.
+            foreach (var (enumType, prefixByte) in prefixGroups)
             {
-                EmitSubDispatch(sb, g.Key, g.ToList());
+                var subEntries = ordered.Where(e => e.EnumTypeName == enumType).OrderBy(e => e.RawValue).ToList();
+                EmitPrefixSubMethod(sb, enumType, prefixByte, subEntries, ref caseCounter);
             }
+
             sb.AppendLine();
             sb.AppendLine("        /// <summary>The number of ops the generator emitted cases for.</summary>");
             sb.AppendLine($"        public const int HandledOpcodeCount = {ordered.Count};");
@@ -300,207 +347,275 @@ namespace Wacs.Compilation
         }
 
         /// <summary>
-        /// Emit a per-prefix sub-dispatch method: <c>TryDispatch_XX</c>. Each owns its
-        /// own register bank + immediate-union declaration, so the method's frame stays
-        /// independent of the others. Splitting keeps each switch table small enough
-        /// that RyuJIT's size heuristics don't kick in and regress performance.
+        /// Emit a per-prefix sub-dispatcher. Reads the secondary byte (single byte for all
+        /// prefixes except SIMD, which uses a u16 to accommodate relaxed-SIMD opcodes >=
+        /// 0x100), switches on it, and runs one op to completion before returning.
         /// </summary>
-        private static void EmitSubDispatch(StringBuilder sb, byte prefix, List<DispatchEntry> entries)
+        private static void EmitPrefixSubMethod(StringBuilder sb, string enumType, byte prefixByte,
+                                                 List<DispatchEntry> entries, ref int caseCounter)
         {
-            sb.AppendLine($"        private static bool TryDispatch_{prefix:X2}(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc, uint op)");
+            bool isSimd = enumType == "SimdCode";
+            string keyType = isSimd ? "ushort" : "byte";
+            sb.AppendLine($"        private static void Dispatch{prefixByte:X2}(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc)");
             sb.AppendLine("        {");
-            sb.AppendLine("            // Stack-operand register bank (reused across cases in this prefix).");
-            sb.AppendLine("            int    _a32 = 0, _b32 = 0, _c32 = 0;");
-            sb.AppendLine("            uint   _au32 = 0, _bu32 = 0, _cu32 = 0;");
-            sb.AppendLine("            long   _a64 = 0, _b64 = 0, _c64 = 0;");
-            sb.AppendLine("            ulong  _au64 = 0, _bu64 = 0, _cu64 = 0;");
-            sb.AppendLine("            float  _af32 = 0, _bf32 = 0, _cf32 = 0;");
-            sb.AppendLine("            double _af64 = 0, _bf64 = 0, _cf64 = 0;");
-            sb.AppendLine("            V128   _avec = default, _bvec = default, _cvec = default;");
-            sb.AppendLine("            Value  _aval = default, _bval = default, _cval = default;");
-            sb.AppendLine("            ImmUnion _imm0 = default, _imm1 = default, _imm2 = default, _imm3 = default;");
-            sb.AppendLine("            ImmUnion _imm4 = default, _imm5 = default, _imm6 = default, _imm7 = default;");
-            sb.AppendLine("            _ = _a32 + _b32 + _c32; _ = _au32 + _bu32 + _cu32;");
-            sb.AppendLine("            _ = _a64 + _b64 + _c64; _ = _au64 + _bu64 + _cu64;");
-            sb.AppendLine("            _ = _af32 + _bf32 + _cf32; _ = _af64 + _bf64 + _cf64;");
-            sb.AppendLine("            _ = _avec; _ = _bvec; _ = _cvec;");
-            sb.AppendLine("            _ = _aval; _ = _bval; _ = _cval;");
-            sb.AppendLine("            _ = _imm0; _ = _imm1; _ = _imm2; _ = _imm3;");
-            sb.AppendLine("            _ = _imm4; _ = _imm5; _ = _imm6; _ = _imm7;");
-            sb.AppendLine();
-            sb.AppendLine("            switch (op)");
+            // Hoist the same locals Run hoists, so emitted case bodies (_opStack.XXX,
+            // _localsSpan[idx]) compile uniformly here too. The hoist cost is tiny in a
+            // per-op sub-method — two field reads — and keeps the generator's per-case
+            // emit identical between Run and each Dispatch<prefix>.
+            sb.AppendLine("            var _opStack = ctx.OpStack;");
+            sb.AppendLine("            var _localsSpan = ctx.Frame.Locals.Span;");
+            if (isSimd)
+            {
+                sb.AppendLine("            ushort sec = BinaryPrimitives.ReadUInt16LittleEndian(code.Slice(pc));");
+                sb.AppendLine("            pc += 2;");
+            }
+            else
+            {
+                sb.AppendLine("            byte sec = code[pc++];");
+            }
+            sb.AppendLine("            switch (sec)");
             sb.AppendLine("            {");
             foreach (var e in entries)
-                EmitCase(sb, e);
-            sb.AppendLine("                default: return false;");
+            {
+                EmitCase(sb, e, "                ", ref caseCounter, singleByteKey: false, inLoop: false, pcVar: "pc");
+            }
+            sb.AppendLine("                default:");
+            sb.AppendLine($"                    throw new NotSupportedException(");
+            sb.AppendLine($"                        $\"Prefix 0x{prefixByte:X2} secondary 0x{{sec:X}} has no [OpSource]/[OpHandler] coverage.\");");
             sb.AppendLine("            }");
             sb.AppendLine("        }");
             sb.AppendLine();
         }
 
-        private static void EmitCase(StringBuilder sb, DispatchEntry e)
+        /// <summary>
+        /// Emit one case: reads immediates, pops stack operands into named locals, inlines
+        /// the handler body with returns rewritten to the per-case push+continue pattern.
+        /// No wrappers, no static local functions — each case is raw inlined logic.
+        /// </summary>
+        /// <param name="singleByteKey">True when this case lives in <c>Run</c>'s primary
+        /// switch (key is the primary byte, same as the opcode value for OpCode-enum ops).
+        /// False when inside a prefix sub-method (key is the secondary byte/u16).</param>
+        /// <param name="inLoop">True when the switch is inside <c>Run</c>'s while loop — we
+        /// end each case with <c>continue;</c>. False inside a prefix sub-method — we end
+        /// with <c>return;</c> to hand control back to the caller's loop.</param>
+        /// <param name="pcVar">Name of the pc variable in this enclosing scope — <c>"_pc"</c>
+        /// in <c>Run</c> (where pc is hoisted from the ref param to a local), <c>"pc"</c> in
+        /// prefix sub-methods (where pc is still the ref parameter). Used both for emitted
+        /// <c>StreamReader.ReadX(code, ref {pcVar})</c> immediate reads and to textually
+        /// rewrite <c>pc</c> identifiers inside handler bodies that take a <c>ref int pc</c>.</param>
+        private static void EmitCase(StringBuilder sb, DispatchEntry e, string indent,
+                                      ref int caseCounter, bool singleByteKey, bool inLoop,
+                                      string pcVar)
         {
-            sb.AppendLine($"                case 0x{e.OpKey:X6}: // {e.EnumName}.{e.EnumMember} — {e.MethodName}");
-            sb.AppendLine("                {");
+            int caseId = caseCounter++;
+            // Key = raw enum value masked to keyType width. For primary ops (OpCode enum),
+            // values already fit in a byte; for prefix ops, SimdCode values can exceed a byte
+            // (relaxed-SIMD is 0x100+), so mask accordingly.
+            string keyHex = singleByteKey
+                ? $"0x{(e.RawValue & 0xFF):X2}"
+                : (e.EnumTypeName == "SimdCode"
+                    ? $"0x{(e.RawValue & 0xFFFF):X}"
+                    : $"0x{(e.RawValue & 0xFF):X2}");
 
-            // Per-type usage counters so we know which bank slot to assign each
-            // stack / immediate operand.
-            var bankCount = new Dictionary<string, int>();
-            var immCount = 0;
-            var paramSlot = new Dictionary<string, string>();
+            sb.Append(indent).AppendLine($"case {keyHex}: // {e.EnumName}.{e.EnumMember} — {e.MethodName}");
+            sb.Append(indent).AppendLine("{");
 
-            string BankSlot(string type)
+            string inner = indent + "    ";
+
+            // 0. Alias the outer Run's ctx/code/pc when the handler's declared parameter
+            //    uses a different name (e.g. handlers that named their ExecContext param
+            //    `context`). Aliasing lets us inline the body verbatim without textual
+            //    parameter renaming. Reference-type aliases (ctx) and span-struct
+            //    aliases (code) just copy the 64-bit / 16-byte value; a ref alias for
+            //    pc is a single ldloca in IL. No observable overhead after inlining.
+            foreach (var p in e.Parameters)
             {
-                var key = type;
-                bankCount.TryGetValue(key, out int n);
-                bankCount[key] = n + 1;
-                var prefix = n switch { 0 => "_a", 1 => "_b", _ => "_c" };
-                var suffix = type switch
+                switch (p.Kind)
                 {
-                    "int"                     => "32",
-                    "uint"                    => "u32",
-                    "long"                    => "64",
-                    "ulong"                   => "u64",
-                    "float"                   => "f32",
-                    "double"                  => "f64",
-                    "Wacs.Core.Runtime.V128"  => "vec",
-                    "Wacs.Core.Runtime.Value" => "val",
-                    _ => null,
-                };
-                return suffix == null ? null : prefix + suffix;
+                    case ParamKind.Ctx when p.Name != "ctx":
+                        sb.Append(inner).AppendLine($"ExecContext {p.Name} = ctx;");
+                        break;
+                    case ParamKind.Code when p.Name != "code":
+                        sb.Append(inner).AppendLine($"System.ReadOnlySpan<byte> {p.Name} = code;");
+                        break;
+                    // RefPc is not aliased — we textually rewrite the body's `pc` → pcVar
+                    // (done in RewriteCtxAccess below). A ref alias would force the JIT to
+                    // treat writes through the alias as going through memory, defeating the
+                    // register-hoist of _pc in Run.
+                }
             }
 
-            string ImmSlotName() => immCount switch
-            {
-                0 => "_imm0", 1 => "_imm1", 2 => "_imm2", 3 => "_imm3",
-                4 => "_imm4", 5 => "_imm5", 6 => "_imm6", 7 => "_imm7",
-                _ => null,
-            };
-
-            string ImmField(string type) => type switch
-            {
-                "int"                    => "S32",
-                "uint"                   => "U32",
-                "long"                   => "S64",
-                "ulong"                  => "U64",
-                "float"                  => "F32",
-                "double"                 => "F64",
-                "byte"                   => "U8",
-                "Wacs.Core.Runtime.V128" => "V128",
-                _                        => null,
-            };
-
-            // 1. Read immediates FIRST — assign each to a shared ImmUnion slot.
+            // 1. Read immediates in declaration order (each advances pc by its width).
             foreach (var p in e.Parameters.Where(p => p.Kind == ParamKind.Immediate))
             {
                 var reader = TypeToImmReader(p.Type);
-                var field = ImmField(p.Type);
-                var slot = ImmSlotName();
-                if (reader == null || field == null || slot == null)
+                if (reader == null)
                 {
-                    sb.AppendLine($"                    // skipped — unsupported [Imm] type {p.Type}");
-                    sb.AppendLine("                    return false;");
-                    sb.AppendLine("                }");
+                    sb.Append(inner).AppendLine($"// skipped — unsupported [Imm] type {p.Type}");
+                    sb.Append(inner).AppendLine("throw new NotSupportedException(\"Unsupported immediate type\");");
+                    sb.Append(indent).AppendLine("}");
                     return;
                 }
-                sb.AppendLine($"                    {slot}.{field} = StreamReader.{reader}(code, ref pc);");
-                paramSlot[p.Name] = $"{slot}.{field}";
-                immCount++;
+                sb.Append(inner).AppendLine($"{p.Type} {p.Name} = StreamReader.{reader}(code, ref {pcVar});");
             }
 
-            // 2. Pop stack operands in REVERSE parameter order into typed bank slots.
+            // 2. Pop stack operands in REVERSE parameter order (WASM semantics: last param
+            //    was pushed last, so it's the top of stack). Each pop lands in a local
+            //    named after the parameter — the handler body references these by name
+            //    verbatim, no renaming needed.
             var stackParams = e.Parameters.Where(p => p.Kind == ParamKind.Stack).ToList();
-            // Bank slot assignment mirrors parameter order (left-to-right) even though
-            // pops happen in reverse; we pop into the correct slot directly.
-            var stackSlots = new string[stackParams.Count];
-            for (int i = 0; i < stackParams.Count; i++)
-            {
-                var slot = BankSlot(stackParams[i].Type);
-                if (slot == null)
-                {
-                    sb.AppendLine($"                    // skipped — unsupported stack parameter type {stackParams[i].Type}");
-                    sb.AppendLine("                    return false;");
-                    sb.AppendLine("                }");
-                    return;
-                }
-                stackSlots[i] = slot;
-                paramSlot[stackParams[i].Name] = slot;
-            }
             for (int i = stackParams.Count - 1; i >= 0; i--)
             {
                 var p = stackParams[i];
                 var popOp = TypeToPop(p.Type);
                 if (popOp == null)
                 {
-                    sb.AppendLine($"                    // skipped — unsupported stack parameter type {p.Type}");
-                    sb.AppendLine("                    return false;");
-                    sb.AppendLine("                }");
+                    sb.Append(inner).AppendLine($"// skipped — unsupported stack parameter type {p.Type}");
+                    sb.Append(inner).AppendLine("throw new NotSupportedException(\"Unsupported stack type\");");
+                    sb.Append(indent).AppendLine("}");
                     return;
                 }
-                sb.AppendLine($"                    {stackSlots[i]} = ctx.OpStack.{popOp}();");
+                sb.Append(inner).AppendLine($"{p.Type} {p.Name} = _opStack.{popOp}();");
             }
 
-            // 3. Emit the body as a static local function. Args come from bank/imm
-            //    slots instead of per-case named locals — the JIT will (usually)
-            //    inline the local function, leaving handler bodies referencing the
-            //    shared slots directly. Keeping the local-function wrapper preserves
-            //    handler-body portability (the bodies still look like the polymorphic
-            //    methods they came from).
-            var localSigParts = e.Parameters.Select(p => p.Kind switch
+            // 3. Inline the body. Fast path for the overwhelmingly common case
+            //    (expression-bodied handler, i.e. `=> expr;`): emit a single push-continue
+            //    with the raw expression — no __r temp, no goto, no label. Matches the
+            //    MinimalDispatcher shape byte-for-byte.
+            //
+            //    For block bodies (multi-return, trap paths): declare a result local,
+            //    rewrite `return <expr>;` to `{ __r = <expr>; goto __end_N; }`, rewrite
+            //    `return;` (void) to `goto __end_N;`, converge at __end_N.
+            string endLabel = $"__end_{caseId}";
+            string pushOp = e.ReturnType == "void" ? null : TypeToPush(e.ReturnType);
+            if (e.ReturnType != "void" && pushOp == null)
             {
-                ParamKind.Ctx       => $"ExecContext {p.Name}",
-                ParamKind.RefPc     => $"ref int {p.Name}",
-                ParamKind.Code      => $"System.ReadOnlySpan<byte> {p.Name}",
-                _                   => $"{p.Type} {p.Name}",
-            });
-            string paramList = string.Join(", ", localSigParts);
-            string body = IndentBody(e.Body, "                    ");
-            sb.AppendLine($"                    static {e.ReturnType} __Op({paramList})");
-            sb.AppendLine(body);
+                sb.Append(inner).AppendLine($"// skipped — unsupported return type {e.ReturnType}");
+                sb.Append(inner).AppendLine("throw new NotSupportedException(\"Unsupported return type\");");
+                sb.Append(indent).AppendLine("}");
+                return;
+            }
 
-            // 4. Call the local function with bank/imm slots as the args.
-            var argList = string.Join(", ", e.Parameters.Select(p => p.Kind switch
+            string terminator = inLoop ? "continue;" : "return;";
+
+            if (e.BodyIsExpression)
             {
-                ParamKind.Ctx   => "ctx",
-                ParamKind.RefPc => "ref pc",
-                ParamKind.Code  => "code",
-                _               => paramSlot[p.Name],
-            }));
+                string exprBody = RewriteCtxAccess(e.Body, pcVar);
+                if (e.ReturnType == "void")
+                {
+                    sb.Append(inner).AppendLine($"{exprBody}; {terminator}");
+                }
+                else
+                {
+                    sb.Append(inner).AppendLine($"_opStack.{pushOp}({exprBody}); {terminator}");
+                }
+                // No label emitted for expression bodies — nothing jumps to it.
+                sb.Append(indent).AppendLine("}");
+                return;
+            }
+
+            // Block body: needs the result-capture + label pattern for multi-return safety.
+            if (e.ReturnType != "void")
+                sb.Append(inner).AppendLine($"{e.ReturnType} __r = default;");
+
+            string rewritten = RewriteBody(e.Body, e.BodyIsExpression, e.ReturnType, endLabel, pcVar);
+            foreach (var line in rewritten.Split('\n'))
+            {
+                if (line.Length == 0) { sb.AppendLine(); continue; }
+                sb.Append(inner).AppendLine(line.TrimEnd('\r'));
+            }
 
             if (e.ReturnType == "void")
             {
-                sb.AppendLine($"                    __Op({argList});");
+                sb.Append(inner).AppendLine($"{endLabel}: {terminator}");
             }
             else
             {
-                var pushOp = TypeToPush(e.ReturnType);
-                if (pushOp == null)
-                {
-                    sb.AppendLine($"                    // skipped — unsupported return type {e.ReturnType}");
-                    sb.AppendLine("                    return false;");
-                    sb.AppendLine("                }");
-                    return;
-                }
-                sb.AppendLine($"                    ctx.OpStack.{pushOp}(__Op({argList}));");
+                sb.Append(inner).AppendLine($"{endLabel}: _opStack.{pushOp}(__r); {terminator}");
             }
 
-            sb.AppendLine("                    return true;");
-            sb.AppendLine("                }");
+            sb.Append(indent).AppendLine("}");
         }
 
-        private static string IndentBody(string body, string indent)
+        /// <summary>
+        /// Rewrite <c>return</c> statements in a handler body to the push+goto pattern the
+        /// inlined case wants.
+        ///
+        /// <para>For expression bodies (single <c>=&gt; expr</c>), we emit just
+        /// <c>__r = &lt;expr&gt;; goto END;</c> (non-void) or <c>&lt;expr&gt;; goto END;</c> (void).</para>
+        ///
+        /// <para>For block bodies we preserve the original <c>{ ... }</c>, stripping the outer
+        /// braces so nested locals defined in the body share the case's scope (immediates +
+        /// popped operands live at the case scope, the body sees them through the same
+        /// names), then apply a textual rewrite: <c>return &lt;expr&gt;;</c> becomes
+        /// <c>{ __r = &lt;expr&gt;; goto END; }</c>, and bare <c>return;</c> becomes
+        /// <c>goto END;</c>. Because C# <c>return</c> statements cannot appear inside
+        /// sub-expressions (the keyword is statement-level), a simple non-greedy regex is
+        /// safe for every handler body in the codebase (no nested lambdas or local
+        /// functions in any annotated method).</para>
+        /// </summary>
+        private static string RewriteBody(string body, bool isExpression, string returnType, string endLabel, string pcVar)
         {
-            var lines = body.Replace("\r\n", "\n").Split('\n');
-            var sb = new StringBuilder();
-            for (int i = 0; i < lines.Length; i++)
+            body = RewriteCtxAccess(body, pcVar);
+            if (isExpression)
             {
-                var line = lines[i];
-                if (line.Length == 0 && i == lines.Length - 1) continue;
-                sb.Append(indent);
-                sb.Append(line);
-                if (i < lines.Length - 1) sb.Append('\n');
+                // The body is the raw expression (no braces, no `return` keyword).
+                if (returnType == "void")
+                    return $"{body};";
+                return $"__r = {body}; goto {endLabel};";
             }
-            return sb.ToString();
+
+            // Block body. Strip the outer braces (first `{` and last `}`); keep the rest.
+            string inner = body.Trim();
+            if (inner.StartsWith("{")) inner = inner.Substring(1);
+            if (inner.EndsWith("}"))   inner = inner.Substring(0, inner.Length - 1);
+
+            if (returnType == "void")
+            {
+                // Bare `return;` → `goto END;`.
+                inner = Regex.Replace(inner, @"\breturn\s*;",
+                                      $"goto {endLabel};");
+                return inner;
+            }
+            else
+            {
+                // `return <expr>;` → `{ __r = <expr>; goto END; }`. The non-greedy match
+                // stops at the first semicolon — safe because return-expressions can't
+                // contain unescaped semicolons.
+                inner = Regex.Replace(inner, @"\breturn\s+(.+?);",
+                                      "{ __r = $1; goto " + endLabel + "; }",
+                                      RegexOptions.Singleline);
+                return inner;
+            }
+        }
+
+        /// <summary>
+        /// Rewrite hoistable ctx accesses in a handler body to their hoisted-local names.
+        /// <list type="bullet">
+        ///   <item><c>ctx.OpStack</c> → <c>_opStack</c></item>
+        ///   <item><c>ctx.Frame.Locals.Span</c> → <c>_localsSpan</c></item>
+        ///   <item><c>pc</c> → <c>{pcVar}</c> (whole-word; skipped when pcVar == "pc")</item>
+        /// </list>
+        /// All handlers with a <c>ref int pc</c> parameter name it <c>pc</c>, so the word-
+        /// boundary rewrite reliably retargets the body at Run's local <c>_pc</c> without
+        /// introducing a ref alias (which would force writes through memory, defeating the
+        /// register hoist).
+        ///
+        /// <para>The rewrites are token-safe for today's handler bodies: none of
+        /// <c>ctx.OpStack</c>, <c>ctx.Frame.Locals.Span</c>, or the identifier <c>pc</c>
+        /// appears inside strings or as substrings of other identifiers. If a future
+        /// handler introduces either, spell it in a form these patterns don't match
+        /// (e.g. fully-qualified <c>Wacs.Core.Runtime.ExecContext.OpStack</c>, or a
+        /// differently-named pc parameter).</para>
+        /// </summary>
+        private static string RewriteCtxAccess(string body, string pcVar)
+        {
+            body = body
+                .Replace("ctx.OpStack", "_opStack")
+                .Replace("ctx.Frame.Locals.Span", "_localsSpan");
+            if (pcVar != "pc")
+                body = System.Text.RegularExpressions.Regex.Replace(body, @"\bpc\b", pcVar);
+            return body;
         }
 
         private static string TypeToPop(string t) => t switch
@@ -511,10 +626,8 @@ namespace Wacs.Compilation
             "ulong"  => "PopU64",
             "float"  => "PopF32",
             "double" => "PopF64",
-            // Type-agnostic stack values (Value struct) — used by variable + parametric ops.
             "Wacs.Core.Runtime.Value" => "PopAny",
-            // V128 — 128-bit SIMD value.
-            "Wacs.Core.Runtime.V128" => "PopV128",
+            "Wacs.Core.Runtime.V128"  => "PopV128",
             _ => null,
         };
 
@@ -527,7 +640,7 @@ namespace Wacs.Compilation
             "float"  => "PushF32",
             "double" => "PushF64",
             "Wacs.Core.Runtime.Value" => "PushValue",
-            "Wacs.Core.Runtime.V128" => "PushV128",
+            "Wacs.Core.Runtime.V128"  => "PushV128",
             _ => null,
         };
 
@@ -548,26 +661,30 @@ namespace Wacs.Compilation
 
         private sealed class DispatchEntry
         {
-            public readonly uint OpKey;
+            public readonly string EnumTypeName;
+            public readonly int RawValue;
             public readonly string MethodName;
             public readonly string EnumName;
             public readonly string EnumMember;
             public readonly ImmutableArray<ParamInfo> Parameters;
             public readonly string ReturnType;
             public readonly string Body;
+            public readonly bool BodyIsExpression;
             public readonly bool IsHandler;
 
-            public DispatchEntry(uint opKey, string methodName, string enumName, string enumMember,
-                                 ImmutableArray<ParamInfo> parameters, string returnType, string body,
-                                 bool isHandler)
+            public DispatchEntry(string enumTypeName, int rawValue, string methodName, string enumName,
+                                 string enumMember, ImmutableArray<ParamInfo> parameters, string returnType,
+                                 string body, bool bodyIsExpression, bool isHandler)
             {
-                OpKey = opKey;
+                EnumTypeName = enumTypeName;
+                RawValue = rawValue;
                 MethodName = methodName;
                 EnumName = enumName;
                 EnumMember = enumMember;
                 Parameters = parameters;
                 ReturnType = returnType;
                 Body = body;
+                BodyIsExpression = bodyIsExpression;
                 IsHandler = isHandler;
             }
         }

@@ -17,88 +17,83 @@ using Wacs.Core.Types.Defs;
 namespace Wacs.Core.Compilation
 {
     /// <summary>
-    /// Optional byte-stream interpreter. Drives <see cref="GeneratedDispatcher.TryDispatch"/>
-    /// directly off a <see cref="ReadOnlySpan{Byte}"/> (for low-level tests) or a full
-    /// <see cref="CompiledFunction"/> (for production — enables exception handling via the
-    /// HandlerTable sidecar).
+    /// Public entry point for the monolithic-switch interpreter. The actual dispatch
+    /// loop lives inside <see cref="GeneratedDispatcher.Run"/> — this class is a thin
+    /// wrapper that adds WASM-exception handling (via the <see cref="CompiledFunction"/>
+    /// overload's per-function handler table) and the top-level <c>Invoke</c> surface.
     ///
-    /// Bytecode format: each instruction starts with its WASM primary byte. Primary bytes
-    /// in <c>0xFB..0xFF</c> indicate an extended opcode and are followed by the secondary
-    /// byte. Each handler then reads its own immediates inline from the stream.
-    ///
-    /// The original runtime in <c>WasmRuntimeExecution</c> is unaffected — this is a
-    /// parallel, opt-in execution path. AOT-safe: no reflection or runtime emit on the
-    /// hot path.
+    /// <para>The original polymorphic runtime in <c>WasmRuntimeExecution</c> is unaffected
+    /// — this is a parallel, opt-in execution path. AOT-safe: no reflection or runtime
+    /// emit on the hot path.</para>
     /// </summary>
     public static class SwitchRuntime
     {
         /// <summary>
-        /// Low-level byte-stream driver. No handler-table awareness; any <c>WasmException</c>
-        /// from an opcode propagates out unhandled. Useful for testing raw bytecode
-        /// snippets; production invocation uses the <see cref="CompiledFunction"/> overload.
+        /// Global toggle — when true, <see cref="Run(ExecContext, CompiledFunction)"/>
+        /// routes dispatch through <see cref="MinimalDispatcher"/> instead of the
+        /// source-generated dispatcher. Used to prototype/measure hand-written
+        /// one-method dispatch against the generator output.
+        /// </summary>
+        public static bool UseMinimal = false;
+
+        /// <summary>
+        /// Low-level byte-stream driver. No handler-table awareness; any
+        /// <c>WasmException</c> from an opcode propagates out unhandled. Useful for
+        /// testing raw bytecode snippets; production invocation uses the
+        /// <see cref="CompiledFunction"/> overload.
         /// </summary>
         public static void Run(ExecContext ctx, ReadOnlySpan<byte> code)
         {
             int pc = 0;
-            while (pc < code.Length)
-            {
-                uint op = ReadOp(code, ref pc);
-                if (!GeneratedDispatcher.TryDispatch(ctx, code, ref pc, op))
-                    throw new NotSupportedException(
-                        $"Opcode 0x{op:X6} has no [OpSource]/[OpHandler] coverage in GeneratedDispatcher.");
-            }
+            int pcBefore = 0;
+            GeneratedDispatcher.Run(ctx, code, ref pc, ref pcBefore);
         }
 
-        /// <summary>
-        /// Decode the next opcode from <paramref name="code"/>. Key layout:
-        /// <c>(primary &lt;&lt; 16) | secondary</c>. FD-prefixed ops carry a 2-byte
-        /// secondary so relaxed-SIMD opcodes (0x100+) don't truncate to the core set;
-        /// every other prefix still uses a single secondary byte.
-        /// </summary>
-        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-        private static uint ReadOp(ReadOnlySpan<byte> code, ref int pc)
-        {
-            byte primary = code[pc++];
-            if (primary == 0xFD)
-            {
-                ushort sec = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(code.Slice(pc));
-                pc += 2;
-                return (0xFDu << 16) | sec;
-            }
-            if (primary >= 0xFB && primary <= 0xFF)
-            {
-                byte sec = code[pc++];
-                return ((uint)primary << 16) | sec;
-            }
-            return (uint)primary << 16;
-        }
 
         /// <summary>
         /// Full-function driver. Wraps dispatch in a <c>WasmException</c> catcher that
         /// consults <see cref="CompiledFunction.HandlerTable"/> — on match, resumes at
-        /// the catch handler; on miss, rethrows so the caller's frame can do its own
-        /// lookup one managed-frame up.
+        /// the catch handler's pc; on miss, rethrows so the caller's frame can do its
+        /// own lookup one managed-frame up.
+        ///
+        /// <para>For handler-free functions the common case is a single
+        /// <c>GeneratedDispatcher.Run</c> call with no try/catch (saves the IL overhead
+        /// of an exception region on the hot path). Handler-carrying functions pay for
+        /// the resume loop — they're rare.</para>
         /// </summary>
         public static void Run(ExecContext ctx, CompiledFunction func)
         {
+            if (UseMinimal)
+            {
+                MinimalDispatcher.Run(ctx, func.Bytecode);
+                return;
+            }
+
             var code = func.Bytecode;
             var handlers = func.HandlerTable;
-            int pc = 0;
-            int pcBeforeDispatch = 0;
-            while (pc < code.Length)
+
+            if (handlers.Length == 0)
             {
-                // Snapshot pc before fetch/dispatch. Handler-range checks on throw use
-                // this — the in-range semantics is "throw's opcode was inside the
-                // try_table's body," not "pc after the throw advanced past its
-                // immediates is inside." A throw-as-last-instruction before End would
-                // miss otherwise.
-                pcBeforeDispatch = pc;
+                int pc = 0;
+                int pcBefore = 0;
+                GeneratedDispatcher.Run(ctx, code, ref pc, ref pcBefore);
+                return;
+            }
+
+            // Handler-carrying functions: dispatch inside a catch that may resume at a
+            // matching handler's pc. On a miss we rethrow for the outer frame to catch.
+            // The re-entry loop is driven by pc being rewritten by TryResumeWithHandler
+            // (and Run resuming from that pc) — the generator's Run is restart-safe: it
+            // loops while (pc &lt; code.Length), so restarting just re-enters the loop at
+            // the new pc.
+            int rpc = 0;
+            int rpcBefore = 0;
+            while (true)
+            {
                 try
                 {
-                    uint op = ReadOp(code, ref pc);
-                    if (!GeneratedDispatcher.TryDispatch(ctx, code, ref pc, op))
-                        throw new NotSupportedException(
-                            $"Opcode 0x{op:X6} has no [OpSource]/[OpHandler] coverage.");
+                    GeneratedDispatcher.Run(ctx, code, ref rpc, ref rpcBefore);
+                    return;
                 }
                 catch (WasmException we)
                 {
@@ -107,8 +102,7 @@ namespace Wacs.Core.Compilation
                     // restores ctx.Frame. That would leave the wrong module's TagAddrs
                     // visible during tag comparison. Catching here guarantees we run only
                     // after every intermediate finally has executed.
-                    if (handlers.Length == 0 ||
-                        !TryResumeWithHandler(ctx, handlers, ref pc, we.Exn, pcBeforeDispatch))
+                    if (!TryResumeWithHandler(ctx, handlers, ref rpc, we.Exn, rpcBefore))
                         throw;
                 }
             }
@@ -135,8 +129,6 @@ namespace Wacs.Core.Compilation
 
             while (true)
             {
-                // Find innermost (largest StartPc) try_table covering pc, with StartPc
-                // strictly less than the one we just finished checking.
                 uint candidateStart = 0;
                 bool hasCandidate = false;
                 for (int i = 0; i < handlers.Length; i++)
@@ -152,7 +144,6 @@ namespace Wacs.Core.Compilation
                 }
                 if (!hasCandidate) return false;
 
-                // Scan this try_table's catches in declaration order.
                 for (int i = 0; i < handlers.Length; i++)
                 {
                     var h = handlers[i];
@@ -188,7 +179,6 @@ namespace Wacs.Core.Compilation
                     return true;
                 }
 
-                // No catch in this try_table matched — try the next-outer try_table.
                 lastStart = candidateStart;
             }
         }
@@ -202,9 +192,6 @@ namespace Wacs.Core.Compilation
         public static Value[] Invoke(ExecContext ctx, FunctionInstance func, params Value[] args)
         {
             foreach (var v in args) ctx.OpStack.PushValue(v);
-            // InvokeWasm sets up the frame, pops args into locals, runs the compiled body,
-            // and restores the caller's frame on return. Results are on OpStack after it
-            // returns.
             ControlHandlers.InvokeWasm(ctx, func);
 
             int arity = func.Type.ResultType.Arity;
