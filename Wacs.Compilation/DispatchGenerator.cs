@@ -359,19 +359,23 @@ namespace Wacs.Compilation
             sb.AppendLine($"        private static void Dispatch{prefixByte:X2}(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc)");
             sb.AppendLine("        {");
             // Hoist the same locals Run hoists, so emitted case bodies (_opStack.XXX,
-            // _localsSpan[idx]) compile uniformly here too. The hoist cost is tiny in a
-            // per-op sub-method — two field reads — and keeps the generator's per-case
-            // emit identical between Run and each Dispatch<prefix>.
+            // _localsSpan[idx], Unsafe.ReadUnaligned(ref _codeBase, ...)) compile uniformly
+            // here too. The hoist cost is tiny in a per-op sub-method — a few field reads —
+            // and keeps the generator's per-case emit identical between Run and each
+            // Dispatch<prefix>.
             sb.AppendLine("            var _opStack = ctx.OpStack;");
             sb.AppendLine("            var _localsSpan = ctx.Frame.Locals.Span;");
+            sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(code);");
             if (isSimd)
             {
-                sb.AppendLine("            ushort sec = BinaryPrimitives.ReadUInt16LittleEndian(code.Slice(pc));");
+                // Two-byte secondary (relaxed-SIMD opcodes go past 0xFF). Unsafe.ReadUnaligned
+                // avoids the Slice bounds check that BinaryPrimitives would demand.
+                sb.AppendLine("            ushort sec = System.Runtime.CompilerServices.Unsafe.ReadUnaligned<ushort>(ref System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, pc));");
                 sb.AppendLine("            pc += 2;");
             }
             else
             {
-                sb.AppendLine("            byte sec = code[pc++];");
+                sb.AppendLine("            byte sec = System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, pc); pc += 1;");
             }
             sb.AppendLine("            switch (sec)");
             sb.AppendLine("            {");
@@ -445,18 +449,38 @@ namespace Wacs.Compilation
                 }
             }
 
-            // 1. Read immediates in declaration order (each advances pc by its width).
+            // 1. Read immediates in declaration order. Emit inline Unsafe.ReadUnaligned<T>
+            //    off the hoisted ref-byte _codeBase instead of calling StreamReader.ReadX —
+            //    Run is too large for the JIT to honour StreamReader's [AggressiveInlining]
+            //    attribute, so the call would otherwise turn into an out-of-line PLT-style
+            //    indirect dispatch per immediate (~11 instructions + a blr). With the
+            //    inline form each immediate reduces to one unaligned load + a pc increment.
+            //
+            //    Little-endian only: .NET supported platforms (x64, ARM64) are all LE, and
+            //    the annotated bytecode stream is always emitted LE by BytecodeCompiler. A
+            //    big-endian host would need a byte-swap here, but that's a non-goal.
             foreach (var p in e.Parameters.Where(p => p.Kind == ParamKind.Immediate))
             {
-                var reader = TypeToImmReader(p.Type);
-                if (reader == null)
+                int width = ImmWidth(p.Type);
+                if (width == 0)
                 {
                     sb.Append(inner).AppendLine($"// skipped — unsupported [Imm] type {p.Type}");
                     sb.Append(inner).AppendLine("throw new NotSupportedException(\"Unsupported immediate type\");");
                     sb.Append(indent).AppendLine("}");
                     return;
                 }
-                sb.Append(inner).AppendLine($"{p.Type} {p.Name} = StreamReader.{reader}(code, ref {pcVar});");
+                if (p.Type == "byte")
+                {
+                    // Single-byte read: one Unsafe.Add + deref, no need for ReadUnaligned.
+                    sb.Append(inner).AppendLine(
+                        $"{p.Type} {p.Name} = System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, {pcVar}); {pcVar} += 1;");
+                }
+                else
+                {
+                    sb.Append(inner).AppendLine(
+                        $"{p.Type} {p.Name} = System.Runtime.CompilerServices.Unsafe.ReadUnaligned<{p.Type}>(" +
+                        $"ref System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, {pcVar})); {pcVar} += {width};");
+                }
             }
 
             // 2. Pop stack operands in REVERSE parameter order (WASM semantics: last param
@@ -655,6 +679,24 @@ namespace Wacs.Compilation
             "byte"   => "ReadU8",
             "Wacs.Core.Runtime.V128" => "ReadV128",
             _ => null,
+        };
+
+        /// <summary>
+        /// Byte width of each supported immediate type. 0 means unsupported (the generator
+        /// falls through to its <c>NotSupportedException</c> path for that case). Matches
+        /// the widths produced by <see cref="Wacs.Core.Compilation.BytecodeCompiler"/>.
+        /// </summary>
+        private static int ImmWidth(string t) => t switch
+        {
+            "int"    => 4,
+            "uint"   => 4,
+            "long"   => 8,
+            "ulong"  => 8,
+            "float"  => 4,
+            "double" => 8,
+            "byte"   => 1,
+            "Wacs.Core.Runtime.V128" => 16,
+            _ => 0,
         };
 
         private enum ParamKind { Stack, Immediate, Ctx, RefPc, Code }
