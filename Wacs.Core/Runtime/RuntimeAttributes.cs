@@ -25,6 +25,15 @@ namespace Wacs.Core.Runtime
         public int LocalPoolSize = 64;
         public int MaxCallStack = 2048;
 
+        /// <summary>
+        /// Upper bound on nested <c>InvokeWasm</c> depth on the switch-runtime path
+        /// specifically. Each frame carries ~20 KiB of managed stack (the generated
+        /// monolithic TryDispatch switch has that many locals), so even the 32 MiB
+        /// worker-thread stack can only hold ~1500 frames before overflowing. 1024
+        /// keeps a comfortable margin. Polymorphic path is unchanged.
+        /// </summary>
+        public int SwitchMaxCallStack = 1024;
+
         public int MaxFunctionLocals = 2048;
 
         public int MaxOpStack = 2048;

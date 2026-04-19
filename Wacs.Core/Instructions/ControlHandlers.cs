@@ -310,7 +310,7 @@ namespace Wacs.Core.Instructions
                 // otherwise we crash the process instead of failing the test cleanly. This
                 // mirrors ExecContext.PushFrame's MaxCallStack check on the polymorphic
                 // path. Tail calls do NOT increment depth: they reuse this InvokeWasm.
-                if (ctx.SwitchCallDepth >= ctx.Attributes.MaxCallStack)
+                if (ctx.SwitchCallDepth >= ctx.Attributes.SwitchMaxCallStack)
                 {
                     ArrayPool<Value>.Shared.Return(rented, clearArray: true);
                     ctx.ReturnFrame(frame);
