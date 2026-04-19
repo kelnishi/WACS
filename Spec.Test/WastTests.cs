@@ -116,6 +116,10 @@ namespace Spec.Test
 
             runtime.SuperInstruction = false;
             runtime.UseSwitchRuntime = true;
+            // Phase G: fuse common wasm sequences into WacsCode super-ops at compile
+            // time. The fuser produces an equivalent stream, so enabling it here
+            // exercises correctness across the whole spec suite.
+            runtime.ExecContext.Attributes.UseSwitchSuperInstructions = true;
             runtime.TraceExecution = file.TraceExecution;
 
             Module? module = null;
