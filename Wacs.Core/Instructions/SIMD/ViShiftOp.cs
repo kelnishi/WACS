@@ -36,7 +36,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I64x2ShrS    = new (SimdCode.I64x2ShrS    , ExecuteI64x2ShrS   , ValidateOperands(pop1: ValType.V128, pop2: ValType.I32, push: ValType.V128), -1);
         public static readonly NumericInst I64x2ShrU    = new (SimdCode.I64x2ShrU    , ExecuteI64x2ShrU   , ValidateOperands(pop1: ValType.V128, pop2: ValType.I32, push: ValType.V128), -1);
 
-        private static void ExecuteI8x16Shl(ExecContext context) 
+        internal static void ExecuteI8x16Shl(ExecContext context) 
         {
             int shiftAmount = context.OpStack.PopI32();
             V128 val = context.OpStack.PopV128();
@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI8x16ShrS(ExecContext context) 
+        internal static void ExecuteI8x16ShrS(ExecContext context) 
         {
             int shiftAmount = context.OpStack.PopI32();
             V128 val = context.OpStack.PopV128();
@@ -86,7 +86,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI8x16ShrU(ExecContext context) 
+        internal static void ExecuteI8x16ShrU(ExecContext context) 
         {
             int shiftAmount = context.OpStack.PopI32();
             V128 val = context.OpStack.PopV128();
@@ -111,7 +111,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8Shl(ExecContext context) 
+        internal static void ExecuteI16x8Shl(ExecContext context) 
         {
             int shiftAmount = context.OpStack.PopI32();
             V128 val = context.OpStack.PopV128();
@@ -128,7 +128,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8ShrS(ExecContext context) 
+        internal static void ExecuteI16x8ShrS(ExecContext context) 
         {
             int shiftAmount = context.OpStack.PopI32();
             V128 val = context.OpStack.PopV128();
@@ -145,7 +145,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8ShrU(ExecContext context) 
+        internal static void ExecuteI16x8ShrU(ExecContext context) 
         {
             int shiftAmount = context.OpStack.PopI32();
             V128 val = context.OpStack.PopV128();
@@ -162,7 +162,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4Shl(ExecContext context) 
+        internal static void ExecuteI32x4Shl(ExecContext context) 
         {
             int shiftAmount = context.OpStack.PopI32();
             V128 val = context.OpStack.PopV128();
@@ -175,7 +175,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4ShrS(ExecContext context) 
+        internal static void ExecuteI32x4ShrS(ExecContext context) 
         {
             int shiftAmount = context.OpStack.PopI32();
             V128 val = context.OpStack.PopV128();
@@ -188,7 +188,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4ShrU(ExecContext context) 
+        internal static void ExecuteI32x4ShrU(ExecContext context) 
         {
             int shiftAmount = context.OpStack.PopI32();
             V128 val = context.OpStack.PopV128();
@@ -201,7 +201,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI64x2Shl(ExecContext context) 
+        internal static void ExecuteI64x2Shl(ExecContext context) 
         {
             int shiftAmount = context.OpStack.PopI32();
             V128 val = context.OpStack.PopV128();
@@ -212,7 +212,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI64x2ShrS(ExecContext context) 
+        internal static void ExecuteI64x2ShrS(ExecContext context) 
         {
             int shiftAmount = context.OpStack.PopI32();
             V128 val = context.OpStack.PopV128();
@@ -223,7 +223,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI64x2ShrU(ExecContext context) 
+        internal static void ExecuteI64x2ShrU(ExecContext context) 
         {
             int shiftAmount = context.OpStack.PopI32();
             V128 val = context.OpStack.PopV128();

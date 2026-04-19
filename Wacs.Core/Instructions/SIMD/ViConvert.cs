@@ -45,7 +45,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I64x2ExtendLowI32x4U  = new(SimdCode.I64x2ExtendLowI32x4U,  ExecuteI64x2ExtendLowI32x4U,  ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
         public static readonly NumericInst I64x2ExtendHighI32x4U = new(SimdCode.I64x2ExtendHighI32x4U, ExecuteI64x2ExtendHighI32x4U, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        private static void ExecuteI32x4TruncSatF32x4S(ExecContext context)
+        internal static void ExecuteI32x4TruncSatF32x4S(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
             V128 result = new V128(
@@ -57,7 +57,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4TruncSatF32x4U(ExecContext context)
+        internal static void ExecuteI32x4TruncSatF32x4U(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
             V128 result = new V128(
@@ -69,7 +69,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4TruncSatF64x2SZero(ExecContext context)
+        internal static void ExecuteI32x4TruncSatF64x2SZero(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
             V128 result = new V128(
@@ -81,7 +81,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4TruncSatF64x2UZero(ExecContext context)
+        internal static void ExecuteI32x4TruncSatF64x2UZero(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
             V128 result = new V128(
@@ -94,7 +94,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @Spec 4.4.3.17. t2xN.narrow_t1xM_sx
-        private static void ExecuteI8x16NarrowI16x8S(ExecContext context)
+        internal static void ExecuteI8x16NarrowI16x8S(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
@@ -119,7 +119,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI8x16NarrowI16x8U(ExecContext context)
+        internal static void ExecuteI8x16NarrowI16x8U(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
@@ -144,7 +144,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8NarrowI32x4S(ExecContext context)
+        internal static void ExecuteI16x8NarrowI32x4S(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
@@ -161,7 +161,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8NarrowI32x4U(ExecContext context)
+        internal static void ExecuteI16x8NarrowI32x4U(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
@@ -178,7 +178,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8ExtendLowI8x16S(ExecContext context)
+        internal static void ExecuteI16x8ExtendLowI8x16S(ExecContext context)
         {
             V128 v = context.OpStack.PopV128();
             V128 result = new V128(
@@ -194,7 +194,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8ExtendHighI8x16S(ExecContext context)
+        internal static void ExecuteI16x8ExtendHighI8x16S(ExecContext context)
         {
             V128 v = context.OpStack.PopV128();
             V128 result = new V128(
@@ -210,7 +210,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8ExtendLowI8x16U(ExecContext context)
+        internal static void ExecuteI16x8ExtendLowI8x16U(ExecContext context)
         {
             V128 v = context.OpStack.PopV128();
             V128 result = new V128(
@@ -226,7 +226,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8ExtendHighI8x16U(ExecContext context)
+        internal static void ExecuteI16x8ExtendHighI8x16U(ExecContext context)
         {
             V128 v = context.OpStack.PopV128();
             V128 result = new V128(
@@ -242,7 +242,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4ExtendLowI16x8S(ExecContext context)
+        internal static void ExecuteI32x4ExtendLowI16x8S(ExecContext context)
         {
             V128 v = context.OpStack.PopV128();
             V128 result = new V128(
@@ -254,7 +254,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4ExtendHighI16x8S(ExecContext context)
+        internal static void ExecuteI32x4ExtendHighI16x8S(ExecContext context)
         {
             V128 v = context.OpStack.PopV128();
             V128 result = new V128(
@@ -266,7 +266,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4ExtendLowI16x8U(ExecContext context)
+        internal static void ExecuteI32x4ExtendLowI16x8U(ExecContext context)
         {
             V128 v = context.OpStack.PopV128();
             V128 result = new V128(
@@ -278,7 +278,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4ExtendHighI16x8U(ExecContext context)
+        internal static void ExecuteI32x4ExtendHighI16x8U(ExecContext context)
         {
             V128 v = context.OpStack.PopV128();
             V128 result = new V128(
@@ -290,7 +290,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI64x2ExtendLowI32x4S(ExecContext context)
+        internal static void ExecuteI64x2ExtendLowI32x4S(ExecContext context)
         {
             V128 v = context.OpStack.PopV128();
             V128 result = new V128(
@@ -300,7 +300,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI64x2ExtendHighI32x4S(ExecContext context)
+        internal static void ExecuteI64x2ExtendHighI32x4S(ExecContext context)
         {
             V128 v = context.OpStack.PopV128();
             V128 result = new V128(
@@ -310,7 +310,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI64x2ExtendLowI32x4U(ExecContext context)
+        internal static void ExecuteI64x2ExtendLowI32x4U(ExecContext context)
         {
             V128 v = context.OpStack.PopV128();
             V128 result = new V128(
@@ -320,7 +320,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI64x2ExtendHighI32x4U(ExecContext context)
+        internal static void ExecuteI64x2ExtendHighI32x4U(ExecContext context)
         {
             V128 v = context.OpStack.PopV128();
             V128 result = new V128(
