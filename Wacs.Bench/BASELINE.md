@@ -33,6 +33,31 @@ each case into a shared bank declared at `TryDispatch` entry (see
 
 Spec-test suite wall time dropped 34s → 15s as well (2.3×).
 
+### Post `[MethodImpl(AggressiveInlining)]` on OpStack Push/Pop
+
+Inlined the `OpStack.PushI32`/`PopI32`/etc. hot-path methods. Medians
+over 3 runs:
+
+| workload        | polymorphic | switch   | ratio    |
+|-----------------|-------------|----------|----------|
+| fib-iter(5M)    | 1055 ms     | 12100 ms | **11.5×** |
+| fib-rec(25)     |  119 ms     |   330 ms | **2.8×**  |
+| sum(5M)         |  857 ms     | 13200 ms | **15.4×** |
+
+**Mixed result.** Polymorphic gained ~13% (1214 → 1055 on fib-iter) —
+the expected inlining win on small `Execute` methods. Switch runtime
+*regressed* on fib-iter/sum (11255 → 12100, 10695 → 13200) while still
+improving fib-rec slightly.
+
+Hypothesis: inlining Push/Pop bloats the already-huge `TryDispatch`
+method past a JIT size/budget threshold (register-allocation quality,
+loop cloning, tiered-JIT behaviour) — net loss on the monolithic switch
+path, net win on polymorphic's many-small-methods path. Leaving the
+inlining in since polymorphic benefits and the inlining is still "the
+right thing" semantically; the switch-side regression is a symptom of
+the inner loop needing its own refactor (inline `TryDispatch` into
+`Run`, or threaded dispatch).
+
 Wall-clock comparisons only — not iterations/sec, but the ratios are what
 matters.
 
