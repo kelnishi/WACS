@@ -279,7 +279,8 @@ namespace Wacs.Core.Instructions
                     compiled = BytecodeCompiler.Compile(
                         func.Body.Instructions.Flatten().ToArray(),
                         func.Type,
-                        localsCount: func.Type.ParameterTypes.Arity + func.Locals.Length);
+                        localsCount: func.Type.ParameterTypes.Arity + func.Locals.Length,
+                        useSuperInstructions: ctx.Attributes.UseSwitchSuperInstructions);
                     func.SwitchCompiled = compiled;
                 }
 

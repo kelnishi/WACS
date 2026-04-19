@@ -45,7 +45,8 @@ namespace Wacs.Core.OpCodes
         
         [OpCode("local.getset")] LocalGetSet = 0x40,
         [OpCode("local.constset")] LocalConstSet = 0x41,
-        
+        [OpCode("local.i64constset")] LocalI64ConstSet = 0x42,
+
         [OpCode("catch")] Catch = 0x69,
     }
 }
