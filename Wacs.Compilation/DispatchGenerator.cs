@@ -780,6 +780,19 @@ namespace Wacs.Compilation
                 .Replace("ctx.Frame.Locals.Span", "_localsSpan");
             if (pcVar != "pc")
                 body = System.Text.RegularExpressions.Regex.Replace(body, @"\bpc\b", pcVar);
+
+            // Inline the ShiftResults fast-path at emit time. The overwhelmingly common
+            // branch case is one whose target's result-height equals the current stack
+            // depth (no stack trimming needed) — for those, the unconditional call to
+            // ShiftResults is pure overhead. Rewriting to an explicit check + call-to-
+            // ShiftResultsSlow short-circuits that call without relying on the JIT to
+            // inline the wrapper (which it declines for Run-sized methods). Regex captures
+            // the two u32-cast arguments the emit layer produces verbatim.
+            body = System.Text.RegularExpressions.Regex.Replace(
+                body,
+                @"_opStack\.ShiftResults\(\s*(\(int\)\w+)\s*,\s*(\(int\)\w+)\s*\);",
+                "if (_opStack.Count != $2) _opStack.ShiftResultsSlow($1, $2);");
+
             return body;
         }
 

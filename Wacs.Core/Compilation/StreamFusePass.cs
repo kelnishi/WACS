@@ -256,6 +256,8 @@ namespace Wacs.Core.Compilation
                 if (!targets.Contains(p1) && !targets.Contains(p2))
                 {
                     byte op0 = code[p0], op1 = code[p1], op2 = code[p2];
+                    int totalSize = opSize[p0] + opSize[p1] + opSize[p2];
+
                     if (op0 == (byte)OpCode.LocalGet)
                     {
                         // local.get $idx ; i32.const $k ; i32.<op>
@@ -271,17 +273,47 @@ namespace Wacs.Core.Compilation
                             };
                             if (fused is WacsCode fs)
                             {
-                                decision = new FuseDecision(fs, 3,
-                                    opSize[p0] + opSize[p1] + opSize[p2], 10);
+                                decision = new FuseDecision(fs, 3, totalSize, 10);
                                 return true;
                             }
                         }
-                        // local.get $idx ; i64.const $k ; i64.add (symmetric i64 set)
+                        // local.get $idx ; i64.const $k ; i64.add
                         if (op1 == (byte)OpCode.I64Const && op2 == (byte)OpCode.I64Add)
                         {
-                            decision = new FuseDecision(WacsCode.I64FusedAdd, 3,
-                                opSize[p0] + opSize[p1] + opSize[p2], 14);
+                            decision = new FuseDecision(WacsCode.I64FusedAdd, 3, totalSize, 14);
                             return true;
+                        }
+
+                        // local.get $a ; local.get $b ; i32.<op>  (local-local arith/cmp)
+                        if (op1 == (byte)OpCode.LocalGet)
+                        {
+                            WacsCode? fused = op2 switch
+                            {
+                                (byte)OpCode.I32Add  => WacsCode.I32LLAdd,
+                                (byte)OpCode.I32Sub  => WacsCode.I32LLSub,
+                                (byte)OpCode.I32Mul  => WacsCode.I32LLMul,
+                                (byte)OpCode.I32And  => WacsCode.I32LLAnd,
+                                (byte)OpCode.I32Or   => WacsCode.I32LLOr,
+                                (byte)OpCode.I32Xor  => WacsCode.I32LLXor,
+                                (byte)OpCode.I32Eq   => WacsCode.I32LLEq,
+                                (byte)OpCode.I32Ne   => WacsCode.I32LLNe,
+                                (byte)OpCode.I32LtS  => WacsCode.I32LLLtS,
+                                (byte)OpCode.I32LtU  => WacsCode.I32LLLtU,
+                                (byte)OpCode.I32GtS  => WacsCode.I32LLGtS,
+                                (byte)OpCode.I32GtU  => WacsCode.I32LLGtU,
+                                (byte)OpCode.I32LeS  => WacsCode.I32LLLeS,
+                                (byte)OpCode.I32LeU  => WacsCode.I32LLLeU,
+                                (byte)OpCode.I32GeS  => WacsCode.I32LLGeS,
+                                (byte)OpCode.I32GeU  => WacsCode.I32LLGeU,
+                                (byte)OpCode.I64Add  => WacsCode.I64LLAdd,
+                                (byte)OpCode.I64Mul  => WacsCode.I64LLMul,
+                                _ => null,
+                            };
+                            if (fused is WacsCode fs)
+                            {
+                                decision = new FuseDecision(fs, 3, totalSize, 10);
+                                return true;
+                            }
                         }
                     }
                 }
@@ -294,25 +326,30 @@ namespace Wacs.Core.Compilation
                 if (!targets.Contains(p1))
                 {
                     byte op0 = code[p0], op1 = code[p1];
+                    int totalSize = opSize[p0] + opSize[p1];
+
                     // local.get ; local.set  →  LocalGetSet
                     if (op0 == (byte)OpCode.LocalGet && op1 == (byte)OpCode.LocalSet)
                     {
-                        decision = new FuseDecision(WacsCode.LocalGetSet, 2,
-                            opSize[p0] + opSize[p1], 10);
+                        decision = new FuseDecision(WacsCode.LocalGetSet, 2, totalSize, 10);
                         return true;
                     }
                     // i32.const ; local.set  →  LocalConstSet (i32)
                     if (op0 == (byte)OpCode.I32Const && op1 == (byte)OpCode.LocalSet)
                     {
-                        decision = new FuseDecision(WacsCode.LocalConstSet, 2,
-                            opSize[p0] + opSize[p1], 10);
+                        decision = new FuseDecision(WacsCode.LocalConstSet, 2, totalSize, 10);
                         return true;
                     }
                     // i64.const ; local.set  →  LocalI64ConstSet
                     if (op0 == (byte)OpCode.I64Const && op1 == (byte)OpCode.LocalSet)
                     {
-                        decision = new FuseDecision(WacsCode.LocalI64ConstSet, 2,
-                            opSize[p0] + opSize[p1], 14);
+                        decision = new FuseDecision(WacsCode.LocalI64ConstSet, 2, totalSize, 14);
+                        return true;
+                    }
+                    // local.get $a ; i64.extend_i32_s
+                    if (op0 == (byte)OpCode.LocalGet && op1 == (byte)OpCode.I64ExtendI32S)
+                    {
+                        decision = new FuseDecision(WacsCode.I64ExtendI32SL, 2, totalSize, 6);
                         return true;
                     }
                 }
@@ -366,6 +403,34 @@ namespace Wacs.Core.Compilation
                     // local.get @p+1 (u32 idx), i64.const @p+5+1 (s64 k), arith @p+14
                     Span4(newCode, writePos, ReadU32(oldCode, p + 1)); writePos += 4;
                     Span8(newCode, writePos, ReadU64(oldCode, p + 5 + 1)); writePos += 8;
+                    break;
+                // Local-local 3-op fusions: two u32 indices out of the two local.get
+                // ops. Arith opcode at offset 10 is absorbed by the fuse; nothing to
+                // copy from there.
+                case WacsCode.I32LLAdd:
+                case WacsCode.I32LLSub:
+                case WacsCode.I32LLMul:
+                case WacsCode.I32LLAnd:
+                case WacsCode.I32LLOr:
+                case WacsCode.I32LLXor:
+                case WacsCode.I32LLEq:
+                case WacsCode.I32LLNe:
+                case WacsCode.I32LLLtS:
+                case WacsCode.I32LLLtU:
+                case WacsCode.I32LLGtS:
+                case WacsCode.I32LLGtU:
+                case WacsCode.I32LLLeS:
+                case WacsCode.I32LLLeU:
+                case WacsCode.I32LLGeS:
+                case WacsCode.I32LLGeU:
+                case WacsCode.I64LLAdd:
+                case WacsCode.I64LLMul:
+                    Span4(newCode, writePos, ReadU32(oldCode, p + 1));     writePos += 4; // a
+                    Span4(newCode, writePos, ReadU32(oldCode, p + 5 + 1)); writePos += 4; // b
+                    break;
+                // local.get $a ; i64.extend_i32_s — just the single u32 idx from local.get.
+                case WacsCode.I64ExtendI32SL:
+                    Span4(newCode, writePos, ReadU32(oldCode, p + 1)); writePos += 4;
                     break;
                 default:
                     throw new NotSupportedException($"StreamFusePass: no emit rule for {fd.SuperOp}");

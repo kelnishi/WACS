@@ -324,7 +324,8 @@ namespace Wacs.Core.Runtime
         }
 
         /// <summary>
-        /// Shrink the OpStack to resultsHeight.
+        /// Shrink the OpStack to resultsHeight. Called by the polymorphic Br/BrIf/BrTable
+        /// handlers and by the generator's unfused branch cases.
         /// </summary>
         /// <param name="resultCount">The number of results that should be shifted</param>
         /// <param name="resultsHeight">The OpStack height after shrinking</param>
@@ -332,6 +333,20 @@ namespace Wacs.Core.Runtime
         {
             if (Count == resultsHeight)
                 return;
+            ShiftResultsSlow(resultCount, resultsHeight);
+        }
+
+        /// <summary>
+        /// The no-short-circuit body of <see cref="ShiftResults"/>. Public so the
+        /// generator can inline the <c>Count == resultsHeight</c> check at each Br/BrIf
+        /// case and skip the call entirely on the fast path (which fires on most
+        /// branches inside a loop since the target label's result-height matches the
+        /// current stack depth). Polymorphic callers use <see cref="ShiftResults"/>
+        /// and pay the extra compare-and-branch per call — which is a wash, since that
+        /// method's JIT-inlined prologue does the same check.
+        /// </summary>
+        public void ShiftResultsSlow(int resultCount, int resultsHeight)
+        {
             int src = Count - resultCount;
             int dest = resultsHeight - resultCount;
             Array.Copy(_registers, src, _registers, dest, resultCount);

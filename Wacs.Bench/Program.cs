@@ -51,9 +51,8 @@ static void RunBench(string wasmPath, Bench b)
     long superMs  = RunOne(wasmPath, useSwitch: false, superInst: true,  useMinimal: false, switchSuper: false, b);
     long switchMs = RunOne(wasmPath, useSwitch: true,  superInst: false, useMinimal: false, switchSuper: false, b);
     long swFuseMs = RunOne(wasmPath, useSwitch: true,  superInst: false, useMinimal: false, switchSuper: true,  b);
-    long minMs    = RunOne(wasmPath, useSwitch: true,  superInst: false, useMinimal: true,  switchSuper: false, b);
-    Console.WriteLine($"  {b.Name,-18} poly={polyMs,5}   super={superMs,5}   switch={switchMs,5}   swFuse={swFuseMs,5}   min={minMs,5}   " +
-                      $"fuse/switch={(double)swFuseMs/switchMs,5:F2}x   min/super={(double)minMs/superMs,5:F2}x");
+    Console.WriteLine($"  {b.Name,-18} poly={polyMs,5}   super={superMs,5}   switch={switchMs,5}   swFuse={swFuseMs,5}   " +
+                      $"fuse/switch={(double)swFuseMs/switchMs,5:F2}x   fuse/super={(double)swFuseMs/superMs,5:F2}x");
 }
 
 var here = AppContext.BaseDirectory;

@@ -47,6 +47,35 @@ namespace Wacs.Core.OpCodes
         [OpCode("local.constset")] LocalConstSet = 0x41,
         [OpCode("local.i64constset")] LocalI64ConstSet = 0x42,
 
+        // Local-local 3-op arithmetic fusions: `local.get a; local.get b; i32.<op>`.
+        // Encoding: [FF][code][idxA:4][idxB:4] = 10 bytes.
+        [OpCode("i32.lladd")] I32LLAdd = 0x50,
+        [OpCode("i32.llsub")] I32LLSub = 0x51,
+        [OpCode("i32.llmul")] I32LLMul = 0x52,
+        [OpCode("i32.lland")] I32LLAnd = 0x53,
+        [OpCode("i32.llor")]  I32LLOr  = 0x54,
+        [OpCode("i32.llxor")] I32LLXor = 0x55,
+
+        // Local-local 3-op relational fusions (i32). Same encoding as arith.
+        [OpCode("i32.lleq")]   I32LLEq   = 0x58,
+        [OpCode("i32.llne")]   I32LLNe   = 0x59,
+        [OpCode("i32.lllts")]  I32LLLtS  = 0x5A,
+        [OpCode("i32.lllgu")]  I32LLLtU  = 0x5B,
+        [OpCode("i32.llgts")]  I32LLGtS  = 0x5C,
+        [OpCode("i32.llgtu")]  I32LLGtU  = 0x5D,
+        [OpCode("i32.llles")]  I32LLLeS  = 0x5E,
+        [OpCode("i32.llleu")]  I32LLLeU  = 0x5F,
+        [OpCode("i32.llges")]  I32LLGeS  = 0x60,
+        [OpCode("i32.llgeu")]  I32LLGeU  = 0x61,
+
+        // Local-local 3-op i64 arith fusions.
+        [OpCode("i64.lladd")] I64LLAdd = 0x68,
+
         [OpCode("catch")] Catch = 0x69,
+
+        [OpCode("i64.llmul")] I64LLMul = 0x6A,
+
+        // Local + i64.extend_i32_s (2-op). Encoding: [FF][code][idx:4] = 6 bytes.
+        [OpCode("i64.extendi32s.l")] I64ExtendI32SL = 0x70,
     }
 }
