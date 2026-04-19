@@ -202,7 +202,11 @@ namespace Wacs.Core.Compilation
                 // Most arithmetic SIMD ops take no immediates. v128.load/store take memarg
                 // (12 bytes); v128.const takes 16 bytes; lane ops take 1 byte; shuffle
                 // takes 16 bytes. For the initial slice we only cover no-immediate ops.
-                OpCode.FD => SizeOfSimd(inst.Op.xFD),
+                // Quirk: InstMemoryLoadZero tags itself with V128LoadNLane opcodes (see
+                // emit-side note) but has no lane byte — adjust the size here so the
+                // pass-1 sizing and pass-2 emit stay in sync.
+                OpCode.FD => inst is Wacs.Core.Instructions.SIMD.InstMemoryLoadZero ? 12
+                             : SizeOfSimd(inst.Op.xFD),
                 // No-immediate ops (drop/select/return/unreachable/nop/numeric).
                 _ => 0,
             };
@@ -260,6 +264,10 @@ namespace Wacs.Core.Compilation
         private static int SizeOfGc(GcCode code) => code switch
         {
             GcCode.RefI31 or GcCode.I31GetS or GcCode.I31GetU => 0,
+            // extern ↔ any conversions — no immediates, pure retag on stack.
+            GcCode.AnyConvertExtern or GcCode.ExternConvertAny => 0,
+            // br_on_cast / br_on_cast_fail: flags:u8 + rt1:i32 + rt2:i32 + triple (12).
+            GcCode.BrOnCast or GcCode.BrOnCastFail => 21,
             // ref.test / ref.cast (+ null variants): heap type encoded as i32 ValType bits.
             GcCode.RefTest or GcCode.RefTestNull or GcCode.RefCast or GcCode.RefCastNull => 4,
             // struct.new / struct.new_default: typeIdx:u32.
@@ -372,7 +380,10 @@ namespace Wacs.Core.Compilation
         /// 4-byte heap-type immediate. Struct/array ops with typeIdx (+fieldIdx) will be
         /// added as they're wired.
         /// </summary>
-        private static int EmitGc(byte[] buf, int writePos, GcCode code, InstructionBase inst)
+        private static int EmitGc(byte[] buf, int writePos, GcCode code, InstructionBase inst,
+                                  int[] streamOffset,
+                                  IReadOnlyDictionary<BlockTarget, int> blockLocalIdx,
+                                  IReadOnlyDictionary<BlockTarget, int> blockEndLocalIdx)
         {
             switch (code)
             {
@@ -431,6 +442,29 @@ namespace Wacs.Core.Compilation
                     break;
                 case GcCode.ArrayLen:
                     break;
+                case GcCode.AnyConvertExtern:
+                case GcCode.ExternConvertAny:
+                    break;
+                case GcCode.BrOnCast:
+                {
+                    var bc = (InstBrOnCast)inst;
+                    buf[writePos++] = (byte)bc.Flags;
+                    writePos = WriteS32(buf, writePos, (int)bc.SourceType);
+                    writePos = WriteS32(buf, writePos, (int)bc.TargetType);
+                    writePos = WriteBranch(buf, writePos, bc.LinkedLabel!, streamOffset,
+                                           blockLocalIdx, blockEndLocalIdx);
+                    break;
+                }
+                case GcCode.BrOnCastFail:
+                {
+                    var bc = (InstBrOnCastFail)inst;
+                    buf[writePos++] = (byte)bc.Flags;
+                    writePos = WriteS32(buf, writePos, (int)bc.SourceType);
+                    writePos = WriteS32(buf, writePos, (int)bc.TargetType);
+                    writePos = WriteBranch(buf, writePos, bc.LinkedLabel!, streamOffset,
+                                           blockLocalIdx, blockEndLocalIdx);
+                    break;
+                }
                 case GcCode.ArrayNewFixed:
                 {
                     var nf = (InstArrayNewFixed)inst;
@@ -534,9 +568,22 @@ namespace Wacs.Core.Compilation
                     break;
                 }
                 // Memory-load-lane / store-lane — memarg + lane index.
+                //
+                // Quirk: InstMemoryLoadZero.Op returns V128LoadNLane on the polymorphic
+                // path. We remap the secondary opcode at header-write time (see primary
+                // byte emit), so by the point we reach here with a Lane opcode the
+                // instance really is Load/StoreLane — but the `switch (code)` in this
+                // method still sees Lane because it's keyed off inst.Op. Route by
+                // concrete type first to handle LoadZero instances arriving here.
                 case SimdCode.V128Load8Lane or SimdCode.V128Load16Lane
                     or SimdCode.V128Load32Lane or SimdCode.V128Load64Lane:
                 {
+                    if (inst is Wacs.Core.Instructions.SIMD.InstMemoryLoadZero zero)
+                    {
+                        writePos = WriteU32(buf, writePos, (uint)zero.MemIndex);
+                        writePos = WriteS64(buf, writePos, zero.MemOffset);
+                        break;
+                    }
                     var load = (Wacs.Core.Instructions.SIMD.InstMemoryLoadLane)inst;
                     writePos = WriteU32(buf, writePos, (uint)load.MemIndex);
                     writePos = WriteS64(buf, writePos, load.MemOffset);
@@ -613,7 +660,25 @@ namespace Wacs.Core.Compilation
             {
                 case OpCode.FB: buf[writePos++] = (byte)op.xFB; break;
                 case OpCode.FC: buf[writePos++] = (byte)op.xFC; break;
-                case OpCode.FD: buf[writePos++] = (byte)op.xFD; break;
+                case OpCode.FD:
+                {
+                    // Quirk: InstMemoryLoadZero tags itself with V128LoadNLane opcodes
+                    // on the polymorphic path (see VMemory.cs). For the switch runtime
+                    // we want the dispatcher to see the real Zero op so it routes to
+                    // the correct handler. Remap at write time.
+                    byte secondary = (byte)op.xFD;
+                    if (inst is Wacs.Core.Instructions.SIMD.InstMemoryLoadZero loadZero)
+                    {
+                        secondary = loadZero.LoadWidth switch
+                        {
+                            4 => (byte)SimdCode.V128Load32Zero,
+                            8 => (byte)SimdCode.V128Load64Zero,
+                            _ => secondary,
+                        };
+                    }
+                    buf[writePos++] = secondary;
+                    break;
+                }
                 case OpCode.FE: buf[writePos++] = (byte)op.xFE; break;
                 case OpCode.FF: buf[writePos++] = (byte)op.xFF; break;
             }
@@ -729,7 +794,8 @@ namespace Wacs.Core.Compilation
 
                 // ---- FB-prefixed: GC ops (i31/struct/array/cast) --------
                 case OpCode.FB:
-                    writePos = EmitGc(buf, writePos, op.xFB, inst);
+                    writePos = EmitGc(buf, writePos, op.xFB, inst,
+                                      streamOffset, blockLocalIdx, blockEndLocalIdx);
                     break;
 
                 // ---- FC-prefixed: bulk memory + table ops --------
