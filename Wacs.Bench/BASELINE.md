@@ -51,12 +51,40 @@ improving fib-rec slightly.
 
 Hypothesis: inlining Push/Pop bloats the already-huge `TryDispatch`
 method past a JIT size/budget threshold (register-allocation quality,
-loop cloning, tiered-JIT behaviour) — net loss on the monolithic switch
-path, net win on polymorphic's many-small-methods path. Leaving the
-inlining in since polymorphic benefits and the inlining is still "the
-right thing" semantically; the switch-side regression is a symptom of
-the inner loop needing its own refactor (inline `TryDispatch` into
-`Run`, or threaded dispatch).
+loop cloning, tiered-JIT behaviour) — net loss on the monolithic
+switch path, net win on polymorphic's many-small-methods path.
+Confirmed by the next step below.
+
+### Post prefix-split of `TryDispatch`
+
+The monolithic switch was split by prefix byte (0x00 / 0xFB / 0xFC /
+0xFD — the primary-opcode families) into per-prefix `TryDispatch_XX`
+methods, each with its own register-bank + immediate-union declaration.
+The outer `TryDispatch` becomes a 5-way switch that tail-calls into one
+of them. No change in semantics, same 237/237 tests, same dispatch-key
+format.
+
+Medians over 3 runs:
+
+| workload        | polymorphic | switch  | ratio    |
+|-----------------|-------------|---------|----------|
+| fib-iter(5M)    | 1063 ms     | 1204 ms | **1.13×** |
+| fib-rec(25)     |  117 ms     |  122 ms | **1.04×** |
+| sum(5M)         |  869 ms     |  911 ms | **1.05×** |
+
+**~10× speedup from this single change** on iterative workloads
+(11.5× → 1.13×). Spec suite dropped from 15s to 9s in parallel.
+
+Confirms the JIT-budget hypothesis: the 300+-case switch was past a
+threshold that caused register-allocation / dispatch-table / loop-
+opt decisions to fall off a cliff. Giving each prefix its own smaller
+method (~170 cases for primary, ~140 for 0xFD SIMD, ~20 each for the
+others) puts every sub-method back under the JIT's optimization budget.
+
+The switch runtime is now effectively at parity with polymorphic on
+tight loops (within 5-13%). Remaining gap is likely just the outer
+`TryDispatch` prefix-switch call overhead — future work could inline
+the prefix switch into `SwitchRuntime.Run` directly.
 
 Wall-clock comparisons only — not iterations/sec, but the ratios are what
 matters.

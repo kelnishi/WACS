@@ -263,14 +263,53 @@ namespace Wacs.Compilation
             sb.AppendLine("        /// FD set when packed. Each handler reads its own immediates inline from <paramref name=\"code\"/>");
             sb.AppendLine("        /// starting at <paramref name=\"pc\"/>, advancing it as it consumes bytes.");
             sb.AppendLine("        /// </summary>");
+            // Split the flat set of opcodes by prefix byte. Each prefix group gets
+            // its own TryDispatchX method — giving RyuJIT a smaller switch table per
+            // method to reason about, rather than one monolithic 300+-case switch
+            // that blows past its internal budget thresholds. The outer TryDispatch
+            // routes to one of them based on the top 8 bits of the op key.
+            var byPrefix = ordered.GroupBy(e => (byte)(e.OpKey >> 16))
+                                  .OrderBy(g => g.Key)
+                                  .ToList();
+
             sb.AppendLine("        public static bool TryDispatch(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc, uint op)");
             sb.AppendLine("        {");
-            // Register-bank + immediate-union declarations — see
-            // Wacs.Core/Compilation/README-RegisterBankDispatch.md. All pops and
-            // immediate reads land in these shared slots instead of per-case named
-            // locals, collapsing the method frame from ~20 KiB/activation to ~200 B
-            // and giving RyuJIT a chance to register-allocate them.
-            sb.AppendLine("            // Stack-operand register bank (reused across cases).");
+            sb.AppendLine("            byte primary = (byte)(op >> 16);");
+            sb.AppendLine("            switch (primary)");
+            sb.AppendLine("            {");
+            foreach (var g in byPrefix)
+            {
+                sb.AppendLine($"                case 0x{g.Key:X2}: return TryDispatch_{g.Key:X2}(ctx, code, ref pc, op);");
+            }
+            sb.AppendLine("                default: return false;");
+            sb.AppendLine("            }");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+
+            foreach (var g in byPrefix)
+            {
+                EmitSubDispatch(sb, g.Key, g.ToList());
+            }
+            sb.AppendLine();
+            sb.AppendLine("        /// <summary>The number of ops the generator emitted cases for.</summary>");
+            sb.AppendLine($"        public const int HandledOpcodeCount = {ordered.Count};");
+            sb.AppendLine("    }");
+            sb.AppendLine("}");
+
+            spc.AddSource("GeneratedDispatcher.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+        }
+
+        /// <summary>
+        /// Emit a per-prefix sub-dispatch method: <c>TryDispatch_XX</c>. Each owns its
+        /// own register bank + immediate-union declaration, so the method's frame stays
+        /// independent of the others. Splitting keeps each switch table small enough
+        /// that RyuJIT's size heuristics don't kick in and regress performance.
+        /// </summary>
+        private static void EmitSubDispatch(StringBuilder sb, byte prefix, List<DispatchEntry> entries)
+        {
+            sb.AppendLine($"        private static bool TryDispatch_{prefix:X2}(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc, uint op)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            // Stack-operand register bank (reused across cases in this prefix).");
             sb.AppendLine("            int    _a32 = 0, _b32 = 0, _c32 = 0;");
             sb.AppendLine("            uint   _au32 = 0, _bu32 = 0, _cu32 = 0;");
             sb.AppendLine("            long   _a64 = 0, _b64 = 0, _c64 = 0;");
@@ -279,12 +318,8 @@ namespace Wacs.Compilation
             sb.AppendLine("            double _af64 = 0, _bf64 = 0, _cf64 = 0;");
             sb.AppendLine("            V128   _avec = default, _bvec = default, _cvec = default;");
             sb.AppendLine("            Value  _aval = default, _bval = default, _cval = default;");
-            sb.AppendLine("            // Immediate union slots — every immediate read writes here. Eight slots");
-            sb.AppendLine("            // cover the widest handler (br_on_cast takes 6 immediates: flags, rt1, rt2,");
-            sb.AppendLine("            // targetPc, resultsHeight, arity).");
             sb.AppendLine("            ImmUnion _imm0 = default, _imm1 = default, _imm2 = default, _imm3 = default;");
             sb.AppendLine("            ImmUnion _imm4 = default, _imm5 = default, _imm6 = default, _imm7 = default;");
-            sb.AppendLine("            // Suppress \"unused\" warnings for unused slots in any given path.");
             sb.AppendLine("            _ = _a32 + _b32 + _c32; _ = _au32 + _bu32 + _cu32;");
             sb.AppendLine("            _ = _a64 + _b64 + _c64; _ = _au64 + _bu64 + _cu64;");
             sb.AppendLine("            _ = _af32 + _bf32 + _cf32; _ = _af64 + _bf64 + _cf64;");
@@ -295,20 +330,12 @@ namespace Wacs.Compilation
             sb.AppendLine();
             sb.AppendLine("            switch (op)");
             sb.AppendLine("            {");
-            foreach (var e in ordered)
-            {
+            foreach (var e in entries)
                 EmitCase(sb, e);
-            }
             sb.AppendLine("                default: return false;");
             sb.AppendLine("            }");
             sb.AppendLine("        }");
             sb.AppendLine();
-            sb.AppendLine("        /// <summary>The number of ops the generator emitted cases for.</summary>");
-            sb.AppendLine($"        public const int HandledOpcodeCount = {ordered.Count};");
-            sb.AppendLine("    }");
-            sb.AppendLine("}");
-
-            spc.AddSource("GeneratedDispatcher.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
         }
 
         private static void EmitCase(StringBuilder sb, DispatchEntry e)
