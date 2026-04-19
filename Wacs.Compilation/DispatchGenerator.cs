@@ -287,6 +287,13 @@ namespace Wacs.Compilation
             // Run, so our hoisted span is never observed stale from within our own switch.
             sb.AppendLine("            var _opStack = ctx.OpStack;");
             sb.AppendLine("            var _localsSpan = ctx.Frame.Locals.Span;");
+            // Hoist a raw ref to _registers[0]. The emit-time-inlined pops/pushes below
+            // index off this ref, bypassing both the safe array indexer (bounds check)
+            // and the Pop*Fast method-call boundary — RyuJIT declines to inline the Fast
+            // wrappers because Run exceeds its inlining budget, so each call would stay
+            // as an out-of-line blr. Inlining here reduces every pop/push to a single
+            // Unsafe.Add + .Data.<field> access with zero calls.
+            sb.AppendLine("            ref Wacs.Core.Runtime.Value _registersRef = ref _opStack.FirstRegister();");
             // pc / pcBefore are plain method-local ints, seeded from ctx fields. Previously
             // these were `ref int` parameters; the ref aliased the locals back to a caller
             // stack slot, which RyuJIT treated conservatively and spilled _pc to memory on
@@ -334,7 +341,7 @@ namespace Wacs.Compilation
 
             foreach (var e in hotPrimaryOps.OrderBy(e => e.RawValue))
             {
-                EmitCase(sb, e, "                        ", ref caseCounter, singleByteKey: true, inLoop: true, pcVar: "_pc");
+                EmitCase(sb, e, "                        ", ref caseCounter, singleByteKey: true, inLoop: true, pcVar: "_pc", inlineStack: true);
             }
             // Sub-methods return the new pc as an int, not via a ref parameter. Any
             // `ref int pc` in a sub-method signature would force Run's _pc to be
@@ -400,12 +407,17 @@ namespace Wacs.Compilation
             // register; we return the updated pc for Run to reassign.
             sb.AppendLine("            var _opStack = ctx.OpStack;");
             sb.AppendLine("            var _localsSpan = ctx.Frame.Locals.Span;");
+            // No _registersRef hoist here — cold sub-methods stay on the Pop*Fast /
+            // Push*Fast method calls. Inlining each case's stack ops would grow the
+            // frame enough to overflow the stack on deeply recursive wasm (the
+            // call_indirect.wast suite hits ~48 recursive InvokeWasm levels, each
+            // stacking a GeneratedDispatcher.Run + DispatchCold frame pair).
             sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(code);");
             sb.AppendLine("            switch (primary)");
             sb.AppendLine("            {");
             foreach (var e in coldEntries.OrderBy(e => e.RawValue))
             {
-                EmitCase(sb, e, "                ", ref caseCounter, singleByteKey: true, inLoop: false, pcVar: "pc");
+                EmitCase(sb, e, "                ", ref caseCounter, singleByteKey: true, inLoop: false, pcVar: "pc", inlineStack: false);
             }
             sb.AppendLine("                default:");
             sb.AppendLine("                    throw new NotSupportedException(");
@@ -501,6 +513,7 @@ namespace Wacs.Compilation
             // Dispatch<prefix>.
             sb.AppendLine("            var _opStack = ctx.OpStack;");
             sb.AppendLine("            var _localsSpan = ctx.Frame.Locals.Span;");
+            // Prefix sub-methods also stay on method calls (see DispatchCold comment).
             sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(code);");
             if (isSimd)
             {
@@ -517,7 +530,7 @@ namespace Wacs.Compilation
             sb.AppendLine("            {");
             foreach (var e in entries)
             {
-                EmitCase(sb, e, "                ", ref caseCounter, singleByteKey: false, inLoop: false, pcVar: "pc");
+                EmitCase(sb, e, "                ", ref caseCounter, singleByteKey: false, inLoop: false, pcVar: "pc", inlineStack: false);
             }
             sb.AppendLine("                default:");
             sb.AppendLine($"                    throw new NotSupportedException(");
@@ -543,9 +556,16 @@ namespace Wacs.Compilation
         /// prefix sub-methods (where pc is still the ref parameter). Used both for emitted
         /// <c>StreamReader.ReadX(code, ref {pcVar})</c> immediate reads and to textually
         /// rewrite <c>pc</c> identifiers inside handler bodies that take a <c>ref int pc</c>.</param>
+        /// <param name="inlineStack">True to emit inline pop/push sequences against the
+        /// hoisted <c>_registersRef</c>. False to call the OpStack's <c>Pop*Fast /
+        /// Push*Fast</c> methods. The inline form is faster per site, but declares more
+        /// temporaries, which grows the method frame. We keep inline on in Run (where the
+        /// hot loop runs) and off in cold sub-methods (DispatchCold, Dispatch<prefix>)
+        /// because deep recursive-call wasm (e.g. call_indirect.wast) blows the stack
+        /// when every frame in the recursion is inline-sized.</param>
         private static void EmitCase(StringBuilder sb, DispatchEntry e, string indent,
                                       ref int caseCounter, bool singleByteKey, bool inLoop,
-                                      string pcVar)
+                                      string pcVar, bool inlineStack)
         {
             int caseId = caseCounter++;
             // Key = raw enum value masked to keyType width. For primary ops (OpCode enum),
@@ -627,16 +647,17 @@ namespace Wacs.Compilation
             for (int i = stackParams.Count - 1; i >= 0; i--)
             {
                 var p = stackParams[i];
-                var popOp = TypeToPop(p.Type);
-                if (popOp == null)
+                if (!EmitInlinePop(sb, inner, p.Type, p.Name, inlineStack))
                 {
                     sb.Append(inner).AppendLine($"// skipped — unsupported stack parameter type {p.Type}");
                     sb.Append(inner).AppendLine("throw new NotSupportedException(\"Unsupported stack type\");");
                     sb.Append(indent).AppendLine("}");
                     return;
                 }
-                sb.Append(inner).AppendLine($"{p.Type} {p.Name} = _opStack.{popOp}();");
             }
+
+            // Nothing below this line depends on TypeToPop/Push — pops are already emitted
+            // inline above, and pushes below go through EmitInlinePush.
 
             // 3. Inline the body. Fast path for the overwhelmingly common case
             //    (expression-bodied handler, i.e. `=> expr;`): emit a single push-continue
@@ -647,8 +668,7 @@ namespace Wacs.Compilation
             //    rewrite `return <expr>;` to `{ __r = <expr>; goto __end_N; }`, rewrite
             //    `return;` (void) to `goto __end_N;`, converge at __end_N.
             string endLabel = $"__end_{caseId}";
-            string pushOp = e.ReturnType == "void" ? null : TypeToPush(e.ReturnType);
-            if (e.ReturnType != "void" && pushOp == null)
+            if (e.ReturnType != "void" && !IsSupportedPushType(e.ReturnType))
             {
                 sb.Append(inner).AppendLine($"// skipped — unsupported return type {e.ReturnType}");
                 sb.Append(inner).AppendLine("throw new NotSupportedException(\"Unsupported return type\");");
@@ -665,14 +685,14 @@ namespace Wacs.Compilation
 
             if (e.BodyIsExpression)
             {
-                string exprBody = RewriteCtxAccess(e.Body, pcVar);
+                string exprBody = RewriteCtxAccess(e.Body, pcVar, inlineStack);
                 if (e.ReturnType == "void")
                 {
                     sb.Append(inner).AppendLine($"{exprBody}; {terminator}");
                 }
                 else
                 {
-                    sb.Append(inner).AppendLine($"_opStack.{pushOp}({exprBody}); {terminator}");
+                    sb.Append(inner).AppendLine($"{InlinePushStatement(e.ReturnType, exprBody, inlineStack)} {terminator}");
                 }
                 // No label emitted for expression bodies — nothing jumps to it.
                 sb.Append(indent).AppendLine("}");
@@ -683,7 +703,7 @@ namespace Wacs.Compilation
             if (e.ReturnType != "void")
                 sb.Append(inner).AppendLine($"{e.ReturnType} __r = default;");
 
-            string rewritten = RewriteBody(e.Body, e.BodyIsExpression, e.ReturnType, endLabel, pcVar);
+            string rewritten = RewriteBody(e.Body, e.BodyIsExpression, e.ReturnType, endLabel, pcVar, inlineStack);
             foreach (var line in rewritten.Split('\n'))
             {
                 if (line.Length == 0) { sb.AppendLine(); continue; }
@@ -696,7 +716,7 @@ namespace Wacs.Compilation
             }
             else
             {
-                sb.Append(inner).AppendLine($"{endLabel}: _opStack.{pushOp}(__r); {terminator}");
+                sb.Append(inner).AppendLine($"{endLabel}: {InlinePushStatement(e.ReturnType, "__r", inlineStack)} {terminator}");
             }
 
             sb.Append(indent).AppendLine("}");
@@ -719,9 +739,9 @@ namespace Wacs.Compilation
         /// safe for every handler body in the codebase (no nested lambdas or local
         /// functions in any annotated method).</para>
         /// </summary>
-        private static string RewriteBody(string body, bool isExpression, string returnType, string endLabel, string pcVar)
+        private static string RewriteBody(string body, bool isExpression, string returnType, string endLabel, string pcVar, bool inlineStack)
         {
-            body = RewriteCtxAccess(body, pcVar);
+            body = RewriteCtxAccess(body, pcVar, inlineStack);
             if (isExpression)
             {
                 // The body is the raw expression (no braces, no `return` keyword).
@@ -773,13 +793,115 @@ namespace Wacs.Compilation
         /// (e.g. fully-qualified <c>Wacs.Core.Runtime.ExecContext.OpStack</c>, or a
         /// differently-named pc parameter).</para>
         /// </summary>
-        private static string RewriteCtxAccess(string body, string pcVar)
+        private static string RewriteCtxAccess(string body, string pcVar, bool inlineStack)
         {
             body = body
                 .Replace("ctx.OpStack", "_opStack")
                 .Replace("ctx.Frame.Locals.Span", "_localsSpan");
             if (pcVar != "pc")
                 body = System.Text.RegularExpressions.Regex.Replace(body, @"\bpc\b", pcVar);
+
+            if (!inlineStack)
+            {
+                // Cold paths route through the Fast method calls. Same bounds-check
+                // elision, but the JIT won't inline the call (Run is too big) — this
+                // costs one blr per pop/push, which is acceptable in cold code and
+                // keeps the cold sub-methods' frames small enough that recursive wasm
+                // (call_indirect.wast) doesn't overflow the stack.
+                body = body
+                    .Replace("_opStack.PopI32()",   "_opStack.PopI32Fast()")
+                    .Replace("_opStack.PopU32()",   "_opStack.PopU32Fast()")
+                    .Replace("_opStack.PopI64()",   "_opStack.PopI64Fast()")
+                    .Replace("_opStack.PopU64()",   "_opStack.PopU64Fast()")
+                    .Replace("_opStack.PopF32()",   "_opStack.PopF32Fast()")
+                    .Replace("_opStack.PopF64()",   "_opStack.PopF64Fast()")
+                    .Replace("_opStack.PopAny()",   "_opStack.PopAnyFast()")
+                    .Replace("_opStack.PushI32(",   "_opStack.PushI32Fast(")
+                    .Replace("_opStack.PushU32(",   "_opStack.PushU32Fast(")
+                    .Replace("_opStack.PushI64(",   "_opStack.PushI64Fast(")
+                    .Replace("_opStack.PushU64(",   "_opStack.PushU64Fast(")
+                    .Replace("_opStack.PushF32(",   "_opStack.PushF32Fast(")
+                    .Replace("_opStack.PushF64(",   "_opStack.PushF64Fast(")
+                    .Replace("_opStack.PushValue(", "_opStack.PushValueFast(");
+
+                body = System.Text.RegularExpressions.Regex.Replace(
+                    body,
+                    @"_opStack\.ShiftResults\(\s*(\(int\)\w+)\s*,\s*(\(int\)\w+)\s*\);",
+                    "if (_opStack.Count != $2) _opStack.ShiftResultsSlow($1, $2);");
+
+                return body;
+            }
+
+            // Inline handler-body pop/push calls. Same reasoning as the emit-time
+            // inline at the stack-param site — a `ctx.OpStack.PopI32()` or
+            // `ctx.OpStack.PushI32(x)` left as a method call would land as an
+            // out-of-line blr because Run is too large for the JIT to honour the
+            // Fast methods' [AggressiveInlining]. The pop rewrite expands to a
+            // single parenthesised expression (usable as a sub-expression in any
+            // context where the original method call appeared). The push rewrite
+            // expands to a self-contained `{ ... }` statement; callers emit it
+            // where a statement is legal (expression-body handlers and block bodies
+            // are both fine because the original call sites were statements).
+            body = body
+                .Replace("_opStack.PopI32()",
+                         "(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.Int32)")
+                .Replace("_opStack.PopU32()",
+                         "(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.UInt32)")
+                .Replace("_opStack.PopI64()",
+                         "(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.Int64)")
+                .Replace("_opStack.PopU64()",
+                         "(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.UInt64)")
+                .Replace("_opStack.PopF32()",
+                         "(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.Float32)")
+                .Replace("_opStack.PopF64()",
+                         "(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.Float64)");
+
+            // PopAny / PushValue / PushI32.. have an argument; do balanced-paren
+            // substitution that respects nesting. Handler bodies write things like
+            // `PushValue(new Value(ValType.Ref | (ValType)typeIdx, ai))` where the
+            // argument spans its own parentheses — a non-greedy regex would match
+            // the first `)` and get it wrong.
+            body = ReplaceBalancedCall(body, "_opStack.PushI32",
+                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.I32; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.Int32 = (" + arg + "); _opStack.Count++; }");
+            body = ReplaceBalancedCall(body, "_opStack.PushU32",
+                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.I32; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.UInt32 = (" + arg + "); _opStack.Count++; }");
+            body = ReplaceBalancedCall(body, "_opStack.PushI64",
+                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.I64; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.Int64 = (" + arg + "); _opStack.Count++; }");
+            body = ReplaceBalancedCall(body, "_opStack.PushU64",
+                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.I64; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.UInt64 = (" + arg + "); _opStack.Count++; }");
+            body = ReplaceBalancedCall(body, "_opStack.PushF32",
+                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.F32; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.Float32 = (" + arg + "); _opStack.Count++; }");
+            body = ReplaceBalancedCall(body, "_opStack.PushF64",
+                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.F64; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.Float64 = (" + arg + "); _opStack.Count++; }");
+            body = ReplaceBalancedCall(body, "_opStack.PushValue",
+                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count) = (" + arg + "); _opStack.Count++; }");
+
+            // PopAny: same inline expansion as the generator's stack-param pop path,
+            // but the body-text form is a sub-expression. Wrap in a `(expr)` that
+            // evaluates to the popped Value. Uses a C# statement expression emulation
+            // via an inline helper call would be cleaner but we don't have one; instead
+            // produce the expanded expression that both reads the slot and nulls the
+            // GcRef as an evaluation side effect.
+            //
+            //   (__s = Unsafe.Add(ref _registersRef, --_opStack.Count), __v = __s, __s.GcRef = null, __v)  <-- requires C# tuple-comma which doesn't exist.
+            //
+            // We can't model PopAny as a single expression without local mutations. So
+            // rewrite `var v = _opStack.PopAny();` style via a regex: match an lvalue
+            // declaration/assignment, emit the multi-line block with a scoped __s.
+            body = System.Text.RegularExpressions.Regex.Replace(
+                body,
+                @"(\b(?:var|Wacs\.Core\.Runtime\.Value|Value)\s+(\w+)\s*=\s*)_opStack\.PopAny\(\);",
+                "--_opStack.Count; Wacs.Core.Runtime.Value $2 = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count); System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).GcRef = null;");
+            // Same pattern for assignment-expressions used as statements, e.g.
+            // `span[i] = _opStack.PopAny();`. Matches any simple lvalue followed by =.
+            body = System.Text.RegularExpressions.Regex.Replace(
+                body,
+                @"([^;\n]+?)\s*=\s*_opStack\.PopAny\(\);",
+                "--_opStack.Count; $1 = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count); System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).GcRef = null;");
+            // Stray _opStack.PopAny() that escaped both rewrites (shouldn't happen in
+            // the current handler set, but fall back to the method call so broken
+            // output is surfaced as a compile error rather than silent mis-codegen).
+            body = body.Replace("_opStack.PopAny()", "_opStack.PopAnyFast()");
 
             // Inline the ShiftResults fast-path at emit time. The overwhelmingly common
             // branch case is one whose target's result-height equals the current stack
@@ -796,31 +918,244 @@ namespace Wacs.Compilation
             return body;
         }
 
-        private static string TypeToPop(string t) => t switch
+        // =====================================================================
+        // Inline pop / push emission.
+        // ---------------------------------------------------------------------
+        // The generator emits the full body of a Fast-path pop or push at each
+        // call site instead of delegating to OpStack.Pop*Fast / Push*Fast. The
+        // Fast methods are [AggressiveInlining] but RyuJIT declines to inline
+        // them — Run has ~500 switch cases and busts the JIT's inlining budget,
+        // so every Fast call was landing as an out-of-line blr. Inlining at
+        // emit time sidesteps the JIT's budget entirely and lets the JIT see
+        // "ldr → .Data.Int32 → stur" as local scalar flow on a single ref.
+        //
+        // Layout assumptions this emit encodes:
+        //   * ref Value _registersRef = ref _opStack.FirstRegister();  (hoisted in Run)
+        //   * _opStack.Count is a public int field on OpStack — ++/-- work in-place
+        //   * Unsafe.Add(ref T, int) is a .NET intrinsic lowering to `T* + index`
+        // Push emits avoid declaring a ref local — declaring `ref Value __s` per
+        // case scope bloated the Run frame enough to stack-overflow deeply
+        // recursive wasm (call_indirect.wast hits ~48 InvokeWasm levels). Using
+        // two `Unsafe.Add(ref _registersRef, _opStack.Count)` statements lets
+        // RyuJIT CSE the address computation without adding a named slot.
+        // PopV128 / PushV128 stay on the safe method calls — V128 path isn't
+        // hot-loop material and its semantics (VecRef wrapping) aren't worth
+        // duplicating per call site.
+        // =====================================================================
+
+        /// <summary>
+        /// Emit a pop into a freshly-declared local. Returns false if the type isn't
+        /// supported by the inline fast-path (e.g. V128), in which case the caller
+        /// should abort the case emit with a NotSupportedException.
+        /// When <paramref name="inline"/> is false, emit a method call to the
+        /// OpStack's <c>Pop*Fast</c> variant instead of an inline expression —
+        /// used by cold sub-methods to keep their frame small.
+        /// </summary>
+        private static bool EmitInlinePop(StringBuilder sb, string indent, string type, string name, bool inline)
         {
-            "int"    => "PopI32",
-            "uint"   => "PopU32",
-            "long"   => "PopI64",
-            "ulong"  => "PopU64",
-            "float"  => "PopF32",
-            "double" => "PopF64",
-            "Wacs.Core.Runtime.Value" => "PopAny",
+            string field = TypeToDataField(type);
+            if (!inline)
+            {
+                string popOp = TypeToFastPop(type);
+                if (popOp == null) return false;
+                sb.Append(indent).AppendLine($"{type} {name} = _opStack.{popOp}();");
+                return true;
+            }
+            if (field != null)
+            {
+                sb.Append(indent).AppendLine(
+                    $"{type} {name} = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.{field};");
+                return true;
+            }
+            if (type == "Wacs.Core.Runtime.Value")
+            {
+                // PopAny has a GcRef-null side effect — read the slot into the named
+                // local, then clear the GcRef to drop the outgoing managed reference.
+                // No ref local (see push comment for why — keeps the frame narrow).
+                sb.Append(indent).AppendLine($"--_opStack.Count;");
+                sb.Append(indent).AppendLine(
+                    $"Wacs.Core.Runtime.Value {name} = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count);");
+                sb.Append(indent).AppendLine(
+                    "System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).GcRef = null;");
+                return true;
+            }
+            if (type == "Wacs.Core.Runtime.V128")
+            {
+                sb.Append(indent).AppendLine($"{type} {name} = _opStack.PopV128();");
+                return true;
+            }
+            return false;
+        }
+
+        private static string TypeToFastPop(string t) => t switch
+        {
+            "int"    => "PopI32Fast",
+            "uint"   => "PopU32Fast",
+            "long"   => "PopI64Fast",
+            "ulong"  => "PopU64Fast",
+            "float"  => "PopF32Fast",
+            "double" => "PopF64Fast",
+            "Wacs.Core.Runtime.Value" => "PopAnyFast",
             "Wacs.Core.Runtime.V128"  => "PopV128",
             _ => null,
         };
 
-        private static string TypeToPush(string t) => t switch
+        private static string TypeToFastPush(string t) => t switch
         {
-            "int"    => "PushI32",
-            "uint"   => "PushU32",
-            "long"   => "PushI64",
-            "ulong"  => "PushU64",
-            "float"  => "PushF32",
-            "double" => "PushF64",
-            "Wacs.Core.Runtime.Value" => "PushValue",
+            "int"    => "PushI32Fast",
+            "uint"   => "PushU32Fast",
+            "long"   => "PushI64Fast",
+            "ulong"  => "PushU64Fast",
+            "float"  => "PushF32Fast",
+            "double" => "PushF64Fast",
+            "Wacs.Core.Runtime.Value" => "PushValueFast",
             "Wacs.Core.Runtime.V128"  => "PushV128",
             _ => null,
         };
+
+        /// <summary>
+        /// Produce the statements that push <paramref name="expr"/> as a value of
+        /// <paramref name="type"/>. Emits bare statements (no <c>{ ... }</c> wrap)
+        /// and declares no locals — see the header comment for why a <c>ref Value
+        /// __s</c> per case regressed stack consumption. Two Unsafe.Add reads
+        /// CSE to one address.
+        /// </summary>
+        private static string InlinePushStatement(string type, string expr, bool inline)
+        {
+            if (!inline)
+            {
+                string pushOp = TypeToFastPush(type);
+                return pushOp == null ? null : $"_opStack.{pushOp}({expr});";
+            }
+            string field = TypeToDataField(type);
+            string valType = TypeToValType(type);
+            if (field != null)
+            {
+                return
+                    $"System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.{valType}; " +
+                    $"System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.{field} = ({expr}); " +
+                    "_opStack.Count++;";
+            }
+            if (type == "Wacs.Core.Runtime.Value")
+            {
+                // Whole-Value assignment — copies Type, Data, and GcRef in one struct store.
+                return $"System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count) = ({expr}); _opStack.Count++;";
+            }
+            if (type == "Wacs.Core.Runtime.V128")
+            {
+                return $"_opStack.PushV128({expr});";
+            }
+            return null;
+        }
+
+        private static bool IsSupportedPushType(string t) =>
+            TypeToDataField(t) != null
+            || t == "Wacs.Core.Runtime.Value"
+            || t == "Wacs.Core.Runtime.V128";
+
+        /// <summary>
+        /// Map a CLR scalar type to the corresponding union field on
+        /// <c>Wacs.Core.Runtime.Value.Data</c>. Returns null for types that aren't
+        /// representable via a Data-field read/write (V128, whole Value).
+        /// </summary>
+        private static string TypeToDataField(string t) => t switch
+        {
+            "int"    => "Int32",
+            "uint"   => "UInt32",
+            "long"   => "Int64",
+            "ulong"  => "UInt64",
+            "float"  => "Float32",
+            "double" => "Float64",
+            _ => null,
+        };
+
+        private static string TypeToValType(string t) => t switch
+        {
+            "int"    => "I32",
+            "uint"   => "I32",
+            "long"   => "I64",
+            "ulong"  => "I64",
+            "float"  => "F32",
+            "double" => "F64",
+            _ => null,
+        };
+
+        /// <summary>
+        /// Find every occurrence of <paramref name="call"/> followed by <c>(...);</c>
+        /// and replace the call + its arguments + the trailing semicolon with the
+        /// string returned by <paramref name="rewrite"/>, which receives the balanced
+        /// argument text (parens removed). Paren matching respects nested parens
+        /// and ignores parens inside string / char literals.
+        ///
+        /// <para>Used to rewrite <c>_opStack.PushX(arg)</c> handler-body calls to an
+        /// inline <c>{ ... }</c> statement block, where <c>arg</c> may itself contain
+        /// arbitrary parens (e.g. <c>new Value(ValType.Ref | (ValType)typeIdx, ai)</c>).
+        /// A non-greedy regex would match the first <c>)</c> and fail on nested cases.</para>
+        /// </summary>
+        private static string ReplaceBalancedCall(string source, string call,
+                                                   System.Func<string, string> rewrite)
+        {
+            var sb = new StringBuilder(source.Length);
+            int i = 0;
+            while (i < source.Length)
+            {
+                int idx = source.IndexOf(call, i, System.StringComparison.Ordinal);
+                if (idx < 0)
+                {
+                    sb.Append(source, i, source.Length - i);
+                    break;
+                }
+                sb.Append(source, i, idx - i);
+                int p = idx + call.Length;
+                if (p >= source.Length || source[p] != '(')
+                {
+                    // Not a call — append the token verbatim and continue.
+                    sb.Append(source, idx, p - idx);
+                    i = p;
+                    continue;
+                }
+                // Walk from the `(` to the matching `)` respecting nesting + strings.
+                int depth = 1;
+                int argStart = p + 1;
+                int j = argStart;
+                bool inStr = false, inChar = false;
+                while (j < source.Length && depth > 0)
+                {
+                    char c = source[j];
+                    if (inStr)
+                    {
+                        if (c == '\\' && j + 1 < source.Length) { j += 2; continue; }
+                        if (c == '"') inStr = false;
+                    }
+                    else if (inChar)
+                    {
+                        if (c == '\\' && j + 1 < source.Length) { j += 2; continue; }
+                        if (c == '\'') inChar = false;
+                    }
+                    else
+                    {
+                        if (c == '"') inStr = true;
+                        else if (c == '\'') inChar = true;
+                        else if (c == '(') depth++;
+                        else if (c == ')') { depth--; if (depth == 0) break; }
+                    }
+                    j++;
+                }
+                if (depth != 0)
+                {
+                    // Unbalanced — bail out, emit the rest as-is.
+                    sb.Append(source, idx, source.Length - idx);
+                    break;
+                }
+                string arg = source.Substring(argStart, j - argStart);
+                int endOfCall = j + 1;
+                // Eat the trailing `;` if present (we're replacing a statement).
+                bool hadSemicolon = endOfCall < source.Length && source[endOfCall] == ';';
+                sb.Append(rewrite(arg));
+                i = hadSemicolon ? endOfCall + 1 : endOfCall;
+            }
+            return sb.ToString();
+        }
 
         private static string TypeToImmReader(string t) => t switch
         {
