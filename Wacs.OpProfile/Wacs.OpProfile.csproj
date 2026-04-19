@@ -11,4 +11,10 @@
     <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
     <ProjectReference Include="..\Wacs.WASIp1\Wacs.WASIp1.csproj" />
   </ItemGroup>
+  <!-- Samples checked into Data/ so the profiler is self-contained. PreserveNewest
+       copies them to bin/; the profiler still resolves paths relative to the repo
+       root (cwd when invoked via dotnet run), not the bin dir. -->
+  <ItemGroup>
+    <None Include="Data\**\*.wasm" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
