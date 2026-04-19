@@ -41,7 +41,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F64x2PMax = new (SimdCode.F64x2PMax, ExecuteF64x2PMax, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
         [OpHandler(SimdCode.F32x4Add)]
-        private static void ExecuteF32x4Add(ExecContext context)
+        internal static void ExecuteF32x4Add(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -55,7 +55,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         [OpHandler(SimdCode.F32x4Sub)]
-        private static void ExecuteF32x4Sub(ExecContext context)
+        internal static void ExecuteF32x4Sub(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -69,7 +69,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         [OpHandler(SimdCode.F32x4Mul)]
-        private static void ExecuteF32x4Mul(ExecContext context)
+        internal static void ExecuteF32x4Mul(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -83,7 +83,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         [OpHandler(SimdCode.F32x4Div)]
-        private static void ExecuteF32x4Div(ExecContext context)
+        internal static void ExecuteF32x4Div(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -96,7 +96,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4Min(ExecContext context)
+        internal static void ExecuteF32x4Min(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -109,7 +109,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4Max(ExecContext context)
+        internal static void ExecuteF32x4Max(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -131,7 +131,7 @@ namespace Wacs.Core.Instructions.Numeric
             return a < b ? a : b;
         }
 
-        private static void ExecuteF32x4PMin(ExecContext context)
+        internal static void ExecuteF32x4PMin(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -153,7 +153,7 @@ namespace Wacs.Core.Instructions.Numeric
             return a > b ? a : b;
         }
 
-        private static void ExecuteF32x4PMax(ExecContext context)
+        internal static void ExecuteF32x4PMax(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -167,7 +167,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         [OpHandler(SimdCode.F64x2Add)]
-        private static void ExecuteF64x2Add(ExecContext context)
+        internal static void ExecuteF64x2Add(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -179,7 +179,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         [OpHandler(SimdCode.F64x2Sub)]
-        private static void ExecuteF64x2Sub(ExecContext context)
+        internal static void ExecuteF64x2Sub(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -191,7 +191,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         [OpHandler(SimdCode.F64x2Mul)]
-        private static void ExecuteF64x2Mul(ExecContext context)
+        internal static void ExecuteF64x2Mul(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -203,7 +203,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         [OpHandler(SimdCode.F64x2Div)]
-        private static void ExecuteF64x2Div(ExecContext context)
+        internal static void ExecuteF64x2Div(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -214,7 +214,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Min(ExecContext context)
+        internal static void ExecuteF64x2Min(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -225,7 +225,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Max(ExecContext context)
+        internal static void ExecuteF64x2Max(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -245,7 +245,7 @@ namespace Wacs.Core.Instructions.Numeric
             return a < b ? a : b;
         }
 
-        private static void ExecuteF64x2PMin(ExecContext context)
+        internal static void ExecuteF64x2PMin(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
@@ -265,7 +265,7 @@ namespace Wacs.Core.Instructions.Numeric
             return a > b ? a : b;
         }
 
-        private static void ExecuteF64x2PMax(ExecContext context)
+        internal static void ExecuteF64x2PMax(ExecContext context)
         {
             V128 val2 = context.OpStack.PopV128();
             V128 val1 = context.OpStack.PopV128();
