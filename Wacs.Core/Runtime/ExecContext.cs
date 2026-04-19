@@ -95,6 +95,20 @@ namespace Wacs.Core.Runtime
         /// </summary>
         public Types.FunctionInstance? TailCallPending;
 
+        /// <summary>
+        /// Switch-runtime pc state, moved onto ExecContext so
+        /// <c>GeneratedDispatcher.Run</c> doesn't need <c>ref int pc / ref int pcBefore</c>
+        /// parameters — those refs alias-pinned the method's local pc to a stack slot
+        /// and prevented RyuJIT from register-allocating it across the hot dispatch loop.
+        /// With the fields here, Run hoists them into plain method locals at entry and
+        /// writes back on exit (via try/finally, so even exceptional exits leave
+        /// SwitchRuntime's handler-resume path a correct pc to re-enter at).
+        ///
+        /// <para>The polymorphic path doesn't touch these.</para>
+        /// </summary>
+        public int SwitchPc;
+        public int SwitchPcBefore;
+
         public ExecContext(Store store, RuntimeAttributes? attributes = default)
         {
             Store = store;
