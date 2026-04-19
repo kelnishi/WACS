@@ -22,6 +22,18 @@ namespace Wacs.Core.Instructions.SIMD
     /// </summary>
     internal static class VDelegateHandlers
     {
+        [OpHandler(SimdCode.I64x2ExtMulHighI32x4S)]
+        private static void I64x2ExtMulHighI32x4S(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2ExtMulHighI32x4S(ctx);
+
+        [OpHandler(SimdCode.I64x2ExtMulHighI32x4U)]
+        private static void I64x2ExtMulHighI32x4U(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2ExtMulHighI32x4U(ctx);
+
+        [OpHandler(SimdCode.I64x2ExtMulLowI32x4S)]
+        private static void I64x2ExtMulLowI32x4S(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2ExtMulLowI32x4S(ctx);
+
+        [OpHandler(SimdCode.I64x2ExtMulLowI32x4U)]
+        private static void I64x2ExtMulLowI32x4U(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2ExtMulLowI32x4U(ctx);
+
         [OpHandler(SimdCode.F32x4Abs)]
         private static void F32x4Abs(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF32x4Abs(ctx);
 
