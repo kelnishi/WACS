@@ -19,6 +19,20 @@ Captured 2026-04-18, pre-register-bank refactor. macOS / arm64 / net8.0 Release.
 | fib-rec(25)     |  123 ms     |   548 ms | **4.5×**  |
 | sum(5M)         |  878 ms     | 19726 ms | **22.5×** |
 
+### Post register-bank refactor
+
+Same benchmark after hoisting stack-operand + immediate locals out of
+each case into a shared bank declared at `TryDispatch` entry (see
+`README-RegisterBankDispatch.md`).
+
+| workload        | polymorphic | switch   | ratio   | vs baseline |
+|-----------------|-------------|----------|---------|-------------|
+| fib-iter(5M)    | 1214 ms     | 11255 ms | **9.3×**  | 2.4× faster |
+| fib-rec(25)     |  128 ms     |   349 ms | **2.7×**  | 1.7× faster |
+| sum(5M)         |  964 ms     | 10695 ms | **11.1×** | 2.0× faster |
+
+Spec-test suite wall time dropped 34s → 15s as well (2.3×).
+
 Wall-clock comparisons only — not iterations/sec, but the ratios are what
 matters.
 

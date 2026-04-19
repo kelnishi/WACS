@@ -265,6 +265,34 @@ namespace Wacs.Compilation
             sb.AppendLine("        /// </summary>");
             sb.AppendLine("        public static bool TryDispatch(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc, uint op)");
             sb.AppendLine("        {");
+            // Register-bank + immediate-union declarations — see
+            // Wacs.Core/Compilation/README-RegisterBankDispatch.md. All pops and
+            // immediate reads land in these shared slots instead of per-case named
+            // locals, collapsing the method frame from ~20 KiB/activation to ~200 B
+            // and giving RyuJIT a chance to register-allocate them.
+            sb.AppendLine("            // Stack-operand register bank (reused across cases).");
+            sb.AppendLine("            int    _a32 = 0, _b32 = 0, _c32 = 0;");
+            sb.AppendLine("            uint   _au32 = 0, _bu32 = 0, _cu32 = 0;");
+            sb.AppendLine("            long   _a64 = 0, _b64 = 0, _c64 = 0;");
+            sb.AppendLine("            ulong  _au64 = 0, _bu64 = 0, _cu64 = 0;");
+            sb.AppendLine("            float  _af32 = 0, _bf32 = 0, _cf32 = 0;");
+            sb.AppendLine("            double _af64 = 0, _bf64 = 0, _cf64 = 0;");
+            sb.AppendLine("            V128   _avec = default, _bvec = default, _cvec = default;");
+            sb.AppendLine("            Value  _aval = default, _bval = default, _cval = default;");
+            sb.AppendLine("            // Immediate union slots — every immediate read writes here. Eight slots");
+            sb.AppendLine("            // cover the widest handler (br_on_cast takes 6 immediates: flags, rt1, rt2,");
+            sb.AppendLine("            // targetPc, resultsHeight, arity).");
+            sb.AppendLine("            ImmUnion _imm0 = default, _imm1 = default, _imm2 = default, _imm3 = default;");
+            sb.AppendLine("            ImmUnion _imm4 = default, _imm5 = default, _imm6 = default, _imm7 = default;");
+            sb.AppendLine("            // Suppress \"unused\" warnings for unused slots in any given path.");
+            sb.AppendLine("            _ = _a32 + _b32 + _c32; _ = _au32 + _bu32 + _cu32;");
+            sb.AppendLine("            _ = _a64 + _b64 + _c64; _ = _au64 + _bu64 + _cu64;");
+            sb.AppendLine("            _ = _af32 + _bf32 + _cf32; _ = _af64 + _bf64 + _cf64;");
+            sb.AppendLine("            _ = _avec; _ = _bvec; _ = _cvec;");
+            sb.AppendLine("            _ = _aval; _ = _bval; _ = _cval;");
+            sb.AppendLine("            _ = _imm0; _ = _imm1; _ = _imm2; _ = _imm3;");
+            sb.AppendLine("            _ = _imm4; _ = _imm5; _ = _imm6; _ = _imm7;");
+            sb.AppendLine();
             sb.AppendLine("            switch (op)");
             sb.AppendLine("            {");
             foreach (var e in ordered)
@@ -288,27 +316,89 @@ namespace Wacs.Compilation
             sb.AppendLine($"                case 0x{e.OpKey:X6}: // {e.EnumName}.{e.EnumMember} — {e.MethodName}");
             sb.AppendLine("                {");
 
-            // 1. Read immediates FIRST (left-to-right), advancing pc. Order matters — a handler
-            //    could, in principle, have immediate-then-stack interleaved, but WASM semantics
-            //    separate them: immediates are encoded in the instruction, stack values in the
-            //    operand stack. Read all immediates before touching the stack.
+            // Per-type usage counters so we know which bank slot to assign each
+            // stack / immediate operand.
+            var bankCount = new Dictionary<string, int>();
+            var immCount = 0;
+            var paramSlot = new Dictionary<string, string>();
+
+            string BankSlot(string type)
+            {
+                var key = type;
+                bankCount.TryGetValue(key, out int n);
+                bankCount[key] = n + 1;
+                var prefix = n switch { 0 => "_a", 1 => "_b", _ => "_c" };
+                var suffix = type switch
+                {
+                    "int"                     => "32",
+                    "uint"                    => "u32",
+                    "long"                    => "64",
+                    "ulong"                   => "u64",
+                    "float"                   => "f32",
+                    "double"                  => "f64",
+                    "Wacs.Core.Runtime.V128"  => "vec",
+                    "Wacs.Core.Runtime.Value" => "val",
+                    _ => null,
+                };
+                return suffix == null ? null : prefix + suffix;
+            }
+
+            string ImmSlotName() => immCount switch
+            {
+                0 => "_imm0", 1 => "_imm1", 2 => "_imm2", 3 => "_imm3",
+                4 => "_imm4", 5 => "_imm5", 6 => "_imm6", 7 => "_imm7",
+                _ => null,
+            };
+
+            string ImmField(string type) => type switch
+            {
+                "int"                    => "S32",
+                "uint"                   => "U32",
+                "long"                   => "S64",
+                "ulong"                  => "U64",
+                "float"                  => "F32",
+                "double"                 => "F64",
+                "byte"                   => "U8",
+                "Wacs.Core.Runtime.V128" => "V128",
+                _                        => null,
+            };
+
+            // 1. Read immediates FIRST — assign each to a shared ImmUnion slot.
             foreach (var p in e.Parameters.Where(p => p.Kind == ParamKind.Immediate))
             {
                 var reader = TypeToImmReader(p.Type);
-                if (reader == null)
+                var field = ImmField(p.Type);
+                var slot = ImmSlotName();
+                if (reader == null || field == null || slot == null)
                 {
                     sb.AppendLine($"                    // skipped — unsupported [Imm] type {p.Type}");
                     sb.AppendLine("                    return false;");
                     sb.AppendLine("                }");
                     return;
                 }
-                sb.AppendLine($"                    {p.Type} {p.Name} = StreamReader.{reader}(code, ref pc);");
+                sb.AppendLine($"                    {slot}.{field} = StreamReader.{reader}(code, ref pc);");
+                paramSlot[p.Name] = $"{slot}.{field}";
+                immCount++;
             }
 
-            // 2. Pop stack operands in REVERSE parameter order so i1/i2 pop naturally (WASM pushes
-            //    left-to-right; we pop right-to-left). This matches the pre-existing convention
-            //    used by every polymorphic Execute method.
+            // 2. Pop stack operands in REVERSE parameter order into typed bank slots.
             var stackParams = e.Parameters.Where(p => p.Kind == ParamKind.Stack).ToList();
+            // Bank slot assignment mirrors parameter order (left-to-right) even though
+            // pops happen in reverse; we pop into the correct slot directly.
+            var stackSlots = new string[stackParams.Count];
+            for (int i = 0; i < stackParams.Count; i++)
+            {
+                var slot = BankSlot(stackParams[i].Type);
+                if (slot == null)
+                {
+                    sb.AppendLine($"                    // skipped — unsupported stack parameter type {stackParams[i].Type}");
+                    sb.AppendLine("                    return false;");
+                    sb.AppendLine("                }");
+                    return;
+                }
+                stackSlots[i] = slot;
+                paramSlot[stackParams[i].Name] = slot;
+            }
             for (int i = stackParams.Count - 1; i >= 0; i--)
             {
                 var p = stackParams[i];
@@ -320,13 +410,15 @@ namespace Wacs.Compilation
                     sb.AppendLine("                }");
                     return;
                 }
-                sb.AppendLine($"                    {p.Type} {p.Name} = ctx.OpStack.{popOp}();");
+                sb.AppendLine($"                    {stackSlots[i]} = ctx.OpStack.{popOp}();");
             }
 
-            // 3. Emit the body via a static local function so multi-return / throw bodies port
-            //    verbatim. The JIT inlines small static locals — no allocation, no closure.
-            //    Parameters of the local function match the original method signature order,
-            //    with ExecContext and `ref int pc` forwarded as-is when present.
+            // 3. Emit the body as a static local function. Args come from bank/imm
+            //    slots instead of per-case named locals — the JIT will (usually)
+            //    inline the local function, leaving handler bodies referencing the
+            //    shared slots directly. Keeping the local-function wrapper preserves
+            //    handler-body portability (the bodies still look like the polymorphic
+            //    methods they came from).
             var localSigParts = e.Parameters.Select(p => p.Kind switch
             {
                 ParamKind.Ctx       => $"ExecContext {p.Name}",
@@ -339,13 +431,13 @@ namespace Wacs.Compilation
             sb.AppendLine($"                    static {e.ReturnType} __Op({paramList})");
             sb.AppendLine(body);
 
-            // 4. Call the local function with args in original parameter order.
+            // 4. Call the local function with bank/imm slots as the args.
             var argList = string.Join(", ", e.Parameters.Select(p => p.Kind switch
             {
                 ParamKind.Ctx   => "ctx",
                 ParamKind.RefPc => "ref pc",
                 ParamKind.Code  => "code",
-                _               => p.Name,
+                _               => paramSlot[p.Name],
             }));
 
             if (e.ReturnType == "void")
