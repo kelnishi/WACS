@@ -86,6 +86,31 @@ tight loops (within 5-13%). Remaining gap is likely just the outer
 `TryDispatch` prefix-switch call overhead — future work could inline
 the prefix switch into `SwitchRuntime.Run` directly.
 
+### Tried and reverted: void return from TryDispatch
+
+Replaced `bool TryDispatch` (+ caller `if (!...) throw`) with
+`void TryDispatch` (+ `default: throw new NotSupportedException(...)`).
+Idea was to kill the per-op bool-check branch in the caller — the
+default case is unreachable in practice (all opcodes covered).
+
+Regressed by ~20%:
+
+| workload        | with bool | with void |
+|-----------------|-----------|-----------|
+| fib-iter(5M)    | **1.13×** | 1.35×     |
+| fib-rec(25)     | **1.04×** | 1.10×     |
+| sum(5M)         | **1.05×** | 1.31×     |
+
+Likely cause: the `throw new NotSupportedException($"...{op:X6}...")`
+in `default:` brings an interpolated-string builder + exception ctor
+into the method's CFG. RyuJIT adapts its code layout / register
+allocation to accommodate the throwing path — even though it's never
+taken, the analysis changes enough to hurt the non-throwing cases.
+
+Reverted. The bool-check + per-op branch is demonstrably cheaper than
+dragging exception machinery into the method body, at least with
+RyuJIT's current heuristics.
+
 Wall-clock comparisons only — not iterations/sec, but the ratios are what
 matters.
 
