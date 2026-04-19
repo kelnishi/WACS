@@ -41,6 +41,21 @@ namespace Wacs.Core.Runtime
         /// </summary>
         public int SwitchMaxCallStack = 48;
 
+        /// <summary>
+        /// When true, <see cref="Wacs.Core.Compilation.BytecodeCompiler.Compile"/>
+        /// runs <see cref="Wacs.Core.Compilation.StreamFusePass"/> as its final step:
+        /// common 2- and 3-op wasm sequences (local.get + local.set, i32.const +
+        /// local.set, local.get + i32.const + i32.add, etc.) are rewritten into
+        /// single WacsCode super-ops. Each match saves one or two switch-dispatches
+        /// per execution and shrinks the stream by 1–2 bytes per fuse.
+        ///
+        /// <para>Off by default — the switch runtime executes the unfused stream
+        /// with identical semantics, and the fuse pass adds non-trivial compile-time
+        /// work (one walk over the function's bytecode per Compile). Flip on per
+        /// runtime for benchmark runs and production-style workloads.</para>
+        /// </summary>
+        public bool UseSwitchSuperInstructions = false;
+
         public int MaxFunctionLocals = 2048;
 
         public int MaxOpStack = 2048;

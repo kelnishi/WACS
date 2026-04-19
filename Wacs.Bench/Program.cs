@@ -8,7 +8,7 @@ using System.Diagnostics;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 
-static long RunOne(string wasmPath, bool useSwitch, bool superInst, bool useMinimal, Bench b)
+static long RunOne(string wasmPath, bool useSwitch, bool superInst, bool useMinimal, bool switchSuper, Bench b)
 {
     var bytes = File.ReadAllBytes(wasmPath);
     using var ms = new MemoryStream(bytes);
@@ -18,6 +18,10 @@ static long RunOne(string wasmPath, bool useSwitch, bool superInst, bool useMini
     runtime.UseSwitchRuntime = useSwitch;
     runtime.SuperInstruction = superInst;
     Wacs.Core.Compilation.SwitchRuntime.UseMinimal = useMinimal;
+    // Switch-runtime-side superinstructions (phase G StreamFusePass). Orthogonal
+    // to polymorphic's SuperInstruction — different fusion rules, different cost
+    // model. Configured via the same WasmRuntime's ExecContext.Attributes.
+    runtime.ExecContext.Attributes.UseSwitchSuperInstructions = switchSuper;
 
     var modInst = runtime.InstantiateModule(module,
         new RuntimeOptions { SkipModuleValidation = true });
@@ -43,12 +47,13 @@ static long RunOne(string wasmPath, bool useSwitch, bool superInst, bool useMini
 
 static void RunBench(string wasmPath, Bench b)
 {
-    long polyMs = RunOne(wasmPath, useSwitch: false, superInst: false, useMinimal: false, b);
-    long superMs = RunOne(wasmPath, useSwitch: false, superInst: true, useMinimal: false, b);
-    long switchMs = RunOne(wasmPath, useSwitch: true, superInst: false, useMinimal: false, b);
-    long minMs = RunOne(wasmPath, useSwitch: true, superInst: false, useMinimal: true, b);
-    Console.WriteLine($"  {b.Name,-18} poly={polyMs,5}   super={superMs,5}   switch={switchMs,5}   min={minMs,5}   " +
-                      $"min/poly={(double)minMs/polyMs,5:F2}x   min/super={(double)minMs/superMs,5:F2}x");
+    long polyMs   = RunOne(wasmPath, useSwitch: false, superInst: false, useMinimal: false, switchSuper: false, b);
+    long superMs  = RunOne(wasmPath, useSwitch: false, superInst: true,  useMinimal: false, switchSuper: false, b);
+    long switchMs = RunOne(wasmPath, useSwitch: true,  superInst: false, useMinimal: false, switchSuper: false, b);
+    long swFuseMs = RunOne(wasmPath, useSwitch: true,  superInst: false, useMinimal: false, switchSuper: true,  b);
+    long minMs    = RunOne(wasmPath, useSwitch: true,  superInst: false, useMinimal: true,  switchSuper: false, b);
+    Console.WriteLine($"  {b.Name,-18} poly={polyMs,5}   super={superMs,5}   switch={switchMs,5}   swFuse={swFuseMs,5}   min={minMs,5}   " +
+                      $"fuse/switch={(double)swFuseMs/switchMs,5:F2}x   min/super={(double)minMs/superMs,5:F2}x");
 }
 
 var here = AppContext.BaseDirectory;

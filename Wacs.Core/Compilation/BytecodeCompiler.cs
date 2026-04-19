@@ -42,7 +42,8 @@ namespace Wacs.Core.Compilation
         public static CompiledFunction Compile(
             InstructionBase[] linked,
             FunctionType signature,
-            int localsCount)
+            int localsCount,
+            bool useSuperInstructions = false)
         {
             // --- Pass 1: sizing + block maps -------------------------------------------------
             var streamOffset = new int[linked.Length + 1];
@@ -126,8 +127,23 @@ namespace Wacs.Core.Compilation
                 }
             }
 
-            return new CompiledFunction(buf, localsCount, signature,
-                                        handlers?.ToArray() ?? System.Array.Empty<HandlerEntry>());
+            var fn = new CompiledFunction(buf, localsCount, signature,
+                                          handlers?.ToArray() ?? System.Array.Empty<HandlerEntry>());
+
+            // Optional fusion pass. Opt-in via runtime flag — disabled builds of the
+            // runtime see an unchanged stream and the fuser file is just dead code.
+            // Rewriting the stream is idempotent and doesn't change semantics, so
+            // enabling/disabling at runtime only affects perf, not correctness.
+            //
+            // We hand the fuser our own streamOffset[] — it encodes each op's exact
+            // start position, computed authoritatively by SizeOf above — instead of
+            // having the fuser walk the stream itself. A standalone walker has to
+            // re-derive every prefix-op immediate layout (SIMD memargs, relaxed
+            // opcodes, etc.); passing streamOffset skips that entirely.
+            if (useSuperInstructions)
+                fn = StreamFusePass.Apply(fn, streamOffset);
+
+            return fn;
         }
 
         /// <summary>Byte footprint of <paramref name="inst"/> in the annotated stream.</summary>
