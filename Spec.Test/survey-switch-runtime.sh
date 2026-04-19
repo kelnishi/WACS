@@ -3,7 +3,7 @@
 # through RunWastOnSwitch one-at-a-time via the `Single` knob — so a managed-
 # stack overflow in one recursive test doesn't crash the rest of the suite.
 #
-# Overwrites bin/Debug/net8.0/testsettings.json per iteration to avoid a full
+# Overwrites bin/Release/net8.0/testsettings.json per iteration to avoid a full
 # rebuild between tests. Restores the original settings on completion.
 #
 # Run from repo root: ./Spec.Test/survey-switch-runtime.sh
@@ -13,12 +13,12 @@ set -u
 cd "$(dirname "$0")/.."
 TESTS_DIR="Spec.Test/generated-json"
 SETTINGS_SRC="Spec.Test/testsettings.json"
-SETTINGS_OUT="Spec.Test/bin/Debug/net8.0/testsettings.json"
+SETTINGS_OUT="Spec.Test/bin/Release/net8.0/testsettings.json"
 REPORT="/tmp/switch_survey.txt"
 > "$REPORT"
 
 # Ensure the test DLL exists before we start stamping testsettings into bin/.
-dotnet build Spec.Test/Spec.Test.csproj -c Debug --verbosity quiet >/dev/null 2>&1
+dotnet build Spec.Test/Spec.Test.csproj -c Release --verbosity quiet >/dev/null 2>&1
 
 PASS=0; FAIL=0; CRASH=0; SKIP=0
 TOTAL=$(ls "$TESTS_DIR" | wc -l | tr -d ' ')
@@ -55,7 +55,7 @@ for wast in $(ls "$TESTS_DIR"); do
   "SkipWasts": []
 }
 EOF
-  OUT=$(dotnet test Spec.Test/Spec.Test.csproj -c Debug --verbosity quiet --filter "RunWastOnSwitch" --no-build 2>&1 | tail -3)
+  OUT=$(dotnet test Spec.Test/Spec.Test.csproj -c Release --verbosity quiet --filter "RunWastOnSwitch" --no-build 2>&1 | tail -3)
   if echo "$OUT" | grep -q "Passed!"; then
     echo "[$i/$TOTAL] $wast: PASS"; PASS=$((PASS+1)); echo "PASS $wast" >> "$REPORT"
   elif echo "$OUT" | grep -q "Failed!"; then

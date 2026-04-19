@@ -8,7 +8,7 @@ using System.Diagnostics;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 
-static long RunOne(string wasmPath, bool useSwitch, Bench b)
+static long RunOne(string wasmPath, bool useSwitch, bool superInst, bool useMinimal, Bench b)
 {
     var bytes = File.ReadAllBytes(wasmPath);
     using var ms = new MemoryStream(bytes);
@@ -16,6 +16,8 @@ static long RunOne(string wasmPath, bool useSwitch, Bench b)
 
     var runtime = new WasmRuntime();
     runtime.UseSwitchRuntime = useSwitch;
+    runtime.SuperInstruction = superInst;
+    Wacs.Core.Compilation.SwitchRuntime.UseMinimal = useMinimal;
 
     var modInst = runtime.InstantiateModule(module,
         new RuntimeOptions { SkipModuleValidation = true });
@@ -41,10 +43,12 @@ static long RunOne(string wasmPath, bool useSwitch, Bench b)
 
 static void RunBench(string wasmPath, Bench b)
 {
-    long polyMs = RunOne(wasmPath, useSwitch: false, b);
-    long switchMs = RunOne(wasmPath, useSwitch: true, b);
-    double ratio = (double)switchMs / polyMs;
-    Console.WriteLine($"  {b.Name,-20} poly={polyMs,6}ms   switch={switchMs,6}ms   ratio={ratio,5:F2}x");
+    long polyMs = RunOne(wasmPath, useSwitch: false, superInst: false, useMinimal: false, b);
+    long superMs = RunOne(wasmPath, useSwitch: false, superInst: true, useMinimal: false, b);
+    long switchMs = RunOne(wasmPath, useSwitch: true, superInst: false, useMinimal: false, b);
+    long minMs = RunOne(wasmPath, useSwitch: true, superInst: false, useMinimal: true, b);
+    Console.WriteLine($"  {b.Name,-18} poly={polyMs,5}   super={superMs,5}   switch={switchMs,5}   min={minMs,5}   " +
+                      $"min/poly={(double)minMs/polyMs,5:F2}x   min/super={(double)minMs/superMs,5:F2}x");
 }
 
 var here = AppContext.BaseDirectory;
@@ -56,8 +60,8 @@ Console.WriteLine($"  ----------------------------------------------------------
 
 // Tight loop — tests dispatch throughput on i32 arith + branches.
 RunBench(fibWasm, new Bench("fib-iter(5M)", "fib",     5_000_000, Repeats: 3));
-// Exponential recursion — tests call / frame setup dominance.
-RunBench(fibWasm, new Bench("fib-rec(25)",  "fib-rec",         25, Repeats: 3));
+// mul-heavy loop — fac iterates 20 times per call, same dispatch mix as fib.
+RunBench(fibWasm, new Bench("fac(20)x250k", "fac",            20, Repeats: 250_000));
 // i64 accumulate — different dispatch case, fewer branches.
 RunBench(fibWasm, new Bench("sum(5M)",      "sum",     5_000_000, Repeats: 3));
 
