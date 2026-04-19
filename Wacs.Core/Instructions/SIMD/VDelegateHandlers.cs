@@ -16,29 +16,11 @@ namespace Wacs.Core.Instructions.SIMD
     /// <summary>
     /// [OpHandler] entries that delegate to the polymorphic NumericInst.ExecuteX
     /// implementations. Every handler here is a one-line call to the already-tested
-    /// polymorphic body — same pop/push semantics via ctx.OpStack. This keeps the
-    /// switch runtime close to feature-complete for SIMD without re-implementing
-    /// 100+ lane-expansion bodies; correctness parity is automatic.
-    ///
-    /// Note: relaxed-simd opcodes (0x100+) are NOT wired through this file — their
-    /// SimdCode values exceed the byte range our dispatcher packs as the secondary
-    /// opcode byte, causing enum-value collisions with the core set. Those are
-    /// deferred until the dispatcher gets multi-byte secondary-opcode support.
+    /// polymorphic body — same pop/push semantics via ctx.OpStack. Covers the core
+    /// SIMD set plus the relaxed-SIMD family (0x100+).
     /// </summary>
     internal static class VDelegateHandlers
     {
-        [OpHandler(SimdCode.I64x2ExtMulHighI32x4S)]
-        private static void I64x2ExtMulHighI32x4S(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2ExtMulHighI32x4S(ctx);
-
-        [OpHandler(SimdCode.I64x2ExtMulHighI32x4U)]
-        private static void I64x2ExtMulHighI32x4U(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2ExtMulHighI32x4U(ctx);
-
-        [OpHandler(SimdCode.I64x2ExtMulLowI32x4S)]
-        private static void I64x2ExtMulLowI32x4S(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2ExtMulLowI32x4S(ctx);
-
-        [OpHandler(SimdCode.I64x2ExtMulLowI32x4U)]
-        private static void I64x2ExtMulLowI32x4U(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2ExtMulLowI32x4U(ctx);
-
         [OpHandler(SimdCode.F32x4Abs)]
         private static void F32x4Abs(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF32x4Abs(ctx);
 
@@ -74,6 +56,18 @@ namespace Wacs.Core.Instructions.SIMD
 
         [OpHandler(SimdCode.F32x4PMin)]
         private static void F32x4PMin(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF32x4PMin(ctx);
+
+        [OpHandler(SimdCode.F32x4RelaxedMAdd)]
+        private static void F32x4RelaxedMAdd(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF32x4RelaxedMAdd(ctx);
+
+        [OpHandler(SimdCode.F32x4RelaxedMax)]
+        private static void F32x4RelaxedMax(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF32x4RelaxedMax(ctx);
+
+        [OpHandler(SimdCode.F32x4RelaxedMin)]
+        private static void F32x4RelaxedMin(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF32x4RelaxedMin(ctx);
+
+        [OpHandler(SimdCode.F32x4RelaxedNMAdd)]
+        private static void F32x4RelaxedNMAdd(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF32x4RelaxedNMAdd(ctx);
 
         [OpHandler(SimdCode.F32x4Sqrt)]
         private static void F32x4Sqrt(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF32x4Sqrt(ctx);
@@ -116,6 +110,18 @@ namespace Wacs.Core.Instructions.SIMD
 
         [OpHandler(SimdCode.F64x2PromoteLowF32x4)]
         private static void F64x2PromoteLowF32x4(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF64x2PromoteLowF32x4(ctx);
+
+        [OpHandler(SimdCode.F64x2RelaxedMAdd)]
+        private static void F64x2RelaxedMAdd(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF64x2RelaxedMAdd(ctx);
+
+        [OpHandler(SimdCode.F64x2RelaxedMax)]
+        private static void F64x2RelaxedMax(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF64x2RelaxedMax(ctx);
+
+        [OpHandler(SimdCode.F64x2RelaxedMin)]
+        private static void F64x2RelaxedMin(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF64x2RelaxedMin(ctx);
+
+        [OpHandler(SimdCode.F64x2RelaxedNMAdd)]
+        private static void F64x2RelaxedNMAdd(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF64x2RelaxedNMAdd(ctx);
 
         [OpHandler(SimdCode.F64x2Sqrt)]
         private static void F64x2Sqrt(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteF64x2Sqrt(ctx);
@@ -192,6 +198,15 @@ namespace Wacs.Core.Instructions.SIMD
         [OpHandler(SimdCode.I16x8Q15MulRSatS)]
         private static void I16x8Q15MulRSatS(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI16x8Q15MulRSatS(ctx);
 
+        [OpHandler(SimdCode.I16x8RelaxedDotI8x16I7x16S)]
+        private static void I16x8RelaxedDotI8x16I7x16S(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI16x8RelaxedDotI8x16I7x16S(ctx);
+
+        [OpHandler(SimdCode.I16x8RelaxedLaneselect)]
+        private static void I16x8RelaxedLaneselect(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI16x8RelaxedLaneselect(ctx);
+
+        [OpHandler(SimdCode.I16x8RelaxedQ15MulrS)]
+        private static void I16x8RelaxedQ15MulrS(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI16x8RelaxedQ15MulrS(ctx);
+
         [OpHandler(SimdCode.I16x8Shl)]
         private static void I16x8Shl(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI16x8Shl(ctx);
 
@@ -258,6 +273,24 @@ namespace Wacs.Core.Instructions.SIMD
         [OpHandler(SimdCode.I32x4Neg)]
         private static void I32x4Neg(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI32x4Neg(ctx);
 
+        [OpHandler(SimdCode.I32x4RelaxedDotI8x16I7x16AddS)]
+        private static void I32x4RelaxedDotI8x16I7x16AddS(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI32x4RelaxedDotI8x16I7x16AddS(ctx);
+
+        [OpHandler(SimdCode.I32x4RelaxedLaneselect)]
+        private static void I32x4RelaxedLaneselect(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI32x4RelaxedLaneselect(ctx);
+
+        [OpHandler(SimdCode.I32x4RelaxedTruncF32x4S)]
+        private static void I32x4RelaxedTruncF32x4S(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI32x4RelaxedTruncF32x4S(ctx);
+
+        [OpHandler(SimdCode.I32x4RelaxedTruncF32x4U)]
+        private static void I32x4RelaxedTruncF32x4U(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI32x4RelaxedTruncF32x4U(ctx);
+
+        [OpHandler(SimdCode.I32x4RelaxedTruncF64x2SZero)]
+        private static void I32x4RelaxedTruncF64x2SZero(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI32x4RelaxedTruncF64x2SZero(ctx);
+
+        [OpHandler(SimdCode.I32x4RelaxedTruncF64x2UZero)]
+        private static void I32x4RelaxedTruncF64x2UZero(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI32x4RelaxedTruncF64x2UZero(ctx);
+
         [OpHandler(SimdCode.I32x4Shl)]
         private static void I32x4Shl(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI32x4Shl(ctx);
 
@@ -282,6 +315,18 @@ namespace Wacs.Core.Instructions.SIMD
         [OpHandler(SimdCode.I64x2Abs)]
         private static void I64x2Abs(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2Abs(ctx);
 
+        [OpHandler(SimdCode.I64x2ExtMulHighI32x4S)]
+        private static void I64x2ExtMulHighI32x4S(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2ExtMulHighI32x4S(ctx);
+
+        [OpHandler(SimdCode.I64x2ExtMulHighI32x4U)]
+        private static void I64x2ExtMulHighI32x4U(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2ExtMulHighI32x4U(ctx);
+
+        [OpHandler(SimdCode.I64x2ExtMulLowI32x4S)]
+        private static void I64x2ExtMulLowI32x4S(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2ExtMulLowI32x4S(ctx);
+
+        [OpHandler(SimdCode.I64x2ExtMulLowI32x4U)]
+        private static void I64x2ExtMulLowI32x4U(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2ExtMulLowI32x4U(ctx);
+
         [OpHandler(SimdCode.I64x2ExtendHighI32x4S)]
         private static void I64x2ExtendHighI32x4S(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2ExtendHighI32x4S(ctx);
 
@@ -299,6 +344,9 @@ namespace Wacs.Core.Instructions.SIMD
 
         [OpHandler(SimdCode.I64x2Neg)]
         private static void I64x2Neg(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2Neg(ctx);
+
+        [OpHandler(SimdCode.I64x2RelaxedLaneselect)]
+        private static void I64x2RelaxedLaneselect(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2RelaxedLaneselect(ctx);
 
         [OpHandler(SimdCode.I64x2Shl)]
         private static void I64x2Shl(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI64x2Shl(ctx);
@@ -344,6 +392,12 @@ namespace Wacs.Core.Instructions.SIMD
 
         [OpHandler(SimdCode.I8x16Popcnt)]
         private static void I8x16Popcnt(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI8x16Popcnt(ctx);
+
+        [OpHandler(SimdCode.I8x16RelaxedLaneselect)]
+        private static void I8x16RelaxedLaneselect(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI8x16RelaxedLaneselect(ctx);
+
+        [OpHandler(SimdCode.I8x16RelaxedSwizzle)]
+        private static void I8x16RelaxedSwizzle(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI8x16RelaxedSwizzle(ctx);
 
         [OpHandler(SimdCode.I8x16Shl)]
         private static void I8x16Shl(ExecContext ctx) => Wacs.Core.Instructions.Numeric.NumericInst.ExecuteI8x16Shl(ctx);
