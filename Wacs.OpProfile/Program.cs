@@ -84,11 +84,29 @@ static List<ModuleSpec> ParseSpecs(string[] args)
     // profiler expects cwd = repo root.
     var defaults = new List<ModuleSpec>
     {
-        new("coremark", "Wacs.Console/Data/coremark.wasm",      null, true, 120_000, null),
-        new("wasm2wat", "Wacs.Console/Data/wasm2wat.wasm",      null, true, 120_000,
-            new[] { "wasm2wat", "Wacs.Console/Data/coremark.wasm" }),
-        new("perl",     "Wacs.Console/Data/andrewsample/perl.wasm", null, true, 120_000,
-            new[] { "perl", "-e", "for (1..100) { print \"ok\\n\"; }" }),
+        new("coremark",    "Wacs.Console/Data/coremark.wasm",    null, true, 120_000, null, false),
+        new("wasm2wat",    "Wacs.Console/Data/wasm2wat.wasm",    null, true, 120_000,
+            new[] { "wasm2wat", "Wacs.Console/Data/coremark.wasm" }, false),
+        new("perl",        "Wacs.Console/Data/andrewsample/perl.wasm", null, true, 120_000,
+            new[] { "perl", "-e", "for (1..100) { print \"ok\\n\"; }" }, false),
+        // f64-numeric: a synthetic matmul + dot-product kernel hand-written to
+        // dominate execution with f64.load / f64.mul / f64.add plus linear-memory
+        // i32 address arithmetic. Designed to be the counterpoint to coremark —
+        // if a hot/cold split demotes f64 ops to a sub-method, this is the
+        // workload that pays for it. Starts via a `(start $run)` wasm start
+        // function, so no WASI wiring is needed.
+        new("f64-numeric", "Wacs.OpProfile/Data/f64-numeric.wasm",  null, false, 120_000, null, false),
+        // spectra: an emscripten-compiled C++ eigenvalue-solver library (Spectra on
+        // top of Eigen). Today this entry fails parsing — the binary was built
+        // with emscripten's *old* exception-handling proposal (opcode 0x06 `try`
+        // etc.), which WACS doesn't support (only the newer `try_table`
+        // variant). Kept in the default list as a forward-compatibility slot:
+        // re-building spectra with `-fwasm-exceptions=new` (or dropping -fexceptions
+        // entirely) produces a module WACS can parse, and the Emscripten=true
+        // stubs below are ready to satisfy its env.* / embind imports for a
+        // __wasm_call_ctors-only profile. Until then we accept the failure.
+        new("spectra",     "Wacs.OpProfile/Data/spectra.wasm",
+            "__wasm_call_ctors", false, 120_000, null, true),
     };
 
     if (args.Length == 0) return defaults;
@@ -109,7 +127,7 @@ static List<ModuleSpec> ParseSpecs(string[] args)
             System.Console.Error.WriteLine($"Unparseable spec (expected name=path): {arg}");
             continue;
         }
-        overrides.Add(new ModuleSpec(a.Substring(0, eq), a.Substring(eq + 1), null, true, 120_000, null));
+        overrides.Add(new ModuleSpec(a.Substring(0, eq), a.Substring(eq + 1), null, true, 120_000, null, false));
     }
     return append ? defaults.Concat(overrides).ToList() : overrides;
 }
@@ -132,6 +150,11 @@ static ProfileReport Profile(ModuleSpec spec)
     // emscripten sometimes asks the host to re-read memory pages after grow;
     // nothing to do here, we just need to not trap.
     runtime.BindHostFunction<Action<int>>(("env", "emscripten_notify_memory_growth"), _ => { });
+
+    if (spec.Emscripten)
+    {
+        BindEmscriptenStubs(runtime);
+    }
 
     Wacs.WASIp1.Wasi wasi = null;
     if (spec.Wasi)
@@ -332,6 +355,53 @@ static void PrintSummary(List<ProfileReport> reports)
         System.Console.WriteLine($"  0x{key:X4}  {ByteCodeFromKey(key).GetMnemonic()}");
 }
 
+/// <summary>
+/// Bind no-op stubs for the env + wasi_snapshot_preview1 imports that
+/// emscripten+embind wasm modules expect. Signatures match spectra.wasm's
+/// import table; a different emscripten module may pull in additional
+/// imports — add them here when they fail with a NotSupportedException.
+///
+/// <para>The stubs intentionally don't emulate emscripten semantics. Handle
+/// values returned from <c>_emval_*</c> are dummy (0) — fine because spectra's
+/// ctor path uses them only to register embind metadata, never to round-trip
+/// through JS. <c>emscripten_resize_heap</c> returns 0 (failure) — if the
+/// module allocates past its initial memory the grow will fail, but
+/// <c>__wasm_call_ctors</c> doesn't trigger that path for this module.</para>
+/// </summary>
+static void BindEmscriptenStubs(WasmRuntime runtime)
+{
+    runtime.BindHostFunction<Action<int>>(("env", "_emval_decref"),           _ => { });
+    runtime.BindHostFunction<Action<int,int,int,int,int,int,int,int>>(
+        ("env", "_embind_register_function"),                                 (a,b,c,d,e,f,g,h) => { });
+    runtime.BindHostFunction<Func<int>>(("env", "_emval_new_object"),         () => 0);
+    runtime.BindHostFunction<Action<int,int,int,int>>(
+        ("env", "__assert_fail"),                                             (a,b,c,d) => throw new InvalidOperationException("__assert_fail"));
+    runtime.BindHostFunction<Action<int>>(("env", "_emval_incref"),           _ => { });
+    runtime.BindHostFunction<Func<int,int>>(("env", "_emval_new_cstring"),    _ => 0);
+    runtime.BindHostFunction<Action<int,int,int>>(("env", "_emval_set_property"),  (a,b,c) => { });
+    runtime.BindHostFunction<Func<int,int,int,int>>(("env", "_emval_create_invoker"), (a,b,c) => 0);
+    runtime.BindHostFunction<Func<int,int,int,int,int,double>>(
+        ("env", "_emval_invoke"),                                             (a,b,c,d,e) => 0.0);
+    runtime.BindHostFunction<Action<int>>(("env", "_emval_run_destructors"),  _ => { });
+    runtime.BindHostFunction<Func<int,int,int>>(("env", "_emval_get_property"),    (a,b) => 0);
+    runtime.BindHostFunction<Action<int,int>>(("env", "_emval_array_to_memory_view"), (a,b) => { });
+    runtime.BindHostFunction<Func<int>>(("env", "_emval_new_array"),          () => 0);
+    runtime.BindHostFunction<Action<int,int>>(("env", "_embind_register_void"),       (a,b) => { });
+    runtime.BindHostFunction<Action<int,int,int,int>>(("env", "_embind_register_bool"),   (a,b,c,d) => { });
+    runtime.BindHostFunction<Action<int,int,int,int,int>>(("env", "_embind_register_integer"), (a,b,c,d,e) => { });
+    runtime.BindHostFunction<Action<int,int,int,long,long>>(("env", "_embind_register_bigint"), (a,b,c,d,e) => { });
+    runtime.BindHostFunction<Action<int,int,int>>(("env", "_embind_register_float"),  (a,b,c) => { });
+    runtime.BindHostFunction<Action<int,int>>(("env", "_embind_register_std_string"), (a,b) => { });
+    runtime.BindHostFunction<Action<int,int,int>>(("env", "_embind_register_std_wstring"), (a,b,c) => { });
+    runtime.BindHostFunction<Action<int>>(("env", "_embind_register_emval"),  _ => { });
+    runtime.BindHostFunction<Action<int,int,int>>(("env", "_embind_register_memory_view"), (a,b,c) => { });
+    runtime.BindHostFunction<Func<int,int>>(("env", "emscripten_resize_heap"), _ => 0);
+    runtime.BindHostFunction<Func<int,int,int>>(("wasi_snapshot_preview1", "environ_sizes_get"), (a,b) => 0);
+    runtime.BindHostFunction<Func<int,int,int>>(("wasi_snapshot_preview1", "environ_get"), (a,b) => 0);
+    runtime.BindHostFunction<Action<int,int,int,int>>(("env", "_tzset_js"),   (a,b,c,d) => { });
+    runtime.BindHostFunction<Action>(("env", "_abort_js"),                    () => throw new InvalidOperationException("emscripten _abort_js"));
+}
+
 static ByteCode ByteCodeFromKey(ushort key)
 {
     // Reconstruct a ByteCode from the ushort Stats key. The explicit
@@ -360,7 +430,8 @@ sealed record ModuleSpec(
     string Invoke,
     bool Wasi,
     int TimeoutMs,
-    string[] WasiArgs = null);
+    string[] WasiArgs,
+    bool Emscripten);
 
 sealed record ProfileReport(
     string Name,
