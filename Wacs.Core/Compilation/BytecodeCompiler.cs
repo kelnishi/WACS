@@ -453,15 +453,29 @@ namespace Wacs.Core.Compilation
                     writePos = WriteS64(buf, writePos, store.MemOffset);
                     break;
                 }
-                // Memory-load variants with memarg only (widen, splat, zero-fill).
+                // Memory-load widen family (8x8_s/u, 16x4_s/u, 32x2_s/u) — InstMemoryLoadMxN.
                 case SimdCode.V128Load8x8S or SimdCode.V128Load8x8U
                     or SimdCode.V128Load16x4S or SimdCode.V128Load16x4U
-                    or SimdCode.V128Load32x2S or SimdCode.V128Load32x2U
-                    or SimdCode.V128Load8Splat or SimdCode.V128Load16Splat
-                    or SimdCode.V128Load32Splat or SimdCode.V128Load64Splat
-                    or SimdCode.V128Load32Zero or SimdCode.V128Load64Zero:
+                    or SimdCode.V128Load32x2S or SimdCode.V128Load32x2U:
                 {
-                    var load = (InstMemoryLoad)inst;
+                    var load = (Wacs.Core.Instructions.SIMD.InstMemoryLoadMxN)inst;
+                    writePos = WriteU32(buf, writePos, (uint)load.MemIndex);
+                    writePos = WriteS64(buf, writePos, load.MemOffset);
+                    break;
+                }
+                // Memory-load splat — InstMemoryLoadSplat.
+                case SimdCode.V128Load8Splat or SimdCode.V128Load16Splat
+                    or SimdCode.V128Load32Splat or SimdCode.V128Load64Splat:
+                {
+                    var load = (Wacs.Core.Instructions.SIMD.InstMemoryLoadSplat)inst;
+                    writePos = WriteU32(buf, writePos, (uint)load.MemIndex);
+                    writePos = WriteS64(buf, writePos, load.MemOffset);
+                    break;
+                }
+                // Memory-load zero — InstMemoryLoadZero.
+                case SimdCode.V128Load32Zero or SimdCode.V128Load64Zero:
+                {
+                    var load = (Wacs.Core.Instructions.SIMD.InstMemoryLoadZero)inst;
                     writePos = WriteU32(buf, writePos, (uint)load.MemIndex);
                     writePos = WriteS64(buf, writePos, load.MemOffset);
                     break;
