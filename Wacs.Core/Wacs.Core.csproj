@@ -67,4 +67,10 @@
     <PackageReference Include="Microsoft.Extensions.ObjectPool" Version="9.0.0" />
   </ItemGroup>
 
+  <!-- Unsafe.Add is in-box for net5.0+; netstandard2.1 needs the package.
+       Used by the generated dispatcher for bounds-check-free code fetch. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
+  </ItemGroup>
+
 </Project>
