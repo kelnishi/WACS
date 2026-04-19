@@ -77,6 +77,44 @@ namespace Wacs.Core.Instructions.GC
             refStruct[(FieldIdx)fieldIdx] = val;
         }
 
+        // 0xFB 03 struct.get_s — packed signed extension on i8 / i16 fields.
+        [OpHandler(GcCode.StructGetS)]
+        private static int StructGetS(ExecContext ctx, [Imm] uint typeIdx, [Imm] uint fieldIdx, Value refVal)
+        {
+            if (refVal.IsNullRef)
+                throw new TrapException("struct.get_s: null reference");
+            var refStruct = (StoreStruct)refVal.GcRef;
+            var v = refStruct[(FieldIdx)fieldIdx];
+            var defType = ctx.Frame.Module.Types[(TypeIdx)typeIdx];
+            var structType = (StructType)defType.Expansion;
+            var fieldType = structType.FieldTypes[(int)fieldIdx];
+            return fieldType.StorageType switch
+            {
+                ValType.I8 => (int)(sbyte)v.Data.Int32,
+                ValType.I16 => (int)(short)v.Data.Int32,
+                _ => v.Data.Int32,
+            };
+        }
+
+        // 0xFB 04 struct.get_u — packed unsigned extension.
+        [OpHandler(GcCode.StructGetU)]
+        private static int StructGetU(ExecContext ctx, [Imm] uint typeIdx, [Imm] uint fieldIdx, Value refVal)
+        {
+            if (refVal.IsNullRef)
+                throw new TrapException("struct.get_u: null reference");
+            var refStruct = (StoreStruct)refVal.GcRef;
+            var v = refStruct[(FieldIdx)fieldIdx];
+            var defType = ctx.Frame.Module.Types[(TypeIdx)typeIdx];
+            var structType = (StructType)defType.Expansion;
+            var fieldType = structType.FieldTypes[(int)fieldIdx];
+            return fieldType.StorageType switch
+            {
+                ValType.I8 => (int)(byte)v.Data.Int32,
+                ValType.I16 => (int)(ushort)v.Data.Int32,
+                _ => v.Data.Int32,
+            };
+        }
+
         // 0xFB 07 array.new_default — pop count n, alloc zero-init array of length n.
         [OpHandler(GcCode.ArrayNewDefault)]
         private static void ArrayNewDefault(ExecContext ctx, [Imm] uint typeIdx, int n)
