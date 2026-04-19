@@ -304,6 +304,13 @@ namespace Wacs.Compilation
             // to a single pointer read; stays AOT-safe.
             sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(code);");
             sb.AppendLine("            int _codeLen = code.Length;");
+            // try/finally restored. Correctness beats micro-perf here: SwitchRuntime's
+            // handler-resume path reads pc/pcBefore via the refs after a WasmException
+            // escapes, and if we don't write them back on exceptional exit the caller
+            // sees their pre-call (zero) state and the range check against handler
+            // StartPc/EndPc fails. Removing the try/finally didn't actually get _pc
+            // into a register anyway — the ref parameter is what pins it, not the
+            // exception region. That's a separate fix (phase F candidate).
             sb.AppendLine("            try");
             sb.AppendLine("            {");
             sb.AppendLine("                while (_pc < _codeLen)");
@@ -314,7 +321,20 @@ namespace Wacs.Compilation
             sb.AppendLine("                    switch (primary)");
             sb.AppendLine("                    {");
             int caseCounter = 0;
-            foreach (var e in primaryOps.OrderBy(e => e.RawValue))
+            // Hot/cold primary-opcode split. HOT ops — control flow, locals/globals,
+            // parametric, consts, i32/i64/f32/f64 arith + cmp + essential load/store —
+            // stay inline in Run's switch so the hot loop is a direct jump-table dispatch
+            // into the opcode body. COLD ops — div/rem, rotl/rotr, bit-counting,
+            // saturating/float conversions, sign-extension, ref types, exceptions,
+            // memory size/grow — route through a single Run default case into the
+            // DispatchCold sub-method. Rationale: the OpProfile survey found the hot
+            // set covers >95% of execution across coremark / wasm2wat / perl / f64-numeric
+            // while shrinking Run's jump table enough that the JIT can optimise it.
+            var hotPrimaries = HotPrimaryOpcodes();
+            var hotPrimaryOps = primaryOps.Where(e => hotPrimaries.Contains(e.RawValue & 0xFF)).ToList();
+            var coldPrimaryOps = primaryOps.Where(e => !hotPrimaries.Contains(e.RawValue & 0xFF)).ToList();
+
+            foreach (var e in hotPrimaryOps.OrderBy(e => e.RawValue))
             {
                 EmitCase(sb, e, "                        ", ref caseCounter, singleByteKey: true, inLoop: true, pcVar: "_pc");
             }
@@ -322,9 +342,7 @@ namespace Wacs.Compilation
             {
                 sb.AppendLine($"                        case 0x{pb:X2}: Dispatch{pb:X2}(ctx, code, ref _pc); continue;");
             }
-            sb.AppendLine("                        default:");
-            sb.AppendLine("                            throw new NotSupportedException(");
-            sb.AppendLine("                                $\"Opcode 0x{primary:X2} at pc={_pc - 1} has no [OpSource]/[OpHandler] coverage.\");");
+            sb.AppendLine("                        default: DispatchCold(ctx, code, ref _pc, primary); continue;");
             sb.AppendLine("                    }");
             sb.AppendLine("                }");
             sb.AppendLine("            }");
@@ -335,6 +353,14 @@ namespace Wacs.Compilation
             sb.AppendLine("            }");
             sb.AppendLine("        }");
             sb.AppendLine();
+
+            // DispatchCold: the long-tail primary-opcode sub-method. Same per-case
+            // body shape as Run's inline hot cases (emits through EmitCase), but each
+            // cold invocation takes a function-call hit: one blr into this method,
+            // one re-hoist of _opStack / _localsSpan / _codeBase, one body, one ret.
+            // The 5 hottest workloads in OpProfile put the cold-set fraction at
+            // 0–11% of execution, so the amortised regression is small.
+            EmitColdDispatch(sb, coldPrimaryOps, ref caseCounter);
 
             // Per-prefix sub-methods. Each reads its secondary byte (or u16 for SIMD) and
             // dispatches a single op. Returns control to Run's loop after.
@@ -351,6 +377,102 @@ namespace Wacs.Compilation
             sb.AppendLine("}");
 
             spc.AddSource("GeneratedDispatcher.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+        }
+
+        /// <summary>
+        /// Emit <c>DispatchCold</c> — sub-method covering cold primary opcodes. Receives
+        /// the primary byte from Run (already-read), hoists its own copies of the stream
+        /// locals, and dispatches on the primary to the right case body. Body shape per
+        /// case is identical to Run's inline hot cases (same <see cref="EmitCase"/> code
+        /// path). Returns to Run which continues the loop.
+        /// </summary>
+        private static void EmitColdDispatch(StringBuilder sb, List<DispatchEntry> coldEntries, ref int caseCounter)
+        {
+            sb.AppendLine("        private static void DispatchCold(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc, byte primary)");
+            sb.AppendLine("        {");
+            // Mirror Run's hoisted locals so EmitCase's output can reference _opStack /
+            // _localsSpan / _codeBase unchanged. One re-hoist per cold-op execution — a
+            // few mov/ldr instructions, dwarfed by the body of any non-trivial cold op.
+            sb.AppendLine("            var _opStack = ctx.OpStack;");
+            sb.AppendLine("            var _localsSpan = ctx.Frame.Locals.Span;");
+            sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(code);");
+            sb.AppendLine("            switch (primary)");
+            sb.AppendLine("            {");
+            foreach (var e in coldEntries.OrderBy(e => e.RawValue))
+            {
+                EmitCase(sb, e, "                ", ref caseCounter, singleByteKey: true, inLoop: false, pcVar: "pc");
+            }
+            sb.AppendLine("                default:");
+            sb.AppendLine("                    throw new NotSupportedException(");
+            sb.AppendLine("                        $\"Opcode 0x{primary:X2} at pc={pc - 1} has no [OpSource]/[OpHandler] coverage.\");");
+            sb.AppendLine("            }");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+        }
+
+        /// <summary>
+        /// The set of primary-byte opcodes kept inline in <c>Run</c>'s switch. Everything
+        /// outside this set is routed to <see cref="EmitColdDispatch"/>.
+        ///
+        /// <para>Chosen from the OpProfile survey (coremark / wasm2wat / perl / f64-numeric)
+        /// and padded out to full op-family symmetry so a workload that shows up at 0% in
+        /// our samples but uses the family in a production setting (i64 in 64-bit targets,
+        /// f32 in graphics, extensions for iterating over smaller types) still hits the
+        /// hot path.</para>
+        ///
+        /// <para>What's NOT here (and therefore demoted to cold): div/rem (trap-heavy),
+        /// rotl/rotr, integer truncating float conversions (trap-heavy), saturating
+        /// conversions, reference-type ops, exception ops (throw/throw_ref/try_table),
+        /// memory.size/grow, table ops. Demoted ops pay one sub-method-call hit per
+        /// execution — acceptable since none appeared above 1% in any profiled workload.</para>
+        /// </summary>
+        private static HashSet<int> HotPrimaryOpcodes()
+        {
+            return new HashSet<int>
+            {
+                // Control — keep direct call (0x10) and call_indirect (0x11) hot since
+                // non-trivial programs hit them constantly. Tail-call / call-ref variants
+                // (0x12-0x15) have heavier bodies (frame setup, type checks) and appear
+                // rarely — demote them to the cold sub-method.
+                0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+                0x10, 0x11,
+                // Parametric
+                0x1A, 0x1B, 0x1C,
+                // Variable (local + global)
+                0x20, 0x21, 0x22, 0x23, 0x24,
+                // Loads: i32/i64/f32/f64 full-width + i32 narrow widths (used heavily in
+                // string-handling code — wasm2wat had 2% i32.load8_u, 1.3% i32.load16_u).
+                // i64 narrow loads (0x30-0x35) left cold — they share the bounds-check
+                // and alignment machinery with the full-width loads but aren't seen in
+                // any profiled workload.
+                0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
+                // Stores: same principle — core stores hot, i64 narrow stores cold.
+                0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B,
+                // Consts (tiny bodies)
+                0x41, 0x42, 0x43, 0x44,
+                // i32 relational + eqz (0x45..0x4F)
+                0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F,
+                // i64 relational + eqz (0x50..0x5A)
+                0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A,
+                // f32 relational (0x5B..0x60)
+                0x5B, 0x5C, 0x5D, 0x5E, 0x5F, 0x60,
+                // f64 relational (0x61..0x66)
+                0x61, 0x62, 0x63, 0x64, 0x65, 0x66,
+                // i32 arith: add, sub, mul, and, or, xor, shl, shr_s, shr_u. Clz/ctz/
+                // popcnt and div/rem stay cold (rarer, div/rem has trap paths).
+                0x6A, 0x6B, 0x6C, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76,
+                // i64 arith: same family
+                0x7C, 0x7D, 0x7E, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88,
+                // f32 arith: add, sub, mul, div (tiny single-op bodies). Unary f32
+                // (abs/neg/sqrt/ceil/floor/trunc/nearest) and min/max/copysign stay
+                // cold — they're rarer in real code and add bytes to Run.
+                0x92, 0x93, 0x94, 0x95,
+                // f64 arith: add, sub, mul, div
+                0xA0, 0xA1, 0xA2, 0xA3,
+                // Leaving conversions and sign-extensions in the cold set.
+                // (0xAC i64.extend_i32_s appears in sum/fac hot loops — evaluated
+                // separately.)
+            };
         }
 
         /// <summary>
