@@ -266,9 +266,17 @@ namespace Wacs.Core.Compilation
             GcCode.StructNew or GcCode.StructNewDefault => 4,
             // struct.get / struct.get_s / struct.get_u / struct.set: typeIdx + fieldIdx.
             GcCode.StructGet or GcCode.StructGetS or GcCode.StructGetU or GcCode.StructSet => 8,
-            // array.new / array.new_default / array.get / array.get_s / array.get_u / array.set: typeIdx.
+            // array.new / array.new_default / array.get / array.get_s / array.get_u / array.set / array.fill: typeIdx.
             GcCode.ArrayNew or GcCode.ArrayNewDefault
-                or GcCode.ArrayGet or GcCode.ArrayGetS or GcCode.ArrayGetU or GcCode.ArraySet => 4,
+                or GcCode.ArrayGet or GcCode.ArrayGetS or GcCode.ArrayGetU or GcCode.ArraySet
+                or GcCode.ArrayFill => 4,
+            // array.new_fixed: typeIdx + count.
+            GcCode.ArrayNewFixed => 8,
+            // array.new_data / array.new_elem / array.init_data / array.init_elem: typeIdx + dataIdx/elemIdx.
+            GcCode.ArrayNewData or GcCode.ArrayNewElem
+                or GcCode.ArrayInitData or GcCode.ArrayInitElem => 8,
+            // array.copy: dstTypeIdx + srcTypeIdx.
+            GcCode.ArrayCopy => 8,
             // array.len: no immediate.
             GcCode.ArrayLen => 0,
             _ => 0,
@@ -418,8 +426,53 @@ namespace Wacs.Core.Compilation
                 case GcCode.ArraySet:
                     writePos = WriteU32(buf, writePos, (uint)((InstArraySet)inst).TypeIndex);
                     break;
+                case GcCode.ArrayFill:
+                    writePos = WriteU32(buf, writePos, (uint)((InstArrayFill)inst).TypeIndex);
+                    break;
                 case GcCode.ArrayLen:
                     break;
+                case GcCode.ArrayNewFixed:
+                {
+                    var nf = (InstArrayNewFixed)inst;
+                    writePos = WriteU32(buf, writePos, (uint)nf.TypeIndex);
+                    writePos = WriteU32(buf, writePos, (uint)nf.FixedCount);
+                    break;
+                }
+                case GcCode.ArrayNewData:
+                {
+                    var nd = (InstArrayNewData)inst;
+                    writePos = WriteU32(buf, writePos, (uint)nd.TypeIndex);
+                    writePos = WriteU32(buf, writePos, (uint)nd.DataIndex);
+                    break;
+                }
+                case GcCode.ArrayNewElem:
+                {
+                    var ne = (InstArrayNewElem)inst;
+                    writePos = WriteU32(buf, writePos, (uint)ne.TypeIndex);
+                    writePos = WriteU32(buf, writePos, (uint)ne.ElemIndex);
+                    break;
+                }
+                case GcCode.ArrayCopy:
+                {
+                    var cp = (InstArrayCopy)inst;
+                    writePos = WriteU32(buf, writePos, (uint)cp.DstTypeIndex);
+                    writePos = WriteU32(buf, writePos, (uint)cp.SrcTypeIndex);
+                    break;
+                }
+                case GcCode.ArrayInitData:
+                {
+                    var id = (InstArrayInitData)inst;
+                    writePos = WriteU32(buf, writePos, (uint)id.TypeIndex);
+                    writePos = WriteU32(buf, writePos, (uint)id.DataIndex);
+                    break;
+                }
+                case GcCode.ArrayInitElem:
+                {
+                    var ie = (InstArrayInitElem)inst;
+                    writePos = WriteU32(buf, writePos, (uint)ie.TypeIndex);
+                    writePos = WriteU32(buf, writePos, (uint)ie.ElemIndex);
+                    break;
+                }
                 default:
                     throw new NotSupportedException(
                         $"BytecodeCompiler cannot yet emit GcCode.{code} (0xFB 0x{(byte)code:X2}).");
