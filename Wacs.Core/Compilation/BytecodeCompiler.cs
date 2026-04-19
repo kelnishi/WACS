@@ -222,10 +222,23 @@ namespace Wacs.Core.Compilation
         /// </summary>
         private static int SizeOfSimd(SimdCode code) => code switch
         {
-            // v128.load / v128.store — memarg: memIdx:u32 + offset:u64.
-            SimdCode.V128Load or SimdCode.V128Store => 12,
+            // v128.load / v128.store + widen / splat / zero variants — memarg only.
+            SimdCode.V128Load or SimdCode.V128Store
+                or SimdCode.V128Load8x8S or SimdCode.V128Load8x8U
+                or SimdCode.V128Load16x4S or SimdCode.V128Load16x4U
+                or SimdCode.V128Load32x2S or SimdCode.V128Load32x2U
+                or SimdCode.V128Load8Splat or SimdCode.V128Load16Splat
+                or SimdCode.V128Load32Splat or SimdCode.V128Load64Splat
+                or SimdCode.V128Load32Zero or SimdCode.V128Load64Zero => 12,
+            // v128.loadN_lane / storeN_lane — memarg (12) + lane index (1).
+            SimdCode.V128Load8Lane or SimdCode.V128Load16Lane
+                or SimdCode.V128Load32Lane or SimdCode.V128Load64Lane
+                or SimdCode.V128Store8Lane or SimdCode.V128Store16Lane
+                or SimdCode.V128Store32Lane or SimdCode.V128Store64Lane => 13,
             // v128.const — 16-byte literal.
             SimdCode.V128Const => 16,
+            // i8x16.shuffle — 16-byte lane-index literal.
+            SimdCode.I8x16Shuffle => 16,
             // Lane-indexed extract/replace ops — 1-byte lane index.
             SimdCode.I8x16ExtractLaneS or SimdCode.I8x16ExtractLaneU
                 or SimdCode.I16x8ExtractLaneS or SimdCode.I16x8ExtractLaneU
@@ -440,10 +453,48 @@ namespace Wacs.Core.Compilation
                     writePos = WriteS64(buf, writePos, store.MemOffset);
                     break;
                 }
+                // Memory-load variants with memarg only (widen, splat, zero-fill).
+                case SimdCode.V128Load8x8S or SimdCode.V128Load8x8U
+                    or SimdCode.V128Load16x4S or SimdCode.V128Load16x4U
+                    or SimdCode.V128Load32x2S or SimdCode.V128Load32x2U
+                    or SimdCode.V128Load8Splat or SimdCode.V128Load16Splat
+                    or SimdCode.V128Load32Splat or SimdCode.V128Load64Splat
+                    or SimdCode.V128Load32Zero or SimdCode.V128Load64Zero:
+                {
+                    var load = (InstMemoryLoad)inst;
+                    writePos = WriteU32(buf, writePos, (uint)load.MemIndex);
+                    writePos = WriteS64(buf, writePos, load.MemOffset);
+                    break;
+                }
+                // Memory-load-lane / store-lane — memarg + lane index.
+                case SimdCode.V128Load8Lane or SimdCode.V128Load16Lane
+                    or SimdCode.V128Load32Lane or SimdCode.V128Load64Lane:
+                {
+                    var load = (Wacs.Core.Instructions.SIMD.InstMemoryLoadLane)inst;
+                    writePos = WriteU32(buf, writePos, (uint)load.MemIndex);
+                    writePos = WriteS64(buf, writePos, load.MemOffset);
+                    buf[writePos++] = load.LaneIndex;
+                    break;
+                }
+                case SimdCode.V128Store8Lane or SimdCode.V128Store16Lane
+                    or SimdCode.V128Store32Lane or SimdCode.V128Store64Lane:
+                {
+                    var store = (Wacs.Core.Instructions.SIMD.InstMemoryStoreLane)inst;
+                    writePos = WriteU32(buf, writePos, (uint)store.MemIndex);
+                    writePos = WriteS64(buf, writePos, store.MemOffset);
+                    buf[writePos++] = store.LaneIndex;
+                    break;
+                }
                 case SimdCode.V128Const:
                 {
                     var c = (Wacs.Core.Instructions.Simd.InstV128Const)inst;
                     writePos = WriteV128(buf, writePos, c.Value);
+                    break;
+                }
+                case SimdCode.I8x16Shuffle:
+                {
+                    var sh = (InstShuffleOp)inst;
+                    writePos = WriteV128(buf, writePos, sh.LaneIndices);
                     break;
                 }
                 case SimdCode.I8x16ExtractLaneS or SimdCode.I8x16ExtractLaneU

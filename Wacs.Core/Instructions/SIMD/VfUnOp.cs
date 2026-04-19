@@ -43,7 +43,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F64x2Nearest = new (SimdCode.F64x2Nearest , ExecuteF64x2Nearest, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
 
-        private static void ExecuteF32x4Abs(ExecContext context)
+        internal static void ExecuteF32x4Abs(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -55,7 +55,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Abs(ExecContext context)
+        internal static void ExecuteF64x2Abs(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -65,7 +65,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4Neg(ExecContext context)
+        internal static void ExecuteF32x4Neg(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -77,7 +77,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Neg(ExecContext context)
+        internal static void ExecuteF64x2Neg(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -87,7 +87,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4Sqrt(ExecContext context)
+        internal static void ExecuteF32x4Sqrt(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -99,7 +99,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Sqrt(ExecContext context)
+        internal static void ExecuteF64x2Sqrt(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -109,7 +109,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4Ceil(ExecContext context)
+        internal static void ExecuteF32x4Ceil(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -121,7 +121,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Ceil(ExecContext context)
+        internal static void ExecuteF64x2Ceil(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -131,7 +131,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4Floor(ExecContext context)
+        internal static void ExecuteF32x4Floor(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -143,7 +143,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Floor(ExecContext context)
+        internal static void ExecuteF64x2Floor(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -153,7 +153,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4Trunc(ExecContext context)
+        internal static void ExecuteF32x4Trunc(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -165,7 +165,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Trunc(ExecContext context)
+        internal static void ExecuteF64x2Trunc(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -175,7 +175,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4Nearest(ExecContext context)
+        internal static void ExecuteF32x4Nearest(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -187,7 +187,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Nearest(ExecContext context)
+        internal static void ExecuteF64x2Nearest(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
