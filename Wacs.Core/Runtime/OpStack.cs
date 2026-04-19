@@ -16,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -25,7 +26,11 @@ namespace Wacs.Core.Runtime
 {
     public class OpStack
     {
-        private readonly Value[] _registers;
+        // Internal so the switch-runtime fast-paths (Pop*Fast / Push*Fast below and the
+        // generated dispatcher's hoists) can read _registers directly as a ref Value
+        // without going through the safe array indexer. The polymorphic path still
+        // accesses the safe overloads, which retain the array bounds-check.
+        internal readonly Value[] _registers;
         private readonly int _stackLimit;
         public int Count;
 
@@ -321,6 +326,162 @@ namespace Wacs.Core.Runtime
                 Console.WriteLine(e);
                 throw;
             }
+        }
+
+        /// <summary>
+        /// <c>ref</c> to <c>_registers[0]</c> without a bounds check. Abstracted so we
+        /// can pick the right underlying call per target framework —
+        /// <c>GetArrayDataReference</c> in net5.0+, <c>GetReference(span)</c> on
+        /// netstandard2.1 (both lower to the same single-instruction pointer read).
+        /// All Fast-path pops/pushes below route through this.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal ref Value FirstRegister()
+        {
+#if NET5_0_OR_GREATER
+            return ref MemoryMarshal.GetArrayDataReference(_registers);
+#else
+            return ref MemoryMarshal.GetReference(_registers.AsSpan());
+#endif
+        }
+
+        // =========================================================================
+        // Fast-path pop / push — switch-runtime only.
+        // ---------------------------------------------------------------------
+        // Same semantics as the safe variants above except:
+        //   * No array bounds check (the wasm validator has already proved
+        //     Count stays in [0, MaxOpStack)).
+        //   * Access the storage slot via Unsafe.Add(ref first-element, Count)
+        //     instead of array-indexer syntax, so the JIT skips the per-op
+        //     `ldr length; cmp; bhs` sequence the bounds check would generate.
+        // The polymorphic runtime continues to go through the safe pops/pushes
+        // — these are only called from generator-emitted code that's gated
+        // behind the switch runtime.
+        //
+        // A misuse (popping below 0, pushing above MaxOpStack) in release mode
+        // produces an out-of-bounds memory access — which in managed land
+        // still traps as AccessViolation rather than corrupting memory, so
+        // the safety-belt gap is not a memory-safety hole. In Debug mode we
+        // could add DebugAssert to catch it earlier; today we trust validation.
+        // =========================================================================
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int PopI32Fast()
+        {
+            --Count;
+            return Unsafe.Add(ref FirstRegister(), Count).Data.Int32;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public uint PopU32Fast()
+        {
+            --Count;
+            return Unsafe.Add(ref FirstRegister(), Count).Data.UInt32;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long PopI64Fast()
+        {
+            --Count;
+            return Unsafe.Add(ref FirstRegister(), Count).Data.Int64;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ulong PopU64Fast()
+        {
+            --Count;
+            return Unsafe.Add(ref FirstRegister(), Count).Data.UInt64;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public float PopF32Fast()
+        {
+            --Count;
+            return Unsafe.Add(ref FirstRegister(), Count).Data.Float32;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double PopF64Fast()
+        {
+            --Count;
+            return Unsafe.Add(ref FirstRegister(), Count).Data.Float64;
+        }
+
+        /// <summary>
+        /// Fast <see cref="PopAny"/>: strictly the same semantics — decrement, read
+        /// the slot as a <see cref="Value"/>, then null the slot's <c>GcRef</c> so the
+        /// outgoing managed reference doesn't keep the previous object alive in the
+        /// array. Skips bounds checking.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Value PopAnyFast()
+        {
+            --Count;
+            ref Value slot = ref Unsafe.Add(ref FirstRegister(), Count);
+            Value value = slot;
+            slot.GcRef = null;
+            return value;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void PushI32Fast(int value)
+        {
+            ref Value slot = ref Unsafe.Add(ref FirstRegister(), Count);
+            slot.Type = ValType.I32;
+            slot.Data.Int32 = value;
+            Count++;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void PushU32Fast(uint value)
+        {
+            ref Value slot = ref Unsafe.Add(ref FirstRegister(), Count);
+            slot.Type = ValType.I32;
+            slot.Data.UInt32 = value;
+            Count++;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void PushI64Fast(long value)
+        {
+            ref Value slot = ref Unsafe.Add(ref FirstRegister(), Count);
+            slot.Type = ValType.I64;
+            slot.Data.Int64 = value;
+            Count++;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void PushU64Fast(ulong value)
+        {
+            ref Value slot = ref Unsafe.Add(ref FirstRegister(), Count);
+            slot.Type = ValType.I64;
+            slot.Data.UInt64 = value;
+            Count++;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void PushF32Fast(float value)
+        {
+            ref Value slot = ref Unsafe.Add(ref FirstRegister(), Count);
+            slot.Type = ValType.F32;
+            slot.Data.Float32 = value;
+            Count++;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void PushF64Fast(double value)
+        {
+            ref Value slot = ref Unsafe.Add(ref FirstRegister(), Count);
+            slot.Type = ValType.F64;
+            slot.Data.Float64 = value;
+            Count++;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void PushValueFast(Value value)
+        {
+            Unsafe.Add(ref FirstRegister(), Count) = value;
+            Count++;
         }
 
         /// <summary>
