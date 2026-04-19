@@ -97,7 +97,7 @@ namespace Wacs.Compilation
             if (arg.Kind != TypedConstantKind.Enum || arg.Type == null || arg.Value == null) return null;
 
             int rawValue = System.Convert.ToInt32(arg.Value);
-            ushort opKey = ComputeOpcodeKey(arg.Type.Name, rawValue);
+            uint opKey = ComputeOpcodeKey(arg.Type.Name, rawValue);
             string enumName = arg.Type.ToDisplayString();
             string enumMember = arg.Type.GetMembers()
                 .OfType<IFieldSymbol>()
@@ -170,24 +170,29 @@ namespace Wacs.Compilation
             return new ParamInfo(p.Name, type, ParamKind.Stack);
         }
 
-        private static ushort ComputeOpcodeKey(string enumTypeName, int value)
+        private static uint ComputeOpcodeKey(string enumTypeName, int value)
         {
-            byte b = (byte)value;
+            // Key layout: (primary << 16) | (secondary & 0xFFFF). Primary-only ops
+            // (single-byte opcodes) go in the upper 8 bits of the primary slot so the
+            // switch key matches the first stream byte shifted into place. Relaxed-SIMD
+            // opcodes (0x100+) overflow a single byte — keeping the secondary as a full
+            // u16 lets the whole SimdCode enum fit without truncation collisions.
+            uint v = (uint)value & 0xFFFFu;
             return enumTypeName switch
             {
-                "OpCode"   => (ushort)(b << 8),
-                "GcCode"   => (ushort)((0xFB << 8) | b),
-                "ExtCode"  => (ushort)((0xFC << 8) | b),
-                "SimdCode" => (ushort)((0xFD << 8) | b),
-                "AtomCode" => (ushort)((0xFE << 8) | b),
-                "WacsCode" => (ushort)((0xFF << 8) | b),
-                _ => (ushort)(b << 8),
+                "OpCode"   => (uint)(((uint)(byte)value) << 16),
+                "GcCode"   => (0xFBu << 16) | (uint)(byte)value,
+                "ExtCode"  => (0xFCu << 16) | (uint)(byte)value,
+                "SimdCode" => (0xFDu << 16) | v,
+                "AtomCode" => (0xFEu << 16) | (uint)(byte)value,
+                "WacsCode" => (0xFFu << 16) | (uint)(byte)value,
+                _ => ((uint)(byte)value) << 16,
             };
         }
 
         private static void Emit(SourceProductionContext spc, ImmutableArray<DispatchEntry> entries)
         {
-            var deduped = new Dictionary<ushort, DispatchEntry>();
+            var deduped = new Dictionary<uint, DispatchEntry>();
             foreach (var e in entries)
             {
                 if (e == null) continue;
@@ -253,12 +258,12 @@ namespace Wacs.Compilation
             sb.AppendLine("        private const ulong WordMask = 0xFFFF_FFFFul;");
             sb.AppendLine();
             sb.AppendLine("        /// <summary>");
-            sb.AppendLine("        /// Dispatches <paramref name=\"op\"/> (primary &lt;&lt; 8 | secondary; matches (ushort)ByteCode).");
-            sb.AppendLine("        /// Each handler reads its own immediates inline from <paramref name=\"code\"/> starting at");
-            sb.AppendLine("        /// <paramref name=\"pc\"/>, advancing it as it consumes bytes. Returns true if the op was");
-            sb.AppendLine("        /// handled. Returns false for ops without [OpSource]/[OpHandler] coverage yet.");
+            sb.AppendLine("        /// Dispatches <paramref name=\"op\"/> — key layout is (primary &lt;&lt; 16) | secondary. The");
+            sb.AppendLine("        /// secondary is a full u16 so relaxed-SIMD opcodes (0x100+) don't collide with the core");
+            sb.AppendLine("        /// FD set when packed. Each handler reads its own immediates inline from <paramref name=\"code\"/>");
+            sb.AppendLine("        /// starting at <paramref name=\"pc\"/>, advancing it as it consumes bytes.");
             sb.AppendLine("        /// </summary>");
-            sb.AppendLine("        public static bool TryDispatch(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc, ushort op)");
+            sb.AppendLine("        public static bool TryDispatch(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc, uint op)");
             sb.AppendLine("        {");
             sb.AppendLine("            switch (op)");
             sb.AppendLine("            {");
@@ -280,7 +285,7 @@ namespace Wacs.Compilation
 
         private static void EmitCase(StringBuilder sb, DispatchEntry e)
         {
-            sb.AppendLine($"                case 0x{e.OpKey:X4}: // {e.EnumName}.{e.EnumMember} — {e.MethodName}");
+            sb.AppendLine($"                case 0x{e.OpKey:X6}: // {e.EnumName}.{e.EnumMember} — {e.MethodName}");
             sb.AppendLine("                {");
 
             // 1. Read immediates FIRST (left-to-right), advancing pc. Order matters — a handler
@@ -424,7 +429,7 @@ namespace Wacs.Compilation
 
         private sealed class DispatchEntry
         {
-            public readonly ushort OpKey;
+            public readonly uint OpKey;
             public readonly string MethodName;
             public readonly string EnumName;
             public readonly string EnumMember;
@@ -433,7 +438,7 @@ namespace Wacs.Compilation
             public readonly string Body;
             public readonly bool IsHandler;
 
-            public DispatchEntry(ushort opKey, string methodName, string enumName, string enumMember,
+            public DispatchEntry(uint opKey, string methodName, string enumName, string enumMember,
                                  ImmutableArray<ParamInfo> parameters, string returnType, string body,
                                  bool isHandler)
             {
