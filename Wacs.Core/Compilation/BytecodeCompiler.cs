@@ -142,9 +142,11 @@ namespace Wacs.Core.Compilation
                 || primary == OpCode.TryTable)
                 return 0;
 
-            // Prefix ops need their secondary byte too.
-            int hdr = (primary == OpCode.FB || primary == OpCode.FC || primary == OpCode.FD ||
-                      primary == OpCode.FE || primary == OpCode.FF) ? 2 : 1;
+            // Prefix ops need their secondary byte(s) too. 0xFD (SIMD) carries a u16
+            // so relaxed-SIMD ops (0x100+) don't truncate; all others use a single byte.
+            int hdr = primary == OpCode.FD ? 3
+                    : (primary == OpCode.FB || primary == OpCode.FC ||
+                       primary == OpCode.FE || primary == OpCode.FF) ? 2 : 1;
 
             int imm = primary switch
             {
@@ -662,21 +664,26 @@ namespace Wacs.Core.Compilation
                 case OpCode.FC: buf[writePos++] = (byte)op.xFC; break;
                 case OpCode.FD:
                 {
+                    // 0xFD secondary is a full u16 — relaxed-SIMD opcodes are 0x100+
+                    // and don't fit in a byte. Write little-endian so the dispatcher's
+                    // BinaryPrimitives.ReadUInt16 sees them in the same order.
+                    //
                     // Quirk: InstMemoryLoadZero tags itself with V128LoadNLane opcodes
                     // on the polymorphic path (see VMemory.cs). For the switch runtime
                     // we want the dispatcher to see the real Zero op so it routes to
                     // the correct handler. Remap at write time.
-                    byte secondary = (byte)op.xFD;
+                    ushort secondary = (ushort)op.xFD;
                     if (inst is Wacs.Core.Instructions.SIMD.InstMemoryLoadZero loadZero)
                     {
                         secondary = loadZero.LoadWidth switch
                         {
-                            4 => (byte)SimdCode.V128Load32Zero,
-                            8 => (byte)SimdCode.V128Load64Zero,
+                            4 => (ushort)SimdCode.V128Load32Zero,
+                            8 => (ushort)SimdCode.V128Load64Zero,
                             _ => secondary,
                         };
                     }
-                    buf[writePos++] = secondary;
+                    buf[writePos++] = (byte)(secondary & 0xFF);
+                    buf[writePos++] = (byte)(secondary >> 8);
                     break;
                 }
                 case OpCode.FE: buf[writePos++] = (byte)op.xFE; break;

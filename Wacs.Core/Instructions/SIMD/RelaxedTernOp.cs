@@ -68,7 +68,7 @@ namespace Wacs.Core.Instructions.Numeric
             return result;
         }
 
-        private static void ExecuteI8x16RelaxedLaneselect(ExecContext context)
+        internal static void ExecuteI8x16RelaxedLaneselect(ExecContext context)
         {
             V128 m = context.OpStack.PopV128();
             V128 b = context.OpStack.PopV128();
@@ -99,7 +99,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8RelaxedLaneselect(ExecContext context)
+        internal static void ExecuteI16x8RelaxedLaneselect(ExecContext context)
         {
             V128 m = context.OpStack.PopV128();
             V128 b = context.OpStack.PopV128();
@@ -130,7 +130,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4RelaxedLaneselect(ExecContext context)
+        internal static void ExecuteI32x4RelaxedLaneselect(ExecContext context)
         {
             V128 m = context.OpStack.PopV128();
             V128 b = context.OpStack.PopV128();
@@ -161,7 +161,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI64x2RelaxedLaneselect(ExecContext context)
+        internal static void ExecuteI64x2RelaxedLaneselect(ExecContext context)
         {
             V128 m = context.OpStack.PopV128();
             V128 b = context.OpStack.PopV128();
@@ -192,7 +192,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4RelaxedMAdd(ExecContext context)
+        internal static void ExecuteF32x4RelaxedMAdd(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
             V128 b = context.OpStack.PopV128();
@@ -211,7 +211,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4RelaxedNMAdd(ExecContext context)
+        internal static void ExecuteF32x4RelaxedNMAdd(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
             V128 b = context.OpStack.PopV128();
@@ -230,7 +230,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2RelaxedMAdd(ExecContext context)
+        internal static void ExecuteF64x2RelaxedMAdd(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
             V128 b = context.OpStack.PopV128();
@@ -245,7 +245,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2RelaxedNMAdd(ExecContext context)
+        internal static void ExecuteF64x2RelaxedNMAdd(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
             V128 b = context.OpStack.PopV128();
@@ -260,7 +260,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4RelaxedDotI8x16I7x16AddS(ExecContext context)
+        internal static void ExecuteI32x4RelaxedDotI8x16I7x16AddS(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
             V128 b = context.OpStack.PopV128();

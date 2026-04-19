@@ -42,25 +42,35 @@ namespace Wacs.Core.Compilation
             int pc = 0;
             while (pc < code.Length)
             {
-                byte primary = code[pc++];
-                ushort op;
-                if (primary >= 0xFB && primary <= 0xFF)
-                {
-                    if (pc >= code.Length)
-                        throw new InvalidProgramException(
-                            $"Truncated bytecode: prefix 0x{primary:X2} at end of stream.");
-                    byte secondary = code[pc++];
-                    op = (ushort)((primary << 8) | secondary);
-                }
-                else
-                {
-                    op = (ushort)(primary << 8);
-                }
-
+                uint op = ReadOp(code, ref pc);
                 if (!GeneratedDispatcher.TryDispatch(ctx, code, ref pc, op))
                     throw new NotSupportedException(
-                        $"Opcode 0x{op:X4} has no [OpSource]/[OpHandler] coverage in GeneratedDispatcher.");
+                        $"Opcode 0x{op:X6} has no [OpSource]/[OpHandler] coverage in GeneratedDispatcher.");
             }
+        }
+
+        /// <summary>
+        /// Decode the next opcode from <paramref name="code"/>. Key layout:
+        /// <c>(primary &lt;&lt; 16) | secondary</c>. FD-prefixed ops carry a 2-byte
+        /// secondary so relaxed-SIMD opcodes (0x100+) don't truncate to the core set;
+        /// every other prefix still uses a single secondary byte.
+        /// </summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        private static uint ReadOp(ReadOnlySpan<byte> code, ref int pc)
+        {
+            byte primary = code[pc++];
+            if (primary == 0xFD)
+            {
+                ushort sec = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(code.Slice(pc));
+                pc += 2;
+                return (0xFDu << 16) | sec;
+            }
+            if (primary >= 0xFB && primary <= 0xFF)
+            {
+                byte sec = code[pc++];
+                return ((uint)primary << 16) | sec;
+            }
+            return (uint)primary << 16;
         }
 
         /// <summary>
@@ -85,24 +95,10 @@ namespace Wacs.Core.Compilation
                 pcBeforeDispatch = pc;
                 try
                 {
-                    byte primary = code[pc++];
-                    ushort op;
-                    if (primary >= 0xFB && primary <= 0xFF)
-                    {
-                        if (pc >= code.Length)
-                            throw new InvalidProgramException(
-                                $"Truncated bytecode: prefix 0x{primary:X2} at end of stream.");
-                        byte secondary = code[pc++];
-                        op = (ushort)((primary << 8) | secondary);
-                    }
-                    else
-                    {
-                        op = (ushort)(primary << 8);
-                    }
-
+                    uint op = ReadOp(code, ref pc);
                     if (!GeneratedDispatcher.TryDispatch(ctx, code, ref pc, op))
                         throw new NotSupportedException(
-                            $"Opcode 0x{op:X4} has no [OpSource]/[OpHandler] coverage.");
+                            $"Opcode 0x{op:X6} has no [OpSource]/[OpHandler] coverage.");
                 }
                 catch (WasmException we)
                 {
