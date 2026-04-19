@@ -278,7 +278,7 @@ namespace Wacs.Compilation
             // emits `{T} name = ...;` on first use in each case, and the method-level hoists
             // (_pc, _pcBefore, _opStack, etc.) are all initialized immediately.
             sb.AppendLine("        [System.Runtime.CompilerServices.SkipLocalsInit]");
-            sb.AppendLine("        public static void Run(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc, ref int pcBefore)");
+            sb.AppendLine("        public static void Run(ExecContext ctx, ReadOnlySpan<byte> code)");
             sb.AppendLine("        {");
             // Hoist the OpStack and the current frame's locals out of the hot loop. OpStack
             // is a readonly field (bound at ExecContext construction), so it's trivially safe.
@@ -287,17 +287,15 @@ namespace Wacs.Compilation
             // Run, so our hoisted span is never observed stale from within our own switch.
             sb.AppendLine("            var _opStack = ctx.OpStack;");
             sb.AppendLine("            var _localsSpan = ctx.Frame.Locals.Span;");
-            // Hoist pc and pcBefore from the caller's refs into method-local ints. Two wins:
-            //   1) Eliminates JIT aliasing-conservatism: with two <c>ref int</c> parameters,
-            //      a write to pcBefore forces pc to reload through memory on every iteration.
-            //      Locals live in registers and the write becomes a reg-to-reg mov.
-            //   2) Call-immediate reads (<c>StreamReader.ReadX(code, ref _pc)</c>) still spill
-            //      the local for the call, but that only happens in cases with immediates —
-            //      not every iteration's fetch/branch/pop/push.
-            // The try/finally writes back on both normal and abnormal exit so the caller
-            // sees final pc / pcBefore values (needed for exception-handler range checks).
-            sb.AppendLine("            int _pc = pc;");
-            sb.AppendLine("            int _pcBefore = pcBefore;");
+            // pc / pcBefore are plain method-local ints, seeded from ctx fields. Previously
+            // these were `ref int` parameters; the ref aliased the locals back to a caller
+            // stack slot, which RyuJIT treated conservatively and spilled _pc to memory on
+            // every modification (visible as 3× ldr+str pairs around each immediate-read in
+            // the hot dispatch). Passing state via ctx fields instead lets _pc live in a
+            // register across the loop body. Writeback at loop exit (in the finally) keeps
+            // SwitchRuntime's handler-resume path observing current values even on throws.
+            sb.AppendLine("            int _pc = ctx.SwitchPc;");
+            sb.AppendLine("            int _pcBefore = ctx.SwitchPcBefore;");
             // Hoist the span's raw byte reference + length so the per-iteration fetch can
             // use Unsafe.Add (no bounds check) — the while-loop guard already ensures
             // _pc &lt; _codeLen at the read site. GetReference is an intrinsic that lowers
@@ -338,18 +336,23 @@ namespace Wacs.Compilation
             {
                 EmitCase(sb, e, "                        ", ref caseCounter, singleByteKey: true, inLoop: true, pcVar: "_pc");
             }
+            // Sub-methods return the new pc as an int, not via a ref parameter. Any
+            // `ref int pc` in a sub-method signature would force Run's _pc to be
+            // address-taken (has to live in the stack frame), which defeats the whole
+            // point of the ExecContext-fields refactor. int return + reassign keeps
+            // _pc register-resident across the hot loop.
             foreach (var (_, pb) in prefixGroups)
             {
-                sb.AppendLine($"                        case 0x{pb:X2}: Dispatch{pb:X2}(ctx, code, ref _pc); continue;");
+                sb.AppendLine($"                        case 0x{pb:X2}: _pc = Dispatch{pb:X2}(ctx, code, _pc); continue;");
             }
-            sb.AppendLine("                        default: DispatchCold(ctx, code, ref _pc, primary); continue;");
+            sb.AppendLine("                        default: _pc = DispatchCold(ctx, code, _pc, primary); continue;");
             sb.AppendLine("                    }");
             sb.AppendLine("                }");
             sb.AppendLine("            }");
             sb.AppendLine("            finally");
             sb.AppendLine("            {");
-            sb.AppendLine("                pc = _pc;");
-            sb.AppendLine("                pcBefore = _pcBefore;");
+            sb.AppendLine("                ctx.SwitchPc = _pc;");
+            sb.AppendLine("                ctx.SwitchPcBefore = _pcBefore;");
             sb.AppendLine("            }");
             sb.AppendLine("        }");
             sb.AppendLine();
@@ -388,11 +391,13 @@ namespace Wacs.Compilation
         /// </summary>
         private static void EmitColdDispatch(StringBuilder sb, List<DispatchEntry> coldEntries, ref int caseCounter)
         {
-            sb.AppendLine("        private static void DispatchCold(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc, byte primary)");
+            sb.AppendLine("        private static int DispatchCold(ExecContext ctx, ReadOnlySpan<byte> code, int pc, byte primary)");
             sb.AppendLine("        {");
             // Mirror Run's hoisted locals so EmitCase's output can reference _opStack /
             // _localsSpan / _codeBase unchanged. One re-hoist per cold-op execution — a
             // few mov/ldr instructions, dwarfed by the body of any non-trivial cold op.
+            // pc is an int value (not a ref) so Run can keep its local _pc in a
+            // register; we return the updated pc for Run to reassign.
             sb.AppendLine("            var _opStack = ctx.OpStack;");
             sb.AppendLine("            var _localsSpan = ctx.Frame.Locals.Span;");
             sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(code);");
@@ -469,9 +474,11 @@ namespace Wacs.Compilation
                 0x92, 0x93, 0x94, 0x95,
                 // f64 arith: add, sub, mul, div
                 0xA0, 0xA1, 0xA2, 0xA3,
-                // Leaving conversions and sign-extensions in the cold set.
-                // (0xAC i64.extend_i32_s appears in sum/fac hot loops — evaluated
-                // separately.)
+                // i64.extend_i32_s (0xAC) — a single (long)i cast. Appears in the
+                // inner loop of any i32-counter → i64-accumulator pattern (sum(5M)
+                // hits it 5M times, fac 5M). Cold demotion would cost a full
+                // DispatchCold round-trip per iteration.
+                0xAC,
             };
         }
 
@@ -485,7 +492,7 @@ namespace Wacs.Compilation
         {
             bool isSimd = enumType == "SimdCode";
             string keyType = isSimd ? "ushort" : "byte";
-            sb.AppendLine($"        private static void Dispatch{prefixByte:X2}(ExecContext ctx, ReadOnlySpan<byte> code, ref int pc)");
+            sb.AppendLine($"        private static int Dispatch{prefixByte:X2}(ExecContext ctx, ReadOnlySpan<byte> code, int pc)");
             sb.AppendLine("        {");
             // Hoist the same locals Run hoists, so emitted case bodies (_opStack.XXX,
             // _localsSpan[idx], Unsafe.ReadUnaligned(ref _codeBase, ...)) compile uniformly
@@ -649,7 +656,12 @@ namespace Wacs.Compilation
                 return;
             }
 
-            string terminator = inLoop ? "continue;" : "return;";
+            // inLoop=true → we're in Run's while-loop, fall back to the loop head via
+            // `continue`. inLoop=false → we're in a sub-method that returns the updated
+            // pc to Run; emit `return pc;` so the value propagates back. Both paths are
+            // by-design non-ref — passing pc as a value everywhere is what lets Run
+            // keep its `_pc` register-resident across the hot dispatch loop.
+            string terminator = inLoop ? "continue;" : $"return {pcVar};";
 
             if (e.BodyIsExpression)
             {

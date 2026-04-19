@@ -44,9 +44,9 @@ namespace Wacs.Core.Compilation
         /// </summary>
         public static void Run(ExecContext ctx, ReadOnlySpan<byte> code)
         {
-            int pc = 0;
-            int pcBefore = 0;
-            GeneratedDispatcher.Run(ctx, code, ref pc, ref pcBefore);
+            ctx.SwitchPc = 0;
+            ctx.SwitchPcBefore = 0;
+            GeneratedDispatcher.Run(ctx, code);
         }
 
 
@@ -72,27 +72,28 @@ namespace Wacs.Core.Compilation
             var code = func.Bytecode;
             var handlers = func.HandlerTable;
 
+            // Handler-free and handler-carrying paths both initialise ctx.SwitchPc /
+            // ctx.SwitchPcBefore. GeneratedDispatcher.Run reads those fields at entry,
+            // hoists to locals for the loop body, and writes them back in its finally.
+            ctx.SwitchPc = 0;
+            ctx.SwitchPcBefore = 0;
+
             if (handlers.Length == 0)
             {
-                int pc = 0;
-                int pcBefore = 0;
-                GeneratedDispatcher.Run(ctx, code, ref pc, ref pcBefore);
+                GeneratedDispatcher.Run(ctx, code);
                 return;
             }
 
             // Handler-carrying functions: dispatch inside a catch that may resume at a
             // matching handler's pc. On a miss we rethrow for the outer frame to catch.
-            // The re-entry loop is driven by pc being rewritten by TryResumeWithHandler
-            // (and Run resuming from that pc) — the generator's Run is restart-safe: it
-            // loops while (pc &lt; code.Length), so restarting just re-enters the loop at
-            // the new pc.
-            int rpc = 0;
-            int rpcBefore = 0;
+            // The re-entry loop is driven by TryResumeWithHandler rewriting
+            // ctx.SwitchPc — the next GeneratedDispatcher.Run call reads it and resumes
+            // there.
             while (true)
             {
                 try
                 {
-                    GeneratedDispatcher.Run(ctx, code, ref rpc, ref rpcBefore);
+                    GeneratedDispatcher.Run(ctx, code);
                     return;
                 }
                 catch (WasmException we)
@@ -102,7 +103,7 @@ namespace Wacs.Core.Compilation
                     // restores ctx.Frame. That would leave the wrong module's TagAddrs
                     // visible during tag comparison. Catching here guarantees we run only
                     // after every intermediate finally has executed.
-                    if (!TryResumeWithHandler(ctx, handlers, ref rpc, we.Exn, rpcBefore))
+                    if (!TryResumeWithHandler(ctx, handlers, we.Exn, ctx.SwitchPcBefore))
                         throw;
                 }
             }
@@ -122,7 +123,7 @@ namespace Wacs.Core.Compilation
         /// catches in natural order. Move one try_table outward on a miss.</para>
         /// </summary>
         private static bool TryResumeWithHandler(ExecContext ctx, HandlerEntry[] handlers,
-                                                  ref int pc, ExnInstance exn, int pcForRangeCheck)
+                                                  ExnInstance exn, int pcForRangeCheck)
         {
             uint upc = (uint)pcForRangeCheck;
             uint lastStart = uint.MaxValue;
@@ -175,7 +176,7 @@ namespace Wacs.Core.Compilation
                             break;
                     }
                     ctx.OpStack.ShiftResults((int)h.Arity, (int)h.ResultsHeight);
-                    pc = (int)h.HandlerPc;
+                    ctx.SwitchPc = (int)h.HandlerPc;
                     return true;
                 }
 
