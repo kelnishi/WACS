@@ -17,6 +17,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.Instructions.Reference;
@@ -238,6 +239,22 @@ namespace Wacs.Transpiler.AOT
             // here; Initialize constructs TagInstance with null! DefType when
             // needed. The linker replaces imported tag slots with the
             // exporter's fully-typed TagInstance before any throw/catch runs.
+
+            // Snapshot every referenced data-segment's bytes now, so the
+            // codec-encoded init-data embedded in the generated .dll carries
+            // the full payload. (The pre-phase-4 Initialize path only
+            // populated SavedDataSegments *after* PrepareInitData, which was
+            // fine for in-process since ModuleInit already had the bytes
+            // under the transpile-time IDs — but cross-process load starts
+            // with an empty ModuleInit, so the bytes must ride in the
+            // embedded resource.)
+            foreach (var (_, _, segId) in data.ActiveDataSegments)
+            {
+                if (data.SavedDataSegments.ContainsKey(segId)) continue;
+                var segData = ModuleInit.GetDataSegmentData(segId);
+                if (segData != null && segData.Length > 0)
+                    data.SavedDataSegments[segId] = (byte[])segData.Clone();
+            }
 
             _initDataId = InitRegistry.Register(data);
         }
@@ -535,7 +552,69 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// Bake the type. Call after Generate() and after Functions type is created.
         /// </summary>
-        public Type? CreateType() => ModuleType?.CreateType();
+        public Type? CreateType()
+        {
+            // Bake the embedded-init-data holder type too. It's separate
+            // from ModuleType so it can live alongside the Module class
+            // and be referenced from Module ctor IL (Ldsfld on its Data).
+            _embeddedInitType?.CreateType();
+            return ModuleType?.CreateType();
+        }
+
+        // Holder type + byte[] field holding the codec-encoded ModuleInitData.
+        // Populated once during EmitConstructor via EmitEmbeddedInitData.
+        private TypeBuilder? _embeddedInitType;
+        private FieldBuilder? _embeddedInitField;
+
+        /// <summary>
+        /// Encode the prepared <see cref="ModuleInitData"/> via
+        /// <see cref="InitDataCodec.Encode"/> and persist the bytes into a
+        /// static <c>byte[]</c> field on a generated <c>__WACSInit</c> type
+        /// in the same namespace as the Module class.
+        ///
+        /// <para>Implementation: Base64-encode the bytes into a string
+        /// literal, decode in the holder's static constructor. Chosen over
+        /// <c>ModuleBuilder.DefineInitializedData</c> because
+        /// <c>Lokad.ILPack</c> — our dynamic-assembly → PE serializer —
+        /// NREs on <c>IsReferencedType</c> when a method body takes
+        /// <c>Ldtoken</c> on a DefineInitializedData-originated field.
+        /// Base64 adds ~33% size overhead; for typical init data (a few
+        /// KB) that's a non-issue, and the decoded byte[] is pinned once
+        /// at first-use and reused for the life of the loaded
+        /// assembly.</para>
+        /// </summary>
+        private FieldBuilder EmitEmbeddedInitData()
+        {
+            if (_embeddedInitField != null) return _embeddedInitField;
+            if (_initDataId < 0) PrepareInitData();
+
+            var data = InitRegistry.Get(_initDataId);
+            var bytes = InitDataCodec.Encode(data);
+            string base64 = Convert.ToBase64String(bytes);
+
+            // Holder type + static byte[] field.
+            _embeddedInitType = _moduleBuilder.DefineType(
+                $"{_namespace}.__WACSInit",
+                TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
+            _embeddedInitField = _embeddedInitType.DefineField(
+                "Data", typeof(byte[]),
+                FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.InitOnly);
+
+            // Static ctor: Data = Convert.FromBase64String(<literal>);
+            var cctor = _embeddedInitType.DefineTypeInitializer();
+            var il = cctor.GetILGenerator();
+            il.Emit(OpCodes.Ldstr, base64);
+            il.Emit(OpCodes.Call, typeof(Convert).GetMethod(
+                nameof(Convert.FromBase64String),
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(string) },
+                modifiers: null)!);
+            il.Emit(OpCodes.Stsfld, _embeddedInitField);
+            il.Emit(OpCodes.Ret);
+
+            return _embeddedInitField;
+        }
 
         private void EmitConstructor(FieldBuilder ctxField)
         {
@@ -557,11 +636,29 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
 
-            // === Initialize via InitializationHelper ===
-            // ThinContext ctx = InitializationHelper.Initialize(initDataId);
+            // === Initialize via InitializationHelper from embedded init-data ===
+            // The generator embeds a codec-encoded ModuleInitData as a static
+            // byte[] on a sibling type (__WACSInit.Data, built below). The
+            // ctor reads it, decodes into a ModuleInitData, and drives
+            // InitializeFromData — which handles both in-process (where
+            // ModuleInit registrations already exist) and cross-process
+            // (.dll loaded in a fresh process) via data-segment remapping.
+            var initDataField = EmitEmbeddedInitData();
+
+            // ThinContext ctx = InitializationHelper.InitializeFromEmbedded(
+            //     __WACSInit.Data, _initDataId);
+            //
+            // The helper's dual path: in-process (InitRegistry has the
+            // transpile-time entry, side-tables like GcTypeRegistry /
+            // MultiReturnMethodRegistry are populated under _initDataId)
+            // takes the fast Initialize(int) branch. Cross-process (fresh
+            // process — InitRegistry empty) falls through to a codec
+            // Decode of the embedded byte[] and an InitializeFromData
+            // with the transpile-time id as a hint.
+            il.Emit(OpCodes.Ldsfld, initDataField);
             il.Emit(OpCodes.Ldc_I4, _initDataId);
             il.Emit(OpCodes.Call, typeof(InitializationHelper).GetMethod(
-                nameof(InitializationHelper.Initialize),
+                nameof(InitializationHelper.InitializeFromEmbedded),
                 BindingFlags.Public | BindingFlags.Static)!);
             var ctxLocal = il.DeclareLocal(typeof(ThinContext));
             il.Emit(OpCodes.Stloc, ctxLocal);
