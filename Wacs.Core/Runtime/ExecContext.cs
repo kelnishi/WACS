@@ -109,6 +109,26 @@ namespace Wacs.Core.Runtime
         public int SwitchPc;
         public int SwitchPcBefore;
 
+        /// <summary>
+        /// Per-thread explicit call stack for the iterative switch runtime.
+        ///
+        /// <para>In the iterative dispatch model (phase M), every WASM <c>call</c>
+        /// pushes a <see cref="Compilation.SwitchCallFrame"/> recording the caller's
+        /// bytecode, handler table, pc, and Frame, then mutates the dispatch locals
+        /// (<c>code</c>, <c>_codeBase</c>, <c>handlers</c>, <c>ctx.Frame</c>,
+        /// <c>_localsSpan</c>, <c>_pc</c>) to point at the callee. Execution stays
+        /// in the same <c>GeneratedDispatcher.Run</c> invocation — no native-stack
+        /// growth per WASM call. On function exit the frame is popped and the
+        /// caller's state is restored.</para>
+        ///
+        /// <para>Distinct from <see cref="_callStack"/> (the polymorphic path's
+        /// <see cref="Types.Frame"/> stack) because the switch runtime's per-call
+        /// state is a small struct, not a full Frame. Both paths are mutually
+        /// exclusive at runtime (toggled by <see cref="WasmRuntime.UseSwitchRuntime"/>)
+        /// so the two stacks don't interleave.</para>
+        /// </summary>
+        internal System.Collections.Generic.Stack<Compilation.SwitchCallFrame> _switchCallStack;
+
         public ExecContext(Store store, RuntimeAttributes? attributes = default)
         {
             Store = store;
@@ -120,6 +140,7 @@ namespace Wacs.Core.Runtime
             _localsDataPool = ArrayPool<Value>.Create(Attributes.MaxFunctionLocals, Attributes.LocalPoolSize);
             
             _callStack = new (Attributes.InitialCallStack);
+            _switchCallStack = new System.Collections.Generic.Stack<Compilation.SwitchCallFrame>(Attributes.InitialCallStack);
             
             // _hostReturnSequence = InstructionSequence.Empty;
             

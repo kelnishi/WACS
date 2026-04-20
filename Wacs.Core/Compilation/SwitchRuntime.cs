@@ -46,20 +46,15 @@ namespace Wacs.Core.Compilation
         {
             ctx.SwitchPc = 0;
             ctx.SwitchPcBefore = 0;
-            GeneratedDispatcher.Run(ctx, code);
+            GeneratedDispatcher.Run(ctx, new CompiledFunction(code, 0, null!, System.Array.Empty<HandlerEntry>()));
         }
 
 
         /// <summary>
-        /// Full-function driver. Wraps dispatch in a <c>WasmException</c> catcher that
-        /// consults <see cref="CompiledFunction.HandlerTable"/> — on match, resumes at
-        /// the catch handler's pc; on miss, rethrows so the caller's frame can do its
-        /// own lookup one managed-frame up.
-        ///
-        /// <para>For handler-free functions the common case is a single
-        /// <c>GeneratedDispatcher.Run</c> call with no try/catch (saves the IL overhead
-        /// of an exception region on the hot path). Handler-carrying functions pay for
-        /// the resume loop — they're rare.</para>
+        /// Full-function driver. Phase M: exception handling happens inside
+        /// <c>GeneratedDispatcher.Run</c>'s outer try/catch, which walks the per-frame
+        /// handler table AND <c>ctx._switchCallStack</c>. This wrapper is now trivial
+        /// — just seeds <c>ctx.SwitchPc</c> and dispatches.
         /// </summary>
         public static void Run(ExecContext ctx, CompiledFunction func)
         {
@@ -69,44 +64,9 @@ namespace Wacs.Core.Compilation
                 return;
             }
 
-            var code = func.Bytecode;
-            var handlers = func.HandlerTable;
-
-            // Handler-free and handler-carrying paths both initialise ctx.SwitchPc /
-            // ctx.SwitchPcBefore. GeneratedDispatcher.Run reads those fields at entry,
-            // hoists to locals for the loop body, and writes them back in its finally.
             ctx.SwitchPc = 0;
             ctx.SwitchPcBefore = 0;
-
-            if (handlers.Length == 0)
-            {
-                GeneratedDispatcher.Run(ctx, code);
-                return;
-            }
-
-            // Handler-carrying functions: dispatch inside a catch that may resume at a
-            // matching handler's pc. On a miss we rethrow for the outer frame to catch.
-            // The re-entry loop is driven by TryResumeWithHandler rewriting
-            // ctx.SwitchPc — the next GeneratedDispatcher.Run call reads it and resumes
-            // there.
-            while (true)
-            {
-                try
-                {
-                    GeneratedDispatcher.Run(ctx, code);
-                    return;
-                }
-                catch (WasmException we)
-                {
-                    // Catch unconditionally (not via a filter) because C# filters evaluate
-                    // during first-pass unwinding, before the callee's InvokeWasm finally
-                    // restores ctx.Frame. That would leave the wrong module's TagAddrs
-                    // visible during tag comparison. Catching here guarantees we run only
-                    // after every intermediate finally has executed.
-                    if (!TryResumeWithHandler(ctx, handlers, we.Exn, ctx.SwitchPcBefore))
-                        throw;
-                }
-            }
+            GeneratedDispatcher.Run(ctx, func);
         }
 
         /// <summary>
@@ -122,6 +82,25 @@ namespace Wacs.Core.Compilation
         /// (= innermost not-yet-tried try_table); the inner loop then checks its
         /// catches in natural order. Move one try_table outward on a miss.</para>
         /// </summary>
+        /// <summary>
+        /// Public overload of <see cref="TryResumeWithHandler"/> that also returns the
+        /// matching handler's pc via an out parameter (rather than writing to
+        /// <c>ctx.SwitchPc</c>). Used by the iterative <c>GeneratedDispatcher.Run</c>
+        /// unwind loop which manages pc as a method-local instead of a context field.
+        /// </summary>
+        internal static bool TryResumeWithHandlerTable(ExecContext ctx, HandlerEntry[] handlers,
+                                                        ExnInstance exn, int pcForRangeCheck,
+                                                        out int handlerPc)
+        {
+            if (TryResumeWithHandler(ctx, handlers, exn, pcForRangeCheck))
+            {
+                handlerPc = ctx.SwitchPc;
+                return true;
+            }
+            handlerPc = 0;
+            return false;
+        }
+
         private static bool TryResumeWithHandler(ExecContext ctx, HandlerEntry[] handlers,
                                                   ExnInstance exn, int pcForRangeCheck)
         {

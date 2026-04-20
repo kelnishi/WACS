@@ -207,6 +207,7 @@ namespace Wacs.Compilation
             sb.AppendLine("using System;");
             sb.AppendLine("using System.Buffers.Binary;");
             sb.AppendLine("using System.Collections.Generic;");
+            sb.AppendLine("using System.Linq;");
             sb.AppendLine("using System.Runtime.InteropServices;");
             sb.AppendLine("using Wacs.Core.OpCodes;");
             sb.AppendLine("using Wacs.Core.Runtime;");
@@ -278,102 +279,138 @@ namespace Wacs.Compilation
             // emits `{T} name = ...;` on first use in each case, and the method-level hoists
             // (_pc, _pcBefore, _opStack, etc.) are all initialized immediately.
             sb.AppendLine("        [System.Runtime.CompilerServices.SkipLocalsInit]");
-            sb.AppendLine("        public static void Run(ExecContext ctx, byte[] code)");
+            sb.AppendLine("        public static void Run(ExecContext ctx, Wacs.Core.Compilation.CompiledFunction entryFunc)");
             sb.AppendLine("        {");
-            // Hoist the OpStack and the current frame's locals out of the hot loop. OpStack
-            // is a readonly field (bound at ExecContext construction), so it's trivially safe.
-            // Frame.Locals is fixed for the duration of THIS Run invocation — Call opcodes
-            // recurse into nested InvokeWasm which saves+restores ctx.Frame around the inner
-            // Run, so our hoisted span is never observed stale from within our own switch.
+            // Phase M: iterative dispatch. Instead of calling InvokeWasm (which would
+            // recurse natively into SwitchRuntime.Run → GeneratedDispatcher.Run per
+            // WASM call), the Call/CallIndirect/CallRef cases push a SwitchCallFrame
+            // onto ctx._switchCallStack and mutate the dispatch-locals (`code`,
+            // `handlers`, `_codeBase`, `ctx.Frame`, `_localsSpan`, `_pc`) to point at
+            // the callee. Execution stays in this same method frame. On natural
+            // function exit (pc >= code.Length), we pop the stack and restore the
+            // caller's state. WASM recursion depth is bounded by _switchCallStack's
+            // heap growth, not by native thread stack.
             sb.AppendLine("            var _opStack = ctx.OpStack;");
-            sb.AppendLine("            var _localsSpan = ctx.Frame.Locals.Span;");
-            // Hoist a raw ref to _registers[0]. The emit-time-inlined pops/pushes below
-            // index off this ref, bypassing both the safe array indexer (bounds check)
-            // and the Pop*Fast method-call boundary — RyuJIT declines to inline the Fast
-            // wrappers because Run exceeds its inlining budget, so each call would stay
-            // as an out-of-line blr. Inlining here reduces every pop/push to a single
-            // Unsafe.Add + .Data.<field> access with zero calls.
             sb.AppendLine("            ref Wacs.Core.Runtime.Value _registersRef = ref _opStack.FirstRegister();");
-            // Hoist _opStack.Count into a local. It's a public mutable field on a class
-            // — the JIT can't keep it in a register across opcode bodies because a
-            // call-out through the class reference could (in theory) alias it. Each
-            // inlined pop/push went through ldr/str, and a single I32Add touched Count
-            // at 4 memory addresses. With the hoist, Count lives in a register across
-            // the dispatch loop; we sync to/from _opStack.Count only when a callee
-            // needs the live value (Dispatch<prefix> / DispatchCold / block-body
-            // handlers that invoke OpStack methods we don't inline, like PopResults).
             sb.AppendLine("            int _stackCount = _opStack.Count;");
-            // _pc lives as a plain local, seeded from ctx.SwitchPc at entry. The
-            // try/finally around the dispatch loop is GONE in this phase — it was
-            // forcing the JIT to keep _pc memory-observable (observable across every
-            // potential throw), which manifested as 4 ldr + 2 str pairs per iteration
-            // in the disasm. Without the finally, _pc stays in a callee-saved register.
-            //
-            // Writeback strategy (replacing what the finally did):
-            //   * ctx.SwitchPcBefore — written directly at each iteration start (the
-            //     only field SwitchRuntime's catch reads for handler lookup). One str
-            //     per iteration, not per-load-of-_pc.
-            //   * ctx.SwitchPc — not read by anything post-Run, so no writeback needed.
-            //   * _opStack.Count — written back after the loop (normal exit) and synced
-            //     before every throwable site (the per-case sync bracket handles this,
-            //     see EmitCase), so exception paths always see a valid Count too.
+            sb.AppendLine();
+            // Mutable per-frame state. All of these are updated on Call (to point at
+            // callee) and on Return/pc-end (to point back at caller).
+            sb.AppendLine("            byte[] code = entryFunc.Bytecode;");
+            sb.AppendLine("            Wacs.Core.Compilation.HandlerEntry[] handlers = entryFunc.HandlerTable;");
+            sb.AppendLine("            var _localsSpan = ctx.Frame.Locals.Span;");
+            sb.AppendLine("            ref byte _codeBase = ref Wacs.Core.Compilation.ArrayRefHelper.GetByteRef(code);");
             sb.AppendLine("            int _pc = ctx.SwitchPc;");
-            // Hoist the span's raw byte reference + length so the per-iteration fetch can
-            // use Unsafe.Add (no bounds check) — the while-loop guard already ensures
-            // _pc &lt; _codeLen at the read site. GetReference is an intrinsic that lowers
-            // to a single pointer read; stays AOT-safe.
-            sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetArrayDataReference(code);");
-            sb.AppendLine("            while (_pc < code.Length)");
+            sb.AppendLine();
+            // Outer loop wraps the dispatch in a try/catch so a WasmException can be
+            // caught and re-resumed at a matching handler (walking the call stack if
+            // needed). Normal exit uses `return` directly.
+            sb.AppendLine("            while (true)");
             sb.AppendLine("            {");
-            // Write pre-fetch pc to ctx.SwitchPcBefore each iteration so SwitchRuntime's
-            // handler-carrying catch can locate the throwing opcode's try_table. One str
-            // per iteration. Didn't attempt to skip this for handler-free functions since
-            // we'd need a compile-time signal; the cost amortises across the hot cases.
-            sb.AppendLine("                ctx.SwitchPcBefore = _pc;");
-            sb.AppendLine("                byte primary = System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, _pc);");
-            sb.AppendLine("                _pc++;");
-            sb.AppendLine("                switch (primary)");
+            sb.AppendLine("                try");
             sb.AppendLine("                {");
+            sb.AppendLine("                    while (true)");
+            sb.AppendLine("                    {");
+            // Loop-top: function-end check. If we fell off the end (or Return set pc to
+            // int.MaxValue), either pop a frame or return if we're at the entry frame.
+            sb.AppendLine("                        if (_pc >= code.Length)");
+            sb.AppendLine("                        {");
+            sb.AppendLine("                            if (ctx._switchCallStack.Count == 0)");
+            sb.AppendLine("                            {");
+            sb.AppendLine("                                _opStack.Count = _stackCount;");
+            sb.AppendLine("                                return;");
+            sb.AppendLine("                            }");
+            sb.AppendLine("                            // Pop frame: return callee's rented locals + frame to pools,");
+            sb.AppendLine("                            // restore caller's code/handlers/frame/pc.");
+            sb.AppendLine("                            var __popped = ctx._switchCallStack.Pop();");
+            sb.AppendLine("                            System.Buffers.ArrayPool<Wacs.Core.Runtime.Value>.Shared.Return(__popped.CalleeRentedLocals, clearArray: true);");
+            sb.AppendLine("                            ctx.ReturnFrame(ctx.Frame);");
+            sb.AppendLine("                            code = __popped.Code;");
+            sb.AppendLine("                            handlers = __popped.Handlers;");
+            sb.AppendLine("                            ctx.Frame = __popped.WasmFrame;");
+            sb.AppendLine("                            _codeBase = ref Wacs.Core.Compilation.ArrayRefHelper.GetByteRef(code);");
+            sb.AppendLine("                            _localsSpan = ctx.Frame.Locals.Span;");
+            sb.AppendLine("                            _pc = __popped.ResumePc;");
+            // Do NOT reset _stackCount from _opStack.Count here. _stackCount is the
+            // authoritative local across the callee's execution (expression-body
+            // opcodes update only _stackCount, not the field). _opStack.Count was
+            // last synced at Call entry and is stale by exactly the callee's net
+            // stack effect. Keep the local.
+            sb.AppendLine("                            continue;");
+            sb.AppendLine("                        }");
+            sb.AppendLine();
+            sb.AppendLine("                        ctx.SwitchPcBefore = _pc;");
+            sb.AppendLine("                        byte primary = System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, _pc);");
+            sb.AppendLine("                        _pc++;");
+            sb.AppendLine("                        switch (primary)");
+            sb.AppendLine("                        {");
             int caseCounter = 0;
-            // Hot/cold primary-opcode split. HOT ops — control flow, locals/globals,
-            // parametric, consts, i32/i64/f32/f64 arith + cmp + essential load/store —
-            // stay inline in Run's switch so the hot loop is a direct jump-table dispatch
-            // into the opcode body. COLD ops — div/rem, rotl/rotr, bit-counting,
-            // saturating/float conversions, sign-extension, ref types, exceptions,
-            // memory size/grow — route through a single Run default case into the
-            // DispatchCold sub-method. Rationale: the OpProfile survey found the hot
-            // set covers >95% of execution across coremark / wasm2wat / perl / f64-numeric
-            // while shrinking Run's jump table enough that the JIT can optimise it.
+            // Filter out the call-family opcodes; we emit custom iterative bodies for
+            // them below. Everything else follows the normal EmitCase path.
+            var iterativeCallOps = new HashSet<int> { 0x10, 0x11, 0x12, 0x13, 0x14, 0x15 };
             var hotPrimaries = HotPrimaryOpcodes();
-            var hotPrimaryOps = primaryOps.Where(e => hotPrimaries.Contains(e.RawValue & 0xFF)).ToList();
-            var coldPrimaryOps = primaryOps.Where(e => !hotPrimaries.Contains(e.RawValue & 0xFF)).ToList();
+            var hotPrimaryOps = primaryOps.Where(e => hotPrimaries.Contains(e.RawValue & 0xFF)
+                                                      && !iterativeCallOps.Contains(e.RawValue & 0xFF)).ToList();
+            var coldPrimaryOps = primaryOps.Where(e => !hotPrimaries.Contains(e.RawValue & 0xFF)
+                                                       && !iterativeCallOps.Contains(e.RawValue & 0xFF)).ToList();
 
             foreach (var e in hotPrimaryOps.OrderBy(e => e.RawValue))
             {
-                EmitCase(sb, e, "                        ", ref caseCounter, singleByteKey: true, inLoop: true, pcVar: "_pc", inlineStack: true);
+                EmitCase(sb, e, "                            ", ref caseCounter, singleByteKey: true, inLoop: true, pcVar: "_pc", inlineStack: true);
             }
-            // Sub-methods return the new pc as an int, not via a ref parameter. Any
-            // `ref int pc` in a sub-method signature would force Run's _pc to be
-            // address-taken (has to live in the stack frame), which defeats the whole
-            // point of the ExecContext-fields refactor. int return + reassign keeps
-            // _pc register-resident across the hot loop.
-            // Sub-method call sites sync _stackCount to memory before calling (the
-            // callee reads _opStack.Count to know where the operand stack top is) and
-            // re-hoist after (the callee may have pushed/popped). Cold ops are rare so
-            // the two memory ops per call are amortised across the hot-case savings.
+
+            // Emit iterative call-family case bodies. These replace the former
+            // ControlHandlers.InvokeWasm native-recursion path with a push-frame-and-
+            // continue loop.
+            EmitIterativeCallCases(sb, "                            ");
+
             foreach (var (_, pb) in prefixGroups)
             {
-                sb.AppendLine($"                        case 0x{pb:X2}: _opStack.Count = _stackCount; _pc = Dispatch{pb:X2}(ctx, code, _pc); _stackCount = _opStack.Count; continue;");
+                sb.AppendLine($"                            case 0x{pb:X2}: _opStack.Count = _stackCount; _pc = Dispatch{pb:X2}(ctx, code, _pc); _stackCount = _opStack.Count; continue;");
             }
-            sb.AppendLine("                        default: _opStack.Count = _stackCount; _pc = DispatchCold(ctx, code, _pc, primary); _stackCount = _opStack.Count; continue;");
+            sb.AppendLine("                            default: _opStack.Count = _stackCount; _pc = DispatchCold(ctx, code, _pc, primary); _stackCount = _opStack.Count; continue;");
+            sb.AppendLine("                        }");
+            sb.AppendLine("                    }");
+            sb.AppendLine("                }");
+            sb.AppendLine("                catch (Wacs.Core.Compilation.WasmException __we)");
+            sb.AppendLine("                {");
+            // Exception unwinding: try the current function's handlers at ctx.SwitchPcBefore.
+            // Miss: pop the current frame (returning pools), try the caller's handlers at
+            // the caller's saved ResumePc − 1 (pre-call opcode). Keep walking until we find
+            // a handler or exhaust the call stack.
+            sb.AppendLine("                    _opStack.Count = _stackCount;");
+            sb.AppendLine("                    int __handlerPc;");
+            sb.AppendLine("                    int __handlerPcBefore = ctx.SwitchPcBefore;");
+            sb.AppendLine("                    while (true)");
+            sb.AppendLine("                    {");
+            sb.AppendLine("                        if (Wacs.Core.Compilation.SwitchRuntime.TryResumeWithHandlerTable(");
+            sb.AppendLine("                            ctx, handlers, __we.Exn, __handlerPcBefore, out __handlerPc))");
+            sb.AppendLine("                        {");
+            sb.AppendLine("                            _pc = __handlerPc;");
+            sb.AppendLine("                            _stackCount = _opStack.Count;");
+            sb.AppendLine("                            goto __resume;");
+            sb.AppendLine("                        }");
+            sb.AppendLine("                        if (ctx._switchCallStack.Count == 0)");
+            sb.AppendLine("                            throw;");
+            // Unwind one frame: discard callee's state, take on caller's.
+            sb.AppendLine("                        var __popped = ctx._switchCallStack.Pop();");
+            sb.AppendLine("                        System.Buffers.ArrayPool<Wacs.Core.Runtime.Value>.Shared.Return(__popped.CalleeRentedLocals, clearArray: true);");
+            sb.AppendLine("                        ctx.ReturnFrame(ctx.Frame);");
+            sb.AppendLine("                        code = __popped.Code;");
+            sb.AppendLine("                        handlers = __popped.Handlers;");
+            sb.AppendLine("                        ctx.Frame = __popped.WasmFrame;");
+            sb.AppendLine("                        _codeBase = ref Wacs.Core.Compilation.ArrayRefHelper.GetByteRef(code);");
+            sb.AppendLine("                        _localsSpan = ctx.Frame.Locals.Span;");
+            // The caller's pcBefore (= opcode pc of the Call that got us here) is stored
+            // as ResumePc minus the Call opcode's instruction bytes. We can't know the
+            // exact pre-call pc without tracking it — use ResumePc itself. HandlerTable
+            // ranges are inclusive at StartPc and exclusive at EndPc; Call opcode's pc
+            // is just below ResumePc, but both are within the try_table range if either is.
+            sb.AppendLine("                        __handlerPcBefore = __popped.ResumePc - 1;");
+            sb.AppendLine("                    }");
+            sb.AppendLine("                    __resume: ;");
             sb.AppendLine("                }");
             sb.AppendLine("            }");
-            // Normal-exit writeback of _stackCount. On exception exit, _opStack.Count
-            // is already valid — every throwable site (block-body handler, sub-method
-            // call) syncs _stackCount into the field before the potentially-throwing
-            // operation runs, so an exception propagating out sees the pre-operation
-            // Count, which is exactly what the catch-and-resume path wants.
-            sb.AppendLine("            _opStack.Count = _stackCount;");
             sb.AppendLine("        }");
             sb.AppendLine();
 
@@ -425,7 +462,7 @@ namespace Wacs.Compilation
             // frame enough to overflow the stack on deeply recursive wasm (the
             // call_indirect.wast suite hits ~48 recursive InvokeWasm levels, each
             // stacking a GeneratedDispatcher.Run + DispatchCold frame pair).
-            sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetArrayDataReference(code);");
+            sb.AppendLine("            ref byte _codeBase = ref Wacs.Core.Compilation.ArrayRefHelper.GetByteRef(code);");
             sb.AppendLine("            switch (primary)");
             sb.AppendLine("            {");
             foreach (var e in coldEntries.OrderBy(e => e.RawValue))
@@ -512,6 +549,254 @@ namespace Wacs.Compilation
         /// prefixes except SIMD, which uses a u16 to accommodate relaxed-SIMD opcodes >=
         /// 0x100), switches on it, and runs one op to completion before returning.
         /// </summary>
+        /// <summary>
+        /// Emit iterative bodies for Call / CallIndirect / CallRef and their three
+        /// tail-call variants. Replaces ControlHandlers.InvokeWasm's native recursion
+        /// with a push-frame-and-switch sequence that stays inside Run's outer loop.
+        ///
+        /// <para>Flow per call opcode:</para>
+        /// <list type="number">
+        /// <item>Resolve the target FunctionInstance / callee bytecode + handlers.</item>
+        /// <item>If host function (not a FunctionInstance), sync Count and native-call
+        ///       through <c>target.Invoke(ctx)</c>; continue with the current frame.</item>
+        /// <item>Otherwise compile-on-demand, rent callee locals, pop args off OpStack,
+        ///       initialize declared locals with their default values.</item>
+        /// <item>For non-tail calls: push a SwitchCallFrame (caller's code, handlers,
+        ///       Frame, resume pc) onto ctx._switchCallStack. Check depth.</item>
+        /// <item>For tail calls: release the current frame but do NOT push; the current
+        ///       slot is reused by the callee.</item>
+        /// <item>Swap all mutable state (code, handlers, ctx.Frame, _codeBase, _localsSpan,
+        ///       _pc = 0, _stackCount = _opStack.Count). <c>continue;</c> back to the
+        ///       outer loop.</item>
+        /// </list>
+        /// </summary>
+        private static void EmitIterativeCallCases(StringBuilder sb, string indent)
+        {
+            // Helper snippets used across all 6 call variants.
+            string syncOut = "_opStack.Count = _stackCount;";
+
+            // Depth check: mirrors ExecContext.PushFrame. Bounds _switchCallStack growth
+            // to Attributes.MaxCallStack (2048 by default) — the polymorphic limit, not
+            // the old 48-level native-stack limit.
+            string depthCheck =
+                "if (ctx._switchCallStack.Count >= ctx.Attributes.MaxCallStack) " +
+                "throw new Wacs.Core.Runtime.Exceptions.WasmRuntimeException(" +
+                "$\"Runtime call stack exhausted {ctx._switchCallStack.Count}\");";
+
+            // Rent + init callee's locals buffer. Pops args off OpStack in reverse param
+            // order (top-of-stack is last param).
+            string rentAndPopArgs =
+                "int __paramCount = wasmFunc.Type.ParameterTypes.Arity; " +
+                "int __declaredCount = wasmFunc.Locals.Length; " +
+                "int __totalCount = __paramCount + __declaredCount; " +
+                "var __rented = System.Buffers.ArrayPool<Wacs.Core.Runtime.Value>.Shared.Rent(__totalCount); " +
+                "var __newLocals = new System.Memory<Wacs.Core.Runtime.Value>(__rented, 0, __totalCount); " +
+                "var __newSpan = __newLocals.Span; " +
+                "for (int __i = __paramCount - 1; __i >= 0; __i--) __newSpan[__i] = _opStack.PopAnyFast(); " +
+                "for (int __i = 0; __i < __declaredCount; __i++) __newSpan[__paramCount + __i] = new Wacs.Core.Runtime.Value(wasmFunc.Locals[__i]);";
+
+            // Rent callee's Frame, wire module/locals.
+            string rentFrame =
+                "var __newFrame = ctx.RentFrame(); " +
+                "__newFrame.Module = wasmFunc.Module; " +
+                "__newFrame.Locals = __newLocals;";
+
+            // Swap dispatch locals to point at callee. Used by non-tail calls after
+            // push; used by tail calls after frame-release-in-place.
+            string switchToCallee =
+                "code = __compiled.Bytecode; " +
+                "handlers = __compiled.HandlerTable; " +
+                "ctx.Frame = __newFrame; " +
+                "_codeBase = ref Wacs.Core.Compilation.ArrayRefHelper.GetByteRef(code); " +
+                "_localsSpan = __newSpan; " +
+                "_pc = 0; " +
+                "_stackCount = _opStack.Count;";
+
+            // Push caller's state before switch.
+            string pushCaller =
+                "ctx._switchCallStack.Push(new Wacs.Core.Compilation.SwitchCallFrame(" +
+                "code, handlers, ctx.Frame, _pc, __rented));";
+
+            // Compile-on-demand cache lookup.
+            string compileIfNeeded =
+                "var __compiled = wasmFunc.SwitchCompiled; " +
+                "if (__compiled == null) { __compiled = Wacs.Core.Compilation.BytecodeCompiler.Compile(" +
+                "wasmFunc.Body.Instructions.Flatten().ToArray(), wasmFunc.Type, " +
+                "wasmFunc.Type.ParameterTypes.Arity + wasmFunc.Locals.Length, " +
+                "ctx.Attributes.UseSwitchSuperInstructions); wasmFunc.SwitchCompiled = __compiled; }";
+
+            // --- 0x10 Call ---------------------------------------------------------
+            sb.Append(indent).AppendLine("case 0x10: // OpCode.Call — iterative");
+            sb.Append(indent).AppendLine("{");
+            sb.Append(indent).AppendLine("    uint funcIdx = System.Runtime.CompilerServices.Unsafe.ReadUnaligned<uint>(ref System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, _pc)); _pc += 4;");
+            sb.Append(indent).AppendLine($"    {syncOut}");
+            sb.Append(indent).AppendLine("    var __target = ctx.Store[ctx.Frame.Module.FuncAddrs[(Wacs.Core.Types.FuncIdx)funcIdx]];");
+            sb.Append(indent).AppendLine("    if (__target is Wacs.Core.Runtime.Types.FunctionInstance wasmFunc)");
+            sb.Append(indent).AppendLine("    {");
+            sb.Append(indent).AppendLine($"        {compileIfNeeded}");
+            sb.Append(indent).AppendLine($"        {rentAndPopArgs}");
+            sb.Append(indent).AppendLine($"        {rentFrame}");
+            sb.Append(indent).AppendLine($"        {depthCheck}");
+            sb.Append(indent).AppendLine($"        {pushCaller}");
+            sb.Append(indent).AppendLine($"        {switchToCallee}");
+            sb.Append(indent).AppendLine("        continue;");
+            sb.Append(indent).AppendLine("    }");
+            sb.Append(indent).AppendLine("    __target.Invoke(ctx);");
+            sb.Append(indent).AppendLine("    _stackCount = _opStack.Count;");
+            sb.Append(indent).AppendLine("    continue;");
+            sb.Append(indent).AppendLine("}");
+
+            // --- 0x11 CallIndirect -------------------------------------------------
+            sb.Append(indent).AppendLine("case 0x11: // OpCode.CallIndirect — iterative");
+            sb.Append(indent).AppendLine("{");
+            sb.Append(indent).AppendLine("    uint typeIdx = System.Runtime.CompilerServices.Unsafe.ReadUnaligned<uint>(ref System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, _pc)); _pc += 4;");
+            sb.Append(indent).AppendLine("    uint tableIdx = System.Runtime.CompilerServices.Unsafe.ReadUnaligned<uint>(ref System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, _pc)); _pc += 4;");
+            sb.Append(indent).AppendLine($"    {syncOut}");
+            sb.Append(indent).AppendLine("    uint __idx = _opStack.PopU32Fast();");
+            sb.Append(indent).AppendLine("    var __tab = ctx.Store[ctx.Frame.Module.TableAddrs[(Wacs.Core.Types.TableIdx)tableIdx]];");
+            sb.Append(indent).AppendLine("    if (__idx >= (uint)__tab.Elements.Count)");
+            sb.Append(indent).AppendLine("        throw new Wacs.Core.Runtime.Types.TrapException($\"call_indirect: undefined element ({__idx} >= {__tab.Elements.Count})\");");
+            sb.Append(indent).AppendLine("    var __reference = __tab.Elements[(int)__idx];");
+            sb.Append(indent).AppendLine("    if (__reference.IsNullRef) throw new Wacs.Core.Runtime.Types.TrapException(\"call_indirect: null reference\");");
+            sb.Append(indent).AppendLine("    var __ftExpect = ctx.Frame.Module.Types[(Wacs.Core.Types.TypeIdx)typeIdx];");
+            sb.Append(indent).AppendLine("    var __funcInst = ctx.Store[__reference.GetFuncAddr(ctx.Frame.Module.Types)];");
+            sb.Append(indent).AppendLine("    if (__funcInst is Wacs.Core.Runtime.Types.FunctionInstance __ftAct && !__ftAct.DefType.Matches(__ftExpect, ctx.Frame.Module.Types))");
+            sb.Append(indent).AppendLine("        throw new Wacs.Core.Runtime.Types.TrapException(\"call_indirect: indirect call type mismatch\");");
+            sb.Append(indent).AppendLine("    if (!__funcInst.Type.Matches(__ftExpect.Unroll.Body, ctx.Frame.Module.Types))");
+            sb.Append(indent).AppendLine("        throw new Wacs.Core.Runtime.Types.TrapException(\"call_indirect: indirect call type mismatch\");");
+            sb.Append(indent).AppendLine("    if (__funcInst is Wacs.Core.Runtime.Types.FunctionInstance wasmFunc)");
+            sb.Append(indent).AppendLine("    {");
+            sb.Append(indent).AppendLine($"        {compileIfNeeded}");
+            sb.Append(indent).AppendLine($"        {rentAndPopArgs}");
+            sb.Append(indent).AppendLine($"        {rentFrame}");
+            sb.Append(indent).AppendLine($"        {depthCheck}");
+            sb.Append(indent).AppendLine($"        {pushCaller}");
+            sb.Append(indent).AppendLine($"        {switchToCallee}");
+            sb.Append(indent).AppendLine("        continue;");
+            sb.Append(indent).AppendLine("    }");
+            sb.Append(indent).AppendLine("    __funcInst.Invoke(ctx);");
+            sb.Append(indent).AppendLine("    _stackCount = _opStack.Count;");
+            sb.Append(indent).AppendLine("    continue;");
+            sb.Append(indent).AppendLine("}");
+
+            // --- 0x14 CallRef ------------------------------------------------------
+            sb.Append(indent).AppendLine("case 0x14: // OpCode.CallRef — iterative");
+            sb.Append(indent).AppendLine("{");
+            sb.Append(indent).AppendLine("    uint typeIdx = System.Runtime.CompilerServices.Unsafe.ReadUnaligned<uint>(ref System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, _pc)); _pc += 4;");
+            sb.Append(indent).AppendLine($"    {syncOut}");
+            sb.Append(indent).AppendLine("    Wacs.Core.Runtime.Value __refVal = _opStack.PopAnyFast();");
+            sb.Append(indent).AppendLine("    if (__refVal.IsNullRef) throw new Wacs.Core.Runtime.Types.TrapException(\"call_ref: null reference\");");
+            sb.Append(indent).AppendLine("    var __ftExpect = ctx.Frame.Module.Types[(Wacs.Core.Types.TypeIdx)typeIdx];");
+            sb.Append(indent).AppendLine("    var __funcInst = ctx.Store[__refVal.GetFuncAddr(ctx.Frame.Module.Types)];");
+            sb.Append(indent).AppendLine("    if (!__funcInst.Type.Matches((Wacs.Core.Types.FunctionType)__ftExpect.Expansion, ctx.Frame.Module.Types))");
+            sb.Append(indent).AppendLine("        throw new Wacs.Core.Runtime.Types.TrapException(\"call_ref: type mismatch\");");
+            sb.Append(indent).AppendLine("    if (__funcInst is Wacs.Core.Runtime.Types.FunctionInstance wasmFunc)");
+            sb.Append(indent).AppendLine("    {");
+            sb.Append(indent).AppendLine($"        {compileIfNeeded}");
+            sb.Append(indent).AppendLine($"        {rentAndPopArgs}");
+            sb.Append(indent).AppendLine($"        {rentFrame}");
+            sb.Append(indent).AppendLine($"        {depthCheck}");
+            sb.Append(indent).AppendLine($"        {pushCaller}");
+            sb.Append(indent).AppendLine($"        {switchToCallee}");
+            sb.Append(indent).AppendLine("        continue;");
+            sb.Append(indent).AppendLine("    }");
+            sb.Append(indent).AppendLine("    __funcInst.Invoke(ctx);");
+            sb.Append(indent).AppendLine("    _stackCount = _opStack.Count;");
+            sb.Append(indent).AppendLine("    continue;");
+            sb.Append(indent).AppendLine("}");
+
+            // --- Tail-call variants: 0x12 ReturnCall, 0x13 ReturnCallIndirect, 0x15 ReturnCallRef
+            // Tail calls don't push a new frame — they release the current one and
+            // take on the callee's state in place. The existing caller's entry on
+            // _switchCallStack (if any) remains; when the callee eventually returns,
+            // it returns to the caller's caller, skipping us. Exactly WASM's tail-
+            // call semantics.
+
+            // Helper for the tail-call-after-resolve body. "wasmFunc" must already
+            // be in scope with the FunctionInstance.
+            string tailPopAndSwitch = rentAndPopArgs + " " + rentFrame + " " +
+                // Release current frame's rented+Frame without pushing.
+                "var __prevFrame = ctx.Frame; " +
+                "ctx.ReturnFrame(__prevFrame); " +
+                // Current function's own rented locals: we need to return those too.
+                // The current _localsSpan is a Memory view into the current rented. Get
+                // the underlying array via MemoryMarshal.TryGetArray on the Frame's Locals.
+                "if (System.Runtime.InteropServices.MemoryMarshal.TryGetArray<Wacs.Core.Runtime.Value>(__prevFrame.Locals, out var __seg) && __seg.Array != null) " +
+                "System.Buffers.ArrayPool<Wacs.Core.Runtime.Value>.Shared.Return(__seg.Array, clearArray: true); " +
+                switchToCallee;
+
+            // 0x12 ReturnCall
+            sb.Append(indent).AppendLine("case 0x12: // OpCode.ReturnCall — iterative tail-call");
+            sb.Append(indent).AppendLine("{");
+            sb.Append(indent).AppendLine("    uint funcIdx = System.Runtime.CompilerServices.Unsafe.ReadUnaligned<uint>(ref System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, _pc)); _pc += 4;");
+            sb.Append(indent).AppendLine($"    {syncOut}");
+            sb.Append(indent).AppendLine("    var __target = ctx.Store[ctx.Frame.Module.FuncAddrs[(Wacs.Core.Types.FuncIdx)funcIdx]];");
+            sb.Append(indent).AppendLine("    if (__target is Wacs.Core.Runtime.Types.FunctionInstance wasmFunc)");
+            sb.Append(indent).AppendLine("    {");
+            sb.Append(indent).AppendLine($"        {compileIfNeeded}");
+            sb.Append(indent).AppendLine($"        {tailPopAndSwitch}");
+            sb.Append(indent).AppendLine("        continue;");
+            sb.Append(indent).AppendLine("    }");
+            sb.Append(indent).AppendLine("    __target.Invoke(ctx);");
+            sb.Append(indent).AppendLine("    _pc = code.Length;  // trigger function-end; caller frame pops us");
+            sb.Append(indent).AppendLine("    _stackCount = _opStack.Count;");
+            sb.Append(indent).AppendLine("    continue;");
+            sb.Append(indent).AppendLine("}");
+
+            // 0x13 ReturnCallIndirect
+            sb.Append(indent).AppendLine("case 0x13: // OpCode.ReturnCallIndirect — iterative tail-call");
+            sb.Append(indent).AppendLine("{");
+            sb.Append(indent).AppendLine("    uint typeIdx = System.Runtime.CompilerServices.Unsafe.ReadUnaligned<uint>(ref System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, _pc)); _pc += 4;");
+            sb.Append(indent).AppendLine("    uint tableIdx = System.Runtime.CompilerServices.Unsafe.ReadUnaligned<uint>(ref System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, _pc)); _pc += 4;");
+            sb.Append(indent).AppendLine($"    {syncOut}");
+            sb.Append(indent).AppendLine("    uint __idx = _opStack.PopU32Fast();");
+            sb.Append(indent).AppendLine("    var __tab = ctx.Store[ctx.Frame.Module.TableAddrs[(Wacs.Core.Types.TableIdx)tableIdx]];");
+            sb.Append(indent).AppendLine("    if (__idx >= (uint)__tab.Elements.Count)");
+            sb.Append(indent).AppendLine("        throw new Wacs.Core.Runtime.Types.TrapException($\"return_call_indirect: undefined element ({__idx} >= {__tab.Elements.Count})\");");
+            sb.Append(indent).AppendLine("    var __reference = __tab.Elements[(int)__idx];");
+            sb.Append(indent).AppendLine("    if (__reference.IsNullRef) throw new Wacs.Core.Runtime.Types.TrapException(\"return_call_indirect: null reference\");");
+            sb.Append(indent).AppendLine("    var __ftExpect = ctx.Frame.Module.Types[(Wacs.Core.Types.TypeIdx)typeIdx];");
+            sb.Append(indent).AppendLine("    var __funcInst = ctx.Store[__reference.GetFuncAddr(ctx.Frame.Module.Types)];");
+            sb.Append(indent).AppendLine("    if (__funcInst is Wacs.Core.Runtime.Types.FunctionInstance __ftAct && !__ftAct.DefType.Matches(__ftExpect, ctx.Frame.Module.Types))");
+            sb.Append(indent).AppendLine("        throw new Wacs.Core.Runtime.Types.TrapException(\"return_call_indirect: indirect call type mismatch\");");
+            sb.Append(indent).AppendLine("    if (!__funcInst.Type.Matches(__ftExpect.Unroll.Body, ctx.Frame.Module.Types))");
+            sb.Append(indent).AppendLine("        throw new Wacs.Core.Runtime.Types.TrapException(\"return_call_indirect: indirect call type mismatch\");");
+            sb.Append(indent).AppendLine("    if (__funcInst is Wacs.Core.Runtime.Types.FunctionInstance wasmFunc)");
+            sb.Append(indent).AppendLine("    {");
+            sb.Append(indent).AppendLine($"        {compileIfNeeded}");
+            sb.Append(indent).AppendLine($"        {tailPopAndSwitch}");
+            sb.Append(indent).AppendLine("        continue;");
+            sb.Append(indent).AppendLine("    }");
+            sb.Append(indent).AppendLine("    __funcInst.Invoke(ctx);");
+            sb.Append(indent).AppendLine("    _pc = code.Length;");
+            sb.Append(indent).AppendLine("    _stackCount = _opStack.Count;");
+            sb.Append(indent).AppendLine("    continue;");
+            sb.Append(indent).AppendLine("}");
+
+            // 0x15 ReturnCallRef
+            sb.Append(indent).AppendLine("case 0x15: // OpCode.ReturnCallRef — iterative tail-call");
+            sb.Append(indent).AppendLine("{");
+            sb.Append(indent).AppendLine("    uint typeIdx = System.Runtime.CompilerServices.Unsafe.ReadUnaligned<uint>(ref System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, _pc)); _pc += 4;");
+            sb.Append(indent).AppendLine($"    {syncOut}");
+            sb.Append(indent).AppendLine("    Wacs.Core.Runtime.Value __refVal = _opStack.PopAnyFast();");
+            sb.Append(indent).AppendLine("    if (__refVal.IsNullRef) throw new Wacs.Core.Runtime.Types.TrapException(\"return_call_ref: null reference\");");
+            sb.Append(indent).AppendLine("    var __ftExpect = ctx.Frame.Module.Types[(Wacs.Core.Types.TypeIdx)typeIdx];");
+            sb.Append(indent).AppendLine("    var __funcInst = ctx.Store[__refVal.GetFuncAddr(ctx.Frame.Module.Types)];");
+            sb.Append(indent).AppendLine("    if (!__funcInst.Type.Matches((Wacs.Core.Types.FunctionType)__ftExpect.Expansion, ctx.Frame.Module.Types))");
+            sb.Append(indent).AppendLine("        throw new Wacs.Core.Runtime.Types.TrapException(\"return_call_ref: type mismatch\");");
+            sb.Append(indent).AppendLine("    if (__funcInst is Wacs.Core.Runtime.Types.FunctionInstance wasmFunc)");
+            sb.Append(indent).AppendLine("    {");
+            sb.Append(indent).AppendLine($"        {compileIfNeeded}");
+            sb.Append(indent).AppendLine($"        {tailPopAndSwitch}");
+            sb.Append(indent).AppendLine("        continue;");
+            sb.Append(indent).AppendLine("    }");
+            sb.Append(indent).AppendLine("    __funcInst.Invoke(ctx);");
+            sb.Append(indent).AppendLine("    _pc = code.Length;");
+            sb.Append(indent).AppendLine("    _stackCount = _opStack.Count;");
+            sb.Append(indent).AppendLine("    continue;");
+            sb.Append(indent).AppendLine("}");
+        }
+
         private static void EmitPrefixSubMethod(StringBuilder sb, string enumType, byte prefixByte,
                                                  List<DispatchEntry> entries, ref int caseCounter)
         {
@@ -527,7 +812,7 @@ namespace Wacs.Compilation
             sb.AppendLine("            var _opStack = ctx.OpStack;");
             sb.AppendLine("            var _localsSpan = ctx.Frame.Locals.Span;");
             // Prefix sub-methods also stay on method calls (see DispatchCold comment).
-            sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetArrayDataReference(code);");
+            sb.AppendLine("            ref byte _codeBase = ref Wacs.Core.Compilation.ArrayRefHelper.GetByteRef(code);");
             if (isSimd)
             {
                 // Two-byte secondary (relaxed-SIMD opcodes go past 0xFF). Unsafe.ReadUnaligned
