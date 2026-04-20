@@ -29,7 +29,8 @@ namespace Wacs.Core.Instructions.Reference
         public InstBrOnNull() : base(ByteCode.BrOnNull) { }
 
         private LabelIdx L;
-        private BlockTarget? LinkedLabel;
+        // Populated by Link(); consumed by BytecodeCompiler.
+        internal BlockTarget? LinkedLabel;
         public int Label => (int)L.Value;
 
         public override void Validate(IWasmValidationContext context)
@@ -84,7 +85,8 @@ namespace Wacs.Core.Instructions.Reference
         public InstBrOnNonNull() : base(ByteCode.BrOnNonNull, -1) { }
 
         private LabelIdx L;
-        private BlockTarget? LinkedLabel;
+        // Populated by Link(); consumed by BytecodeCompiler.
+        internal BlockTarget? LinkedLabel;
         public int Label => (int)L.Value;
 
         public override void Validate(IWasmValidationContext context)

@@ -33,7 +33,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         public static readonly NumericInst I8x16Popcnt  = new (SimdCode.I8x16Popcnt  , ExecuteI8x16Popcnt , ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        private static void ExecuteI8x16Abs(ExecContext context)
+        internal static void ExecuteI8x16Abs(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -57,7 +57,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8Abs(ExecContext context)
+        internal static void ExecuteI16x8Abs(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -73,7 +73,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4Abs(ExecContext context)
+        internal static void ExecuteI32x4Abs(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -85,7 +85,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI64x2Abs(ExecContext context)
+        internal static void ExecuteI64x2Abs(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -95,7 +95,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI8x16Neg(ExecContext context)
+        internal static void ExecuteI8x16Neg(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -118,7 +118,7 @@ namespace Wacs.Core.Instructions.Numeric
             ); context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8Neg(ExecContext context)
+        internal static void ExecuteI16x8Neg(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -134,7 +134,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4Neg(ExecContext context)
+        internal static void ExecuteI32x4Neg(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -146,7 +146,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI64x2Neg(ExecContext context)
+        internal static void ExecuteI64x2Neg(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -156,7 +156,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI8x16Popcnt(ExecContext context)
+        internal static void ExecuteI8x16Popcnt(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(

@@ -75,6 +75,60 @@ namespace Wacs.Core.Runtime
         public Dictionary<ushort, ExecStat> Stats = new();
         public long steps;
 
+        /// <summary>
+        /// Legacy — unused after phase M. Was the native-recursion depth counter
+        /// for the old switch-runtime model where every WASM <c>call</c> grew the
+        /// native thread stack. Phase M replaced native recursion with
+        /// <see cref="_switchCallStack"/>; depth is now that stack's <c>Count</c>.
+        /// Retained so older callers still compile.
+        /// </summary>
+        public int SwitchCallDepth;
+
+        /// <summary>
+        /// Legacy — unused after phase M. Was the cross-Run tail-call handoff for
+        /// <c>return_call</c> / <c>return_call_ref</c> / <c>return_call_indirect</c>
+        /// when each nested Run invocation was a separate native frame. Phase M's
+        /// iterative dispatcher handles tail calls inline in the opcode case body
+        /// (release current frame in place, switch locals to the callee, don't push
+        /// a new <see cref="Compilation.SwitchCallFrame"/>). Retained so older
+        /// callers still compile.
+        /// </summary>
+        public Types.FunctionInstance? TailCallPending;
+
+        /// <summary>
+        /// Switch-runtime pc state, moved onto ExecContext so
+        /// <c>GeneratedDispatcher.Run</c> doesn't need <c>ref int pc / ref int pcBefore</c>
+        /// parameters — those refs alias-pinned the method's local pc to a stack slot
+        /// and prevented RyuJIT from register-allocating it across the hot dispatch loop.
+        /// With the fields here, Run hoists them into plain method locals at entry and
+        /// writes back on exit (via try/finally, so even exceptional exits leave
+        /// SwitchRuntime's handler-resume path a correct pc to re-enter at).
+        ///
+        /// <para>The polymorphic path doesn't touch these.</para>
+        /// </summary>
+        public int SwitchPc;
+        public int SwitchPcBefore;
+
+        /// <summary>
+        /// Per-thread explicit call stack for the iterative switch runtime.
+        ///
+        /// <para>In the iterative dispatch model (phase M), every WASM <c>call</c>
+        /// pushes a <see cref="Compilation.SwitchCallFrame"/> recording the caller's
+        /// bytecode, handler table, pc, and Frame, then mutates the dispatch locals
+        /// (<c>code</c>, <c>_codeBase</c>, <c>handlers</c>, <c>ctx.Frame</c>,
+        /// <c>_localsSpan</c>, <c>_pc</c>) to point at the callee. Execution stays
+        /// in the same <c>GeneratedDispatcher.Run</c> invocation — no native-stack
+        /// growth per WASM call. On function exit the frame is popped and the
+        /// caller's state is restored.</para>
+        ///
+        /// <para>Distinct from <see cref="_callStack"/> (the polymorphic path's
+        /// <see cref="Types.Frame"/> stack) because the switch runtime's per-call
+        /// state is a small struct, not a full Frame. Both paths are mutually
+        /// exclusive at runtime (toggled by <see cref="WasmRuntime.UseSwitchRuntime"/>)
+        /// so the two stacks don't interleave.</para>
+        /// </summary>
+        internal System.Collections.Generic.Stack<Compilation.SwitchCallFrame> _switchCallStack;
+
         public ExecContext(Store store, RuntimeAttributes? attributes = default)
         {
             Store = store;
@@ -86,6 +140,7 @@ namespace Wacs.Core.Runtime
             _localsDataPool = ArrayPool<Value>.Create(Attributes.MaxFunctionLocals, Attributes.LocalPoolSize);
             
             _callStack = new (Attributes.InitialCallStack);
+            _switchCallStack = new System.Collections.Generic.Stack<Compilation.SwitchCallFrame>(Attributes.InitialCallStack);
             
             // _hostReturnSequence = InstructionSequence.Empty;
             
@@ -158,6 +213,20 @@ namespace Wacs.Core.Runtime
             frame.ReturnLabel.Arity = arity;
             frame.ReturnLabel.StackHeight = OpStack.Count;
             return frame;
+        }
+
+        /// <summary>
+        /// Rent a bare pooled Frame without the ReserveFrame bookkeeping (return-label setup,
+        /// pointer tracking). Used by the switch runtime's call path which manages its own
+        /// frame lifecycle outside the polymorphic call stack.
+        /// </summary>
+        internal Frame RentFrame() => _framePool.Get();
+
+        /// <summary>Return a Frame rented via <see cref="RentFrame"/> back to the pool.</summary>
+        internal void ReturnFrame(Frame frame)
+        {
+            frame.Clear();
+            _framePool.Return(frame);
         }
 
         public void PushFrame(Frame frame)

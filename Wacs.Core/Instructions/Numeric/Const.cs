@@ -79,8 +79,8 @@ namespace Wacs.Core.Instructions.Numeric
     {
         public InstI64Const() : base(ByteCode.I64Const, +1) { }
         public int LinkStackDiff => StackDiff;
-        
-        private long Value;
+
+        internal long Value;
         public Func<ExecContext, long> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
 
@@ -114,8 +114,8 @@ namespace Wacs.Core.Instructions.Numeric
     {
         public InstF32Const() : base(ByteCode.F32Const, +1) { }
         public int LinkStackDiff => StackDiff;
-        
-        private float Value;
+
+        internal float Value;
         public Func<ExecContext, float> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
 
@@ -157,8 +157,8 @@ namespace Wacs.Core.Instructions.Numeric
     {
         public InstF64Const() : base(ByteCode.F64Const, +1) { }
         public int LinkStackDiff => StackDiff;
-        
-        private double Value;
+
+        internal double Value;
         public Func<ExecContext, double> GetFunc => FetchImmediate;
         public int CalculateSize() => 1;
 
