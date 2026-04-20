@@ -557,11 +557,6 @@ namespace Wacs.Transpiler.AOT
             // Bake the embedded-init-data holder type too. It's separate
             // from ModuleType so it can live alongside the Module class
             // and be referenced from Module ctor IL (Ldsfld on its Data).
-            // Finalize the <Module> type BEFORE the holder type — the
-            // holder's .cctor uses Ldtoken on a DefineInitializedData
-            // field whose underlying type lives on <Module>; that type
-            // must be baked before the holder's cctor JITs.
-            _moduleBuilder.CreateGlobalFunctions();
             _embeddedInitType?.CreateType();
             return ModuleType?.CreateType();
         }
@@ -575,11 +570,18 @@ namespace Wacs.Transpiler.AOT
         /// Encode the prepared <see cref="ModuleInitData"/> via
         /// <see cref="InitDataCodec.Encode"/> and persist the bytes into a
         /// static <c>byte[]</c> field on a generated <c>__WACSInit</c> type
-        /// in the same namespace as the Module class. Uses
-        /// <see cref="ModuleBuilder.DefineInitializedData"/> so the payload
-        /// lives in the PE's <c>.sdata</c> section (cheap — no per-byte
-        /// IL) and <see cref="RuntimeHelpers.InitializeArray"/> hydrates it
-        /// into a managed <c>byte[]</c> on first class-type touch.
+        /// in the same namespace as the Module class.
+        ///
+        /// <para>Implementation: Base64-encode the bytes into a string
+        /// literal, decode in the holder's static constructor. Chosen over
+        /// <c>ModuleBuilder.DefineInitializedData</c> because
+        /// <c>Lokad.ILPack</c> — our dynamic-assembly → PE serializer —
+        /// NREs on <c>IsReferencedType</c> when a method body takes
+        /// <c>Ldtoken</c> on a DefineInitializedData-originated field.
+        /// Base64 adds ~33% size overhead; for typical init data (a few
+        /// KB) that's a non-issue, and the decoded byte[] is pinned once
+        /// at first-use and reused for the life of the loaded
+        /// assembly.</para>
         /// </summary>
         private FieldBuilder EmitEmbeddedInitData()
         {
@@ -588,15 +590,9 @@ namespace Wacs.Transpiler.AOT
 
             var data = InitRegistry.Get(_initDataId);
             var bytes = InitDataCodec.Encode(data);
+            string base64 = Convert.ToBase64String(bytes);
 
-            // 1) Raw bytes in PE .sdata — gets a synthetic struct type named
-            //    by Reflection.Emit (e.g. __StaticArrayInitTypeSize=N).
-            var rawDataField = _moduleBuilder.DefineInitializedData(
-                $"__WACSInitBytes_{System.Threading.Interlocked.Increment(ref _rawDataCounter)}",
-                bytes,
-                FieldAttributes.Assembly | FieldAttributes.Static);
-
-            // 2) Public holder type + static byte[] field.
+            // Holder type + static byte[] field.
             _embeddedInitType = _moduleBuilder.DefineType(
                 $"{_namespace}.__WACSInit",
                 TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
@@ -604,25 +600,21 @@ namespace Wacs.Transpiler.AOT
                 "Data", typeof(byte[]),
                 FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.InitOnly);
 
-            // 3) Static ctor: Data = new byte[N]; RuntimeHelpers.InitializeArray(Data, rawDataField.FieldHandle);
+            // Static ctor: Data = Convert.FromBase64String(<literal>);
             var cctor = _embeddedInitType.DefineTypeInitializer();
             var il = cctor.GetILGenerator();
-            il.Emit(OpCodes.Ldc_I4, bytes.Length);
-            il.Emit(OpCodes.Newarr, typeof(byte));
-            il.Emit(OpCodes.Dup);
-            il.Emit(OpCodes.Ldtoken, rawDataField);
-            il.Emit(OpCodes.Call, typeof(RuntimeHelpers).GetMethod(
-                nameof(RuntimeHelpers.InitializeArray),
+            il.Emit(OpCodes.Ldstr, base64);
+            il.Emit(OpCodes.Call, typeof(Convert).GetMethod(
+                nameof(Convert.FromBase64String),
                 BindingFlags.Public | BindingFlags.Static,
                 binder: null,
-                types: new[] { typeof(Array), typeof(RuntimeFieldHandle) },
+                types: new[] { typeof(string) },
                 modifiers: null)!);
             il.Emit(OpCodes.Stsfld, _embeddedInitField);
             il.Emit(OpCodes.Ret);
 
             return _embeddedInitField;
         }
-        private static int _rawDataCounter = 0;
 
         private void EmitConstructor(FieldBuilder ctxField)
         {
