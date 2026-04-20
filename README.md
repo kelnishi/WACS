@@ -339,28 +339,9 @@ runtime.ExecContext.Attributes.UseSwitchSuperInstructions = true;  // (optional)
 var modInst = runtime.InstantiateModule(module);                   // must happen AFTER UseSwitchRuntime is set
 ```
 
-**From the CLI (`Wacs.Console`):**
-
-```bash
-dotnet run --project Wacs.Console -- --switch --switch_super -i fib Wacs.Bench/fib.wasm 10
-```
-
-* `--switch` — route dispatch through the switch runtime.
-* `--switch_super` — also enable the bytecode-stream fuser. No effect without `--switch`.
-
-Both flags must be passed before the module path, as they configure the
-runtime at Instantiate time.
-
-**Rough performance** (fib-iter 5M / fac 20×250k / sum 5M, M1 Pro, .NET 8, median of 3):
-
-| mode | fib-iter | fac-20×250k | sum |
-|---|---|---|---|
-| polymorphic | 1067 ms | 478 ms | 888 ms |
-| polymorphic + super | 639 ms | 238 ms | 623 ms |
-| switch | 737 ms | 228 ms | 605 ms |
-| switch + super | 535 ms | 178 ms | 461 ms |
-
-Switch + super is ~2× polymorphic on these microbench workloads.
+See the [Running Wacs.Console](#running-wacsconsole) section below for all
+CLI combinations across the polymorphic, super-instruction, switch, and
+AOT paths, plus benchmark numbers.
 
 Architectural details live in
 [`Wacs.Core/Compilation/SWITCH_RUNTIME.md`](Wacs.Core/Compilation/SWITCH_RUNTIME.md).
@@ -398,6 +379,71 @@ Optimization is an ongoing process and I have a few other strategies yet to impl
 ### Expected Runtime Performance
 When built in AOT or Release mode, my benchmarks show WACS runs between 2~10% native throughput for benchmark programs
 like coremark. This is roughly on par with interpreted-only Python or about ~25% of an equivalent program written in C# on dotnet.
+
+### Running `Wacs.Console`
+
+`Wacs.Console` is the reference host — it wires WASI, parses argv, and
+drives execution through any of the available back-ends. All examples
+assume the repo is checked out and you're running `dotnet` from the
+repo root.
+
+```bash
+# Default (polymorphic interpreter)
+dotnet run --project Wacs.Console -c Release -- Wacs.Console/Data/coremark.wasm
+
+# Polymorphic + super-instruction rewriter
+dotnet run --project Wacs.Console -c Release -- --super Wacs.Console/Data/coremark.wasm
+
+# Source-generated switch runtime
+dotnet run --project Wacs.Console -c Release -- --switch Wacs.Console/Data/coremark.wasm
+
+# Switch runtime + bytecode-stream super-instruction fuser
+dotnet run --project Wacs.Console -c Release -- --switch --switch_super Wacs.Console/Data/coremark.wasm
+
+# AOT transpile to .NET IL and run through the JITted code (-t alias: --aot)
+dotnet run --project Wacs.Console -c Release -- -t Wacs.Console/Data/coremark.wasm
+
+# AOT with hardware SIMD intrinsics + persist the .dll
+dotnet run --project Wacs.Console -c Release -- -t --aot_simd intrinsics --aot_save out.dll Wacs.Console/Data/coremark.wasm
+```
+
+Invoking a specific export with arguments (applies across every mode):
+
+```bash
+dotnet run --project Wacs.Console -c Release -- -i fib Wacs.Bench/fib.wasm 10
+```
+
+**Flag cheatsheet:**
+
+| Flag | Effect |
+|---|---|
+| *(none)* | Polymorphic virtual-dispatch interpreter. Baseline, canonical. |
+| `--super` | Polymorphic + block-level super-instruction rewriter. |
+| `--switch` | Source-generated monolithic-switch interpreter. AOT-safe. |
+| `--switch_super` | (Requires `--switch`.) Additionally run the bytecode-stream fuser. |
+| `-t`, `--transpiler`, `--aot` | AOT transpile to .NET IL and run the generated code. |
+| `--aot_simd {scalar,intrinsics,interpreter}` | SIMD strategy for the AOT path. |
+| `--aot_save <path>` | Persist the transpiled assembly to disk. |
+| `--aot_no_tail_calls` | Drop the CIL `tail.` prefix (debugging only). |
+| `--aot_max_fn_size N` | Skip functions larger than N instructions in the transpile pass. |
+| `--aot_data_storage {compressed,raw,static}` | How data segments are embedded in the saved assembly. |
+
+**Sampled CoreMark performance** (M3 Max, .NET 8, `Wacs.Console/Data/coremark.wasm`, default 6000 iterations; single run each):
+
+| Mode | CoreMark (iter/s) | Relative |
+|---|---:|---:|
+| polymorphic | 276 | 1.00× |
+| `--super` | 328 | 1.19× |
+| `--switch` | 349 | 1.27× |
+| `--switch --switch_super` | 382 | 1.38× |
+| `-t` (AOT) | **17 651** | **64×** |
+
+The AOT path emits ordinary .NET methods that the CLR JIT optimizes as
+native code, so the ~64× jump over the fastest interpreter mode is the
+gap between "dispatch + pop/push per op" and "inline register arithmetic."
+Expect similar ratios on any compute-bound workload; IO-bound / WASI-heavy
+workloads see a smaller lift because WASI calls still bridge back to the
+interpreter's host-function machinery.
 
 ## Roadmap
 
