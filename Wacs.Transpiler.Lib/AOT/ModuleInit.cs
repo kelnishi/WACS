@@ -44,6 +44,36 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
+        /// Cross-process load path: register every saved data segment and
+        /// return the old-id → new-id remapping the caller applies to
+        /// <see cref="ModuleInitData.ActiveDataSegments"/> (the
+        /// <c>segId</c> field) and <see cref="ModuleInitData.DataSegmentBaseId"/>.
+        /// Safe to call multiple times per process (each call gets fresh
+        /// IDs, avoiding cross-module collisions).
+        /// </summary>
+        public static Dictionary<int, int> RegisterDataSegmentsWithRemap(Dictionary<int, byte[]> savedByOldId)
+        {
+            // Iterate in old-ID-ascending order so the new contiguous range
+            // preserves per-module ordering: the generated IL indexes
+            // segments by local offset from DataSegmentBaseId, so
+            // { oldBase+i → newBase+i } must hold for every local i.
+            var oldIds = new List<int>(savedByOldId.Keys);
+            oldIds.Sort();
+
+            var map = new Dictionary<int, int>(oldIds.Count);
+            lock (_lock)
+            {
+                foreach (var oldId in oldIds)
+                {
+                    int newId = _dataSegments.Count;
+                    _dataSegments[newId] = savedByOldId[oldId];
+                    map[oldId] = newId;
+                }
+            }
+            return map;
+        }
+
+        /// <summary>
         /// Copy a registered data segment into a memory at the given offset.
         /// Called from the Module constructor's IL.
         /// </summary>
