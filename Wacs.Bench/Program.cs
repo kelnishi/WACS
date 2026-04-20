@@ -69,6 +69,9 @@ RunBench(fibWasm, new Bench("fac(20)x250k", "fac",            20, Repeats: 250_0
 // i64 accumulate — different dispatch case, fewer branches.
 RunBench(fibWasm, new Bench("sum(5M)",      "sum",     5_000_000, Repeats: 3));
 
+Console.WriteLine();
+Wacs.Bench.CompactStackBench.Run();
+
 return 0;
 
 record Bench(string Name, string Function, long Arg, int Repeats);
