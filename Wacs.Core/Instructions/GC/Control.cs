@@ -28,7 +28,7 @@ namespace Wacs.Core.Instructions.GC
 
         public CastFlags Flags;
         public LabelIdx L;
-        private BlockTarget? LinkedLabel;
+        public BlockTarget? LinkedLabel;
 
         private ValType Rt1;
         private ValType Rt2;
@@ -102,7 +102,7 @@ namespace Wacs.Core.Instructions.GC
 
         public CastFlags Flags;
         public LabelIdx L;
-        private BlockTarget? LinkedLabel;
+        public BlockTarget? LinkedLabel;
 
         private ValType Rt1;
         private ValType Rt2;

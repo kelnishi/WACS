@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.8.1] Switch runtime (opt-in, source-generated dispatcher)
+
+- New alternative interpreter backed by a source-generated monolithic
+  `switch` over an annotated bytecode stream. Immediates are pre-decoded
+  at instantiation (no LEB128 at runtime), branch targets resolved to
+  absolute stream offsets, and every reachable function is compiled
+  eagerly when `UseSwitchRuntime` is set before `InstantiateModule`.
+  AOT-safe — no `Reflection.Emit`, no `DynamicMethod`; build-time source
+  generation only.
+- Opt-in at the API level:
+  ```csharp
+  runtime.UseSwitchRuntime = true;
+  runtime.ExecContext.Attributes.UseSwitchSuperInstructions = true; // optional stream-fuser
+  runtime.InstantiateModule(module);
+  ```
+- `Wacs.Console` exposes the runtime through two new flags: `--switch`
+  routes dispatch through the switch runtime; `--switch_super`
+  additionally enables the bytecode-stream super-instruction fuser.
+- **Spec parity: 118/118 wast files pass** on the WebAssembly 3.0 spec
+  suite (matching the polymorphic runtime).
+- Rough microbenchmarks (M1 Pro, .NET 8, median of 3): `switch` +
+  `swFuse` is 1.5–2× faster than polymorphic across `fib-iter` / `fac` /
+  `sum`. CoreMark: 376 iter/s (`--switch --switch_super`) vs 277 iter/s
+  polymorphic — a 36% improvement on a real workload.
+- Full architecture walkthrough in
+  [`Wacs.Core/Compilation/SWITCH_RUNTIME.md`](Wacs.Core/Compilation/SWITCH_RUNTIME.md)
+  (phases A–N, including the iterative Run that eliminates native-stack
+  growth per WASM call).
+- The polymorphic runtime remains the default and is unaffected.
+
 ## WACS.Transpiler [0.1.0] First release
 
 - New NuGet package: `WACS.Transpiler`. Installs as a dotnet global tool

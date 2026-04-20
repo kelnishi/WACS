@@ -32,28 +32,28 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I64x2Bitmask = new(SimdCode.I64x2Bitmask, ExecuteI64x2Bitmask, ValidateOperands(pop: ValType.V128, push: ValType.I32), 0);
 
         // @Spec 4.4.3.8. shape.splat
-        private static void ExecuteI8x16Splat(ExecContext context)
+        internal static void ExecuteI8x16Splat(ExecContext context)
         {
             byte v = (byte)(uint)context.OpStack.PopI32();
             V128 result = new V128(v, v, v, v, v, v, v, v, v, v, v, v, v, v, v, v);
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8Splat(ExecContext context)
+        internal static void ExecuteI16x8Splat(ExecContext context)
         {
             ushort v = (ushort)(uint)context.OpStack.PopI32();
             V128 result = new V128(v, v, v, v, v, v, v, v);
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4Splat(ExecContext context)
+        internal static void ExecuteI32x4Splat(ExecContext context)
         {
             uint v = context.OpStack.PopU32();
             V128 result = new V128(v, v, v, v);
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI64x2Splat(ExecContext context)
+        internal static void ExecuteI64x2Splat(ExecContext context)
         {
             ulong v = context.OpStack.PopU64();
             V128 result = new V128(v, v);
@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // @spec 4.4.3.16. txN.bitmask
-        private static void ExecuteI8x16Bitmask(ExecContext context)
+        internal static void ExecuteI8x16Bitmask(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
             int mask =
@@ -84,7 +84,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(mask);
         }
 
-        private static void ExecuteI16x8Bitmask(ExecContext context)
+        internal static void ExecuteI16x8Bitmask(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
             int mask =
@@ -99,7 +99,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(mask);
         }
 
-        private static void ExecuteI32x4Bitmask(ExecContext context)
+        internal static void ExecuteI32x4Bitmask(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
             int mask =
@@ -110,7 +110,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(mask);
         }
 
-        private static void ExecuteI64x2Bitmask(ExecContext context)
+        internal static void ExecuteI64x2Bitmask(ExecContext context)
         {
             V128 c = context.OpStack.PopV128();
             int mask = (c.I64x2_0 < 0 ? 0b1 : 0) | (c.I64x2_1 < 0 ? 0b10 : 0);

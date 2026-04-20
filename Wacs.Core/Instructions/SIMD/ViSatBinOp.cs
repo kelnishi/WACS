@@ -33,7 +33,7 @@ namespace Wacs.Core.Instructions.Numeric
 
         //q15mulr_sat_s
 
-        private static void ExecuteI8x16AddSatS(ExecContext context)
+        internal static void ExecuteI8x16AddSatS(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
@@ -58,7 +58,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI8x16AddSatU(ExecContext context)
+        internal static void ExecuteI8x16AddSatU(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
@@ -83,7 +83,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8AddSatS(ExecContext context)
+        internal static void ExecuteI16x8AddSatS(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
@@ -100,7 +100,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8AddSatU(ExecContext context)
+        internal static void ExecuteI16x8AddSatU(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
@@ -118,7 +118,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
 
-        private static void ExecuteI8x16SubSatS(ExecContext context)
+        internal static void ExecuteI8x16SubSatS(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
@@ -143,7 +143,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI8x16SubSatU(ExecContext context)
+        internal static void ExecuteI8x16SubSatU(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
@@ -169,7 +169,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
 
-        private static void ExecuteI16x8SubSatS(ExecContext context)
+        internal static void ExecuteI16x8SubSatS(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();
@@ -186,7 +186,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8SubSatU(ExecContext context)
+        internal static void ExecuteI16x8SubSatU(ExecContext context)
         {
             V128 v2 = context.OpStack.PopV128();
             V128 v1 = context.OpStack.PopV128();

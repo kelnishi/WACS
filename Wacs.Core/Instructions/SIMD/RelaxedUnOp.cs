@@ -26,7 +26,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I32x4RelaxedTruncF64x2SZero = new (SimdCode.I32x4RelaxedTruncF64x2SZero, ExecuteI32x4RelaxedTruncF64x2SZero, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
         public static readonly NumericInst I32x4RelaxedTruncF64x2UZero = new (SimdCode.I32x4RelaxedTruncF64x2UZero, ExecuteI32x4RelaxedTruncF64x2UZero, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        private static void ExecuteI32x4RelaxedTruncF32x4S(ExecContext context)
+        internal static void ExecuteI32x4RelaxedTruncF32x4S(ExecContext context)
         {
             V128 a = context.OpStack.PopV128();
             MV128 result = new MV128();
@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4RelaxedTruncF32x4U(ExecContext context)
+        internal static void ExecuteI32x4RelaxedTruncF32x4U(ExecContext context)
         {
             V128 a = context.OpStack.PopV128();
             MV128 result = new MV128();
@@ -96,7 +96,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4RelaxedTruncF64x2SZero(ExecContext context)
+        internal static void ExecuteI32x4RelaxedTruncF64x2SZero(ExecContext context)
         {
             V128 a = context.OpStack.PopV128();
             MV128 result = new MV128();
@@ -127,7 +127,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI32x4RelaxedTruncF64x2UZero(ExecContext context)
+        internal static void ExecuteI32x4RelaxedTruncF64x2UZero(ExecContext context)
         {
             V128 a = context.OpStack.PopV128();
             MV128 result = new MV128();

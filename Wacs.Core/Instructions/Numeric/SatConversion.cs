@@ -53,6 +53,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
 
+        [Wacs.Core.Compilation.OpSource(ExtCode.I32TruncSatF32S)]
         public static int TruncSatF32S(float value)
         {
             // Handle special cases first
@@ -76,6 +77,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushU32(result);
         }
 
+        [Wacs.Core.Compilation.OpSource(ExtCode.I32TruncSatF32U)]
         public static uint TruncSatF32U(float value)
         {
             // Handle special cases first
@@ -101,6 +103,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(result);
         }
 
+        [Wacs.Core.Compilation.OpSource(ExtCode.I32TruncSatF64S)]
         public static int TruncSatF64S(double value)
         {
             // Handle special cases first
@@ -121,6 +124,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushU32(result);
         }
 
+        [Wacs.Core.Compilation.OpSource(ExtCode.I32TruncSatF64U)]
         public static uint TruncSatF64U(double value)
         {
             // Handle special cases first
@@ -297,6 +301,7 @@ namespace Wacs.Core.Instructions.Numeric
         }
 
         // Public static helpers for transpiler (i64 variants)
+        [Wacs.Core.Compilation.OpSource(ExtCode.I64TruncSatF32S)]
         public static long TruncSatF32SToI64(float value)
         {
             if (float.IsNaN(value)) return 0;
@@ -307,6 +312,7 @@ namespace Wacs.Core.Instructions.Numeric
             return (long)Math.Truncate((double)value);
         }
 
+        [Wacs.Core.Compilation.OpSource(ExtCode.I64TruncSatF32U)]
         public static long TruncSatF32UToI64(float value)
         {
             if (float.IsNaN(value)) return 0;
@@ -317,6 +323,7 @@ namespace Wacs.Core.Instructions.Numeric
             return (long)(ulong)Math.Truncate((double)value);
         }
 
+        [Wacs.Core.Compilation.OpSource(ExtCode.I64TruncSatF64S)]
         public static long TruncSatF64SToI64(double value)
         {
             if (double.IsNaN(value)) return 0;
@@ -327,6 +334,7 @@ namespace Wacs.Core.Instructions.Numeric
             return (long)Math.Truncate(value);
         }
 
+        [Wacs.Core.Compilation.OpSource(ExtCode.I64TruncSatF64U)]
         public static long TruncSatF64UToI64(double value)
         {
             if (double.IsNaN(value)) return 0;

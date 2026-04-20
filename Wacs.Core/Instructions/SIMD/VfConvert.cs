@@ -27,7 +27,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F32x4DemoteF64x2Zero = new(SimdCode.F32x4DemoteF64x2Zero, ExecuteF32x4DemoteF64x2Zero, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
         public static readonly NumericInst F64x2PromoteLowF32x4 = new(SimdCode.F64x2PromoteLowF32x4, ExecuteF64x2PromoteLowF32x4, ValidateOperands(pop: ValType.V128, push: ValType.V128), 0);
 
-        private static void ExecuteF32x4ConvertI32x4S(ExecContext context)
+        internal static void ExecuteF32x4ConvertI32x4S(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -39,7 +39,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4ConvertI32x4U(ExecContext context)
+        internal static void ExecuteF32x4ConvertI32x4U(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -51,7 +51,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2ConvertLowI32x4S(ExecContext context)
+        internal static void ExecuteF64x2ConvertLowI32x4S(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -61,7 +61,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2ConvertLowI32x4U(ExecContext context)
+        internal static void ExecuteF64x2ConvertLowI32x4U(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -71,7 +71,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4DemoteF64x2Zero(ExecContext context)
+        internal static void ExecuteF32x4DemoteF64x2Zero(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(
@@ -83,7 +83,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2PromoteLowF32x4(ExecContext context)
+        internal static void ExecuteF64x2PromoteLowF32x4(ExecContext context)
         {
             V128 val = context.OpStack.PopV128();
             V128 result = new V128(

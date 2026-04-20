@@ -31,7 +31,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst I16x8RelaxedQ15MulrS = new(SimdCode.I16x8RelaxedQ15MulrS, ExecuteI16x8RelaxedQ15MulrS, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
         public static readonly NumericInst I16x8RelaxedDotI8x16I7x16S = new (SimdCode.I16x8RelaxedDotI8x16I7x16S, ExecuteI16x8RelaxedDotI8x16I7x16S, ValidateOperands(pop1: ValType.V128, pop2: ValType.V128, push: ValType.V128), -1);
 
-        private static void ExecuteI8x16RelaxedSwizzle(ExecContext context)
+        internal static void ExecuteI8x16RelaxedSwizzle(ExecContext context)
         {
             V128 s = context.OpStack.PopV128();
             V128 a = context.OpStack.PopV128();
@@ -54,7 +54,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4RelaxedMin(ExecContext context)
+        internal static void ExecuteF32x4RelaxedMin(ExecContext context)
         {
             V128 b = context.OpStack.PopV128();
             V128 a = context.OpStack.PopV128();
@@ -81,7 +81,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4RelaxedMax(ExecContext context)
+        internal static void ExecuteF32x4RelaxedMax(ExecContext context)
         {
             V128 b = context.OpStack.PopV128();
             V128 a = context.OpStack.PopV128();
@@ -108,7 +108,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2RelaxedMin(ExecContext context)
+        internal static void ExecuteF64x2RelaxedMin(ExecContext context)
         {
             V128 b = context.OpStack.PopV128();
             V128 a = context.OpStack.PopV128();
@@ -135,7 +135,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2RelaxedMax(ExecContext context)
+        internal static void ExecuteF64x2RelaxedMax(ExecContext context)
         {
             V128 b = context.OpStack.PopV128();
             V128 a = context.OpStack.PopV128();
@@ -162,7 +162,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8RelaxedQ15MulrS(ExecContext context)
+        internal static void ExecuteI16x8RelaxedQ15MulrS(ExecContext context)
         {
             V128 b = context.OpStack.PopV128();
             V128 a = context.OpStack.PopV128();
@@ -185,7 +185,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteI16x8RelaxedDotI8x16I7x16S(ExecContext context)
+        internal static void ExecuteI16x8RelaxedDotI8x16I7x16S(ExecContext context)
         {
             V128 c2 = context.OpStack.PopV128();
             V128 c1 = context.OpStack.PopV128();
