@@ -281,22 +281,22 @@ namespace Wacs.Core.Instructions
                     func.Body.Instructions.Flatten().ToArray(),
                     func.Type,
                     localsCount: func.Type.ParameterTypes.Arity + func.Locals.Length,
-                    useSuperInstructions: ctx.Attributes.UseSwitchSuperInstructions);
+                    useSuperInstructions: ctx.Attributes.UseSwitchSuperInstructions,
+                    declaredLocalTypes: func.Locals);
                 func.SwitchCompiled = compiled;
             }
 
-            int paramCount = func.Type.ParameterTypes.Arity;
-            int declaredCount = func.Locals.Length;
-            int totalCount = paramCount + declaredCount;
+            int paramCount = compiled.ParamCount;
+            int totalCount = compiled.LocalsCount;
 
             // ---- Rent entry frame's locals + pop args off caller's OpStack ---------
             var rented = ArrayPool<Value>.Shared.Rent(totalCount);
             var locals = new System.Memory<Value>(rented, 0, totalCount);
             var span = locals.Span;
+            if (compiled.DefaultLocalsTemplate != null)
+                System.Array.Copy(compiled.DefaultLocalsTemplate, 0, rented, 0, totalCount);
             for (int i = paramCount - 1; i >= 0; i--)
                 span[i] = ctx.OpStack.PopAny();
-            for (int i = 0; i < declaredCount; i++)
-                span[paramCount + i] = new Value(func.Locals[i]);
 
             var frame = ctx.RentFrame();
             frame.Module = func.Module;
