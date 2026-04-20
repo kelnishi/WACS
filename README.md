@@ -394,27 +394,60 @@ The transpiler is spec-equivalent to the interpreter on the WebAssembly 3.0 test
 
 ### Expected Runtime Performance
 
-Rough throughput positioning on compute-bound workloads (CoreMark on an
-M3 Max; "native" = a `clang -O3` build of the same C source running
-directly on the CPU). Numbers move with hardware, the WASM module, and
-the CLR JIT version — treat as ballpark, not benchmark ground truth.
+Measured CoreMark throughput on a MacBook Pro M3 Max, .NET 8. The
+native baseline is the EEMBC CoreMark C source built with
+`clang -O3` and run directly on the CPU (single-core, 600 000
+iterations, three runs within 0.2% of each other). WACS numbers come
+from running `Wacs.Console/Data/coremark.wasm` — the same C source,
+compiled to WASM with `clang -O3` via emscripten — through each mode.
 
-| Mode | CoreMark iter/s | % of native | Comparable to |
-|---|---:|---:|---|
-| WACS polymorphic (default) | ~275 | ~0.4% | Wasm3 / Wasmi (pure interpreters), CPython |
-| WACS `--super` | ~335 | ~0.5% | Wasm3 / Wasmi (pure interpreters) |
-| WACS `--switch` | ~360 | ~0.5% | faster than Wasm3, ~1/2 of WebAssembly Micro Runtime's interpreter |
-| WACS `--switch --super` | ~385 | ~0.6% | top-tier interpreter territory |
-| WACS `-t` / `--aot` (Reflection.Emit) | ~17 500 | ~25% | Node.js / V8 running the same logic as JavaScript (~40–60% of this AOT) |
-| `wasm-transpile` pre-compiled `.dll` loaded via `TranspiledModuleLoader` | ~17 500 | ~25% | same as `--aot`, AOT-safe on IL2CPP targets |
-| Native `clang -O3` | ~70 000 | 100% | (baseline) |
+| Mode | CoreMark iter/s | % of native |
+|---|---:|---:|
+| WACS polymorphic (default) | 274 | 0.79% |
+| WACS `--super` | 337 | 0.98% |
+| WACS `--switch` | 358 | 1.04% |
+| WACS `--switch --super` | 385 | 1.12% |
+| WACS `-t` / `--aot` (Reflection.Emit) | 17 552 | **50.9%** |
+| `wasm-transpile` pre-compiled `.dll` loaded via `TranspiledModuleLoader` | 17 552 | **50.9%** |
+| Native `clang -O3` (same C source, no wasm) | 34 488 | 100% |
+
+Ballpark comparison to other WASM runtimes on the same workload (not
+measured on this machine — pulled from published numbers; treat as
+positioning, not apples-to-apples):
+
+- **WACS AOT (`-t`) ≈ WAMR "fast JIT" / Wasmer.** AOT-class wasm
+  runtimes typically land at 50–70% of native C on CoreMark; WACS's
+  51% is in that band.
+- **WACS interpreter modes (274–385 iter/s) are slower than Wasm3**
+  (typically 4–6 k iter/s on M-series). Wasm3 is heavily tuned for
+  CoreMark-like tight loops; WACS's interpreter prioritises Unity
+  AOT compatibility and WASM 3.0 spec completeness over interpreter
+  micro-benchmarks. Think "Python-for-WASM" speed rather than
+  "Wasm3-class interpreter."
+- **All five modes are C#-on-CLR**, so speedups over interpreted
+  Python or IronPython for equivalent logic look larger than the
+  CoreMark-vs-C ratios above would suggest.
 
 **Choosing a mode:**
 
-- **Can you JIT?** (Desktop, server, `dotnet run`, Godot Mono) — use `-t` / `--aot`. It's ~60× the interpreter and within ~3–4× of native speed.
-- **AOT-only target?** (Unity IL2CPP, `PublishAot`, iOS, full-AOT Mono) — pre-compile the `.wasm → .dll` on a JIT host with [`wasm-transpile`](Wacs.Transpiler/README.md), ship the `.dll`, load it at runtime with `WACS.Transpiler.Lib`'s `TranspiledModuleLoader`. Same AOT speed, no `Reflection.Emit` dependency.
-- **Locked-down / policy-reviewed target, can't ship a pre-compiled `.dll`?** — use `--switch --super`. Build-time source-gen + `System.Runtime.CompilerServices.Unsafe` intrinsics only, no runtime codegen, no `unsafe` keyword blocks. ~1.4× over the polymorphic baseline.
-- **Maximum conservatism?** — default polymorphic, or `--super` for a small safe boost. Pure managed, no source-gen, no `Unsafe` usage. Roughly "Python-for-WASM" speed — fine for cold-path scripting, UGC validation, or logic that doesn't dominate a frame budget.
+- **Can you JIT?** (Desktop, server, `dotnet run`, Godot Mono) — use
+  `-t` / `--aot`. It's ~60× the interpreter and within ~2× of native
+  C speed.
+- **AOT-only target?** (Unity IL2CPP, `PublishAot`, iOS, full-AOT
+  Mono) — pre-compile the `.wasm → .dll` on a JIT host with
+  [`wasm-transpile`](Wacs.Transpiler/README.md), ship the `.dll`,
+  load it at runtime with `WACS.Transpiler.Lib`'s
+  `TranspiledModuleLoader`. Same AOT speed, no `Reflection.Emit`
+  dependency at runtime.
+- **Locked-down / policy-reviewed target, can't ship a pre-compiled
+  `.dll`?** — use `--switch --super`. Build-time source-gen +
+  `System.Runtime.CompilerServices.Unsafe` intrinsics only, no
+  runtime codegen, no `unsafe` keyword blocks. ~1.4× over the
+  polymorphic baseline.
+- **Maximum conservatism?** — default polymorphic, or `--super` for a
+  small safe boost. Pure managed, no source-gen, no `Unsafe` usage.
+  Fine for cold-path scripting, UGC validation, or logic that doesn't
+  dominate a frame budget — but don't put it in a hot inner loop.
 
 ### Running `Wacs.Console`
 
