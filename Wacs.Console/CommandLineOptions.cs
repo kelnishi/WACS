@@ -75,6 +75,12 @@ namespace Wacs.Console
         [Option('t', "transpiler", HelpText = "Invoke the transpiler on instantiated module")]
         public bool Transpile { get; set; }
 
+        [Option("switch", HelpText = "Use the source-generated monolithic switch runtime (faster, AOT-safe).", Default = false)]
+        public bool UseSwitch { get; set; }
+
+        [Option("switch_super", HelpText = "When --switch is set, enable the bytecode-stream super-instruction fuser.", Default = false)]
+        public bool SwitchSuperInstructions { get; set; }
+
         // This will capture all values that aren't tied to an option
         [Value(0, Required = true, MetaName = "WasmModule", HelpText = "Path to the executable")]
         public string WasmModule { get; set; } = "";

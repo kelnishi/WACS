@@ -95,6 +95,17 @@ namespace Wacs.Core.Runtime.Types
         public bool IsAsync => false;
 
         /// <summary>
+        /// Cached annotated-bytecode form, produced lazily by
+        /// <c>Wacs.Core.Compilation.BytecodeCompiler</c> on the first switch-runtime
+        /// invocation. Accessed via a simple field read on the hot path — no
+        /// dictionary lookup, no lock. The compile pass is deterministic, so a benign
+        /// race just produces both threads' work and discards one via last-writer-wins.
+        /// Field lives here rather than in a side dictionary so it's GC-tied to the
+        /// FunctionInstance lifetime and not leaked across module unloads.
+        /// </summary>
+        internal Wacs.Core.Compilation.CompiledFunction? SwitchCompiled;
+
+        /// <summary>
         /// Sets Body and precomputes labels
         /// </summary>
         /// <param name="body"></param>

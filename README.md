@@ -320,6 +320,53 @@ In my testing, this leads to roughly 60% higher instruction processing throughpu
 Linking of the instructions into a tree cannot 100% be determined across block boundaries. So in these cases, the rewriter just passes
 the sequence through unaltered. So WASM code with lots of function calls or branches will see less benefit.
 
+### Switch Runtime (source-generated dispatcher)
+
+An alternative interpreter backed by a source-generated monolithic `switch`
+over an annotated bytecode stream. Immediates are pre-decoded at instantiation
+(no LEB128 at runtime), branch targets are resolved to absolute stream offsets,
+and every reachable function is compiled eagerly when `UseSwitchRuntime` is
+set before `InstantiateModule`. AOT-safe — no `Reflection.Emit`, no
+`DynamicMethod`, build-time source generation only.
+
+**Opt-in at the API level:**
+
+```csharp
+var runtime = new WasmRuntime();
+runtime.UseSwitchRuntime = true;                                   // route wasm→wasm dispatch through the switch runtime
+runtime.ExecContext.Attributes.UseSwitchSuperInstructions = true;  // (optional) run the bytecode-stream super-instruction fuser
+
+var modInst = runtime.InstantiateModule(module);                   // must happen AFTER UseSwitchRuntime is set
+```
+
+**From the CLI (`Wacs.Console`):**
+
+```bash
+dotnet run --project Wacs.Console -- --switch --switch_super -i fib Wacs.Bench/fib.wasm 10
+```
+
+* `--switch` — route dispatch through the switch runtime.
+* `--switch_super` — also enable the bytecode-stream fuser. No effect without `--switch`.
+
+Both flags must be passed before the module path, as they configure the
+runtime at Instantiate time.
+
+**Rough performance** (fib-iter 5M / fac 20×250k / sum 5M, M1 Pro, .NET 8, median of 3):
+
+| mode | fib-iter | fac-20×250k | sum |
+|---|---|---|---|
+| polymorphic | 1067 ms | 478 ms | 888 ms |
+| polymorphic + super | 639 ms | 238 ms | 623 ms |
+| switch | 737 ms | 228 ms | 605 ms |
+| switch + super | 535 ms | 178 ms | 461 ms |
+
+Switch + super is ~2× polymorphic on these microbench workloads.
+
+Architectural details live in
+[`Wacs.Core/Compilation/SWITCH_RUNTIME.md`](Wacs.Core/Compilation/SWITCH_RUNTIME.md).
+The polymorphic runtime remains the canonical path; the switch runtime is
+a parallel back-end on top of the same parse/validate/link pipeline.
+
 ### AOT Transpiler (`WACS.Transpiler`)
 Super-instruction threading squeezes more out of the interpreter, but each WASM instruction still goes through a dispatch
 layer. The `WACS.Transpiler` package takes the next step: it *compiles* the module into a real .NET assembly at

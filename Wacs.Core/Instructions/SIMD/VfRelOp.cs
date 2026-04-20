@@ -35,7 +35,7 @@ namespace Wacs.Core.Instructions.Numeric
         public static readonly NumericInst F64x2Le = new(SimdCode.F64x2Le, ExecuteF64x2Le, ValidateOperands(pop1:ValType.V128, pop2:ValType.V128, push: ValType.V128), -1);
         public static readonly NumericInst F64x2Ge = new(SimdCode.F64x2Ge, ExecuteF64x2Ge, ValidateOperands(pop1:ValType.V128, pop2:ValType.V128, push: ValType.V128), -1);
 
-        private static void ExecuteF32x4Eq(ExecContext context)
+        internal static void ExecuteF32x4Eq(ExecContext context)
         {
             V128 c2 = context.OpStack.PopV128();
             V128 c1 = context.OpStack.PopV128();
@@ -50,7 +50,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4Ne(ExecContext context)
+        internal static void ExecuteF32x4Ne(ExecContext context)
         {
             V128 c2 = context.OpStack.PopV128();
             V128 c1 = context.OpStack.PopV128();
@@ -65,7 +65,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4Lt(ExecContext context)
+        internal static void ExecuteF32x4Lt(ExecContext context)
         {
             V128 c2 = context.OpStack.PopV128();
             V128 c1 = context.OpStack.PopV128();
@@ -80,7 +80,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4Gt(ExecContext context)
+        internal static void ExecuteF32x4Gt(ExecContext context)
         {
             V128 c2 = context.OpStack.PopV128();
             V128 c1 = context.OpStack.PopV128();
@@ -95,7 +95,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4Le(ExecContext context)
+        internal static void ExecuteF32x4Le(ExecContext context)
         {
             V128 c2 = context.OpStack.PopV128();
             V128 c1 = context.OpStack.PopV128();
@@ -110,7 +110,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF32x4Ge(ExecContext context)
+        internal static void ExecuteF32x4Ge(ExecContext context)
         {
             V128 c2 = context.OpStack.PopV128();
             V128 c1 = context.OpStack.PopV128();
@@ -125,7 +125,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Eq(ExecContext context)
+        internal static void ExecuteF64x2Eq(ExecContext context)
         {
             V128 c2 = context.OpStack.PopV128();
             V128 c1 = context.OpStack.PopV128();
@@ -138,7 +138,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Ne(ExecContext context)
+        internal static void ExecuteF64x2Ne(ExecContext context)
         {
             V128 c2 = context.OpStack.PopV128();
             V128 c1 = context.OpStack.PopV128();
@@ -151,7 +151,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Lt(ExecContext context)
+        internal static void ExecuteF64x2Lt(ExecContext context)
         {
             V128 c2 = context.OpStack.PopV128();
             V128 c1 = context.OpStack.PopV128();
@@ -164,7 +164,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Gt(ExecContext context)
+        internal static void ExecuteF64x2Gt(ExecContext context)
         {
             V128 c2 = context.OpStack.PopV128();
             V128 c1 = context.OpStack.PopV128();
@@ -177,7 +177,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Le(ExecContext context)
+        internal static void ExecuteF64x2Le(ExecContext context)
         {
             V128 c2 = context.OpStack.PopV128();
             V128 c1 = context.OpStack.PopV128();
@@ -190,7 +190,7 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushV128(result);
         }
 
-        private static void ExecuteF64x2Ge(ExecContext context)
+        internal static void ExecuteF64x2Ge(ExecContext context)
         {
             V128 c2 = context.OpStack.PopV128();
             V128 c1 = context.OpStack.PopV128();
