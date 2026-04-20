@@ -1,14 +1,21 @@
 # WACS (C# WebAssembly Interpreter)
-![wasm wast spec](https://github.com/kelnishi/WACS/actions/workflows/ci.yml/badge.svg?branch=main) 
-![Platform](https://img.shields.io/badge/platform-.NET%20Standard%202.1-blue)
-[![License](https://img.shields.io/github/license/kelnishi/WACS)](LICENSE)
-[![NuGet](https://img.shields.io/nuget/v/WACS?label=WACS)](https://www.nuget.org/packages/WACS)
-[![NuGet (WASIp1)](https://img.shields.io/nuget/v/WACS.WASIp1?label=WACS.WASIp1)](https://www.nuget.org/packages/WACS.WASIp1)
-[![NuGet (Transpiler)](https://img.shields.io/nuget/v/WACS.Transpiler?label=WACS.Transpiler)](https://www.nuget.org/packages/WACS.Transpiler)
-[![Downloads](https://img.shields.io/nuget/dt/WACS?label=WACS%20downloads)](https://www.nuget.org/packages/WACS)
+
+**Project status**
+&nbsp;![CI](https://github.com/kelnishi/WACS/actions/workflows/ci.yml/badge.svg?branch=main)
+&nbsp;![Platform](https://img.shields.io/badge/platform-.NET%20Standard%202.1-blue)
+&nbsp;[![License](https://img.shields.io/github/license/kelnishi/WACS)](LICENSE)
+
+**NuGet packages**
+&nbsp;[![WACS](https://img.shields.io/nuget/v/WACS?label=WACS)](https://www.nuget.org/packages/WACS)
+&nbsp;[![WACS.WASIp1](https://img.shields.io/nuget/v/WACS.WASIp1?label=WACS.WASIp1)](https://www.nuget.org/packages/WACS.WASIp1)
+&nbsp;[![WACS.Transpiler](https://img.shields.io/nuget/v/WACS.Transpiler?label=WACS.Transpiler)](https://www.nuget.org/packages/WACS.Transpiler)
+&nbsp;[![WACS.Transpiler.Lib](https://img.shields.io/nuget/v/WACS.Transpiler.Lib?label=WACS.Transpiler.Lib)](https://www.nuget.org/packages/WACS.Transpiler.Lib)
+&nbsp;[![Downloads](https://img.shields.io/nuget/dt/WACS?label=WACS%20downloads)](https://www.nuget.org/packages/WACS)
 
 ## Overview
-Latest changes: [0.8.1](https://github.com/kelnishi/WACS/tree/main/CHANGELOG.md)
+
+**Latest releases** (see the [CHANGELOG](CHANGELOG.md) for details):
+WACS `0.8.1` · WACS.WASIp1 `0.9.7` · WACS.Transpiler `0.2.0` · WACS.Transpiler.Lib `0.2.0`
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including Godot and AOT environments like Unity's IL2CPP.
 
@@ -35,7 +42,7 @@ WACS supports the latest standardized webassembly feature extensions including *
 
 - **Unity Compatibility**: Compatible with **Unity 2021.3+** including AOT/IL2CPP modes for iOS.
 - **Godot Compatibility**: Compatible with **Godot Engine - [.NET](https://docs.godotengine.org/en/stable/tutorials/scripting/c_sharp/c_sharp_basics.html)**. 
-- **Pure C# Implementation**: Written in C# 9.0/.NET Standard 2.1. (No unsafe code)
+- **Pure C# Implementation**: Written in C# 9.0/.NET Standard 2.1. (No `unsafe` keyword blocks, no raw pointer arithmetic — see [notes on `System.Runtime.CompilerServices.Unsafe` in the switch dispatcher](#running-wacsconsole).)
 - **No Complex Dependencies**: Uses [FluentValidation](https://github.com/FluentValidation/FluentValidation) and [Microsoft.Extensions.ObjectPool](https://www.nuget.org/packages/Microsoft.Extensions.ObjectPool) as its only dependencies.
 - **WebAssembly 3.0 Spec Compliance**: Passes the [WebAssembly 3.0](https://webassembly.github.io/spec/versions/core/WebAssembly-3.0-draft.pdf) spec [test suite](https://github.com/WebAssembly/spec/tree/wasm-3.0).
 - **Magical Interop**: Host bindings are validated with reflection, no boilerplate code required.
@@ -118,9 +125,12 @@ wasm-transpile -i coremark.wasm -o coremark.dll --wasi --entry-point _start --ru
 `wasi_snapshot_preview1` imports, shares memory with the interpreter
 bindings, and invokes the entry-point export in-process. For custom
 host imports (`env.sayc`, game bindings, etc.), use the library API
-with `BindHostFunction` + an `ImportDispatcher` proxy; see
-[`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the full
-flag surface, library API, and v0.1 known limitations.
+(`WACS.Transpiler.Lib`, new in v0.2) with `BindHostFunction` + the
+built-in `TranspiledModuleLoader` or a custom `ImportDispatcher` proxy.
+See [`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the
+full flag surface, the seamless-load API, and the remaining v0.3
+tracked items (non-scalar `--emit-main` argv parsing, exotic GC init
+values).
 
 ### From source
 
@@ -316,9 +326,12 @@ How does this differ from executing the wasm instructions linearly with the WACS
 - The CLR's implementation can use hardware more effectively (use registers instead of heap memory)
 - Avoids instruction fetching and dispatch
 
-In my testing, this leads to roughly 60% higher instruction processing throughput (128Mips -> 210Mips). These gains are situational however.
-Linking of the instructions into a tree cannot 100% be determined across block boundaries. So in these cases, the rewriter just passes
-the sequence through unaltered. So WASM code with lots of function calls or branches will see less benefit.
+Throughput win is roughly 20–25% on compute-bound microbenchmarks (see the
+[Wacs.Console](#running-wacsconsole) section below for CoreMark numbers).
+Gains are situational: linking instructions into a tree can't always be
+determined across block boundaries, so WASM code heavy on function calls
+or branches sees less benefit — the rewriter passes those sequences
+through unaltered.
 
 ### Switch Runtime (source-generated dispatcher)
 
@@ -367,18 +380,41 @@ ahead-of-time, producing native CLR methods the JIT can optimize like any other 
   so any invalid module trips at transpile time rather than as a runtime `InvalidProgramException`.
 - **Mixed-mode execution.** Transpilation is opportunistic: any function the transpiler declines (e.g. very large bodies
   under `--max-fn-size`) falls back to the Wacs.Core interpreter for that function only, so the module still runs.
-- **CLI + library.** Installed as a dotnet global tool (`wasm-transpile`) for one-shot `.wasm → .dll` builds, and
-  exposed as `Wacs.Transpiler.AOT.ModuleTranspiler` for programmatic use inside a host. See
-  [`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the full flag surface and v0.1 known limitations
-  (e.g. standalone cross-process `.dll` execution is slated for v0.2).
+- **CLI + library.** The `WACS.Transpiler` NuGet package installs the
+  `wasm-transpile` dotnet global tool for one-shot `.wasm → .dll` builds.
+  The programmatic surface ships separately as
+  [`WACS.Transpiler.Lib`](https://www.nuget.org/packages/WACS.Transpiler.Lib)
+  (v0.2) — reference it to drive transpilation and loading from inside
+  a host. The library also includes `TranspiledModuleLoader` for
+  seamless dynamic loading of saved `.dll`s without `Reflection.Emit`.
+  See [`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the
+  full flag surface.
 
 The transpiler is spec-equivalent to the interpreter on the WebAssembly 3.0 test suite (473/473), verified on macOS ARM64 and Linux x64.
 
-Optimization is an ongoing process and I have a few other strategies yet to implement.
-
 ### Expected Runtime Performance
-When built in AOT or Release mode, my benchmarks show WACS runs between 2~10% native throughput for benchmark programs
-like coremark. This is roughly on par with interpreted-only Python or about ~25% of an equivalent program written in C# on dotnet.
+
+Rough throughput positioning on compute-bound workloads (CoreMark on an
+M3 Max; "native" = a `clang -O3` build of the same C source running
+directly on the CPU). Numbers move with hardware, the WASM module, and
+the CLR JIT version — treat as ballpark, not benchmark ground truth.
+
+| Mode | CoreMark iter/s | % of native | Comparable to |
+|---|---:|---:|---|
+| WACS polymorphic (default) | ~275 | ~0.4% | Wasm3 / Wasmi (pure interpreters), CPython |
+| WACS `--super` | ~335 | ~0.5% | Wasm3 / Wasmi (pure interpreters) |
+| WACS `--switch` | ~360 | ~0.5% | faster than Wasm3, ~1/2 of WebAssembly Micro Runtime's interpreter |
+| WACS `--switch --super` | ~385 | ~0.6% | top-tier interpreter territory |
+| WACS `-t` / `--aot` (Reflection.Emit) | ~17 500 | ~25% | Node.js / V8 running the same logic as JavaScript (~40–60% of this AOT) |
+| `wasm-transpile` pre-compiled `.dll` loaded via `TranspiledModuleLoader` | ~17 500 | ~25% | same as `--aot`, AOT-safe on IL2CPP targets |
+| Native `clang -O3` | ~70 000 | 100% | (baseline) |
+
+**Choosing a mode:**
+
+- **Can you JIT?** (Desktop, server, `dotnet run`, Godot Mono) — use `-t` / `--aot`. It's ~60× the interpreter and within ~3–4× of native speed.
+- **AOT-only target?** (Unity IL2CPP, `PublishAot`, iOS, full-AOT Mono) — pre-compile the `.wasm → .dll` on a JIT host with [`wasm-transpile`](Wacs.Transpiler/README.md), ship the `.dll`, load it at runtime with `WACS.Transpiler.Lib`'s `TranspiledModuleLoader`. Same AOT speed, no `Reflection.Emit` dependency.
+- **Locked-down / policy-reviewed target, can't ship a pre-compiled `.dll`?** — use `--switch --super`. Build-time source-gen + `System.Runtime.CompilerServices.Unsafe` intrinsics only, no runtime codegen, no `unsafe` keyword blocks. ~1.4× over the polymorphic baseline.
+- **Maximum conservatism?** — default polymorphic, or `--super` for a small safe boost. Pure managed, no source-gen, no `Unsafe` usage. Roughly "Python-for-WASM" speed — fine for cold-path scripting, UGC validation, or logic that doesn't dominate a frame budget.
 
 ### Running `Wacs.Console`
 
@@ -488,15 +524,9 @@ interpreter's host-function machinery.
 
 ## Roadmap
 
-The current TODO list includes:
-
-- **Source Generated Bindings**: Use Roslyn source generator for generating bindings.
-- **WASI p1 Test Suite**: Validate WASIp1 with the test suite for improved standard compliance.
-- **WASI p2 and Component Model**: Implement the component model proposal.
-- **Text Format Parsing**: Add support for WebAssembly text format.
-- **SIMD Intrinsics**: Add hardware-accelerated SIMD (software implementation included in Wacs.Core).
-- **Unity Bindings for SDL**: Implement SDL2 with Unity bindings.
-- **JavaScript Proxy Bindings**: Maybe support common JS env functions.
+- **WebAssembly Component Model**: implement the [component-model
+  proposal](https://github.com/WebAssembly/component-model) on top of
+  the existing WACS core runtime, including Preview 2 WASI wiring.
 
 ## Sponsorship & Collaboration
 
