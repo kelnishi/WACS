@@ -26,6 +26,8 @@ using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.WASIp1;
+using Wacs.Transpiler.AOT;
+using Wacs.Transpiler.Cli;
 using Wacs.WASIp1.Types;
 
 namespace Wacs.Console
@@ -223,7 +225,8 @@ namespace Wacs.Console
             if (opts.LogProg)
                 System.Console.Error.WriteLine($"Instantiating Module {moduleName}");
 
-            if (opts.Transpile)
+            // Interpreter super-instructions (polymorphic path only).
+            if (opts.SuperInstructions)
                 runtime.SuperInstruction = true;
 
             // Switch runtime opt-in. Flag must be set BEFORE InstantiateModule —
@@ -238,6 +241,15 @@ namespace Wacs.Console
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing, or you're like super confident.
             var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true, TimeInstantiation = opts.LogProg});
             runtime.RegisterModule(moduleName, modInst);
+
+            // -t / --transpiler and --aot both route through the AOT path.
+            // Kept as aliases so --transpiler does what its name implies
+            // (actually invoke the transpiler); the interpreter
+            // super-instruction toggle moved to its own --super flag.
+            if (opts.Transpile || opts.Aot)
+            {
+                return RunViaTranspiler(opts, runtime, modInst);
+            }
 
             var callOptions = new InvokerOptions
             {
@@ -352,5 +364,85 @@ namespace Wacs.Console
 
             return 0;
         }
+
+        /// <summary>
+        /// AOT path for <c>--aot</c>: transpile the already-instantiated module
+        /// into a .NET assembly and execute through the transpiled code.
+        /// Imports wired via <see cref="HostedRunner"/> — the runtime keeps
+        /// its interpreter-bound host functions (WASI, user hosts) live;
+        /// the transpiled module calls into them through a DispatchProxy.
+        /// </summary>
+        private static int RunViaTranspiler(CommandLineOptions opts, WasmRuntime runtime, ModuleInstance modInst)
+        {
+            // Note: --aot needs Reflection.Emit at runtime. If you're running
+            // a PublishAot-compiled binary of Wacs.Console, the transpiler
+            // will throw deep in Reflection.Emit. We surface that failure
+            // below via the catch-all; the RuntimeFeature.IsDynamicCodeSupported
+            // check is unreliable here because PublishAot=true in the csproj
+            // sets it false at compile-time even for `dotnet run` builds.
+
+            var tOpts = new TranspilerOptions
+            {
+                Simd = ParseSimdStrategy(opts.AotSimd),
+                EmitTailCallPrefix = !opts.AotNoTailCalls,
+                MaxFunctionSize = opts.AotMaxFnSize,
+                DataStorage = ParseDataStorage(opts.AotDataStorage),
+            };
+
+            if (opts.LogProg)
+                System.Console.Error.WriteLine(
+                    $"AOT: transpiling (simd={tOpts.Simd}, tail_calls={tOpts.EmitTailCallPrefix}, "
+                    + $"max_fn_size={tOpts.MaxFunctionSize}, data_storage={tOpts.DataStorage})");
+
+            var transpiler = new ModuleTranspiler("WacsConsoleAot", tOpts);
+            TranspilationResult result;
+            try
+            {
+                result = transpiler.Transpile(modInst, runtime, "WasmModule");
+            }
+            catch (Exception exc)
+            {
+                System.Console.Error.WriteLine($"error: --aot: transpile failed: {exc.Message}");
+                if (opts.LogProg) System.Console.Error.WriteLine(exc);
+                return 1;
+            }
+
+            if (!string.IsNullOrEmpty(opts.AotSave))
+            {
+                try
+                {
+                    result.SaveAssembly(opts.AotSave);
+                    if (opts.LogProg)
+                        System.Console.Error.WriteLine($"AOT: saved to {opts.AotSave}");
+                }
+                catch (Exception exc)
+                {
+                    System.Console.Error.WriteLine($"error: --aot: SaveAssembly failed: {exc.Message}");
+                    return 1;
+                }
+            }
+
+            string entryPoint = !string.IsNullOrEmpty(opts.InvokeFunction)
+                ? opts.InvokeFunction
+                : (modInst.StartFunc != null
+                    ? runtime.GetFunctionName(modInst.StartFunc)
+                    : "_start");
+
+            return HostedRunner.Run(result, runtime, modInst, entryPoint, opts.LogProg);
+        }
+
+        private static SimdStrategy ParseSimdStrategy(string value) => value switch
+        {
+            "interpreter" => SimdStrategy.InterpreterDispatch,
+            "intrinsics" => SimdStrategy.HardwareIntrinsics,
+            _ => SimdStrategy.ScalarReference,
+        };
+
+        private static DataSegmentStorage ParseDataStorage(string value) => value switch
+        {
+            "raw" => DataSegmentStorage.RawResource,
+            "static" => DataSegmentStorage.StaticArrays,
+            _ => DataSegmentStorage.CompressedResource,
+        };
     }
 }

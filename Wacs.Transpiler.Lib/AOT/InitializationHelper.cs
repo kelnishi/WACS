@@ -190,6 +190,12 @@ namespace Wacs.Transpiler.AOT
 
         public static ModuleInitData Get(int id) => _initData[id];
 
+        /// <summary>True iff the given ID refers to a live registration.</summary>
+        public static bool Contains(int id)
+        {
+            lock (_lock) { return id >= 0 && id < _initData.Count; }
+        }
+
         /// <summary>
         /// Reset the registry. Call between test runs.
         /// </summary>
@@ -409,8 +415,116 @@ namespace Wacs.Transpiler.AOT
         /// Returns a fully initialized ThinContext ready for function execution.
         /// </summary>
         public static ThinContext Initialize(int initDataId)
+            => InitializeCore(InitRegistry.Get(initDataId), initDataId, remapSavedSegments: false);
+
+        /// <summary>
+        /// Unified entry for the generated Module ctor. Chooses the fast
+        /// in-process path (<see cref="Initialize(int)"/>, which uses the
+        /// already-populated <see cref="InitRegistry"/>) when the baked ID
+        /// is live, and falls back to the codec-embedded cross-process
+        /// path (<see cref="InitializeFromData(ModuleInitData, int)"/>)
+        /// when the registry has been wiped — i.e. the assembly loaded
+        /// in a fresh process.
+        /// </summary>
+        public static ThinContext InitializeFromEmbedded(byte[] embeddedBytes, int transpileTimeInitDataId)
         {
-            var data = InitRegistry.Get(initDataId);
+            if (InitRegistry.Contains(transpileTimeInitDataId))
+                return Initialize(transpileTimeInitDataId);
+            var data = InitDataCodec.Decode(embeddedBytes);
+            return InitializeFromData(data, transpileTimeInitDataId);
+        }
+
+        /// <summary>
+        /// Cross-process entry: call with a freshly-decoded <see cref="ModuleInitData"/>
+        /// (e.g. from <see cref="InitDataCodec.Decode"/>). The method registers the
+        /// embedded data segments into <see cref="ModuleInit"/> with fresh IDs (to
+        /// avoid cross-module collisions), rewrites <c>data.ActiveDataSegments</c>
+        /// and <c>data.DataSegmentBaseId</c> in place to match, then runs the
+        /// standard init. A fresh <see cref="InitRegistry"/> entry is allocated so
+        /// runtime-side callers that still use <c>ctx.InitDataId</c> see a valid
+        /// handle. Safe to call concurrently; multiple modules get disjoint ID
+        /// ranges.
+        /// </summary>
+        /// <summary>
+        /// Variant that takes a hint of the transpile-time <c>InitDataId</c>.
+        /// In-process callers (where GcTypeRegistry / MultiReturnMethodRegistry
+        /// were populated at that ID during the transpile run) pass the
+        /// original so GC / call_indirect-multi-return lookups resolve.
+        /// Cross-process callers pass -1 (no such entries exist).
+        /// </summary>
+        public static ThinContext InitializeFromData(ModuleInitData data, int transpileTimeInitDataId)
+        {
+            var ctx = InitializeFromData(data);
+            if (transpileTimeInitDataId >= 0)
+                ctx.InitDataId = transpileTimeInitDataId;
+            return ctx;
+        }
+
+        public static ThinContext InitializeFromData(ModuleInitData data)
+        {
+            if (data == null) throw new ArgumentNullException(nameof(data));
+
+            // Detect in-process vs cross-process. In-process: the transpile
+            // step has already registered data segments in ModuleInit under
+            // their declared IDs, and side tables like MultiReturnMethodRegistry
+            // are keyed against the transpile-time InitDataId baked into the
+            // generated IL. Remapping would leave those side tables stale.
+            //
+            // Cross-process: ModuleInit starts empty, so we *must* register
+            // the saved segments and rewrite the IDs on the fly.
+            bool alreadyRegistered = false;
+            if (data.ActiveDataSegments.Length > 0)
+            {
+                var probe = ModuleInit.GetDataSegmentData(data.ActiveDataSegments[0].segId);
+                alreadyRegistered = probe != null;
+            }
+            else if (data.SavedDataSegments.Count > 0)
+            {
+                foreach (var kv in data.SavedDataSegments)
+                {
+                    alreadyRegistered = ModuleInit.GetDataSegmentData(kv.Key) != null;
+                    break;
+                }
+            }
+
+            if (!alreadyRegistered && data.SavedDataSegments.Count > 0)
+            {
+                var map = ModuleInit.RegisterDataSegmentsWithRemap(data.SavedDataSegments);
+
+                // Rewrite ActiveDataSegments' segId to the new IDs.
+                for (int i = 0; i < data.ActiveDataSegments.Length; i++)
+                {
+                    var entry = data.ActiveDataSegments[i];
+                    if (map.TryGetValue(entry.segId, out int newId))
+                        data.ActiveDataSegments[i] = (entry.memIdx, entry.offset, newId);
+                }
+
+                // Recompute DataSegmentBaseId as the min of the new IDs (all
+                // segments of one module share a contiguous range because
+                // RegisterDataSegmentsWithRemap iterates the dict in a
+                // single lock).
+                int newBase = int.MaxValue;
+                foreach (var id in map.Values) if (id < newBase) newBase = id;
+                data.DataSegmentBaseId = newBase == int.MaxValue ? 0 : newBase;
+
+                // Rebuild SavedDataSegments dict keyed by new IDs, so any
+                // downstream consumer that re-reads the bytes via the dict
+                // gets them at the same keys the ctx now carries.
+                var newDict = new Dictionary<int, byte[]>(data.SavedDataSegments.Count);
+                foreach (var kv in data.SavedDataSegments)
+                    newDict[map.TryGetValue(kv.Key, out var nid) ? nid : kv.Key] = kv.Value;
+                data.SavedDataSegments = newDict;
+            }
+
+            int newInitDataId = InitRegistry.Register(data);
+            return InitializeCore(data, newInitDataId, remapSavedSegments: false);
+        }
+
+        private static ThinContext InitializeCore(ModuleInitData data, int initDataId, bool remapSavedSegments)
+        {
+            // remapSavedSegments is reserved for a future path (currently
+            // handled by InitializeFromData before reaching Core). Kept as
+            // a parameter so the call sites document their intent.
 
             // 1. Allocate memories (as MemoryInstance for shared growth)
             var memories = new MemoryInstance[data.Memories.Length];
