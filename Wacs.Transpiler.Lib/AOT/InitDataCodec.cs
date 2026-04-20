@@ -942,11 +942,14 @@ namespace Wacs.Transpiler.AOT
                     return;
                 }
 
-                // Externref / funcref with an opaque idx. Type determines
-                // which — both use Data.Ptr; the Type itself is already
-                // encoded in the prefix.
-                bool isExtern = v.Type.Matches(ValType.ExternRef, null!)
-                             || (v.Type & ~ValType.NullableRef) == ValType.ExternRef;
+                // Externref / funcref with an opaque idx — both carry
+                // just the idx in Data.Ptr; the full ValType (including
+                // nullability and any module-type projection) is already
+                // encoded in the leading WriteVarInt32 above, so we pick
+                // the value-kind tag based on the raw type identity.
+                bool isExtern = v.Type == ValType.ExternRef
+                             || v.Type == ValType.NoExtern
+                             || v.Type == ValType.NoExternNN;
                 w.Write(isExtern ? ValueKindExternRef : ValueKindFuncRef);
                 WriteVarInt64(w, v.Data.Ptr);
                 return;

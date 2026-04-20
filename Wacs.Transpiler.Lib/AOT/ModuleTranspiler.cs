@@ -283,7 +283,15 @@ namespace Wacs.Transpiler.AOT
                 dataEmitter, dataSegmentBaseId >= 0 ? dataSegmentBaseId : 0,
                 elemSegmentBaseId >= 0 ? elemSegmentBaseId : 0,
                 allFunctionTypes);
-            moduleClassGen.Generate();
+            // Populate initData BEFORE Generate(): the generator's
+            // EmitEmbeddedInitData takes a snapshot of InitRegistry.Get(id)
+            // and writes it into the emitted byte[] resource. Anything we
+            // mutate on the data object after Generate() runs won't make
+            // it into the persisted .dll (in-process still works because
+            // InitRegistry holds the live object, but cross-process sees
+            // the pre-mutation snapshot). Ordering: prepare → populate all
+            // fields → generate.
+            moduleClassGen.PrepareInitData();
 
             // Resolve array element ValType for each GC global init so
             // array.new_default can seed Value[] slots with proper null refs
@@ -299,10 +307,6 @@ namespace Wacs.Transpiler.AOT
                         gi.ElementValType = (int)at.ElementType.StorageType;
                 }
             }
-
-            // Finalize the types
-            var functionsType = typeBuilder.CreateType()!;
-            var moduleClassType = moduleClassGen.CreateType();
 
             // Populate function type hashes for runtime ref.cast/ref.test on funcrefs.
             // Each function's hash is the DefType.GetHashCode() (SubType.ComputedHash)
@@ -365,6 +369,12 @@ namespace Wacs.Transpiler.AOT
                 if (gcType.ClrType != null)
                     GcTypeRegistry.Register(initDataId, typeIdx, gcType.ClrType);
             }
+
+            // NOW we can generate the Module ctor IL (which will snapshot
+            // the fully-populated initData) and finalize the types.
+            moduleClassGen.Generate();
+            var functionsType = typeBuilder.CreateType()!;
+            var moduleClassType = moduleClassGen.CreateType();
 
             // Retrieve the actual MethodInfo objects from the baked type
             var methods = new MethodInfo[wasmFunctions.Count];
