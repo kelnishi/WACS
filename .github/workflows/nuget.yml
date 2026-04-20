@@ -26,6 +26,9 @@ jobs:
           - path: Wacs.Transpiler
             package_name: WACS.Transpiler
             tag_prefix: WACS-Transpiler-v
+          - path: Wacs.Transpiler.Lib
+            package_name: WACS.Transpiler.Lib
+            tag_prefix: WACS-Transpiler-v
 
     steps:
       - name: Checkout code
