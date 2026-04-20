@@ -926,6 +926,89 @@ is that the iterative loop's frame-size change interacts with the loop
 body's scalar-sum pattern differently than the recursive model did.
 Worth disasm-investigating but not a correctness issue.
 
+### Phase N — eager compile + cached CompiledFunction fields
+
+**Motivation**: disasm of phase M's `Run` showed each WASM `call` hit a
+null-check on `wasmFunc.SwitchCompiled` + a `Signature.ParameterTypes.Arity`
+dereference + a per-slot `new Value(ValType)` init loop + a per-call
+`ctx.Attributes.MaxCallStack` dereference. None of these belong in the
+hot path — all derivable at compile time or hoistable.
+
+**Change**: four cached fields + one instantiation-time walker.
+
+1. **Strict eager compilation in `WasmRuntime.LinkModule`.** When
+   `UseSwitchRuntime = true` at Instantiate time, every module-owned
+   `FunctionInstance` is compiled through `BytecodeCompiler.Compile`
+   as part of linking. The generator's `Call`/`CallIndirect`/`CallRef`
+   cases then dereference `wasmFunc.SwitchCompiled` with no null check.
+   Gated on the flag so poly-side `SuperInstruction` (which rewrites into
+   `WacsCode` ops the bytecode compiler doesn't accept) stays unaffected.
+2. **`CompiledFunction.ParamCount`** — cached from
+   `Signature.ParameterTypes.Arity` at compile time. Call-family cases
+   read the int field directly instead of walking through `Type →
+   ParameterTypes → Arity`.
+3. **`CompiledFunction.DefaultLocalsTemplate`** — pre-built `Value[]`
+   holding per-slot defaults for declared locals. Call-site init replaces
+   the per-slot `new Value(ValType)` loop with a single `Array.Copy`
+   into the ArrayPool-rented buffer, plus the arg-pop loop. Applies both
+   to `ControlHandlers.InvokeWasm` (entry) and to the generator's
+   iterative Call cases.
+4. **`_maxCallStack` hoisted at Run entry** — the Call-family depth
+   guard reads a local int instead of `ctx.Attributes.MaxCallStack`
+   (two field loads) per call.
+
+**Bonus fix**: `BytecodeCompiler`'s handler-table pass now handles
+`InstExpressionProxy` as a catch target (returns the `int.MaxValue`
+return-sentinel pc, mirroring the branch-resolution path). Latent bug
+previously masked by lazy compile — eager-compile on the full spec suite
+was the gate that surfaced it.
+
+**Bench** (median of 3, same workloads/hardware as §7):
+
+| workload | switch phase M | switch phase N | swFuse phase M | swFuse phase N |
+|---|---|---|---|---|
+| fib-iter(5M) | 800 ms | **737 ms** (−8%) | 585 ms | 535 ms (−9%) |
+| fac(20)×250k | 245 ms | **228 ms** (−7%) | 200 ms | 178 ms (−11%) |
+| sum(5M) | 645 ms | **605 ms** (−6%) | 530 ms | 461 ms (−13%) |
+
+The `fac` improvement is direct attribution: every one of the 5M calls
+now skips the null-check, the Arity-walk, and the per-slot Value init
+loop. The `fib-iter` and `sum` improvements are subtler — those
+workloads have only one top-level call, so the Call-path wins are
+negligible. Most of the delta is from eager compile warming L1i with
+the callee's bytecode during instantiation, and from RyuJIT's slightly
+better register allocation on the shortened Call case bodies (fewer
+GC-tracked struct locals = lower register pressure).
+
+**Tried and reverted**: a pending-trampoline try/catch refactor —
+capture the exception in a local inside catch, run the unwind (which
+mutates `code`, `handlers`, `_codeBase`, `_localsSpan`, `_pc`,
+`_stackCount`) *outside* the try so the inner-loop dispatch locals
+don't have to stay memory-observable across may-throw points. Disasm
+showed no frame change and no per-iteration instruction change —
+the 1424 B frame is driven by GC-tracked struct locals inside the 6
+Call-family case blocks (each declares its own `__compiled`,
+`__rented`, `__newLocals: Memory<Value>`, `__newSpan: Span<Value>`,
+`__newFrame`), not by try/catch liveness. RyuJIT doesn't coalesce
+GC-tracked locals across disjoint case blocks in a 5500-line switch.
+Reverted to keep the generator simpler.
+
+**Frame analysis** (for follow-up consideration):
+
+The Call-family tail (compile-check → rent-from-template → push-frame →
+switch-to-callee) is identical across the 6 Call opcodes but the JIT
+allocates 6 separate slots for each GC-tracked local it holds. Extracting
+the tail into a helper method would save ~1000 B of frame space but adds
+a `blr` per WASM call — net-negative on call-heavy benchmarks.
+
+The bigger per-iteration cost is that `_pc`, `code`, `_localsSpan`,
+`_stackCount` all spill to frame between opcodes (~8 mem ops in the
+fetch/advance/dispatch header before any opcode body runs). This is
+register-allocation failure across 172+ case blocks, not frame size —
+the JIT exhausts its register budget and spills even the hottest locals.
+Not cleanly addressable without structural changes (per-case helpers
+regressed historically; large switch exhausts register pressure).
+
 ---
 
 ## 7. Measured results
@@ -934,13 +1017,13 @@ Comparison of a 3-benchmark micro-suite across the optimization phases.
 All numbers median of 4 runs, M1 Pro, .NET 8, `net8.0` target framework,
 `DOTNET_TieredCompilation=0`.
 
-Phase M (current head):
+Phase N (current head):
 
 ```
               polymorphic     super       switch      swFuse     switch/poly   fuse/super
-fib-iter(5M):    1060 ms     620 ms       800 ms      585 ms       0.75x        0.93x
-fac(20)×250k:     480 ms     245 ms       245 ms      200 ms       0.51x        0.82x
-sum(5M):          880 ms     620 ms       645 ms      530 ms       0.73x        0.86x
+fib-iter(5M):    1067 ms     639 ms       737 ms      535 ms       0.69x        0.84x
+fac(20)×250k:     478 ms     238 ms       228 ms      178 ms       0.48x        0.75x
+sum(5M):          888 ms     623 ms       605 ms      461 ms       0.68x        0.74x
 ```
 
 * **polymorphic**: virtual-dispatch `ProcessThreadWithOptions`.
@@ -951,17 +1034,16 @@ sum(5M):          880 ms     620 ms       645 ms      530 ms       0.73x        
 * **swFuse**: switch runtime + stream-fuser (`StreamFusePass`), the
   intended shipping configuration.
 
-Phase M flipped the story vs phase L: `switch` (plain) is now the
-fastest configuration across all three benchmarks, because eliminating
-the per-call native-frame overhead (InvokeWasm + SwitchRuntime.Run ≈
-320 B/level) outweighs the cost of checking `_pc >= code.Length` and
-pushing/popping SwitchCallFrame on call/return. `swFuse` is still
-faster than polymorphic-super on fib and fac, but slower than plain
-`switch` on fib due to the outer try/catch interacting poorly with
-DispatchFF's register pressure (see §8.4).
+Plain `switch` is the fastest across all three benchmarks even without
+the stream-fuser. `swFuse` beats polymorphic-super by 12–26%, and plain
+`switch` beats polymorphic by 31–52%. Phase N's Call-family cleanup
+shaved the remaining Call overhead (null-check, Arity walk, per-slot
+Value init, MaxCallStack dereference) — the fac workload, which exercises
+Call 5M times, saw the largest relative gains.
 
-Correctness: **723/723 spec tests pass**, parity with polymorphic.
-Up from 720/3 at phase L. Compilation tests: 50/50.
+Correctness: **118/118 wast files pass** on the spec-suite survey
+(`Spec.Test/survey-switch-runtime.sh`), parity with polymorphic.
+Compilation tests: 50/50.
 
 ---
 
@@ -1069,7 +1151,9 @@ Generated output (one file, produced at build time):
 Hand-written runtime support:
 
 * `Wacs.Core/Compilation/CompiledFunction.cs` — class holding the
-  annotated bytecode, handler table, locals count, and signature.
+  annotated bytecode, handler table, locals count, signature,
+  plus the phase-N caches: `ParamCount` and `DefaultLocalsTemplate`
+  (pre-built `Value[]` for call-site locals init).
 * `Wacs.Core/Compilation/BytecodeCompiler.cs` — the link-pass consumer
   that walks `InstructionBase[]` and emits the annotated stream +
   handler table.
@@ -1118,6 +1202,11 @@ ExecContext fields added/changed over the phases:
   by both polymorphic `_callStack` and switch `_switchCallStack`).
   `Attributes.SwitchMaxCallStack` is still defined but unused post-M.
 * `Attributes.UseSwitchSuperInstructions` — gate for `StreamFusePass`.
+* `UseSwitchRuntime` — **Phase N** uses this flag at Instantiate time
+  to decide whether to eagerly compile every module-owned
+  `FunctionInstance`. Flipping the flag *after* instantiation leaves
+  `SwitchCompiled` null on callees, and the generator's Call-family
+  cases assume non-null — so flag-flip-after-instantiate is unsupported.
 
 ---
 
