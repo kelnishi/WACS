@@ -16,6 +16,7 @@ using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.Instructions.Reference;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.GC;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
@@ -871,9 +872,17 @@ namespace Wacs.Transpiler.AOT
             }
         }
 
+        // Value-encoding kind tags. See InitDataFormat.md §VALUE_ENCODING.
+        private const byte ValueKindScalar      = 0;
+        private const byte ValueKindNullRef     = 1;
+        private const byte ValueKindFuncRef     = 2; // funcref with opaque idx
+        private const byte ValueKindExternRef   = 3; // externref with opaque idx
+        private const byte ValueKindI31         = 4;
+        private const byte ValueKindV128        = 5; // 16 raw bytes
+        // Tags 6+ reserved for StructRef / ArrayRef in a future phase.
+
         internal static void WriteValue(BinaryWriter w, Value v)
         {
-            // Phase 1: scalar-only. Phase 3 adds ref/GC/V128.
             WriteVarInt32(w, (int)v.Type);
             switch (v.Type)
             {
@@ -881,13 +890,72 @@ namespace Wacs.Transpiler.AOT
                 case ValType.I64:
                 case ValType.F32:
                 case ValType.F64:
-                    w.Write((byte)0); // scalar
+                    w.Write(ValueKindScalar);
                     w.Write((ulong)v.Data.Int64);
-                    break;
-                default:
-                    throw new NotImplementedException(
-                        $"InitDataCodec: Value encoding for type {v.Type} lands in phase 3.");
+                    return;
+
+                case ValType.V128:
+                    w.Write(ValueKindV128);
+                    // V128 is stored via a VecRef GcRef. Extract the 16 bytes
+                    // as two ulongs (MV128 overlays U64x2_0 / U64x2_1 at 0 /
+                    // 8). Zero-init fallback when the GcRef isn't present.
+                    if (v.GcRef is VecRef vec)
+                    {
+                        w.Write(vec.V128.U64x2_0);
+                        w.Write(vec.V128.U64x2_1);
+                    }
+                    else
+                    {
+                        w.Write(0UL);
+                        w.Write(0UL);
+                    }
+                    return;
+
+                case ValType.I31:
+                case ValType.I31NN:
+                    w.Write(ValueKindI31);
+                    WriteVarInt32(w, (int)v.Data.Ptr);
+                    return;
             }
+
+            // Reference types (FuncRef / ExternRef / nullables / typed refs).
+            if (v.Type.IsRefType())
+            {
+                if (v.IsNullRef)
+                {
+                    w.Write(ValueKindNullRef);
+                    return;
+                }
+
+                // Concrete reference — we encode the idx. For structrefs and
+                // arrayrefs with real GC payloads, the GcRef itself carries
+                // per-object state that isn't in Data.Ptr — those cases
+                // aren't handled in the phase-3 codec (they're extremely
+                // rare in transpiled init data; the transpiler's current
+                // PrepareInitData only ever emits RefI31 + null + funcidx
+                // values). Defer struct/array-value serialization to a
+                // later phase.
+                if (v.GcRef is I31Ref i31)
+                {
+                    w.Write(ValueKindI31);
+                    WriteVarInt32(w, i31.Value);
+                    return;
+                }
+
+                // Externref / funcref with an opaque idx. Type determines
+                // which — both use Data.Ptr; the Type itself is already
+                // encoded in the prefix.
+                bool isExtern = v.Type.Matches(ValType.ExternRef, null!)
+                             || (v.Type & ~ValType.NullableRef) == ValType.ExternRef;
+                w.Write(isExtern ? ValueKindExternRef : ValueKindFuncRef);
+                WriteVarInt64(w, v.Data.Ptr);
+                return;
+            }
+
+            throw new NotSupportedException(
+                $"InitDataCodec: Value encoding for type {v.Type} (GcRef={v.GcRef?.GetType().Name ?? "null"}) " +
+                "isn't in the phase-3 set. Struct/array GC values require codec extension — " +
+                "the only transpiler-side producer today is RefI31, which is covered.");
         }
 
         internal static Value ReadValue(BinaryReader r)
@@ -895,25 +963,52 @@ namespace Wacs.Transpiler.AOT
             int typeRaw = ReadVarInt32(r);
             var type = (ValType)typeRaw;
             byte kind = r.ReadByte();
+
             switch (kind)
             {
-                case 0:
+                case ValueKindScalar:
                 {
                     ulong bits = r.ReadUInt64();
                     Value v = default;
-                    // Value is a struct with explicit fields — we set Type
-                    // directly and Data.Int64 carries the bit pattern. The
-                    // generated IL reads back via Data.Int32 / Float32 /
-                    // etc. (overlaid union), so storing the bits verbatim
-                    // round-trips all four scalar types.
                     v.Type = type;
                     v.Data.Int64 = unchecked((long)bits);
                     return v;
                 }
-                default:
-                    throw new NotImplementedException(
-                        $"InitDataCodec: Value decoding kind={kind} lands in phase 3.");
+                case ValueKindNullRef:
+                {
+                    return Value.Null(type);
+                }
+                case ValueKindFuncRef:
+                {
+                    long idx = ReadVarInt64(r);
+                    return new Value(type, idx, null);
+                }
+                case ValueKindExternRef:
+                {
+                    long idx = ReadVarInt64(r);
+                    return new Value(type, idx, null);
+                }
+                case ValueKindI31:
+                {
+                    int i = ReadVarInt32(r);
+                    int masked = i & 0x7FFF_FFFF;
+                    return new Value(type, masked, new I31Ref(masked));
+                }
+                case ValueKindV128:
+                {
+                    ulong lo = r.ReadUInt64();
+                    ulong hi = r.ReadUInt64();
+                    // V128(ulong, ulong) overload is implicit via tuple; use
+                    // the two-ulong ctor to reconstruct the value directly.
+                    var v128 = new V128(lo, hi);
+                    Value v = default;
+                    v.Type = ValType.V128;
+                    v.GcRef = new VecRef(v128);
+                    return v;
+                }
             }
+            throw new InvalidDataException(
+                $"InitDataCodec: unknown value kind tag 0x{kind:X2} for type {type}");
         }
 
         // =================================================================
