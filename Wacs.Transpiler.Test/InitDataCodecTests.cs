@@ -14,6 +14,7 @@ using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.Instructions.Reference;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.GC;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
@@ -687,6 +688,118 @@ namespace Wacs.Transpiler.Test
             Assert.NotNull(back.Tables[0].initExpr);
             Assert.Equal(2, back.Tables[0].initExpr!.Instructions.Count);
             Assert.Null(back.Tables[1].initExpr);
+        }
+
+        // =================================================================
+        // Value round-trips (phase 3): ref types, V128, i31
+        // =================================================================
+
+        [Fact]
+        public void Value_Null_Funcref_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                Globals = new (ValType, Mutability, Value)[]
+                {
+                    (ValType.FuncRef | ValType.NullableRef, Mutability.Immutable,
+                     Value.Null(ValType.FuncRef | ValType.NullableRef)),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Single(back.Globals);
+            Assert.True(back.Globals[0].init.IsNullRef);
+        }
+
+        [Fact]
+        public void Value_Null_Externref_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                Globals = new (ValType, Mutability, Value)[]
+                {
+                    (ValType.ExternRef | ValType.NullableRef, Mutability.Immutable,
+                     Value.Null(ValType.ExternRef | ValType.NullableRef)),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.True(back.Globals[0].init.IsNullRef);
+        }
+
+        [Fact]
+        public void Value_Funcref_WithIdx_RoundTrip()
+        {
+            Value funcref = new Value(ValType.FuncRef, 42L, null);
+            var data = new ModuleInitData
+            {
+                Globals = new (ValType, Mutability, Value)[]
+                {
+                    (ValType.FuncRef, Mutability.Immutable, funcref),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(ValType.FuncRef, back.Globals[0].init.Type);
+            Assert.Equal(42L, back.Globals[0].init.Data.Ptr);
+            Assert.False(back.Globals[0].init.IsNullRef);
+        }
+
+        [Fact]
+        public void Value_I31_RoundTrip()
+        {
+            Value i31 = new Value(ValType.I31, 12345, new Wacs.Core.Runtime.GC.I31Ref(12345));
+            var data = new ModuleInitData
+            {
+                Globals = new (ValType, Mutability, Value)[]
+                {
+                    (ValType.I31, Mutability.Immutable, i31),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(ValType.I31, back.Globals[0].init.Type);
+            Assert.Equal(12345L, back.Globals[0].init.Data.Ptr);
+            Assert.IsType<Wacs.Core.Runtime.GC.I31Ref>(back.Globals[0].init.GcRef);
+            Assert.Equal(12345, ((Wacs.Core.Runtime.GC.I31Ref)back.Globals[0].init.GcRef!).Value);
+        }
+
+        [Fact]
+        public void Value_V128_RoundTrip()
+        {
+            var v128 = new V128(0x1234_5678_9ABC_DEF0UL, 0xCAFE_BABE_FEED_FACEUL);
+            Value val = default;
+            val.Type = ValType.V128;
+            val.GcRef = new VecRef(v128);
+
+            var data = new ModuleInitData
+            {
+                Globals = new (ValType, Mutability, Value)[]
+                {
+                    (ValType.V128, Mutability.Immutable, val),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(ValType.V128, back.Globals[0].init.Type);
+            Assert.IsType<VecRef>(back.Globals[0].init.GcRef);
+            var roundTripped = ((VecRef)back.Globals[0].init.GcRef!).V128;
+            Assert.Equal(0x1234_5678_9ABC_DEF0UL, roundTripped.U64x2_0);
+            Assert.Equal(0xCAFE_BABE_FEED_FACEUL, roundTripped.U64x2_1);
+        }
+
+        [Fact]
+        public void GcElementValues_WithI31_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                GcElementValues = new Dictionary<(int, int), Value>
+                {
+                    [(0, 0)] = new Value(ValType.I31, 7, new Wacs.Core.Runtime.GC.I31Ref(7)),
+                    [(0, 1)] = new Value(ValType.I31, 42, new Wacs.Core.Runtime.GC.I31Ref(42)),
+                    [(1, 3)] = Value.Null(ValType.FuncRef | ValType.NullableRef),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(3, back.GcElementValues.Count);
+            Assert.Equal(7, ((Wacs.Core.Runtime.GC.I31Ref)back.GcElementValues[(0, 0)].GcRef!).Value);
+            Assert.Equal(42, ((Wacs.Core.Runtime.GC.I31Ref)back.GcElementValues[(0, 1)].GcRef!).Value);
+            Assert.True(back.GcElementValues[(1, 3)].IsNullRef);
         }
 
         // =================================================================
