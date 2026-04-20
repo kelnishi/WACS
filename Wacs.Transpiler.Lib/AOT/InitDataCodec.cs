@@ -10,6 +10,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using Wacs.Core;
+using Wacs.Core.Instructions;
+using Wacs.Core.Instructions.Numeric;
+using Wacs.Core.Instructions.Reference;
+using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -650,16 +655,220 @@ namespace Wacs.Transpiler.AOT
         // Expression / Value / DefType encoding (phase 2+ stubs)
         // =================================================================
 
+        // =================================================================
+        // Expression codec (phase 2)
+        //
+        // Supports the WASM "constant expression" subset plus WASM 3.0
+        // constant arithmetic. GC-constant ops (struct.new / array.new*
+        // / ref.i31 / *_convert_*) land in phase 3 alongside DefType.
+        //
+        // Encoding: varuint32 count, then count × { op-tag: u8, op-specific
+        // immediate bytes }. Tag is a private byte assigned below, NOT the
+        // WASM binary opcode — this way the codec is decoupled from spec
+        // opcode changes. Unknown tags cause decode failure (we don't get
+        // forward-compat per-op; spec additions bump the codec minor
+        // version and decoders ignore unknown sections).
+        // =================================================================
+
+        internal enum InitOp : byte
+        {
+            End             = 0x01,
+            I32Const        = 0x02,
+            I64Const        = 0x03,
+            F32Const        = 0x04,
+            F64Const        = 0x05,
+            GlobalGet       = 0x06,
+            RefNull         = 0x07,
+            RefFunc         = 0x08,
+            I32Add          = 0x09,
+            I32Sub          = 0x0A,
+            I32Mul          = 0x0B,
+            I64Add          = 0x0C,
+            I64Sub          = 0x0D,
+            I64Mul          = 0x0E,
+            // 0x10–0x17 reserved for phase 3 GC ops (StructNew, ArrayNew*,
+            // RefI31, AnyConvertExtern, ExternConvertAny).
+        }
+
         internal static void WriteExpression(BinaryWriter w, WasmExpression expr)
         {
-            throw new NotImplementedException(
-                "InitDataCodec: Expression encoding lands in phase 2.");
+            var insts = expr.Instructions._instructions;
+            WriteVarUInt32(w, (uint)insts.Count);
+            foreach (var inst in insts) WriteInitInstruction(w, inst);
         }
 
         internal static WasmExpression ReadExpression(BinaryReader r)
         {
-            throw new NotImplementedException(
-                "InitDataCodec: Expression decoding lands in phase 2.");
+            uint count = ReadVarUInt32(r);
+            var list = new List<InstructionBase>((int)count);
+            for (int i = 0; i < count; i++) list.Add(ReadInitInstruction(r));
+            // Arity = 1 matches Expression.ParseInitializer; init exprs
+            // always produce a single value. True arity varies (e.g. the
+            // 0-arity table.init expression) but isn't observed at load
+            // time — the codec's consumers (deferred inits / data offsets)
+            // all evaluate the expression as a single-value producer.
+            return new WasmExpression(1, new InstructionSequence(list), isStatic: true);
+        }
+
+        private static void WriteInitInstruction(BinaryWriter w, InstructionBase inst)
+        {
+            switch (inst)
+            {
+                case InstEnd _:
+                    w.Write((byte)InitOp.End);
+                    return;
+                case InstI32Const i32:
+                    w.Write((byte)InitOp.I32Const);
+                    WriteVarInt32(w, i32.Value);
+                    return;
+                case InstI64Const i64:
+                    w.Write((byte)InitOp.I64Const);
+                    WriteVarInt64(w, i64.FetchImmediate(null!));
+                    return;
+                case InstF32Const f32:
+                    w.Write((byte)InitOp.F32Const);
+                    w.Write(f32.FetchImmediate(null!));
+                    return;
+                case InstF64Const f64:
+                    w.Write((byte)InitOp.F64Const);
+                    w.Write(f64.FetchImmediate(null!));
+                    return;
+                case InstGlobalGet gg:
+                    w.Write((byte)InitOp.GlobalGet);
+                    WriteVarUInt32(w, (uint)gg.GetIndex());
+                    return;
+                case InstRefNull rn:
+                    w.Write((byte)InitOp.RefNull);
+                    WriteVarInt32(w, (int)rn.RefType);
+                    return;
+                case InstRefFunc rf:
+                    w.Write((byte)InitOp.RefFunc);
+                    WriteVarUInt32(w, rf.FunctionIndex.Value);
+                    return;
+                case InstI32BinOp bin32 when bin32.Op == OpCode.I32Add: w.Write((byte)InitOp.I32Add); return;
+                case InstI32BinOp bin32 when bin32.Op == OpCode.I32Sub: w.Write((byte)InitOp.I32Sub); return;
+                case InstI32BinOp bin32 when bin32.Op == OpCode.I32Mul: w.Write((byte)InitOp.I32Mul); return;
+                case InstI64BinOp bin64 when bin64.Op == OpCode.I64Add: w.Write((byte)InitOp.I64Add); return;
+                case InstI64BinOp bin64 when bin64.Op == OpCode.I64Sub: w.Write((byte)InitOp.I64Sub); return;
+                case InstI64BinOp bin64 when bin64.Op == OpCode.I64Mul: w.Write((byte)InitOp.I64Mul); return;
+            }
+            throw new NotSupportedException(
+                $"InitDataCodec: constant-expression op '{inst.GetType().Name}' (opcode {inst.Op}) " +
+                "isn't in the phase-2 set. GC-constant ops land in phase 3; anything else is a codec gap.");
+        }
+
+        private static InstructionBase ReadInitInstruction(BinaryReader r)
+        {
+            byte tagByte = r.ReadByte();
+            var tag = (InitOp)tagByte;
+            switch (tag)
+            {
+                case InitOp.End:
+                    return new InstEnd();
+                case InitOp.I32Const:
+                {
+                    int v = ReadVarInt32(r);
+                    return InstI32Const.Inst.Immediate(v);
+                }
+                case InitOp.I64Const:
+                {
+                    long v = ReadVarInt64(r);
+                    // InstI64Const.Value is internal — round-trip through
+                    // Parse() with a tiny byte buffer holding just the
+                    // LEB-encoded i64. The buffer is never truncated since
+                    // ReadLeb128_s64 stops at the LSB-clear terminator.
+                    var inst = new InstI64Const();
+                    InvokeParseWithWasmLeb(inst, signedValue: v, writeSignedLeb64: true);
+                    return inst;
+                }
+                case InitOp.F32Const:
+                {
+                    float v = r.ReadSingle();
+                    var inst = new InstF32Const();
+                    using var ms = new MemoryStream();
+                    using (var w = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true)) w.Write(v);
+                    ms.Position = 0;
+                    using var br = new BinaryReader(ms, Encoding.UTF8, leaveOpen: true);
+                    return inst.Parse(br);
+                }
+                case InitOp.F64Const:
+                {
+                    double v = r.ReadDouble();
+                    var inst = new InstF64Const();
+                    using var ms = new MemoryStream();
+                    using (var w = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true)) w.Write(v);
+                    ms.Position = 0;
+                    using var br = new BinaryReader(ms, Encoding.UTF8, leaveOpen: true);
+                    return inst.Parse(br);
+                }
+                case InitOp.GlobalGet:
+                {
+                    uint idx = ReadVarUInt32(r);
+                    var inst = new InstGlobalGet();
+                    InvokeParseWithWasmLeb(inst, unsignedValue: idx, writeUnsignedLeb32: true);
+                    return inst;
+                }
+                case InitOp.RefNull:
+                {
+                    int typeRaw = ReadVarInt32(r);
+                    return new InstRefNull().Immediate((ValType)typeRaw);
+                }
+                case InitOp.RefFunc:
+                {
+                    uint idx = ReadVarUInt32(r);
+                    var inst = new InstRefFunc();
+                    InvokeParseWithWasmLeb(inst, unsignedValue: idx, writeUnsignedLeb32: true);
+                    return inst;
+                }
+                case InitOp.I32Add: return InstI32BinOp.I32Add;
+                case InitOp.I32Sub: return InstI32BinOp.I32Sub;
+                case InitOp.I32Mul: return InstI32BinOp.I32Mul;
+                case InitOp.I64Add: return InstI64BinOp.I64Add;
+                case InitOp.I64Sub: return InstI64BinOp.I64Sub;
+                case InitOp.I64Mul: return InstI64BinOp.I64Mul;
+            }
+            throw new InvalidDataException($"InitDataCodec: unknown init-op tag 0x{tagByte:X2}");
+        }
+
+        /// <summary>
+        /// Round-trip a single u32 / s64 immediate through the instruction's
+        /// <see cref="InstructionBase.Parse"/> by synthesizing a WASM-binary
+        /// <see cref="BinaryReader"/> over the LEB-encoded bytes. Used for
+        /// instruction types whose immediate fields aren't public-settable.
+        /// </summary>
+        private static void InvokeParseWithWasmLeb(
+            InstructionBase inst,
+            long signedValue = 0,
+            uint unsignedValue = 0,
+            bool writeSignedLeb64 = false,
+            bool writeUnsignedLeb32 = false)
+        {
+            using var ms = new MemoryStream();
+            if (writeSignedLeb64) WriteSignedLeb64(ms, signedValue);
+            else if (writeUnsignedLeb32) WriteUnsignedLeb32(ms, unsignedValue);
+            ms.Position = 0;
+            using var br = new BinaryReader(ms, Encoding.UTF8, leaveOpen: true);
+            inst.Parse(br);
+        }
+
+        private static void WriteUnsignedLeb32(Stream s, uint v)
+        {
+            while (v >= 0x80) { s.WriteByte((byte)((v & 0x7F) | 0x80)); v >>= 7; }
+            s.WriteByte((byte)v);
+        }
+
+        private static void WriteSignedLeb64(Stream s, long v)
+        {
+            bool more = true;
+            while (more)
+            {
+                byte b = (byte)(v & 0x7F);
+                v >>= 7;
+                bool sign = (b & 0x40) != 0;
+                more = !((v == 0 && !sign) || (v == -1 && sign));
+                if (more) b |= 0x80;
+                s.WriteByte(b);
+            }
         }
 
         internal static void WriteValue(BinaryWriter w, Value v)
