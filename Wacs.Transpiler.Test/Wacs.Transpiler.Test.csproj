@@ -24,6 +24,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
+      <ProjectReference Include="..\Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj" />
       <ProjectReference Include="..\Wacs.Transpiler\Wacs.Transpiler.csproj" />
       <ProjectReference Include="..\Spec.Test.Data\Spec.Test.Data.csproj" />
     </ItemGroup>
