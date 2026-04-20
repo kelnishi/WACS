@@ -294,6 +294,15 @@ namespace Wacs.Compilation
             // as an out-of-line blr. Inlining here reduces every pop/push to a single
             // Unsafe.Add + .Data.<field> access with zero calls.
             sb.AppendLine("            ref Wacs.Core.Runtime.Value _registersRef = ref _opStack.FirstRegister();");
+            // Hoist _opStack.Count into a local. It's a public mutable field on a class
+            // — the JIT can't keep it in a register across opcode bodies because a
+            // call-out through the class reference could (in theory) alias it. Each
+            // inlined pop/push went through ldr/str, and a single I32Add touched Count
+            // at 4 memory addresses. With the hoist, Count lives in a register across
+            // the dispatch loop; we sync to/from _opStack.Count only when a callee
+            // needs the live value (Dispatch<prefix> / DispatchCold / block-body
+            // handlers that invoke OpStack methods we don't inline, like PopResults).
+            sb.AppendLine("            int _stackCount = _opStack.Count;");
             // pc / pcBefore are plain method-local ints, seeded from ctx fields. Previously
             // these were `ref int` parameters; the ref aliased the locals back to a caller
             // stack slot, which RyuJIT treated conservatively and spilled _pc to memory on
@@ -348,11 +357,15 @@ namespace Wacs.Compilation
             // address-taken (has to live in the stack frame), which defeats the whole
             // point of the ExecContext-fields refactor. int return + reassign keeps
             // _pc register-resident across the hot loop.
+            // Sub-method call sites sync _stackCount to memory before calling (the
+            // callee reads _opStack.Count to know where the operand stack top is) and
+            // re-hoist after (the callee may have pushed/popped). Cold ops are rare so
+            // the two memory ops per call are amortised across the hot-case savings.
             foreach (var (_, pb) in prefixGroups)
             {
-                sb.AppendLine($"                        case 0x{pb:X2}: _pc = Dispatch{pb:X2}(ctx, code, _pc); continue;");
+                sb.AppendLine($"                        case 0x{pb:X2}: _opStack.Count = _stackCount; _pc = Dispatch{pb:X2}(ctx, code, _pc); _stackCount = _opStack.Count; continue;");
             }
-            sb.AppendLine("                        default: _pc = DispatchCold(ctx, code, _pc, primary); continue;");
+            sb.AppendLine("                        default: _opStack.Count = _stackCount; _pc = DispatchCold(ctx, code, _pc, primary); _stackCount = _opStack.Count; continue;");
             sb.AppendLine("                    }");
             sb.AppendLine("                }");
             sb.AppendLine("            }");
@@ -360,6 +373,10 @@ namespace Wacs.Compilation
             sb.AppendLine("            {");
             sb.AppendLine("                ctx.SwitchPc = _pc;");
             sb.AppendLine("                ctx.SwitchPcBefore = _pcBefore;");
+            // Writeback _stackCount on exit. The finally fires on both normal path
+            // (loop-exit) and exception path (WasmException propagating through); both
+            // rely on _opStack.Count reflecting the current top-of-stack.
+            sb.AppendLine("                _opStack.Count = _stackCount;");
             sb.AppendLine("            }");
             sb.AppendLine("        }");
             sb.AppendLine();
@@ -643,7 +660,58 @@ namespace Wacs.Compilation
             //    was pushed last, so it's the top of stack). Each pop lands in a local
             //    named after the parameter — the handler body references these by name
             //    verbatim, no renaming needed.
+            //
+            // In-place optimisation — for pure-scalar [OpSource] handlers whose
+            // stack params and return type are all the same type, the bottom
+            // operand can stay in its slot: we read it from the slot, compute the
+            // new value, and write back to the same slot. This saves one
+            // --_stackCount / ++_stackCount pair and the Type-field store (Type
+            // is already correct for same-type ops). See TryEmitInPlace below.
             var stackParams = e.Parameters.Where(p => p.Kind == ParamKind.Stack).ToList();
+            bool inPlace = inlineStack
+                           && !e.IsHandler
+                           && e.BodyIsExpression
+                           && e.ReturnType != "void"
+                           && TypeToDataField(e.ReturnType) != null
+                           && (stackParams.Count == 1 || stackParams.Count == 2)
+                           && stackParams.All(p => p.Type == e.ReturnType);
+
+            if (inPlace)
+            {
+                string field = TypeToDataField(e.ReturnType);
+                string inPlaceTerm = inLoop ? "continue;" : $"return {pcVar};";
+                if (stackParams.Count == 2)
+                {
+                    // Binary: pop y (top); peek x from new top; body reads both by name;
+                    // write result back to same slot; no Count++ needed (we already decremented).
+                    var pY = stackParams[1];
+                    var pX = stackParams[0];
+                    sb.Append(inner).AppendLine(
+                        $"{pY.Type} {pY.Name} = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_stackCount).Data.{field};");
+                    sb.Append(inner).AppendLine(
+                        $"{pX.Type} {pX.Name} = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _stackCount - 1).Data.{field};");
+                    string exprBody = RewriteCtxAccess(e.Body, pcVar, inlineStack);
+                    sb.Append(inner).AppendLine(
+                        $"System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _stackCount - 1).Data.{field} = ({exprBody});");
+                    sb.Append(inner).AppendLine(inPlaceTerm);
+                    sb.Append(indent).AppendLine("}");
+                    return;
+                }
+                else // stackParams.Count == 1
+                {
+                    // Unary: peek top, write back; Count unchanged, Type unchanged.
+                    var pX = stackParams[0];
+                    sb.Append(inner).AppendLine(
+                        $"{pX.Type} {pX.Name} = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _stackCount - 1).Data.{field};");
+                    string exprBody = RewriteCtxAccess(e.Body, pcVar, inlineStack);
+                    sb.Append(inner).AppendLine(
+                        $"System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _stackCount - 1).Data.{field} = ({exprBody});");
+                    sb.Append(inner).AppendLine(inPlaceTerm);
+                    sb.Append(indent).AppendLine("}");
+                    return;
+                }
+            }
+
             for (int i = stackParams.Count - 1; i >= 0; i--)
             {
                 var p = stackParams[i];
@@ -683,18 +751,40 @@ namespace Wacs.Compilation
             // keep its `_pc` register-resident across the hot dispatch loop.
             string terminator = inLoop ? "continue;" : $"return {pcVar};";
 
+            // Body rewrites always use _opStack.Count, not _stackCount. The handler
+            // body may invoke non-inlined OpStack methods (PopResults, PushV128,
+            // InvokeWasm...) that read Count directly, and mixing _stackCount
+            // updates with those calls leaves the two views out of sync. We sync
+            // _stackCount into _opStack.Count before the body and resync after —
+            // generator-emitted pops/pushes (before and after the body) still use
+            // _stackCount, so the hot arith cases where there's no body-text
+            // retain the register-resident count.
             if (e.BodyIsExpression)
             {
-                string exprBody = RewriteCtxAccess(e.Body, pcVar, inlineStack);
+                string exprBody = RewriteCtxAccess(e.Body, pcVar, inlineStack, useCountLocal: !inlineStack);
+                // Skip the sync bracket when the rewritten expression doesn't touch
+                // _opStack — the arith/rel hot cases (`i1 + i2`, `i1 == i2 ? 1 : 0`)
+                // are pure expressions over popped locals and need no sync.
+                bool needsSync = inlineStack && exprBody.Contains("_opStack.");
+                if (needsSync)
+                    sb.Append(inner).AppendLine("_opStack.Count = _stackCount;");
                 if (e.ReturnType == "void")
                 {
-                    sb.Append(inner).AppendLine($"{exprBody}; {terminator}");
+                    sb.Append(inner).AppendLine($"{exprBody};");
                 }
-                else
+                else if (needsSync)
                 {
-                    sb.Append(inner).AppendLine($"{InlinePushStatement(e.ReturnType, exprBody, inlineStack)} {terminator}");
+                    // Capture result into __r so we can resync Count before pushing.
+                    sb.Append(inner).AppendLine($"{e.ReturnType} __r = {exprBody};");
                 }
-                // No label emitted for expression bodies — nothing jumps to it.
+                if (needsSync)
+                    sb.Append(inner).AppendLine("_stackCount = _opStack.Count;");
+                if (e.ReturnType != "void")
+                {
+                    string toPush = needsSync ? "__r" : exprBody;
+                    sb.Append(inner).AppendLine($"{InlinePushStatement(e.ReturnType, toPush, inlineStack)}");
+                }
+                sb.Append(inner).AppendLine(terminator);
                 sb.Append(indent).AppendLine("}");
                 return;
             }
@@ -703,20 +793,34 @@ namespace Wacs.Compilation
             if (e.ReturnType != "void")
                 sb.Append(inner).AppendLine($"{e.ReturnType} __r = default;");
 
-            string rewritten = RewriteBody(e.Body, e.BodyIsExpression, e.ReturnType, endLabel, pcVar, inlineStack);
+            string rewritten = RewriteBody(e.Body, e.BodyIsExpression, e.ReturnType, endLabel, pcVar, inlineStack, useCountLocal: !inlineStack);
+
+            // Block bodies can call non-inlined OpStack methods (PopResults, PushV128,
+            // InvokeWasm, ...) that read _opStack.Count directly, and the body may
+            // also contain inline rewrites that use _opStack.Count (useCountLocal=false
+            // path). Sync _stackCount to _opStack.Count before the body and resync
+            // after. Skip the sync if the rewritten body doesn't reference _opStack
+            // at all — that's rare for block bodies but happens for e.g. Nop.
+            bool blockNeedsSync = inlineStack && rewritten.Contains("_opStack.");
+            if (blockNeedsSync)
+                sb.Append(inner).AppendLine("_opStack.Count = _stackCount;");
+
             foreach (var line in rewritten.Split('\n'))
             {
                 if (line.Length == 0) { sb.AppendLine(); continue; }
                 sb.Append(inner).AppendLine(line.TrimEnd('\r'));
             }
 
+            sb.Append(inner).AppendLine($"{endLabel}: ;");
+            if (blockNeedsSync)
+                sb.Append(inner).AppendLine("_stackCount = _opStack.Count;");
             if (e.ReturnType == "void")
             {
-                sb.Append(inner).AppendLine($"{endLabel}: {terminator}");
+                sb.Append(inner).AppendLine(terminator);
             }
             else
             {
-                sb.Append(inner).AppendLine($"{endLabel}: {InlinePushStatement(e.ReturnType, "__r", inlineStack)} {terminator}");
+                sb.Append(inner).AppendLine($"{InlinePushStatement(e.ReturnType, "__r", inlineStack)} {terminator}");
             }
 
             sb.Append(indent).AppendLine("}");
@@ -739,9 +843,9 @@ namespace Wacs.Compilation
         /// safe for every handler body in the codebase (no nested lambdas or local
         /// functions in any annotated method).</para>
         /// </summary>
-        private static string RewriteBody(string body, bool isExpression, string returnType, string endLabel, string pcVar, bool inlineStack)
+        private static string RewriteBody(string body, bool isExpression, string returnType, string endLabel, string pcVar, bool inlineStack, bool useCountLocal)
         {
-            body = RewriteCtxAccess(body, pcVar, inlineStack);
+            body = RewriteCtxAccess(body, pcVar, inlineStack, useCountLocal);
             if (isExpression)
             {
                 // The body is the raw expression (no braces, no `return` keyword).
@@ -793,13 +897,23 @@ namespace Wacs.Compilation
         /// (e.g. fully-qualified <c>Wacs.Core.Runtime.ExecContext.OpStack</c>, or a
         /// differently-named pc parameter).</para>
         /// </summary>
-        private static string RewriteCtxAccess(string body, string pcVar, bool inlineStack)
+        /// <summary>
+        /// <paramref name="useCountLocal"/>: when true, inline Pop/Push rewrites update
+        /// the hoisted <c>_stackCount</c> local directly (no writeback to the field).
+        /// When false, the rewrites update <c>_opStack.Count</c> in memory — slower per
+        /// access but the only correct form for block bodies that sit inside the pre/post
+        /// sync pair. A block body that called an inline <c>PushI32</c> via <c>_stackCount</c>
+        /// would see its update reverted by the post-body resync (<c>_stackCount =
+        /// _opStack.Count</c>), because the resync reads the pre-body value the sync wrote.
+        /// </summary>
+        private static string RewriteCtxAccess(string body, string pcVar, bool inlineStack, bool useCountLocal = true)
         {
             body = body
                 .Replace("ctx.OpStack", "_opStack")
                 .Replace("ctx.Frame.Locals.Span", "_localsSpan");
             if (pcVar != "pc")
                 body = System.Text.RegularExpressions.Regex.Replace(body, @"\bpc\b", pcVar);
+            string countVar = useCountLocal ? "_stackCount" : "_opStack.Count";
 
             if (!inlineStack)
             {
@@ -844,17 +958,17 @@ namespace Wacs.Compilation
             // are both fine because the original call sites were statements).
             body = body
                 .Replace("_opStack.PopI32()",
-                         "(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.Int32)")
+                         $"(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --{countVar}).Data.Int32)")
                 .Replace("_opStack.PopU32()",
-                         "(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.UInt32)")
+                         $"(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --{countVar}).Data.UInt32)")
                 .Replace("_opStack.PopI64()",
-                         "(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.Int64)")
+                         $"(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --{countVar}).Data.Int64)")
                 .Replace("_opStack.PopU64()",
-                         "(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.UInt64)")
+                         $"(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --{countVar}).Data.UInt64)")
                 .Replace("_opStack.PopF32()",
-                         "(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.Float32)")
+                         $"(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --{countVar}).Data.Float32)")
                 .Replace("_opStack.PopF64()",
-                         "(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.Float64)");
+                         $"(System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --{countVar}).Data.Float64)");
 
             // PopAny / PushValue / PushI32.. have an argument; do balanced-paren
             // substitution that respects nesting. Handler bodies write things like
@@ -862,19 +976,19 @@ namespace Wacs.Compilation
             // argument spans its own parentheses — a non-greedy regex would match
             // the first `)` and get it wrong.
             body = ReplaceBalancedCall(body, "_opStack.PushI32",
-                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.I32; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.Int32 = (" + arg + "); _opStack.Count++; }");
+                arg => $"{{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).Type = Wacs.Core.Types.Defs.ValType.I32; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).Data.Int32 = (" + arg + $"); {countVar}++; }}");
             body = ReplaceBalancedCall(body, "_opStack.PushU32",
-                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.I32; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.UInt32 = (" + arg + "); _opStack.Count++; }");
+                arg => $"{{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).Type = Wacs.Core.Types.Defs.ValType.I32; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).Data.UInt32 = (" + arg + $"); {countVar}++; }}");
             body = ReplaceBalancedCall(body, "_opStack.PushI64",
-                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.I64; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.Int64 = (" + arg + "); _opStack.Count++; }");
+                arg => $"{{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).Type = Wacs.Core.Types.Defs.ValType.I64; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).Data.Int64 = (" + arg + $"); {countVar}++; }}");
             body = ReplaceBalancedCall(body, "_opStack.PushU64",
-                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.I64; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.UInt64 = (" + arg + "); _opStack.Count++; }");
+                arg => $"{{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).Type = Wacs.Core.Types.Defs.ValType.I64; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).Data.UInt64 = (" + arg + $"); {countVar}++; }}");
             body = ReplaceBalancedCall(body, "_opStack.PushF32",
-                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.F32; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.Float32 = (" + arg + "); _opStack.Count++; }");
+                arg => $"{{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).Type = Wacs.Core.Types.Defs.ValType.F32; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).Data.Float32 = (" + arg + $"); {countVar}++; }}");
             body = ReplaceBalancedCall(body, "_opStack.PushF64",
-                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.F64; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.Float64 = (" + arg + "); _opStack.Count++; }");
+                arg => $"{{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).Type = Wacs.Core.Types.Defs.ValType.F64; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).Data.Float64 = (" + arg + $"); {countVar}++; }}");
             body = ReplaceBalancedCall(body, "_opStack.PushValue",
-                arg => "{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count) = (" + arg + "); _opStack.Count++; }");
+                arg => $"{{ System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}) = (" + arg + $"); {countVar}++; }}");
 
             // PopAny: same inline expansion as the generator's stack-param pop path,
             // but the body-text form is a sub-expression. Wrap in a `(expr)` that
@@ -891,16 +1005,26 @@ namespace Wacs.Compilation
             body = System.Text.RegularExpressions.Regex.Replace(
                 body,
                 @"(\b(?:var|Wacs\.Core\.Runtime\.Value|Value)\s+(\w+)\s*=\s*)_opStack\.PopAny\(\);",
-                "--_opStack.Count; Wacs.Core.Runtime.Value $2 = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count); System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).GcRef = null;");
+                $"--{countVar}; Wacs.Core.Runtime.Value $2 = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}); System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).GcRef = null;");
             // Same pattern for assignment-expressions used as statements, e.g.
             // `span[i] = _opStack.PopAny();`. Matches any simple lvalue followed by =.
             body = System.Text.RegularExpressions.Regex.Replace(
                 body,
                 @"([^;\n]+?)\s*=\s*_opStack\.PopAny\(\);",
-                "--_opStack.Count; $1 = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count); System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).GcRef = null;");
-            // Stray _opStack.PopAny() that escaped both rewrites (shouldn't happen in
-            // the current handler set, but fall back to the method call so broken
-            // output is surfaced as a compile error rather than silent mis-codegen).
+                $"--{countVar}; $1 = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}); System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).GcRef = null;");
+            // Bare `_opStack.PopAny()` with its return value discarded — the Drop
+            // handler's expression body `=> ctx.OpStack.PopAny()` is the one such
+            // case in the tree. For expression bodies (useCountLocal=true) the
+            // Fast method would read the stale field instead of the hoisted
+            // _stackCount, so inline it as a scoped block of `--count; slot.GcRef
+            // = null`. A block is a valid statement, so emitting it inside the
+            // expression-body "expr; continue;" wrapper compiles as `{block};
+            // continue;` (block + empty statement + continue).
+            if (useCountLocal)
+                body = body.Replace("_opStack.PopAny()",
+                    $"{{ --{countVar}; System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, {countVar}).GcRef = null; }}");
+            // Stray _opStack.PopAny() remaining (block-body case — runs inside the
+            // sync bracket so PopAnyFast's read of the field is correct).
             body = body.Replace("_opStack.PopAny()", "_opStack.PopAnyFast()");
 
             // Inline the ShiftResults fast-path at emit time. The overwhelmingly common
@@ -910,6 +1034,10 @@ namespace Wacs.Compilation
             // ShiftResultsSlow short-circuits that call without relying on the JIT to
             // inline the wrapper (which it declines for Run-sized methods). Regex captures
             // the two u32-cast arguments the emit layer produces verbatim.
+            // ShiftResults appears inside block bodies (br/brif/brtable). We always
+            // emit it with _opStack.Count since block bodies run inside the sync
+            // bracket — ShiftResultsSlow mutates Count in memory, and the resync picks
+            // that up.
             body = System.Text.RegularExpressions.Regex.Replace(
                 body,
                 @"_opStack\.ShiftResults\(\s*(\(int\)\w+)\s*,\s*(\(int\)\w+)\s*\);",
@@ -964,7 +1092,7 @@ namespace Wacs.Compilation
             if (field != null)
             {
                 sb.Append(indent).AppendLine(
-                    $"{type} {name} = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_opStack.Count).Data.{field};");
+                    $"{type} {name} = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, --_stackCount).Data.{field};");
                 return true;
             }
             if (type == "Wacs.Core.Runtime.Value")
@@ -972,11 +1100,11 @@ namespace Wacs.Compilation
                 // PopAny has a GcRef-null side effect — read the slot into the named
                 // local, then clear the GcRef to drop the outgoing managed reference.
                 // No ref local (see push comment for why — keeps the frame narrow).
-                sb.Append(indent).AppendLine($"--_opStack.Count;");
+                sb.Append(indent).AppendLine($"--_stackCount;");
                 sb.Append(indent).AppendLine(
-                    $"Wacs.Core.Runtime.Value {name} = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count);");
+                    $"Wacs.Core.Runtime.Value {name} = System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _stackCount);");
                 sb.Append(indent).AppendLine(
-                    "System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).GcRef = null;");
+                    "System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _stackCount).GcRef = null;");
                 return true;
             }
             if (type == "Wacs.Core.Runtime.V128")
@@ -1032,14 +1160,14 @@ namespace Wacs.Compilation
             if (field != null)
             {
                 return
-                    $"System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Type = Wacs.Core.Types.Defs.ValType.{valType}; " +
-                    $"System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count).Data.{field} = ({expr}); " +
-                    "_opStack.Count++;";
+                    $"System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _stackCount).Type = Wacs.Core.Types.Defs.ValType.{valType}; " +
+                    $"System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _stackCount).Data.{field} = ({expr}); " +
+                    "_stackCount++;";
             }
             if (type == "Wacs.Core.Runtime.Value")
             {
                 // Whole-Value assignment — copies Type, Data, and GcRef in one struct store.
-                return $"System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _opStack.Count) = ({expr}); _opStack.Count++;";
+                return $"System.Runtime.CompilerServices.Unsafe.Add(ref _registersRef, _stackCount) = ({expr}); _stackCount++;";
             }
             if (type == "Wacs.Core.Runtime.V128")
             {
