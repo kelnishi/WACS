@@ -77,5 +77,18 @@ namespace Wacs.Core.OpCodes
 
         // Local + i64.extend_i32_s (2-op). Encoding: [FF][code][idx:4] = 6 bytes.
         [OpCode("i64.extendi32s.l")] I64ExtendI32SL = 0x70,
+
+        // Register-program super-op (prototype). Encodes an arbitrary-depth
+        // pure-arith subtree as an inner bytecode executed against a
+        // register file of 8 ulong locals. Stream format:
+        //   [FF][RegProg][nInputs:u8][nOutputs:u8][microByteCount:u16]
+        //   [outputRegs:u8 * nOutputs]
+        //   [micro bytecode: microByteCount bytes]
+        //
+        // See DispatchGenerator's EmitRegProgCase for the microop ISA and
+        // inner dispatch. Intent: collapse "stack traffic" on deep
+        // expression subtrees that StreamFusePass's fixed-depth patterns
+        // can't cover.
+        [OpCode("reg.prog")] RegProg = 0x80,
     }
 }

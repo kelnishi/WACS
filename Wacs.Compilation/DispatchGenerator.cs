@@ -852,6 +852,18 @@ namespace Wacs.Compilation
             {
                 EmitCase(sb, e, "                ", ref caseCounter, singleByteKey: false, inLoop: false, pcVar: "pc", inlineStack: false);
             }
+
+            // Special case: WacsCode.RegProg (0x80). Bypasses the
+            // [OpHandler] inlining path — the handler body references
+            // class-level constants and helpers that don't survive
+            // textual inlining. Emit a direct method call instead.
+            if (prefixByte == 0xFF)
+            {
+                sb.AppendLine("                case 0x80: // WacsCode.RegProg — register-program super-op");
+                sb.AppendLine("                    Wacs.Core.Instructions.RegProgHandler.Execute(ctx, ref pc, code);");
+                sb.AppendLine("                    return pc;");
+            }
+
             sb.AppendLine("                default:");
             sb.AppendLine($"                    throw new NotSupportedException(");
             sb.AppendLine($"                        $\"Prefix 0x{prefixByte:X2} secondary 0x{{sec:X}} has no [OpSource]/[OpHandler] coverage.\");");
