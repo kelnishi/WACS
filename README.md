@@ -421,7 +421,7 @@ dotnet run --project Wacs.Console -c Release -- -i fib Wacs.Bench/fib.wasm 10
 | `--super` | Polymorphic + block-level super-instruction rewriter. |
 | `--switch` | Source-generated monolithic-switch interpreter. AOT-safe. |
 | `--switch_super` | (Requires `--switch`.) Additionally run the bytecode-stream fuser. |
-| `-t`, `--transpiler`, `--aot` | AOT transpile to .NET IL and run the generated code. |
+| `-t`, `--transpiler`, `--aot` | AOT transpile the **WASM module** to .NET IL and run the generated code. Requires `Reflection.Emit` at runtime — see note below. |
 | `--aot_simd {scalar,intrinsics,interpreter}` | SIMD strategy for the AOT path. |
 | `--aot_save <path>` | Persist the transpiled assembly to disk. |
 | `--aot_no_tail_calls` | Drop the CIL `tail.` prefix (debugging only). |
@@ -444,6 +444,20 @@ gap between "dispatch + pop/push per op" and "inline register arithmetic."
 Expect similar ratios on any compute-bound workload; IO-bound / WASI-heavy
 workloads see a smaller lift because WASI calls still bridge back to the
 interpreter's host-function machinery.
+
+> **"AOT" here means *ahead-of-time compilation of the WASM module*, not
+> that the WACS runtime itself is AOT-safe.** `-t` / `--aot` uses
+> `System.Reflection.Emit` at runtime to synthesize a dynamic .NET
+> assembly containing the transpiled module. That's incompatible with
+> environments that disable dynamic code: **Unity IL2CPP, .NET Native
+> AOT (`PublishAot=true`), iOS, Mono AOT-only builds,** etc. On those
+> platforms use one of the three interpreter modes instead — all of
+> them (including the source-generated `--switch` runtime) are fully
+> AOT-compatible. If you need native-class speed in an IL2CPP target,
+> pre-compile the `.wasm → .dll` on a JIT-capable host with
+> [`wasm-transpile`](Wacs.Transpiler/README.md) and ship the resulting
+> assembly — the saved `.dll` runs without `Reflection.Emit` via
+> `WACS.Transpiler.Lib`'s `TranspiledModuleLoader`.
 
 ## Roadmap
 
