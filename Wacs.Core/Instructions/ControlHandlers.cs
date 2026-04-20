@@ -266,6 +266,16 @@ namespace Wacs.Core.Instructions
             // in place on each iteration but always restores to the same caller on
             // exit — one InvokeWasm invocation, regardless of how many tail jumps.
             var savedFrame = ctx.Frame;
+            // Save the caller's SwitchPcBefore too. Run writes this field at the start
+            // of each iteration so SwitchRuntime's handler-resume path can locate the
+            // throwing opcode's try_table. Each nested Run overwrites it with its own
+            // iteration pc, so without the restore here a WasmException propagating
+            // out of a callee would leave the caller's handler lookup pointing at the
+            // callee's pc — out of range for the caller's handler table, so every
+            // try_table silently misses and the runtime surfaces an
+            // UnhandledWasmException. The restore happens in the finally below
+            // regardless of normal or exceptional exit.
+            int savedPcBefore = ctx.SwitchPcBefore;
 
             while (true)
             {
@@ -346,6 +356,7 @@ namespace Wacs.Core.Instructions
                 {
                     ctx.SwitchCallDepth--;
                     ctx.Frame = savedFrame;
+                    ctx.SwitchPcBefore = savedPcBefore;
                     ctx.ReturnFrame(frame);
                     // clearArray:true to drop any GcRef references in the slots before
                     // putting the array back in the pool, keeping the GC graph tidy.
