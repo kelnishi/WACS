@@ -9,11 +9,15 @@ The generated assembly is spec-equivalent to the WACS interpreter —
 ARM64 and Linux x64 — but runs natively via the CLR's JIT instead of
 the interpreter's expression-tree dispatch.
 
-> **v0.1 known limitation**: the saved `.dll` currently depends on
-> process-local init state and is intended for programmatic
-> (same-process) use and inspection — cross-process standalone
-> execution lands in v0.2. See
-> [Known Limitations](#v01-known-limitations).
+> **v0.2**: saved `.dll`s now work cross-process — every transpiled
+> assembly embeds a codec-encoded init-data resource that the generated
+> Module ctor decodes on first use. See
+> [Loading a Transpiled Assembly](#loading-a-transpiled-assembly) for
+> the seamless `TranspiledModuleLoader` API.
+>
+> **For library use, reference `WACS.Transpiler.Lib`** (new in 0.2).
+> The `WACS.Transpiler` package stays as the `wasm-transpile`
+> dotnet-tool CLI.
 
 ## Installation
 
@@ -260,43 +264,67 @@ The `TranspilationResult` also exposes `ExportMethods`, `ImportMethods`,
 
 ## Loading a Transpiled Assembly
 
-Once a `.dll` has been written, load it like any other .NET assembly:
+### Seamless: `TranspiledModuleLoader` (recommended)
+
+New in v0.2 — reference **WACS.Transpiler.Lib** and use the built-in
+loader. It discovers the generated types, wires imports, and returns a
+handle you can invoke directly:
+
+```csharp
+using Wacs.Transpiler.Hosting;
+
+// No-import module:
+var loaded = TranspiledModuleLoader.Load("add.dll");
+int sum = (int)loaded.Invoke("add", 2, 3)!;  // 5
+
+// Or a typed delegate for hot paths:
+var add = loaded.GetExport<Func<int, int, int>>("add");
+int sum2 = add(2, 3);
+```
+
+Modules with imports: either pass an object implementing the generated
+`IImports` interface (AOT-safe, full `AssemblyLoadContext` isolation),
+or a by-name delegate dictionary (loader auto-downgrades isolation —
+`DispatchProxy` can't reference collectible assemblies):
+
+```csharp
+var loaded = TranspiledModuleLoader.Load("game.dll", imports: new Dictionary<string, Delegate>
+{
+    ["env_play_sound"] = (Action<int>)(id => AudioEngine.Play(id)),
+    ["env_random_up_to"] = (Func<int, int>)(n => Random.Shared.Next(n)),
+});
+loaded.Invoke("tick");
+```
+
+The `LoadedModule` handle also exposes `ExportsInterface` / `ImportsInterface`
+as `Type` so tools can enumerate methods, inspect signatures, and
+generate wrappers reflectively.
+
+### Manual
+
+Raw `Assembly.LoadFrom` still works if you need full control:
 
 ```csharp
 using System.Reflection;
 
 var asm = Assembly.LoadFrom("module.dll");
-var moduleType = asm.GetType("MyNamespace.WasmModule.Module")
-    ?? throw new InvalidOperationException("module class not found");
-
-// Instantiate (zero-arg ctor when the wasm has no imports):
+var moduleType = asm.GetType("MyNamespace.WasmModule.Module")!;
 var module = Activator.CreateInstance(moduleType);
-
-// Invoke an exported function via the generated IExports interface:
 var addMethod = moduleType.GetMethod("add");
 var result = addMethod!.Invoke(module, new object[] { 2, 3 });
-Console.WriteLine(result);  // 5
 ```
 
-## v0.1 Known Limitations
+## Remaining limitations (tracked for v0.3)
 
-- **Cross-process execution of the saved `.dll` is not yet supported.** The
-  emitted assembly depends on runtime state (a per-process
-  `InitRegistry` carrying data segments, type hashes, tag tables, etc.)
-  that's populated during transpilation and not yet persisted into the
-  assembly. The saved `.dll` is usable in the same process that produced
-  it (programmatic API path) but loading it in a fresh process throws
-  `ArgumentOutOfRangeException` from `InitRegistry.Get`. Full standalone
-  AOT (init-data embedded as assembly resources) is the v0.2 milestone.
-- **`--emit-main` shares the same limitation**: the generated
-  `Program.Main` is reachable reflectively but can't be run with
-  `dotnet path/to.dll` in a fresh process until init-data embedding
-  lands.
-- **`--emit-main` rejects modules with imports.** v0.2 will add a
-  `--wasi-host` flag backed by `WACS.WASIp1` and an
-  `--allow-missing-imports` escape hatch that emits throwing stubs.
+- **`--emit-main` rejects modules with imports.** A `--wasi-host` flag
+  backed by `WACS.WASIp1` and an `--allow-missing-imports` escape hatch
+  (throwing stubs) are planned.
 - **Scalar args only** for `--emit-main` — `i32`/`i64`/`f32`/`f64`.
   Ref-typed and `v128` params aren't parsed from argv yet.
+- **Rare GC init patterns** (struct/array values in active element
+  segments with non-i31 payloads) throw `NotSupportedException` from
+  the codec at transpile time. Most modules — including CoreMark,
+  typical emscripten/rustc output, and the spec suite — don't hit this.
 
 ## License
 

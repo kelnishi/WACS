@@ -1,5 +1,46 @@
 # Changelog
 
+## WACS.Transpiler / WACS.Transpiler.Lib [0.2.0] Cross-process loading
+
+- **Package split**: WACS.Transpiler remains the `wasm-transpile`
+  dotnet-tool CLI; the programmatic surface (AOT namespace + Hosting
+  helpers) now ships as a separate NuGet package **WACS.Transpiler.Lib**.
+  Consumers who only want the library can reference it without pulling
+  the tool packaging.
+- **Saved .dlls now run in a fresh process.** Every transpiled assembly
+  embeds a codec-encoded `ModuleInitData` as a `byte[]` field on a
+  generated `__WACSInit` type. The Module constructor dispatches through
+  `InitializationHelper.InitializeFromEmbedded`: in-process transpile +
+  run keeps the fast `InitRegistry` path; cross-process load decodes the
+  embedded bytes and rebuilds memories, tables, globals, data segments,
+  and type metadata from the codec with no re-parse of the original
+  WASM. Closes the v0.1 "cross-process execution is not yet supported"
+  limitation.
+- **Codec format documented and versioned.** Format spec in
+  `Wacs.Core/Compilation/../../Wacs.Transpiler.Lib/AOT/InitDataFormat.md`:
+  8-byte "WACSINIT" magic, u8 major+minor version, TLV-tagged section
+  stream. Unknown tags skipped on decode (forward compat); newer-major
+  files rejected cleanly. 60+ unit tests cover each section and
+  primitive.
+- **`TranspiledModuleLoader` (new)**: seamless dynamic-environment
+  loading. Reads a saved `.dll`, discovers the Module / IExports /
+  IImports types, wires imports (typed object OR by-name delegate
+  dictionary via `DispatchProxy`), returns a `LoadedModule` handle
+  that exposes the interfaces as first-class reflection objects plus
+  `Invoke(name, args)` / `GetExport<TDelegate>(name)` for dispatch.
+- **`Wacs.Console` integration**: new `--aot` flag transpiles the
+  instantiated module and runs through the transpiled code. Subset of
+  `TranspilerOptions` surfaced via `--aot_simd`, `--aot_no_tail_calls`,
+  `--aot_max_fn_size`, `--aot_data_storage`; `--aot_save <path>` also
+  persists the .dll to disk. CoreMark end-to-end: **17,542 iter/sec**
+  on `--aot` vs 376 (`--switch --switch_super`) vs 277 (polymorphic).
+- **Still not covered in 0.2** (tracked for v0.3): `--emit-main`
+  expansion (auto-bind `--wasi-host`, `--allow-missing-imports` stubs,
+  ref-type / v128 argv parsing).
+- Spec parity unchanged: 473/473 on WebAssembly 3.0 spec suite; the new
+  codec + loader add 70 unit tests + 4 cross-process end-to-end tests
+  (549 total transpiler suite).
+
 ## [0.8.1] Switch runtime (opt-in, source-generated dispatcher)
 
 - New alternative interpreter backed by a source-generated monolithic
