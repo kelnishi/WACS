@@ -52,14 +52,23 @@ namespace Wacs.Core.Compilation
         /// on the hot exit path.)</summary>
         public readonly Value[] CalleeRentedLocals;
 
+        /// <summary>The caller's OpStack base — the <c>_stackCount</c> value at which
+        /// the caller's frame began. Branch targets inside the callee carry
+        /// frame-relative <c>resultsHeight</c>; the dispatcher adds the current
+        /// frame's base to produce the absolute <c>_stackCount</c> to trim to.
+        /// Restored on pop-frame so the caller's branches resume using its own
+        /// base rather than the callee's.</summary>
+        public readonly int CallerStackBase;
+
         public SwitchCallFrame(byte[] code, HandlerEntry[] handlers, Frame wasmFrame,
-                                int resumePc, Value[] calleeRentedLocals)
+                                int resumePc, Value[] calleeRentedLocals, int callerStackBase)
         {
             Code = code;
             Handlers = handlers;
             WasmFrame = wasmFrame;
             ResumePc = resumePc;
             CalleeRentedLocals = calleeRentedLocals;
+            CallerStackBase = callerStackBase;
         }
     }
 }
