@@ -1,0 +1,488 @@
+// Copyright 2025 Kelvin Nishikawa
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+
+using System.Collections.Generic;
+using System.IO;
+using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
+using Wacs.Transpiler.AOT;
+using Xunit;
+
+namespace Wacs.Transpiler.Test
+{
+    /// <summary>
+    /// Phase 1 of the init-data codec test suite. Covers header validation
+    /// plus scalar / array-of-primitive sections. Expression, DefType, and
+    /// ref-typed Value payloads are pending phases 2-3; their round-trip
+    /// tests live in follow-up commits.
+    /// </summary>
+    public class InitDataCodecTests
+    {
+        // =================================================================
+        // LEB128 primitive round-trips
+        // =================================================================
+
+        [Theory]
+        [InlineData(0u)]
+        [InlineData(1u)]
+        [InlineData(127u)]
+        [InlineData(128u)]
+        [InlineData(16383u)]
+        [InlineData(16384u)]
+        [InlineData(1u << 28)]
+        [InlineData(uint.MaxValue)]
+        public void VarUInt32_RoundTrip(uint value)
+        {
+            using var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+                InitDataCodec.WriteVarUInt32(w, value);
+            ms.Position = 0;
+            using var r = new BinaryReader(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+            Assert.Equal(value, InitDataCodec.ReadVarUInt32(r));
+            Assert.Equal(ms.Length, ms.Position);
+        }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(1)]
+        [InlineData(-1)]
+        [InlineData(63)]
+        [InlineData(-64)]
+        [InlineData(64)]
+        [InlineData(-65)]
+        [InlineData(int.MaxValue)]
+        [InlineData(int.MinValue)]
+        public void VarInt32_RoundTrip(int value)
+        {
+            using var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+                InitDataCodec.WriteVarInt32(w, value);
+            ms.Position = 0;
+            using var r = new BinaryReader(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+            Assert.Equal(value, InitDataCodec.ReadVarInt32(r));
+            Assert.Equal(ms.Length, ms.Position);
+        }
+
+        [Theory]
+        [InlineData(0L)]
+        [InlineData(1L)]
+        [InlineData(-1L)]
+        [InlineData(long.MaxValue)]
+        [InlineData(long.MinValue)]
+        [InlineData(1L << 48)]
+        [InlineData(-(1L << 48))]
+        public void VarInt64_RoundTrip(long value)
+        {
+            using var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+                InitDataCodec.WriteVarInt64(w, value);
+            ms.Position = 0;
+            using var r = new BinaryReader(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+            Assert.Equal(value, InitDataCodec.ReadVarInt64(r));
+            Assert.Equal(ms.Length, ms.Position);
+        }
+
+        [Theory]
+        [InlineData(0UL)]
+        [InlineData(1UL)]
+        [InlineData(ulong.MaxValue)]
+        [InlineData(1UL << 50)]
+        public void VarUInt64_RoundTrip(ulong value)
+        {
+            using var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+                InitDataCodec.WriteVarUInt64(w, value);
+            ms.Position = 0;
+            using var r = new BinaryReader(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+            Assert.Equal(value, InitDataCodec.ReadVarUInt64(r));
+            Assert.Equal(ms.Length, ms.Position);
+        }
+
+        // =================================================================
+        // Header validation
+        // =================================================================
+
+        [Fact]
+        public void Decode_RejectsBadMagic()
+        {
+            var bytes = new byte[]
+            {
+                (byte)'N', (byte)'O', (byte)'P', (byte)'E',
+                (byte)'I', (byte)'N', (byte)'I', (byte)'T',
+                1, 0, 0, 0,
+            };
+            Assert.Throws<InvalidDataException>(() => InitDataCodec.Decode(bytes));
+        }
+
+        [Fact]
+        public void Decode_RejectsNewerMajor()
+        {
+            var bytes = new byte[]
+            {
+                (byte)'W', (byte)'A', (byte)'C', (byte)'S',
+                (byte)'I', (byte)'N', (byte)'I', (byte)'T',
+                (byte)(InitDataCodec.VersionMajor + 1), 0, 0, 0,
+            };
+            Assert.Throws<InvalidDataException>(() => InitDataCodec.Decode(bytes));
+        }
+
+        [Fact]
+        public void Decode_AcceptsEmptyV1()
+        {
+            var empty = new ModuleInitData();
+            var bytes = InitDataCodec.Encode(empty);
+            var back = InitDataCodec.Decode(bytes);
+            AssertEquivalentScalarFields(empty, back);
+        }
+
+        [Fact]
+        public void Decode_SkipsUnknownSections()
+        {
+            // Encode a normal payload, then splice in an unknown section
+            // between the header and the real sections.
+            var data = new ModuleInitData
+            {
+                StartFuncIndex = 42,
+                ImportFuncCount = 3,
+                TotalFuncCount = 7,
+            };
+            var baseline = InitDataCodec.Encode(data);
+
+            // Header is 12 bytes; splice an unknown tag right after.
+            using var ms = new MemoryStream();
+            ms.Write(baseline, 0, 12);
+            ms.WriteByte(0xF7);                             // unknown tag
+            ms.WriteByte(3);                                // length = 3 (LEB single byte)
+            ms.Write(new byte[] { 0xDE, 0xAD, 0xBE }, 0, 3); // garbage payload
+            ms.Write(baseline, 12, baseline.Length - 12);
+
+            var spliced = ms.ToArray();
+            var back = InitDataCodec.Decode(spliced);
+            Assert.Equal(42, back.StartFuncIndex);
+            Assert.Equal(3, back.ImportFuncCount);
+            Assert.Equal(7, back.TotalFuncCount);
+        }
+
+        // =================================================================
+        // Section-level round-trips (full Encode/Decode path)
+        // =================================================================
+
+        [Fact]
+        public void Memories_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                Memories = new (long, long?)[]
+                {
+                    (0, null),
+                    (1, 10),
+                    (1024, null),
+                    (65536, 131072),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(data.Memories.Length, back.Memories.Length);
+            for (int i = 0; i < data.Memories.Length; i++)
+            {
+                Assert.Equal(data.Memories[i].min, back.Memories[i].min);
+                Assert.Equal(data.Memories[i].max, back.Memories[i].max);
+            }
+        }
+
+        [Fact]
+        public void Globals_ScalarsRoundTrip()
+        {
+            Value i32 = default; i32.Type = ValType.I32; i32.Data.Int32 = 42;
+            Value i64 = default; i64.Type = ValType.I64; i64.Data.Int64 = 0x1234_5678_9ABC_DEF0L;
+            Value f32 = default; f32.Type = ValType.F32; f32.Data.Float32 = 3.14f;
+            Value f64 = default; f64.Type = ValType.F64; f64.Data.Float64 = 2.718281828;
+
+            var data = new ModuleInitData
+            {
+                Globals = new (ValType, Mutability, Value)[]
+                {
+                    (ValType.I32, Mutability.Immutable, i32),
+                    (ValType.I64, Mutability.Mutable, i64),
+                    (ValType.F32, Mutability.Immutable, f32),
+                    (ValType.F64, Mutability.Mutable, f64),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(4, back.Globals.Length);
+            Assert.Equal(ValType.I32, back.Globals[0].type);
+            Assert.Equal(42, back.Globals[0].init.Data.Int32);
+            Assert.Equal(Mutability.Mutable, back.Globals[1].mut);
+            Assert.Equal(0x1234_5678_9ABC_DEF0L, back.Globals[1].init.Data.Int64);
+            Assert.Equal(3.14f, back.Globals[2].init.Data.Float32);
+            Assert.Equal(2.718281828, back.Globals[3].init.Data.Float64);
+        }
+
+        [Fact]
+        public void FuncTypeHashes_NullVsEmptyVsPopulated()
+        {
+            // null → null
+            var a = new ModuleInitData { FuncTypeHashes = null };
+            Assert.Null(InitDataCodec.Decode(InitDataCodec.Encode(a)).FuncTypeHashes);
+
+            // empty → empty
+            var b = new ModuleInitData { FuncTypeHashes = System.Array.Empty<int>() };
+            var bBack = InitDataCodec.Decode(InitDataCodec.Encode(b)).FuncTypeHashes;
+            Assert.NotNull(bBack);
+            Assert.Empty(bBack!);
+
+            // populated → equal
+            var c = new ModuleInitData { FuncTypeHashes = new[] { 0, -1, int.MaxValue, int.MinValue, 42 } };
+            Assert.Equal(c.FuncTypeHashes, InitDataCodec.Decode(InitDataCodec.Encode(c)).FuncTypeHashes);
+        }
+
+        [Fact]
+        public void FuncTypeSuperHashes_JaggedRoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                FuncTypeSuperHashes = new[]
+                {
+                    new[] { 1 },
+                    new[] { 2, 3, 4 },
+                    System.Array.Empty<int>(),
+                    new[] { int.MaxValue, int.MinValue },
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data)).FuncTypeSuperHashes;
+            Assert.NotNull(back);
+            Assert.Equal(data.FuncTypeSuperHashes.Length, back!.Length);
+            for (int i = 0; i < back.Length; i++)
+                Assert.Equal(data.FuncTypeSuperHashes[i], back[i]);
+        }
+
+        [Fact]
+        public void TypeIsFunc_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                TypeIsFunc = new[] { true, false, true, true, false },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data)).TypeIsFunc;
+            Assert.Equal(data.TypeIsFunc, back);
+        }
+
+        [Fact]
+        public void ActiveDataSegments_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                ActiveDataSegments = new (int, int, int)[]
+                {
+                    (0, 0, 0),
+                    (0, 1024, 1),
+                    (1, 65536, 2),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(data.ActiveDataSegments, back.ActiveDataSegments);
+        }
+
+        [Fact]
+        public void ActiveElementSegments_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                ActiveElementSegments = new (int, int, int[])[]
+                {
+                    (0, 0, new[] { 0, 1, 2 }),
+                    (1, 100, new[] { 5 }),
+                    (0, 50, System.Array.Empty<int>()),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(data.ActiveElementSegments.Length, back.ActiveElementSegments.Length);
+            for (int i = 0; i < back.ActiveElementSegments.Length; i++)
+            {
+                Assert.Equal(data.ActiveElementSegments[i].tableIdx, back.ActiveElementSegments[i].tableIdx);
+                Assert.Equal(data.ActiveElementSegments[i].offset, back.ActiveElementSegments[i].offset);
+                Assert.Equal(data.ActiveElementSegments[i].funcIndices, back.ActiveElementSegments[i].funcIndices);
+            }
+        }
+
+        [Fact]
+        public void DeferredElemGlobals_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                DeferredElemGlobals = new List<(int, int, int)>
+                {
+                    (0, 0, 5),
+                    (1, 3, 2),
+                    (0, 7, 0),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(data.DeferredElemGlobals, back.DeferredElemGlobals);
+        }
+
+        [Fact]
+        public void StartFuncIndex_RoundTrip()
+        {
+            foreach (int idx in new[] { -1, 0, 1, 42, int.MaxValue })
+            {
+                var data = new ModuleInitData { StartFuncIndex = idx };
+                Assert.Equal(idx, InitDataCodec.Decode(InitDataCodec.Encode(data)).StartFuncIndex);
+            }
+        }
+
+        [Fact]
+        public void SegmentBaseIds_RoundTrip()
+        {
+            var data = new ModuleInitData { DataSegmentBaseId = 17, ElemSegmentBaseId = 42 };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(17, back.DataSegmentBaseId);
+            Assert.Equal(42, back.ElemSegmentBaseId);
+        }
+
+        [Fact]
+        public void ActiveIndicesArrays_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                ActiveElemIndices = new[] { 0, 2, 5 },
+                ActiveDataIndices = new[] { 1, 3 },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(data.ActiveElemIndices, back.ActiveElemIndices);
+            Assert.Equal(data.ActiveDataIndices, back.ActiveDataIndices);
+        }
+
+        [Fact]
+        public void SavedDataSegments_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                SavedDataSegments = new Dictionary<int, byte[]>
+                {
+                    [0] = new byte[] { 1, 2, 3, 4, 5 },
+                    [5] = System.Array.Empty<byte>(),
+                    [99] = new byte[] { 0xDE, 0xAD, 0xBE, 0xEF },
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(data.SavedDataSegments.Count, back.SavedDataSegments.Count);
+            foreach (var kv in data.SavedDataSegments)
+            {
+                Assert.True(back.SavedDataSegments.ContainsKey(kv.Key));
+                Assert.Equal(kv.Value, back.SavedDataSegments[kv.Key]);
+            }
+        }
+
+        [Fact]
+        public void Counts_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                ImportFuncCount = 3,
+                TotalFuncCount = 17,
+                ImportedTagCount = 2,
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(3, back.ImportFuncCount);
+            Assert.Equal(17, back.TotalFuncCount);
+            Assert.Equal(2, back.ImportedTagCount);
+        }
+
+        [Fact]
+        public void GcGlobalInits_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                GcGlobalInits = new List<GcGlobalInit>
+                {
+                    new GcGlobalInit
+                    {
+                        GlobalIndex = 0,
+                        TypeIndex = 3,
+                        InitKind = 0,
+                        Params = new long[] { 5, 10 },
+                        ElementValType = 0x7F,
+                    },
+                    new GcGlobalInit
+                    {
+                        GlobalIndex = 1,
+                        TypeIndex = 7,
+                        InitKind = 2,
+                        Params = System.Array.Empty<long>(),
+                        ElementValType = 0,
+                    },
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data)).GcGlobalInits;
+            Assert.Equal(data.GcGlobalInits.Count, back.Count);
+            for (int i = 0; i < back.Count; i++)
+            {
+                Assert.Equal(data.GcGlobalInits[i].GlobalIndex, back[i].GlobalIndex);
+                Assert.Equal(data.GcGlobalInits[i].TypeIndex, back[i].TypeIndex);
+                Assert.Equal(data.GcGlobalInits[i].InitKind, back[i].InitKind);
+                Assert.Equal(data.GcGlobalInits[i].Params, back[i].Params);
+                Assert.Equal(data.GcGlobalInits[i].ElementValType, back[i].ElementValType);
+            }
+        }
+
+        // =================================================================
+        // Composite / omnibus round-trip
+        // =================================================================
+
+        [Fact]
+        public void FullData_ScalarSubset_RoundTrip()
+        {
+            Value i32 = default; i32.Type = ValType.I32; i32.Data.Int32 = 99;
+            var data = new ModuleInitData
+            {
+                Memories = new (long, long?)[] { (1, 2), (4, null) },
+                Globals = new (ValType, Mutability, Value)[] { (ValType.I32, Mutability.Mutable, i32) },
+                FuncTypeHashes = new[] { 111, 222, 333 },
+                TypeHashes = new[] { 1, 2 },
+                TypeIsFunc = new[] { true, false },
+                ActiveDataSegments = new (int, int, int)[] { (0, 128, 0) },
+                ActiveElementSegments = new (int, int, int[])[] { (0, 0, new[] { 0, 1 }) },
+                ActiveElemIndices = new[] { 0 },
+                ActiveDataIndices = new[] { 0 },
+                SavedDataSegments = new Dictionary<int, byte[]> { [0] = new byte[] { 42 } },
+                StartFuncIndex = 5,
+                DataSegmentBaseId = 0,
+                ElemSegmentBaseId = 0,
+                ImportFuncCount = 1,
+                TotalFuncCount = 4,
+                ImportedTagCount = 0,
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            AssertEquivalentScalarFields(data, back);
+        }
+
+        // =================================================================
+        // Helpers
+        // =================================================================
+
+        private static void AssertEquivalentScalarFields(ModuleInitData expected, ModuleInitData actual)
+        {
+            Assert.Equal(expected.Memories.Length, actual.Memories.Length);
+            Assert.Equal(expected.Globals.Length, actual.Globals.Length);
+            Assert.Equal(expected.FuncTypeHashes, actual.FuncTypeHashes);
+            Assert.Equal(expected.TypeHashes, actual.TypeHashes);
+            Assert.Equal(expected.TypeIsFunc, actual.TypeIsFunc);
+            Assert.Equal(expected.ActiveDataSegments, actual.ActiveDataSegments);
+            Assert.Equal(expected.ActiveElemIndices, actual.ActiveElemIndices);
+            Assert.Equal(expected.ActiveDataIndices, actual.ActiveDataIndices);
+            Assert.Equal(expected.StartFuncIndex, actual.StartFuncIndex);
+            Assert.Equal(expected.DataSegmentBaseId, actual.DataSegmentBaseId);
+            Assert.Equal(expected.ElemSegmentBaseId, actual.ElemSegmentBaseId);
+            Assert.Equal(expected.ImportFuncCount, actual.ImportFuncCount);
+            Assert.Equal(expected.TotalFuncCount, actual.TotalFuncCount);
+            Assert.Equal(expected.ImportedTagCount, actual.ImportedTagCount);
+        }
+    }
+}
