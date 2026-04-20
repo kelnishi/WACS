@@ -75,14 +75,11 @@ namespace Wacs.Console
         [Option('t', "transpiler", HelpText = "Ahead-of-time transpile the module to .NET IL and run through the transpiled code (CLR JIT-native speed). Imports wired through the interpreter for mixed-mode execution. Alias of --aot.", Default = false)]
         public bool Transpile { get; set; }
 
-        [Option("super", HelpText = "Enable interpreter super-instruction rewriting (block-level expression fusion). Applies to the polymorphic dispatcher only.", Default = false)]
+        [Option("super", HelpText = "Enable super-instruction fusion. Applies to both the polymorphic runtime (block-level expression rewriter) and, when combined with --switch, the switch runtime's bytecode-stream fuser.", Default = false)]
         public bool SuperInstructions { get; set; }
 
         [Option("switch", HelpText = "Use the source-generated monolithic switch runtime (faster, AOT-safe).", Default = false)]
         public bool UseSwitch { get; set; }
-
-        [Option("switch_super", HelpText = "When --switch is set, enable the bytecode-stream super-instruction fuser.", Default = false)]
-        public bool SwitchSuperInstructions { get; set; }
 
         [Option("aot", HelpText = "Alias of --transpiler: AOT transpile the module and run through the transpiled code.", Default = false)]
         public bool Aot { get; set; }

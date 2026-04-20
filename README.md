@@ -398,7 +398,7 @@ dotnet run --project Wacs.Console -c Release -- --super Wacs.Console/Data/corema
 dotnet run --project Wacs.Console -c Release -- --switch Wacs.Console/Data/coremark.wasm
 
 # Switch runtime + bytecode-stream super-instruction fuser
-dotnet run --project Wacs.Console -c Release -- --switch --switch_super Wacs.Console/Data/coremark.wasm
+dotnet run --project Wacs.Console -c Release -- --switch --super Wacs.Console/Data/coremark.wasm
 
 # AOT transpile to .NET IL and run through the JITted code (-t alias: --aot)
 dotnet run --project Wacs.Console -c Release -- -t Wacs.Console/Data/coremark.wasm
@@ -418,9 +418,8 @@ dotnet run --project Wacs.Console -c Release -- -i fib Wacs.Bench/fib.wasm 10
 | Flag | Effect |
 |---|---|
 | *(none)* | Polymorphic virtual-dispatch interpreter. Baseline, canonical. |
-| `--super` | Polymorphic + block-level super-instruction rewriter. |
+| `--super` | Enable super-instruction fusion on whichever runtime ends up executing — the polymorphic block-level rewriter, and (when paired with `--switch`) the switch runtime's bytecode-stream fuser. |
 | `--switch` | Source-generated monolithic-switch interpreter. Build-time code generation (Roslyn) + `System.Runtime.CompilerServices.Unsafe` intrinsics — see note below. |
-| `--switch_super` | (Requires `--switch`.) Additionally run the bytecode-stream fuser. |
 | `-t`, `--transpiler`, `--aot` | AOT transpile the **WASM module** to .NET IL and run the generated code. Requires `Reflection.Emit` at runtime — see note below. |
 | `--aot_simd {scalar,intrinsics,interpreter}` | SIMD strategy for the AOT path. |
 | `--aot_save <path>` | Persist the transpiled assembly to disk. |
@@ -432,11 +431,11 @@ dotnet run --project Wacs.Console -c Release -- -i fib Wacs.Bench/fib.wasm 10
 
 | Mode | CoreMark (iter/s) | Relative |
 |---|---:|---:|
-| polymorphic | 276 | 1.00× |
-| `--super` | 328 | 1.19× |
-| `--switch` | 349 | 1.27× |
-| `--switch --switch_super` | 382 | 1.38× |
-| `-t` (AOT) | **17 651** | **64×** |
+| polymorphic | 274 | 1.00× |
+| `--super` | 337 | 1.23× |
+| `--switch` | 358 | 1.31× |
+| `--switch --super` | 385 | 1.40× |
+| `-t` (AOT) | **17 552** | **64×** |
 
 The AOT path emits ordinary .NET methods that the CLR JIT optimizes as
 native code, so the ~64× jump over the fastest interpreter mode is the
@@ -485,8 +484,7 @@ interpreter's host-function machinery.
 > Both the polymorphic (default) and the polymorphic-super (`--super`)
 > modes are pure managed code with no source-gen and no Unsafe usage —
 > pick those if you need the most conservative surface. Expect ~25–40%
-> lower throughput vs `--switch --switch_super` on compute-bound
-> workloads.
+> lower throughput vs `--switch --super` on compute-bound workloads.
 
 ## Roadmap
 
