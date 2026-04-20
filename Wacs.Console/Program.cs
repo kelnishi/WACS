@@ -225,7 +225,8 @@ namespace Wacs.Console
             if (opts.LogProg)
                 System.Console.Error.WriteLine($"Instantiating Module {moduleName}");
 
-            if (opts.Transpile)
+            // Interpreter super-instructions (polymorphic path only).
+            if (opts.SuperInstructions)
                 runtime.SuperInstruction = true;
 
             // Switch runtime opt-in. Flag must be set BEFORE InstantiateModule —
@@ -241,7 +242,11 @@ namespace Wacs.Console
             var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true, TimeInstantiation = opts.LogProg});
             runtime.RegisterModule(moduleName, modInst);
 
-            if (opts.Aot)
+            // -t / --transpiler and --aot both route through the AOT path.
+            // Kept as aliases so --transpiler does what its name implies
+            // (actually invoke the transpiler); the interpreter
+            // super-instruction toggle moved to its own --super flag.
+            if (opts.Transpile || opts.Aot)
             {
                 return RunViaTranspiler(opts, runtime, modInst);
             }
