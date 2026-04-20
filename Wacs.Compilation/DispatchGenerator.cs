@@ -297,6 +297,14 @@ namespace Wacs.Compilation
             // reference it per call, and re-dereferencing ctx.Attributes.MaxCallStack on
             // every call would be an unnecessary two-field-load + ldfld per invocation.
             sb.AppendLine("            int _maxCallStack = ctx.Attributes.MaxCallStack;");
+            // Per-frame OpStack base: the _stackCount value at which the current WASM
+            // frame began. Branch opcodes carry frame-relative results-heights; adding
+            // _frameBase produces the absolute count to trim to. Updated on Call (to
+            // the callee's start count) and on pop-frame (restored from the popped
+            // SwitchCallFrame). Entry frame starts at whatever count the host left on
+            // the OpStack after pushing args — ControlHandlers.InvokeWasm pops params
+            // before Run is entered, so the initial base is just _stackCount.
+            sb.AppendLine("            int _frameBase = _stackCount;");
             sb.AppendLine();
             // Mutable per-frame state. All of these are updated on Call (to point at
             // callee) and on Return/pc-end (to point back at caller).
@@ -335,6 +343,9 @@ namespace Wacs.Compilation
             sb.AppendLine("                            _codeBase = ref Wacs.Core.Compilation.ArrayRefHelper.GetByteRef(code);");
             sb.AppendLine("                            _localsSpan = ctx.Frame.Locals.Span;");
             sb.AppendLine("                            _pc = __popped.ResumePc;");
+            // Restore the caller's frame base so its subsequent branches trim to
+            // absolute heights anchored at the caller (not the callee's base).
+            sb.AppendLine("                            _frameBase = __popped.CallerStackBase;");
             // Do NOT reset _stackCount from _opStack.Count here. _stackCount is the
             // authoritative local across the callee's execution (expression-body
             // opcodes update only _stackCount, not the field). _opStack.Count was
@@ -405,6 +416,7 @@ namespace Wacs.Compilation
             sb.AppendLine("                        ctx.Frame = __popped.WasmFrame;");
             sb.AppendLine("                        _codeBase = ref Wacs.Core.Compilation.ArrayRefHelper.GetByteRef(code);");
             sb.AppendLine("                        _localsSpan = ctx.Frame.Locals.Span;");
+            sb.AppendLine("                        _frameBase = __popped.CallerStackBase;");
             // The caller's pcBefore (= opcode pc of the Call that got us here) is stored
             // as ResumePc minus the Call opcode's instruction bytes. We can't know the
             // exact pre-call pc without tracking it — use ResumePc itself. HandlerTable
@@ -609,7 +621,10 @@ namespace Wacs.Compilation
                 "__newFrame.Locals = __newLocals;";
 
             // Swap dispatch locals to point at callee. Used by non-tail calls after
-            // push; used by tail calls after frame-release-in-place.
+            // push; used by tail calls after frame-release-in-place. The new frame's
+            // base is the current _opStack.Count (= _stackCount after popping args) —
+            // branches inside the callee add this to their compile-time frame-relative
+            // results-height to get the absolute stack count.
             string switchToCallee =
                 "code = __compiled.Bytecode; " +
                 "handlers = __compiled.HandlerTable; " +
@@ -617,12 +632,14 @@ namespace Wacs.Compilation
                 "_codeBase = ref Wacs.Core.Compilation.ArrayRefHelper.GetByteRef(code); " +
                 "_localsSpan = __newSpan; " +
                 "_pc = 0; " +
-                "_stackCount = _opStack.Count;";
+                "_stackCount = _opStack.Count; " +
+                "_frameBase = _stackCount;";
 
-            // Push caller's state before switch.
+            // Push caller's state before switch. CallerStackBase is the caller's
+            // _frameBase (the just-left frame's base), so pop-frame can restore it.
             string pushCaller =
                 "ctx._switchCallStack.Push(new Wacs.Core.Compilation.SwitchCallFrame(" +
-                "code, handlers, ctx.Frame, _pc, __rented));";
+                "code, handlers, ctx.Frame, _pc, __rented, _frameBase));";
 
             // Strict eager compilation: WasmRuntime.Instantiate walks the call graph and
             // pre-compiles every reachable FunctionInstance, so this field is guaranteed
@@ -1325,10 +1342,14 @@ namespace Wacs.Compilation
             // emit it with _opStack.Count since block bodies run inside the sync
             // bracket — ShiftResultsSlow mutates Count in memory, and the resync picks
             // that up.
+            // resultsHeight is emitted frame-relative by BytecodeCompiler — the
+            // dispatcher adds _frameBase to get the absolute OpStack count to trim to.
+            // Without this, a callee's branch with a frame-relative height of 0 would
+            // trim the caller's residue values below it (spec-violating).
             body = System.Text.RegularExpressions.Regex.Replace(
                 body,
                 @"_opStack\.ShiftResults\(\s*(\(int\)\w+)\s*,\s*(\(int\)\w+)\s*\);",
-                "if (_opStack.Count != $2) _opStack.ShiftResultsSlow($1, $2);");
+                "{ int __abs = _frameBase + $2; if (_opStack.Count != __abs) _opStack.ShiftResultsSlow($1, __abs); }");
 
             return body;
         }
