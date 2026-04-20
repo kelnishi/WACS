@@ -278,7 +278,7 @@ namespace Wacs.Compilation
             // emits `{T} name = ...;` on first use in each case, and the method-level hoists
             // (_pc, _pcBefore, _opStack, etc.) are all initialized immediately.
             sb.AppendLine("        [System.Runtime.CompilerServices.SkipLocalsInit]");
-            sb.AppendLine("        public static void Run(ExecContext ctx, ReadOnlySpan<byte> code)");
+            sb.AppendLine("        public static void Run(ExecContext ctx, byte[] code)");
             sb.AppendLine("        {");
             // Hoist the OpStack and the current frame's locals out of the hot loop. OpStack
             // is a readonly field (bound at ExecContext construction), so it's trivially safe.
@@ -322,9 +322,8 @@ namespace Wacs.Compilation
             // use Unsafe.Add (no bounds check) — the while-loop guard already ensures
             // _pc &lt; _codeLen at the read site. GetReference is an intrinsic that lowers
             // to a single pointer read; stays AOT-safe.
-            sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(code);");
-            sb.AppendLine("            int _codeLen = code.Length;");
-            sb.AppendLine("            while (_pc < _codeLen)");
+            sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetArrayDataReference(code);");
+            sb.AppendLine("            while (_pc < code.Length)");
             sb.AppendLine("            {");
             // Write pre-fetch pc to ctx.SwitchPcBefore each iteration so SwitchRuntime's
             // handler-carrying catch can locate the throwing opcode's try_table. One str
@@ -412,7 +411,7 @@ namespace Wacs.Compilation
         /// </summary>
         private static void EmitColdDispatch(StringBuilder sb, List<DispatchEntry> coldEntries, ref int caseCounter)
         {
-            sb.AppendLine("        private static int DispatchCold(ExecContext ctx, ReadOnlySpan<byte> code, int pc, byte primary)");
+            sb.AppendLine("        private static int DispatchCold(ExecContext ctx, byte[] code, int pc, byte primary)");
             sb.AppendLine("        {");
             // Mirror Run's hoisted locals so EmitCase's output can reference _opStack /
             // _localsSpan / _codeBase unchanged. One re-hoist per cold-op execution — a
@@ -426,7 +425,7 @@ namespace Wacs.Compilation
             // frame enough to overflow the stack on deeply recursive wasm (the
             // call_indirect.wast suite hits ~48 recursive InvokeWasm levels, each
             // stacking a GeneratedDispatcher.Run + DispatchCold frame pair).
-            sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(code);");
+            sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetArrayDataReference(code);");
             sb.AppendLine("            switch (primary)");
             sb.AppendLine("            {");
             foreach (var e in coldEntries.OrderBy(e => e.RawValue))
@@ -518,7 +517,7 @@ namespace Wacs.Compilation
         {
             bool isSimd = enumType == "SimdCode";
             string keyType = isSimd ? "ushort" : "byte";
-            sb.AppendLine($"        private static int Dispatch{prefixByte:X2}(ExecContext ctx, ReadOnlySpan<byte> code, int pc)");
+            sb.AppendLine($"        private static int Dispatch{prefixByte:X2}(ExecContext ctx, byte[] code, int pc)");
             sb.AppendLine("        {");
             // Hoist the same locals Run hoists, so emitted case bodies (_opStack.XXX,
             // _localsSpan[idx], Unsafe.ReadUnaligned(ref _codeBase, ...)) compile uniformly
@@ -528,7 +527,7 @@ namespace Wacs.Compilation
             sb.AppendLine("            var _opStack = ctx.OpStack;");
             sb.AppendLine("            var _localsSpan = ctx.Frame.Locals.Span;");
             // Prefix sub-methods also stay on method calls (see DispatchCold comment).
-            sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(code);");
+            sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetArrayDataReference(code);");
             if (isSimd)
             {
                 // Two-byte secondary (relaxed-SIMD opcodes go past 0xFF). Unsafe.ReadUnaligned

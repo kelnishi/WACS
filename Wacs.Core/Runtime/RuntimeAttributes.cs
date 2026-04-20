@@ -28,16 +28,31 @@ namespace Wacs.Core.Runtime
         /// <summary>
         /// Upper bound on nested <c>InvokeWasm</c> depth on the switch-runtime path
         /// specifically. Guards the managed C# stack from overflowing recursive WASM
-        /// calls — each <c>call</c> opcode adds three managed frames (InvokeWasm's,
-        /// <c>SwitchRuntime.Run</c>'s, and the generated <c>GeneratedDispatcher.Run</c>'s).
+        /// calls — each <c>call</c> opcode adds at least three managed frames
+        /// (InvokeWasm's, <c>SwitchRuntime.Run</c>'s, and the generated
+        /// <c>GeneratedDispatcher.Run</c>'s), plus one more if the call site dispatches
+        /// through a prefix sub-method (<c>DispatchFC</c> / <c>DispatchFF</c> / etc.).
         ///
-        /// <para>The generated Run method frame is sizable because the method body is a
-        /// ~300-case switch — even with no register-bank bloat, RyuJIT allocates a few
-        /// hundred bytes of locals. 256 fits comfortably within the ~1 MiB default
-        /// .NET thread stack (used by xUnit test threads) while still catching any
-        /// runaway recursion as a clean <c>WasmRuntimeException</c>. If your embedding
-        /// needs deeper WASM call chains, tune this alongside <c>Thread.StackSize</c>
-        /// on the invoking thread. Polymorphic path is unchanged.</para>
+        /// <para>Sizing: static method prologues measure only ≈800 B per WASM call
+        /// level on ARM64. Empirically the budget is closer to 6–8 KiB per level once
+        /// the JIT's dynamic spill slots, passed-in ReadOnlySpan parameters, and the
+        /// test runner's own overhead are included — a managed StackOverflowException
+        /// fires on xUnit's default thread stack at depth ≈128 even though the
+        /// static-measured cost would suggest 1024+. 48 is the empirical ceiling that
+        /// reliably turns a runaway (<c>call.wast</c>'s <c>runaway</c> /
+        /// <c>mutual-runaway</c>) into a clean <c>WasmRuntimeException</c> before
+        /// the CLR terminates the test host.</para>
+        ///
+        /// <para>Known spec-test consequence: the three <c>even</c>/<c>odd</c>
+        /// mutual-recursion tests in <c>call.wast</c> / <c>call_indirect.wast</c> /
+        /// <c>call_ref.wast</c> require depths ~100–201 and therefore trap under the
+        /// switch runtime with the default limit. The polymorphic runtime passes them
+        /// because it uses an explicit <c>Stack&lt;Frame&gt;</c> rather than native
+        /// recursion (see <see cref="MaxCallStack"/> = 2048) — its depth budget costs
+        /// zero native stack per level. Embeddings that need deeper WASM call chains
+        /// under the switch runtime must spawn a worker thread with an enlarged
+        /// <c>Thread.StackSize</c> (pre-phase-A we used a dedicated 32-MiB worker
+        /// thread for exactly this reason) and raise this attribute accordingly.</para>
         /// </summary>
         public int SwitchMaxCallStack = 48;
 

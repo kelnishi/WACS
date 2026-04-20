@@ -42,7 +42,7 @@ namespace Wacs.Core.Compilation
         /// testing raw bytecode snippets; production invocation uses the
         /// <see cref="CompiledFunction"/> overload.
         /// </summary>
-        public static void Run(ExecContext ctx, ReadOnlySpan<byte> code)
+        public static void Run(ExecContext ctx, byte[] code)
         {
             ctx.SwitchPc = 0;
             ctx.SwitchPcBefore = 0;
