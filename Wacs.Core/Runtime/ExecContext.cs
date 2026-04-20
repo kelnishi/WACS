@@ -76,22 +76,22 @@ namespace Wacs.Core.Runtime
         public long steps;
 
         /// <summary>
-        /// Running depth of nested <c>InvokeWasm</c> calls on the switch runtime path.
-        /// Incremented before <c>SwitchRuntime.Run</c> recurses into a callee, decremented
-        /// on return. Checked against <c>Attributes.MaxCallStack</c> so runaway recursion
-        /// surfaces as <see cref="Exceptions.WasmRuntimeException"/> before blowing the
-        /// managed stack — mirrors <see cref="PushFrame"/>'s bound on the polymorphic path.
+        /// Legacy — unused after phase M. Was the native-recursion depth counter
+        /// for the old switch-runtime model where every WASM <c>call</c> grew the
+        /// native thread stack. Phase M replaced native recursion with
+        /// <see cref="_switchCallStack"/>; depth is now that stack's <c>Count</c>.
+        /// Retained so older callers still compile.
         /// </summary>
         public int SwitchCallDepth;
 
         /// <summary>
-        /// Signals a true tail-call from a return_call / return_call_ref /
-        /// return_call_indirect handler to the enclosing <c>InvokeWasm</c> loop. The
-        /// handler pops args, sets pc = int.MaxValue (to exit <c>SwitchRuntime.Run</c>
-        /// immediately), and stashes the callee here. InvokeWasm's outer loop picks it
-        /// up, tears down the current frame, and re-enters Run on the callee — without
-        /// growing the C# stack. This is what makes deeply iterative tail recursion
-        /// (count(1_000_000) in return_call.wast) terminate on a finite thread stack.
+        /// Legacy — unused after phase M. Was the cross-Run tail-call handoff for
+        /// <c>return_call</c> / <c>return_call_ref</c> / <c>return_call_indirect</c>
+        /// when each nested Run invocation was a separate native frame. Phase M's
+        /// iterative dispatcher handles tail calls inline in the opcode case body
+        /// (release current frame in place, switch locals to the callee, don't push
+        /// a new <see cref="Compilation.SwitchCallFrame"/>). Retained so older
+        /// callers still compile.
         /// </summary>
         public Types.FunctionInstance? TailCallPending;
 

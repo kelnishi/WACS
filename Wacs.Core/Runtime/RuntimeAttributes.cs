@@ -26,35 +26,16 @@ namespace Wacs.Core.Runtime
         public int MaxCallStack = 2048;
 
         /// <summary>
-        /// Upper bound on nested <c>InvokeWasm</c> depth on the switch-runtime path
-        /// specifically. Guards the managed C# stack from overflowing recursive WASM
-        /// calls — each <c>call</c> opcode adds at least three managed frames
-        /// (InvokeWasm's, <c>SwitchRuntime.Run</c>'s, and the generated
-        /// <c>GeneratedDispatcher.Run</c>'s), plus one more if the call site dispatches
-        /// through a prefix sub-method (<c>DispatchFC</c> / <c>DispatchFF</c> / etc.).
-        ///
-        /// <para>Sizing: static method prologues measure only ≈800 B per WASM call
-        /// level on ARM64. Empirically the budget is closer to 6–8 KiB per level once
-        /// the JIT's dynamic spill slots, passed-in ReadOnlySpan parameters, and the
-        /// test runner's own overhead are included — a managed StackOverflowException
-        /// fires on xUnit's default thread stack at depth ≈128 even though the
-        /// static-measured cost would suggest 1024+. 48 is the empirical ceiling that
-        /// reliably turns a runaway (<c>call.wast</c>'s <c>runaway</c> /
-        /// <c>mutual-runaway</c>) into a clean <c>WasmRuntimeException</c> before
-        /// the CLR terminates the test host.</para>
-        ///
-        /// <para>Known spec-test consequence: the three <c>even</c>/<c>odd</c>
-        /// mutual-recursion tests in <c>call.wast</c> / <c>call_indirect.wast</c> /
-        /// <c>call_ref.wast</c> require depths ~100–201 and therefore trap under the
-        /// switch runtime with the default limit. The polymorphic runtime passes them
-        /// because it uses an explicit <c>Stack&lt;Frame&gt;</c> rather than native
-        /// recursion (see <see cref="MaxCallStack"/> = 2048) — its depth budget costs
-        /// zero native stack per level. Embeddings that need deeper WASM call chains
-        /// under the switch runtime must spawn a worker thread with an enlarged
-        /// <c>Thread.StackSize</c> (pre-phase-A we used a dedicated 32-MiB worker
-        /// thread for exactly this reason) and raise this attribute accordingly.</para>
+        /// Legacy field — unused after phase M. Retained so existing public-API
+        /// consumers that read/write this attribute still compile. Phase M replaced
+        /// the native-recursion call model (each WASM <c>call</c> adding three native
+        /// frames and bounded by this counter) with an explicit heap-allocated
+        /// <c>ctx._switchCallStack</c>. Depth is now bounded by
+        /// <see cref="MaxCallStack"/> (default 2048), identical to the polymorphic
+        /// path, and costs zero native thread stack per level.
         /// </summary>
-        public int SwitchMaxCallStack = 48;
+        [System.Obsolete("Unused after phase M — switch runtime no longer uses native recursion. Use MaxCallStack instead.")]
+        public int SwitchMaxCallStack = 2048;
 
         /// <summary>
         /// When true, <see cref="Wacs.Core.Compilation.BytecodeCompiler.Compile"/>
