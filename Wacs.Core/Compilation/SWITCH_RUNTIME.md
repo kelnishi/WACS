@@ -42,8 +42,15 @@ because the receiver type is only known at run time. Each iteration pays:
   into big ones.
 
 Running `fib(5M)` through this loop was measured at 1050 ms; the switch runtime
-described below runs it at 520 ms. The rest of the document is how that was
-done without surrendering spec conformance.
+described below runs it at ~590 ms with super-instructions (800 ms without).
+More importantly, phase M's iterative-dispatch refactor eliminated the
+native-stack depth ceiling that used to cap WASM recursion at 48 levels —
+the switch runtime now handles the full 2048-deep call chains that the
+polymorphic path supports. The rest of the document is how that was done
+without surrendering spec conformance.
+
+**As of phase M, all 723 spec tests pass** — parity with the polymorphic
+runtime.
 
 ---
 
@@ -62,9 +69,24 @@ done without surrendering spec conformance.
     │    ├────────────────────┤      ├─────────────────────────┤   │
     │    │ ProcessThreadWith- │      │ InvokeViaSwitch         │   │
     │    │   Options          │      │  → InvokeWasm           │   │
-    │    │   (virtual Execute)│      │    → SwitchRuntime.Run  │   │
+    │    │   (virtual Execute)│      │    (one native frame)   │   │
+    │    │                    │      │    → SwitchRuntime.Run  │   │
     │    │                    │      │      → Generated-       │   │
     │    │                    │      │        Dispatcher.Run   │   │
+    │    │                    │      │        ┌──────────────┐ │   │
+    │    │                    │      │        │ one outer    │ │   │
+    │    │                    │      │        │ while-loop   │ │   │
+    │    │                    │      │        │ iterates     │ │   │
+    │    │                    │      │        │ through every│ │   │
+    │    │                    │      │        │ WASM call    │ │   │
+    │    │                    │      │        │ (push frame  │ │   │
+    │    │                    │      │        │ onto ctx.    │ │   │
+    │    │                    │      │        │ _switchCall- │ │   │
+    │    │                    │      │        │ Stack, swap  │ │   │
+    │    │                    │      │        │ code+pc+Frame│ │   │
+    │    │                    │      │        │ locals; pop  │ │   │
+    │    │                    │      │        │ on exit)     │ │   │
+    │    │                    │      │        └──────────────┘ │   │
     │    └────────┬───────────┘      └────────┬────────────────┘   │
     │             ↓                            ↓                    │
     │          PopScalars (same in both paths)                      │
@@ -73,29 +95,45 @@ done without surrendering spec conformance.
 
 **Shared:** module parsing, validation, instantiation, `Store`, `Frame`,
 `OpStack`, the pooled `Value[]` locals array, `WasmException`/`TrapException`,
-exception-handler resumption search, host-function calls.
+host-function calls.
 
 **Switch-only:** the annotated bytecode stream compiled by `BytecodeCompiler`,
 the generated dispatch loop in `GeneratedDispatcher.Run`, the hoisted
-register-like locals that the inner loop works with, and a handful of helper
-classes (`StreamReader`, `StreamFusePass`) that exist to keep the hot loop
-dense.
+register-like locals that the inner loop works with, the explicit call stack
+(`ctx._switchCallStack`) that replaces native-frame recursion per WASM call,
+and a handful of helper classes (`StreamReader`, `StreamFusePass`) that exist
+to keep the hot loop dense.
 
 Host-function calls transition from switch back to polymorphic automatically:
-`Call`'s generated body checks `target is FunctionInstance` and only calls
-`ControlHandlers.InvokeWasm` for WASM functions; for host functions it calls
-`target.Invoke(ctx)` which runs the polymorphic marshalling path.
+`Call`'s generated body checks `target is FunctionInstance` and only runs the
+iterative push-frame-and-switch sequence for WASM functions; for host
+functions it calls `target.Invoke(ctx)` which runs the polymorphic
+marshalling path.
+
+### Polymorphic's frame stack vs switch's call stack
+
+Both paths share `ctx.OpStack` (the operand value stack) but diverge on how
+they track *call frames* (the per-function locals + module context):
+
+| Aspect | Polymorphic | Switch (iterative, phase M+) |
+|---|---|---|
+| Call-frame storage | `ctx._callStack: Stack<Frame>` | `ctx._switchCallStack: Stack<SwitchCallFrame>` |
+| Per-call native frames | zero | zero |
+| Depth bound | `Attributes.MaxCallStack` (2048) | same (2048) |
+| Heap per level | one pooled `Frame` object + locals `Value[]` | one pooled `Frame` + locals + one 32 B `SwitchCallFrame` struct |
+
+Phase M eliminated the native-stack dependency that used to cap switch-runtime
+recursion at ~48 levels. See §6.M.
 
 ---
 
-## 3. Invocation flow
+## 3. Invocation flow (phase M — iterative)
 
 Entry: `WasmRuntime.InvokeViaSwitch(func, funcType, args)` in
 [`Wacs.Core/Runtime/WasmRuntimeSwitch.cs`](../Runtime/WasmRuntimeSwitch.cs).
 
 ```csharp
 Context.OpStack.PushScalars(funcType.ParameterTypes, args);
-Context.SwitchCallDepth = 0;
 try {
     ControlHandlers.InvokeWasm(Context, func);
 } catch (WasmException we) {
@@ -109,45 +147,184 @@ Context.OpStack.PopScalars(funcType.ResultType, results);
 return results;
 ```
 
-`ControlHandlers.InvokeWasm` (shared between both runtimes — it lives in
-[`Instructions/ControlHandlers.cs`](../Instructions/ControlHandlers.cs)) does
-the frame setup that every WASM function call requires:
+`ControlHandlers.InvokeWasm` is now a thin entry-point wrapper (phase M
+collapsed its old native-recursion body). It does the one-time frame setup
+for the outermost function, then hands off to the iterative dispatcher:
 
 1. Read the `SwitchCompiled` field on `FunctionInstance`; if null,
    `BytecodeCompiler.Compile` and cache it. Compile is deterministic; benign
    races just duplicate work.
 2. Rent a `Value[]` locals array from `ArrayPool<Value>.Shared`, sliced to the
    exact parameter + declared-locals count. Pop args from the caller's OpStack
-   into locals[0..paramCount].
+   into `locals[0..paramCount]`.
 3. Rent a `Frame` from `ExecContext._framePool`; wire `Module` and `Locals`.
-4. Check `SwitchCallDepth` against `SwitchMaxCallStack` (default 48). This
-   ensures runaway recursion surfaces as a `WasmRuntimeException` before the
-   CLR's StackOverflowException terminates the process.
-5. Swap `ctx.Frame`, bump depth, enter `SwitchRuntime.Run(ctx, compiled)`
-   inside a try/finally that returns the locals array and frame to their pools
-   on any exit.
+   Set `ctx.Frame` to this entry frame.
+4. Call `SwitchRuntime.Run(ctx, compiled)` inside a try/finally that drains
+   any residue on `ctx._switchCallStack` (defensive — only non-WasmException
+   throw paths can leave residue), restores the outer caller's Frame, and
+   returns the entry Frame + rented locals to their pools.
 
-`SwitchRuntime.Run` picks a dispatch entry:
+Note: the old `SwitchCallDepth` counter and `SwitchMaxCallStack = 48` guard
+are **gone**. The iterative model caps depth via the heap-allocated
+`ctx._switchCallStack` (`Attributes.MaxCallStack = 2048`, same as polymorphic).
+
+`SwitchRuntime.Run` is now a trivial wrapper:
 
 ```csharp
-if (handlers.Length == 0) {
-    GeneratedDispatcher.Run(ctx, code);   // handler-free fast path
-    return;
+public static void Run(ExecContext ctx, CompiledFunction func) {
+    ctx.SwitchPc = 0;
+    ctx.SwitchPcBefore = 0;
+    GeneratedDispatcher.Run(ctx, func);
 }
-while (true) {
-    try { GeneratedDispatcher.Run(ctx, code); return; }
-    catch (WasmException we) {
-        if (!TryResumeWithHandler(ctx, handlers, we.Exn, ctx.SwitchPcBefore))
-            throw;
-        // loop: TryResumeWithHandler set ctx.SwitchPc; re-enter Run.
+```
+
+All the handler-aware exception handling that used to live here has moved
+*inside* `GeneratedDispatcher.Run`'s outer try/catch — it runs per-exception,
+walking `ctx._switchCallStack` and calling `TryResumeWithHandlerTable` on
+each level's `HandlerEntry[]` until either a matching `try_table` resumes
+execution or the stack is empty and the exception rethrows.
+
+### The actual dispatch loop
+
+`GeneratedDispatcher.Run` hoists its per-frame state into mutable locals so
+`Call`/`CallIndirect`/`CallRef` (and their tail-call variants) can push a
+`SwitchCallFrame` onto `ctx._switchCallStack` and re-aim the locals at the
+callee without calling any helper that would grow the native stack:
+
+```csharp
+public static void Run(ExecContext ctx, CompiledFunction entryFunc) {
+    var _opStack = ctx.OpStack;
+    ref Value _registersRef = ref _opStack.FirstRegister();
+    int _stackCount = _opStack.Count;
+
+    // Per-frame state — reassigned on Call (switch to callee) and on pop
+    // (restore caller).
+    byte[] code = entryFunc.Bytecode;
+    HandlerEntry[] handlers = entryFunc.HandlerTable;
+    var _localsSpan = ctx.Frame.Locals.Span;
+    ref byte _codeBase = ref ArrayRefHelper.GetByteRef(code);
+    int _pc = ctx.SwitchPc;
+
+    while (true) {
+      try {
+        while (true) {
+            // Function-exit check (pc past end, or Return set it to int.MaxValue).
+            if (_pc >= code.Length) {
+                if (ctx._switchCallStack.Count == 0) {
+                    _opStack.Count = _stackCount; return;          // outermost done
+                }
+                var popped = ctx._switchCallStack.Pop();
+                ArrayPool<Value>.Shared.Return(popped.CalleeRentedLocals, true);
+                ctx.ReturnFrame(ctx.Frame);           // return callee's frame
+                code        = popped.Code;
+                handlers    = popped.Handlers;
+                ctx.Frame   = popped.WasmFrame;
+                _codeBase   = ref ArrayRefHelper.GetByteRef(code);
+                _localsSpan = ctx.Frame.Locals.Span;
+                _pc         = popped.ResumePc;
+                // DO NOT reset _stackCount from _opStack.Count here —
+                // the callee's local tracking is authoritative (see §6.M).
+                continue;
+            }
+
+            ctx.SwitchPcBefore = _pc;
+            byte primary = Unsafe.Add(ref _codeBase, _pc);
+            _pc++;
+            switch (primary) {
+                case 0x10: {  // Call — iterative push + switch
+                    uint funcIdx = ...;
+                    _opStack.Count = _stackCount;
+                    var target = ctx.Store[...];
+                    if (target is FunctionInstance wasmFunc) {
+                        var compiled = wasmFunc.SwitchCompiled ?? Compile(wasmFunc);
+                        // Pop arity args into newly-rented callee locals
+                        var rented  = ArrayPool<Value>.Shared.Rent(totalCount);
+                        var newSpan = new Memory<Value>(rented, 0, totalCount).Span;
+                        for (int i = paramCount-1; i >= 0; i--)
+                            newSpan[i] = _opStack.PopAnyFast();
+                        var newFrame = ctx.RentFrame();
+                        newFrame.Module = wasmFunc.Module;
+                        newFrame.Locals = new Memory<Value>(rented, 0, totalCount);
+                        // Bounded-depth check
+                        if (ctx._switchCallStack.Count >= ctx.Attributes.MaxCallStack)
+                            throw new WasmRuntimeException(...);
+                        // Push caller state, switch all locals to callee
+                        ctx._switchCallStack.Push(new SwitchCallFrame(
+                            code, handlers, ctx.Frame, _pc, rented));
+                        code        = compiled.Bytecode;
+                        handlers    = compiled.HandlerTable;
+                        ctx.Frame   = newFrame;
+                        _codeBase   = ref ArrayRefHelper.GetByteRef(code);
+                        _localsSpan = newSpan;
+                        _pc         = 0;
+                        _stackCount = _opStack.Count;   // fresh for callee
+                        continue;
+                    }
+                    target.Invoke(ctx);                   // host function — native call
+                    _stackCount = _opStack.Count;
+                    continue;
+                }
+                // ... 0x11 CallIndirect, 0x14 CallRef: analogous ...
+                // ... 0x12/0x13/0x15 tail-call variants: release current frame
+                //     WITHOUT pushing, then switch to callee ...
+                // ... all other opcodes: unchanged from phase L emission ...
+            }
+        }
+      } catch (WasmException we) {
+        // Unwind: try current function's handlers at ctx.SwitchPcBefore.
+        // On miss, pop one level and retry at the caller's resume-1. On
+        // empty stack, rethrow.
+        ...
+      }
     }
 }
 ```
 
-`TryResumeWithHandler` walks the function's `HandlerEntry[]` sidecar looking
-for the innermost `try_table` whose `[StartPc, EndPc)` range contains the
-throwing opcode's pc. Handler-free functions skip the try/catch entirely —
-zero IL overhead for the common case.
+`SwitchCallFrame` is a 5-field struct (32 B on 64-bit): `byte[] Code`,
+`HandlerEntry[] Handlers`, `Frame WasmFrame` (the *caller's* frame at push
+time), `int ResumePc`, `Value[] CalleeRentedLocals` (for pool return on
+pop). The backing `Stack<SwitchCallFrame>` is preallocated to
+`Attributes.InitialCallStack = 512` at ExecContext construction — push/pop
+is a struct-copy into/out of that array with no heap activity unless depth
+exceeds 512 (then the array doubles; zero-alloc thereafter for the lifetime
+of the ExecContext).
+
+### Tail calls come for free
+
+`return_call` (0x12), `return_call_indirect` (0x13), and `return_call_ref`
+(0x15) replace the current frame in place: release the current frame's
+rented locals + Frame back to pools, swap dispatch locals to point at the
+callee, *do not* push a new `SwitchCallFrame`. The caller's prior entry
+on `ctx._switchCallStack` (if any) remains — when the callee eventually
+returns, it returns to the caller's caller, skipping us. Correct tail-call
+semantics, bounded by `MaxCallStack` on the heap, zero native-stack cost.
+
+### Exception unwinding
+
+The outer `try/catch` around the dispatch loop fires once per
+`WasmException`. The handler:
+
+1. Calls `SwitchRuntime.TryResumeWithHandlerTable(ctx, handlers, exn, pcBefore, out handlerPc)` —
+   walks the current function's `HandlerEntry[]` looking for the innermost
+   `try_table` whose `[StartPc, EndPc)` range covers `pcBefore`. On match,
+   sets `ctx.SwitchPc = handlerPc` and returns `true`.
+2. If matched: set the dispatch-local `_pc = handlerPc`, `_stackCount =
+   _opStack.Count` (handler-resume shifts the stack), `goto __resume;`
+   re-enters the outer loop at the handler.
+3. If miss: pop one `SwitchCallFrame` (return its callee rented + Frame),
+   restore the caller's `code/handlers/Frame/pc`. Retry at
+   `popped.ResumePc - 1` (the caller's opcode pc of the Call that got us
+   here — within the caller's try_table range if the call was inside one).
+4. If `ctx._switchCallStack.Count == 0` and still no match: rethrow. The
+   exception propagates out of Run → out of InvokeWasm → into
+   `InvokeViaSwitch`'s `catch (WasmException)`, which flushes the stack and
+   raises `UnhandledWasmException`.
+
+The `EnclosingBlock` linked list on `BlockTarget` is *not* walked at
+runtime — `BytecodeCompiler` already linearized every `try_table` into the
+function's `HandlerTable` sidecar during the emit pass, keyed by
+`(StartPc, EndPc)` ranges that cover the `try_table` region of the
+annotated stream.
 
 ---
 
@@ -621,6 +798,134 @@ is simpler. Bench: fac and sum −6% each; fib flat. A modest win from
 the secondary effects, even though the stated register-allocation goal
 didn't pan out.
 
+### Phase L — shrink Run's frame 624 → 448 B
+
+Three small experiments on `Run`'s local set; kept the two that stuck.
+
+**Kept (A)** — unhoist `_codeLen`. Replaced the `_codeLen` int local with
+an inline `code.Length` read at the `while` guard. Removing that one 4-byte
+local freed the register the JIT was reserving for it; cascaded into
+~160 B of spill-slot savings (the JIT had been parking other hot values
+to stack to preserve the reservation). Zero bench regression.
+
+**Reverted (B)** — unhoist `_localsSpan`. Reading `ctx.Frame.Locals.Span`
+inline per LocalGet/LocalSet/Tee saved another 32 B of frame, but each
+access included a `Memory<Value>.get_Span()` call; swFuse regressed 15–22%
+on fib/fac/sum. Not worth the 32 B.
+
+**Kept (C)** — switch Run from `ReadOnlySpan<byte> code` to `byte[] code`.
+Eliminates the 16 B span-struct parameter-spill slot. Uses
+`MemoryMarshal.GetArrayDataReference(code)` via a tiny
+[`ArrayRefHelper`](GetArrayDataReferencePolyfill.cs) netstandard2.1
+polyfill. Frame: 464 → 448 B. Bench flat.
+
+Net: frame 624 → 448 B (−28%). Per-level recursion cost dropped from
+~1 KB to ~800 B. Still not enough on its own to pass the 3 failing
+`even(100)`/`odd(200)` tests under a 256 KiB xUnit thread stack — that
+required the native-recursion model to go entirely (phase M).
+
+### Phase M — iterative Run: no native recursion per WASM call
+
+**Motivation**: Phase L plugged the per-frame leaks; the per-*depth* cost
+was fundamental. Every WASM `call` still added three native frames
+(InvokeWasm + SwitchRuntime.Run + GeneratedDispatcher.Run), and xUnit's
+thread stack ran out around depth 48. The three spec tests exercising
+`even(100)`/`odd(200)` needed depth ≥ 201 and trapped prematurely.
+
+**Change**: replaced the native-recursion call model with an explicit
+call stack on `ExecContext`. Conceptually: instead of calling a function
+to dispatch the callee, the Call opcode body pushes a record of the
+caller's state onto `ctx._switchCallStack` and mutates the dispatch
+loop's per-frame locals to point at the callee. Execution stays in the
+same outer `GeneratedDispatcher.Run` invocation — one native frame,
+N WASM-call frames.
+
+```csharp
+// Per-frame state in Run becomes mutable:
+byte[] code             = entryFunc.Bytecode;
+HandlerEntry[] handlers = entryFunc.HandlerTable;
+ref byte _codeBase      = ref ArrayRefHelper.GetByteRef(code);
+var _localsSpan         = ctx.Frame.Locals.Span;
+int _pc                 = 0;
+```
+
+**Pieces**:
+
+* `SwitchCallFrame` struct (5 fields, 32 B): `byte[] Code`,
+  `HandlerEntry[] Handlers`, `Frame WasmFrame` (caller's),
+  `int ResumePc`, `Value[] CalleeRentedLocals`.
+* `ExecContext._switchCallStack: Stack<SwitchCallFrame>` preallocated to
+  `InitialCallStack = 512` slots at construction (16 KiB).
+* `GeneratedDispatcher.Run`: signature changed to `(ExecContext,
+  CompiledFunction)`. Outer `while(true) { try { while(true) { ... } }
+  catch { ... } }` — the inner loop dispatches opcodes, the outer-loop
+  catch unwinds for exception handling.
+* `Call` (0x10), `CallIndirect` (0x11), `CallRef` (0x14) emit
+  iterative push-frame-and-switch sequences. Tail variants (0x12, 0x13,
+  0x15) emit release-in-place-and-switch (no push).
+* `ControlHandlers.InvokeWasm` collapsed from a recursive wrapper to a
+  thin "rent entry frame, call Run once" setup. No more
+  `SwitchCallDepth` counter or `SwitchMaxCallStack` guard.
+* Exception unwinding walks `ctx._switchCallStack`, calling
+  `TryResumeWithHandlerTable` on each level's `HandlerEntry[]`.
+
+**Depth bound**: `Attributes.MaxCallStack = 2048` — same as polymorphic,
+64 KiB of heap per ExecContext at max capacity.
+
+**Result**: **723/723 spec tests pass** — parity with polymorphic. The
+3 depth-limited failures (`call.wast`, `call_indirect.wast`,
+`call_ref.wast`) now pass.
+
+**Three subtle correctness notes**:
+
+1. *Do not resync `_stackCount = _opStack.Count` on pop-frame.* The
+   callee's local `_stackCount` is authoritative across its entire
+   execution (expression-body opcodes update only the local, not the
+   field). `_opStack.Count` was last synced at Call entry and is stale
+   by exactly the callee's net stack effect. Reading it on pop would
+   give the pre-call value; the callee's pushed result would be lost.
+   (Found by: `fac(5)` returning `1` instead of `120`.)
+
+2. *InvokeWasm's defensive finally-drain returns `ctx.Frame` (the
+   current callee), not `popped.WasmFrame` (the caller).* The push
+   records the caller as `WasmFrame`; at pop, we're exiting the
+   callee whose frame is `ctx.Frame`. Reversing the direction
+   double-frees the entry frame on the abort path.
+
+3. *`FlushCallStackForSwitch` clears `OpStack.Count` to 0 unconditionally
+   instead of draining via `PopAny`.* In the iterative model, each active
+   WASM frame's intermediate stack values stay on the shared OpStack
+   simultaneously. Deep recursion can push the count past
+   `_registers.Length` before the depth guard catches it; a subsequent
+   `PopAny` would re-throw `IndexOutOfRangeException` and mask the real
+   `WasmRuntimeException`. On the abort path the data is already lost,
+   so just zero the count.
+
+**Bench** (median of 4 runs vs phase L baseline):
+
+| workload | switch phase L | switch phase M | swFuse phase L | swFuse phase M |
+|---|---|---|---|---|
+| fib-iter(5M) | 1111 ms | **801 ms** (−28%) | 509 ms | 587 ms (+15%) |
+| fac(20)×250k | 320 ms | **243 ms** (−24%) | 167 ms | 200 ms (+20%) |
+| sum(5M) | 495 ms | 647 ms (+31%) | 443 ms | 530 ms (+20%) |
+
+`switch` (no super-instructions) **big wins** from eliminating the two
+native frames per call (InvokeWasm + SwitchRuntime.Run ≈ 320 B/level)
+and from avoiding each call's prologue/epilogue.
+
+`swFuse` regressed ~15–20%. The outer `try/catch` wrapping Run's
+dispatch loop adds exception-region IL that the JIT handles
+conservatively, forcing some loop-local state to memory. Super-
+instructions are more sensitive to this than plain opcodes because
+DispatchFF is already hot and any extra memory ops compound. Likely
+recoverable by splitting the handler-free path (no try/catch needed)
+from the handler-carrying path — a follow-up.
+
+`sum` regression across both modes is less obvious; current hypothesis
+is that the iterative loop's frame-size change interacts with the loop
+body's scalar-sum pattern differently than the recursive model did.
+Worth disasm-investigating but not a correctness issue.
+
 ---
 
 ## 7. Measured results
@@ -629,11 +934,13 @@ Comparison of a 3-benchmark micro-suite across the optimization phases.
 All numbers median of 4 runs, M1 Pro, .NET 8, `net8.0` target framework,
 `DOTNET_TieredCompilation=0`.
 
+Phase M (current head):
+
 ```
               polymorphic     super       switch      swFuse     switch/poly   fuse/super
-fib-iter(5M):    1050 ms     620 ms      1110 ms      520 ms       1.05x        0.85x
-fac(20)×250k:     480 ms     240 ms       335 ms      170 ms       0.70x        0.70x
-sum(5M):          870 ms     610 ms       520 ms      450 ms       0.60x        0.74x
+fib-iter(5M):    1060 ms     620 ms       800 ms      585 ms       0.75x        0.93x
+fac(20)×250k:     480 ms     245 ms       245 ms      200 ms       0.51x        0.82x
+sum(5M):          880 ms     620 ms       645 ms      530 ms       0.73x        0.86x
 ```
 
 * **polymorphic**: virtual-dispatch `ProcessThreadWithOptions`.
@@ -644,10 +951,17 @@ sum(5M):          870 ms     610 ms       520 ms      450 ms       0.60x        
 * **swFuse**: switch runtime + stream-fuser (`StreamFusePass`), the
   intended shipping configuration.
 
-The consistent story: `switch` cuts memory traffic per opcode enough to
-match the polymorphic runtime *without* super-instructions, and `swFuse`
-(= switch + stream fuser) cuts it enough to match or beat
-polymorphic-with-super.
+Phase M flipped the story vs phase L: `switch` (plain) is now the
+fastest configuration across all three benchmarks, because eliminating
+the per-call native-frame overhead (InvokeWasm + SwitchRuntime.Run ≈
+320 B/level) outweighs the cost of checking `_pc >= code.Length` and
+pushing/popping SwitchCallFrame on call/return. `swFuse` is still
+faster than polymorphic-super on fib and fac, but slower than plain
+`switch` on fib due to the outer try/catch interacting poorly with
+DispatchFF's register pressure (see §8.4).
+
+Correctness: **723/723 spec tests pass**, parity with polymorphic.
+Up from 720/3 at phase L. Compilation tests: 50/50.
 
 ---
 
@@ -685,6 +999,37 @@ Works fine from smaller callers (the polymorphic path, tests), so we keep
 the attribute — it just doesn't earn its keep on the switch path, and every
 phase from C onward has expanded the bodies inline at emit time anyway.
 
+### 8.4 Phase M's try/catch pessimising the swFuse hot path
+
+The outer `try/catch (WasmException)` wrapping Run's dispatch loop is
+required for per-function exception-handler unwinding (the catch walks
+`ctx._switchCallStack` and calls `TryResumeWithHandlerTable` on each
+level). The exception region adds IL metadata that RyuJIT treats
+conservatively — some loop-local state gets spilled to the frame so the
+catch can observe it.
+
+Measurement: switching from phase L's native-recursion model (where
+each Run invocation's try/catch was scoped to one function at a time,
+and handler-free functions skipped the catch entirely) to phase M's
+single all-encompassing try/catch cost swFuse ~15–20% across fib/fac.
+Plain `switch` still net-wins because the saved native-frame overhead
+dominates.
+
+The obvious fix is to split the dispatch loop: a handler-free inner
+loop that runs until the callee pushes a frame with `Handlers.Length >
+0`, at which point we switch to a handler-aware inner loop with the
+try/catch. Most WASM functions have no `try_table`, so the fast path
+would stay exception-region-free. Deferred to a follow-up.
+
+### 8.5 `sum(5M)` regression under phase M
+
+Plain `switch` on `sum(5M)` went from 495 ms (phase L) to 645 ms
+(phase M) — worse than the ~30% gain on fib/fac. `sum` is an iterative
+i64-accumulate loop with no function calls, so the iterative/recursive
+change should be neutral. Hypothesis: the added per-call-state locals
+in Run (`code`, `handlers` as mutable vars) interact badly with the
+i64-arith hot path's register allocation. Needs disasm investigation.
+
 ---
 
 ## 9. AOT compatibility
@@ -712,9 +1057,10 @@ per-opcode info at debug time.
 Generator (builds into `Wacs.Compilation.dll`, a `netstandard2.0` assembly
 for source-generator compatibility):
 
-* `Wacs.Compilation/DispatchGenerator.cs` — the generator. ~1300 lines
+* `Wacs.Compilation/DispatchGenerator.cs` — the generator. ~1500 lines
   including comments; contains all emission logic, parameter
-  classification, body rewrites, and the inline expansion passes.
+  classification, body rewrites, the inline expansion passes, and the
+  phase-M iterative Call/CallIndirect/CallRef/tail-call case emission.
 
 Generated output (one file, produced at build time):
 
@@ -722,7 +1068,7 @@ Generated output (one file, produced at build time):
 
 Hand-written runtime support:
 
-* `Wacs.Core/Compilation/CompiledFunction.cs` — `record` holding the
+* `Wacs.Core/Compilation/CompiledFunction.cs` — class holding the
   annotated bytecode, handler table, locals count, and signature.
 * `Wacs.Core/Compilation/BytecodeCompiler.cs` — the link-pass consumer
   that walks `InstructionBase[]` and emits the annotated stream +
@@ -733,10 +1079,17 @@ Hand-written runtime support:
 * `Wacs.Core/Compilation/StreamReader.cs` — retained for the handful of
   places (validation-only tooling, `MinimalDispatcher`) that haven't
   been migrated to inline reads.
-* `Wacs.Core/Compilation/SwitchRuntime.cs` — `Invoke` top-level wrapper,
-  `Run` handler-aware dispatcher, `TryResumeWithHandler`.
+* `Wacs.Core/Compilation/SwitchRuntime.cs` — trivial entry wrappers
+  (post-phase-M) plus `TryResumeWithHandler` /
+  `TryResumeWithHandlerTable` for the iterative catch.
+* `Wacs.Core/Compilation/SwitchCallFrame.cs` — phase M's per-call
+  struct: `Code`, `Handlers`, `WasmFrame` (caller), `ResumePc`,
+  `CalleeRentedLocals`.
 * `Wacs.Core/Compilation/HandlerEntry.cs` — struct holding
   `{StartPc, EndPc, TagIdx, HandlerPc, ResultsHeight, Arity, Kind}`.
+* `Wacs.Core/Compilation/GetArrayDataReferencePolyfill.cs` — tiny
+  netstandard2.1 forwarder so `Run` can use the same reference-producing
+  call on both target frameworks.
 * `Wacs.Core/Compilation/GeneratedDispatcher.cs` — a ~20-line partial
   declaration so the generator has something to hook into.
 * `Wacs.Core/Compilation/MinimalDispatcher.cs` — a reference
@@ -749,17 +1102,22 @@ OpStack `Fast` variants:
   `FirstRegister`. These are the method-call equivalents of the inline
   expansion; called from cold sub-methods.
 
-ExecContext fields added over the phases:
+ExecContext fields added/changed over the phases:
 
 * `SwitchPc`, `SwitchPcBefore` — Phase F. Seeded at entry, updated by
   the dispatch loop, read by the handler-resume path.
-* `SwitchCallDepth` — Phase A. Bounded recursion counter for
-  `InvokeWasm`'s depth check.
-* `Attributes.SwitchMaxCallStack` — tunable depth limit (default 48).
+* `_switchCallStack: Stack<SwitchCallFrame>` — **Phase M.** The
+  explicit per-WASM-call frame record. Preallocated to
+  `InitialCallStack = 512` slots at ExecContext construction (16 KiB);
+  doubles on depth growth up to `MaxCallStack = 2048`.
+* `SwitchCallDepth`, `TailCallPending` — **Phase M removed these.**
+  `SwitchCallDepth` is replaced by `_switchCallStack.Count`;
+  `TailCallPending` is gone because return_call/etc. handle the tail
+  replacement inline in the Call case body.
+* `Attributes.MaxCallStack` — tunable depth limit (default 2048, used
+  by both polymorphic `_callStack` and switch `_switchCallStack`).
+  `Attributes.SwitchMaxCallStack` is still defined but unused post-M.
 * `Attributes.UseSwitchSuperInstructions` — gate for `StreamFusePass`.
-* `TailCallPending` — Phase G tail-call support; set by
-  `return_call*` handlers so `InvokeWasm` can re-enter without growing
-  the managed stack.
 
 ---
 
@@ -767,7 +1125,15 @@ ExecContext fields added over the phases:
 
 * **Adding an op**: write an `[OpSource]` (pure scalar) or `[OpHandler]`
   method in `Wacs.Core/Instructions/…`. The generator picks it up on
-  next build. No wiring, no table edit.
+  next build. No wiring, no table edit. **Exception:** the 6 call-family
+  opcodes (`0x10`/`0x11`/`0x12`/`0x13`/`0x14`/`0x15`) are hand-crafted
+  directly in `DispatchGenerator.EmitIterativeCallCases` — they need
+  access to the mutable per-frame locals (`code`, `handlers`,
+  `_codeBase`, `_localsSpan`, `_pc`) that only the outer Run loop owns.
+  The `[OpHandler]` methods for these opcodes in
+  `ControlHandlers.cs` are effectively dead code (retained as a reference
+  implementation and for the polymorphic runtime's use; the switch
+  generator's filter skips them).
 * **Adding an immediate type**: extend `ImmWidth` and `TypeToDataField`
   in the generator. Update `BytecodeCompiler.SizeOf` to match.
 * **Super-instruction patterns**: add a recogniser to `StreamFusePass`,
@@ -778,6 +1144,24 @@ ExecContext fields added over the phases:
   the per-phase gate; it must keep passing.
 * **When a phase appears to work on a subset of tests**: verify the
   complete `Spec.Test` run. Multi-value block/if tests, mutual recursion
-  (call.wast `even`/`odd`), and try_table/throw tests are the canaries —
-  they exercise stack-height invariants, `ctx.SwitchPcBefore`, and the
-  sync bracket interactions that aren't obvious from a unit test.
+  (call.wast `even`/`odd`), try_table/throw tests, and the
+  `assert_exhaustion` runaway-recursion tests are the canaries — they
+  exercise stack-height invariants, `ctx.SwitchPcBefore`, the
+  sync-bracket interactions, *and* (post-M) the iterative frame
+  push/pop + handler-table unwinding.
+* **Modifying Run's outer loop**: any change to how `code`, `handlers`,
+  `_codeBase`, `_localsSpan`, or `_pc` get swapped on Call/pop needs to
+  keep these invariants:
+   1. At pop, do NOT reset `_stackCount = _opStack.Count` — the local
+      has the authoritative running count; the field is stale by the
+      callee's net stack effect.
+   2. On a push, the stored `WasmFrame` is the *caller's* frame (the
+      current `ctx.Frame` just before the switch); the stored
+      `CalleeRentedLocals` is the *callee's* newly-rented array. On
+      pop, return `ctx.Frame` (the callee) to the Frame pool and
+      `CalleeRentedLocals` to the ArrayPool; then restore
+      `ctx.Frame = popped.WasmFrame`.
+   3. Emit `ctx.SwitchPcBefore = _pc` at iteration start, before the
+      opcode fetch, so the handler-unwind path (and
+      `SwitchRuntime.TryResumeWithHandlerTable`) sees the opcode's
+      pre-fetch pc when a throw fires mid-case.
