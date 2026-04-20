@@ -72,6 +72,9 @@ RunBench(fibWasm, new Bench("sum(5M)",      "sum",     5_000_000, Repeats: 3));
 Console.WriteLine();
 Wacs.Bench.CompactStackBench.Run();
 
+Console.WriteLine();
+Wacs.Bench.RegProgBench.Run();
+
 return 0;
 
 record Bench(string Name, string Function, long Arg, int Repeats);
