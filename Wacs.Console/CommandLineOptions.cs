@@ -81,6 +81,24 @@ namespace Wacs.Console
         [Option("switch_super", HelpText = "When --switch is set, enable the bytecode-stream super-instruction fuser.", Default = false)]
         public bool SwitchSuperInstructions { get; set; }
 
+        [Option("aot", HelpText = "Ahead-of-time transpile the module to .NET IL and run through the transpiled code (CLR JIT-native speed). Imports wired through the interpreter for mixed-mode execution.", Default = false)]
+        public bool Aot { get; set; }
+
+        [Option("aot_save", HelpText = "Also save the transpiled assembly to this path (.dll). Only effective when --aot is set.")]
+        public string AotSave { get; set; } = "";
+
+        [Option("aot_simd", HelpText = "SIMD strategy for --aot: 'interpreter' / 'scalar' / 'intrinsics'.", Default = "scalar")]
+        public string AotSimd { get; set; } = "scalar";
+
+        [Option("aot_no_tail_calls", HelpText = "Disable the CIL tail. prefix for return_call* when --aot is set.", Default = false)]
+        public bool AotNoTailCalls { get; set; }
+
+        [Option("aot_max_fn_size", HelpText = "Skip functions larger than N instructions when --aot is set (0 = unlimited).", Default = 0)]
+        public int AotMaxFnSize { get; set; }
+
+        [Option("aot_data_storage", HelpText = "Data-segment storage for --aot: 'compressed' / 'raw' / 'static'.", Default = "compressed")]
+        public string AotDataStorage { get; set; } = "compressed";
+
         // This will capture all values that aren't tied to an option
         [Value(0, Required = true, MetaName = "WasmModule", HelpText = "Path to the executable")]
         public string WasmModule { get; set; } = "";
