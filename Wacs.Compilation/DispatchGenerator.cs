@@ -303,37 +303,38 @@ namespace Wacs.Compilation
             // needs the live value (Dispatch<prefix> / DispatchCold / block-body
             // handlers that invoke OpStack methods we don't inline, like PopResults).
             sb.AppendLine("            int _stackCount = _opStack.Count;");
-            // pc / pcBefore are plain method-local ints, seeded from ctx fields. Previously
-            // these were `ref int` parameters; the ref aliased the locals back to a caller
-            // stack slot, which RyuJIT treated conservatively and spilled _pc to memory on
-            // every modification (visible as 3× ldr+str pairs around each immediate-read in
-            // the hot dispatch). Passing state via ctx fields instead lets _pc live in a
-            // register across the loop body. Writeback at loop exit (in the finally) keeps
-            // SwitchRuntime's handler-resume path observing current values even on throws.
+            // _pc lives as a plain local, seeded from ctx.SwitchPc at entry. The
+            // try/finally around the dispatch loop is GONE in this phase — it was
+            // forcing the JIT to keep _pc memory-observable (observable across every
+            // potential throw), which manifested as 4 ldr + 2 str pairs per iteration
+            // in the disasm. Without the finally, _pc stays in a callee-saved register.
+            //
+            // Writeback strategy (replacing what the finally did):
+            //   * ctx.SwitchPcBefore — written directly at each iteration start (the
+            //     only field SwitchRuntime's catch reads for handler lookup). One str
+            //     per iteration, not per-load-of-_pc.
+            //   * ctx.SwitchPc — not read by anything post-Run, so no writeback needed.
+            //   * _opStack.Count — written back after the loop (normal exit) and synced
+            //     before every throwable site (the per-case sync bracket handles this,
+            //     see EmitCase), so exception paths always see a valid Count too.
             sb.AppendLine("            int _pc = ctx.SwitchPc;");
-            sb.AppendLine("            int _pcBefore = ctx.SwitchPcBefore;");
             // Hoist the span's raw byte reference + length so the per-iteration fetch can
             // use Unsafe.Add (no bounds check) — the while-loop guard already ensures
             // _pc &lt; _codeLen at the read site. GetReference is an intrinsic that lowers
             // to a single pointer read; stays AOT-safe.
             sb.AppendLine("            ref byte _codeBase = ref System.Runtime.InteropServices.MemoryMarshal.GetReference(code);");
             sb.AppendLine("            int _codeLen = code.Length;");
-            // try/finally restored. Correctness beats micro-perf here: SwitchRuntime's
-            // handler-resume path reads pc/pcBefore via the refs after a WasmException
-            // escapes, and if we don't write them back on exceptional exit the caller
-            // sees their pre-call (zero) state and the range check against handler
-            // StartPc/EndPc fails. Removing the try/finally didn't actually get _pc
-            // into a register anyway — the ref parameter is what pins it, not the
-            // exception region. That's a separate fix (phase F candidate).
-            sb.AppendLine("            try");
+            sb.AppendLine("            while (_pc < _codeLen)");
             sb.AppendLine("            {");
-            sb.AppendLine("                while (_pc < _codeLen)");
+            // Write pre-fetch pc to ctx.SwitchPcBefore each iteration so SwitchRuntime's
+            // handler-carrying catch can locate the throwing opcode's try_table. One str
+            // per iteration. Didn't attempt to skip this for handler-free functions since
+            // we'd need a compile-time signal; the cost amortises across the hot cases.
+            sb.AppendLine("                ctx.SwitchPcBefore = _pc;");
+            sb.AppendLine("                byte primary = System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, _pc);");
+            sb.AppendLine("                _pc++;");
+            sb.AppendLine("                switch (primary)");
             sb.AppendLine("                {");
-            sb.AppendLine("                    _pcBefore = _pc;");
-            sb.AppendLine("                    byte primary = System.Runtime.CompilerServices.Unsafe.Add(ref _codeBase, _pc);");
-            sb.AppendLine("                    _pc++;");
-            sb.AppendLine("                    switch (primary)");
-            sb.AppendLine("                    {");
             int caseCounter = 0;
             // Hot/cold primary-opcode split. HOT ops — control flow, locals/globals,
             // parametric, consts, i32/i64/f32/f64 arith + cmp + essential load/store —
@@ -366,18 +367,14 @@ namespace Wacs.Compilation
                 sb.AppendLine($"                        case 0x{pb:X2}: _opStack.Count = _stackCount; _pc = Dispatch{pb:X2}(ctx, code, _pc); _stackCount = _opStack.Count; continue;");
             }
             sb.AppendLine("                        default: _opStack.Count = _stackCount; _pc = DispatchCold(ctx, code, _pc, primary); _stackCount = _opStack.Count; continue;");
-            sb.AppendLine("                    }");
             sb.AppendLine("                }");
             sb.AppendLine("            }");
-            sb.AppendLine("            finally");
-            sb.AppendLine("            {");
-            sb.AppendLine("                ctx.SwitchPc = _pc;");
-            sb.AppendLine("                ctx.SwitchPcBefore = _pcBefore;");
-            // Writeback _stackCount on exit. The finally fires on both normal path
-            // (loop-exit) and exception path (WasmException propagating through); both
-            // rely on _opStack.Count reflecting the current top-of-stack.
-            sb.AppendLine("                _opStack.Count = _stackCount;");
-            sb.AppendLine("            }");
+            // Normal-exit writeback of _stackCount. On exception exit, _opStack.Count
+            // is already valid — every throwable site (block-body handler, sub-method
+            // call) syncs _stackCount into the field before the potentially-throwing
+            // operation runs, so an exception propagating out sees the pre-operation
+            // Count, which is exactly what the catch-and-resume path wants.
+            sb.AppendLine("            _opStack.Count = _stackCount;");
             sb.AppendLine("        }");
             sb.AppendLine();
 
@@ -795,13 +792,14 @@ namespace Wacs.Compilation
 
             string rewritten = RewriteBody(e.Body, e.BodyIsExpression, e.ReturnType, endLabel, pcVar, inlineStack, useCountLocal: !inlineStack);
 
-            // Block bodies can call non-inlined OpStack methods (PopResults, PushV128,
-            // InvokeWasm, ...) that read _opStack.Count directly, and the body may
-            // also contain inline rewrites that use _opStack.Count (useCountLocal=false
-            // path). Sync _stackCount to _opStack.Count before the body and resync
-            // after. Skip the sync if the rewritten body doesn't reference _opStack
-            // at all — that's rare for block bodies but happens for e.g. Nop.
-            bool blockNeedsSync = inlineStack && rewritten.Contains("_opStack.");
+            // Block bodies always sync around the body. They may call into arbitrary
+            // methods (InvokeWasm, target.Invoke, PopResults, PushV128, ...) that
+            // read _opStack.Count directly — a rewritten-text scan wouldn't catch
+            // `target.Invoke(ctx)` which still indirects through ctx.OpStack inside.
+            // Unconditional sync keeps the field and _stackCount in agreement at
+            // every block-body boundary. Cost: 2 mem ops per block case, amortised
+            // across the 15+ expression-body hot cases that pay nothing.
+            bool blockNeedsSync = inlineStack;
             if (blockNeedsSync)
                 sb.Append(inner).AppendLine("_opStack.Count = _stackCount;");
 
