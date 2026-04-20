@@ -158,7 +158,8 @@ namespace Wacs.Core.Compilation
                 }
             }
 
-            return new CompiledFunction(newCode, fn.LocalsCount, fn.Signature, newHandlers);
+            return new CompiledFunction(newCode, fn.LocalsCount, fn.Signature, newHandlers,
+                                        fn.DefaultLocalsTemplate);
         }
 
         // ------------------------------------------------------------------------

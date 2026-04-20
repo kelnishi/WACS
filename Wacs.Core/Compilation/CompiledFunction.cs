@@ -6,6 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Compilation
@@ -27,6 +28,20 @@ namespace Wacs.Core.Compilation
         /// <summary>Total number of locals the frame must provision (params + declared locals).</summary>
         public readonly int LocalsCount;
 
+        /// <summary>Parameter count — cached from <see cref="Signature"/> so the Call hot
+        /// path doesn't dereference <c>Signature.ParameterTypes.Arity</c> per invocation.</summary>
+        public readonly int ParamCount;
+
+        /// <summary>
+        /// Pre-initialized locals buffer. Slots <c>[0..ParamCount)</c> are zero (overwritten
+        /// with popped args at call time); slots <c>[ParamCount..LocalsCount)</c> hold the
+        /// per-type default <c>Value</c> for each declared local. Call-site initialization
+        /// becomes a single <c>Array.Copy(DefaultLocalsTemplate, 0, rented, 0, LocalsCount)</c>
+        /// plus the arg-pop loop — no per-slot <c>new Value(ValType)</c> construction.
+        /// Null when <c>LocalsCount == 0</c>.
+        /// </summary>
+        public readonly Value[]? DefaultLocalsTemplate;
+
         /// <summary>Function signature — used by the invocation glue to marshal args/results.</summary>
         public readonly FunctionType Signature;
 
@@ -38,12 +53,15 @@ namespace Wacs.Core.Compilation
         public readonly HandlerEntry[] HandlerTable;
 
         public CompiledFunction(byte[] bytecode, int localsCount, FunctionType signature,
-                                HandlerEntry[] handlerTable)
+                                HandlerEntry[] handlerTable,
+                                Value[]? defaultLocalsTemplate = null)
         {
             Bytecode = bytecode;
             LocalsCount = localsCount;
+            ParamCount = signature?.ParameterTypes.Arity ?? 0;
             Signature = signature;
             HandlerTable = handlerTable;
+            DefaultLocalsTemplate = defaultLocalsTemplate;
         }
     }
 }

@@ -43,7 +43,8 @@ namespace Wacs.Core.Compilation
             InstructionBase[] linked,
             FunctionType signature,
             int localsCount,
-            bool useSuperInstructions = false)
+            bool useSuperInstructions = false,
+            ValType[]? declaredLocalTypes = null)
         {
             // --- Pass 1: sizing + block maps -------------------------------------------------
             var streamOffset = new int[linked.Length + 1];
@@ -111,10 +112,22 @@ namespace Wacs.Core.Compilation
                     {
                         var c = tt.Catches[k];
                         var target = tt.CatchTargets[k]!;
-                        int targetIdx = ((OpCode)target.Op) == OpCode.Loop
-                            ? blockLocalIdx[target]
-                            : blockEndLocalIdx[target];
-                        uint handlerPc = (uint)streamOffset[targetIdx];
+                        // If the catch resolves to the synthetic function-body wrapper,
+                        // use the return-sentinel pc (int.MaxValue) — same convention the
+                        // branch-resolution path uses so the dispatcher's pc-past-end
+                        // check exits Run naturally.
+                        uint handlerPc;
+                        if (target is InstExpressionProxy)
+                        {
+                            handlerPc = uint.MaxValue;
+                        }
+                        else
+                        {
+                            int targetIdx = ((OpCode)target.Op) == OpCode.Loop
+                                ? blockLocalIdx[target]
+                                : blockEndLocalIdx[target];
+                            handlerPc = (uint)streamOffset[targetIdx];
+                        }
                         uint arity = (uint)target.Label.Arity;
                         uint resultsHeight = (uint)(target.Label.StackHeight + arity);
                         byte kind = (byte)c.Mode;
@@ -127,8 +140,21 @@ namespace Wacs.Core.Compilation
                 }
             }
 
+            // Locals template — pre-initialized Value[] copied wholesale on each call.
+            // Param slots left at default (overwritten by pop-args); declared slots hold
+            // the per-type default Value. Skip allocation when the function has no locals.
+            Wacs.Core.Runtime.Value[]? template = null;
+            if (localsCount > 0 && declaredLocalTypes != null)
+            {
+                template = new Wacs.Core.Runtime.Value[localsCount];
+                int paramCount = signature.ParameterTypes.Arity;
+                for (int i = 0; i < declaredLocalTypes.Length; i++)
+                    template[paramCount + i] = new Wacs.Core.Runtime.Value(declaredLocalTypes[i]);
+            }
+
             var fn = new CompiledFunction(buf, localsCount, signature,
-                                          handlers?.ToArray() ?? System.Array.Empty<HandlerEntry>());
+                                          handlers?.ToArray() ?? System.Array.Empty<HandlerEntry>(),
+                                          template);
 
             // Optional fusion pass. Opt-in via runtime flag — disabled builds of the
             // runtime see an unchanged stream and the fuser file is just dead code.
