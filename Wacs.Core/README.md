@@ -47,6 +47,26 @@ if (runtime.TryGetExportedFunction(("hello", "main"), out var mainAddr))
 }
 ```
 
+## Switch Runtime (opt-in)
+
+An alternative interpreter backed by a source-generated monolithic switch over
+an annotated bytecode stream — typically 1.5–2× the polymorphic runtime on
+compute-heavy workloads, AOT-safe, same correctness (118/118 wast files pass).
+
+Set both flags **before** `InstantiateModule` — the switch runtime eagerly
+compiles every module-owned function at link time when enabled:
+
+```csharp
+var runtime = new WasmRuntime();
+runtime.UseSwitchRuntime = true;
+runtime.ExecContext.Attributes.UseSwitchSuperInstructions = true;  // optional stream-fuser
+
+var modInst = runtime.InstantiateModule(module);
+```
+
+See [`Compilation/SWITCH_RUNTIME.md`](Compilation/SWITCH_RUNTIME.md) for the
+full architecture. The polymorphic runtime stays the default path.
+
 ## License
 
 WACS is distributed under the [Apache 2.0 License](https://github.com/kelnishi/WACS/blob/main/LICENSE), allowing usage in both open-source and commercial projects.

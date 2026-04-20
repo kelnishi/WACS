@@ -225,7 +225,16 @@ namespace Wacs.Console
 
             if (opts.Transpile)
                 runtime.SuperInstruction = true;
-            
+
+            // Switch runtime opt-in. Flag must be set BEFORE InstantiateModule —
+            // phase N eagerly compiles every module-owned function at link time
+            // when this is true; flipping post-instantiate is unsupported.
+            if (opts.UseSwitch)
+            {
+                runtime.UseSwitchRuntime = true;
+                runtime.ExecContext.Attributes.UseSwitchSuperInstructions = opts.SwitchSuperInstructions;
+            }
+
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing, or you're like super confident.
             var modInst = runtime.InstantiateModule(module, new RuntimeOptions { SkipModuleValidation = true, TimeInstantiation = opts.LogProg});
             runtime.RegisterModule(moduleName, modInst);
