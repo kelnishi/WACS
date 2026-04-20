@@ -225,17 +225,22 @@ namespace Wacs.Console
             if (opts.LogProg)
                 System.Console.Error.WriteLine($"Instantiating Module {moduleName}");
 
-            // Interpreter super-instructions (polymorphic path only).
-            if (opts.SuperInstructions)
-                runtime.SuperInstruction = true;
-
-            // Switch runtime opt-in. Flag must be set BEFORE InstantiateModule —
-            // phase N eagerly compiles every module-owned function at link time
-            // when this is true; flipping post-instantiate is unsupported.
+            // --super routes to whichever fuser belongs to the active
+            // runtime: the polymorphic block-level rewriter rewrites the
+            // instruction tree into Wacs.Core.Instructions.SuperInstruction
+            // types that the switch-runtime's BytecodeCompiler can't
+            // consume, so the two are mutually exclusive. --switch takes
+            // precedence: when present, --super enables the switch
+            // runtime's bytecode-stream fuser; otherwise it enables the
+            // polymorphic tree rewriter.
             if (opts.UseSwitch)
             {
                 runtime.UseSwitchRuntime = true;
-                runtime.ExecContext.Attributes.UseSwitchSuperInstructions = opts.SwitchSuperInstructions;
+                runtime.ExecContext.Attributes.UseSwitchSuperInstructions = opts.SuperInstructions;
+            }
+            else if (opts.SuperInstructions)
+            {
+                runtime.SuperInstruction = true;
             }
 
             //Validation normally happens after instantiation, but you can skip it if you did it after parsing, or you're like super confident.
