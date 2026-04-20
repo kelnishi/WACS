@@ -72,8 +72,11 @@ namespace Wacs.Console
         [Option('i', "invoke", HelpText = "Call a specific function.")]
         public string InvokeFunction { get; set; } = "";
 
-        [Option('t', "transpiler", HelpText = "Invoke the transpiler on instantiated module")]
+        [Option('t', "transpiler", HelpText = "Ahead-of-time transpile the module to .NET IL and run through the transpiled code (CLR JIT-native speed). Imports wired through the interpreter for mixed-mode execution. Alias of --aot.", Default = false)]
         public bool Transpile { get; set; }
+
+        [Option("super", HelpText = "Enable interpreter super-instruction rewriting (block-level expression fusion). Applies to the polymorphic dispatcher only.", Default = false)]
+        public bool SuperInstructions { get; set; }
 
         [Option("switch", HelpText = "Use the source-generated monolithic switch runtime (faster, AOT-safe).", Default = false)]
         public bool UseSwitch { get; set; }
@@ -81,7 +84,7 @@ namespace Wacs.Console
         [Option("switch_super", HelpText = "When --switch is set, enable the bytecode-stream super-instruction fuser.", Default = false)]
         public bool SwitchSuperInstructions { get; set; }
 
-        [Option("aot", HelpText = "Ahead-of-time transpile the module to .NET IL and run through the transpiled code (CLR JIT-native speed). Imports wired through the interpreter for mixed-mode execution.", Default = false)]
+        [Option("aot", HelpText = "Alias of --transpiler: AOT transpile the module and run through the transpiled code.", Default = false)]
         public bool Aot { get; set; }
 
         [Option("aot_save", HelpText = "Also save the transpiled assembly to this path (.dll). Only effective when --aot is set.")]
