@@ -293,6 +293,10 @@ namespace Wacs.Compilation
             sb.AppendLine("            var _opStack = ctx.OpStack;");
             sb.AppendLine("            ref Wacs.Core.Runtime.Value _registersRef = ref _opStack.FirstRegister();");
             sb.AppendLine("            int _stackCount = _opStack.Count;");
+            // Hoist the call-stack depth limit once — the Call/CallIndirect/CallRef cases
+            // reference it per call, and re-dereferencing ctx.Attributes.MaxCallStack on
+            // every call would be an unnecessary two-field-load + ldfld per invocation.
+            sb.AppendLine("            int _maxCallStack = ctx.Attributes.MaxCallStack;");
             sb.AppendLine();
             // Mutable per-frame state. All of these are updated on Call (to point at
             // callee) and on Return/pc-end (to point back at caller).
@@ -577,23 +581,26 @@ namespace Wacs.Compilation
 
             // Depth check: mirrors ExecContext.PushFrame. Bounds _switchCallStack growth
             // to Attributes.MaxCallStack (2048 by default) — the polymorphic limit, not
-            // the old 48-level native-stack limit.
+            // the old 48-level native-stack limit. Uses the `_maxCallStack` local hoisted
+            // once at Run entry to avoid re-dereferencing ctx.Attributes per call.
             string depthCheck =
-                "if (ctx._switchCallStack.Count >= ctx.Attributes.MaxCallStack) " +
+                "if (ctx._switchCallStack.Count >= _maxCallStack) " +
                 "throw new Wacs.Core.Runtime.Exceptions.WasmRuntimeException(" +
                 "$\"Runtime call stack exhausted {ctx._switchCallStack.Count}\");";
 
-            // Rent + init callee's locals buffer. Pops args off OpStack in reverse param
-            // order (top-of-stack is last param).
+            // Rent + init callee's locals buffer. Uses CompiledFunction.ParamCount /
+            // LocalsCount (cached at compile time) and DefaultLocalsTemplate (pre-built
+            // Value[] holding per-slot defaults for declared locals). Param slots come
+            // from pop-args; declared-local slots come from the template copy.
             string rentAndPopArgs =
-                "int __paramCount = wasmFunc.Type.ParameterTypes.Arity; " +
-                "int __declaredCount = wasmFunc.Locals.Length; " +
-                "int __totalCount = __paramCount + __declaredCount; " +
+                "int __paramCount = __compiled.ParamCount; " +
+                "int __totalCount = __compiled.LocalsCount; " +
                 "var __rented = System.Buffers.ArrayPool<Wacs.Core.Runtime.Value>.Shared.Rent(__totalCount); " +
                 "var __newLocals = new System.Memory<Wacs.Core.Runtime.Value>(__rented, 0, __totalCount); " +
                 "var __newSpan = __newLocals.Span; " +
-                "for (int __i = __paramCount - 1; __i >= 0; __i--) __newSpan[__i] = _opStack.PopAnyFast(); " +
-                "for (int __i = 0; __i < __declaredCount; __i++) __newSpan[__paramCount + __i] = new Wacs.Core.Runtime.Value(wasmFunc.Locals[__i]);";
+                "if (__compiled.DefaultLocalsTemplate != null) " +
+                "System.Array.Copy(__compiled.DefaultLocalsTemplate, 0, __rented, 0, __totalCount); " +
+                "for (int __i = __paramCount - 1; __i >= 0; __i--) __newSpan[__i] = _opStack.PopAnyFast();";
 
             // Rent callee's Frame, wire module/locals.
             string rentFrame =
@@ -617,13 +624,11 @@ namespace Wacs.Compilation
                 "ctx._switchCallStack.Push(new Wacs.Core.Compilation.SwitchCallFrame(" +
                 "code, handlers, ctx.Frame, _pc, __rented));";
 
-            // Compile-on-demand cache lookup.
+            // Strict eager compilation: WasmRuntime.Instantiate walks the call graph and
+            // pre-compiles every reachable FunctionInstance, so this field is guaranteed
+            // non-null on the switch-runtime path. The field read is a single ldfld.
             string compileIfNeeded =
-                "var __compiled = wasmFunc.SwitchCompiled; " +
-                "if (__compiled == null) { __compiled = Wacs.Core.Compilation.BytecodeCompiler.Compile(" +
-                "wasmFunc.Body.Instructions.Flatten().ToArray(), wasmFunc.Type, " +
-                "wasmFunc.Type.ParameterTypes.Arity + wasmFunc.Locals.Length, " +
-                "ctx.Attributes.UseSwitchSuperInstructions); wasmFunc.SwitchCompiled = __compiled; }";
+                "var __compiled = wasmFunc.SwitchCompiled;";
 
             // --- 0x10 Call ---------------------------------------------------------
             sb.Append(indent).AppendLine("case 0x10: // OpCode.Call — iterative");

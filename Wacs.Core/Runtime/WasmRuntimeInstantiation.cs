@@ -460,19 +460,35 @@ namespace Wacs.Core.Runtime
         }
 
         /// <summary>
-        /// Serialize all function instructions into the context
+        /// Serialize all function instructions into the context. When the switch runtime
+        /// is enabled, also eagerly compile every module-owned FunctionInstance — the
+        /// dispatcher's Call-family cases then dereference <c>wasmFunc.SwitchCompiled</c>
+        /// with no null check. Skipped when <see cref="UseSwitchRuntime"/> is off (the
+        /// compile cost would be pure overhead, and poly-side super-instruction rewrites
+        /// may leave <c>WacsCode</c> ops the bytecode compiler doesn't accept).
         /// </summary>
         /// <param name="moduleInstance"></param>
         private void LinkModule(ModuleInstance moduleInstance)
         {
+            bool eagerCompile = UseSwitchRuntime;
             foreach (var funcAddr in moduleInstance.FuncAddrs)
             {
                 var instance = Store[funcAddr];
                 if (instance is FunctionInstance functionInstance)
                 {
-                    if (functionInstance.Module != moduleInstance) 
+                    if (functionInstance.Module != moduleInstance)
                         continue;
                     Context.LinkFunction(functionInstance);
+
+                    if (eagerCompile && functionInstance.SwitchCompiled == null)
+                    {
+                        functionInstance.SwitchCompiled = Wacs.Core.Compilation.BytecodeCompiler.Compile(
+                            functionInstance.Body.Instructions.Flatten().ToArray(),
+                            functionInstance.Type,
+                            localsCount: functionInstance.Type.ParameterTypes.Arity + functionInstance.Locals.Length,
+                            useSuperInstructions: Context.Attributes.UseSwitchSuperInstructions,
+                            declaredLocalTypes: functionInstance.Locals);
+                    }
                 }
             }
         }
