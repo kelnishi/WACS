@@ -419,7 +419,7 @@ dotnet run --project Wacs.Console -c Release -- -i fib Wacs.Bench/fib.wasm 10
 |---|---|
 | *(none)* | Polymorphic virtual-dispatch interpreter. Baseline, canonical. |
 | `--super` | Polymorphic + block-level super-instruction rewriter. |
-| `--switch` | Source-generated monolithic-switch interpreter. AOT-safe. |
+| `--switch` | Source-generated monolithic-switch interpreter. Build-time code generation (Roslyn) + `System.Runtime.CompilerServices.Unsafe` intrinsics — see note below. |
 | `--switch_super` | (Requires `--switch`.) Additionally run the bytecode-stream fuser. |
 | `-t`, `--transpiler`, `--aot` | AOT transpile the **WASM module** to .NET IL and run the generated code. Requires `Reflection.Emit` at runtime — see note below. |
 | `--aot_simd {scalar,intrinsics,interpreter}` | SIMD strategy for the AOT path. |
@@ -458,6 +458,35 @@ interpreter's host-function machinery.
 > [`wasm-transpile`](Wacs.Transpiler/README.md) and ship the resulting
 > assembly — the saved `.dll` runs without `Reflection.Emit` via
 > `WACS.Transpiler.Lib`'s `TranspiledModuleLoader`.
+
+> **`--switch` notes for restrictive targets.** The switch runtime
+> is AOT-compatible — it uses **no runtime codegen** — but two
+> implementation choices are worth flagging in case your environment
+> forbids them:
+>
+> 1. **Build-time source generation (Roslyn).** The dispatcher method
+>    is emitted by a Roslyn incremental source generator
+>    (`Wacs.Compilation`) during the build of `Wacs.Core`. The shipped
+>    `.dll` contains ordinary IL — there's no runtime Roslyn, no
+>    dynamic code. If your build system runs Roslyn-based compilation
+>    (the standard SDK path does), you're fine. If you consume WACS
+>    as a pre-built NuGet package, the generation already happened
+>    upstream and the binary is self-contained.
+> 2. **`System.Runtime.CompilerServices.Unsafe` intrinsics.** The hot
+>    loop uses `Unsafe.Add` / `Unsafe.ReadUnaligned` for inline array
+>    indexing and LEB-free immediate reads — not `unsafe` pointer
+>    blocks, not `fixed` statements. `System.Runtime.CompilerServices.
+>    Unsafe` is part of the BCL on every .NET 8+ target (including
+>    IL2CPP, PublishAot, iOS, trimmed assemblies). If your policy
+>    reviews flag the keyword name, note that these are JIT/AOT
+>    intrinsics, same family as `MemoryMarshal` — no raw pointer math,
+>    no unverifiable IL.
+>
+> Both the polymorphic (default) and the polymorphic-super (`--super`)
+> modes are pure managed code with no source-gen and no Unsafe usage —
+> pick those if you need the most conservative surface. Expect ~25–40%
+> lower throughput vs `--switch --switch_super` on compute-bound
+> workloads.
 
 ## Roadmap
 
