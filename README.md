@@ -8,7 +8,7 @@
 [![Downloads](https://img.shields.io/nuget/dt/WACS?label=WACS%20downloads)](https://www.nuget.org/packages/WACS)
 
 ## Overview
-Latest changes: [0.8.0](https://github.com/kelnishi/WACS/tree/main/CHANGELOG.md)
+Latest changes: [0.8.1](https://github.com/kelnishi/WACS/tree/main/CHANGELOG.md)
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including Godot and AOT environments like Unity's IL2CPP.
 
