@@ -8,12 +8,18 @@
 
 using System.Collections.Generic;
 using System.IO;
+using Wacs.Core;
+using Wacs.Core.Instructions;
+using Wacs.Core.Instructions.Numeric;
+using Wacs.Core.Instructions.Reference;
+using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 using Wacs.Transpiler.AOT;
 using Xunit;
+using WasmExpression = Wacs.Core.Types.Expression;
 
 namespace Wacs.Transpiler.Test
 {
@@ -464,8 +470,277 @@ namespace Wacs.Transpiler.Test
         }
 
         // =================================================================
+        // Expression round-trips (phase 2)
+        // =================================================================
+
+        [Fact]
+        public void Expression_I32Const_RoundTrip()
+        {
+            var expr = MakeExpression(
+                InstI32Const.Inst.Immediate(42),
+                new InstEnd());
+            var back = RoundTripExpression(expr);
+            Assert.Equal(2, back.Instructions.Count);
+            Assert.Equal(42, ((InstI32Const)back.Instructions[0]!).Value);
+            Assert.IsType<InstEnd>(back.Instructions[1]!);
+        }
+
+        [Fact]
+        public void Expression_I64Const_RoundTrip()
+        {
+            var i64 = new InstI64Const();
+            // InstI64Const.Value is internal — round-trip via its Parse API
+            // by synthesizing a tiny LEB buffer. Safer than reflecting.
+            using (var ms = new MemoryStream())
+            {
+                WriteLeb64(ms, 0x1234_5678_9ABC_DEF0L);
+                ms.Position = 0;
+                using var br = new BinaryReader(ms);
+                i64.Parse(br);
+            }
+
+            var expr = MakeExpression(i64, new InstEnd());
+            var back = RoundTripExpression(expr);
+            Assert.Equal(0x1234_5678_9ABC_DEF0L, ((InstI64Const)back.Instructions[0]!).FetchImmediate(null!));
+        }
+
+        [Fact]
+        public void Expression_F32Const_RoundTrip()
+        {
+            var f32 = new InstF32Const();
+            using (var ms = new MemoryStream())
+            using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                w.Write(3.14159f);
+                ms.Position = 0;
+                using var br = new BinaryReader(ms);
+                f32.Parse(br);
+            }
+
+            var expr = MakeExpression(f32, new InstEnd());
+            var back = RoundTripExpression(expr);
+            Assert.Equal(3.14159f, ((InstF32Const)back.Instructions[0]!).FetchImmediate(null!));
+        }
+
+        [Fact]
+        public void Expression_F64Const_RoundTrip()
+        {
+            var f64 = new InstF64Const();
+            using (var ms = new MemoryStream())
+            using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                w.Write(2.718281828459045);
+                ms.Position = 0;
+                using var br = new BinaryReader(ms);
+                f64.Parse(br);
+            }
+
+            var expr = MakeExpression(f64, new InstEnd());
+            var back = RoundTripExpression(expr);
+            Assert.Equal(2.718281828459045, ((InstF64Const)back.Instructions[0]!).FetchImmediate(null!));
+        }
+
+        [Fact]
+        public void Expression_GlobalGet_RoundTrip()
+        {
+            // InstGlobalGet.Index setter is internal; round-trip via Parse.
+            var gg = new InstGlobalGet();
+            using (var ms = new MemoryStream())
+            {
+                WriteLeb32Unsigned(ms, 7);
+                ms.Position = 0;
+                using var br = new BinaryReader(ms);
+                gg.Parse(br);
+            }
+
+            var expr = MakeExpression(gg, new InstEnd());
+            var back = RoundTripExpression(expr);
+            Assert.Equal(7, ((InstGlobalGet)back.Instructions[0]!).GetIndex());
+        }
+
+        [Fact]
+        public void Expression_RefNull_RoundTrip()
+        {
+            var rn = (InstRefNull)new InstRefNull().Immediate(ValType.FuncRef | ValType.NullableRef);
+            var expr = MakeExpression(rn, new InstEnd());
+            var back = RoundTripExpression(expr);
+            Assert.Equal(ValType.FuncRef | ValType.NullableRef, ((InstRefNull)back.Instructions[0]!).RefType);
+        }
+
+        [Fact]
+        public void Expression_RefFunc_RoundTrip()
+        {
+            var rf = new InstRefFunc();
+            using (var ms = new MemoryStream())
+            {
+                WriteLeb32Unsigned(ms, 42);
+                ms.Position = 0;
+                using var br = new BinaryReader(ms);
+                rf.Parse(br);
+            }
+
+            var expr = MakeExpression(rf, new InstEnd());
+            var back = RoundTripExpression(expr);
+            Assert.Equal(42u, ((InstRefFunc)back.Instructions[0]!).FunctionIndex.Value);
+        }
+
+        [Fact]
+        public void Expression_ConstArithmetic_RoundTrip()
+        {
+            // i32.const 10; i32.const 32; i32.add; end
+            // i32.add in constant exprs is WASM 3.0.
+            var expr = MakeExpression(
+                InstI32Const.Inst.Immediate(10),
+                InstI32Const.Inst.Immediate(32),
+                InstI32BinOp.I32Add,
+                new InstEnd());
+            var back = RoundTripExpression(expr);
+            Assert.Equal(4, back.Instructions.Count);
+            Assert.Same(InstI32BinOp.I32Add, back.Instructions[2]);
+        }
+
+        [Fact]
+        public void Expression_AllBinOps_RoundTrip()
+        {
+            var ops = new InstructionBase[]
+            {
+                InstI32BinOp.I32Add, InstI32BinOp.I32Sub, InstI32BinOp.I32Mul,
+                InstI64BinOp.I64Add, InstI64BinOp.I64Sub, InstI64BinOp.I64Mul,
+                new InstEnd(),
+            };
+            var expr = MakeExpression(ops);
+            var back = RoundTripExpression(expr);
+            // Static instances: reference equality should hold after round-trip.
+            for (int i = 0; i < 6; i++)
+                Assert.Same(ops[i], back.Instructions[i]);
+            Assert.IsType<InstEnd>(back.Instructions[6]!);
+        }
+
+        [Fact]
+        public void Expression_EndOnly_RoundTrip()
+        {
+            var expr = MakeExpression(new InstEnd());
+            var back = RoundTripExpression(expr);
+            Assert.Equal(1, back.Instructions.Count);
+            Assert.IsType<InstEnd>(back.Instructions[0]!);
+        }
+
+        [Fact]
+        public void DeferredGlobalInits_ExpressionSection_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                DeferredGlobalInits = new List<(int, WasmExpression)>
+                {
+                    (3, MakeExpression(InstI32Const.Inst.Immediate(100), new InstEnd())),
+                    (7, MakeExpression(
+                        InstI32Const.Inst.Immediate(5),
+                        InstI32Const.Inst.Immediate(2),
+                        InstI32BinOp.I32Mul,
+                        new InstEnd())),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(2, back.DeferredGlobalInits.Count);
+            Assert.Equal(3, back.DeferredGlobalInits[0].globalIdx);
+            Assert.Equal(100, ((InstI32Const)back.DeferredGlobalInits[0].initializer.Instructions[0]!).Value);
+            Assert.Equal(7, back.DeferredGlobalInits[1].globalIdx);
+            Assert.Same(InstI32BinOp.I32Mul, back.DeferredGlobalInits[1].initializer.Instructions[2]);
+        }
+
+        [Fact]
+        public void DeferredDataOffsets_ExpressionSection_RoundTrip()
+        {
+            var data = new ModuleInitData
+            {
+                DeferredDataOffsets = new List<(int, WasmExpression)>
+                {
+                    (0, MakeExpression(
+                        MakeGlobalGet(5),
+                        InstI32Const.Inst.Immediate(16),
+                        InstI32BinOp.I32Add,
+                        new InstEnd())),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Single(back.DeferredDataOffsets);
+            Assert.Equal(0, back.DeferredDataOffsets[0].dataSegIdx);
+            Assert.Equal(4, back.DeferredDataOffsets[0].offsetExpr.Instructions.Count);
+            Assert.Equal(5, ((InstGlobalGet)back.DeferredDataOffsets[0].offsetExpr.Instructions[0]!).GetIndex());
+        }
+
+        [Fact]
+        public void Tables_WithInitExpr_RoundTrip()
+        {
+            var initExpr = MakeExpression(MakeRefNull(ValType.FuncRef | ValType.NullableRef), new InstEnd());
+            var data = new ModuleInitData
+            {
+                Tables = new (long, long, ValType, WasmExpression?)[]
+                {
+                    (10, 100, ValType.FuncRef | ValType.NullableRef, initExpr),
+                    (5, uint.MaxValue, ValType.ExternRef | ValType.NullableRef, null),
+                },
+            };
+            var back = InitDataCodec.Decode(InitDataCodec.Encode(data));
+            Assert.Equal(2, back.Tables.Length);
+            Assert.Equal(10L, back.Tables[0].min);
+            Assert.NotNull(back.Tables[0].initExpr);
+            Assert.Equal(2, back.Tables[0].initExpr!.Instructions.Count);
+            Assert.Null(back.Tables[1].initExpr);
+        }
+
+        // =================================================================
         // Helpers
         // =================================================================
+
+        private static WasmExpression MakeExpression(params InstructionBase[] insts)
+        {
+            return new WasmExpression(arity: 1, new InstructionSequence(insts), isStatic: true);
+        }
+
+        private static WasmExpression RoundTripExpression(WasmExpression expr)
+        {
+            using var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+                InitDataCodec.WriteExpression(w, expr);
+            ms.Position = 0;
+            using var r = new BinaryReader(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+            return InitDataCodec.ReadExpression(r);
+        }
+
+        private static InstGlobalGet MakeGlobalGet(uint idx)
+        {
+            var inst = new InstGlobalGet();
+            using var ms = new MemoryStream();
+            WriteLeb32Unsigned(ms, idx);
+            ms.Position = 0;
+            using var br = new BinaryReader(ms);
+            inst.Parse(br);
+            return inst;
+        }
+
+        private static InstRefNull MakeRefNull(ValType t)
+            => (InstRefNull)new InstRefNull().Immediate(t);
+
+        private static void WriteLeb32Unsigned(Stream s, uint v)
+        {
+            while (v >= 0x80) { s.WriteByte((byte)((v & 0x7F) | 0x80)); v >>= 7; }
+            s.WriteByte((byte)v);
+        }
+
+        private static void WriteLeb64(Stream s, long v)
+        {
+            bool more = true;
+            while (more)
+            {
+                byte b = (byte)(v & 0x7F);
+                v >>= 7;
+                bool sign = (b & 0x40) != 0;
+                more = !((v == 0 && !sign) || (v == -1 && sign));
+                if (more) b |= 0x80;
+                s.WriteByte(b);
+            }
+        }
 
         private static void AssertEquivalentScalarFields(ModuleInitData expected, ModuleInitData actual)
         {
