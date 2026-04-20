@@ -339,28 +339,9 @@ runtime.ExecContext.Attributes.UseSwitchSuperInstructions = true;  // (optional)
 var modInst = runtime.InstantiateModule(module);                   // must happen AFTER UseSwitchRuntime is set
 ```
 
-**From the CLI (`Wacs.Console`):**
-
-```bash
-dotnet run --project Wacs.Console -- --switch --switch_super -i fib Wacs.Bench/fib.wasm 10
-```
-
-* `--switch` — route dispatch through the switch runtime.
-* `--switch_super` — also enable the bytecode-stream fuser. No effect without `--switch`.
-
-Both flags must be passed before the module path, as they configure the
-runtime at Instantiate time.
-
-**Rough performance** (fib-iter 5M / fac 20×250k / sum 5M, M1 Pro, .NET 8, median of 3):
-
-| mode | fib-iter | fac-20×250k | sum |
-|---|---|---|---|
-| polymorphic | 1067 ms | 478 ms | 888 ms |
-| polymorphic + super | 639 ms | 238 ms | 623 ms |
-| switch | 737 ms | 228 ms | 605 ms |
-| switch + super | 535 ms | 178 ms | 461 ms |
-
-Switch + super is ~2× polymorphic on these microbench workloads.
+See the [Running Wacs.Console](#running-wacsconsole) section below for all
+CLI combinations across the polymorphic, super-instruction, switch, and
+AOT paths, plus benchmark numbers.
 
 Architectural details live in
 [`Wacs.Core/Compilation/SWITCH_RUNTIME.md`](Wacs.Core/Compilation/SWITCH_RUNTIME.md).
@@ -398,6 +379,114 @@ Optimization is an ongoing process and I have a few other strategies yet to impl
 ### Expected Runtime Performance
 When built in AOT or Release mode, my benchmarks show WACS runs between 2~10% native throughput for benchmark programs
 like coremark. This is roughly on par with interpreted-only Python or about ~25% of an equivalent program written in C# on dotnet.
+
+### Running `Wacs.Console`
+
+`Wacs.Console` is the reference host — it wires WASI, parses argv, and
+drives execution through any of the available back-ends. All examples
+assume the repo is checked out and you're running `dotnet` from the
+repo root.
+
+```bash
+# Default (polymorphic interpreter)
+dotnet run --project Wacs.Console -c Release -- Wacs.Console/Data/coremark.wasm
+
+# Polymorphic + super-instruction rewriter
+dotnet run --project Wacs.Console -c Release -- --super Wacs.Console/Data/coremark.wasm
+
+# Source-generated switch runtime
+dotnet run --project Wacs.Console -c Release -- --switch Wacs.Console/Data/coremark.wasm
+
+# Switch runtime + bytecode-stream super-instruction fuser
+dotnet run --project Wacs.Console -c Release -- --switch --switch_super Wacs.Console/Data/coremark.wasm
+
+# AOT transpile to .NET IL and run through the JITted code (-t alias: --aot)
+dotnet run --project Wacs.Console -c Release -- -t Wacs.Console/Data/coremark.wasm
+
+# AOT with hardware SIMD intrinsics + persist the .dll
+dotnet run --project Wacs.Console -c Release -- -t --aot_simd intrinsics --aot_save out.dll Wacs.Console/Data/coremark.wasm
+```
+
+Invoking a specific export with arguments (applies across every mode):
+
+```bash
+dotnet run --project Wacs.Console -c Release -- -i fib Wacs.Bench/fib.wasm 10
+```
+
+**Flag cheatsheet:**
+
+| Flag | Effect |
+|---|---|
+| *(none)* | Polymorphic virtual-dispatch interpreter. Baseline, canonical. |
+| `--super` | Polymorphic + block-level super-instruction rewriter. |
+| `--switch` | Source-generated monolithic-switch interpreter. Build-time code generation (Roslyn) + `System.Runtime.CompilerServices.Unsafe` intrinsics — see note below. |
+| `--switch_super` | (Requires `--switch`.) Additionally run the bytecode-stream fuser. |
+| `-t`, `--transpiler`, `--aot` | AOT transpile the **WASM module** to .NET IL and run the generated code. Requires `Reflection.Emit` at runtime — see note below. |
+| `--aot_simd {scalar,intrinsics,interpreter}` | SIMD strategy for the AOT path. |
+| `--aot_save <path>` | Persist the transpiled assembly to disk. |
+| `--aot_no_tail_calls` | Drop the CIL `tail.` prefix (debugging only). |
+| `--aot_max_fn_size N` | Skip functions larger than N instructions in the transpile pass. |
+| `--aot_data_storage {compressed,raw,static}` | How data segments are embedded in the saved assembly. |
+
+**Sampled CoreMark performance** (M3 Max, .NET 8, `Wacs.Console/Data/coremark.wasm`, default 6000 iterations; single run each):
+
+| Mode | CoreMark (iter/s) | Relative |
+|---|---:|---:|
+| polymorphic | 276 | 1.00× |
+| `--super` | 328 | 1.19× |
+| `--switch` | 349 | 1.27× |
+| `--switch --switch_super` | 382 | 1.38× |
+| `-t` (AOT) | **17 651** | **64×** |
+
+The AOT path emits ordinary .NET methods that the CLR JIT optimizes as
+native code, so the ~64× jump over the fastest interpreter mode is the
+gap between "dispatch + pop/push per op" and "inline register arithmetic."
+Expect similar ratios on any compute-bound workload; IO-bound / WASI-heavy
+workloads see a smaller lift because WASI calls still bridge back to the
+interpreter's host-function machinery.
+
+> **"AOT" here means *ahead-of-time compilation of the WASM module*, not
+> that the WACS runtime itself is AOT-safe.** `-t` / `--aot` uses
+> `System.Reflection.Emit` at runtime to synthesize a dynamic .NET
+> assembly containing the transpiled module. That's incompatible with
+> environments that disable dynamic code: **Unity IL2CPP, .NET Native
+> AOT (`PublishAot=true`), iOS, Mono AOT-only builds,** etc. On those
+> platforms use one of the three interpreter modes instead — all of
+> them (including the source-generated `--switch` runtime) are fully
+> AOT-compatible. If you need native-class speed in an IL2CPP target,
+> pre-compile the `.wasm → .dll` on a JIT-capable host with
+> [`wasm-transpile`](Wacs.Transpiler/README.md) and ship the resulting
+> assembly — the saved `.dll` runs without `Reflection.Emit` via
+> `WACS.Transpiler.Lib`'s `TranspiledModuleLoader`.
+
+> **`--switch` notes for restrictive targets.** The switch runtime
+> is AOT-compatible — it uses **no runtime codegen** — but two
+> implementation choices are worth flagging in case your environment
+> forbids them:
+>
+> 1. **Build-time source generation (Roslyn).** The dispatcher method
+>    is emitted by a Roslyn incremental source generator
+>    (`Wacs.Compilation`) during the build of `Wacs.Core`. The shipped
+>    `.dll` contains ordinary IL — there's no runtime Roslyn, no
+>    dynamic code. If your build system runs Roslyn-based compilation
+>    (the standard SDK path does), you're fine. If you consume WACS
+>    as a pre-built NuGet package, the generation already happened
+>    upstream and the binary is self-contained.
+> 2. **`System.Runtime.CompilerServices.Unsafe` intrinsics.** The hot
+>    loop uses `Unsafe.Add` / `Unsafe.ReadUnaligned` for inline array
+>    indexing and LEB-free immediate reads — not `unsafe` pointer
+>    blocks, not `fixed` statements. `System.Runtime.CompilerServices.
+>    Unsafe` is part of the BCL on every .NET 8+ target (including
+>    IL2CPP, PublishAot, iOS, trimmed assemblies). If your policy
+>    reviews flag the keyword name, note that these are JIT/AOT
+>    intrinsics, same family as `MemoryMarshal` — no raw pointer math,
+>    no unverifiable IL.
+>
+> Both the polymorphic (default) and the polymorphic-super (`--super`)
+> modes are pure managed code with no source-gen and no Unsafe usage —
+> pick those if you need the most conservative surface. Expect ~25–40%
+> lower throughput vs `--switch --switch_super` on compute-bound
+> workloads.
 
 ## Roadmap
 
