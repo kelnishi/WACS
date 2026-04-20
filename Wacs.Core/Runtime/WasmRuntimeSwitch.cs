@@ -88,8 +88,13 @@ namespace Wacs.Core.Runtime
 
         private void FlushCallStackForSwitch()
         {
-            while (Context.OpStack.HasValue)
-                Context.OpStack.PopAny();
+            // A push-overflow (hit during the iterative recursion path — each active
+            // frame leaves its leftover stack values on the shared OpStack, so deep
+            // recursion can push Count past _registers.Length before the depth guard
+            // or any other check fires) leaves Count in an out-of-range state. The
+            // naïve PopAny loop would re-throw IOOR on the first read. Zero the stack
+            // unconditionally here — we're on an abort path, the data is already gone.
+            Context.OpStack.Count = 0;
         }
     }
 }
