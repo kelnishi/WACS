@@ -27,7 +27,6 @@ WACS supports the latest standardized webassembly feature extensions including *
 
 - [Features](#features)
 - [WebAssembly Feature Extensions](#webassembly-feature-extensions)
-- [WebAssembly Text Format (WAT / WAST)](#webassembly-text-format-wat--wast)
 - [Getting Started](#getting-started)
 - [Installation](#installation)
 - [Usage](#usage)
@@ -36,6 +35,7 @@ WACS supports the latest standardized webassembly feature extensions including *
 - [Interop Bindings](#interop-bindings)
 - [Customization](#customization)
 - [Performance](#performance)
+- [WebAssembly Text Format (WAT / WAST)](#webassembly-text-format-wat--wast)
 - [Roadmap](#roadmap)
 - [License](#license)
 
@@ -93,125 +93,6 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |[Streaming Compilation](https://webassembly.github.io/spec/web-api/index.html#streaming-modules)|streaming_compilation|<span title="Browser idioms, not directly supported">🌐</span>|
 
 ###### This table was generated with the Feature.Detect test harness.
-
-## WebAssembly Text Format (WAT / WAST)
-
-WACS ships a pure-C# reader and writer for the WebAssembly text format.
-No `wabt` / `wast2json` toolchain is required — `.wat` modules and
-`.wast` spec scripts feed directly into the same `Module` and runtime
-pipeline the binary parser uses.
-
-### What's supported
-
-- **`.wat` modules.** The full text grammar of WebAssembly 3.0,
-  including every enabled proposal (GC structs / arrays / sub / rec
-  groups, typed function references, tail-call, exception handling,
-  SIMD, relaxed SIMD, multi-memory, memory64, threads/atomics,
-  annotations). Abbreviations (inline imports/exports, implicit
-  typeuse, folded instructions, anonymous blocks) are desugared into
-  the same `Module` shape the binary parser produces.
-- **`.wast` scripts.** `module`, `register`, `invoke`, `get`, and every
-  `assert_*` form — including `(module binary …)` and
-  `(module quote …)` — producing a `ScriptCommand[]` aligned with the
-  existing spec-runner command shape.
-- **Writer.** `TextModuleWriter.Write(module)` emits canonical,
-  parser-friendly WAT that round-trips back through the text parser
-  and produces a structurally equivalent `Module`.
-- **AOT-safe.** No runtime `Reflection.Emit`. Reflection over
-  `[OpCode("mnemonic")]` attributes happens once at static-ctor time
-  to build the mnemonic→ByteCode lookup; everything else is plain
-  managed code. `PublishAot=true` builds continue to pass.
-
-### How it works
-
-The text pipeline lives under `Wacs.Core.Text`:
-
-- **`Lexer` / `Token` / `SExpr` / `SExprParser`** — a WAT-specific
-  tokenizer (line / block comments, string escapes, annotations,
-  quoted identifiers with full `\XX` / `\u{…}` UTF-8 decoding) feeding
-  a lightweight s-expression tree. No WASM semantics at this layer.
-- **`Mnemonics`** — a `FrozenDictionary<string, ByteCode>` built once
-  by reflecting over the `[OpCode(...)]` attributes already present
-  on every real opcode enum field (`OpCode`, `GcCode`, `ExtCode`,
-  `SimdCode`, `AtomCode`). Parse and render share the same source of
-  truth, so a mnemonic added in one direction is automatically
-  visible in the other.
-- **`TextModuleParser`** — two-pass section driver. Pass 1 pre-declares
-  names and pre-populates the type section (including rec-group
-  flattening for GC); pass 2 resolves `$name` references, synthesizes
-  inline typeuses with rec-isolated dedup, and produces the same
-  `Module` object the binary parser produces. Each instruction's
-  text-specific immediate decoding lives in a per-class `ParseText`
-  hook co-located with the binary `Parse` override — no parallel
-  hierarchy of text decoders.
-- **`TextScriptParser`** — `.wast` → `ScriptCommand[]`. Nested
-  `(module …)` forms inside assertions are re-parsed through the
-  same module parser; `(module binary …)` dispatches to the binary
-  parser on an in-memory stream.
-- **`TextModuleWriter`** — canonical round-trip emitter. Distinct from
-  the existing `ModuleRenderer.RenderWatToStream` (debug/display
-  variant with stack annotations and `(;id;)` comments), which is kept
-  for inspection use.
-
-### Using it
-
-**CLI (`Wacs.Console`).** Pass a `.wat` path exactly like a `.wasm`
-path:
-
-```bash
-# Run a text-format module through the polymorphic interpreter
-dotnet run --project Wacs.Console -c Release -- path/to/module.wat
-
-# Round-trip a binary module out as parser-friendly WAT
-# (writes module.wat next to module.wasm via TextModuleWriter)
-dotnet run --project Wacs.Console -c Release -- -r path/to/module.wasm
-
-# Re-run the emitted .wat through the interpreter to confirm round-trip
-dotnet run --project Wacs.Console -c Release -- path/to/module.wat
-```
-
-Every back-end (`--super`, `--switch`, `-t` / `--aot`, …) works
-identically on `.wat` input since the parser produces the same
-`Module` object the binary path does.
-
-**Library.** One entry point, drops into any existing WACS flow:
-
-```csharp
-using Wacs.Core;
-using Wacs.Core.Text;
-
-using var fs = new FileStream("module.wat", FileMode.Open);
-Module module = TextModuleParser.ParseWat(fs);
-
-// Or from a string:
-Module m2 = TextModuleParser.ParseWat(File.ReadAllText("module.wat"));
-
-// Emit canonical, round-trip WAT:
-string wat = TextModuleWriter.Write(module);
-```
-
-### Coverage
-
-The `Wacs.Core.Test` xUnit project runs two gates across the full
-WebAssembly 3.0 spec suite (`Spec.Test/spec/test/core/*.wast`):
-
-- **`SpecWastSmokeTests`** — every `.wast` file in the spec suite
-  parses without error. **120 / 120 files. No skipped files.** The
-  `SkipList` is empty.
-- **`SpecWastEquivalenceTests`** — every module embedded in a spec
-  script parses through the text parser *and* through the binary
-  parser (via `(module binary …)` or `wast2json`-produced `.wasm`
-  sidecars), and the two `Module` objects are compared for structural
-  equivalence (types, imports, functions, tables, memories, globals,
-  exports, element segments, data segments, custom sections, plus
-  instruction streams including preserved `try_table` shapes and
-  rec-group layouts). **3457 / 3457 modules match.**
-
-The text parser is held to the same wasm-3.0 bar as the runtime: GC,
-typed function references, exception handling, tail-call, SIMD,
-relaxed SIMD, multi-memory, memory64, threads/atomics, and
-annotations all parse to structurally identical `Module` objects
-regardless of which parser built them.
 
 ## Getting Started
 
@@ -675,6 +556,125 @@ interpreter's host-function machinery.
 > modes are pure managed code with no source-gen and no Unsafe usage —
 > pick those if you need the most conservative surface. Expect ~25–40%
 > lower throughput vs `--switch --super` on compute-bound workloads.
+
+## WebAssembly Text Format (WAT / WAST)
+
+WACS ships a pure-C# reader and writer for the WebAssembly text format.
+No `wabt` / `wast2json` toolchain is required — `.wat` modules and
+`.wast` spec scripts feed directly into the same `Module` and runtime
+pipeline the binary parser uses.
+
+### What's supported
+
+- **`.wat` modules.** The full text grammar of WebAssembly 3.0,
+  including every enabled proposal (GC structs / arrays / sub / rec
+  groups, typed function references, tail-call, exception handling,
+  SIMD, relaxed SIMD, multi-memory, memory64, threads/atomics,
+  annotations). Abbreviations (inline imports/exports, implicit
+  typeuse, folded instructions, anonymous blocks) are desugared into
+  the same `Module` shape the binary parser produces.
+- **`.wast` scripts.** `module`, `register`, `invoke`, `get`, and every
+  `assert_*` form — including `(module binary …)` and
+  `(module quote …)` — producing a `ScriptCommand[]` aligned with the
+  existing spec-runner command shape.
+- **Writer.** `TextModuleWriter.Write(module)` emits canonical,
+  parser-friendly WAT that round-trips back through the text parser
+  and produces a structurally equivalent `Module`.
+- **AOT-safe.** No runtime `Reflection.Emit`. Reflection over
+  `[OpCode("mnemonic")]` attributes happens once at static-ctor time
+  to build the mnemonic→ByteCode lookup; everything else is plain
+  managed code. `PublishAot=true` builds continue to pass.
+
+### How it works
+
+The text pipeline lives under `Wacs.Core.Text`:
+
+- **`Lexer` / `Token` / `SExpr` / `SExprParser`** — a WAT-specific
+  tokenizer (line / block comments, string escapes, annotations,
+  quoted identifiers with full `\XX` / `\u{…}` UTF-8 decoding) feeding
+  a lightweight s-expression tree. No WASM semantics at this layer.
+- **`Mnemonics`** — a `FrozenDictionary<string, ByteCode>` built once
+  by reflecting over the `[OpCode(...)]` attributes already present
+  on every real opcode enum field (`OpCode`, `GcCode`, `ExtCode`,
+  `SimdCode`, `AtomCode`). Parse and render share the same source of
+  truth, so a mnemonic added in one direction is automatically
+  visible in the other.
+- **`TextModuleParser`** — two-pass section driver. Pass 1 pre-declares
+  names and pre-populates the type section (including rec-group
+  flattening for GC); pass 2 resolves `$name` references, synthesizes
+  inline typeuses with rec-isolated dedup, and produces the same
+  `Module` object the binary parser produces. Each instruction's
+  text-specific immediate decoding lives in a per-class `ParseText`
+  hook co-located with the binary `Parse` override — no parallel
+  hierarchy of text decoders.
+- **`TextScriptParser`** — `.wast` → `ScriptCommand[]`. Nested
+  `(module …)` forms inside assertions are re-parsed through the
+  same module parser; `(module binary …)` dispatches to the binary
+  parser on an in-memory stream.
+- **`TextModuleWriter`** — canonical round-trip emitter. Distinct from
+  the existing `ModuleRenderer.RenderWatToStream` (debug/display
+  variant with stack annotations and `(;id;)` comments), which is kept
+  for inspection use.
+
+### Using it
+
+**CLI (`Wacs.Console`).** Pass a `.wat` path exactly like a `.wasm`
+path:
+
+```bash
+# Run a text-format module through the polymorphic interpreter
+dotnet run --project Wacs.Console -c Release -- path/to/module.wat
+
+# Round-trip a binary module out as parser-friendly WAT
+# (writes module.wat next to module.wasm via TextModuleWriter)
+dotnet run --project Wacs.Console -c Release -- -r path/to/module.wasm
+
+# Re-run the emitted .wat through the interpreter to confirm round-trip
+dotnet run --project Wacs.Console -c Release -- path/to/module.wat
+```
+
+Every back-end (`--super`, `--switch`, `-t` / `--aot`, …) works
+identically on `.wat` input since the parser produces the same
+`Module` object the binary path does.
+
+**Library.** One entry point, drops into any existing WACS flow:
+
+```csharp
+using Wacs.Core;
+using Wacs.Core.Text;
+
+using var fs = new FileStream("module.wat", FileMode.Open);
+Module module = TextModuleParser.ParseWat(fs);
+
+// Or from a string:
+Module m2 = TextModuleParser.ParseWat(File.ReadAllText("module.wat"));
+
+// Emit canonical, round-trip WAT:
+string wat = TextModuleWriter.Write(module);
+```
+
+### Coverage
+
+The `Wacs.Core.Test` xUnit project runs two gates across the full
+WebAssembly 3.0 spec suite (`Spec.Test/spec/test/core/*.wast`):
+
+- **`SpecWastSmokeTests`** — every `.wast` file in the spec suite
+  parses without error. **120 / 120 files. No skipped files.** The
+  `SkipList` is empty.
+- **`SpecWastEquivalenceTests`** — every module embedded in a spec
+  script parses through the text parser *and* through the binary
+  parser (via `(module binary …)` or `wast2json`-produced `.wasm`
+  sidecars), and the two `Module` objects are compared for structural
+  equivalence (types, imports, functions, tables, memories, globals,
+  exports, element segments, data segments, custom sections, plus
+  instruction streams including preserved `try_table` shapes and
+  rec-group layouts). **3457 / 3457 modules match.**
+
+The text parser is held to the same wasm-3.0 bar as the runtime: GC,
+typed function references, exception handling, tail-call, SIMD,
+relaxed SIMD, multi-memory, memory64, threads/atomics, and
+annotations all parse to structurally identical `Module` objects
+regardless of which parser built them.
 
 ## Roadmap
 
