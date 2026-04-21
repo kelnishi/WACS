@@ -1284,11 +1284,16 @@ namespace Wacs.Core.Text
         /// with an <see cref="InstEnd"/>. Used for function bodies and for
         /// global / table / elem / data initializer expressions.
         /// </summary>
-        internal static Expression ParseExpressionBody(TextFunctionContext fctx, SExpr form, ref int i, int arity, bool isStatic)
+        /// <param name="isFunctionEnd">Set true for function bodies — the
+        /// terminating <see cref="InstEnd"/> is tagged so <c>Link()</c>
+        /// emits the function-return shim. Leave false for init
+        /// expressions.</param>
+        internal static Expression ParseExpressionBody(TextFunctionContext fctx, SExpr form, ref int i, int arity, bool isStatic, bool isFunctionEnd = false)
         {
             var instrs = ParseInstrList(fctx, form, ref i, InstrStop.None, out _);
             instrs.Add(new InstEnd());
-            return new Expression(arity, new InstructionSequence(instrs), isStatic);
+            var seq = new InstructionSequence(instrs, functionEnd: isFunctionEnd);
+            return new Expression(arity, seq, isStatic);
         }
     }
 }

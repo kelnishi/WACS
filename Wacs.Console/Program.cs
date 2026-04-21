@@ -76,10 +76,11 @@ namespace Wacs.Console
             }
 
             // Check the file extension
-            string fileExtension = Path.GetExtension(opts.WasmModule);
-            if (fileExtension != ".wasm")
+            string fileExtension = Path.GetExtension(opts.WasmModule).ToLowerInvariant();
+            if (fileExtension != ".wasm" && fileExtension != ".wat")
             {
-                System.Console.Error.WriteLine($"Error: Invalid file extension: {fileExtension}. Expected .wasm");
+                System.Console.Error.WriteLine(
+                    $"Error: Invalid file extension: {fileExtension}. Expected .wasm or .wat (for .wast scripts use a spec runner).");
                 return 1;
             }
 
@@ -130,9 +131,14 @@ namespace Wacs.Console
                 parseTimer.Start();
             }
             
-            //Parse the module
-            using var fileStream = new FileStream(opts.WasmModule, FileMode.Open);
-            var module = BinaryModuleParser.ParseWasm(fileStream);
+            //Parse the module — dispatch on extension.
+            Wacs.Core.Module module;
+            using (var fileStream = new FileStream(opts.WasmModule, FileMode.Open))
+            {
+                module = fileExtension == ".wat"
+                    ? Wacs.Core.Text.TextModuleParser.ParseWat(fileStream)
+                    : BinaryModuleParser.ParseWasm(fileStream);
+            }
 
             if (opts.LogProg)
             {

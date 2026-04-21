@@ -154,7 +154,9 @@ namespace Wacs.Core.Text
             }
 
             // Remaining children are the body — parse as an expression.
-            var body = ParseExpressionBody(fctx, form, ref i, ft.ResultType.Arity, isStatic: false);
+            // Function bodies carry a FunctionEnd marker on their terminal
+            // InstEnd so the runtime's Link pass emits the return shim.
+            var body = ParseExpressionBody(fctx, form, ref i, ft.ResultType.Arity, isStatic: false, isFunctionEnd: true);
 
             var fn = new Module.Function
             {

@@ -29,16 +29,11 @@ namespace Wacs.Core.Test
             return Path.Combine(dir.FullName, "Spec.Test", "spec", "test", "core");
         }
 
-        // Files that exercise spec extensions requiring specialized lexer
-        // grammar beyond core WAT. Skipping here lets the smoke test remain
-        // a faithful gate for Phase 1.1 / 1.2 while we track the gap.
-        private static readonly HashSet<string> SkipList = new HashSet<string>
-        {
-            // Custom annotations proposal: the `(@name ...)` grammar permits
-            // arbitrary tokens (braces, commas, unmatched quotes etc.) inside
-            // the annotation body — core idchar rules don't apply.
-            "annotations.wast",
-        };
+        /// <summary>
+        /// Currently empty — the lexer handles the annotations proposal
+        /// directly (broadens idchars inside <c>(@name …)</c>).
+        /// </summary>
+        private static readonly HashSet<string> SkipList = new HashSet<string>();
 
         public static IEnumerable<object[]> CoreWastFiles()
         {
