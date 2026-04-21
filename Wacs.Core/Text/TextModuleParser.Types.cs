@@ -245,11 +245,10 @@ namespace Wacs.Core.Text
         // ---- (type ...) form ----------------------------------------------
 
         /// <summary>
-        /// Parse a <c>(type $id? (func signature))</c> form.
-        /// Accepts GC <c>(sub …)</c> and <c>(struct …)</c> / <c>(array …)</c>
-        /// bodies as placeholders (index slot stays consistent; the type
-        /// body is an empty FunctionType so downstream code doesn't
-        /// crash). Full GC body parsing is a follow-up.
+        /// Parse a <c>(type $id? (func|struct|array|sub body))</c> form.
+        /// All GC composite types are first-class; the body is stored in
+        /// the appropriate <see cref="CompositeType"/> subclass
+        /// (FunctionType / StructType / ArrayType).
         /// </summary>
         private static void ParseTypeForm(TextParseContext ctx, SExpr form)
         {
@@ -262,12 +261,8 @@ namespace Wacs.Core.Text
             i++;
             ExpectConsumed(form, i, "type");
 
-            FunctionType ft = ParseTypeBody(ctx, body);
-
-            // Bind the $name → index, then append to Module.Types as a single
-            // non-recursive SubType (no supertypes, final).
+            var sub = ParseSubType(ctx, body);
             ctx.Types.Declare(name);
-            var sub = new SubType(ft, final: true);
             ctx.Module.Types.Add(new RecursiveType(sub));
         }
 
@@ -293,20 +288,58 @@ namespace Wacs.Core.Text
                 if (bi >= inner.Children.Count)
                     throw new FormatException($"line {inner.Token.Line}: (type …) missing body");
                 var body = inner.Children[bi];
-                var ft = ParseTypeBody(ctx, body);
+                var sub = ParseSubType(ctx, body);
 
                 ctx.Types.Declare(subName);
-                subs.Add(new SubType(ft, final: true));
+                subs.Add(sub);
             }
             ctx.Module.Types.Add(new RecursiveType(subs.ToArray()));
         }
 
         /// <summary>
-        /// Parse the body of a (type …) form — func, struct, array, or sub.
-        /// Returns a FunctionType (empty for non-func forms, as a
-        /// placeholder until full GC support lands).
+        /// Parse a SubType body: either a bare composite (<c>func</c>,
+        /// <c>struct</c>, <c>array</c>) or a <c>(sub final? super* body)</c>
+        /// wrapper.
         /// </summary>
-        private static FunctionType ParseTypeBody(TextParseContext ctx, SExpr body)
+        private static SubType ParseSubType(TextParseContext ctx, SExpr body)
+        {
+            if (body.IsForm("sub"))
+            {
+                // (sub final? $super* body)
+                int si = 1;
+                bool final = false;
+                if (si < body.Children.Count
+                    && body.Children[si].Kind == SExprKind.Atom
+                    && body.Children[si].Token.Kind == TokenKind.Keyword
+                    && body.Children[si].AtomText() == "final")
+                {
+                    final = true;
+                    si++;
+                }
+                var supers = new List<TypeIdx>();
+                while (si < body.Children.Count)
+                {
+                    var ch = body.Children[si];
+                    if (ch.Kind == SExprKind.Atom)
+                    {
+                        supers.Add((TypeIdx)ResolveTypeIdx(ctx, ch));
+                        si++;
+                        continue;
+                    }
+                    break;
+                }
+                if (si >= body.Children.Count)
+                    throw new FormatException($"line {body.Token.Line}: (sub …) missing composite body");
+                var inner = body.Children[si++];
+                ExpectConsumed(body, si, "sub");
+                var comp = ParseCompositeType(ctx, inner);
+                return new SubType(supers.ToArray(), comp, final);
+            }
+            var composite = ParseCompositeType(ctx, body);
+            return new SubType(composite, final: true);
+        }
+
+        private static CompositeType ParseCompositeType(TextParseContext ctx, SExpr body)
         {
             if (body.IsForm("func"))
             {
@@ -315,26 +348,106 @@ namespace Wacs.Core.Text
                 ExpectConsumed(body, bi, "func");
                 return ft;
             }
-            if (body.IsForm("sub"))
+            if (body.IsForm("struct"))
             {
-                // (sub final? (super-id*) body)
-                // Drill into the inner body (last child that's a list form).
-                for (int k = body.Children.Count - 1; k >= 1; k--)
+                var fields = new List<FieldType>();
+                for (int k = 1; k < body.Children.Count; k++)
                 {
-                    var ch = body.Children[k];
-                    if (ch.Kind == SExprKind.List
-                        && (ch.IsForm("func") || ch.IsForm("struct") || ch.IsForm("array")))
-                        return ParseTypeBody(ctx, ch);
+                    var f = body.Children[k];
+                    if (f.Kind != SExprKind.List || !f.IsForm("field"))
+                        throw new FormatException($"line {f.Token.Line}: (struct …) expects (field …) children");
+                    foreach (var ft in ParseFieldForm(ctx, f))
+                        fields.Add(ft);
                 }
-                return FunctionType.Empty;
+                return new StructType(fields.ToArray());
             }
-            if (body.IsForm("struct") || body.IsForm("array"))
+            if (body.IsForm("array"))
             {
-                // GC struct/array — placeholder empty FunctionType for now.
-                return FunctionType.Empty;
+                if (body.Children.Count != 2)
+                    throw new FormatException($"line {body.Token.Line}: (array …) expects one field");
+                var inner = body.Children[1];
+                if (inner.Kind != SExprKind.List || !inner.IsForm("field"))
+                {
+                    // (array T)  or  (array (mut T))  — treat as implicit single field
+                    var single = ParseFieldNoWrapper(ctx, inner);
+                    return new ArrayType(single);
+                }
+                var fields = ParseFieldForm(ctx, inner);
+                if (fields.Count != 1)
+                    throw new FormatException($"line {body.Token.Line}: (array …) expects exactly one field");
+                return new ArrayType(fields[0]);
             }
             throw new FormatException(
                 $"line {body.Token.Line}: (type …) body '{body.Head}' not recognized");
+        }
+
+        /// <summary>
+        /// Parse one <c>(field …)</c> form. A single field form can
+        /// contain multiple storage types (each spawning a separate
+        /// FieldType), or a named form with a single type.
+        /// Accepted shapes:
+        ///   (field T+)              anonymous, one or more types
+        ///   (field $name T)         named, single type
+        ///   (field (mut T))         anonymous mutable
+        ///   (field $name (mut T))   named mutable
+        /// </summary>
+        private static List<FieldType> ParseFieldForm(TextParseContext ctx, SExpr form)
+        {
+            var list = new List<FieldType>();
+            int i = 1;
+            // Named field: (field $name storage)
+            if (i < form.Children.Count
+                && form.Children[i].Kind == SExprKind.Atom
+                && form.Children[i].Token.Kind == TokenKind.Id)
+            {
+                i++;
+                if (i >= form.Children.Count)
+                    throw new FormatException($"line {form.Token.Line}: (field $name …) missing type");
+                list.Add(ParseFieldNoWrapper(ctx, form.Children[i]));
+                i++;
+                if (i != form.Children.Count)
+                    throw new FormatException($"line {form.Token.Line}: named (field $name …) expects exactly one type");
+                return list;
+            }
+            // Anonymous: one or more types, each becomes a field.
+            for (; i < form.Children.Count; i++)
+                list.Add(ParseFieldNoWrapper(ctx, form.Children[i]));
+            return list;
+        }
+
+        /// <summary>
+        /// Parse a single field storage type + mutability, not wrapped
+        /// in a <c>(field …)</c> form.
+        /// </summary>
+        private static FieldType ParseFieldNoWrapper(TextParseContext ctx, SExpr node)
+        {
+            if (node.Kind == SExprKind.List && node.IsForm("mut"))
+            {
+                if (node.Children.Count != 2)
+                    throw new FormatException($"line {node.Token.Line}: (mut …) takes one type");
+                var vt = ParseStorageType(ctx, node.Children[1]);
+                return new FieldType(vt, Mutability.Mutable);
+            }
+            var storage = ParseStorageType(ctx, node);
+            return new FieldType(storage, Mutability.Immutable);
+        }
+
+        /// <summary>
+        /// Parse a storage type. Extends <see cref="ParseValType"/> to
+        /// accept the packed types <c>i8</c> and <c>i16</c> which are
+        /// valid only in GC struct/array fields.
+        /// </summary>
+        private static ValType ParseStorageType(TextParseContext ctx, SExpr node)
+        {
+            if (node.Kind == SExprKind.Atom && node.Token.Kind == TokenKind.Keyword)
+            {
+                switch (node.AtomText())
+                {
+                    case "i8":  return ValType.I8;
+                    case "i16": return ValType.I16;
+                }
+            }
+            return ParseValType(ctx, node);
         }
 
         // ---- Type-use ------------------------------------------------------

@@ -1477,15 +1477,20 @@ namespace Wacs.Core.Text
                 var ft = new FunctionType(
                     paramTypes.Count == 0 ? ResultType.Empty : new ResultType(paramTypes.ToArray()),
                     resultTypes.Count == 0 ? ResultType.Empty : new ResultType(resultTypes.ToArray()));
-                // Dedup against existing Module.Types.
+                // Dedup against non-rec (single-subtype) Module.Types only.
+                int flatSeen = 0;
                 for (int t = 0; t < ctx.Module.Types.Count; t++)
                 {
-                    if (ctx.Module.Types[t].SubTypes.Length != 1) continue;
-                    var body = ctx.Module.Types[t].SubTypes[0].Body as FunctionType;
-                    if (body != null && FunctionTypeStructurallyEqual(body, ft))
-                        return (ValType)t;
+                    var group = ctx.Module.Types[t];
+                    if (group.SubTypes.Length == 1)
+                    {
+                        var body = group.SubTypes[0].Body as FunctionType;
+                        if (body != null && FunctionTypeStructurallyEqual(body, ft))
+                            return (ValType)flatSeen;
+                    }
+                    flatSeen += group.SubTypes.Length;
                 }
-                var idx2 = ctx.Module.Types.Count;
+                var idx2 = flatSeen;
                 ctx.Module.Types.Add(new RecursiveType(new SubType(ft, final: true)));
                 return (ValType)idx2;
             }
