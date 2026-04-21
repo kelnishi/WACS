@@ -124,26 +124,133 @@ namespace Wacs.Core.Text
             // resolved funcidx.
             var pendingExports = ConsumePendingExports(form, ref i);
 
-            // Require an explicit (type $n) in phase 1.3. Inline typeuse
-            // (raw param/result without a (type …) header) is deferred to
-            // phase 1.4, where we synthesize a type and dedup.
+            // Require an explicit (type $n) header. Inline typeuse (raw
+            // param/result without a (type …) header) is deferred to a
+            // follow-up pass that would synthesize a type into Module.Types.
             int typeIdx = ParseExplicitTypeUse(ctx, form, ref i);
 
-            // Phase 1.3: discard locals + body; phase 1.4 parses them.
-            // We still need to advance `i` to end-of-form so the caller's
-            // ExpectConsumed works. Just consume the remaining children.
-            i = form.Children.Count;
+            // Build a function-scope context for the body. Params come from
+            // the referenced FunctionType; declared locals follow via
+            // (local $name? T*) forms.
+            var fctx = new TextFunctionContext(ctx);
+            FunctionType ft = ctx.Module.Types[typeIdx];
+
+            // Optional redundant (param $x T)* / (result T)* forms after the
+            // (type $n) header — WAT spec: these must be structurally equal
+            // to the referenced type, and their purpose is to introduce
+            // $names for parameters (the type itself is anonymous). Pull
+            // param $names from here; ignore result annotations (no naming).
+            var paramNames = ConsumeRedundantParamResultForms(ctx, form, ref i);
+            int paramCount = ft.ParameterTypes.Arity;
+            for (int p = 0; p < paramCount; p++)
+            {
+                string? paramName = (paramNames != null && p < paramNames.Count) ? paramNames[p] : null;
+                fctx.LocalNames.Add(paramName);
+                fctx.LocalTypes.Add(ft.ParameterTypes.Types[p]);
+            }
+
+            // Consume local declarations: (local $name? T+) forms may appear
+            // interleaved at the start of the body.
+            while (i < form.Children.Count)
+            {
+                var child = form.Children[i];
+                if (child.Kind != SExprKind.List || !child.IsForm("local")) break;
+                ParseLocalForm(ctx, child, fctx);
+                i++;
+            }
+
+            // Remaining children are the body — parse as an expression.
+            var body = ParseExpressionBody(fctx, form, ref i, ft.ResultType.Arity, isStatic: false);
 
             var fn = new Module.Function
             {
                 TypeIndex = (TypeIdx)typeIdx,
-                Locals = Array.Empty<ValType>(),
-                Body = Wacs.Core.Types.Expression.Empty,
+                Locals = fctx.LocalTypes.GetRange(ft.ParameterTypes.Arity,
+                    fctx.LocalTypes.Count - ft.ParameterTypes.Arity).ToArray(),
+                Body = body,
             };
             int funcIdx = ctx.Funcs.Declare(name);
             ctx.Module.Funcs.Add(fn);
 
             FlushExports(ctx, pendingExports, ExternalKind.Function, funcIdx);
+        }
+
+        /// <summary>
+        /// After a <c>(type $n)</c> header, WAT lets you repeat
+        /// <c>(param $id? T*)</c> and <c>(result T*)</c> forms for
+        /// documentation and, critically, to bind <c>$id</c> names to
+        /// function parameters (the type itself is anonymous). Reads and
+        /// discards the redundant forms, returning just the param $names
+        /// in declaration order (null for anonymous params).
+        /// </summary>
+        private static List<string?>? ConsumeRedundantParamResultForms(
+            TextParseContext ctx, SExpr form, ref int i)
+        {
+            List<string?>? names = null;
+            while (i < form.Children.Count)
+            {
+                var child = form.Children[i];
+                if (child.Kind != SExprKind.List) break;
+                if (child.IsForm("param"))
+                {
+                    names ??= new List<string?>();
+                    CollectParamNames(child, names);
+                    i++;
+                    continue;
+                }
+                if (child.IsForm("result"))
+                {
+                    // No names to collect from result forms.
+                    i++;
+                    continue;
+                }
+                break;
+            }
+            return names;
+        }
+
+        private static void CollectParamNames(SExpr paramForm, List<string?> names)
+        {
+            int i = 1;
+            // Named single-param form: (param $x T)
+            if (i < paramForm.Children.Count
+                && paramForm.Children[i].Kind == SExprKind.Atom
+                && paramForm.Children[i].Token.Kind == TokenKind.Id)
+            {
+                names.Add(paramForm.Children[i].AtomText());
+                return;
+            }
+            // Anonymous run — one entry per type child.
+            for (; i < paramForm.Children.Count; i++)
+                names.Add(null);
+        }
+
+        private static void ParseLocalForm(TextParseContext ctx, SExpr form, TextFunctionContext fctx)
+        {
+            int i = 1;
+            // Named: (local $x T)  (single type)
+            if (i < form.Children.Count
+                && form.Children[i].Kind == SExprKind.Atom
+                && form.Children[i].Token.Kind == TokenKind.Id)
+            {
+                var name = form.Children[i].AtomText();
+                i++;
+                if (i >= form.Children.Count)
+                    throw new FormatException($"line {form.Token.Line}: (local $id T) missing type");
+                var t = ParseValType(ctx, form.Children[i]);
+                i++;
+                ExpectConsumed(form, i, "local");
+                fctx.LocalNames.Add(name);
+                fctx.LocalTypes.Add(t);
+                return;
+            }
+            // Anonymous: (local T*)
+            for (; i < form.Children.Count; i++)
+            {
+                var t = ParseValType(ctx, form.Children[i]);
+                fctx.LocalNames.Add(null);
+                fctx.LocalTypes.Add(t);
+            }
         }
 
         // ---- (table $id? inline-import? inline-export* ...) ---------------
@@ -260,14 +367,33 @@ namespace Wacs.Core.Text
             var pendingExports = ConsumePendingExports(form, ref i);
 
             var gt = ParseGlobalTypeInline(ctx, form, ref i);
-            // Phase 1.3: swallow the initializer instructions. Phase 1.4
-            // will parse them.
-            i = form.Children.Count;
+
+            // Parse the initializer expression — a constant-folded sequence
+            // terminating at end-of-form. Globals run in an empty-locals
+            // context, so we synthesize a minimal TextFunctionContext.
+            var initFctx = new TextFunctionContext(ctx);
+            var init = ParseExpressionBody(initFctx, form, ref i, arity: 1, isStatic: true);
 
             int idx = ctx.Globals.Declare(name);
-            ctx.Module.Globals.Add(new Module.Global(gt));
+            // Module.Global's public ctor takes (GlobalType) and defaults the
+            // initializer to Expression.Empty. To carry our parsed init, we
+            // use the private binary-parser ctor pathway via reflection … or
+            // simpler, construct with Expression.Empty then swap. The Global
+            // class exposes Initializer as readonly. To set it we'd need to
+            // either add an internal ctor or use reflection.
+            // For phase 1.4 we just attach via a dedicated path — extend
+            // the Global class below to accept an init expression.
+            ctx.Module.Globals.Add(CreateGlobalWithInit(gt, init));
             FlushExports(ctx, pendingExports, ExternalKind.Global, idx);
         }
+
+        /// <summary>
+        /// Construct a <see cref="Module.Global"/> with both type and
+        /// initializer populated. Routes through an internal Global
+        /// constructor added for the text-parser path.
+        /// </summary>
+        private static Module.Global CreateGlobalWithInit(GlobalType gt, Expression init)
+            => new Module.Global(gt, init);
 
         private static GlobalType ParseGlobalTypeInline(TextParseContext ctx, SExpr parent, ref int index)
         {

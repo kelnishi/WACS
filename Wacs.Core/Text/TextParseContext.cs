@@ -8,6 +8,7 @@
 
 using System.Collections.Generic;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 
 namespace Wacs.Core.Text
 {
@@ -76,5 +77,46 @@ namespace Wacs.Core.Text
         // explicit (type $x) reference. Keeps the list on hand so TypeSection
         // order stays stable.
         public List<FunctionType> SyntheticTypes { get; } = new List<FunctionType>();
+    }
+
+    /// <summary>
+    /// Function-scope parse state, created per-function body. Tracks locals
+    /// (indexed over params + declared locals) and the label stack as we
+    /// descend into block / loop / if forms.
+    /// </summary>
+    internal sealed class TextFunctionContext
+    {
+        public TextParseContext Module { get; }
+        public List<string?> LocalNames { get; } = new List<string?>();
+        public List<ValType> LocalTypes { get; } = new List<ValType>();
+        /// <summary>
+        /// Label stack. Top of stack = innermost block. Empty string for
+        /// anonymous blocks. Resolution from a <c>br $name</c> counts from
+        /// the top (depth 0 = innermost).
+        /// </summary>
+        public List<string?> LabelStack { get; } = new List<string?>();
+
+        public TextFunctionContext(TextParseContext module) { Module = module; }
+
+        public bool TryResolveLocal(string name, out int idx)
+        {
+            for (int i = LocalNames.Count - 1; i >= 0; i--)
+            {
+                if (LocalNames[i] == name) { idx = i; return true; }
+            }
+            idx = -1;
+            return false;
+        }
+
+        public bool TryResolveLabel(string name, out int depth)
+        {
+            // Top of stack = innermost = depth 0. Scan backwards.
+            for (int i = LabelStack.Count - 1; i >= 0; i--)
+            {
+                if (LabelStack[i] == name) { depth = LabelStack.Count - 1 - i; return true; }
+            }
+            depth = -1;
+            return false;
+        }
     }
 }

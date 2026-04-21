@@ -45,6 +45,11 @@ namespace Wacs.Core
             public Global(GlobalType type) =>
                 (Type, Initializer) = (type, Expression.Empty);
 
+            // Used by the text parser to populate both type and init in one
+            // shot (readonly fields preclude a mutation-based API).
+            internal Global(GlobalType type, Expression init) =>
+                (Type, Initializer) = (type, init);
+
             private Global(BinaryReader reader) =>
                 (Type, Initializer) = (GlobalType.Parse(reader), Expression.ParseInitializer(reader));
 
