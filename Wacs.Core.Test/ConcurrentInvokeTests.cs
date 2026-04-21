@@ -117,6 +117,55 @@ namespace Wacs.Core.Test
         }
 
         [Fact]
+        public void Concurrent_atomic_rmw_on_shared_memory_sums_correctly()
+        {
+            // Each thread performs N atomic.add ops against the same cell.
+            // Final sum must equal threadCount * iterations * delta.
+            // Proves per-thread ExecContext (Layer 1c) + atomic RMW semantics
+            // (phase-1 atomics) compose correctly under real concurrency.
+            var src = @"
+                (module
+                  (memory (export ""m"") 1 1 shared)
+                  (func (export ""inc"") (param $delta i32) (result i32)
+                    i32.const 0
+                    local.get $delta
+                    i32.atomic.rmw.add)
+                  (func (export ""read"") (result i32)
+                    i32.const 0
+                    i32.atomic.load))";
+            var runtime = new WasmRuntime();
+            var module = TextModuleParser.ParseWat(src);
+            var inst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("M", inst);
+            var incAddr = runtime.GetExportedFunction(("M", "inc"));
+            var readAddr = runtime.GetExportedFunction(("M", "read"));
+
+            const int threadCount = 8;
+            const int iterations = 1000;
+            const int delta = 3;
+            var barrier = new Barrier(threadCount);
+
+            var threads = new Thread[threadCount];
+            for (int t = 0; t < threadCount; t++)
+            {
+                threads[t] = new Thread(() =>
+                {
+                    var invoker = runtime.CreateStackInvoker(incAddr);
+                    barrier.SignalAndWait();
+                    for (int i = 0; i < iterations; i++)
+                        invoker(new Value[] { (Value)delta });
+                });
+            }
+
+            foreach (var th in threads) th.Start();
+            foreach (var th in threads) th.Join();
+
+            var reader = runtime.CreateStackInvoker(readAddr);
+            var finalSum = (int)reader(Array.Empty<Value>())[0];
+            Assert.Equal(threadCount * iterations * delta, finalSum);
+        }
+
+        [Fact]
         public async Task WasmThread_runs_entry_and_completes_task()
         {
             var runtime = new WasmRuntime();
