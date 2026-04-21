@@ -124,23 +124,17 @@ namespace Wacs.Core.Text
             // resolved funcidx.
             var pendingExports = ConsumePendingExports(form, ref i);
 
-            // Require an explicit (type $n) header. Inline typeuse (raw
-            // param/result without a (type …) header) is deferred to a
-            // follow-up pass that would synthesize a type into Module.Types.
-            int typeIdx = ParseExplicitTypeUse(ctx, form, ref i);
+            // typeuse: either explicit (type $n) followed by optional
+            // redundant param/result forms, or inline param/result forms
+            // that we synthesize into a new Module.Types entry (dedup'd
+            // against existing types for structural equality).
+            int typeIdx = ParseFuncTypeUseWithNames(ctx, form, ref i, out var paramNames);
 
             // Build a function-scope context for the body. Params come from
             // the referenced FunctionType; declared locals follow via
             // (local $name? T*) forms.
             var fctx = new TextFunctionContext(ctx);
             FunctionType ft = ctx.Module.Types[typeIdx];
-
-            // Optional redundant (param $x T)* / (result T)* forms after the
-            // (type $n) header — WAT spec: these must be structurally equal
-            // to the referenced type, and their purpose is to introduce
-            // $names for parameters (the type itself is anonymous). Pull
-            // param $names from here; ignore result annotations (no naming).
-            var paramNames = ConsumeRedundantParamResultForms(ctx, form, ref i);
             int paramCount = ft.ParameterTypes.Arity;
             for (int p = 0; p < paramCount; p++)
             {
@@ -173,6 +167,120 @@ namespace Wacs.Core.Text
             ctx.Module.Funcs.Add(fn);
 
             FlushExports(ctx, pendingExports, ExternalKind.Function, funcIdx);
+        }
+
+        /// <summary>
+        /// Unified typeuse parser. Handles three syntactic shapes per WAT
+        /// spec §6.6.5:
+        /// <list type="bullet">
+        /// <item><c>(type $n)</c> alone — reference an existing type.</item>
+        /// <item><c>(type $n) (param …)* (result …)*</c> — reference plus
+        ///   redundant inline forms that bind <c>$names</c> for params.</item>
+        /// <item><c>(param …)* (result …)*</c> without a (type …) header —
+        ///   synthesize a new FunctionType, dedup'd against existing
+        ///   <c>Module.Types</c> entries.</item>
+        /// </list>
+        /// Returns the resolved type index and the list of param $names in
+        /// declaration order (null list ⇒ no named params).
+        /// </summary>
+        private static int ParseFuncTypeUseWithNames(
+            TextParseContext ctx, SExpr form, ref int i, out List<string?>? paramNames)
+        {
+            paramNames = null;
+            // Case 1/2: explicit (type $n)
+            if (i < form.Children.Count
+                && form.Children[i].Kind == SExprKind.List
+                && form.Children[i].IsForm("type"))
+            {
+                int idx = ParseExplicitTypeUse(ctx, form, ref i);
+                paramNames = ConsumeRedundantParamResultForms(ctx, form, ref i);
+                return idx;
+            }
+            // Case 3: inline typeuse — collect param/result forms, synthesize
+            // a FunctionType, dedup against existing Module.Types.
+            var inlineParams = new List<ValType>();
+            var inlineResults = new List<ValType>();
+            var inlineNames = new List<string?>();
+            while (i < form.Children.Count)
+            {
+                var child = form.Children[i];
+                if (child.Kind != SExprKind.List) break;
+                if (child.IsForm("param"))
+                {
+                    CollectParamForInlineTypeUse(ctx, child, inlineParams, inlineNames);
+                    i++;
+                    continue;
+                }
+                if (child.IsForm("result"))
+                {
+                    for (int j = 1; j < child.Children.Count; j++)
+                        inlineResults.Add(ParseValType(ctx, child.Children[j]));
+                    i++;
+                    continue;
+                }
+                break;
+            }
+            var ft = new FunctionType(
+                inlineParams.Count == 0 ? ResultType.Empty : new ResultType(inlineParams.ToArray()),
+                inlineResults.Count == 0 ? ResultType.Empty : new ResultType(inlineResults.ToArray()));
+
+            // Dedup: scan existing Module.Types for structural equality.
+            for (int t = 0; t < ctx.Module.Types.Count; t++)
+            {
+                if (ctx.Module.Types[t].SubTypes.Length != 1) continue;
+                var body = ctx.Module.Types[t].SubTypes[0].Body as FunctionType;
+                if (body == null) continue;
+                if (FunctionTypeStructurallyEqual(body, ft))
+                {
+                    paramNames = inlineNames.Count > 0 ? inlineNames : null;
+                    return t;
+                }
+            }
+            // Fresh entry — append.
+            var idx2 = ctx.Module.Types.Count;
+            ctx.Module.Types.Add(new RecursiveType(new SubType(ft, final: true)));
+            // This synthesized type has no user $name, so skip the name-table
+            // declaration.
+            paramNames = inlineNames.Count > 0 ? inlineNames : null;
+            return idx2;
+        }
+
+        private static void CollectParamForInlineTypeUse(
+            TextParseContext ctx, SExpr paramForm,
+            List<ValType> types, List<string?> names)
+        {
+            int i = 1;
+            // (param $x T) — single typed named param
+            if (i < paramForm.Children.Count
+                && paramForm.Children[i].Kind == SExprKind.Atom
+                && paramForm.Children[i].Token.Kind == TokenKind.Id)
+            {
+                var nm = paramForm.Children[i].AtomText();
+                i++;
+                if (i >= paramForm.Children.Count)
+                    throw new FormatException($"line {paramForm.Token.Line}: (param $id T) missing type");
+                types.Add(ParseValType(ctx, paramForm.Children[i]));
+                names.Add(nm);
+                i++;
+                return;
+            }
+            // Anonymous run: one type per child.
+            for (; i < paramForm.Children.Count; i++)
+            {
+                types.Add(ParseValType(ctx, paramForm.Children[i]));
+                names.Add(null);
+            }
+        }
+
+        private static bool FunctionTypeStructurallyEqual(FunctionType a, FunctionType b)
+        {
+            if (a.ParameterTypes.Arity != b.ParameterTypes.Arity) return false;
+            if (a.ResultType.Arity != b.ResultType.Arity) return false;
+            for (int p = 0; p < a.ParameterTypes.Arity; p++)
+                if (a.ParameterTypes.Types[p] != b.ParameterTypes.Types[p]) return false;
+            for (int r = 0; r < a.ResultType.Arity; r++)
+                if (a.ResultType.Types[r] != b.ResultType.Types[r]) return false;
+            return true;
         }
 
         /// <summary>
@@ -265,15 +373,62 @@ namespace Wacs.Core.Text
 
             var pendingExports = ConsumePendingExports(form, ref i);
 
-            // Two forms: (table limits reftype) or (table reftype (elem …))
-            // Phase 1.3 handles the first; the second (elem abbreviation) is
-            // deferred to phase 1.4 because it writes an elem segment.
-            var (elementType, limits) = ParseTableTypeInline(ctx, form, ref i);
+            // Two forms:
+            //   (table limits reftype)            — explicit size
+            //   (table reftype (elem initN*))     — size inferred from elem list
+            // The second form should also synthesize an active elem segment;
+            // phase 1.6 leaves that for phase 3 integration (the table
+            // declaration alone is enough to parse and validate many tests).
+            ValType elementType;
+            Limits limits;
+            if (i < form.Children.Count && IsReftypeHeadAt(form, i))
+            {
+                elementType = ParseValType(ctx, form.Children[i]);
+                if (!elementType.IsRefType())
+                    throw new FormatException($"line {form.Children[i].Token.Line}: table element must be a reftype");
+                i++;
+                if (i >= form.Children.Count || !form.Children[i].IsForm("elem"))
+                    throw new FormatException(
+                        $"line {form.Token.Line}: (table reftype …) abbreviation requires (elem …)");
+                var elemForm = form.Children[i];
+                i++;
+                int n = elemForm.Children.Count - 1;   // minus the `elem` head
+                limits = new Limits(AddrType.I32, n, n);
+            }
+            else
+            {
+                (elementType, limits) = ParseTableTypeInline(ctx, form, ref i);
+            }
             ExpectConsumed(form, i, "table");
 
             int idx = ctx.Tables.Declare(name);
             ctx.Module.Tables.Add(new TableType(elementType, limits));
             FlushExports(ctx, pendingExports, ExternalKind.Table, idx);
+        }
+
+        /// <summary>
+        /// True if the atom / list at the given index looks like the start
+        /// of a reftype (funcref, externref, (ref …) form, etc.). Used by
+        /// the table abbreviation parser to distinguish
+        /// <c>(table reftype …)</c> from <c>(table limits reftype)</c>.
+        /// </summary>
+        private static bool IsReftypeHeadAt(SExpr form, int i)
+        {
+            if (i >= form.Children.Count) return false;
+            var c = form.Children[i];
+            if (c.Kind == SExprKind.List) return c.IsForm("ref");
+            if (c.Token.Kind != TokenKind.Keyword) return false;
+            var text = c.AtomText();
+            switch (text)
+            {
+                case "funcref": case "externref": case "anyref": case "eqref":
+                case "i31ref": case "structref": case "arrayref":
+                case "nullfuncref": case "nullexternref": case "nullref":
+                case "exnref": case "nullexnref":
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         /// <summary>

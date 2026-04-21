@@ -66,5 +66,45 @@ namespace Wacs.Core.Test
             foreach (var node in top)
                 Assert.Equal(SExprKind.List, node.Kind);
         }
+
+        /// <summary>
+        /// Full-parse gauge: try to run the entire <see cref="TextScriptParser"/>
+        /// over each spec .wast. Tracks how many files make it through without
+        /// throwing. Not an equality assertion — the phase 1.4 parser is an
+        /// MVP (no memargs, br_table, SIMD, GC, etc.), so many files will
+        /// fail at the instruction layer. The test records the count for
+        /// visibility.
+        /// </summary>
+        [Fact]
+        public void Spec_wast_full_parse_coverage()
+        {
+            var dir = FindSpecCoreDir();
+            if (!Directory.Exists(dir)) return;   // spec checkout absent
+            int total = 0, ok = 0;
+            var failures = new List<string>();
+            foreach (var path in Directory.EnumerateFiles(dir, "*.wast").OrderBy(p => p))
+            {
+                var name = Path.GetFileName(path);
+                if (SkipList.Contains(name)) continue;
+                total++;
+                try
+                {
+                    var src = File.ReadAllText(path);
+                    Wacs.Core.Text.TextScriptParser.ParseWast(src);
+                    ok++;
+                }
+                catch (System.Exception ex)
+                {
+                    failures.Add($"{name}: {ex.GetType().Name}: {ex.Message.Split('\n')[0]}");
+                }
+            }
+            // Emit diagnostic counts; don't fail — Phase 1 is incremental.
+            // If you want to see which files fail, uncomment the next line
+            // or filter to individual cases.
+            System.Console.WriteLine($"Spec full-parse: {ok}/{total} OK");
+            foreach (var f in failures.Take(5))
+                System.Console.WriteLine("  " + f);
+            Assert.True(total > 0);
+        }
     }
 }
