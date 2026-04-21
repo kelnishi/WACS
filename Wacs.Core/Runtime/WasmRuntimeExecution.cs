@@ -512,11 +512,11 @@ namespace Wacs.Core.Runtime
                     
                     if (inst.IsAsync)
                     {
-                        await inst.ExecuteAsync(Context);
+                        await inst.ExecuteAsync(GetExecContext());
                     }
                     else
                     {
-                        inst.Execute(Context);
+                        inst.Execute(GetExecContext());
                     }
                 }
             }
@@ -534,11 +534,11 @@ namespace Wacs.Core.Runtime
                     
                     if (inst.IsAsync)
                     {
-                        await inst.ExecuteAsync(Context);
+                        await inst.ExecuteAsync(GetExecContext());
                     }
                     else
                     {
-                        inst.Execute(Context);
+                        inst.Execute(GetExecContext());
                     }
                     
                     if (GetExecContext().steps >= gasLimit)
@@ -574,9 +574,9 @@ namespace Wacs.Core.Runtime
                         continue;
                     
                     if (inst.IsAsync)
-                        await inst.ExecuteAsync(Context);
+                        await inst.ExecuteAsync(GetExecContext());
                     else
-                        inst.Execute(Context);
+                        inst.Execute(GetExecContext());
 
                     GetExecContext().InstructionTimer.Stop();
                     GetExecContext().steps += inst.Size;
@@ -595,9 +595,9 @@ namespace Wacs.Core.Runtime
                         continue;
                     
                     if (inst.IsAsync)
-                        await inst.ExecuteAsync(Context);
+                        await inst.ExecuteAsync(GetExecContext());
                     else
-                        inst.Execute(Context);
+                        inst.Execute(GetExecContext());
 
                     GetExecContext().InstructionTimer.Stop();
                     GetExecContext().steps += inst.Size;
@@ -616,9 +616,9 @@ namespace Wacs.Core.Runtime
                         continue;
                     
                     if (inst.IsAsync)
-                        await inst.ExecuteAsync(Context);
+                        await inst.ExecuteAsync(GetExecContext());
                     else
-                        inst.Execute(Context);
+                        inst.Execute(GetExecContext());
                     GetExecContext().InstructionTimer.Stop();
                     GetExecContext().steps += inst.Size;
                 }
@@ -654,9 +654,9 @@ namespace Wacs.Core.Runtime
                 case var _ when InstructionBase.IsVar(inst): break;
                 case var _ when InstructionBase.IsLoad(inst): break;
                 
-                case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && InstructionBase.IsBound(Context, inst):
-                case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && InstructionBase.IsBound(Context, inst):
-                // case OpCode.CallRef when options.LogInstructionExecution&(int)InstructionLogging.Binds) && InstructionBase.IsBound(Context, inst):
+                case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && InstructionBase.IsBound(GetExecContext(), inst):
+                case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && InstructionBase.IsBound(GetExecContext(), inst):
+                // case OpCode.CallRef when options.LogInstructionExecution&(int)InstructionLogging.Binds) && InstructionBase.IsBound(GetExecContext(), inst):
                 
                 case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
                 case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
@@ -688,12 +688,12 @@ namespace Wacs.Core.Runtime
                         if (options.ShowPath)
                             location += $":{path}";
                             
-                        var log = $"{location}: {inst.RenderText(Context)}".PadRight(40, ' ');
+                        var log = $"{location}: {inst.RenderText(GetExecContext())}".PadRight(40, ' ');
                         Console.Error.WriteLine(log);
                     }
                     else
                     {
-                        var log = $"Inst[0x{GetExecContext().InstructionPointer:x8}]: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
+                        var log = $"Inst[0x{GetExecContext().InstructionPointer:x8}]: {inst.RenderText(GetExecContext())}".PadRight(40, ' ') + location;
                         Console.Error.WriteLine(log);
                     }
                     break; 
@@ -720,12 +720,12 @@ namespace Wacs.Core.Runtime
                         if (options.ShowPath)
                             location += $":{path}";
                             
-                        var log = $"{location}: {inst.RenderText(Context)}".PadRight(40, ' ');
+                        var log = $"{location}: {inst.RenderText(GetExecContext())}".PadRight(40, ' ');
                         Console.Error.WriteLine(log);
                     }
                     else
                     {
-                        var log = $"Inst[0x{GetExecContext().InstructionPointer:x8}]: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
+                        var log = $"Inst[0x{GetExecContext().InstructionPointer:x8}]: {inst.RenderText(GetExecContext())}".PadRight(40, ' ') + location;
                         Console.Error.WriteLine(log);
                     }
                     break; 
