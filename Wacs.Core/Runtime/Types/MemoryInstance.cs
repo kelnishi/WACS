@@ -14,8 +14,10 @@
 
 using System;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using FluentValidation;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types;
@@ -26,6 +28,17 @@ namespace Wacs.Core.Runtime.Types
     public class MemoryInstance
     {
         public byte[] Data;
+
+        // Lazy-allocated only when the host has opted into concurrent wasm
+        // execution (see ConcurrencyPolicyMode.HostDefined) AND the memory
+        // type is shared. Without both, atomic ops operate on an
+        // uncontended Data array and Grow is only called from the one
+        // executing thread — no lock needed. Allocating this eagerly on
+        // every MemoryInstance would penalize the single-threaded common
+        // case, and ReaderWriterLockSlim has historical IL2CPP fragility
+        // pre-Unity-2022, so gating on HostDefined keeps Unity consumers
+        // off the lock entirely.
+        internal ReaderWriterLockSlim? _growLock;
 
         [SuppressMessage("ReSharper.DPA", "DPA0003: Excessive memory allocations in LOH", MessageId = "type: System.Byte[]; size: 134MB")]
         public MemoryInstance(MemoryType type)
@@ -77,14 +90,317 @@ namespace Wacs.Core.Runtime.Types
 
             int len = (int)(newNumPages * Constants.PageSize);
 
-            Array.Resize(ref Data, len);
-
-            Type = new MemoryType(newLimits);
+            var gl = _growLock;
+            if (gl != null)
+            {
+                gl.EnterWriteLock();
+                try
+                {
+                    Array.Resize(ref Data, len);
+                    Type = new MemoryType(newLimits);
+                }
+                finally
+                {
+                    gl.ExitWriteLock();
+                }
+            }
+            else
+            {
+                Array.Resize(ref Data, len);
+                Type = new MemoryType(newLimits);
+            }
 
             return true;
         }
 
-        public bool Contains(int offset, int width) => 
+        /// <summary>
+        /// Opt-in: allocate the concurrent-grow lock. Called by the
+        /// runtime when a shared memory is instantiated under
+        /// <see cref="Concurrency.ConcurrencyPolicyMode.HostDefined"/>.
+        /// Idempotent; safe to call more than once.
+        /// </summary>
+        public void EnableConcurrentGrow()
+        {
+            if (_growLock == null)
+                Interlocked.CompareExchange(ref _growLock,
+                    new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion), null);
+        }
+
+        // Atomic helpers. These are the entry points every
+        // InstAtomic* class routes through for shared-memory access,
+        // so the lock-vs-Interlocked discipline lives in one place.
+        // When _growLock is null (single-thread / non-shared case) the
+        // read-lock/release pair is skipped — zero overhead beyond the
+        // Interlocked intrinsic itself.
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void EnterReadIfShared()
+        {
+            _growLock?.EnterReadLock();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void ExitReadIfShared()
+        {
+            _growLock?.ExitReadLock();
+        }
+
+        /// <summary>Atomic 32-bit load at byte offset <paramref name="ea"/>.
+        /// Caller guarantees <paramref name="ea"/> is in-bounds and 4-byte
+        /// aligned.</summary>
+        public int AtomicLoadInt32(int ea)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                return Volatile.Read(ref cell);
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        /// <summary>Atomic 64-bit load. Uses <see cref="Interlocked.Read(ref long)"/>
+        /// because 64-bit reads on 32-bit ARM are not naturally atomic.</summary>
+        public long AtomicLoadInt64(int ea)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                return Interlocked.Read(ref cell);
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        /// <summary>Seq-cst store. Uses <see cref="Interlocked.Exchange(ref int, int)"/>
+        /// (ignoring the return) because <c>Volatile.Write</c> is release-only,
+        /// insufficient for the threads-proposal requirement.</summary>
+        public void AtomicStoreInt32(int ea, int value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                Interlocked.Exchange(ref cell, value);
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        public void AtomicStoreInt64(int ea, long value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                Interlocked.Exchange(ref cell, value);
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        /// <summary>Returns the original value at <paramref name="ea"/>.</summary>
+        public int AtomicCompareExchangeInt32(int ea, int newValue, int expected)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                return Interlocked.CompareExchange(ref cell, newValue, expected);
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        public long AtomicCompareExchangeInt64(int ea, long newValue, long expected)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                return Interlocked.CompareExchange(ref cell, newValue, expected);
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        /// <summary>Fetch-and-add: returns the original value.</summary>
+        public int AtomicAddInt32(int ea, int value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                // Interlocked.Add returns the new value; subtract to get original.
+                return Interlocked.Add(ref cell, value) - value;
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        public long AtomicAddInt64(int ea, long value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                return Interlocked.Add(ref cell, value) - value;
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        /// <summary>Exchange: returns original.</summary>
+        public int AtomicExchangeInt32(int ea, int value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                return Interlocked.Exchange(ref cell, value);
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        public long AtomicExchangeInt64(int ea, long value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                return Interlocked.Exchange(ref cell, value);
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+#if NET8_0_OR_GREATER
+        // Native bitwise-atomic paths (.NET 5+). These return the original value.
+        public int AtomicAndInt32(int ea, int value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                return Interlocked.And(ref cell, value);
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        public int AtomicOrInt32(int ea, int value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                return Interlocked.Or(ref cell, value);
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        public long AtomicAndInt64(int ea, long value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                return Interlocked.And(ref cell, value);
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        public long AtomicOrInt64(int ea, long value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                return Interlocked.Or(ref cell, value);
+            }
+            finally { ExitReadIfShared(); }
+        }
+#else
+        // netstandard2.1 fallbacks — CAS loops for And/Or. Xor is CAS on all targets.
+        public int AtomicAndInt32(int ea, int value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                int old;
+                do { old = Volatile.Read(ref cell); }
+                while (Interlocked.CompareExchange(ref cell, old & value, old) != old);
+                return old;
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        public int AtomicOrInt32(int ea, int value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                int old;
+                do { old = Volatile.Read(ref cell); }
+                while (Interlocked.CompareExchange(ref cell, old | value, old) != old);
+                return old;
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        public long AtomicAndInt64(int ea, long value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                long old;
+                do { old = Interlocked.Read(ref cell); }
+                while (Interlocked.CompareExchange(ref cell, old & value, old) != old);
+                return old;
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        public long AtomicOrInt64(int ea, long value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                long old;
+                do { old = Interlocked.Read(ref cell); }
+                while (Interlocked.CompareExchange(ref cell, old & value, old) != old);
+                return old;
+            }
+            finally { ExitReadIfShared(); }
+        }
+#endif
+
+        // Xor is CAS-loop on all targets — Interlocked.Xor is .NET 7+.
+        public int AtomicXorInt32(int ea, int value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                int old;
+                do { old = Volatile.Read(ref cell); }
+                while (Interlocked.CompareExchange(ref cell, old ^ value, old) != old);
+                return old;
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        public long AtomicXorInt64(int ea, long value)
+        {
+            EnterReadIfShared();
+            try
+            {
+                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                long old;
+                do { old = Interlocked.Read(ref cell); }
+                while (Interlocked.CompareExchange(ref cell, old ^ value, old) != old);
+                return old;
+            }
+            finally { ExitReadIfShared(); }
+        }
+
+        public bool Contains(int offset, int width) =>
             offset >= 0 && (offset + width) <= Data.Length;
 
         public string ReadString(uint ptr, uint len)

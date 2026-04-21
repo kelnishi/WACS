@@ -40,7 +40,11 @@ namespace Wacs.Core
         }
 
         public ValidationResult Validate() => new ModuleValidator().Validate(this);
+        public ValidationResult Validate(Runtime.RuntimeAttributes attributes) =>
+            new ModuleValidator(attributes).Validate(this);
         public void ValidateAndThrow() => new ModuleValidator().ValidateAndThrow(this);
+        public void ValidateAndThrow(Runtime.RuntimeAttributes attributes) =>
+            new ModuleValidator(attributes).ValidateAndThrow(this);
     }
 
     /// <summary>

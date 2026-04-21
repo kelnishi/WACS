@@ -293,7 +293,7 @@ namespace Wacs.Core.Runtime
             {
                 //1
                 if (!options.SkipModuleValidation)
-                    module.ValidateAndThrow();
+                    module.ValidateAndThrow(Context.Attributes);
             }
             catch (ValidationException exc)
             {
