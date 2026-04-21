@@ -45,7 +45,7 @@ namespace Wacs.Console
         [Option('v', "verbose", HelpText = "Log the program.")]
         public bool LogProg { get; set; }
 
-        [Option('r', "render", HelpText = "Render the wasm file to wat.")]
+        [Option('r', "render", HelpText = "Render the module to a .wat file next to the input. Uses the parser-friendly TextModuleWriter so the output round-trips back through the text parser.")]
         public bool Render { get; set; }
 
         [Option('g', "log_gas", HelpText = "Print total instructions executed.", Default = false)]

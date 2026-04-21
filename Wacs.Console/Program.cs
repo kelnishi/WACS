@@ -149,8 +149,14 @@ namespace Wacs.Console
             if (opts.Render)
             {
                 string outputFilePath = Path.ChangeExtension(opts.WasmModule, ".wat");
-                using var outputStream = new FileStream(outputFilePath, FileMode.Create);
-                ModuleRenderer.RenderWatToStream(outputStream, module);
+                // Parser-friendly WAT output via TextModuleWriter — round-
+                // trips cleanly through TextModuleParser. Use
+                // ModuleRenderer.RenderWatToStream if you want the
+                // debug/display variant (stack annotations, (;id;) comments).
+                var wat = Wacs.Core.Text.TextModuleWriter.Write(module);
+                File.WriteAllText(outputFilePath, wat);
+                if (opts.LogProg)
+                    System.Console.Error.WriteLine($"Rendered {outputFilePath} ({wat.Length} chars)");
             }
 
             if (!opts.SkipValidation)
