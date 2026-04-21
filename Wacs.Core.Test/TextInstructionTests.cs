@@ -300,8 +300,11 @@ namespace Wacs.Core.Test
         [Fact]
         public void Unknown_opcode_in_body_throws()
         {
+            // Made-up mnemonic — guard the not-a-real-opcode fallback.
+            // Previously used i32.atomic.load, which became a real
+            // opcode when threads phase 1 landed.
             Assert.Throws<NotSupportedException>(() =>
-                ParseWithFunc("i32.atomic.load"));
+                ParseWithFunc("i32.not_an_opcode"));
         }
 
         [Fact]

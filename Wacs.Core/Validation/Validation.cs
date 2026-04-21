@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using FluentValidation;
+using Wacs.Core.Runtime;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Validation
@@ -22,13 +23,17 @@ namespace Wacs.Core.Validation
     /// </summary>
     public class ModuleValidator : AbstractValidator<Module>
     {
-        public ModuleValidator()
+        public ModuleValidator() : this(null) { }
+
+        public ModuleValidator(RuntimeAttributes? attributes)
         {
             //Set the validation context
             RuleFor(module => module)
                 .Custom((module, ctx) =>
                 {
-                    ctx.RootContextData[nameof(WasmValidationContext)] = new WasmValidationContext(module, ctx);
+                    var vctx = new WasmValidationContext(module, ctx);
+                    if (attributes != null) vctx.Attributes = attributes;
+                    ctx.RootContextData[nameof(WasmValidationContext)] = vctx;
                 });
 
             RuleForEach(module => module.Types).SetValidator(new RecursiveType.Validator());
