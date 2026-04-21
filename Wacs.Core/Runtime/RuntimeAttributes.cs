@@ -13,11 +13,47 @@
 // limitations under the License.
 
 using Wacs.Core.Instructions;
+using Wacs.Core.Runtime.Concurrency;
 
 namespace Wacs.Core.Runtime
 {
     public class RuntimeAttributes
     {
+        /// <summary>
+        /// Backend for <c>memory.atomic.wait*</c> / <c>memory.atomic.notify</c>
+        /// from the WebAssembly threads proposal. Defaults to
+        /// <see cref="NotSupportedPolicy"/> when the runtime detects a
+        /// Unity IL2CPP environment (main-thread blocking risks), and
+        /// <see cref="HostDefinedPolicy"/> elsewhere. Hosts may override
+        /// at any time before instantiation.
+        /// </summary>
+        public IConcurrencyPolicy ConcurrencyPolicy { get; set; } =
+            DetectIsUnity() ? (IConcurrencyPolicy)new NotSupportedPolicy()
+                            : new HostDefinedPolicy();
+
+        /// <summary>
+        /// When true, validation downgrades the "atomic op on non-shared
+        /// memory" error to a pass. Emscripten and LLVM sometimes emit
+        /// atomic ops on non-shared memories for single-threaded hosts; the
+        /// threads proposal itself requires shared. Default false (strict).
+        /// </summary>
+        public bool RelaxAtomicSharedCheck { get; set; } = false;
+
+        // Cache the Unity detection result to avoid reflecting on every
+        // new RuntimeAttributes().
+        private static readonly bool _isUnity = ProbeUnity();
+        private static bool DetectIsUnity() => _isUnity;
+        private static bool ProbeUnity()
+        {
+            // Type.GetType with throwOnError:false is AOT-safe under trimmer
+            // + IL2CPP. UnityEngine.Application is never stripped from a
+            // Unity build (it's bootstrap-critical).
+            var t = System.Type.GetType(
+                "UnityEngine.Application, UnityEngine.CoreModule",
+                throwOnError: false);
+            return t != null;
+        }
+
         public int GrowCallStack = 512;
 
         public int InitialCallStack = 512;
