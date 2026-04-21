@@ -83,7 +83,8 @@ namespace Wacs.Core.Text
         /// The lexeme text of this atom. Throws on lists.
         /// For <see cref="TokenKind.Id"/> tokens, canonicalizes the
         /// <c>$"..."</c> quoted form to the equivalent <c>$name</c> form
-        /// so namespace lookups unify both spellings.
+        /// (with backslash escapes decoded) so namespace lookups unify
+        /// both spellings.
         /// </summary>
         public string AtomText()
         {
@@ -92,8 +93,95 @@ namespace Wacs.Core.Text
             var raw = Lexer.Slice(Token);
             if (Token.Kind == TokenKind.Id
                 && raw.Length >= 3 && raw[0] == '$' && raw[1] == '"' && raw[raw.Length - 1] == '"')
-                return "$" + raw.Substring(2, raw.Length - 3);
+                return "$" + DecodeQuotedIdBody(raw, 2, raw.Length - 1);
             return raw;
+        }
+
+        /// <summary>
+        /// Decode the interior of a <c>$"…"</c> identifier. Per the WAT
+        /// spec, quoted identifiers are UTF-8 byte sequences: plain chars
+        /// are their ASCII byte, <c>\XX</c> emits a raw byte, <c>\u{XXXX}</c>
+        /// emits a UTF-8-encoded Unicode codepoint. All bytes are collected
+        /// into a list and then decoded as a UTF-8 string at the end so
+        /// that <c>"\ef\98\9a"</c> and <c>"\u{f61a}"</c> (which both encode
+        /// the same codepoint) canonicalize to identical names.
+        /// </summary>
+        private static string DecodeQuotedIdBody(string raw, int start, int end)
+        {
+            var bytes = new System.Collections.Generic.List<byte>(end - start);
+            int i = start;
+            while (i < end)
+            {
+                char c = raw[i];
+                if (c != '\\')
+                {
+                    // Non-escape char: encode as its UTF-8 representation.
+                    if (c < 0x80) { bytes.Add((byte)c); i++; continue; }
+                    int advance = 1;
+                    if (System.Char.IsHighSurrogate(c) && i + 1 < end
+                        && System.Char.IsLowSurrogate(raw[i + 1]))
+                        advance = 2;
+                    var enc = System.Text.Encoding.UTF8.GetBytes(raw.Substring(i, advance));
+                    bytes.AddRange(enc);
+                    i += advance;
+                    continue;
+                }
+                if (i + 1 >= end) { bytes.Add((byte)c); i++; continue; }
+                char esc = raw[i + 1];
+                switch (esc)
+                {
+                    case '\\': bytes.Add((byte)'\\'); i += 2; continue;
+                    case '"':  bytes.Add((byte)'"');  i += 2; continue;
+                    case 't':  bytes.Add((byte)'\t'); i += 2; continue;
+                    case 'n':  bytes.Add((byte)'\n'); i += 2; continue;
+                    case 'r':  bytes.Add((byte)'\r'); i += 2; continue;
+                    case 'u':
+                    {
+                        if (i + 2 < end && raw[i + 2] == '{')
+                        {
+                            int j = i + 3;
+                            int cp = 0;
+                            int digits = 0;
+                            while (j < end && raw[j] != '}')
+                            {
+                                int d = HexDigit(raw[j]);
+                                if (d < 0) break;
+                                cp = (cp << 4) | d;
+                                digits++;
+                                j++;
+                            }
+                            if (digits > 0 && j < end && raw[j] == '}')
+                            {
+                                var enc = System.Text.Encoding.UTF8.GetBytes(
+                                    System.Char.ConvertFromUtf32(cp));
+                                bytes.AddRange(enc);
+                                i = j + 1;
+                                continue;
+                            }
+                        }
+                        break;
+                    }
+                }
+                int hi = HexDigit(esc);
+                int lo = (i + 2 < end) ? HexDigit(raw[i + 2]) : -1;
+                if (hi >= 0 && lo >= 0)
+                {
+                    bytes.Add((byte)((hi << 4) | lo));
+                    i += 3;
+                    continue;
+                }
+                bytes.Add((byte)c);
+                i++;
+            }
+            return System.Text.Encoding.UTF8.GetString(bytes.ToArray());
+        }
+
+        private static int HexDigit(char c)
+        {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return -1;
         }
 
         public override string ToString()

@@ -302,6 +302,9 @@ namespace Wacs.Core.Text
                     var els = ParseInstrList(fctx, elseForm, ref ej, InstrStop.None, out _);
                     elseBody.AddRange(els);
                     elseBody.Add(new InstEnd());
+                    // NOTE: elseBody intentionally does not start with
+                    // InstElse — the InstElse divider sits at the end of
+                    // thenInner, per the binary parser's shape.
                     elseSeq = new InstructionSequence(elseBody);
                 }
                 else
@@ -388,20 +391,23 @@ namespace Wacs.Core.Text
                     var blockType = ParseBlockType(fctx.Module, parent, ref i);
                     fctx.LabelStack.Add(label);
                     List<InstructionBase> thenBody, elseBody;
+                    bool hasElse;
                     try
                     {
                         thenBody = ParseInstrList(fctx, parent, ref i, InstrStop.EndOrElse, out var stopKw);
-                        if (stopKw == "else")
+                        hasElse = stopKw == "else";
+                        if (hasElse)
                         {
-                            // Consume the 'else' keyword + its optional label
                             i++;
                             if (i < parent.Children.Count
                                 && parent.Children[i].Kind == SExprKind.Atom
                                 && parent.Children[i].Token.Kind == TokenKind.Id)
                                 i++;
-                            elseBody = new List<InstructionBase> { new InstElse() };
-                            var rest = ParseInstrList(fctx, parent, ref i, InstrStop.End, out _);
-                            elseBody.AddRange(rest);
+                            // ElseBlock body does NOT include a leading
+                            // InstElse — the InstElse sits at the end of
+                            // the IfBlock body as the divider marker
+                            // (matches the binary parser's shape).
+                            elseBody = ParseInstrList(fctx, parent, ref i, InstrStop.End, out _);
                         }
                         else
                         {
@@ -416,14 +422,13 @@ namespace Wacs.Core.Text
                     //   IfBlock instructions end with InstElse when an else
                     //   arm exists, or InstEnd otherwise.
                     //   ElseBlock instructions end with InstEnd.
-                    // Binary-parser invariant enforced by EndsWithElse /
-                    // HasExplicitEnd.
+                    // The "has else" decision is based on whether the
+                    // source had an `else` keyword — an empty else body
+                    // (`if ... else end`) still counts as an else arm.
                     var ifSeq = new List<InstructionBase>(thenBody);
                     InstructionSequence elseSeq;
-                    if (elseBody.Count > 0)
+                    if (hasElse)
                     {
-                        // else branch exists — then-body ends with InstElse,
-                        // else-body ends with InstEnd.
                         ifSeq.Add(new InstElse());
                         elseBody.Add(new InstEnd());
                         elseSeq = new InstructionSequence(elseBody);
@@ -1477,12 +1482,12 @@ namespace Wacs.Core.Text
                 var ft = new FunctionType(
                     paramTypes.Count == 0 ? ResultType.Empty : new ResultType(paramTypes.ToArray()),
                     resultTypes.Count == 0 ? ResultType.Empty : new ResultType(resultTypes.ToArray()));
-                // Dedup against non-rec (single-subtype) Module.Types only.
+                // Dedup against non-rec Module.Types entries only.
                 int flatSeen = 0;
                 for (int t = 0; t < ctx.Module.Types.Count; t++)
                 {
                     var group = ctx.Module.Types[t];
-                    if (group.SubTypes.Length == 1)
+                    if (!ctx.TypesFromRec[t] && group.SubTypes.Length == 1)
                     {
                         var body = group.SubTypes[0].Body as FunctionType;
                         if (body != null && FunctionTypeStructurallyEqual(body, ft))
@@ -1492,6 +1497,7 @@ namespace Wacs.Core.Text
                 }
                 var idx2 = flatSeen;
                 ctx.Module.Types.Add(new RecursiveType(new SubType(ft, final: true)));
+                ctx.TypesFromRec.Add(false);
                 return (ValType)idx2;
             }
 

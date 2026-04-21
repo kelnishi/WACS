@@ -34,6 +34,12 @@ namespace Wacs.Core.Text
         Binary,
         /// <summary>(module quote "…") — reparse of a quoted text module.</summary>
         Quote,
+        /// <summary>
+        /// (module instance $alias $src) — component-model instantiation.
+        /// Not a standalone module definition; shares content with its
+        /// source module. Excluded from .wasm-file pairing.
+        /// </summary>
+        Instance,
     }
 
     public sealed class ScriptModule : ScriptCommand
