@@ -27,7 +27,7 @@ namespace Wacs.Core.Instructions.Atomic
     // Naming: class names follow the AtomCode enum 1:1. File grouped
     // by op family (add/sub/and/or/xor/xchg).
 
-    internal static class SubwordCas
+    public static class SubwordCas
     {
         /// <summary>
         /// CAS loop on a sub-word within the enclosing 32-bit word.

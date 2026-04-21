@@ -469,11 +469,13 @@ namespace Wacs.Transpiler.AOT
                 return;
             }
 
-            // Other multi-byte prefix opcodes (not yet supported)
+            // 0xFE prefix (threads proposal atomics)
             if (op == WasmOpCode.FE)
             {
-                throw new TranspilerException(
-                    $"FunctionCodegen: prefix opcode {inst.Op.GetMnemonic()} should have been caught by CanEmit");
+                TrackAtomicStackEffect(inst, before: true);
+                AtomicEmitter.Emit(il, inst, inst.Op.xFE);
+                TrackAtomicStackEffect(inst, before: false);
+                return;
             }
 
             // Numeric instructions (constants, arithmetic, comparisons, conversions)
@@ -1128,6 +1130,222 @@ namespace Wacs.Transpiler.AOT
         /// Constants push a typed value; unary ops pop+push; binary ops pop 2 push 1.
         /// </summary>
         /// <summary>Track memory instruction stack effects.</summary>
+        /// <summary>
+        /// Track stack effects for 0xFE-prefixed atomic ops. Mirrors the
+        /// before/after shape used by <c>TrackExtStackEffect</c>: pops inputs
+        /// before the emit, pushes the result after. The CIL emitter's
+        /// helper invocation ensures the generated IL already matches these
+        /// pops/pushes — this method just keeps the validator's type stack
+        /// in sync so downstream ops see the right representation.
+        /// </summary>
+        private void TrackAtomicStackEffect(InstructionBase inst, bool before)
+        {
+            var op = inst.Op.xFE;
+            if (before)
+            {
+                switch (op)
+                {
+                    // Loads: [addr] → …
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicLoad:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicLoad:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicLoad8U:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicLoad16U:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicLoad8U:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicLoad16U:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicLoad32U:
+                        _cilValidator.Pop(context: "atomic.load addr");
+                        break;
+
+                    // i32 stores: [addr, i32] → []
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicStore:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicStore8:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicStore16:
+                        _cilValidator.Pop(typeof(int), "i32.atomic.store val");
+                        _cilValidator.Pop(context: "atomic.store addr");
+                        break;
+                    // i64 stores: [addr, i64] → []
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicStore:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicStore8:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicStore16:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicStore32:
+                        _cilValidator.Pop(typeof(long), "i64.atomic.store val");
+                        _cilValidator.Pop(context: "atomic.store addr");
+                        break;
+
+                    // i32 RMW: [addr, i32] → [i32]
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwAdd:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwSub:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwAnd:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwOr:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwXor:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwXchg:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8AddU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16AddU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8SubU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16SubU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8AndU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16AndU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8OrU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16OrU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8XorU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16XorU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8XchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16XchgU:
+                        _cilValidator.Pop(typeof(int), "i32.atomic.rmw arg");
+                        _cilValidator.Pop(context: "atomic.rmw addr");
+                        break;
+
+                    // i64 RMW: [addr, i64] → [i64]
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwAdd:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwSub:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwAnd:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwOr:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwXor:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwXchg:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8AddU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16AddU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32AddU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8SubU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16SubU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32SubU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8AndU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16AndU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32AndU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8OrU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16OrU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32OrU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8XorU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16XorU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32XorU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8XchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16XchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32XchgU:
+                        _cilValidator.Pop(typeof(long), "i64.atomic.rmw arg");
+                        _cilValidator.Pop(context: "atomic.rmw addr");
+                        break;
+
+                    // i32 Cmpxchg: [addr, i32 expected, i32 replacement] → [i32]
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwCmpxchg:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8CmpxchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16CmpxchgU:
+                        _cilValidator.Pop(typeof(int), "cmpxchg replacement");
+                        _cilValidator.Pop(typeof(int), "cmpxchg expected");
+                        _cilValidator.Pop(context: "cmpxchg addr");
+                        break;
+
+                    // i64 Cmpxchg: [addr, i64 expected, i64 replacement] → [i64]
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwCmpxchg:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8CmpxchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16CmpxchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32CmpxchgU:
+                        _cilValidator.Pop(typeof(long), "cmpxchg replacement");
+                        _cilValidator.Pop(typeof(long), "cmpxchg expected");
+                        _cilValidator.Pop(context: "cmpxchg addr");
+                        break;
+
+                    // Notify: [addr, i32 count] → [i32 woken]
+                    case Wacs.Core.OpCodes.AtomCode.MemoryAtomicNotify:
+                        _cilValidator.Pop(typeof(int), "notify count");
+                        _cilValidator.Pop(context: "notify addr");
+                        break;
+
+                    // Wait32: [addr, i32 expected, i64 timeoutNs] → [i32]
+                    case Wacs.Core.OpCodes.AtomCode.MemoryAtomicWait32:
+                        _cilValidator.Pop(typeof(long), "wait32 timeoutNs");
+                        _cilValidator.Pop(typeof(int),  "wait32 expected");
+                        _cilValidator.Pop(context: "wait32 addr");
+                        break;
+
+                    // Wait64: [addr, i64 expected, i64 timeoutNs] → [i32]
+                    case Wacs.Core.OpCodes.AtomCode.MemoryAtomicWait64:
+                        _cilValidator.Pop(typeof(long), "wait64 timeoutNs");
+                        _cilValidator.Pop(typeof(long), "wait64 expected");
+                        _cilValidator.Pop(context: "wait64 addr");
+                        break;
+
+                    // Fence: [] → []
+                    case Wacs.Core.OpCodes.AtomCode.AtomicFence:
+                        break;
+                }
+            }
+            else
+            {
+                switch (op)
+                {
+                    // i32 result
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicLoad:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicLoad8U:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicLoad16U:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwAdd:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwSub:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwAnd:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwOr:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwXor:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwXchg:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8AddU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16AddU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8SubU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16SubU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8AndU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16AndU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8OrU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16OrU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8XorU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16XorU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8XchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16XchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmwCmpxchg:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw8CmpxchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I32AtomicRmw16CmpxchgU:
+                    case Wacs.Core.OpCodes.AtomCode.MemoryAtomicNotify:
+                    case Wacs.Core.OpCodes.AtomCode.MemoryAtomicWait32:
+                    case Wacs.Core.OpCodes.AtomCode.MemoryAtomicWait64:
+                        _cilValidator.Push(typeof(int));
+                        break;
+
+                    // i64 result
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicLoad:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicLoad8U:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicLoad16U:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicLoad32U:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwAdd:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwSub:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwAnd:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwOr:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwXor:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwXchg:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8AddU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16AddU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32AddU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8SubU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16SubU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32SubU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8AndU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16AndU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32AndU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8OrU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16OrU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32OrU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8XorU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16XorU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32XorU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8XchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16XchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32XchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmwCmpxchg:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw8CmpxchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw16CmpxchgU:
+                    case Wacs.Core.OpCodes.AtomCode.I64AtomicRmw32CmpxchgU:
+                        _cilValidator.Push(typeof(long));
+                        break;
+
+                    // Stores + fence: no result
+                    default:
+                        break;
+                }
+            }
+        }
+
         private void TrackMemoryStackEffect(WasmOpCode op)
         {
             // Address type: i32 for memory32, i64 for memory64.
@@ -1674,9 +1892,9 @@ namespace Wacs.Transpiler.AOT
             if (op == WasmOpCode.FD)
                 return SimdEmitter.CanEmit(inst.Op.xFD);
 
-            // Other multi-byte opcodes — not yet supported
+            // 0xFE prefix (threads proposal atomics)
             if (op == WasmOpCode.FE)
-                return false;
+                return AtomicEmitter.CanEmit(inst.Op.xFE);
 
             // Numeric instructions (0x41-0xC4)
             if (NumericEmitter.CanEmit(op))
