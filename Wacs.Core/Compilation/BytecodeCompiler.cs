@@ -251,6 +251,10 @@ namespace Wacs.Core.Compilation
                 // pass-1 sizing and pass-2 emit stay in sync.
                 OpCode.FD => inst is Wacs.Core.Instructions.SIMD.InstMemoryLoadZero ? 12
                              : SizeOfSimd(inst.Op.xFD),
+                // FE-prefixed atomic ops (threads proposal) — every
+                // memarg-carrying op encodes [memIdx:u32][offset:u64]=12
+                // bytes; atomic.fence has no immediates.
+                OpCode.FE => SizeOfAtom(inst.Op.xFE),
                 // No-immediate ops (drop/select/return/unreachable/nop/numeric).
                 _ => 0,
             };
@@ -349,6 +353,19 @@ namespace Wacs.Core.Compilation
             ExtCode.TableSize  => 4,   // tableIdx:u32
             ExtCode.TableFill  => 4,   // tableIdx:u32
             _ => 0,
+        };
+
+        /// <summary>
+        /// 0xFE-prefixed atomic ops (threads proposal). All memarg-carrying
+        /// ops pack <c>[memIdx:u32][offset:u64]</c> for 12 bytes; only
+        /// <c>atomic.fence</c> has no immediate beyond its secondary byte.
+        /// </summary>
+        private static int SizeOfAtom(AtomCode code) => code switch
+        {
+            AtomCode.AtomicFence => 0,
+            // Every other op in the enum is memarg-carrying (loads,
+            // stores, rmw, cmpxchg, wait/notify) — all 12 bytes.
+            _ => 12,
         };
 
         private static int EmitExt(byte[] buf, int writePos, ExtCode code, InstructionBase inst)
@@ -676,6 +693,22 @@ namespace Wacs.Core.Compilation
             return writePos;
         }
 
+        /// <summary>
+        /// Emits 0xFE-prefixed atomic ops (threads proposal). Every
+        /// op except <c>atomic.fence</c> carries a memarg that maps
+        /// exactly like non-atomic memory ops: <c>memIdx:u32</c> +
+        /// <c>offset:u64</c>. The align hint is validation-only and
+        /// omitted from the annotated stream (like non-atomic loads).
+        /// </summary>
+        private static int EmitAtom(byte[] buf, int writePos, AtomCode code, InstructionBase inst)
+        {
+            if (code == AtomCode.AtomicFence) return writePos;
+            var m = (Wacs.Core.Instructions.Atomic.InstAtomicMemoryOp)inst;
+            writePos = WriteU32(buf, writePos, (uint)m.MemIndex);
+            writePos = WriteS64(buf, writePos, m.MemOffset);
+            return writePos;
+        }
+
         private static int Emit(
             byte[] buf, int writePos,
             InstructionBase inst,
@@ -855,6 +888,11 @@ namespace Wacs.Core.Compilation
                 // ---- FD-prefixed: SIMD ops --------
                 case OpCode.FD:
                     writePos = EmitSimd(buf, writePos, op.xFD, inst);
+                    break;
+
+                // ---- FE-prefixed: atomic ops (threads proposal) --------
+                case OpCode.FE:
+                    writePos = EmitAtom(buf, writePos, op.xFE, inst);
                     break;
 
                 // ---- branches ----
