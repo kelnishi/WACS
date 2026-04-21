@@ -119,7 +119,7 @@ namespace Wacs.Core.Runtime.Types
         /// <see cref="Concurrency.ConcurrencyPolicyMode.HostDefined"/>.
         /// Idempotent; safe to call more than once.
         /// </summary>
-        internal void EnableConcurrentGrow()
+        public void EnableConcurrentGrow()
         {
             if (_growLock == null)
                 Interlocked.CompareExchange(ref _growLock,
