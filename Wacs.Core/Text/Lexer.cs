@@ -205,6 +205,34 @@ namespace Wacs.Core.Text
                 {
                     int runStart = _pos;
                     int runLine = line, runCol = col;
+
+                    // Quoted-name extension: `$"..."` — identifier with
+                    // arbitrary printable content delimited by quotes. The
+                    // quotes and any interior chars are part of the token.
+                    if (c == '$' && _pos + 1 < _source.Length && _source[_pos + 1] == '"')
+                    {
+                        Advance();   // consume '$'
+                        Advance();   // opening '"'
+                        while (_pos < _source.Length)
+                        {
+                            char d = _source[_pos];
+                            if (d == '"') { Advance(); break; }
+                            if (d == '\\')
+                            {
+                                if (_pos + 1 >= _source.Length)
+                                    throw new FormatException($"line {line}:{col}: truncated $\"…\" escape");
+                                Advance(); Advance();
+                                continue;
+                            }
+                            if (d == '\n')
+                                throw new FormatException($"line {_line}:{_col}: newline inside $\"…\" name");
+                            Advance();
+                        }
+                        int qLen = _pos - runStart;
+                        tokens.Add(new Token(TokenKind.Id, runStart, qLen, runLine, runCol));
+                        continue;
+                    }
+
                     while (_pos < _source.Length
                         && (IsIdChar(_source[_pos]) || (inAnnot && IsAnnotExtChar(_source[_pos]))))
                         Advance();

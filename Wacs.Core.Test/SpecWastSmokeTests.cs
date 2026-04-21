@@ -90,14 +90,16 @@ namespace Wacs.Core.Test
                 }
                 catch (System.Exception ex)
                 {
-                    failures.Add($"{name}: {ex.GetType().Name}: {ex.Message.Split('\n')[0]}");
+                    var firstLine = ex.Message.Split('\n')[0];
+                    var stack = ex.StackTrace?.Split('\n')[0] ?? "";
+                    failures.Add($"{name}: {ex.GetType().Name}: {firstLine} [at {stack.Trim()}]");
                 }
             }
             // Emit diagnostic counts; don't fail — Phase 1 is incremental.
             // If you want to see which files fail, uncomment the next line
             // or filter to individual cases.
             System.Console.WriteLine($"Spec full-parse: {ok}/{total} OK");
-            foreach (var f in failures.Take(5))
+            foreach (var f in failures.Take(120))
                 System.Console.WriteLine("  " + f);
             Assert.True(total > 0);
         }

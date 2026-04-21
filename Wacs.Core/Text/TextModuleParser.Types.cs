@@ -246,9 +246,10 @@ namespace Wacs.Core.Text
 
         /// <summary>
         /// Parse a <c>(type $id? (func signature))</c> form.
-        /// Also accepts <c>(type (sub final? (func …)))</c> and struct/array
-        /// variants — but the GC subtype forms beyond a plain <c>(func …)</c>
-        /// body are left for a later extension.
+        /// Accepts GC <c>(sub …)</c> and <c>(struct …)</c> / <c>(array …)</c>
+        /// bodies as placeholders (index slot stays consistent; the type
+        /// body is an empty FunctionType so downstream code doesn't
+        /// crash). Full GC body parsing is a follow-up.
         /// </summary>
         private static void ParseTypeForm(TextParseContext ctx, SExpr form)
         {
@@ -261,28 +262,67 @@ namespace Wacs.Core.Text
             i++;
             ExpectConsumed(form, i, "type");
 
-            FunctionType ft;
-            if (body.IsForm("func"))
-            {
-                int bi = 1;
-                ft = ParseFuncTypeSignature(ctx, body, ref bi);
-                ExpectConsumed(body, bi, "func");
-            }
-            else
-            {
-                // Struct / array / sub — not covered in phase 1.3. Emit a
-                // stub empty FunctionType so the index slot stays consistent,
-                // and throw a clear error so it's not silently accepted. This
-                // gives a single choke point for GC-types work in phase 1.5+.
-                throw new NotSupportedException(
-                    $"line {body.Token.Line}: (type …) body '{body.Head}' not yet supported in phase 1.3 (func only)");
-            }
+            FunctionType ft = ParseTypeBody(ctx, body);
 
             // Bind the $name → index, then append to Module.Types as a single
             // non-recursive SubType (no supertypes, final).
             ctx.Types.Declare(name);
             var sub = new SubType(ft, final: true);
             ctx.Module.Types.Add(new RecursiveType(sub));
+        }
+
+        /// <summary>
+        /// Parse a <c>(rec (type …) (type …) …)</c> recursive type group.
+        /// Each inner <c>(type …)</c> becomes a separate entry in
+        /// <c>Module.Types</c>; we don't yet thread the recursive-group
+        /// semantics (for GC). Indices match pre-scan's allocation.
+        /// </summary>
+        private static void ParseRecTypeForm(TextParseContext ctx, SExpr form)
+        {
+            for (int i = 1; i < form.Children.Count; i++)
+            {
+                var inner = form.Children[i];
+                if (inner.Kind != SExprKind.List || !inner.IsForm("type"))
+                    throw new FormatException(
+                        $"line {inner.Token.Line}: (rec …) expects (type …) children");
+                ParseTypeForm(ctx, inner);
+            }
+        }
+
+        /// <summary>
+        /// Parse the body of a (type …) form — func, struct, array, or sub.
+        /// Returns a FunctionType (empty for non-func forms, as a
+        /// placeholder until full GC support lands).
+        /// </summary>
+        private static FunctionType ParseTypeBody(TextParseContext ctx, SExpr body)
+        {
+            if (body.IsForm("func"))
+            {
+                int bi = 1;
+                var ft = ParseFuncTypeSignature(ctx, body, ref bi);
+                ExpectConsumed(body, bi, "func");
+                return ft;
+            }
+            if (body.IsForm("sub"))
+            {
+                // (sub final? (super-id*) body)
+                // Drill into the inner body (last child that's a list form).
+                for (int k = body.Children.Count - 1; k >= 1; k--)
+                {
+                    var ch = body.Children[k];
+                    if (ch.Kind == SExprKind.List
+                        && (ch.IsForm("func") || ch.IsForm("struct") || ch.IsForm("array")))
+                        return ParseTypeBody(ctx, ch);
+                }
+                return FunctionType.Empty;
+            }
+            if (body.IsForm("struct") || body.IsForm("array"))
+            {
+                // GC struct/array — placeholder empty FunctionType for now.
+                return FunctionType.Empty;
+            }
+            throw new FormatException(
+                $"line {body.Token.Line}: (type …) body '{body.Head}' not recognized");
         }
 
         // ---- Type-use ------------------------------------------------------

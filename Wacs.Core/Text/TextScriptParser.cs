@@ -26,6 +26,23 @@ namespace Wacs.Core.Text
         public static List<ScriptCommand> ParseWast(string source)
         {
             var top = SExprParser.Parse(source);
+            // WAT's "inline module" syntax: a .wast file may consist of
+            // top-level module sections (func / memory / global / …) with
+            // no outer (module …) wrapper. When detected, synthesize a
+            // single implicit module by re-lexing the source wrapped in
+            // `(module …)`.
+            if (LooksLikeInlineModule(top))
+            {
+                var wrapped = "(module\n" + source + "\n)";
+                return new List<ScriptCommand>
+                {
+                    new ScriptModule {
+                        Line = top[0].Token.Line, Column = top[0].Token.Column,
+                        Kind = ScriptModuleKind.Text,
+                        Module = TextModuleParser.ParseWat(wrapped),
+                    }
+                };
+            }
             var result = new List<ScriptCommand>();
             foreach (var node in top)
             {
@@ -82,6 +99,32 @@ namespace Wacs.Core.Text
                 }
             }
             return result;
+        }
+
+        /// <summary>
+        /// True when a .wast file's top-level forms are all module-section
+        /// keywords (func, memory, global, table, type, import, export,
+        /// elem, data, tag, start) — i.e. an inline-module shorthand.
+        /// </summary>
+        private static bool LooksLikeInlineModule(List<SExpr> top)
+        {
+            if (top.Count == 0) return false;
+            foreach (var node in top)
+            {
+                if (node.Kind != SExprKind.List) return false;
+                var head = node.Head;
+                if (head == null || head.Kind != SExprKind.Atom) return false;
+                if (head.Token.Kind != TokenKind.Keyword) return false;
+                switch (head.AtomText())
+                {
+                    case "func": case "memory": case "global": case "table":
+                    case "type": case "import": case "export": case "elem":
+                    case "data": case "tag": case "start": case "rec":
+                        continue;
+                    default: return false;
+                }
+            }
+            return true;
         }
 
         public static List<ScriptCommand> ParseWast(Stream stream)

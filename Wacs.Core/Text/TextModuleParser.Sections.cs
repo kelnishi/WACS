@@ -57,9 +57,7 @@ namespace Wacs.Core.Text
             {
                 case "func":
                 {
-                    int typeIdx = ParseExplicitTypeUse(ctx, form, ref i);
-                    // TODO phase 1.4: allow inline (param ...) / (result ...)
-                    // syntactic sugar instead of requiring (type $n).
+                    int typeIdx = ParseFuncTypeUseWithNames(ctx, form, ref i, out _);
                     ExpectConsumed(form, i, "func (import)");
                     ctx.Funcs.Declare(name);
                     return new Module.ImportDesc.FuncDesc { TypeIndex = (TypeIdx)typeIdx };
@@ -93,7 +91,7 @@ namespace Wacs.Core.Text
                 }
                 case "tag":
                 {
-                    int typeIdx = ParseExplicitTypeUse(ctx, form, ref i);
+                    int typeIdx = ParseFuncTypeUseWithNames(ctx, form, ref i, out _);
                     ExpectConsumed(form, i, "tag (import)");
                     ctx.Tags.Declare(name);
                     return new Module.ImportDesc.TagDesc
@@ -381,6 +379,18 @@ namespace Wacs.Core.Text
             // The second form should also synthesize an active elem segment;
             // phase 1.6 leaves that for phase 3 integration (the table
             // declaration alone is enough to parse and validate many tests).
+            // Optional leading i32/i64 address-type prefix (WAT memory64
+            // proposal also applies to tables).
+            var tblAddr = AddrType.I32;
+            if (i < form.Children.Count
+                && form.Children[i].Kind == SExprKind.Atom
+                && form.Children[i].Token.Kind == TokenKind.Keyword)
+            {
+                var kw = form.Children[i].AtomText();
+                if (kw == "i32") { tblAddr = AddrType.I32; i++; }
+                else if (kw == "i64") { tblAddr = AddrType.I64; i++; }
+            }
+
             ValType elementType;
             Limits limits;
             if (i < form.Children.Count && IsReftypeHeadAt(form, i))
@@ -395,12 +405,20 @@ namespace Wacs.Core.Text
                 var elemForm = form.Children[i];
                 i++;
                 int n = elemForm.Children.Count - 1;   // minus the `elem` head
-                limits = new Limits(AddrType.I32, n, n);
+                limits = new Limits(tblAddr, n, n);
             }
             else
             {
-                (elementType, limits) = ParseTableTypeInline(ctx, form, ref i);
+                (elementType, limits) = ParseTableTypeInlineWithAddr(ctx, form, ref i, tblAddr);
             }
+
+            // Some spec tests use `(table N reftype initexpr)` where the
+            // trailing expression is a default initializer for all slots
+            // (e.g. `(ref.null func)` or `(ref.func $f)`). Phase 1.8
+            // tolerates but doesn't model this — consume + ignore so the
+            // parse gets past the form.
+            while (i < form.Children.Count && form.Children[i].Kind == SExprKind.List)
+                i++;
             ExpectConsumed(form, i, "table");
 
             int idx = ctx.Tables.Declare(name);
@@ -438,7 +456,32 @@ namespace Wacs.Core.Text
         /// </summary>
         private static (ValType element, Limits limits) ParseTableTypeInline(TextParseContext ctx, SExpr parent, ref int index)
         {
-            var limits = ParseLimitsInline(parent, ref index);
+            return ParseTableTypeInlineWithAddr(ctx, parent, ref index, AddrType.I32);
+        }
+
+        private static (ValType element, Limits limits) ParseTableTypeInlineWithAddr(
+            TextParseContext ctx, SExpr parent, ref int index, AddrType preConsumedAddr)
+        {
+            Limits limits;
+            if (preConsumedAddr != AddrType.I32)
+            {
+                // Address-type prefix was consumed upstream; read min [max]
+                // directly.
+                if (index >= parent.Children.Count)
+                    throw new FormatException($"line {parent.Token.Line}: tabletype missing minimum");
+                long min = ParseUnsignedInt(parent.Children[index]); index++;
+                long? max = null;
+                if (index < parent.Children.Count && parent.Children[index].Kind == SExprKind.Atom
+                    && parent.Children[index].Token.Kind == TokenKind.Reserved)
+                {
+                    max = ParseUnsignedInt(parent.Children[index]); index++;
+                }
+                limits = new Limits(preConsumedAddr, min, max);
+            }
+            else
+            {
+                limits = ParseLimitsInline(parent, ref index);
+            }
             if (index >= parent.Children.Count)
                 throw new FormatException($"line {parent.Token.Line}: tabletype missing element type");
             var elem = ParseValType(ctx, parent.Children[index]);
@@ -460,13 +503,87 @@ namespace Wacs.Core.Text
 
             var pendingExports = ConsumePendingExports(form, ref i);
 
-            // (memory $id? (data …)) — data abbreviation is phase 1.4.
-            var limits = ParseLimitsInline(form, ref i);
+            // (memory $id? [i32|i64] (data "…")) — inline data abbreviation:
+            // memory size inferred from concatenated data bytes, ceiled to
+            // whole 64 KiB pages. Optional i32/i64 address-type prefix.
+            var addrT = AddrType.I32;
+            if (i < form.Children.Count
+                && form.Children[i].Kind == SExprKind.Atom
+                && form.Children[i].Token.Kind == TokenKind.Keyword)
+            {
+                var kw = form.Children[i].AtomText();
+                if (kw == "i32") { addrT = AddrType.I32; i++; }
+                else if (kw == "i64") { addrT = AddrType.I64; i++; }
+            }
+            if (i < form.Children.Count
+                && form.Children[i].Kind == SExprKind.List
+                && form.Children[i].IsForm("data"))
+            {
+                var dataForm = form.Children[i];
+                i++;
+                ExpectConsumed(form, i, "memory");
+                var bytes = ConcatStringsFromForm(dataForm);
+                int pages = (bytes.Length + 65535) / 65536;
+                if (pages == 0) pages = 0;
+                var limits = new Limits(addrT, pages, pages);
+                int idx = ctx.Mems.Declare(name);
+                ctx.Module.Memories.Add(new MemoryType(limits));
+                FlushExports(ctx, pendingExports, ExternalKind.Memory, idx);
+                return;
+            }
+
+            // Re-thread: if we consumed an addr-type prefix for a regular
+            // (memory i64 min max) form, ParseLimitsInline's own i32/i64
+            // peek would normally consume it — here we already did, so we
+            // adapt: pre-parse the numeric part and wrap with the known
+            // addr type.
+            Limits limitsReg;
+            if (addrT != AddrType.I32)
+            {
+                // We already consumed i32/i64 above, but there was no data
+                // form. Parse the remaining min [max] directly.
+                if (i >= form.Children.Count)
+                    throw new FormatException($"line {form.Token.Line}: memory type missing minimum");
+                long min = ParseUnsignedInt(form.Children[i]); i++;
+                long? max = null;
+                if (i < form.Children.Count && form.Children[i].Kind == SExprKind.Atom
+                    && form.Children[i].Token.Kind == TokenKind.Reserved)
+                {
+                    max = ParseUnsignedInt(form.Children[i]); i++;
+                }
+                bool shared = false;
+                if (i < form.Children.Count && form.Children[i].Kind == SExprKind.Atom
+                    && form.Children[i].Token.Kind == TokenKind.Keyword
+                    && form.Children[i].AtomText() == "shared")
+                { shared = true; i++; }
+                limitsReg = new Limits(addrT, min, max, shared);
+            }
+            else
+            {
+                limitsReg = ParseLimitsInline(form, ref i);
+            }
             ExpectConsumed(form, i, "memory");
 
-            int idx = ctx.Mems.Declare(name);
-            ctx.Module.Memories.Add(new MemoryType(limits));
-            FlushExports(ctx, pendingExports, ExternalKind.Memory, idx);
+            int memIdx = ctx.Mems.Declare(name);
+            ctx.Module.Memories.Add(new MemoryType(limitsReg));
+            FlushExports(ctx, pendingExports, ExternalKind.Memory, memIdx);
+        }
+
+        /// <summary>
+        /// Collect the concatenated bytes of all string literals in a
+        /// <c>(data "…" "…" …)</c> form (children after the head).
+        /// </summary>
+        private static byte[] ConcatStringsFromForm(SExpr form)
+        {
+            using var ms = new System.IO.MemoryStream();
+            for (int i = 1; i < form.Children.Count; i++)
+            {
+                var c = form.Children[i];
+                if (c.Kind != SExprKind.Atom || c.Token.Kind != TokenKind.String) continue;
+                var b = form.Lexer.DecodeString(c.Token);
+                ms.Write(b, 0, b.Length);
+            }
+            return ms.ToArray();
         }
 
         /// <summary>
@@ -645,7 +762,7 @@ namespace Wacs.Core.Text
             if (TryConsumeInlineImport(ctx, form, ref i, name, "tag", out var _))
                 return;
             var pendingExports = ConsumePendingExports(form, ref i);
-            int typeIdx = ParseExplicitTypeUse(ctx, form, ref i);
+            int typeIdx = ParseFuncTypeUseWithNames(ctx, form, ref i, out _);
             ExpectConsumed(form, i, "tag");
             int idx = ctx.Tags.Declare(name);
             ctx.Module.Tags.Add(new TagType(TagTypeAttribute.Exception, (TypeIdx)typeIdx));
@@ -786,7 +903,7 @@ namespace Wacs.Core.Text
             {
                 case "func":
                 {
-                    int typeIdx = ParseExplicitTypeUse(ctx, form, ref index);
+                    int typeIdx = ParseFuncTypeUseWithNames(ctx, form, ref index, out _);
                     ExpectConsumed(form, index, "func (inline import)");
                     ctx.Funcs.Declare(name);
                     desc = new Module.ImportDesc.FuncDesc { TypeIndex = (TypeIdx)typeIdx };
@@ -818,7 +935,7 @@ namespace Wacs.Core.Text
                 }
                 case "tag":
                 {
-                    int typeIdx = ParseExplicitTypeUse(ctx, form, ref index);
+                    int typeIdx = ParseFuncTypeUseWithNames(ctx, form, ref index, out _);
                     ExpectConsumed(form, index, "tag (inline import)");
                     ctx.Tags.Declare(name);
                     desc = new Module.ImportDesc.TagDesc { TagDef = new TagType(TagTypeAttribute.Exception, (TypeIdx)typeIdx) };
