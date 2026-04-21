@@ -49,6 +49,12 @@ namespace Wacs.Core.Text
                 if (node.Kind != SExprKind.List || node.Head == null)
                     throw new FormatException(
                         $"line {node.Token.Line}: top-level WAST commands must be parenthesized forms");
+                if (node.Head.Kind != SExprKind.Atom)
+                {
+                    // The head is itself a list (e.g., a nested annotation
+                    // or other unusual shape). Skip — we don't recognize it.
+                    continue;
+                }
                 var kw = node.Head.AtomText();
                 switch (kw)
                 {

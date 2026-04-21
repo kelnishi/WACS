@@ -165,12 +165,12 @@ namespace Wacs.Core.Text
                     throw new FormatException($"line {atom.Token.Line}: unknown type {text}");
                 return idx;
             }
-            // Plain numeric — reserved token since it's not keyword / id.
             if (atom.Token.Kind != TokenKind.Reserved)
                 throw new FormatException($"line {atom.Token.Line}: expected type index, got {atom}");
-            if (!uint.TryParse(text, out var n))
-                throw new FormatException($"line {atom.Token.Line}: bad type index '{text}'");
-            return (int)n;
+            return (int)(uint)System.Convert.ToInt64(
+                text.Replace("_", "").StartsWith("0x") || text.Replace("_", "").StartsWith("0X")
+                    ? System.Convert.ToUInt32(text.Replace("_", "").Substring(2), 16)
+                    : System.Convert.ToUInt32(text.Replace("_", ""), 10));
         }
 
         // ---- (param ...) / (result ...) -----------------------------------

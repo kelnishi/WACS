@@ -91,8 +91,10 @@ namespace Wacs.Core.Test
                 catch (System.Exception ex)
                 {
                     var firstLine = ex.Message.Split('\n')[0];
-                    var stack = ex.StackTrace?.Split('\n')[0] ?? "";
-                    failures.Add($"{name}: {ex.GetType().Name}: {firstLine} [at {stack.Trim()}]");
+                    var stackLines = ex.StackTrace?.Split('\n') ?? new string[0];
+                    // Show the first 3 stack frames for context.
+                    var head = string.Join(" -> ", stackLines.Take(3).Select(s => s.Trim()));
+                    failures.Add($"{name}: {ex.GetType().Name}: {firstLine} [at {head}]");
                 }
             }
             // Emit diagnostic counts; don't fail — Phase 1 is incremental.

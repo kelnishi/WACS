@@ -76,52 +76,66 @@ namespace Wacs.Core.Test
                     continue;
                 }
 
-                // Collect the binary-produced modules in declaration order.
-                var wasms = Directory.EnumerateFiles(wastJsonDir, "*.wasm")
-                    .OrderBy(p => int.Parse(Path.GetFileNameWithoutExtension(p)!.Split('.').Last()))
-                    .ToList();
+                // Index .wasm files by their numeric suffix — these match
+                // the source-order position of each (module …) command in
+                // the .wast.
+                var wasmByIdx = Directory.EnumerateFiles(wastJsonDir, "*.wasm")
+                    .ToDictionary(p => int.Parse(Path.GetFileNameWithoutExtension(p)!.Split('.').Last()));
 
-                // Pair up my ScriptModule (kind=Text) commands with the
-                // on-disk .wasm files in source order.
-                var textModules = script.OfType<ScriptModule>()
-                    .Where(m => m.Kind == ScriptModuleKind.Text && m.Module != null)
-                    .Select(m => m.Module!)
-                    .ToList();
-
-                int pairCount = Math.Min(textModules.Count, wasms.Count);
-                if (pairCount == 0)
+                // Walk ALL modules (top-level + embedded in assertions) in
+                // source order to match wast2json's numbering.
+                var allModules = new List<ScriptModule>();
+                foreach (var cmd in script)
                 {
-                    // No text-form modules to compare — common for .wast that
-                    // are mostly (module binary …) assertion stress tests.
-                    filesMatched++;
-                    continue;
+                    switch (cmd)
+                    {
+                        case ScriptModule sm: allModules.Add(sm); break;
+                        case ScriptAssertInvalid   ai when ai.Module != null:  allModules.Add(ai.Module); break;
+                        case ScriptAssertMalformed am when am.Module != null:  allModules.Add(am.Module); break;
+                        case ScriptAssertUnlinkable au when au.Module != null: allModules.Add(au.Module); break;
+                        case ScriptAssertTrap at when at.Module != null: allModules.Add(at.Module); break;
+                    }
                 }
-
+                int moduleOrdinal = -1;
                 bool fileOK = true;
-                for (int k = 0; k < pairCount; k++)
+                bool anyCompared = false;
+                foreach (var sm in allModules)
                 {
+                    moduleOrdinal++;
+                    if (sm.Kind != ScriptModuleKind.Text || sm.Module == null) continue;
+                    if (!wasmByIdx.TryGetValue(moduleOrdinal, out var wasmPath)) continue;
+
                     Module binaryModule;
                     try
                     {
-                        using var fs = File.OpenRead(wasms[k]);
+                        using var fs = File.OpenRead(wasmPath);
                         binaryModule = BinaryModuleParser.ParseWasm(fs);
                     }
                     catch (Exception ex)
                     {
-                        perFileStatus.Add($"{wastName}[{k}]: binary parse threw — {ex.GetType().Name}: {ex.Message.Split('\n')[0]}");
+                        perFileStatus.Add($"{wastName}[{moduleOrdinal}]: binary parse threw — {ex.GetType().Name}: {ex.Message.Split('\n')[0]}");
                         fileOK = false;
-                        break;
+                        anyCompared = true;
+                        continue;
                     }
+                    anyCompared = true;
                     modulesChecked++;
-                    var report = ModuleEquivalence.Compare(textModules[k], binaryModule);
+                    var report = ModuleEquivalence.Compare(sm.Module, binaryModule);
                     if (report.IsMatch)
                         modulesMatched++;
                     else
                     {
-                        if (fileOK) // record first divergence per file
-                            perFileStatus.Add($"{wastName}[{k}]: {report.Mismatches.Count} mismatch(es) — first: {report.Mismatches[0]}");
+                        if (fileOK)
+                            perFileStatus.Add($"{wastName}[{moduleOrdinal}]: {report.Mismatches.Count} mismatch(es) — first: {report.Mismatches[0]}");
                         fileOK = false;
                     }
+                }
+                if (!anyCompared)
+                {
+                    // No text-form modules to compare — common for .wast
+                    // files that are mostly binary/quote module assertions.
+                    filesMatched++;
+                    continue;
                 }
                 if (fileOK) filesMatched++;
             }

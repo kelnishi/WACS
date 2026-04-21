@@ -8,6 +8,8 @@
 
 using System;
 using System.Collections.Generic;
+using Wacs.Core.Instructions;
+using Wacs.Core.OpCodes;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 
@@ -111,16 +113,14 @@ namespace Wacs.Core.Text
         {
             int i = 1;
             var name = TryReadIdAt(form, ref i);
-
-            // Inline (import "mod" "name") abbreviation:
-            //   (func $f (import "m" "n") typeuse) == (import "m" "n" (func $f typeuse))
-            if (TryConsumeInlineImport(ctx, form, ref i, name, "func", out var importFor))
-                return;
-
-            // Inline (export "name") annotations may appear after the $id.
-            // Each export expands to a free-standing Module.Export at the
-            // resolved funcidx.
             var pendingExports = ConsumePendingExports(form, ref i);
+
+            // Inline (import "mod" "name") may appear anywhere in the
+            // header — before, after, or between (export …) annotations.
+            if (TryConsumeInlineImport(ctx, form, ref i, name, "func", pendingExports, out _))
+                return;
+            // Scan again in case more exports follow the import spot.
+            pendingExports.AddRange(ConsumePendingExports(form, ref i));
 
             // typeuse: either explicit (type $n) followed by optional
             // redundant param/result forms, or inline param/result forms
@@ -132,7 +132,12 @@ namespace Wacs.Core.Text
             // the referenced FunctionType; declared locals follow via
             // (local $name? T*) forms.
             var fctx = new TextFunctionContext(ctx);
-            FunctionType ft = ctx.Module.Types[typeIdx];
+            // Out-of-range typeuse references are intentionally-invalid
+            // modules (spec assert_invalid tests). Substitute an empty
+            // FunctionType so the parse succeeds — validation will reject.
+            FunctionType ft = (typeIdx < 0 || typeIdx >= ctx.Module.Types.Count)
+                ? FunctionType.Empty
+                : (FunctionType)ctx.Module.Types[typeIdx];
             int paramCount = ft.ParameterTypes.Arity;
             for (int p = 0; p < paramCount; p++)
             {
@@ -367,11 +372,11 @@ namespace Wacs.Core.Text
         {
             int i = 1;
             var name = TryReadIdAt(form, ref i);
-
-            if (TryConsumeInlineImport(ctx, form, ref i, name, "table", out var _))
-                return;
-
             var pendingExports = ConsumePendingExports(form, ref i);
+
+            if (TryConsumeInlineImport(ctx, form, ref i, name, "table", pendingExports, out _))
+                return;
+            pendingExports.AddRange(ConsumePendingExports(form, ref i));
 
             // Two forms:
             //   (table limits reftype)            — explicit size
@@ -393,6 +398,7 @@ namespace Wacs.Core.Text
 
             ValType elementType;
             Limits limits;
+            SExpr? inlineElemForm = null;
             if (i < form.Children.Count && IsReftypeHeadAt(form, i))
             {
                 elementType = ParseValType(ctx, form.Children[i]);
@@ -402,9 +408,9 @@ namespace Wacs.Core.Text
                 if (i >= form.Children.Count || !form.Children[i].IsForm("elem"))
                     throw new FormatException(
                         $"line {form.Token.Line}: (table reftype …) abbreviation requires (elem …)");
-                var elemForm = form.Children[i];
+                inlineElemForm = form.Children[i];
                 i++;
-                int n = elemForm.Children.Count - 1;   // minus the `elem` head
+                int n = inlineElemForm.Children.Count - 1;   // minus the `elem` head
                 limits = new Limits(tblAddr, n, n);
             }
             else
@@ -424,6 +430,27 @@ namespace Wacs.Core.Text
             int idx = ctx.Tables.Declare(name);
             ctx.Module.Tables.Add(new TableType(elementType, limits));
             FlushExports(ctx, pendingExports, ExternalKind.Table, idx);
+
+            // If this was the (table reftype (elem …)) abbreviation,
+            // synthesize an active elem segment at offset 0 referencing
+            // this table.
+            if (inlineElemForm != null)
+            {
+                var inits = new List<Expression>();
+                for (int k = 1; k < inlineElemForm.Children.Count; k++)
+                {
+                    var child = inlineElemForm.Children[k];
+                    inits.Add(ParseElemInit(ctx, child, elementType));
+                }
+                var offset = BuildConstOffset(0);
+                var mode = new Module.ElementMode.ActiveMode((TableIdx)idx, offset);
+                var segment = Module.ElementSegment.Create(elementType, inits.ToArray(), mode);
+                var existingE = ctx.Module.Elements;
+                var nextE = new Module.ElementSegment[existingE.Length + 1];
+                Array.Copy(existingE, nextE, existingE.Length);
+                nextE[existingE.Length] = segment;
+                ctx.Module.Elements = nextE;
+            }
         }
 
         /// <summary>
@@ -497,11 +524,11 @@ namespace Wacs.Core.Text
         {
             int i = 1;
             var name = TryReadIdAt(form, ref i);
-
-            if (TryConsumeInlineImport(ctx, form, ref i, name, "memory", out var _))
-                return;
-
             var pendingExports = ConsumePendingExports(form, ref i);
+
+            if (TryConsumeInlineImport(ctx, form, ref i, name, "memory", pendingExports, out _))
+                return;
+            pendingExports.AddRange(ConsumePendingExports(form, ref i));
 
             // (memory $id? [i32|i64] (data "…")) — inline data abbreviation:
             // memory size inferred from concatenated data bytes, ceiled to
@@ -529,6 +556,16 @@ namespace Wacs.Core.Text
                 int idx = ctx.Mems.Declare(name);
                 ctx.Module.Memories.Add(new MemoryType(limits));
                 FlushExports(ctx, pendingExports, ExternalKind.Memory, idx);
+                // Synthesize the active data segment at offset 0.
+                var offsetExpr = BuildConstOffset(0);
+                var seg = Module.Data.Create(
+                    new Module.DataMode.ActiveMode((MemIdx)idx, offsetExpr),
+                    bytes);
+                var existingD = ctx.Module.Datas;
+                var nextD = new Module.Data[existingD.Length + 1];
+                Array.Copy(existingD, nextD, existingD.Length);
+                nextD[existingD.Length] = seg;
+                ctx.Module.Datas = nextD;
                 return;
             }
 
@@ -634,11 +671,11 @@ namespace Wacs.Core.Text
         {
             int i = 1;
             var name = TryReadIdAt(form, ref i);
-
-            if (TryConsumeInlineImport(ctx, form, ref i, name, "global", out var _))
-                return;
-
             var pendingExports = ConsumePendingExports(form, ref i);
+
+            if (TryConsumeInlineImport(ctx, form, ref i, name, "global", pendingExports, out _))
+                return;
+            pendingExports.AddRange(ConsumePendingExports(form, ref i));
 
             var gt = ParseGlobalTypeInline(ctx, form, ref i);
 
@@ -759,9 +796,10 @@ namespace Wacs.Core.Text
         {
             int i = 1;
             var name = TryReadIdAt(form, ref i);
-            if (TryConsumeInlineImport(ctx, form, ref i, name, "tag", out var _))
-                return;
             var pendingExports = ConsumePendingExports(form, ref i);
+            if (TryConsumeInlineImport(ctx, form, ref i, name, "tag", pendingExports, out _))
+                return;
+            pendingExports.AddRange(ConsumePendingExports(form, ref i));
             int typeIdx = ParseFuncTypeUseWithNames(ctx, form, ref i, out _);
             ExpectConsumed(form, i, "tag");
             int idx = ctx.Tags.Declare(name);
@@ -769,27 +807,311 @@ namespace Wacs.Core.Text
             FlushExports(ctx, pendingExports, ExternalKind.Tag, idx);
         }
 
-        // ---- (elem …) / (data …) placeholders -----------------------------
+        // ---- (elem …) -----------------------------------------------------
+        //
+        // WAT supports several shapes:
+        //   (elem $id? (table $t)? (offset expr) reftype? init*)   active
+        //   (elem $id? (offset expr) init*)                        active table 0
+        //   (elem $id? reftype init*)                              passive
+        //   (elem $id? declare reftype init*)                      declarative
+        //   (elem $id? funcref (elem ...))                         legacy
+        // Each `init` is either a funcidx atom, `(ref.func $f)`,
+        // `(ref.null ht)`, or `(item expr)`.
 
         private static void ParseElemForm(TextParseContext ctx, SExpr form)
         {
-            // Deferred to phase 1.4 — element initializers are expression
-            // bodies. For phase 1.3 we reserve an index slot with an empty
-            // passive segment so downstream order tracking stays coherent.
             int i = 1;
             var name = TryReadIdAt(form, ref i);
-            ctx.Elems.Declare(name);
-            // Do not populate ctx.Module.Elements — phase 1.4 will fill these
-            // in with proper initializer expressions.
+            int idx = ctx.Elems.Declare(name);
+
+            // Mode detection: look at the first child.
+            Module.ElementMode mode;
+            ValType reftype = ValType.FuncRef;
+            int restStart = i;
+
+            if (i < form.Children.Count
+                && form.Children[i].Kind == SExprKind.Atom
+                && form.Children[i].Token.Kind == TokenKind.Keyword
+                && form.Children[i].AtomText() == "declare")
+            {
+                i++;
+                mode = new Module.ElementMode.DeclarativeMode();
+                if (i < form.Children.Count && IsReftypeHeadAt(form, i))
+                {
+                    reftype = ParseValType(ctx, form.Children[i]);
+                    i++;
+                }
+            }
+            else if (i < form.Children.Count
+                && form.Children[i].Kind == SExprKind.List
+                && (form.Children[i].IsForm("table") || form.Children[i].IsForm("offset")
+                    || LooksLikeInstruction(form.Children[i])))
+            {
+                // Active mode
+                uint tableIdx = 0;
+                if (form.Children[i].IsForm("table"))
+                {
+                    var tForm = form.Children[i];
+                    if (tForm.Children.Count >= 2)
+                        tableIdx = ResolveNamespaceIdx(ctx.Tables, tForm.Children[1], "table");
+                    i++;
+                }
+                Expression offset;
+                if (i < form.Children.Count && form.Children[i].IsForm("offset"))
+                {
+                    offset = ParseOffsetExpression(ctx, form.Children[i]);
+                    i++;
+                }
+                else if (i < form.Children.Count && form.Children[i].Kind == SExprKind.List
+                    && LooksLikeInstruction(form.Children[i]))
+                {
+                    // Bare (i32.const N) form — single-instruction init expr.
+                    offset = ParseSingleInstrExpression(ctx, form.Children[i]);
+                    i++;
+                }
+                else
+                {
+                    offset = Expression.Empty;
+                }
+                mode = new Module.ElementMode.ActiveMode((TableIdx)tableIdx, offset);
+                if (i < form.Children.Count && IsReftypeHeadAt(form, i))
+                {
+                    reftype = ParseValType(ctx, form.Children[i]);
+                    i++;
+                }
+            }
+            else if (i < form.Children.Count && IsReftypeHeadAt(form, i))
+            {
+                // Passive: (elem reftype init*)
+                reftype = ParseValType(ctx, form.Children[i]);
+                i++;
+                mode = new Module.ElementMode.PassiveMode();
+            }
+            else if (i < form.Children.Count
+                && form.Children[i].Kind == SExprKind.Atom
+                && form.Children[i].Token.Kind == TokenKind.Keyword
+                && form.Children[i].AtomText() == "func")
+            {
+                // Legacy: (elem (i32.const N) func $f0 $f1 …) — handled earlier path
+                i++;
+                reftype = ValType.FuncRef;
+                mode = new Module.ElementMode.PassiveMode();
+            }
+            else
+            {
+                // Empty passive or legacy shortcut
+                reftype = ValType.FuncRef;
+                mode = new Module.ElementMode.PassiveMode();
+            }
+
+            // Optional `func` keyword between mode and inits (legacy /
+            // sugar for funcidx lists):
+            //   (elem (offset …) func $f1 $f2 …)
+            // Skip it — the reftype is funcref and the following atoms are
+            // funcidx references.
+            if (i < form.Children.Count
+                && form.Children[i].Kind == SExprKind.Atom
+                && form.Children[i].Token.Kind == TokenKind.Keyword
+                && form.Children[i].AtomText() == "func")
+            {
+                i++;
+                reftype = ValType.FuncRef;
+            }
+
+            // Parse remaining children as init expressions.
+            var inits = new List<Expression>();
+            while (i < form.Children.Count)
+            {
+                var child = form.Children[i++];
+                inits.Add(ParseElemInit(ctx, child, reftype));
+            }
+
+            var segment = Module.ElementSegment.Create(reftype, inits.ToArray(), mode);
+            // Append to Module.Elements (array).
+            var existing = ctx.Module.Elements;
+            var next = new Module.ElementSegment[existing.Length + 1];
+            Array.Copy(existing, next, existing.Length);
+            next[existing.Length] = segment;
+            ctx.Module.Elements = next;
         }
 
+        /// <summary>
+        /// Parse one element-segment initializer. Accepted shapes:
+        ///   $f / 42                (funcidx atom — expands to ref.func)
+        ///   (ref.func $f)          (ref-func expression)
+        ///   (ref.null ht)          (null expression)
+        ///   (item expr)            (arbitrary const expression)
+        /// </summary>
+        private static Expression ParseElemInit(TextParseContext ctx, SExpr node, ValType reftype)
+        {
+            if (node.Kind == SExprKind.Atom)
+            {
+                // Treat as funcidx → ref.func $f
+                uint funcIdx = ResolveNamespaceIdx(ctx.Funcs, node, "func");
+                var inst = Wacs.Core.Instructions.SpecFactory.Factory.CreateInstruction((ByteCode)OpCode.RefFunc);
+                var reader = WatBinaryEncoder.BuildReader(w => w.WriteLeb128U32(funcIdx));
+                var configured = inst.Parse(reader);
+                return new Expression(1, configured);
+            }
+            if (node.IsForm("item"))
+            {
+                // (item expr) — parse the inner expr.
+                if (node.Children.Count < 2) return Expression.Empty;
+                return ParseInitExpressionForm(ctx, node, startIndex: 1);
+            }
+            // Otherwise treat as a single-instruction expression.
+            return ParseSingleInstrExpression(ctx, node);
+        }
+
+        // ---- (data …) -----------------------------------------------------
+        //
+        // Shapes:
+        //   (data $id? (memory $m)? (offset expr) bytes*)    active
+        //   (data $id? (memory $m)? expr bytes*)             active short
+        //   (data $id? bytes*)                               passive
         private static void ParseDataForm(TextParseContext ctx, SExpr form)
         {
-            // Similar to (elem …) — offset expression + bytes decoded in
-            // phase 1.4.
             int i = 1;
             var name = TryReadIdAt(form, ref i);
-            ctx.Datas.Declare(name);
+            int idx = ctx.Datas.Declare(name);
+
+            uint memIdx = 0;
+            Module.DataMode mode;
+            Expression? offset = null;
+
+            if (i < form.Children.Count
+                && form.Children[i].Kind == SExprKind.List
+                && form.Children[i].IsForm("memory"))
+            {
+                var mForm = form.Children[i];
+                if (mForm.Children.Count >= 2)
+                    memIdx = ResolveNamespaceIdx(ctx.Mems, mForm.Children[1], "memory");
+                i++;
+            }
+            if (i < form.Children.Count
+                && form.Children[i].Kind == SExprKind.List
+                && form.Children[i].IsForm("offset"))
+            {
+                offset = ParseOffsetExpression(ctx, form.Children[i]);
+                i++;
+            }
+            else if (i < form.Children.Count
+                && form.Children[i].Kind == SExprKind.List
+                && !form.Children[i].IsForm("memory")
+                && form.Children[i].Head != null
+                && form.Children[i].Head!.Token.Kind == TokenKind.Keyword
+                && !IsStringListStart(form, i))
+            {
+                // Bare (i32.const N) / (i64.const N) or similar init expr.
+                var head = form.Children[i].Head!.AtomText();
+                if (head == "i32.const" || head == "i64.const" || head == "global.get"
+                    || head.StartsWith("ref."))
+                {
+                    offset = ParseSingleInstrExpression(ctx, form.Children[i]);
+                    i++;
+                }
+            }
+            mode = offset != null
+                ? new Module.DataMode.ActiveMode((MemIdx)memIdx, offset)
+                : (Module.DataMode)Module.DataMode.Passive;
+
+            // Remaining children are string literals — concatenated bytes.
+            using var ms = new System.IO.MemoryStream();
+            for (; i < form.Children.Count; i++)
+            {
+                var child = form.Children[i];
+                if (child.Kind == SExprKind.Atom && child.Token.Kind == TokenKind.String)
+                {
+                    var bytes = form.Lexer.DecodeString(child.Token);
+                    ms.Write(bytes, 0, bytes.Length);
+                }
+            }
+            var data = Module.Data.Create(mode, ms.ToArray());
+            // Append
+            var existing = ctx.Module.Datas;
+            var next = new Module.Data[existing.Length + 1];
+            Array.Copy(existing, next, existing.Length);
+            next[existing.Length] = data;
+            ctx.Module.Datas = next;
+        }
+
+        private static bool IsStringListStart(SExpr form, int i) => false;
+
+        /// <summary>
+        /// Build a single-instruction constant expression: <c>i32.const N; end</c>.
+        /// Used to synthesize offset expressions for inline data/elem
+        /// abbreviations where the offset is implicitly 0.
+        /// </summary>
+        private static Expression BuildConstOffset(int value)
+        {
+            var inst = new Wacs.Core.Instructions.Numeric.InstI32Const();
+            var configured = ((Wacs.Core.Instructions.Numeric.InstI32Const)inst.Immediate(value));
+            var seq = new InstructionSequence(new List<InstructionBase> { configured, new InstEnd() });
+            return new Expression(1, seq, isStatic: true);
+        }
+
+        /// <summary>
+        /// Heuristic: does this list look like an instruction form (const,
+        /// global.get, ref.func, ref.null) rather than a structural form
+        /// like (elem), (func), etc.?
+        /// </summary>
+        private static bool LooksLikeInstruction(SExpr node)
+        {
+            if (node.Kind != SExprKind.List) return false;
+            var head = node.Head;
+            if (head == null || head.Kind != SExprKind.Atom) return false;
+            if (head.Token.Kind != TokenKind.Keyword) return false;
+            var kw = head.AtomText();
+            if (kw == "i32.const" || kw == "i64.const" || kw == "f32.const"
+                || kw == "f64.const" || kw == "global.get"
+                || kw.StartsWith("ref."))
+                return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Parse an <c>(offset expr)</c> form, returning a const expression
+        /// constructed from the inner instruction(s).
+        /// </summary>
+        private static Expression ParseOffsetExpression(TextParseContext ctx, SExpr form)
+        {
+            // (offset i_folded*) — 1+ folded/plain instructions making up a
+            // constant expression, terminating with an implicit end.
+            return ParseInitExpressionForm(ctx, form, startIndex: 1);
+        }
+
+        /// <summary>
+        /// Build a const expression from a single folded instruction (e.g.,
+        /// <c>(i32.const 42)</c>).
+        /// </summary>
+        private static Expression ParseSingleInstrExpression(TextParseContext ctx, SExpr node)
+        {
+            if (node.Kind != SExprKind.List)
+                return Expression.Empty;
+            var fctx = new TextFunctionContext(ctx);
+            var output = new List<InstructionBase>();
+            ParseFoldedInstruction(fctx, node, output);
+            output.Add(new InstEnd());
+            return new Expression(1, new InstructionSequence(output), isStatic: true);
+        }
+
+        /// <summary>
+        /// Parse an init-expression inside a wrapping form, starting at
+        /// <paramref name="startIndex"/> and consuming all remaining
+        /// children as the expression body.
+        /// </summary>
+        private static Expression ParseInitExpressionForm(TextParseContext ctx, SExpr form, int startIndex)
+        {
+            var fctx = new TextFunctionContext(ctx);
+            var output = new List<InstructionBase>();
+            for (int k = startIndex; k < form.Children.Count; k++)
+            {
+                var child = form.Children[k];
+                if (child.Kind != SExprKind.List) continue;
+                ParseFoldedInstruction(fctx, child, output);
+            }
+            output.Add(new InstEnd());
+            return new Expression(1, new InstructionSequence(output), isStatic: true);
         }
 
         // ---- Helpers ------------------------------------------------------
@@ -881,7 +1203,8 @@ namespace Wacs.Core.Text
         /// </summary>
         private static bool TryConsumeInlineImport(
             TextParseContext ctx, SExpr form, ref int index,
-            string? name, string kind, out Module.Import? import)
+            string? name, string kind, List<string> pendingExports,
+            out Module.Import? import)
         {
             import = null;
             if (index >= form.Children.Count) return false;
@@ -951,6 +1274,30 @@ namespace Wacs.Core.Text
                 Desc = desc,
             };
             AppendImport(ctx, import);
+            // Inline exports attached to this entity now refer to the
+            // imported entity by its namespace index.
+            if (pendingExports.Count > 0)
+            {
+                ExternalKind ek = kind switch
+                {
+                    "func"   => ExternalKind.Function,
+                    "table"  => ExternalKind.Table,
+                    "memory" => ExternalKind.Memory,
+                    "global" => ExternalKind.Global,
+                    "tag"    => ExternalKind.Tag,
+                    _ => throw new InvalidOperationException($"unknown kind {kind}"),
+                };
+                int flushIdx = kind switch
+                {
+                    "func"   => ctx.Funcs.Count - 1,
+                    "table"  => ctx.Tables.Count - 1,
+                    "memory" => ctx.Mems.Count - 1,
+                    "global" => ctx.Globals.Count - 1,
+                    "tag"    => ctx.Tags.Count - 1,
+                    _ => throw new InvalidOperationException($"unknown kind {kind}"),
+                };
+                FlushExports(ctx, pendingExports, ek, flushIdx);
+            }
             return true;
         }
 
