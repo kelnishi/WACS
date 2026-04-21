@@ -80,13 +80,20 @@ namespace Wacs.Core.Text
         }
 
         /// <summary>
-        /// The raw lexeme text of this atom. Throws on lists.
+        /// The lexeme text of this atom. Throws on lists.
+        /// For <see cref="TokenKind.Id"/> tokens, canonicalizes the
+        /// <c>$"..."</c> quoted form to the equivalent <c>$name</c> form
+        /// so namespace lookups unify both spellings.
         /// </summary>
         public string AtomText()
         {
             if (Kind != SExprKind.Atom)
                 throw new System.InvalidOperationException("AtomText called on a list");
-            return Lexer.Slice(Token);
+            var raw = Lexer.Slice(Token);
+            if (Token.Kind == TokenKind.Id
+                && raw.Length >= 3 && raw[0] == '$' && raw[1] == '"' && raw[raw.Length - 1] == '"')
+                return "$" + raw.Substring(2, raw.Length - 3);
+            return raw;
         }
 
         public override string ToString()

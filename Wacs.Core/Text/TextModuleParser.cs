@@ -59,10 +59,31 @@ namespace Wacs.Core.Text
                 && moduleForm.Children[i].Token.Kind == TokenKind.Id)
             {
                 // Module name — binary modules don't surface this anywhere
-                // structural, but render / debugging code reads Module.Names
-                // or similar. Ignored at Phase 1.3; Phase 1.6 will thread it
-                // into the Names section if/when we need round-trip fidelity.
+                // structural. Round-trip into Names is a follow-up.
                 i++;
+            }
+            // Component-model extension: `(module definition $id …)` and
+            // `(module instance $id $src)` — the "instance" form is an
+            // instantiation reference, not a module definition. Skip
+            // entirely; return an empty Module.
+            if (i < moduleForm.Children.Count
+                && moduleForm.Children[i].Kind == SExprKind.Atom
+                && moduleForm.Children[i].Token.Kind == TokenKind.Keyword)
+            {
+                var mk = moduleForm.Children[i].AtomText();
+                if (mk == "instance")
+                {
+                    FinalizeModule(ctx);
+                    return ctx.Module;
+                }
+                if (mk == "definition")
+                {
+                    i++;
+                    // $id may follow the marker
+                    if (i < moduleForm.Children.Count
+                        && moduleForm.Children[i].Kind == SExprKind.Atom
+                        && moduleForm.Children[i].Token.Kind == TokenKind.Id) i++;
+                }
             }
 
             // Pass 1: pre-declare every named entity across all namespaces

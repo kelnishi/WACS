@@ -181,22 +181,15 @@ namespace Wacs.Core.Text
         private static void ParseBlockFolded(
             TextFunctionContext fctx, SExpr node, string kw, List<InstructionBase> output)
         {
-            int i = 1;
-            var label = TryConsumeLabelId(node, ref i);
-            var blockType = ParseBlockType(fctx.Module, node, ref i);
+            int ii = 1;
+            var label = TryConsumeLabelId(node, ref ii);
+            var blockType = ParseBlockType(fctx.Module, node, ref ii);
             fctx.LabelStack.Add(label);
             try
             {
-                var inner = new List<InstructionBase>();
-                while (i < node.Children.Count)
-                {
-                    var child = node.Children[i++];
-                    if (child.Kind != SExprKind.List)
-                        throw new FormatException(
-                            $"line {child.Token.Line}: block body inside folded form must use folded instructions");
-                    ParseFoldedInstruction(fctx, child, inner);
-                }
-                // Append the implicit `end` for the inner sequence.
+                // Body may mix folded (parenthesized) and plain (atom-run)
+                // instructions — spec allows both inside a folded block.
+                var inner = ParseInstrList(fctx, node, ref ii, InstrStop.None, out _);
                 inner.Add(new InstEnd());
                 var seq = new InstructionSequence(inner);
                 var block = kw == "block"
@@ -719,13 +712,62 @@ namespace Wacs.Core.Text
                 }
                 case "memory.init":
                 {
-                    uint d = ResolveNamespaceIdx(fctx.Module.Datas, ReadImmIdxAtom(parent, ref i, kw), "data");
-                    return DecodeViaBinary((ByteCode)ExtCode.MemoryInit, w => { w.WriteLeb128U32(d); w.Write((byte)0); });
+                    // (memory.init $data)           — memory 0 implicit
+                    // (memory.init $mem $data)      — explicit memory
+                    byte mem = 0;
+                    uint d;
+                    var first = parent.Children[i];
+                    bool hasSecond = i + 1 < parent.Children.Count
+                        && parent.Children[i + 1].Kind == SExprKind.Atom
+                        && parent.Children[i + 1].Token.Kind != TokenKind.Keyword;
+                    if (hasSecond)
+                    {
+                        mem = (byte)ResolveNamespaceIdx(fctx.Module.Mems, first, "memory");
+                        i++;
+                        d = ResolveNamespaceIdx(fctx.Module.Datas, parent.Children[i], "data");
+                        i++;
+                    }
+                    else
+                    {
+                        d = ResolveNamespaceIdx(fctx.Module.Datas, first, "data");
+                        i++;
+                    }
+                    byte memC = mem;
+                    return DecodeViaBinary((ByteCode)ExtCode.MemoryInit, w => { w.WriteLeb128U32(d); w.Write(memC); });
                 }
                 case "memory.copy":
-                    return DecodeViaBinary((ByteCode)ExtCode.MemoryCopy, w => { w.Write((byte)0); w.Write((byte)0); });
+                {
+                    byte dst = 0, src = 0;
+                    if (i < parent.Children.Count
+                        && parent.Children[i].Kind == SExprKind.Atom
+                        && parent.Children[i].Token.Kind != TokenKind.Keyword)
+                    {
+                        dst = (byte)ResolveNamespaceIdx(fctx.Module.Mems, parent.Children[i], "memory");
+                        i++;
+                        if (i < parent.Children.Count
+                            && parent.Children[i].Kind == SExprKind.Atom
+                            && parent.Children[i].Token.Kind != TokenKind.Keyword)
+                        {
+                            src = (byte)ResolveNamespaceIdx(fctx.Module.Mems, parent.Children[i], "memory");
+                            i++;
+                        }
+                    }
+                    byte d = dst, s = src;
+                    return DecodeViaBinary((ByteCode)ExtCode.MemoryCopy, w => { w.Write(d); w.Write(s); });
+                }
                 case "memory.fill":
-                    return DecodeViaBinary((ByteCode)ExtCode.MemoryFill, w => w.Write((byte)0));
+                {
+                    byte mem = 0;
+                    if (i < parent.Children.Count
+                        && parent.Children[i].Kind == SExprKind.Atom
+                        && parent.Children[i].Token.Kind != TokenKind.Keyword)
+                    {
+                        mem = (byte)ResolveNamespaceIdx(fctx.Module.Mems, parent.Children[i], "memory");
+                        i++;
+                    }
+                    byte m = mem;
+                    return DecodeViaBinary((ByteCode)ExtCode.MemoryFill, w => w.Write(m));
+                }
                 case "data.drop":
                 {
                     uint d = ResolveNamespaceIdx(fctx.Module.Datas, ReadImmIdxAtom(parent, ref i, kw), "data");
@@ -734,21 +776,27 @@ namespace Wacs.Core.Text
                 case "select":
                 {
                     // `select` (no type) — zero-immediate. Mapped to Select.
-                    // `select (result T)` becomes SelectT with a type vec.
+                    // `select (result T)*` (one or more result annotations)
+                    // becomes SelectT with a concatenated type vec.
                     if (i < parent.Children.Count
                         && parent.Children[i].Kind == SExprKind.List
                         && parent.Children[i].IsForm("result"))
                     {
-                        var rForm = parent.Children[i];
-                        i++;
                         var types = new List<ValType>();
-                        for (int j = 1; j < rForm.Children.Count; j++)
-                            types.Add(ParseValType(fctx.Module, rForm.Children[j]));
+                        while (i < parent.Children.Count
+                            && parent.Children[i].Kind == SExprKind.List
+                            && parent.Children[i].IsForm("result"))
+                        {
+                            var rForm = parent.Children[i];
+                            i++;
+                            for (int j = 1; j < rForm.Children.Count; j++)
+                                types.Add(ParseValType(fctx.Module, rForm.Children[j]));
+                        }
                         return DecodeViaBinary((ByteCode)OpCode.SelectT, w =>
                         {
                             w.WriteLeb128U32((uint)types.Count);
                             foreach (var t in types)
-                                w.WriteLeb128S32((int)t);
+                                WriteValTypeByte(w, t);
                         });
                     }
                     return SpecFactory.Factory.CreateInstruction((ByteCode)OpCode.Select);
@@ -989,6 +1037,26 @@ namespace Wacs.Core.Text
                 }
                 WriteLeb128U64(w, offset);
             });
+        }
+
+        /// <summary>
+        /// Emit the single-byte binary form of a <see cref="ValType"/> that
+        /// the binary parser expects. For abstract types the byte is the
+        /// low byte of the enum; for def-type references the encoding
+        /// requires the RefHt / RefNullHt prefix followed by an LEB128
+        /// s33 type index — handled here as well.
+        /// </summary>
+        private static void WriteValTypeByte(BinaryWriter w, ValType t)
+        {
+            if (t.IsDefType())
+            {
+                // typeidx form — emit the (ref [null]? <idx>) encoding:
+                // prefix byte then s33 LEB.
+                w.Write(t.IsNullable() ? (byte)0x63 : (byte)0x64);
+                w.WriteLeb128S32(t.Index().Value);
+                return;
+            }
+            w.Write((byte)((uint)t & 0xFF));
         }
 
         private static bool IsDecimalOrHexInt(string text)

@@ -55,6 +55,13 @@ namespace Wacs.Core
                 Mode.SegmentType = Type;
             }
 
+            /// <summary>
+            /// Internal factory for the text parser. Takes parsed
+            /// initializer expressions and an already-constructed mode.
+            /// </summary>
+            internal static ElementSegment Create(ValType type, Expression[] expressions, ElementMode mode) =>
+                new ElementSegment(type, expressions, mode);
+
             private ElementSegment(TableIdx tableIndex, Expression e, ValType type, InstructionBase[] funcIndices)
             {
                 Type = type;
