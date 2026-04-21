@@ -50,17 +50,35 @@ namespace Wacs.Core.Runtime
 
         private readonly Stack<BlockTarget> _linkLabelStack = new();
         private readonly ArrayPool<Value> _localsDataPool;
-        public readonly RuntimeAttributes Attributes;
         public readonly Stopwatch InstructionTimer = new();
 
-        public readonly InstructionSequence linkedInstructions = new();
         public readonly OpStack OpStack;
 
         public readonly Stopwatch ProcessTimer = new();
 
-        public readonly Store Store;
+        /// <summary>
+        /// Shared runtime state owned by the <see cref="WasmRuntime"/> and referenced
+        /// by every <see cref="ExecContext"/> bound to it. Contains the <see cref="Store"/>,
+        /// <see cref="RuntimeAttributes"/>, and linked-instruction arrays — all treated as
+        /// read-only post-instantiation so multiple per-thread ExecContexts (Layer 1c)
+        /// can share it safely without locks.
+        /// </summary>
+        internal readonly SharedRuntimeState Shared;
 
-        public InstructionBase[] _currentSequence;
+        public Store Store => Shared.Store;
+        public RuntimeAttributes Attributes => Shared.Attributes;
+        public InstructionSequence linkedInstructions => Shared.LinkedInstructions;
+
+        /// <summary>
+        /// Hot-path dispatch reads this property; the JIT inlines the Shared-field
+        /// delegation into a single load. Set once by <see cref="CacheInstructions"/>
+        /// during instantiation.
+        /// </summary>
+        public InstructionBase[] _currentSequence
+        {
+            get => Shared.CurrentSequence!;
+            set => Shared.CurrentSequence = value;
+        }
         // public List<InstructionBase> _sequenceInstructions;
 
 
@@ -129,25 +147,35 @@ namespace Wacs.Core.Runtime
         /// </summary>
         internal System.Collections.Generic.Stack<Compilation.SwitchCallFrame> _switchCallStack;
 
+        /// <summary>
+        /// Legacy constructor — builds a fresh <see cref="SharedRuntimeState"/> from
+        /// the given store/attributes. Used by callers that haven't been migrated to
+        /// hold a SharedRuntimeState directly.
+        /// </summary>
         public ExecContext(Store store, RuntimeAttributes? attributes = default)
+            : this(new SharedRuntimeState(store, attributes ?? new RuntimeAttributes()))
         {
-            Store = store;
-            Attributes = attributes ?? new RuntimeAttributes();
+        }
+
+        /// <summary>
+        /// Primary constructor — per-thread <see cref="ExecContext"/> instances
+        /// (Layer 1c) will call this with a SharedRuntimeState owned by the runtime
+        /// so each thread has its own operand stack, frame pool, locals pool, and
+        /// call stack while sharing the Store, Attributes, and linked-instruction
+        /// arrays.
+        /// </summary>
+        public ExecContext(SharedRuntimeState shared)
+        {
+            Shared = shared;
 
             _framePool = new DefaultObjectPool<Frame>(new StackPoolPolicy<Frame>(), Attributes.MaxCallStack)
                 .Prime(Attributes.InitialCallStack);
-            
+
             _localsDataPool = ArrayPool<Value>.Create(Attributes.MaxFunctionLocals, Attributes.LocalPoolSize);
-            
+
             _callStack = new (Attributes.InitialCallStack);
             _switchCallStack = new System.Collections.Generic.Stack<Compilation.SwitchCallFrame>(Attributes.InitialCallStack);
-            
-            // _hostReturnSequence = InstructionSequence.Empty;
-            
-            // _currentSequence = _hostReturnSequence;
-            
-            // _sequenceCount = _currentSequence.Count;
-            // _sequenceInstructions = _currentSequence._instructions;
+
             InstructionPointer = -1;
 
             OpStack = new(Attributes.MaxOpStack);
