@@ -113,9 +113,10 @@ namespace Wacs.Core.Test
                     }
                     catch (Exception ex)
                     {
+                        // Intentionally-invalid .wasm files (from spec
+                        // assert_invalid / assert_malformed) fail here.
+                        // Not a text-parser mismatch — don't count.
                         perFileStatus.Add($"{wastName}[{moduleOrdinal}]: binary parse threw — {ex.GetType().Name}: {ex.Message.Split('\n')[0]}");
-                        fileOK = false;
-                        anyCompared = true;
                         continue;
                     }
                     anyCompared = true;
@@ -142,7 +143,7 @@ namespace Wacs.Core.Test
 
             _output.WriteLine($"Equivalence: {filesMatched}/{filesTried} files match; modules {modulesMatched}/{modulesChecked}");
             _output.WriteLine($"  parse-fail: {filesParseFail}, missing-wasm: {filesMissingWasm}");
-            foreach (var line in perFileStatus.Take(20))
+            foreach (var line in perFileStatus.Take(50))
                 _output.WriteLine("  " + line);
             if (perFileStatus.Count > 20)
                 _output.WriteLine($"  (+ {perFileStatus.Count - 20} more)");

@@ -122,6 +122,18 @@ namespace Wacs.Core.Instructions
             );
             return this;
         }
+
+        /// <summary>
+        /// Internal factory for the text parser. Populates Block + Catches
+        /// directly so the try_table keyword round-trips as an
+        /// InstTryTable (not lowered to InstBlock).
+        /// </summary>
+        internal InstTryTable Immediate(ValType blockType, InstructionSequence body, CatchType[] catches)
+        {
+            Block = new Block(blockType, body);
+            Catches = catches;
+            return this;
+        }
     }
     
     public class InstThrow : InstructionBase
