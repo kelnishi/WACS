@@ -50,7 +50,7 @@ namespace Wacs.Core.Runtime
 
             try
             {
-                ControlHandlers.InvokeWasm(Context, func);
+                ControlHandlers.InvokeWasm(GetExecContext(), func);
             }
             catch (WasmException we)
             {

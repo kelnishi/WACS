@@ -18,6 +18,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.ExceptionServices;
+using System.Threading;
 using FluentValidation;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
@@ -39,22 +40,43 @@ namespace Wacs.Core.Runtime
         private readonly Dictionary<string, ModuleInstance> _registeredModules = new();
 
         private readonly SharedRuntimeState _shared;
+
+        /// <summary>
+        /// Instantiation-time <see cref="ExecContext"/>. Owns the link-time state
+        /// (<c>_linkLabelStack</c>, <c>LinkConstants</c>, etc.) and is the slot bound
+        /// to the thread that constructed the <see cref="WasmRuntime"/>.
+        /// <para>Module instantiation is single-threaded and always runs against this
+        /// context; see <see cref="InstantiateModule"/>.</para>
+        /// </summary>
         private readonly ExecContext Context;
+
+        /// <summary>
+        /// Per-thread <see cref="ExecContext"/> slots. Each host thread that enters
+        /// the runtime (e.g. via <c>CreateInvoker</c>) lazily gets its own context
+        /// on first access — with its own operand stack, frame pool, locals pool,
+        /// call stack — while sharing <see cref="_shared"/> (Store, Attributes,
+        /// linked instruction arrays) by reference.
+        ///
+        /// <para>The constructing thread's slot is pre-bound to <see cref="Context"/>
+        /// so the single-threaded case preserves existing behavior exactly.</para>
+        ///
+        /// <para><c>trackAllValues</c> is off here; Layer 1d adds a separate tracked
+        /// thread-handle list (on <see cref="IWasmThreadHost"/>) if cancellation
+        /// broadcast needs it. Keeping it off avoids the GC root that ThreadLocal's
+        /// tracking imposes.</para>
+        /// </summary>
+        private readonly ThreadLocal<ExecContext> _threadContext;
+
         public ExecContext ExecContext => GetExecContext();
 
         /// <summary>
-        /// Abstraction point for per-thread <see cref="ExecContext"/> lookup. Layer 1a
-        /// introduces this helper as a single-point-of-change; later subphases swap it
-        /// for a <see cref="System.Threading.ThreadLocal{T}"/> so concurrent host threads
-        /// each get their own operand/frame/locals state without colliding on the
-        /// runtime-singleton <see cref="Context"/> field.
-        ///
-        /// <para>The polymorphic dispatch loop doesn't call this — handlers take
-        /// <c>ExecContext ctx</c> as a parameter and stay on one thread for the duration
-        /// of a call. This helper is only for the runtime's outer entry points
-        /// (CreateInvoker, InstantiateModule glue, binding lookups).</para>
+        /// Returns the calling thread's <see cref="ExecContext"/>, lazily creating
+        /// one on first access for non-constructing threads. Handlers take
+        /// <c>ExecContext ctx</c> as a parameter and stay on one thread — this helper
+        /// is only called from the runtime's outer entry points (CreateInvoker,
+        /// InstantiateModule glue, binding lookups).
         /// </summary>
-        private ExecContext GetExecContext() => Context;
+        private ExecContext GetExecContext() => _threadContext.Value!;
 
         private Store Store => _shared.Store;
         public Store RuntimeStore => _shared.Store;
@@ -70,6 +92,13 @@ namespace Wacs.Core.Runtime
         {
             _shared = new SharedRuntimeState(new Store(), attributes ?? new RuntimeAttributes());
             Context = new ExecContext(_shared);
+
+            // Per-thread ExecContext factory. Constructing thread's slot is pre-bound
+            // to Context (below) so existing single-threaded behavior is unchanged;
+            // any other thread that calls into the runtime gets its own fresh
+            // ExecContext on first access, sharing _shared by reference.
+            _threadContext = new ThreadLocal<ExecContext>(() => new ExecContext(_shared));
+            _threadContext.Value = Context;
 
             //Cached instructions for module initialization
             _dropInst = SpecFactory.Factory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop);
