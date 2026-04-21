@@ -1,5 +1,74 @@
 # Changelog
 
+## [0.8.3] + WACS.Transpiler / Transpiler.Lib [0.2.1] — Threads proposal
+
+Implements the [WebAssembly threads proposal](https://github.com/webassembly/threads)
+across all three execution back-ends. Flips README feature table
+**Threads / threads ❌ → ✅**. All 47 atomic instructions — load/store
+(full-width + subword zero-extending), RMW (add/sub/and/or/xor/xchg in
+i32/i64/subword), cmpxchg, wait/notify, and fence — share the same
+phase-1 primitives so correctness is identical across back-ends.
+
+- **Polymorphic interpreter** (phase 1 / #79):
+  - New `Wacs.Core.Runtime.Concurrency` namespace:
+    `ConcurrencyPolicyMode` (NotSupported / HostDefined),
+    `IConcurrencyPolicy`, `NotSupportedPolicy` (single-thread semantics
+    — matching-value finite-timeout sleeps then returns 1, infinite
+    timeout traps, mismatch returns 2), `HostDefinedPolicy` (real
+    wait/notify via `ConcurrentDictionary<(MemoryInstance, addr),
+    WaitSlot>` + per-waiter `ManualResetEventSlim`).
+  - `MemoryInstance` atomic helpers:
+    `AtomicLoad/Store/Add/Exchange/And/Or/Xor/CompareExchange{Int32,
+    Int64}`. `Interlocked.*` on net8.0+; `CompareExchange` loop
+    fallback on netstandard2.1 for And/Or/Xor.
+    Lazy `ReaderWriterLockSlim _growLock` only allocated when shared
+    + HostDefined — single-threaded modules pay nothing.
+  - 47 instruction classes under `Wacs.Core.Instructions.Atomic/`:
+    `InstAtomicMemoryOp` base with exact-alignment + shared-memory
+    validation, subword CAS via `SubwordCas.Loop` / `SubwordCas.Cmpxchg`.
+  - Factory (`SpecFactoryFE.cs`) + WAT parser extended with
+    `TryGetAtomicMemoryOpcode` dispatch.
+  - `RuntimeAttributes.ConcurrencyPolicy` with IL2CPP-detecting default
+    (`Type.GetType("UnityEngine.Application,…")`, AOT-safe).
+    `RelaxAtomicSharedCheck` escape hatch for toolchains that emit
+    atomics on non-shared memories.
+- **Switch runtime** (phase 2 / #80):
+  - `BytecodeCompiler.SizeOfAtom` + `EmitAtom` — 12-byte memarg
+    (`[memIdx:u32][offset:u64]`) stream encoding, 0 bytes for
+    `atomic.fence`.
+  - `AtomicHandlers.cs` with 47 `[OpHandler(AtomCode.X)]` methods.
+    The source generator (`DispatchGenerator`) auto-discovers them and
+    inlines the bodies into `DispatchFE` — **67 AtomCode references**
+    in the regenerated `GeneratedDispatcher.g.cs` vs. 0 before.
+- **AOT transpiler** (phase 3 / #81):
+  - New `Wacs.Transpiler.Lib/AOT/Emitters/AtomicEmitter.cs` + public
+    `AtomicHelpers` class. Functions containing atomics transpile to
+    native CIL instead of falling back to the interpreter;
+    `FallbackCount` is 0 for mixed-family modules.
+  - Wait/notify routes through `ThinContext.ExecContext?.Concurrency-
+    Policy ?? _standaloneFallback` — standalone / saved-dll consumers
+    get `NotSupportedPolicy` semantics by default.
+- **Tests (new):**
+  - `Wacs.Core.Test.AtomicInstructionTests` — 28 tests (21 polymorphic
+    + 7 switch-runtime parity).
+  - `Wacs.Core.Test.SpecWastThreadsTests` — 4 tests over a pinned
+    snapshot of `WebAssembly/threads@f521d7b3` at
+    `Spec.Test/Data/threads/atomic.wast`.
+  - `Wacs.Transpiler.Test.AtomicEquivalenceTests` — 12 polymorphic ↔
+    transpiled equivalence tests.
+  - `Wacs.Core.Test` total: 338/338. `Wacs.Transpiler.Test` total:
+    561/561.
+- **AOT stays green.** No runtime `Reflection.Emit` introduced;
+  IL2CPP-safe by construction in `Wacs.Core`. Transpiler runtime
+  assembly unchanged w.r.t. AOT safety (still uses `Reflection.Emit`
+  as before — the produced DLL is AOT-loadable).
+
+Concurrent wasm execution in a single `WasmRuntime` and host
+thread-spawn imports remain out-of-scope for this release — the
+threads proposal itself doesn't standardize spawning, and WACS's
+single-`ExecContext` model is a separate refactor tracked for a
+future release.
+
 ## [0.8.2] First-class WAT / WAST text format
 
 - **Pure-C# WAT reader + writer.** New `Wacs.Core.Text` namespace
