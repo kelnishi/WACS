@@ -134,6 +134,63 @@ namespace Wacs.Core.Test
         }
 
         [Fact]
+        public async Task WasmThread_cancels_via_CancellationToken()
+        {
+            // Tight infinite loop calling a nop function. Cancellation is
+            // observed at function-call boundaries (Layer 1f), so the next
+            // `call $nop` after the CT fires produces an InterruptedException.
+            var src = @"
+                (module
+                  (func $nop)
+                  (func (export ""spin"")
+                    (loop $L
+                      call $nop
+                      br $L)))";
+            var runtime = new WasmRuntime();
+            var module = TextModuleParser.ParseWat(src);
+            var inst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("M", inst);
+            var addr = runtime.GetExportedFunction(("M", "spin"));
+
+            using var cts = new CancellationTokenSource();
+            var wt = runtime.ThreadHost.Spawn(addr, ReadOnlySpan<Value>.Empty, cts.Token);
+
+            // Let the thread enter its loop, then cancel.
+            await Task.Delay(50);
+            cts.Cancel();
+
+            var trap = await wt.Completion;
+            Assert.NotNull(trap);
+            Assert.Contains("interrupted", trap!.Message);
+        }
+
+        [Fact]
+        public async Task WasmThread_cancels_via_RequestTrap()
+        {
+            // Same loop, cancel via wasmThread.RequestTrap instead of CT.
+            var src = @"
+                (module
+                  (func $nop)
+                  (func (export ""spin"")
+                    (loop $L
+                      call $nop
+                      br $L)))";
+            var runtime = new WasmRuntime();
+            var module = TextModuleParser.ParseWat(src);
+            var inst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("M", inst);
+            var addr = runtime.GetExportedFunction(("M", "spin"));
+
+            var wt = runtime.ThreadHost.Spawn(addr, ReadOnlySpan<Value>.Empty);
+            await Task.Delay(50);
+            wt.RequestTrap("host-stop");
+
+            var trap = await wt.Completion;
+            Assert.NotNull(trap);
+            Assert.Contains("interrupted", trap!.Message);
+        }
+
+        [Fact]
         public async Task WasmThread_surfaces_trap_in_completion()
         {
             // Function that unconditionally traps via unreachable.

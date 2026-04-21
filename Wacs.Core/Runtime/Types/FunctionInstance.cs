@@ -117,6 +117,8 @@ namespace Wacs.Core.Runtime.Types
 
         public void Invoke(ExecContext context)
         {
+            context.CheckInterrupt();
+
             //3.
             var funcType = Type;
             //4.

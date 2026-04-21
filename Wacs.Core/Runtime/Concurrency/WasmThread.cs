@@ -31,6 +31,7 @@ namespace Wacs.Core.Runtime.Concurrency
     {
         private readonly TaskCompletionSource<TrapException?> _tcs =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly CancellationTokenSource _cts;
         private volatile string? _trapReason;
 
         public int HostId { get; }
@@ -38,30 +39,57 @@ namespace Wacs.Core.Runtime.Concurrency
         /// <summary>
         /// Completes when the thread exits. The result is <c>null</c> for a clean
         /// return, a <see cref="TrapException"/> for a wasm-level trap (including
-        /// traps requested via <see cref="RequestTrap"/> or CancellationToken).
-        /// A non-trap host exception surfaces as a faulted task.
+        /// traps requested via <see cref="RequestTrap"/> or external
+        /// CancellationToken). A non-trap host exception surfaces as a faulted task.
         /// </summary>
         public Task<TrapException?> Completion => _tcs.Task;
 
-        internal WasmThread(int hostId)
+        /// <summary>
+        /// Combined cancellation signal for the thread — fires on either
+        /// <see cref="RequestTrap"/> or the external CancellationToken passed to
+        /// <see cref="IWasmThreadHost.Spawn"/>. The invoke loop (Layer 1f)
+        /// observes this at call boundaries and traps.
+        /// </summary>
+        internal CancellationToken CancellationToken => _cts.Token;
+
+        /// <summary>Reason string for <see cref="InterruptedException"/>. Set by
+        /// either <see cref="RequestTrap"/> or the external CT firing.</summary>
+        internal string TrapReason => _trapReason ?? "cancelled";
+
+        internal WasmThread(int hostId, CancellationToken externalCt)
         {
             HostId = hostId;
+            _cts = CancellationTokenSource.CreateLinkedTokenSource(externalCt);
+            if (externalCt.CanBeCanceled)
+            {
+                // If the external CT fires, stamp a reason so traps surface as
+                // "cancelled" rather than the empty default. The linked CTS
+                // already forwards the cancellation signal itself.
+                externalCt.Register(() => _trapReason ??= "cancelled");
+            }
         }
 
         /// <summary>
-        /// Request cooperative termination. The running thread will trap at the next
-        /// instruction boundary check (Layer 1f wires the invoke loop to observe
-        /// this). Safe to call from any thread.
+        /// Request cooperative termination. The running thread traps at the next
+        /// instruction-boundary check (Layer 1f wires the invoke loop to observe
+        /// the linked CancellationToken). Safe to call from any thread.
         /// </summary>
         public void RequestTrap(string reason)
         {
             _trapReason = reason ?? "WasmThread.RequestTrap";
+            try { _cts.Cancel(); } catch (ObjectDisposedException) { /* already completed */ }
         }
 
-        /// <summary>Non-null when <see cref="RequestTrap"/> or a CancellationToken has fired.</summary>
-        internal string? TrapReason => _trapReason;
+        internal void Complete(TrapException? trap)
+        {
+            _tcs.TrySetResult(trap);
+            _cts.Dispose();
+        }
 
-        internal void Complete(TrapException? trap) => _tcs.TrySetResult(trap);
-        internal void Fault(Exception exc) => _tcs.TrySetException(exc);
+        internal void Fault(Exception exc)
+        {
+            _tcs.TrySetException(exc);
+            _cts.Dispose();
+        }
     }
 }
