@@ -93,6 +93,15 @@ namespace Wacs.Core.Text
         // explicit (type $x) reference. Keeps the list on hand so TypeSection
         // order stays stable.
         public List<FunctionType> SyntheticTypes { get; } = new List<FunctionType>();
+
+        /// <summary>
+        /// Parallel to Module.Types — true if the entry came from a
+        /// <c>(rec …)</c> wrapper, false if it's a plain <c>(type …)</c> or
+        /// an inline-typeuse synthesis. Used for dedup discipline:
+        /// rec-grouped entries are NOT matched by inline-typeuse
+        /// synthesis, matching the binary encoder's behavior.
+        /// </summary>
+        public List<bool> TypesFromRec { get; } = new List<bool>();
     }
 
     /// <summary>

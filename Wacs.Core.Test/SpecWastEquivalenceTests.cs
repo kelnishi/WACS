@@ -89,6 +89,10 @@ namespace Wacs.Core.Test
                 {
                     switch (cmd)
                     {
+                        // Instance forms share content with their source —
+                        // no separate .wasm file — skip to match wast2json
+                        // ordinal numbering.
+                        case ScriptModule sm when sm.Kind == ScriptModuleKind.Instance: break;
                         case ScriptModule sm: allModules.Add(sm); break;
                         case ScriptAssertInvalid   ai when ai.Module != null:  allModules.Add(ai.Module); break;
                         case ScriptAssertMalformed am when am.Module != null:  allModules.Add(am.Module); break;

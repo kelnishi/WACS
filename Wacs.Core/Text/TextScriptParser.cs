@@ -23,9 +23,19 @@ namespace Wacs.Core.Text
     /// </summary>
     public static class TextScriptParser
     {
+        // Tracks the latest-declared `(module definition $name …)` so that
+        // subsequent `(module instance $alias $name)` forms can instantiate
+        // against the declared module's parsed content.
+        [System.ThreadStatic]
+        private static Dictionary<string, Module>? _moduleDefinitionsSlot;
+        private static Dictionary<string, Module> _moduleDefinitions =>
+            _moduleDefinitionsSlot ??= new Dictionary<string, Module>(System.StringComparer.Ordinal);
+
         public static List<ScriptCommand> ParseWast(string source)
         {
             var top = SExprParser.Parse(source);
+            // Reset the module-definition tracking for this parse.
+            _moduleDefinitions.Clear();
             // WAT's "inline module" syntax: a .wast file may consist of
             // top-level module sections (func / memory / global / …) with
             // no outer (module …) wrapper. When detected, synthesize a
@@ -152,6 +162,33 @@ namespace Wacs.Core.Text
                 && node.Children[i].Token.Kind == TokenKind.Keyword)
             {
                 var kw = node.Children[i].AtomText();
+                if (kw == "instance")
+                {
+                    // (module instance $alias $src)
+                    // Component-model instantiation: the resulting module
+                    // shares $src's parsed content.
+                    i++;
+                    string? alias = null;
+                    string? src = null;
+                    if (i < node.Children.Count
+                        && node.Children[i].Token.Kind == TokenKind.Id)
+                    { alias = node.Children[i].AtomText(); i++; }
+                    if (i < node.Children.Count
+                        && node.Children[i].Token.Kind == TokenKind.Id)
+                    { src = node.Children[i].AtomText(); i++; }
+                    Module? resolved = null;
+                    if (src != null && _moduleDefinitions.TryGetValue(src, out var found))
+                        resolved = found;
+                    // Make the alias refer to the same module for future
+                    // (module instance) or register references.
+                    if (alias != null && resolved != null)
+                        _moduleDefinitions[alias] = resolved;
+                    return new ScriptModule
+                    {
+                        Line = node.Token.Line, Column = node.Token.Column,
+                        Id = alias, Kind = ScriptModuleKind.Instance, Module = resolved,
+                    };
+                }
                 if (kw == "binary")
                 {
                     i++;
@@ -189,9 +226,11 @@ namespace Wacs.Core.Text
                 }
             }
 
-            // Text module — delegate to the full WAT parser. Rewind `i` so
-            // ParseModule sees the original head.
+            // Text module — delegate to the full WAT parser.
             var mod = TextModuleParser.ParseModule(node);
+            // Register under both its $id and any (module definition $name)
+            // so subsequent (module instance) lookups resolve.
+            if (id != null) _moduleDefinitions[id] = mod;
             return new ScriptModule
             {
                 Line = node.Token.Line, Column = node.Token.Column,

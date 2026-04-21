@@ -229,15 +229,14 @@ namespace Wacs.Core.Text
                 inlineParams.Count == 0 ? ResultType.Empty : new ResultType(inlineParams.ToArray()),
                 inlineResults.Count == 0 ? ResultType.Empty : new ResultType(inlineResults.ToArray()));
 
-            // Dedup against non-rec (single-subtype) Module.Types entries
-            // only — matches the binary encoder's behavior which keeps
-            // rec groups isolated from inline-typeuse sharing. Returns
-            // the flat DefType index.
+            // Dedup against non-rec Module.Types entries only (matches
+            // the binary encoder: rec groups are isolated from inline-
+            // typeuse sharing). Returns the flat DefType index.
             int flatSeen = 0;
             for (int t = 0; t < ctx.Module.Types.Count; t++)
             {
                 var group = ctx.Module.Types[t];
-                if (group.SubTypes.Length == 1)
+                if (!ctx.TypesFromRec[t] && group.SubTypes.Length == 1)
                 {
                     var body = group.SubTypes[0].Body as FunctionType;
                     if (body != null && FunctionTypeStructurallyEqual(body, ft))
@@ -251,6 +250,7 @@ namespace Wacs.Core.Text
             // Fresh entry — append as a new single-subtype RecursiveType.
             var idx2 = flatSeen;
             ctx.Module.Types.Add(new RecursiveType(new SubType(ft, final: true)));
+            ctx.TypesFromRec.Add(false);
             // This synthesized type has no user $name, so skip the name-table
             // declaration.
             paramNames = inlineNames.Count > 0 ? inlineNames : null;

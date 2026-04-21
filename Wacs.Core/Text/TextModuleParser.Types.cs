@@ -264,6 +264,7 @@ namespace Wacs.Core.Text
             var sub = ParseSubType(ctx, body);
             ctx.Types.Declare(name);
             ctx.Module.Types.Add(new RecursiveType(sub));
+            ctx.TypesFromRec.Add(false);
         }
 
         /// <summary>
@@ -294,6 +295,7 @@ namespace Wacs.Core.Text
                 subs.Add(sub);
             }
             ctx.Module.Types.Add(new RecursiveType(subs.ToArray()));
+            ctx.TypesFromRec.Add(true);
         }
 
         /// <summary>

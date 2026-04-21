@@ -86,8 +86,22 @@ namespace Wacs.Core.Test
                 return;
             }
             for (int i = 0; i < a.Arity; i++)
-                if (a.Types[i] != b.Types[i])
+                if (NormalizeValType(a.Types[i]) != NormalizeValType(b.Types[i]))
                     r.Mismatches.Add($"{path}[{i}]: {a.Types[i]} vs {b.Types[i]}");
+        }
+
+        /// <summary>
+        /// Normalize ValType for equivalence comparison. The WACS binary
+        /// parser forces `(ref exn)` to always-nullable in
+        /// <c>ValTypeParser.ParseHeapType</c>; apply the same transformation
+        /// so the text parser's source-faithful representation matches.
+        /// </summary>
+        private static Wacs.Core.Types.Defs.ValType NormalizeValType(Wacs.Core.Types.Defs.ValType t)
+        {
+            // Map (ref exn) → (ref null exn) = ValType.Exn.
+            var nonNullExn = Wacs.Core.Types.Defs.ValType.Exn & ~Wacs.Core.Types.Defs.ValType.Nullable;
+            if (t == nonNullExn) return Wacs.Core.Types.Defs.ValType.Exn;
+            return t;
         }
 
         private static void CompareImports(Module a, Module b, Report r)
