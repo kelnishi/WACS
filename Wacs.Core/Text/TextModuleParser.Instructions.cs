@@ -112,6 +112,9 @@ namespace Wacs.Core.Text
                 case "if":
                     ParseIfFolded(fctx, node, output);
                     return;
+                case "try_table":
+                    ParseTryTableFolded(fctx, node, output);
+                    return;
             }
 
             // General folded form: (op imm* foldedInstr*)
@@ -132,6 +135,47 @@ namespace Wacs.Core.Text
                 }
             }
             output.Add(builder);
+        }
+
+        private static void ParseTryTableFolded(
+            TextFunctionContext fctx, SExpr node, List<InstructionBase> output)
+        {
+            int i = 1;
+            var label = TryConsumeLabelId(node, ref i);
+            var blockType = ParseBlockType(fctx.Module, node, ref i);
+            // Skip (catch …) / (catch_ref …) / (catch_all …) / (catch_all_ref …)
+            // clauses (phase 1.8 doesn't thread them through).
+            while (i < node.Children.Count
+                && node.Children[i].Kind == SExprKind.List
+                && node.Children[i].Head != null
+                && node.Children[i].Head!.Token.Kind == TokenKind.Keyword)
+            {
+                var cw = node.Children[i].Head!.AtomText();
+                if (cw == "catch" || cw == "catch_ref"
+                    || cw == "catch_all" || cw == "catch_all_ref")
+                    i++;
+                else
+                    break;
+            }
+            fctx.LabelStack.Add(label);
+            try
+            {
+                var inner = new List<InstructionBase>();
+                while (i < node.Children.Count)
+                {
+                    var child = node.Children[i++];
+                    if (child.Kind != SExprKind.List)
+                        throw new FormatException(
+                            $"line {child.Token.Line}: try_table body inside folded form must use folded instructions");
+                    ParseFoldedInstruction(fctx, child, inner);
+                }
+                inner.Add(new InstEnd());
+                output.Add(new InstBlock().Immediate(blockType, new InstructionSequence(inner)));
+            }
+            finally
+            {
+                fctx.LabelStack.RemoveAt(fctx.LabelStack.Count - 1);
+            }
         }
 
         private static void ParseBlockFolded(
@@ -262,6 +306,44 @@ namespace Wacs.Core.Text
             // pattern — they open a new sub-list terminated by `end`.
             switch (kw)
             {
+                case "try_table":
+                {
+                    // try_table has a block-type + zero or more (catch …)
+                    // clauses + a body terminated by `end`. For Phase 1.8
+                    // we accept the form structurally but don't yet thread
+                    // the catch-table through to the runtime. The body
+                    // parses as a regular block scope so labels resolve.
+                    i++;   // consume 'try_table' keyword
+                    var label = TryConsumeLabelId(parent, ref i);
+                    var blockType = ParseBlockType(fctx.Module, parent, ref i);
+                    // Skip (catch …) / (catch_ref …) / (catch_all …) /
+                    // (catch_all_ref …) s-expr clauses.
+                    while (i < parent.Children.Count
+                        && parent.Children[i].Kind == SExprKind.List
+                        && parent.Children[i].Head != null
+                        && parent.Children[i].Head!.Token.Kind == TokenKind.Keyword)
+                    {
+                        var cw = parent.Children[i].Head!.AtomText();
+                        if (cw == "catch" || cw == "catch_ref"
+                            || cw == "catch_all" || cw == "catch_all_ref")
+                            i++;
+                        else
+                            break;
+                    }
+                    fctx.LabelStack.Add(label);
+                    List<InstructionBase> innerTry;
+                    try
+                    {
+                        innerTry = ParseInstrList(fctx, parent, ref i, InstrStop.End, out _);
+                    }
+                    finally
+                    {
+                        fctx.LabelStack.RemoveAt(fctx.LabelStack.Count - 1);
+                    }
+                    innerTry.Add(new InstEnd());
+                    output.Add(new InstBlock().Immediate(blockType, new InstructionSequence(innerTry)));
+                    return;
+                }
                 case "block":
                 case "loop":
                 {
@@ -525,6 +607,28 @@ namespace Wacs.Core.Text
                     uint idx = ResolveNamespaceIdx(fctx.Module.Funcs, ReadImmIdxAtom(parent, ref i, kw), "func");
                     return DecodeViaBinary((ByteCode)OpCode.ReturnCall, w => w.WriteLeb128U32(idx));
                 }
+                case "throw":
+                {
+                    uint tagIdx = ResolveNamespaceIdx(fctx.Module.Tags, ReadImmIdxAtom(parent, ref i, kw), "tag");
+                    return DecodeViaBinary((ByteCode)OpCode.Throw, w => w.WriteLeb128U32(tagIdx));
+                }
+                case "throw_ref":
+                    return SpecFactory.Factory.CreateInstruction((ByteCode)OpCode.ThrowRef);
+                case "return_call_indirect":
+                {
+                    uint tableIdx = 0;
+                    if (i < parent.Children.Count
+                        && parent.Children[i].Kind == SExprKind.Atom
+                        && parent.Children[i].Token.Kind != TokenKind.Keyword)
+                    {
+                        tableIdx = ResolveNamespaceIdx(fctx.Module.Tables, parent.Children[i], "table");
+                        i++;
+                    }
+                    int ti = ParseFuncTypeUseWithNames(fctx.Module, parent, ref i, out _);
+                    uint typeIdx = (uint)ti;
+                    return DecodeViaBinary((ByteCode)OpCode.ReturnCallIndirect,
+                        w => { w.WriteLeb128U32(typeIdx); w.WriteLeb128U32(tableIdx); });
+                }
                 case "return_call_ref":
                 {
                     uint ti = ResolveNamespaceIdx(fctx.Module.Types, ReadImmIdxAtom(parent, ref i, kw), "type");
@@ -583,16 +687,27 @@ namespace Wacs.Core.Text
                 }
                 case "table.init":
                 {
-                    // (table.init $table $elem) or (table.init $elem) when table 0
+                    // Two shapes:
+                    //   (table.init $elem)            — table 0 implicit
+                    //   (table.init $table $elem)     — explicit table
+                    // Look ahead to see if there are two atom operands;
+                    // if so, resolve first as table, second as elem.
                     uint t = 0, e;
-                    var first = parent.Children[i++];
-                    e = ResolveNamespaceIdx(fctx.Module.Elems, first, "elem");
-                    if (i < parent.Children.Count && parent.Children[i].Kind == SExprKind.Atom
-                        && parent.Children[i].Token.Kind != TokenKind.Keyword)
+                    var first = parent.Children[i];
+                    bool hasSecond = i + 1 < parent.Children.Count
+                        && parent.Children[i + 1].Kind == SExprKind.Atom
+                        && parent.Children[i + 1].Token.Kind != TokenKind.Keyword;
+                    if (hasSecond)
                     {
-                        // Two-operand form — first was actually the table, second is elem.
-                        t = e;
-                        e = ResolveNamespaceIdx(fctx.Module.Elems, parent.Children[i++], "elem");
+                        t = ResolveNamespaceIdx(fctx.Module.Tables, first, "table");
+                        i++;
+                        e = ResolveNamespaceIdx(fctx.Module.Elems, parent.Children[i], "elem");
+                        i++;
+                    }
+                    else
+                    {
+                        e = ResolveNamespaceIdx(fctx.Module.Elems, first, "elem");
+                        i++;
                     }
                     uint ec = e, tc = t;
                     return DecodeViaBinary((ByteCode)ExtCode.TableInit, w => { w.WriteLeb128U32(ec); w.WriteLeb128U32(tc); });
@@ -643,7 +758,7 @@ namespace Wacs.Core.Text
             // Memory load/store — memarg-immediate ops. Handle via a table
             // of natural alignments.
             if (TryGetMemoryOpcode(kw, out var memCode, out var naturalAlign))
-                return BuildMemoryInstruction(memCode, naturalAlign, parent, ref i);
+                return BuildMemoryInstructionWithContext(memCode, naturalAlign, parent, ref i, fctx);
 
             // Zero-immediate ops — look up by mnemonic. The factory produces
             // a ready instance; we don't need to parse further immediates.
@@ -802,6 +917,29 @@ namespace Wacs.Core.Text
         private static InstructionBase BuildMemoryInstruction(
             ByteCode code, int naturalAlignLog2, SExpr parent, ref int i)
         {
+            return BuildMemoryInstructionWithContext(code, naturalAlignLog2, parent, ref i, null);
+        }
+
+        private static InstructionBase BuildMemoryInstructionWithContext(
+            ByteCode code, int naturalAlignLog2, SExpr parent, ref int i, TextFunctionContext? fctx)
+        {
+            // Optional memory index ($name or numeric) preceding the
+            // offset=/align= kw-args. Multi-memory proposal syntax:
+            //   i32.load $mem offset=0 align=4
+            uint memIdx = 0;
+            bool haveMemIdx = false;
+            if (fctx != null
+                && i < parent.Children.Count
+                && parent.Children[i].Kind == SExprKind.Atom
+                && (parent.Children[i].Token.Kind == TokenKind.Id
+                    || (parent.Children[i].Token.Kind == TokenKind.Reserved
+                        && IsDecimalOrHexInt(parent.Children[i].AtomText()))))
+            {
+                memIdx = ResolveNamespaceIdx(fctx.Module.Mems, parent.Children[i], "memory");
+                haveMemIdx = true;
+                i++;
+            }
+
             // Optional `offset=N` and `align=N` kw-args, in either order.
             // The lexer classifies `offset=0` as a Keyword (starts with
             // lowercase letter) even though semantically it's a kw-arg; we
@@ -831,12 +969,35 @@ namespace Wacs.Core.Text
                 break;
             }
             int ai = alignLog2;
+            uint memIdxCaptured = memIdx;
+            bool haveMemIdxCaptured = haveMemIdx;
             return DecodeViaBinary(code, w =>
             {
-                // Binary memarg: LEB128 u32 for align bits, LEB128 u64 for offset.
-                w.WriteLeb128U32((uint)ai);
+                // Binary memarg: LEB128 u32 for align bits (with high bit
+                // indicating memidx follows), optional LEB128 u32 memidx,
+                // then LEB128 u64 for offset.
+                uint alignBits = (uint)ai;
+                if (haveMemIdxCaptured)
+                {
+                    alignBits |= 0x40u;
+                    w.WriteLeb128U32(alignBits);
+                    w.WriteLeb128U32(memIdxCaptured);
+                }
+                else
+                {
+                    w.WriteLeb128U32(alignBits);
+                }
                 WriteLeb128U64(w, offset);
             });
+        }
+
+        private static bool IsDecimalOrHexInt(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+            int start = 0;
+            if (text[0] == '+' || text[0] == '-') start = 1;
+            if (start >= text.Length) return false;
+            return text[start] >= '0' && text[start] <= '9';
         }
 
         private static void WriteLeb128U64(BinaryWriter w, ulong value)
@@ -1067,9 +1228,7 @@ namespace Wacs.Core.Text
                     throw new FormatException($"line {atom.Token.Line}: unknown local {text}");
                 return (uint)idx;
             }
-            if (!uint.TryParse(text, out var n))
-                throw new FormatException($"line {atom.Token.Line}: bad local index '{text}'");
-            return n;
+            return (uint)ParseUnsignedAnyRadix(text, atom.Token.Line);
         }
 
         private static uint ResolveNamespaceIdx(NameTable table, SExpr atom, string ns)
@@ -1081,9 +1240,7 @@ namespace Wacs.Core.Text
                     throw new FormatException($"line {atom.Token.Line}: unknown {ns} {text}");
                 return (uint)idx;
             }
-            if (!uint.TryParse(text, out var n))
-                throw new FormatException($"line {atom.Token.Line}: bad {ns} index '{text}'");
-            return n;
+            return (uint)ParseUnsignedAnyRadix(text, atom.Token.Line);
         }
 
         private static uint ResolveLabel(TextFunctionContext fctx, SExpr atom)

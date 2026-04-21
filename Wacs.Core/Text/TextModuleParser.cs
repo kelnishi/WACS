@@ -65,24 +65,38 @@ namespace Wacs.Core.Text
                 i++;
             }
 
-            // Single-pass section dispatch. Order of section forms in a WAT
-            // source does not have to match binary section order — WAT permits
-            // interleaving; we collect per-section and flush at the end. For
-            // now we dispatch immediately and preserve declaration order; the
-            // spec allows this.
-            for (; i < moduleForm.Children.Count; i++)
+            // Pass 1: pre-declare every named entity across all namespaces
+            // so forward references inside function bodies, elem / data
+            // initializers, exports etc. resolve cleanly. Anonymous
+            // entities get reserved slots so indices stay contiguous.
+            int startOfSections = i;
+            PreDeclareNames(ctx, moduleForm, startOfSections);
+
+            // Pass 2: full parse. Section parsers no longer re-Declare
+            // names — they look up the index pre-assigned in pass 1 and
+            // just populate the Module's per-section collections.
+            for (i = startOfSections; i < moduleForm.Children.Count; i++)
             {
                 var form = moduleForm.Children[i];
                 if (form.Kind != SExprKind.List)
                     throw new FormatException($"line {form.Token.Line}: expected section form, got atom");
                 var head = form.Head;
-                if (head == null || head.Kind != SExprKind.Atom || head.Token.Kind != TokenKind.Keyword)
+                if (head == null || head.Kind != SExprKind.Atom)
+                    throw new FormatException($"line {form.Token.Line}: section form must start with a keyword");
+
+                // Module-level WAT annotations `(@name …)` — round-trip
+                // metadata is deferred; for now we just skip them so the
+                // module still parses.
+                if (head.Token.Kind == TokenKind.Reserved && head.AtomText().StartsWith("@"))
+                    continue;
+                if (head.Token.Kind != TokenKind.Keyword)
                     throw new FormatException($"line {form.Token.Line}: section form must start with a keyword");
 
                 var name = head.AtomText();
                 switch (name)
                 {
                     case "type":    ParseTypeForm(ctx, form); break;
+                    case "rec":     ParseRecTypeForm(ctx, form); break;
                     case "import":  ParseImportForm(ctx, form); break;
                     case "func":    ParseFuncForm(ctx, form); break;
                     case "table":   ParseTableForm(ctx, form); break;
@@ -100,6 +114,89 @@ namespace Wacs.Core.Text
 
             FinalizeModule(ctx);
             return ctx.Module;
+        }
+
+        /// <summary>
+        /// Pass 1: pre-register named entities in each namespace at the
+        /// index they'll receive during pass 2. Lets forward references
+        /// inside instruction bodies and initializers resolve cleanly.
+        /// Walks in source order; index assignment mirrors what pass 2
+        /// would do, so pre-scan's indices match pass 2's indices exactly.
+        /// </summary>
+        private static void PreDeclareNames(TextParseContext ctx, SExpr moduleForm, int sectionStart)
+        {
+            int typeIdx = 0, funcIdx = 0, tableIdx = 0, memIdx = 0,
+                globalIdx = 0, elemIdx = 0, dataIdx = 0, tagIdx = 0;
+
+            for (int i = sectionStart; i < moduleForm.Children.Count; i++)
+            {
+                var form = moduleForm.Children[i];
+                if (form.Kind != SExprKind.List) continue;
+                var head = form.Head;
+                if (head == null || head.Kind != SExprKind.Atom) continue;
+                // Skip (@annotation …) forms at pre-scan time.
+                if (head.Token.Kind == TokenKind.Reserved && head.AtomText().StartsWith("@")) continue;
+                if (head.Token.Kind != TokenKind.Keyword) continue;
+                switch (head.AtomText())
+                {
+                    case "type":   PreRegisterNamed(ctx.Types, form, typeIdx++); break;
+                    case "rec":
+                    {
+                        // Each inner (type $id? …) form consumes a type
+                        // slot in pre-scan order.
+                        for (int j = 1; j < form.Children.Count; j++)
+                        {
+                            var inner = form.Children[j];
+                            if (inner.Kind == SExprKind.List && inner.IsForm("type"))
+                                PreRegisterNamed(ctx.Types, inner, typeIdx++);
+                        }
+                        break;
+                    }
+                    case "import":
+                    {
+                        // (import "m" "n" (kind $id? ...))
+                        if (form.Children.Count >= 4)
+                        {
+                            var desc = form.Children[3];
+                            if (desc.Kind == SExprKind.List && desc.Head != null
+                                && desc.Head.Token.Kind == TokenKind.Keyword)
+                            {
+                                switch (desc.Head.AtomText())
+                                {
+                                    case "func":   PreRegisterNamed(ctx.Funcs,  desc, funcIdx++); break;
+                                    case "table":  PreRegisterNamed(ctx.Tables, desc, tableIdx++); break;
+                                    case "memory": PreRegisterNamed(ctx.Mems,   desc, memIdx++); break;
+                                    case "global": PreRegisterNamed(ctx.Globals,desc, globalIdx++); break;
+                                    case "tag":    PreRegisterNamed(ctx.Tags,   desc, tagIdx++); break;
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    case "func":   PreRegisterNamed(ctx.Funcs,  form, funcIdx++); break;
+                    case "table":  PreRegisterNamed(ctx.Tables, form, tableIdx++); break;
+                    case "memory": PreRegisterNamed(ctx.Mems,   form, memIdx++); break;
+                    case "global": PreRegisterNamed(ctx.Globals,form, globalIdx++); break;
+                    case "elem":   PreRegisterNamed(ctx.Elems,  form, elemIdx++); break;
+                    case "data":   PreRegisterNamed(ctx.Datas,  form, dataIdx++); break;
+                    case "tag":    PreRegisterNamed(ctx.Tags,   form, tagIdx++); break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// If <paramref name="form"/> has a <c>$id</c> atom immediately
+        /// after its head, register it in <paramref name="table"/> at
+        /// <paramref name="index"/>.
+        /// </summary>
+        private static void PreRegisterNamed(NameTable table, SExpr form, int index)
+        {
+            if (form.Children.Count >= 2
+                && form.Children[1].Kind == SExprKind.Atom
+                && form.Children[1].Token.Kind == TokenKind.Id)
+            {
+                table.PrereserveName(form.Children[1].AtomText(), index);
+            }
         }
 
         private static void FinalizeModule(TextParseContext ctx)

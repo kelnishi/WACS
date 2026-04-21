@@ -28,27 +28,43 @@ namespace Wacs.Core.Text
         public int Count { get; private set; }
 
         /// <summary>
-        /// Register a new declaration. <paramref name="name"/> may be null/
-        /// empty for anonymous entries; named entries must not collide.
-        /// Returns the assigned index.
+        /// Pre-scan: register a name at its anticipated pass-2 index. Pass 2
+        /// later walks in the same order and consumes these entries; its
+        /// <see cref="Declare(string)"/> calls return the pre-registered
+        /// index (verified for consistency) without double-mapping.
+        /// </summary>
+        public void PrereserveName(string name, int index)
+        {
+            if (_byName.ContainsKey(name))
+                throw new System.FormatException($"duplicate name {name} in namespace");
+            _byName[name] = index;
+        }
+
+        /// <summary>
+        /// Pass-2 declaration. Advances <see cref="Count"/>; if the name was
+        /// pre-registered, verifies the assigned index matches (same
+        /// traversal order). Anonymous entries (null/empty name) just
+        /// advance.
         /// </summary>
         public int Declare(string? name)
         {
             int idx = Count++;
             if (!string.IsNullOrEmpty(name))
             {
-                if (_byName.ContainsKey(name!))
-                    throw new System.FormatException($"duplicate name {name} in namespace");
-                _byName[name!] = idx;
+                if (_byName.TryGetValue(name!, out var pre))
+                {
+                    if (pre != idx)
+                        throw new System.InvalidOperationException(
+                            $"name table drift: {name} pre-registered at {pre}, pass 2 at {idx}");
+                }
+                else
+                {
+                    _byName[name!] = idx;
+                }
             }
             return idx;
         }
 
-        /// <summary>
-        /// Reserve the next index slot without binding a name. Used when a
-        /// section-level form defers naming (e.g. inline-imported entities
-        /// still need a slot in their namespace).
-        /// </summary>
         public int ReserveAnonymous() => Count++;
 
         public bool TryResolve(string name, out int idx) => _byName.TryGetValue(name, out idx);
