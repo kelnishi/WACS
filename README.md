@@ -15,7 +15,7 @@
 ## Overview
 
 **Latest releases** (see the [CHANGELOG](CHANGELOG.md) for details):
-WACS `0.8.2` · WACS.WASIp1 `0.9.7` · WACS.Transpiler `0.2.0` · WACS.Transpiler.Lib `0.2.0`
+WACS `0.8.3` · WACS.WASIp1 `0.9.7` · WACS.Transpiler `0.2.1` · WACS.Transpiler.Lib `0.2.1`
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including Godot and AOT environments like Unity's IL2CPP.
 
