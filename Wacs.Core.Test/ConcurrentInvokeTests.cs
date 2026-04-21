@@ -7,6 +7,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Concurrency;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Text;
 using Xunit;
@@ -113,6 +114,43 @@ namespace Wacs.Core.Test
             foreach (var th in threads) th.Join();
 
             Assert.Equal(0, failures);
+        }
+
+        [Fact]
+        public async Task WasmThread_runs_entry_and_completes_task()
+        {
+            var runtime = new WasmRuntime();
+            var module = TextModuleParser.ParseWat(PureAddWat);
+            var inst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("M", inst);
+            var addr = runtime.GetExportedFunction(("M", "add"));
+
+            Value[] args = { (Value)7, (Value)35 };
+            var wt = runtime.ThreadHost.Spawn(addr, args);
+
+            var trap = await wt.Completion;
+            Assert.Null(trap);
+            Assert.True(wt.HostId > 0);
+        }
+
+        [Fact]
+        public async Task WasmThread_surfaces_trap_in_completion()
+        {
+            // Function that unconditionally traps via unreachable.
+            var src = @"
+                (module
+                  (func (export ""boom"")
+                    unreachable))";
+            var runtime = new WasmRuntime();
+            var module = TextModuleParser.ParseWat(src);
+            var inst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("M", inst);
+            var addr = runtime.GetExportedFunction(("M", "boom"));
+
+            var wt = runtime.ThreadHost.Spawn(addr, ReadOnlySpan<Value>.Empty);
+            var trap = await wt.Completion;
+
+            Assert.NotNull(trap);
         }
     }
 }

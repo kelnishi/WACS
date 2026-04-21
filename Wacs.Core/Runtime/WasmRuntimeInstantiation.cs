@@ -23,6 +23,7 @@ using FluentValidation;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Concurrency;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -68,6 +69,24 @@ namespace Wacs.Core.Runtime
         private readonly ThreadLocal<ExecContext> _threadContext;
 
         public ExecContext ExecContext => GetExecContext();
+
+        private IWasmThreadHost? _threadHost;
+
+        /// <summary>
+        /// Spawn wasm threads against this runtime. Lazily creates a default
+        /// <see cref="ThreadBasedHost"/> on first access; hosts that need a custom
+        /// thread strategy (e.g. a Unity main-thread-aware host, or a pooled
+        /// thread-dispatching host) can assign their own implementation.
+        ///
+        /// <para>Both wasi-threads (via a <c>thread-spawn</c> host import adapter
+        /// that calls into this) and shared-everything's future <c>thread.spawn</c>
+        /// instruction dispatch through the same primitive.</para>
+        /// </summary>
+        public IWasmThreadHost ThreadHost
+        {
+            get => _threadHost ??= new ThreadBasedHost(this);
+            set => _threadHost = value ?? throw new ArgumentNullException(nameof(value));
+        }
 
         /// <summary>
         /// Returns the calling thread's <see cref="ExecContext"/>, lazily creating
