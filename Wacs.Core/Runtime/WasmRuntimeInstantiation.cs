@@ -39,7 +39,21 @@ namespace Wacs.Core.Runtime
         private readonly Dictionary<string, ModuleInstance> _registeredModules = new();
 
         private readonly ExecContext Context;
-        public ExecContext ExecContext => Context;
+        public ExecContext ExecContext => GetExecContext();
+
+        /// <summary>
+        /// Abstraction point for per-thread <see cref="ExecContext"/> lookup. Layer 1a
+        /// introduces this helper as a single-point-of-change; later subphases swap it
+        /// for a <see cref="System.Threading.ThreadLocal{T}"/> so concurrent host threads
+        /// each get their own operand/frame/locals state without colliding on the
+        /// runtime-singleton <see cref="Context"/> field.
+        ///
+        /// <para>The polymorphic dispatch loop doesn't call this — handlers take
+        /// <c>ExecContext ctx</c> as a parameter and stay on one thread for the duration
+        /// of a call. This helper is only for the runtime's outer entry points
+        /// (CreateInvoker, InstantiateModule glue, binding lookups).</para>
+        /// </summary>
+        private ExecContext GetExecContext() => Context;
 
         private readonly Store Store;
         public Store RuntimeStore => Store;
@@ -293,7 +307,7 @@ namespace Wacs.Core.Runtime
             {
                 //1
                 if (!options.SkipModuleValidation)
-                    module.ValidateAndThrow(Context.Attributes);
+                    module.ValidateAndThrow(GetExecContext().Attributes);
             }
             catch (ValidationException exc)
             {
@@ -305,16 +319,16 @@ namespace Wacs.Core.Runtime
             {
                 Store.OpenTransaction();
                 
-                if (Context.OpStack.Count != 0)
+                if (GetExecContext().OpStack.Count != 0)
                     throw new WasmRuntimeException("OpStack should be empty");
 
                 //2, 3, 4 Checks if imports are satisfied
                 moduleInstance = AllocateModule(module);
 
                 //12.
-                var auxFrame = Context.ReserveFrame(moduleInstance, 0);
+                var auxFrame = GetExecContext().ReserveFrame(moduleInstance, 0);
                 //13.
-                Context.PushFrame(auxFrame);
+                GetExecContext().PushFrame(auxFrame);
                 try
                 {
                     //14, 15
@@ -360,7 +374,7 @@ namespace Wacs.Core.Runtime
                     //Linking may succeed, so we commit the transaction
                     Store.CommitTransaction();
                     Store.OpenTransaction();
-                    Context.FlushCallStack();
+                    GetExecContext().FlushCallStack();
                     ExceptionDispatchInfo.Throw(exc);
                 }
                 finally
@@ -370,7 +384,7 @@ namespace Wacs.Core.Runtime
 
                     LinkModule(moduleInstance);
 
-                    Context.CacheInstructions();
+                    GetExecContext().CacheInstructions();
                 }
                 
                 //17. 
@@ -380,7 +394,7 @@ namespace Wacs.Core.Runtime
                         throw new ValidationException("Module StartFunction index was invalid");
                     
                     var startAddr = moduleInstance.FuncAddrs[module.StartIndex];
-                    if (!Context.Store.Contains(startAddr))
+                    if (!GetExecContext().Store.Contains(startAddr))
                         throw new WasmRuntimeException("Module StartFunction address not found in the Store.");
 
                     moduleInstance.StartFunc = startAddr;
@@ -405,10 +419,10 @@ namespace Wacs.Core.Runtime
                 }
 
                 //18.
-                if (Context.Frame != auxFrame)
+                if (GetExecContext().Frame != auxFrame)
                     throw new InstantiationException("Execution fault in Module Instantiation.");
                 //19.
-                Context.PopFrame();
+                GetExecContext().PopFrame();
 
                 _moduleInstances.Add(moduleInstance);
                 
@@ -417,7 +431,7 @@ namespace Wacs.Core.Runtime
             {
                 Store.DiscardTransaction();
                 Store.OpenTransaction();
-                Context.FlushCallStack();
+                GetExecContext().FlushCallStack();
                 ExceptionDispatchInfo.Throw(exc);
             }
             catch (OutOfBoundsTableAccessException exc)
@@ -426,7 +440,7 @@ namespace Wacs.Core.Runtime
                 // see linking.wast:264
                 Store.CommitTransaction();
                 Store.OpenTransaction();
-                Context.FlushCallStack();
+                GetExecContext().FlushCallStack();
                 ExceptionDispatchInfo.Throw(exc);
             }
             catch (TrapException exc)
@@ -434,7 +448,7 @@ namespace Wacs.Core.Runtime
                 //Linking may succeed, so we commit the transaction
                 Store.CommitTransaction();
                 Store.OpenTransaction();
-                Context.FlushCallStack();
+                GetExecContext().FlushCallStack();
                 ExceptionDispatchInfo.Throw(exc);
             }
             catch (NotSupportedException exc)
@@ -442,7 +456,7 @@ namespace Wacs.Core.Runtime
                 //Unlinkable
                 Store.DiscardTransaction();
                 Store.OpenTransaction();
-                Context.FlushCallStack();
+                GetExecContext().FlushCallStack();
                 ExceptionDispatchInfo.Throw(exc);
             }
             finally
@@ -478,7 +492,7 @@ namespace Wacs.Core.Runtime
                 {
                     if (functionInstance.Module != moduleInstance)
                         continue;
-                    Context.LinkFunction(functionInstance);
+                    GetExecContext().LinkFunction(functionInstance);
 
                     if (eagerCompile && functionInstance.SwitchCompiled == null)
                     {
@@ -486,7 +500,7 @@ namespace Wacs.Core.Runtime
                             functionInstance.Body.Instructions.Flatten().ToArray(),
                             functionInstance.Type,
                             localsCount: functionInstance.Type.ParameterTypes.Arity + functionInstance.Locals.Length,
-                            useSuperInstructions: Context.Attributes.UseSwitchSuperInstructions,
+                            useSuperInstructions: GetExecContext().Attributes.UseSwitchSuperInstructions,
                             declaredLocalTypes: functionInstance.Locals);
                     }
                 }
@@ -573,15 +587,15 @@ namespace Wacs.Core.Runtime
         /// </summary>
         private Value EvaluateInitializer(ModuleInstance module, Expression ini)
         {
-            Frame initFrame = Context.ReserveFrame(module, 1);
-            Context.PushFrame(initFrame);
+            Frame initFrame = GetExecContext().ReserveFrame(module, 1);
+            GetExecContext().PushFrame(initFrame);
 
             ini.ExecuteInitializer(Context);
-            var value = Context.OpStack.PopAny();
-            if (Context.OpStack.Count > 0)
+            var value = GetExecContext().OpStack.PopAny();
+            if (GetExecContext().OpStack.Count > 0)
                 throw new WasmRuntimeException("Values left on stack");
             
-            Context.FlushCallStack();
+            GetExecContext().FlushCallStack();
             return value;
         }
 

@@ -114,9 +114,9 @@ namespace Wacs.Core.Runtime
 
         public IFunctionInstance GetFunction(FuncAddr addr)
         {
-            if (!Context.Store.Contains(addr))
+            if (!GetExecContext().Store.Contains(addr))
                 throw new WasmRuntimeException($"Runtime context did not contain function at address {addr.Value}");
-            return Context.Store[addr];
+            return GetExecContext().Store[addr];
         }
 
         // ==================================================================
@@ -143,9 +143,9 @@ namespace Wacs.Core.Runtime
                 .OfType<ExternalValue.Memory>()
                 .Select(m => m.Address)
                 .ToList();
-            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            if (addrs.Count > 0 && GetExecContext().Store.Contains(addrs[^1]))
             {
-                memory = Context.Store[addrs[^1]];
+                memory = GetExecContext().Store[addrs[^1]];
                 return true;
             }
             memory = null!;
@@ -154,9 +154,9 @@ namespace Wacs.Core.Runtime
 
         public bool TryGetExportedMemory((string module, string entity) id, out MemoryInstance memory)
         {
-            if (GetBoundEntity(id) is MemAddr addr && Context.Store.Contains(addr))
+            if (GetBoundEntity(id) is MemAddr addr && GetExecContext().Store.Contains(addr))
             {
-                memory = Context.Store[addr];
+                memory = GetExecContext().Store[addr];
                 return true;
             }
             var addrs = _moduleInstances
@@ -167,9 +167,9 @@ namespace Wacs.Core.Runtime
                 .OfType<ExternalValue.Memory>()
                 .Select(m => m.Address)
                 .ToList();
-            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            if (addrs.Count > 0 && GetExecContext().Store.Contains(addrs[^1]))
             {
-                memory = Context.Store[addrs[^1]];
+                memory = GetExecContext().Store[addrs[^1]];
                 return true;
             }
             memory = null!;
@@ -191,9 +191,9 @@ namespace Wacs.Core.Runtime
                 .OfType<ExternalValue.Table>()
                 .Select(t => t.Address)
                 .ToList();
-            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            if (addrs.Count > 0 && GetExecContext().Store.Contains(addrs[^1]))
             {
-                table = Context.Store[addrs[^1]];
+                table = GetExecContext().Store[addrs[^1]];
                 return true;
             }
             table = null!;
@@ -202,9 +202,9 @@ namespace Wacs.Core.Runtime
 
         public bool TryGetExportedTable((string module, string entity) id, out TableInstance table)
         {
-            if (GetBoundEntity(id) is TableAddr addr && Context.Store.Contains(addr))
+            if (GetBoundEntity(id) is TableAddr addr && GetExecContext().Store.Contains(addr))
             {
-                table = Context.Store[addr];
+                table = GetExecContext().Store[addr];
                 return true;
             }
             var addrs = _moduleInstances
@@ -215,9 +215,9 @@ namespace Wacs.Core.Runtime
                 .OfType<ExternalValue.Table>()
                 .Select(t => t.Address)
                 .ToList();
-            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            if (addrs.Count > 0 && GetExecContext().Store.Contains(addrs[^1]))
             {
-                table = Context.Store[addrs[^1]];
+                table = GetExecContext().Store[addrs[^1]];
                 return true;
             }
             table = null!;
@@ -239,9 +239,9 @@ namespace Wacs.Core.Runtime
                 .OfType<ExternalValue.Global>()
                 .Select(g => g.Address)
                 .ToList();
-            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            if (addrs.Count > 0 && GetExecContext().Store.Contains(addrs[^1]))
             {
-                global = Context.Store[addrs[^1]];
+                global = GetExecContext().Store[addrs[^1]];
                 return true;
             }
             global = null!;
@@ -250,9 +250,9 @@ namespace Wacs.Core.Runtime
 
         public bool TryGetExportedGlobal((string module, string entity) id, out GlobalInstance global)
         {
-            if (GetBoundEntity(id) is GlobalAddr addr && Context.Store.Contains(addr))
+            if (GetBoundEntity(id) is GlobalAddr addr && GetExecContext().Store.Contains(addr))
             {
-                global = Context.Store[addr];
+                global = GetExecContext().Store[addr];
                 return true;
             }
             var addrs = _moduleInstances
@@ -263,9 +263,9 @@ namespace Wacs.Core.Runtime
                 .OfType<ExternalValue.Global>()
                 .Select(g => g.Address)
                 .ToList();
-            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            if (addrs.Count > 0 && GetExecContext().Store.Contains(addrs[^1]))
             {
-                global = Context.Store[addrs[^1]];
+                global = GetExecContext().Store[addrs[^1]];
                 return true;
             }
             global = null!;
@@ -287,9 +287,9 @@ namespace Wacs.Core.Runtime
                 .OfType<ExternalValue.Tag>()
                 .Select(t => t.Address)
                 .ToList();
-            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            if (addrs.Count > 0 && GetExecContext().Store.Contains(addrs[^1]))
             {
-                tag = Context.Store[addrs[^1]];
+                tag = GetExecContext().Store[addrs[^1]];
                 return true;
             }
             tag = null!;
@@ -298,9 +298,9 @@ namespace Wacs.Core.Runtime
 
         public bool TryGetExportedTag((string module, string entity) id, out TagInstance tag)
         {
-            if (GetBoundEntity(id) is TagAddr addr && Context.Store.Contains(addr))
+            if (GetBoundEntity(id) is TagAddr addr && GetExecContext().Store.Contains(addr))
             {
-                tag = Context.Store[addr];
+                tag = GetExecContext().Store[addr];
                 return true;
             }
             var addrs = _moduleInstances
@@ -311,9 +311,9 @@ namespace Wacs.Core.Runtime
                 .OfType<ExternalValue.Tag>()
                 .Select(t => t.Address)
                 .ToList();
-            if (addrs.Count > 0 && Context.Store.Contains(addrs[^1]))
+            if (addrs.Count > 0 && GetExecContext().Store.Contains(addrs[^1]))
             {
-                tag = Context.Store[addrs[^1]];
+                tag = GetExecContext().Store[addrs[^1]];
                 return true;
             }
             tag = null!;
@@ -333,9 +333,9 @@ namespace Wacs.Core.Runtime
         /// </summary>
         public void ReplaceFunction(FuncAddr addr, IFunctionInstance replacement)
         {
-            if (!Context.Store.Contains(addr))
+            if (!GetExecContext().Store.Contains(addr))
                 throw new WasmRuntimeException($"Runtime context did not contain function at address {addr.Value}");
-            Context.Store.ReplaceFunction(addr, replacement);
+            GetExecContext().Store.ReplaceFunction(addr, replacement);
         }
 
         private IAddress? GetBoundEntity((string module, string entity) id) =>
@@ -409,17 +409,17 @@ namespace Wacs.Core.Runtime
 
         public string GetFunctionName(FuncAddr funcAddr)
         {
-            if (!Context.Store.Contains(funcAddr))
+            if (!GetExecContext().Store.Contains(funcAddr))
                 throw new ArgumentException($"Runtime did not contain function address.");
-            var funcInst = Context.Store[funcAddr];
+            var funcInst = GetExecContext().Store[funcAddr];
             return funcInst.Id;
         }
 
         public FunctionType GetFunctionType(FuncAddr funcAddr)
         {
-            if (!Context.Store.Contains(funcAddr))
+            if (!GetExecContext().Store.Contains(funcAddr))
                 throw new ArgumentException($"Runtime did not contain function address.");
-            var funcInst = Context.Store[funcAddr];
+            var funcInst = GetExecContext().Store[funcAddr];
             return funcInst.Type;
         }
 
