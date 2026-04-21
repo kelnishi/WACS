@@ -26,16 +26,25 @@ namespace Wacs.Core.Attributes
         /// Initializes a new instance of the <see cref="OpCodeAttribute"/> class.
         /// </summary>
         /// <param name="mnemonic">The WAT mnemonic associated with the opcode.</param>
-        /// <param name="category">For annotation, doesn't stick</param>
+        /// <param name="category">Optional marker used to filter variant
+        /// entries. "prototype" tags legacy SIMD opcode aliases that share
+        /// their mnemonic with the canonical form.</param>
         public OpCodeAttribute(string mnemonic, string category = "")
         {
-            _ = category;
             Mnemonic = mnemonic;
+            Category = category;
         }
 
         /// <summary>
         /// The mnemonic used in the WebAssembly Text Format (WAT).
         /// </summary>
         public string Mnemonic { get; }
+
+        /// <summary>
+        /// Category marker. Empty for canonical entries; "prototype" marks
+        /// legacy SIMD aliases that share the canonical mnemonic but encode
+        /// to a non-canonical opcode value.
+        /// </summary>
+        public string Category { get; }
     }
 }
