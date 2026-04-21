@@ -218,32 +218,26 @@ namespace Wacs.Core.Text
                 var thenInnerList = ParseInstrList(fctx, thenForm, ref tj, InstrStop.None, out _);
                 thenInner.AddRange(thenInnerList);
 
-                List<InstructionBase> elseInner;
+                InstructionSequence ifSeq, elseSeq;
                 if (elseForm != null)
                 {
-                    var elseBody = new List<InstructionBase> { new InstElse() };
+                    thenInner.Add(new InstElse());
+                    ifSeq = new InstructionSequence(thenInner);
+
+                    var elseBody = new List<InstructionBase>();
                     int ej = 1;
                     var els = ParseInstrList(fctx, elseForm, ref ej, InstrStop.None, out _);
                     elseBody.AddRange(els);
                     elseBody.Add(new InstEnd());
-                    elseInner = elseBody;
-
-                    // Combine: then-body then the else preamble, ending with End.
-                    thenInner.AddRange(elseInner);
+                    elseSeq = new InstructionSequence(elseBody);
                 }
                 else
                 {
                     thenInner.Add(new InstEnd());
+                    ifSeq = new InstructionSequence(thenInner);
+                    elseSeq = InstructionSequence.Empty;
                 }
-
-                // For InstIf.Immediate the contract is (ifSeq, elseSeq) — but
-                // the binary-parser shape just stores two parallel Blocks.
-                // We have been carrying a single linear sequence in thenInner;
-                // feed it as the ifSeq and leave elseSeq empty — the inner
-                // InstElse / InstEnd boundary markers communicate the split.
-                var ifInst = new InstIf().Immediate(blockType,
-                    new InstructionSequence(thenInner),
-                    InstructionSequence.Empty);
+                var ifInst = new InstIf().Immediate(blockType, ifSeq, elseSeq);
                 output.Add(ifInst);
             }
             finally
@@ -322,11 +316,29 @@ namespace Wacs.Core.Text
                     {
                         fctx.LabelStack.RemoveAt(fctx.LabelStack.Count - 1);
                     }
-                    thenBody.AddRange(elseBody);
-                    thenBody.Add(new InstEnd());
+                    // Per InstIf's contract (mirroring binary parser shape):
+                    //   IfBlock instructions end with InstElse when an else
+                    //   arm exists, or InstEnd otherwise.
+                    //   ElseBlock instructions end with InstEnd.
+                    // Binary-parser invariant enforced by EndsWithElse /
+                    // HasExplicitEnd.
+                    var ifSeq = new List<InstructionBase>(thenBody);
+                    InstructionSequence elseSeq;
+                    if (elseBody.Count > 0)
+                    {
+                        // else branch exists — then-body ends with InstElse,
+                        // else-body ends with InstEnd.
+                        ifSeq.Add(new InstElse());
+                        elseBody.Add(new InstEnd());
+                        elseSeq = new InstructionSequence(elseBody);
+                    }
+                    else
+                    {
+                        ifSeq.Add(new InstEnd());
+                        elseSeq = InstructionSequence.Empty;
+                    }
                     var ifInst = new InstIf().Immediate(blockType,
-                        new InstructionSequence(thenBody),
-                        InstructionSequence.Empty);
+                        new InstructionSequence(ifSeq), elseSeq);
                     output.Add(ifInst);
                     return;
                 }

@@ -15,5 +15,13 @@
 namespace Wacs.Core.Instructions
 {
     public interface IVarInstruction
-    {}
+    {
+        /// <summary>
+        /// The variable's local / global index. Already implemented on every
+        /// concrete <see cref="IVarInstruction"/>, just surfaced here so
+        /// consumers (e.g. <see cref="Wacs.Core.Text.TextModuleWriter"/>)
+        /// can access it without per-type casts.
+        /// </summary>
+        int GetIndex();
+    }
 }
