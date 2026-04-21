@@ -23,12 +23,14 @@ namespace Wacs.Core.Test
     public class AtomicInstructionTests
     {
         private static (WasmRuntime runtime, ModuleInstance inst) Build(string src,
-            IConcurrencyPolicy? policy = null, bool relaxSharedCheck = false)
+            IConcurrencyPolicy? policy = null, bool relaxSharedCheck = false,
+            bool useSwitchRuntime = false)
         {
             var attrs = new RuntimeAttributes();
             if (policy != null) attrs.ConcurrencyPolicy = policy;
             attrs.RelaxAtomicSharedCheck = relaxSharedCheck;
             var runtime = new WasmRuntime(attrs);
+            runtime.UseSwitchRuntime = useSwitchRuntime;
             var module = TextModuleParser.ParseWat(src);
             var inst = runtime.InstantiateModule(module);
             runtime.RegisterModule("M", inst);
@@ -392,6 +394,131 @@ namespace Wacs.Core.Test
             // Running the test suite outside Unity → HostDefined default.
             var attrs = new RuntimeAttributes();
             Assert.Equal(ConcurrencyPolicyMode.HostDefined, attrs.ConcurrencyPolicy.Mode);
+        }
+
+        // ---- Switch-runtime parity (phase 2) ----------------------------
+        // Each polymorphic test has a switch-runtime twin. Identical input
+        // must produce identical output regardless of which back-end
+        // dispatches the atomic instruction.
+
+        [Fact]
+        public void Switch_i32_load_store_round_trip()
+        {
+            var src = @"
+                (module
+                  (memory 1 1 shared)
+                  (func (export ""f"") (result i32)
+                    i32.const 0
+                    i32.const 0x12345678
+                    i32.atomic.store align=4
+                    i32.const 0
+                    i32.atomic.load align=4))";
+            var (rt, _) = Build(src, useSwitchRuntime: true);
+            Assert.Equal(0x12345678, InvokeI32(rt, "f"));
+        }
+
+        [Fact]
+        public void Switch_i64_load_store_round_trip()
+        {
+            var src = @"
+                (module
+                  (memory 1 1 shared)
+                  (func (export ""f"") (result i64)
+                    i32.const 8
+                    i64.const 0x0123456789ABCDEF
+                    i64.atomic.store align=8
+                    i32.const 8
+                    i64.atomic.load align=8))";
+            var (rt, _) = Build(src, useSwitchRuntime: true);
+            Assert.Equal(0x0123456789ABCDEFL, InvokeI64(rt, "f"));
+        }
+
+        [Fact]
+        public void Switch_subword_load_store()
+        {
+            var src = @"
+                (module
+                  (memory 1 1 shared)
+                  (func (export ""f"") (result i32)
+                    i32.const 7
+                    i32.const 0xA5
+                    i32.atomic.store8 align=1
+                    i32.const 7
+                    i32.atomic.load8_u align=1))";
+            var (rt, _) = Build(src, useSwitchRuntime: true);
+            Assert.Equal(0xA5, InvokeI32(rt, "f"));
+        }
+
+        [Fact]
+        public void Switch_rmw_add_and_subword_cas()
+        {
+            var src = @"
+                (module
+                  (memory 1 1 shared)
+                  (func (export ""rmw32"") (result i32)
+                    i32.const 0 i32.const 10 i32.atomic.store align=4
+                    i32.const 0 i32.const 5 i32.atomic.rmw.add align=4)
+                  (func (export ""rmw8"") (result i32)
+                    i32.const 3 i32.const 100 i32.atomic.store8 align=1
+                    i32.const 3 i32.const 56 i32.atomic.rmw8.add_u align=1)
+                  (func (export ""load32"") (result i32)
+                    i32.const 0 i32.atomic.load align=4))";
+            var (rt, _) = Build(src, useSwitchRuntime: true);
+            Assert.Equal(10, InvokeI32(rt, "rmw32"));     // original
+            Assert.Equal(15, InvokeI32(rt, "load32"));    // cell updated via switch path
+            Assert.Equal(100, InvokeI32(rt, "rmw8"));     // subword CAS loop
+        }
+
+        [Fact]
+        public void Switch_cmpxchg_success_and_mismatch()
+        {
+            var src = @"
+                (module
+                  (memory 1 1 shared)
+                  (func (export ""match"") (result i32)
+                    i32.const 0 i32.const 50 i32.atomic.store align=4
+                    i32.const 0 i32.const 50 i32.const 99 i32.atomic.rmw.cmpxchg align=4)
+                  (func (export ""miss"") (result i32)
+                    i32.const 4 i32.const 50 i32.atomic.store align=4
+                    i32.const 4 i32.const 999 i32.const 99 i32.atomic.rmw.cmpxchg align=4)
+                  (func (export ""load"") (param i32) (result i32)
+                    local.get 0 i32.atomic.load align=4))";
+            var (rt, _) = Build(src, useSwitchRuntime: true);
+            Assert.Equal(50, InvokeI32(rt, "match"));
+            Assert.Equal(99, InvokeI32(rt, "load", 0));
+            Assert.Equal(50, InvokeI32(rt, "miss"));
+            Assert.Equal(50, InvokeI32(rt, "load", 4));   // unchanged on miss
+        }
+
+        [Fact]
+        public void Switch_fence_executes()
+        {
+            var src = @"
+                (module
+                  (memory 1 1 shared)
+                  (func (export ""f"") (result i32)
+                    atomic.fence
+                    i32.const 42))";
+            var (rt, _) = Build(src, useSwitchRuntime: true);
+            Assert.Equal(42, InvokeI32(rt, "f"));
+        }
+
+        [Fact]
+        public void Switch_wait_and_notify_policy_semantics()
+        {
+            // NotSupported policy, mismatched expected → 2.
+            var src = @"
+                (module
+                  (memory 1 1 shared)
+                  (func (export ""wait_ne"") (result i32)
+                    i32.const 0 i32.const 99 i64.const 0
+                    memory.atomic.wait32 align=4)
+                  (func (export ""notify_empty"") (result i32)
+                    i32.const 0 i32.const 10
+                    memory.atomic.notify align=4))";
+            var (rt, _) = Build(src, policy: new NotSupportedPolicy(), useSwitchRuntime: true);
+            Assert.Equal(2, InvokeI32(rt, "wait_ne"));
+            Assert.Equal(0, InvokeI32(rt, "notify_empty"));
         }
     }
 }

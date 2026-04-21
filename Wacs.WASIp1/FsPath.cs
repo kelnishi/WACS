@@ -167,6 +167,23 @@ namespace Wacs.WASIp1
             // return ErrNo.Success;
         }
 
+        // This function signiature may SEGFAULT dotnet runtimes, but is required for some where reflection isn't 100% available.
+        // * provided for situations like Unity
+        public ErrNo NakedPathOpen(ExecContext ctx,
+            fd dirFd,
+            LookupFlags dirFlags,
+            ptr pathPtr,
+            size pathLen,
+            OFlags oFlags,
+            Rights fsRightsBase,
+            Rights fsRightsInheriting,
+            FdFlags fsFlags,
+            ptr fdPtr)
+        {
+            PathOpen(ctx, dirFd, dirFlags, pathPtr, pathLen, oFlags, fsRightsBase, fsRightsInheriting, fsFlags, fdPtr, out ErrNo result);
+            return result;
+        }
+
         /// <summary>
         /// Open a file or directory (similar to POSIX openat).
         /// </summary>
