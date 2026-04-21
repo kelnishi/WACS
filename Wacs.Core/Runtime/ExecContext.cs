@@ -157,6 +157,8 @@ namespace Wacs.Core.Runtime
 
         public InstructionBaseFactory InstructionFactory => Attributes.InstructionFactory;
 
+        public Concurrency.IConcurrencyPolicy ConcurrencyPolicy => Attributes.ConcurrencyPolicy;
+
         public MemoryInstance DefaultMemory => Store[Frame.Module.MemAddrs[default]];
 
         public int LabelHeight => _linkLabelStack.Count;

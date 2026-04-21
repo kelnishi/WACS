@@ -84,7 +84,7 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |[Exception handling](https://github.com/WebAssembly/exception-handling)|exceptions|✅|
 |[JS String Builtins](https://github.com/WebAssembly/js-string-builtins)||❌|
 |[Memory64](https://github.com/WebAssembly/memory64)|memory64|✅|
-|[Threads](https://github.com/webassembly/threads)|threads|❌|
+|[Threads](https://github.com/webassembly/threads)|threads|✅|
 |Phase 3|
 |[JS Promise Integration](https://github.com/WebAssembly/js-promise-integration)|jspi|<span title="Browser idiom, but conceptually supported">✳️</span>|
 |[Type Reflection for WebAssembly JavaScript API](https://github.com/WebAssembly/js-types)|type-reflection|<span title="Browser idioms, not directly supported">🌐</span>|

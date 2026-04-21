@@ -834,6 +834,18 @@ namespace Wacs.Core.Text
             if (TryGetMemoryOpcode(kw, out var memCode, out var naturalAlign))
                 return BuildMemoryInstructionWithContext(memCode, naturalAlign, parent, ref i, fctx);
 
+            // Atomic memarg-carrying ops (threads proposal). Natural
+            // alignment is the exact access width; the rest of the memarg
+            // plumbing is identical to non-atomic memory ops.
+            if (TryGetAtomicMemoryOpcode(kw, out var atomCode, out var atomNaturalAlign))
+                return BuildMemoryInstructionWithContext(atomCode, atomNaturalAlign, parent, ref i, fctx);
+
+            // atomic.fence — no memarg, but the binary form carries a
+            // reserved 0x00 byte. Synthesize it so the factory's Parse
+            // succeeds.
+            if (kw == "atomic.fence")
+                return DecodeViaBinary((ByteCode)AtomCode.AtomicFence, w => w.Write((byte)0));
+
             // Zero-immediate ops — look up by mnemonic. The factory produces
             // a ready instance; we don't need to parse further immediates.
             if (Mnemonics.TryLookup(kw, out var bc) && IsZeroImmediate(bc))
@@ -992,6 +1004,102 @@ namespace Wacs.Core.Text
             ByteCode code, int naturalAlignLog2, SExpr parent, ref int i)
         {
             return BuildMemoryInstructionWithContext(code, naturalAlignLog2, parent, ref i, null);
+        }
+
+        /// <summary>
+        /// Memarg-carrying atomic ops (threads proposal). Excludes
+        /// <c>atomic.fence</c>, which takes no memarg. The
+        /// <paramref name="naturalAlignLog2"/> matches the access width
+        /// exactly — atomic ops require <c>align == width</c> at
+        /// validation, not the <c>align ≤ width</c> rule used by
+        /// non-atomic ops.
+        /// </summary>
+        private static bool TryGetAtomicMemoryOpcode(string kw, out ByteCode code, out int naturalAlignLog2)
+        {
+            switch (kw)
+            {
+                // Loads
+                case "i32.atomic.load":       code = (ByteCode)AtomCode.I32AtomicLoad;      naturalAlignLog2 = 2; return true;
+                case "i64.atomic.load":       code = (ByteCode)AtomCode.I64AtomicLoad;      naturalAlignLog2 = 3; return true;
+                case "i32.atomic.load8_u":    code = (ByteCode)AtomCode.I32AtomicLoad8U;    naturalAlignLog2 = 0; return true;
+                case "i32.atomic.load16_u":   code = (ByteCode)AtomCode.I32AtomicLoad16U;   naturalAlignLog2 = 1; return true;
+                case "i64.atomic.load8_u":    code = (ByteCode)AtomCode.I64AtomicLoad8U;    naturalAlignLog2 = 0; return true;
+                case "i64.atomic.load16_u":   code = (ByteCode)AtomCode.I64AtomicLoad16U;   naturalAlignLog2 = 1; return true;
+                case "i64.atomic.load32_u":   code = (ByteCode)AtomCode.I64AtomicLoad32U;   naturalAlignLog2 = 2; return true;
+                // Stores
+                case "i32.atomic.store":      code = (ByteCode)AtomCode.I32AtomicStore;     naturalAlignLog2 = 2; return true;
+                case "i64.atomic.store":      code = (ByteCode)AtomCode.I64AtomicStore;     naturalAlignLog2 = 3; return true;
+                case "i32.atomic.store8":     code = (ByteCode)AtomCode.I32AtomicStore8;    naturalAlignLog2 = 0; return true;
+                case "i32.atomic.store16":    code = (ByteCode)AtomCode.I32AtomicStore16;   naturalAlignLog2 = 1; return true;
+                case "i64.atomic.store8":     code = (ByteCode)AtomCode.I64AtomicStore8;    naturalAlignLog2 = 0; return true;
+                case "i64.atomic.store16":    code = (ByteCode)AtomCode.I64AtomicStore16;   naturalAlignLog2 = 1; return true;
+                case "i64.atomic.store32":    code = (ByteCode)AtomCode.I64AtomicStore32;   naturalAlignLog2 = 2; return true;
+                // Wait/notify
+                case "memory.atomic.notify":  code = (ByteCode)AtomCode.MemoryAtomicNotify; naturalAlignLog2 = 2; return true;
+                case "memory.atomic.wait32":  code = (ByteCode)AtomCode.MemoryAtomicWait32; naturalAlignLog2 = 2; return true;
+                case "memory.atomic.wait64":  code = (ByteCode)AtomCode.MemoryAtomicWait64; naturalAlignLog2 = 3; return true;
+                // RMW add
+                case "i32.atomic.rmw.add":    code = (ByteCode)AtomCode.I32AtomicRmwAdd;    naturalAlignLog2 = 2; return true;
+                case "i64.atomic.rmw.add":    code = (ByteCode)AtomCode.I64AtomicRmwAdd;    naturalAlignLog2 = 3; return true;
+                case "i32.atomic.rmw8.add_u": code = (ByteCode)AtomCode.I32AtomicRmw8AddU;  naturalAlignLog2 = 0; return true;
+                case "i32.atomic.rmw16.add_u":code = (ByteCode)AtomCode.I32AtomicRmw16AddU; naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw8.add_u": code = (ByteCode)AtomCode.I64AtomicRmw8AddU;  naturalAlignLog2 = 0; return true;
+                case "i64.atomic.rmw16.add_u":code = (ByteCode)AtomCode.I64AtomicRmw16AddU; naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw32.add_u":code = (ByteCode)AtomCode.I64AtomicRmw32AddU; naturalAlignLog2 = 2; return true;
+                // RMW sub
+                case "i32.atomic.rmw.sub":    code = (ByteCode)AtomCode.I32AtomicRmwSub;    naturalAlignLog2 = 2; return true;
+                case "i64.atomic.rmw.sub":    code = (ByteCode)AtomCode.I64AtomicRmwSub;    naturalAlignLog2 = 3; return true;
+                case "i32.atomic.rmw8.sub_u": code = (ByteCode)AtomCode.I32AtomicRmw8SubU;  naturalAlignLog2 = 0; return true;
+                case "i32.atomic.rmw16.sub_u":code = (ByteCode)AtomCode.I32AtomicRmw16SubU; naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw8.sub_u": code = (ByteCode)AtomCode.I64AtomicRmw8SubU;  naturalAlignLog2 = 0; return true;
+                case "i64.atomic.rmw16.sub_u":code = (ByteCode)AtomCode.I64AtomicRmw16SubU; naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw32.sub_u":code = (ByteCode)AtomCode.I64AtomicRmw32SubU; naturalAlignLog2 = 2; return true;
+                // RMW and
+                case "i32.atomic.rmw.and":    code = (ByteCode)AtomCode.I32AtomicRmwAnd;    naturalAlignLog2 = 2; return true;
+                case "i64.atomic.rmw.and":    code = (ByteCode)AtomCode.I64AtomicRmwAnd;    naturalAlignLog2 = 3; return true;
+                case "i32.atomic.rmw8.and_u": code = (ByteCode)AtomCode.I32AtomicRmw8AndU;  naturalAlignLog2 = 0; return true;
+                case "i32.atomic.rmw16.and_u":code = (ByteCode)AtomCode.I32AtomicRmw16AndU; naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw8.and_u": code = (ByteCode)AtomCode.I64AtomicRmw8AndU;  naturalAlignLog2 = 0; return true;
+                case "i64.atomic.rmw16.and_u":code = (ByteCode)AtomCode.I64AtomicRmw16AndU; naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw32.and_u":code = (ByteCode)AtomCode.I64AtomicRmw32AndU; naturalAlignLog2 = 2; return true;
+                // RMW or
+                case "i32.atomic.rmw.or":     code = (ByteCode)AtomCode.I32AtomicRmwOr;     naturalAlignLog2 = 2; return true;
+                case "i64.atomic.rmw.or":     code = (ByteCode)AtomCode.I64AtomicRmwOr;     naturalAlignLog2 = 3; return true;
+                case "i32.atomic.rmw8.or_u":  code = (ByteCode)AtomCode.I32AtomicRmw8OrU;   naturalAlignLog2 = 0; return true;
+                case "i32.atomic.rmw16.or_u": code = (ByteCode)AtomCode.I32AtomicRmw16OrU;  naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw8.or_u":  code = (ByteCode)AtomCode.I64AtomicRmw8OrU;   naturalAlignLog2 = 0; return true;
+                case "i64.atomic.rmw16.or_u": code = (ByteCode)AtomCode.I64AtomicRmw16OrU;  naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw32.or_u": code = (ByteCode)AtomCode.I64AtomicRmw32OrU;  naturalAlignLog2 = 2; return true;
+                // RMW xor
+                case "i32.atomic.rmw.xor":    code = (ByteCode)AtomCode.I32AtomicRmwXor;    naturalAlignLog2 = 2; return true;
+                case "i64.atomic.rmw.xor":    code = (ByteCode)AtomCode.I64AtomicRmwXor;    naturalAlignLog2 = 3; return true;
+                case "i32.atomic.rmw8.xor_u": code = (ByteCode)AtomCode.I32AtomicRmw8XorU;  naturalAlignLog2 = 0; return true;
+                case "i32.atomic.rmw16.xor_u":code = (ByteCode)AtomCode.I32AtomicRmw16XorU; naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw8.xor_u": code = (ByteCode)AtomCode.I64AtomicRmw8XorU;  naturalAlignLog2 = 0; return true;
+                case "i64.atomic.rmw16.xor_u":code = (ByteCode)AtomCode.I64AtomicRmw16XorU; naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw32.xor_u":code = (ByteCode)AtomCode.I64AtomicRmw32XorU; naturalAlignLog2 = 2; return true;
+                // RMW xchg
+                case "i32.atomic.rmw.xchg":   code = (ByteCode)AtomCode.I32AtomicRmwXchg;   naturalAlignLog2 = 2; return true;
+                case "i64.atomic.rmw.xchg":   code = (ByteCode)AtomCode.I64AtomicRmwXchg;   naturalAlignLog2 = 3; return true;
+                case "i32.atomic.rmw8.xchg_u":code = (ByteCode)AtomCode.I32AtomicRmw8XchgU; naturalAlignLog2 = 0; return true;
+                case "i32.atomic.rmw16.xchg_u":code = (ByteCode)AtomCode.I32AtomicRmw16XchgU;naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw8.xchg_u":code = (ByteCode)AtomCode.I64AtomicRmw8XchgU; naturalAlignLog2 = 0; return true;
+                case "i64.atomic.rmw16.xchg_u":code = (ByteCode)AtomCode.I64AtomicRmw16XchgU;naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw32.xchg_u":code = (ByteCode)AtomCode.I64AtomicRmw32XchgU;naturalAlignLog2 = 2; return true;
+                // Cmpxchg
+                case "i32.atomic.rmw.cmpxchg":code = (ByteCode)AtomCode.I32AtomicRmwCmpxchg;naturalAlignLog2 = 2; return true;
+                case "i64.atomic.rmw.cmpxchg":code = (ByteCode)AtomCode.I64AtomicRmwCmpxchg;naturalAlignLog2 = 3; return true;
+                case "i32.atomic.rmw8.cmpxchg_u":code = (ByteCode)AtomCode.I32AtomicRmw8CmpxchgU; naturalAlignLog2 = 0; return true;
+                case "i32.atomic.rmw16.cmpxchg_u":code = (ByteCode)AtomCode.I32AtomicRmw16CmpxchgU;naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw8.cmpxchg_u":code = (ByteCode)AtomCode.I64AtomicRmw8CmpxchgU; naturalAlignLog2 = 0; return true;
+                case "i64.atomic.rmw16.cmpxchg_u":code = (ByteCode)AtomCode.I64AtomicRmw16CmpxchgU;naturalAlignLog2 = 1; return true;
+                case "i64.atomic.rmw32.cmpxchg_u":code = (ByteCode)AtomCode.I64AtomicRmw32CmpxchgU;naturalAlignLog2 = 2; return true;
+
+                default:
+                    code = default;
+                    naturalAlignLog2 = 0;
+                    return false;
+            }
         }
 
         private static InstructionBase BuildMemoryInstructionWithContext(
