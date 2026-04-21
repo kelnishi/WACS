@@ -52,6 +52,13 @@ namespace Wacs.Core
                     throw new FormatException($"Data segment size {Size} differs from bytes provided {Init.Length}");
             }
 
+            /// <summary>
+            /// Internal factory for the text parser. Uses the same shape as
+            /// the binary parser's private constructor.
+            /// </summary>
+            internal static Data Create(DataMode mode, byte[] bytes) =>
+                new Data(mode, ((uint)bytes.Length, bytes));
+
             public DataMode Mode { get; }
             public uint Size { get; }
             public byte[] Init { get; }

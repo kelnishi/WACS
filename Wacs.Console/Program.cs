@@ -76,10 +76,11 @@ namespace Wacs.Console
             }
 
             // Check the file extension
-            string fileExtension = Path.GetExtension(opts.WasmModule);
-            if (fileExtension != ".wasm")
+            string fileExtension = Path.GetExtension(opts.WasmModule).ToLowerInvariant();
+            if (fileExtension != ".wasm" && fileExtension != ".wat")
             {
-                System.Console.Error.WriteLine($"Error: Invalid file extension: {fileExtension}. Expected .wasm");
+                System.Console.Error.WriteLine(
+                    $"Error: Invalid file extension: {fileExtension}. Expected .wasm or .wat (for .wast scripts use a spec runner).");
                 return 1;
             }
 
@@ -130,9 +131,14 @@ namespace Wacs.Console
                 parseTimer.Start();
             }
             
-            //Parse the module
-            using var fileStream = new FileStream(opts.WasmModule, FileMode.Open);
-            var module = BinaryModuleParser.ParseWasm(fileStream);
+            //Parse the module — dispatch on extension.
+            Wacs.Core.Module module;
+            using (var fileStream = new FileStream(opts.WasmModule, FileMode.Open))
+            {
+                module = fileExtension == ".wat"
+                    ? Wacs.Core.Text.TextModuleParser.ParseWat(fileStream)
+                    : BinaryModuleParser.ParseWasm(fileStream);
+            }
 
             if (opts.LogProg)
             {
@@ -143,8 +149,14 @@ namespace Wacs.Console
             if (opts.Render)
             {
                 string outputFilePath = Path.ChangeExtension(opts.WasmModule, ".wat");
-                using var outputStream = new FileStream(outputFilePath, FileMode.Create);
-                ModuleRenderer.RenderWatToStream(outputStream, module);
+                // Parser-friendly WAT output via TextModuleWriter — round-
+                // trips cleanly through TextModuleParser. Use
+                // ModuleRenderer.RenderWatToStream if you want the
+                // debug/display variant (stack annotations, (;id;) comments).
+                var wat = Wacs.Core.Text.TextModuleWriter.Write(module);
+                File.WriteAllText(outputFilePath, wat);
+                if (opts.LogProg)
+                    System.Console.Error.WriteLine($"Rendered {outputFilePath} ({wat.Length} chars)");
             }
 
             if (!opts.SkipValidation)

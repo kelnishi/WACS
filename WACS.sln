@@ -23,6 +23,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Compilation.Test", "Wa
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler.Lib", "Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj", "{CC2BEAF6-76B7-449A-8D23-549025E6F120}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Core.Test", "Wacs.Core.Test\Wacs.Core.Test.csproj", "{6DB10230-B3B1-49CF-97E4-939A5DF4FF4B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -73,5 +75,9 @@ Global
 		{CC2BEAF6-76B7-449A-8D23-549025E6F120}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CC2BEAF6-76B7-449A-8D23-549025E6F120}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CC2BEAF6-76B7-449A-8D23-549025E6F120}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6DB10230-B3B1-49CF-97E4-939A5DF4FF4B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6DB10230-B3B1-49CF-97E4-939A5DF4FF4B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6DB10230-B3B1-49CF-97E4-939A5DF4FF4B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6DB10230-B3B1-49CF-97E4-939A5DF4FF4B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
