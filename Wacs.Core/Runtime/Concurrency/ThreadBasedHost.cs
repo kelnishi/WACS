@@ -49,18 +49,19 @@ namespace Wacs.Core.Runtime.Concurrency
             // the span may live on the stack and won't survive this method's return.
             var argArray = args.ToArray();
 
-            var thread = new WasmThread(Interlocked.Increment(ref _nextHostId));
-
-            // Hook CancellationToken to the cooperative-trap mechanism. The invoke
-            // loop in Layer 1f observes TrapReason at call boundaries.
-            CancellationTokenRegistration reg = default;
-            if (ct.CanBeCanceled)
-                reg = ct.Register(() => thread.RequestTrap("cancelled"));
+            var thread = new WasmThread(Interlocked.Increment(ref _nextHostId), ct);
 
             var t = new Thread(() =>
             {
                 try
                 {
+                    // Bind the CT to the per-thread ExecContext (Layer 1c) before
+                    // invoking. The invoke loop observes ctx.Ct at call boundaries
+                    // and traps with InterruptedException on cancellation.
+                    var ctx = _runtime.ExecContext;
+                    ctx.Ct = thread.CancellationToken;
+                    ctx.InterruptReason = thread.TrapReason;
+
                     var invoker = _runtime.CreateStackInvoker(entry);
                     _ = invoker(argArray);
                     thread.Complete(null);
@@ -72,10 +73,6 @@ namespace Wacs.Core.Runtime.Concurrency
                 catch (Exception exc)
                 {
                     thread.Fault(exc);
-                }
-                finally
-                {
-                    reg.Dispose();
                 }
             })
             {

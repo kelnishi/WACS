@@ -45,12 +45,14 @@ namespace Wacs.Core.Runtime
         /// </summary>
         internal Value[] InvokeViaSwitch(FunctionInstance func, FunctionType funcType, object[] args)
         {
-            GetExecContext().OpStack.PushScalars(funcType.ParameterTypes, args);
-            GetExecContext().SwitchCallDepth = 0;
+            var ctx = GetExecContext();
+            ctx.CheckInterrupt();
+            ctx.OpStack.PushScalars(funcType.ParameterTypes, args);
+            ctx.SwitchCallDepth = 0;
 
             try
             {
-                ControlHandlers.InvokeWasm(GetExecContext(), func);
+                ControlHandlers.InvokeWasm(ctx, func);
             }
             catch (WasmException we)
             {

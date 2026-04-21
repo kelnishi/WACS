@@ -18,10 +18,13 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Concurrency;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -84,6 +87,25 @@ namespace Wacs.Core.Runtime
 
         public Frame Frame = NullFrame;
         public int InstructionPointer;
+
+        /// <summary>
+        /// Optional cancellation signal observed at function-call boundaries
+        /// (Layer 1f). When set and cancelled, the invoke path throws
+        /// <see cref="InterruptedException"/> with <see cref="InterruptReason"/>
+        /// so the trap propagates through to <c>WasmThread.Completion</c>.
+        ///
+        /// <para>Set by <see cref="ThreadBasedHost"/> on the per-thread ExecContext
+        /// before dispatching the entry point. Default <see cref="CancellationToken.None"/>
+        /// — single-threaded callers pay no observation cost.</para>
+        /// </summary>
+        public CancellationToken Ct;
+
+        /// <summary>
+        /// Reason string stamped by the cancellation source (e.g. from
+        /// <see cref="WasmThread.RequestTrap"/>). Reported through the thrown
+        /// <see cref="InterruptedException"/>.
+        /// </summary>
+        public string InterruptReason = "cancelled";
         public int LinkOpStackHeight;
         public int MaxLinkOpStackHeight;
         public bool LinkUnreachable;
@@ -381,9 +403,25 @@ namespace Wacs.Core.Runtime
         public BlockTarget PeekLabel() => _linkLabelStack.Peek();
 
 
+        /// <summary>
+        /// Observes the cancellation signal set by
+        /// <see cref="ThreadBasedHost"/> / <see cref="WasmThread.RequestTrap"/>.
+        /// Called at function-call boundaries (Layer 1f); <see cref="Ct"/> defaults
+        /// to <see cref="CancellationToken.None"/> for callers that don't opt in,
+        /// so the observation is a single cheap field read + branch.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CheckInterrupt()
+        {
+            if (Ct.IsCancellationRequested)
+                throw new InterruptedException(InterruptReason);
+        }
+
         // @Spec 4.4.10.1 Function Invocation
         public async Task InvokeAsync(FuncAddr addr)
         {
+            CheckInterrupt();
+
             //1.
             Assert( Store.Contains(addr),
                 $"Failure in Function Invocation. Address does not exist {addr}");
@@ -410,6 +448,8 @@ namespace Wacs.Core.Runtime
 
         public void Invoke(FuncAddr addr)
         {
+            CheckInterrupt();
+
             //1.
             Assert( Store.Contains(addr),
                 $"Failure in Function Invocation. Address does not exist {addr}");
