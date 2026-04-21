@@ -143,20 +143,7 @@ namespace Wacs.Core.Text
             int i = 1;
             var label = TryConsumeLabelId(node, ref i);
             var blockType = ParseBlockType(fctx.Module, node, ref i);
-            // Skip (catch …) / (catch_ref …) / (catch_all …) / (catch_all_ref …)
-            // clauses (phase 1.8 doesn't thread them through).
-            while (i < node.Children.Count
-                && node.Children[i].Kind == SExprKind.List
-                && node.Children[i].Head != null
-                && node.Children[i].Head!.Token.Kind == TokenKind.Keyword)
-            {
-                var cw = node.Children[i].Head!.AtomText();
-                if (cw == "catch" || cw == "catch_ref"
-                    || cw == "catch_all" || cw == "catch_all_ref")
-                    i++;
-                else
-                    break;
-            }
+            var catches = ParseCatchClauses(fctx, node, ref i);
             fctx.LabelStack.Add(label);
             try
             {
@@ -170,12 +157,61 @@ namespace Wacs.Core.Text
                     ParseFoldedInstruction(fctx, child, inner);
                 }
                 inner.Add(new InstEnd());
-                output.Add(new InstBlock().Immediate(blockType, new InstructionSequence(inner)));
+                output.Add(new InstTryTable().Immediate(
+                    blockType, new InstructionSequence(inner), catches));
             }
             finally
             {
                 fctx.LabelStack.RemoveAt(fctx.LabelStack.Count - 1);
             }
+        }
+
+        /// <summary>
+        /// Parse zero or more <c>(catch …)</c> / <c>(catch_ref …)</c> /
+        /// <c>(catch_all …)</c> / <c>(catch_all_ref …)</c> clauses
+        /// following a try_table's block-type. Advances <paramref name="i"/>
+        /// past all consumed clauses.
+        /// </summary>
+        private static CatchType[] ParseCatchClauses(
+            TextFunctionContext fctx, SExpr parent, ref int i)
+        {
+            var list = new List<CatchType>();
+            while (i < parent.Children.Count
+                && parent.Children[i].Kind == SExprKind.List
+                && parent.Children[i].Head != null
+                && parent.Children[i].Head!.Token.Kind == TokenKind.Keyword)
+            {
+                var clause = parent.Children[i];
+                var cw = clause.Head!.AtomText();
+                CatchFlags? flags = cw switch
+                {
+                    "catch"          => (CatchFlags?)CatchFlags.None,
+                    "catch_ref"      => CatchFlags.CatchRef,
+                    "catch_all"      => CatchFlags.CatchAll,
+                    "catch_all_ref"  => CatchFlags.CatchAllRef,
+                    _ => null,
+                };
+                if (flags == null) break;
+                i++;
+                // Shape:
+                //   (catch $tag $label)
+                //   (catch_ref $tag $label)
+                //   (catch_all $label)
+                //   (catch_all_ref $label)
+                int j = 1;
+                if (flags == CatchFlags.None || flags == CatchFlags.CatchRef)
+                {
+                    var tagIdx = (TagIdx)ResolveNamespaceIdx(fctx.Module.Tags, clause.Children[j++], "tag");
+                    var labelIdx = (LabelIdx)ResolveLabel(fctx, clause.Children[j++]);
+                    list.Add(new CatchType(flags.Value, tagIdx, labelIdx));
+                }
+                else
+                {
+                    var labelIdx = (LabelIdx)ResolveLabel(fctx, clause.Children[j++]);
+                    list.Add(new CatchType(flags.Value, labelIdx));
+                }
+            }
+            return list.ToArray();
         }
 
         private static void ParseBlockFolded(
@@ -302,27 +338,11 @@ namespace Wacs.Core.Text
                 case "try_table":
                 {
                     // try_table has a block-type + zero or more (catch …)
-                    // clauses + a body terminated by `end`. For Phase 1.8
-                    // we accept the form structurally but don't yet thread
-                    // the catch-table through to the runtime. The body
-                    // parses as a regular block scope so labels resolve.
+                    // clauses + a body terminated by `end`.
                     i++;   // consume 'try_table' keyword
                     var label = TryConsumeLabelId(parent, ref i);
                     var blockType = ParseBlockType(fctx.Module, parent, ref i);
-                    // Skip (catch …) / (catch_ref …) / (catch_all …) /
-                    // (catch_all_ref …) s-expr clauses.
-                    while (i < parent.Children.Count
-                        && parent.Children[i].Kind == SExprKind.List
-                        && parent.Children[i].Head != null
-                        && parent.Children[i].Head!.Token.Kind == TokenKind.Keyword)
-                    {
-                        var cw = parent.Children[i].Head!.AtomText();
-                        if (cw == "catch" || cw == "catch_ref"
-                            || cw == "catch_all" || cw == "catch_all_ref")
-                            i++;
-                        else
-                            break;
-                    }
+                    var catches = ParseCatchClauses(fctx, parent, ref i);
                     fctx.LabelStack.Add(label);
                     List<InstructionBase> innerTry;
                     try
@@ -334,7 +354,8 @@ namespace Wacs.Core.Text
                         fctx.LabelStack.RemoveAt(fctx.LabelStack.Count - 1);
                     }
                     innerTry.Add(new InstEnd());
-                    output.Add(new InstBlock().Immediate(blockType, new InstructionSequence(innerTry)));
+                    output.Add(new InstTryTable().Immediate(
+                        blockType, new InstructionSequence(innerTry), catches));
                     return;
                 }
                 case "block":

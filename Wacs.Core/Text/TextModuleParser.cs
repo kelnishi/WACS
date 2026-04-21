@@ -86,12 +86,17 @@ namespace Wacs.Core.Text
                 }
             }
 
-            // Pass 1: pre-declare every named entity across all namespaces
+            // Pass 1a: pre-declare every named entity across all namespaces
             // so forward references inside function bodies, elem / data
-            // initializers, exports etc. resolve cleanly. Anonymous
-            // entities get reserved slots so indices stay contiguous.
+            // initializers, exports etc. resolve cleanly.
             int startOfSections = i;
             PreDeclareNames(ctx, moduleForm, startOfSections);
+
+            // Pass 1b: fully parse all explicit (type …) and (rec (type)…)
+            // forms and add them to Module.Types. Matches the binary
+            // encoder's convention of emitting explicit types first;
+            // inline typeuses from pass 2 get synthesized AFTER.
+            PrePopulateTypes(ctx, moduleForm, startOfSections);
 
             // Pass 2: full parse. Section parsers no longer re-Declare
             // names — they look up the index pre-assigned in pass 1 and
@@ -116,8 +121,9 @@ namespace Wacs.Core.Text
                 var name = head.AtomText();
                 switch (name)
                 {
-                    case "type":    ParseTypeForm(ctx, form); break;
-                    case "rec":     ParseRecTypeForm(ctx, form); break;
+                    // Explicit type forms were populated in pass 1b.
+                    case "type":    /* already parsed */ break;
+                    case "rec":     /* already parsed */ break;
                     case "import":  ParseImportForm(ctx, form); break;
                     case "func":    ParseFuncForm(ctx, form); break;
                     case "table":   ParseTableForm(ctx, form); break;
@@ -201,6 +207,30 @@ namespace Wacs.Core.Text
                     case "elem":   PreRegisterNamed(ctx.Elems,  form, elemIdx++); break;
                     case "data":   PreRegisterNamed(ctx.Datas,  form, dataIdx++); break;
                     case "tag":    PreRegisterNamed(ctx.Tags,   form, tagIdx++); break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Pass 1b: parse every explicit <c>(type …)</c> and <c>(rec …)</c>
+        /// form up front so Module.Types is fully populated with declared
+        /// types before pass 2 starts synthesizing inline typeuses. This
+        /// matches the binary encoder's convention of emitting explicit
+        /// types first.
+        /// </summary>
+        private static void PrePopulateTypes(TextParseContext ctx, SExpr moduleForm, int sectionStart)
+        {
+            for (int i = sectionStart; i < moduleForm.Children.Count; i++)
+            {
+                var form = moduleForm.Children[i];
+                if (form.Kind != SExprKind.List) continue;
+                var head = form.Head;
+                if (head == null || head.Kind != SExprKind.Atom
+                    || head.Token.Kind != TokenKind.Keyword) continue;
+                switch (head.AtomText())
+                {
+                    case "type": ParseTypeForm(ctx, form); break;
+                    case "rec":  ParseRecTypeForm(ctx, form); break;
                 }
             }
         }
