@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.8.2] First-class WAT / WAST text format
+
+- **Pure-C# WAT reader + writer.** New `Wacs.Core.Text` namespace
+  provides a self-contained WebAssembly text-format pipeline:
+  - `Lexer` / `Token` / `SExpr` / `SExprParser` tokenize and tree-ify
+    WAT source (line / block comments, string escapes, annotations,
+    quoted identifiers with full `\XX` / `\u{…}` UTF-8 decoding).
+  - `Mnemonics` builds a `FrozenDictionary<string, ByteCode>` once at
+    static-ctor time by reflecting over the `[OpCode(...)]` attributes
+    already present on every opcode enum field. Parse and render share
+    the same source of truth.
+  - `TextModuleParser.ParseWat(Stream|string)` produces the *same*
+    `Module` object the binary parser produces — two-pass name
+    resolution, rec-group flattening, inline-typeuse synthesis with
+    rec-isolated dedup, and per-instruction `ParseText` hooks
+    co-located with each instruction's binary `Parse` override.
+  - `TextScriptParser.ParseWast(...)` produces `ScriptCommand[]` for
+    `.wast` scripts, including `(module binary …)` / `(module quote …)`
+    and every `(assert_*)` form.
+  - `TextModuleWriter.Write(module)` emits canonical, parser-friendly
+    WAT that round-trips back through the text parser to a
+    structurally equivalent `Module`. Distinct from the existing
+    `ModuleRenderer.RenderWatToStream` debug/display variant, which is
+    kept for inspection use.
+- **`Wacs.Console` accepts `.wat` input.** `dotnet run --project
+  Wacs.Console -- module.wat` runs text-format modules through any
+  back-end (`--super`, `--switch`, `-t` / `--aot`) identically to
+  `.wasm` input. The `-r` / `--render` flag now uses
+  `TextModuleWriter` so the emitted `.wat` round-trips cleanly.
+- **Spec-suite coverage: 100%.** New `Wacs.Core.Test` xUnit project
+  runs two gates across the full WebAssembly 3.0 spec suite
+  (`Spec.Test/spec/test/core/*.wast`):
+  - `SpecWastSmokeTests` — **120 / 120** `.wast` files parse without
+    error. The `SkipList` is empty; there are no text-only skipped
+    tests.
+  - `SpecWastEquivalenceTests` — **3457 / 3457** modules embedded in
+    the spec scripts produce structurally identical `Module` objects
+    under both the text parser and the binary parser (including
+    preserved `try_table` shapes, rec-group layouts, GC struct /
+    array composite types, annotations, and all Phase-5 / Phase-4
+    proposals).
+- **WIT IDL parser.** New `Wacs.Core.Components` namespace hosts a
+  standalone recursive-descent parser for the component model's WIT
+  interface definition language (packages, interfaces, worlds, full
+  type system including `own<T>` / `borrow<T>` resource handles,
+  `use` statements, world includes). Separate grammar from WAT, so a
+  separate pipeline. Groundwork for the component-model work tracked
+  in the roadmap.
+- **AOT stays green.** No runtime `Reflection.Emit`. Reflection over
+  `[OpCode("…")]` attributes is one-shot, at static-ctor time, on the
+  same pattern `OpCodeExtensions.LookUp` already uses. `dotnet publish
+  Wacs.Console -c Release -r osx-arm64 -p:PublishAot=true` continues
+  to pass and the published binary parses + executes `.wat` input.
+
 ## WACS.Transpiler / WACS.Transpiler.Lib [0.2.0] Cross-process loading
 
 - **Package split**: WACS.Transpiler remains the `wasm-transpile`
