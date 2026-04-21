@@ -153,13 +153,21 @@ namespace Wacs.Core.Text
         /// <summary>
         /// Tokenize the full source into a list of tokens. Terminates with a
         /// single <see cref="TokenKind.Eof"/> token.
+        ///
+        /// <para>Per the annotations proposal, the <c>(@name …)</c> form
+        /// relaxes the idchar class inside its body to include <c>[ ] { } ,
+        /// ; :</c>. This lexer tracks annotation-depth to apply the broader
+        /// rule within nested annotations and fall back to the spec-strict
+        /// rule outside. The relaxed class also bypasses line-comment
+        /// detection on single <c>;</c>.</para>
         /// </summary>
         public List<Token> Tokenize()
         {
             var tokens = new List<Token>(Math.Max(16, _source.Length / 8));
+            int annotDepth = 0;
             while (true)
             {
-                SkipTrivia();
+                SkipTrivia(annotDepth);
                 int line = _line, col = _col;
                 int start = _pos;
                 if (_pos >= _source.Length)
@@ -170,12 +178,18 @@ namespace Wacs.Core.Text
                 char c = _source[_pos];
                 if (c == '(')
                 {
+                    // `(@` opens an annotation scope.
+                    if (_pos + 1 < _source.Length && _source[_pos + 1] == '@')
+                        annotDepth++;
+                    else if (annotDepth > 0)
+                        annotDepth++;   // nested paren within annotation — counted too
                     tokens.Add(new Token(TokenKind.LParen, start, 1, line, col));
                     Advance();
                     continue;
                 }
                 if (c == ')')
                 {
+                    if (annotDepth > 0) annotDepth--;
                     tokens.Add(new Token(TokenKind.RParen, start, 1, line, col));
                     Advance();
                     continue;
@@ -186,11 +200,13 @@ namespace Wacs.Core.Text
                     tokens.Add(new Token(TokenKind.String, start, len, line, col));
                     continue;
                 }
-                if (IsIdChar(c))
+                bool inAnnot = annotDepth > 0;
+                if (IsIdChar(c) || (inAnnot && IsAnnotExtChar(c)))
                 {
                     int runStart = _pos;
                     int runLine = line, runCol = col;
-                    while (_pos < _source.Length && IsIdChar(_source[_pos]))
+                    while (_pos < _source.Length
+                        && (IsIdChar(_source[_pos]) || (inAnnot && IsAnnotExtChar(_source[_pos]))))
                         Advance();
                     int len = _pos - runStart;
                     TokenKind kind;
@@ -204,7 +220,26 @@ namespace Wacs.Core.Text
             }
         }
 
-        private void SkipTrivia()
+        /// <summary>
+        /// Characters the annotations proposal admits as idchars only inside
+        /// a <c>(@name …)</c> body: brackets, braces, comma, and bare
+        /// semicolon / colon (which are outside the spec's core idchar
+        /// class). Single-char tokens like <c>(</c> and <c>)</c> stay as
+        /// their own lexemes so annotation-level nesting still works.
+        /// </summary>
+        private static bool IsAnnotExtChar(char c)
+        {
+            switch (c)
+            {
+                case '[': case ']':
+                case '{': case '}':
+                case ',': case ';':
+                    return true;
+                default: return false;
+            }
+        }
+
+        private void SkipTrivia(int annotDepth = 0)
         {
             while (_pos < _source.Length)
             {
@@ -221,9 +256,11 @@ namespace Wacs.Core.Text
                     _col = 1;
                     continue;
                 }
+                // `;;` line comment. Per the annotations proposal,
+                // comments still apply inside annotations — single `;`
+                // becomes an idchar there, but `;;` is always a comment.
                 if (c == ';' && _pos + 1 < _source.Length && _source[_pos + 1] == ';')
                 {
-                    // Line comment — run to end-of-line
                     while (_pos < _source.Length && _source[_pos] != '\n') Advance();
                     continue;
                 }

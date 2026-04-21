@@ -104,10 +104,22 @@ namespace Wacs.Core.Text
 
         private static void FinalizeModule(TextParseContext ctx)
         {
-            // Placeholder — post-parse wiring (assigning Function.Index,
-            // linking Codes, running the same FinalizeModule the binary
-            // parser runs) lives here. Phase 1.4 will populate most of it
-            // once instruction bodies are parsed.
+            // Post-parse wiring matching what the binary parser does in its
+            // FinalizeModule — gets the Module to a state the runtime can
+            // instantiate.
+            var module = ctx.Module;
+
+            // Assign FuncIdx to every defined function, starting after
+            // imported function slots (spec index space ordering).
+            int fIdx = module.ImportedFunctions.Count;
+            foreach (var fn in module.Funcs)
+                fn.Index = (Wacs.Core.Types.FuncIdx)fIdx++;
+
+            // The binary parser defaults DataCount when no DataCount
+            // section was present; mirror here so runtime instantiation
+            // doesn't assert on uint.MaxValue.
+            if (module.DataCount == uint.MaxValue)
+                module.DataCount = (uint)module.Datas.Length;
         }
 
         // ---- Helpers shared across section parsers ------------------------
