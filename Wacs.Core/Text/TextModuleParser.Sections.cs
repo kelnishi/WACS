@@ -132,12 +132,12 @@ namespace Wacs.Core.Text
             // the referenced FunctionType; declared locals follow via
             // (local $name? T*) forms.
             var fctx = new TextFunctionContext(ctx);
-            // Out-of-range typeuse references are intentionally-invalid
-            // modules (spec assert_invalid tests). Substitute an empty
-            // FunctionType so the parse succeeds — validation will reject.
-            FunctionType ft = (typeIdx < 0 || typeIdx >= ctx.Module.Types.Count)
-                ? FunctionType.Empty
-                : (FunctionType)ctx.Module.Types[typeIdx];
+            // Resolve the DefType index — flatten SubTypes across all
+            // RecursiveType groups. Out-of-range references (spec
+            // assert_invalid fixtures) fall back to an empty signature.
+            // Non-FunctionType bodies (struct / array) similarly fall
+            // back so parsing succeeds even for cross-pollinated tests.
+            FunctionType ft = LookupFuncSignature(ctx, typeIdx);
             int paramCount = ft.ParameterTypes.Arity;
             for (int p = 0; p < paramCount; p++)
             {
@@ -229,20 +229,27 @@ namespace Wacs.Core.Text
                 inlineParams.Count == 0 ? ResultType.Empty : new ResultType(inlineParams.ToArray()),
                 inlineResults.Count == 0 ? ResultType.Empty : new ResultType(inlineResults.ToArray()));
 
-            // Dedup: scan existing Module.Types for structural equality.
+            // Dedup against non-rec (single-subtype) Module.Types entries
+            // only — matches the binary encoder's behavior which keeps
+            // rec groups isolated from inline-typeuse sharing. Returns
+            // the flat DefType index.
+            int flatSeen = 0;
             for (int t = 0; t < ctx.Module.Types.Count; t++)
             {
-                if (ctx.Module.Types[t].SubTypes.Length != 1) continue;
-                var body = ctx.Module.Types[t].SubTypes[0].Body as FunctionType;
-                if (body == null) continue;
-                if (FunctionTypeStructurallyEqual(body, ft))
+                var group = ctx.Module.Types[t];
+                if (group.SubTypes.Length == 1)
                 {
-                    paramNames = inlineNames.Count > 0 ? inlineNames : null;
-                    return t;
+                    var body = group.SubTypes[0].Body as FunctionType;
+                    if (body != null && FunctionTypeStructurallyEqual(body, ft))
+                    {
+                        paramNames = inlineNames.Count > 0 ? inlineNames : null;
+                        return flatSeen;
+                    }
                 }
+                flatSeen += group.SubTypes.Length;
             }
-            // Fresh entry — append.
-            var idx2 = ctx.Module.Types.Count;
+            // Fresh entry — append as a new single-subtype RecursiveType.
+            var idx2 = flatSeen;
             ctx.Module.Types.Add(new RecursiveType(new SubType(ft, final: true)));
             // This synthesized type has no user $name, so skip the name-table
             // declaration.
@@ -1036,6 +1043,27 @@ namespace Wacs.Core.Text
         }
 
         private static bool IsStringListStart(SExpr form, int i) => false;
+
+        /// <summary>
+        /// Look up a DefType's underlying FunctionType. DefType indices
+        /// flatten across rec groups — Module.Types stores one entry per
+        /// (rec …) group, so we iterate SubTypes in order.
+        /// </summary>
+        private static FunctionType LookupFuncSignature(TextParseContext ctx, int defTypeIdx)
+        {
+            if (defTypeIdx < 0) return FunctionType.Empty;
+            int seen = 0;
+            foreach (var group in ctx.Module.Types)
+            {
+                if (defTypeIdx < seen + group.SubTypes.Length)
+                {
+                    var body = group.SubTypes[defTypeIdx - seen].Body;
+                    return body as FunctionType ?? FunctionType.Empty;
+                }
+                seen += group.SubTypes.Length;
+            }
+            return FunctionType.Empty;
+        }
 
         /// <summary>
         /// Build a single-instruction constant expression: <c>i32.const N; end</c>.
