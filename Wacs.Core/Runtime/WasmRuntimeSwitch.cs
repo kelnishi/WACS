@@ -45,8 +45,8 @@ namespace Wacs.Core.Runtime
         /// </summary>
         internal Value[] InvokeViaSwitch(FunctionInstance func, FunctionType funcType, object[] args)
         {
-            Context.OpStack.PushScalars(funcType.ParameterTypes, args);
-            Context.SwitchCallDepth = 0;
+            GetExecContext().OpStack.PushScalars(funcType.ParameterTypes, args);
+            GetExecContext().SwitchCallDepth = 0;
 
             try
             {
@@ -75,9 +75,9 @@ namespace Wacs.Core.Runtime
 
             Value[] results = new Value[funcType.ResultType.Arity];
             var span = results.AsSpan();
-            Context.OpStack.PopScalars(funcType.ResultType, span);
+            GetExecContext().OpStack.PopScalars(funcType.ResultType, span);
 
-            Context.GetModule(func.Address)?.DerefTypes(span);
+            GetExecContext().GetModule(func.Address)?.DerefTypes(span);
 
             // Drain any leftover stack values (shouldn't happen for well-formed modules,
             // but the polymorphic path does the same defensive flush for top-level calls).
@@ -94,7 +94,7 @@ namespace Wacs.Core.Runtime
             // or any other check fires) leaves Count in an out-of-range state. The
             // naïve PopAny loop would re-throw IOOR on the first read. Zero the stack
             // unconditionally here — we're on an abort path, the data is already gone.
-            Context.OpStack.Count = 0;
+            GetExecContext().OpStack.Count = 0;
         }
     }
 }
