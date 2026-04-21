@@ -38,6 +38,7 @@ namespace Wacs.Core.Runtime
         private readonly List<ModuleInstance> _moduleInstances = new();
         private readonly Dictionary<string, ModuleInstance> _registeredModules = new();
 
+        private readonly SharedRuntimeState _shared;
         private readonly ExecContext Context;
         public ExecContext ExecContext => GetExecContext();
 
@@ -55,8 +56,8 @@ namespace Wacs.Core.Runtime
         /// </summary>
         private ExecContext GetExecContext() => Context;
 
-        private readonly Store Store;
-        public Store RuntimeStore => Store;
+        private Store Store => _shared.Store;
+        public Store RuntimeStore => _shared.Store;
 
         //Cached instructions for module initialization
         private readonly InstElemDrop _dropInst;
@@ -67,9 +68,9 @@ namespace Wacs.Core.Runtime
 
         public WasmRuntime(RuntimeAttributes? attributes = null)
         {
-            Store = new Store();
-            Context = new ExecContext(Store, attributes);
-            
+            _shared = new SharedRuntimeState(new Store(), attributes ?? new RuntimeAttributes());
+            Context = new ExecContext(_shared);
+
             //Cached instructions for module initialization
             _dropInst = SpecFactory.Factory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop);
             _i32ConstInst = SpecFactory.Factory.CreateInstruction<InstI32Const>(OpCode.I32Const);
