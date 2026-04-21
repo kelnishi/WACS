@@ -273,20 +273,32 @@ namespace Wacs.Core.Text
 
         /// <summary>
         /// Parse a <c>(rec (type …) (type …) …)</c> recursive type group.
-        /// Each inner <c>(type …)</c> becomes a separate entry in
-        /// <c>Module.Types</c>; we don't yet thread the recursive-group
-        /// semantics (for GC). Indices match pre-scan's allocation.
+        /// All inner types are collected into a single
+        /// <see cref="RecursiveType"/> with multiple subtypes — matches
+        /// the binary encoder, which emits a rec group as one entry in
+        /// the type section containing all subtypes.
         /// </summary>
         private static void ParseRecTypeForm(TextParseContext ctx, SExpr form)
         {
+            var subs = new List<SubType>();
             for (int i = 1; i < form.Children.Count; i++)
             {
                 var inner = form.Children[i];
                 if (inner.Kind != SExprKind.List || !inner.IsForm("type"))
                     throw new FormatException(
                         $"line {inner.Token.Line}: (rec …) expects (type …) children");
-                ParseTypeForm(ctx, inner);
+
+                int bi = 1;
+                var subName = TryReadIdAt(inner, ref bi);
+                if (bi >= inner.Children.Count)
+                    throw new FormatException($"line {inner.Token.Line}: (type …) missing body");
+                var body = inner.Children[bi];
+                var ft = ParseTypeBody(ctx, body);
+
+                ctx.Types.Declare(subName);
+                subs.Add(new SubType(ft, final: true));
             }
+            ctx.Module.Types.Add(new RecursiveType(subs.ToArray()));
         }
 
         /// <summary>
