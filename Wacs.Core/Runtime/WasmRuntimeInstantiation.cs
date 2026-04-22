@@ -337,7 +337,34 @@ namespace Wacs.Core.Runtime
                 }
             }
 
+            // Layer 2b: mark globals/tables as shared if the module declares any
+            // shared memory. Threads-1.0 doesn't define "shared global" or
+            // "shared table" — this is the pragmatic approximation that lets
+            // concurrent host threads safely reach any global/table in a module
+            // whose memory they can also reach. Shared-everything-threads
+            // (future) will flip IsShared per-declaration from the wasm binary.
+            // Only activates when the host policy supports concurrency at all;
+            // NotSupportedPolicy modules (IL2CPP default) pay nothing.
+            if (_shared.Attributes.ConcurrencyPolicy.Mode == Concurrency.ConcurrencyPolicyMode.HostDefined
+                && ModuleHasSharedMemory(moduleInstance))
+            {
+                for (int i = 0; i < moduleInstance.GlobalAddrs.Count; i++)
+                    Store[moduleInstance.GlobalAddrs[(GlobalIdx)(uint)i]].EnableConcurrentAccess();
+                for (int i = 0; i < moduleInstance.TableAddrs.Count; i++)
+                    Store[moduleInstance.TableAddrs[(TableIdx)(uint)i]].EnableConcurrentAccess();
+            }
+
             return moduleInstance;
+        }
+
+        private bool ModuleHasSharedMemory(ModuleInstance moduleInstance)
+        {
+            for (int i = 0; i < moduleInstance.MemAddrs.Count; i++)
+            {
+                if (Store[moduleInstance.MemAddrs.At(i)].Type.Limits.Shared)
+                    return true;
+            }
+            return false;
         }
 
         /// <summary>

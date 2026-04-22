@@ -31,6 +31,19 @@ namespace Wacs.Core.Runtime.Types
         public readonly TableType Type;
 
         /// <summary>
+        /// True when this table is reachable from host threads running concurrently
+        /// against the owning runtime. Set at module instantiation time by
+        /// <see cref="EnableConcurrentAccess"/> — currently driven by "the module
+        /// declares a shared memory" as a threads-1.0 approximation.
+        /// Shared-everything-threads will carry a per-declaration shared annotation
+        /// that flips this flag directly; the consumer API (<see cref="Grow"/>,
+        /// <see cref="Elements"/> readers) is unchanged.
+        /// <para>While false, <see cref="Grow"/> skips lock acquisition — zero
+        /// overhead for non-threaded modules.</para>
+        /// </summary>
+        public bool IsShared { get; private set; }
+
+        /// <summary>
         /// @Spec 4.5.3.3. Tables
         /// @Spec 4.5.3.10. Modules
         /// </summary>
@@ -54,6 +67,16 @@ namespace Wacs.Core.Runtime.Types
             (Type, Elements) = ((TableType)type.Clone(), elems.ToList());
 
         public TableInstance Clone() => new(Type, Elements);
+
+        /// <summary>
+        /// Mark this table as shared across host threads. Idempotent. Must be
+        /// called during instantiation, before any concurrent execution begins.
+        /// Layer 2d will wire the grow-time lock used by <see cref="Grow"/>.
+        /// </summary>
+        internal void EnableConcurrentAccess()
+        {
+            IsShared = true;
+        }
 
         /// <summary>
         /// @Spec 4.5.3.8. Growing tables
