@@ -61,12 +61,15 @@ namespace Wacs.Core.Runtime
         /// <para>The constructing thread's slot is pre-bound to <see cref="Context"/>
         /// so the single-threaded case preserves existing behavior exactly.</para>
         ///
-        /// <para><c>trackAllValues</c> is off here; Layer 1d adds a separate tracked
-        /// thread-handle list (on <see cref="IWasmThreadHost"/>) if cancellation
-        /// broadcast needs it. Keeping it off avoids the GC root that ThreadLocal's
-        /// tracking imposes.</para>
+        /// <para>Keyed by <see cref="Thread.CurrentThread.ManagedThreadId"/> rather
+        /// than using <see cref="ThreadLocal{T}"/> — the latter's managed-slot
+        /// allocation crashed .NET's test host when many short-lived
+        /// <see cref="WasmRuntime"/> instances were created in sequence
+        /// (observed during spec-suite runs). The dictionary approach has the
+        /// same per-thread lookup semantics with bounded-lifetime storage.</para>
         /// </summary>
-        private readonly ThreadLocal<ExecContext> _threadContext;
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<int, ExecContext> _threadContext
+            = new();
 
         public ExecContext ExecContext => GetExecContext();
 
@@ -95,7 +98,8 @@ namespace Wacs.Core.Runtime
         /// is only called from the runtime's outer entry points (CreateInvoker,
         /// InstantiateModule glue, binding lookups).
         /// </summary>
-        private ExecContext GetExecContext() => _threadContext.Value!;
+        private ExecContext GetExecContext() =>
+            _threadContext.GetOrAdd(Thread.CurrentThread.ManagedThreadId, _ => new ExecContext(_shared));
 
         private Store Store => _shared.Store;
         public Store RuntimeStore => _shared.Store;
@@ -112,12 +116,10 @@ namespace Wacs.Core.Runtime
             _shared = new SharedRuntimeState(new Store(), attributes ?? new RuntimeAttributes());
             Context = new ExecContext(_shared);
 
-            // Per-thread ExecContext factory. Constructing thread's slot is pre-bound
-            // to Context (below) so existing single-threaded behavior is unchanged;
-            // any other thread that calls into the runtime gets its own fresh
-            // ExecContext on first access, sharing _shared by reference.
-            _threadContext = new ThreadLocal<ExecContext>(() => new ExecContext(_shared));
-            _threadContext.Value = Context;
+            // Pre-bind the constructing thread's slot to Context so existing
+            // single-threaded use sees identical behavior; any other thread gets
+            // its own fresh ExecContext on first access, sharing _shared by reference.
+            _threadContext[Thread.CurrentThread.ManagedThreadId] = Context;
 
             //Cached instructions for module initialization
             _dropInst = SpecFactory.Factory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop);

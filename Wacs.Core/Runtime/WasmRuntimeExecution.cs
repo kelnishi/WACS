@@ -34,7 +34,7 @@ namespace Wacs.Core.Runtime
         private Delegate CreateInvokerInternal(FuncAddr funcAddr, Type delegateType, bool returnsResult, InvokerOptions? options = default)
         {
             options ??= new InvokerOptions();
-            var funcInst = GetExecContext().Store[funcAddr];
+            var funcInst = Context.Store[funcAddr];
             var funcType = funcInst.Type;
             
             Delegates.ValidateFunctionTypeCompatibility(funcType, delegateType);
@@ -93,7 +93,7 @@ namespace Wacs.Core.Runtime
         public Action CreateInvokerAction(FuncAddr funcAddr, InvokerOptions? options = default) =>
             () =>
             {
-                var funcInst = GetExecContext().Store[funcAddr];
+                var funcInst = Context.Store[funcAddr];
                 var invoker = CreateInvokerInternal(funcAddr, typeof(Action), false, options);
                 invoker.DynamicInvoke();
             };
@@ -130,7 +130,7 @@ namespace Wacs.Core.Runtime
         {
             options ??= new InvokerOptions();
             var invoker = CreateInvoker(funcAddr, options);
-            var funcInst = GetExecContext().Store[funcAddr];
+            var funcInst = Context.Store[funcAddr];
             var funcType = funcInst.Type;
             object[] p = new object[funcType.ParameterTypes.Arity];
             
@@ -157,107 +157,110 @@ namespace Wacs.Core.Runtime
             return GenericDelegateAsync;
             async Task<Value[]> GenericDelegateAsync(params Value[] args)
             {
-                var funcInst = GetExecContext().Store[funcAddr];
+                // Per-thread ExecContext resolved once at entry; see GenericDelegate
+                // for rationale. All `ctx.X` references below rebind via this local.
+                var ctx = GetExecContext();
+                var funcInst = ctx.Store[funcAddr];
                 var funcType = funcInst.Type;
-                
-                GetExecContext().OpStack.PushValues(args);
+
+                ctx.OpStack.PushValues(args);
 
                 if (options.CollectStats != StatsDetail.None)
                 {
-                    GetExecContext().ResetStats();
-                    GetExecContext().InstructionTimer.Reset();
+                    ctx.ResetStats();
+                    ctx.InstructionTimer.Reset();
                 }
 
-                GetExecContext().ProcessTimer.Restart();
-                GetExecContext().InstructionTimer.Restart();
-                GetExecContext().InstructionPointer = ExecContext.AbortSequence;
+                ctx.ProcessTimer.Restart();
+                ctx.InstructionTimer.Restart();
+                ctx.InstructionPointer = ExecContext.AbortSequence;
                 
-                await GetExecContext().InvokeAsync(funcAddr);
+                await ctx.InvokeAsync(funcAddr);
                 
-                GetExecContext().steps = 0;
+                ctx.steps = 0;
                 bool fastPath = options.UseFastPath();
                 try
                 {
                     if (fastPath)
                     {
-                        await ProcessThreadAsync(options.GasLimit);
+                        await ProcessThreadAsync(ctx, options.GasLimit);
                     }
                     else
                     {
-                        await ProcessThreadWithOptions(options);
+                        await ProcessThreadWithOptions(ctx, options);
                     }
                 }
                 catch (AggregateException agg)
                 {
                     var exc = agg.InnerException;
-                    GetExecContext().ProcessTimer.Stop();
-                    GetExecContext().InstructionTimer.Stop();
+                    ctx.ProcessTimer.Stop();
+                    ctx.InstructionTimer.Stop();
                     if (options.LogProgressEvery > 0)
                         Console.Error.WriteLine();
                     if (options.CollectStats != StatsDetail.None)
                         PrintStats(options);
                     if (options.LogGas)
-                        Console.Error.WriteLine($"Process used {GetExecContext().steps} gas. {GetExecContext().ProcessTimer.Elapsed}");
+                        Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
                     if (options.CalculateLineNumbers)
                     {
-                        var ptr = GetExecContext().ComputePointerPath();
+                        var ptr = ctx.ComputePointerPath();
                         var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = GetExecContext().Frame.Module.Repr.CalculateLine(path);
+                        (int line, string instruction) = ctx.Frame.Module.Repr.CalculateLine(path);
 
-                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{GetExecContext().steps}\n{path}"));
+                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{ctx.steps}\n{path}"));
                     }
 
                     //Flush the stack before throwing...
-                    GetExecContext().FlushCallStack();
+                    ctx.FlushCallStack();
                     ExceptionDispatchInfo.Throw(exc);
                 }
                 catch (TrapException exc)
                 {
-                    GetExecContext().ProcessTimer.Stop();
-                    GetExecContext().InstructionTimer.Stop();
+                    ctx.ProcessTimer.Stop();
+                    ctx.InstructionTimer.Stop();
                     if (options.LogProgressEvery > 0)
                         Console.Error.WriteLine();
                     if (options.CollectStats != StatsDetail.None)
                         PrintStats(options);
                     if (options.LogGas)
-                        Console.Error.WriteLine($"Process used {GetExecContext().steps} gas. {GetExecContext().ProcessTimer.Elapsed}");
+                        Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
                     if (options.CalculateLineNumbers)
                     {
-                        var ptr = GetExecContext().ComputePointerPath();
+                        var ptr = ctx.ComputePointerPath();
                         var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = GetExecContext().Frame.Module.Repr.CalculateLine(path);
+                        (int line, string instruction) = ctx.Frame.Module.Repr.CalculateLine(path);
 
-                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{GetExecContext().steps}\n{path}"));
+                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{ctx.steps}\n{path}"));
                     }
 
                     //Flush the stack before throwing...
-                    GetExecContext().FlushCallStack();
+                    ctx.FlushCallStack();
                     ExceptionDispatchInfo.Throw(exc);
                 }
                 catch (SignalException exc)
                 {
-                    GetExecContext().ProcessTimer.Stop();
-                    GetExecContext().InstructionTimer.Stop();
+                    ctx.ProcessTimer.Stop();
+                    ctx.InstructionTimer.Stop();
                     if (options.LogProgressEvery > 0)
                         Console.Error.WriteLine();
                     if (options.CollectStats != StatsDetail.None)
                         PrintStats(options);
                     if (options.LogGas)
-                        Console.Error.WriteLine($"Process used {GetExecContext().steps} gas. {GetExecContext().ProcessTimer.Elapsed}");
+                        Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
                     string message = exc.Message;
                     if (options.CalculateLineNumbers)
                     {
-                        var ptr = GetExecContext().ComputePointerPath();
+                        var ptr = ctx.ComputePointerPath();
                         var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = GetExecContext().Frame.Module.Repr.CalculateLine(path);
-                        message = exc.Message + $":line {line} instruction #{GetExecContext().steps}\n{path}";
+                        (int line, string instruction) = ctx.Frame.Module.Repr.CalculateLine(path);
+                        message = exc.Message + $":line {line} instruction #{ctx.steps}\n{path}";
                     }
 
                     //Flush the stack before throwing...
-                    GetExecContext().FlushCallStack();
+                    ctx.FlushCallStack();
 
                     var exType = exc.GetType();
                     var ctr = exType.GetConstructor(new Type[] { typeof(int), typeof(string) });
@@ -266,18 +269,18 @@ namespace Wacs.Core.Runtime
                 catch (WasmRuntimeException)
                 {
                     //Maybe Log?
-                    GetExecContext().FlushCallStack();
+                    ctx.FlushCallStack();
                     throw;
                 }
                 
-                GetExecContext().ProcessTimer.Stop();
-                GetExecContext().InstructionTimer.Stop();
+                ctx.ProcessTimer.Stop();
+                ctx.InstructionTimer.Stop();
                 if (options.LogProgressEvery > 0) Console.Error.WriteLine("done.");
                 if (options.CollectStats != StatsDetail.None) PrintStats(options);
-                if (options.LogGas) Console.Error.WriteLine($"Process used {GetExecContext().steps} gas. {GetExecContext().ProcessTimer.Elapsed}");
+                if (options.LogGas) Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
                 Value[] results = new Value[funcType.ResultType.Arity];
-                GetExecContext().OpStack.PopScalars(funcType.ResultType, results);
+                ctx.OpStack.PopScalars(funcType.ResultType, results);
 
                 return results;
             }
@@ -288,7 +291,14 @@ namespace Wacs.Core.Runtime
             return GenericDelegate;
             Value[] GenericDelegate(params object[] args)
             {
-                var funcInst = GetExecContext().Store[funcAddr];
+                // Resolve per-thread ExecContext once at entry (Layer 1c). Every
+                // reference inside this delegate binds to `ctx` — not to the
+                // runtime-singleton `Context` field (which is only safe for the
+                // constructing thread) and not to repeated `GetExecContext()` calls
+                // (which would incur a dictionary lookup per-instruction in the
+                // dispatch loop below).
+                var ctx = GetExecContext();
+                var funcInst = ctx.Store[funcAddr];
                 var funcType = funcInst.Type;
 
                 // Opt-in switch-runtime short-circuit: top-level WASM function invocations
@@ -297,144 +307,144 @@ namespace Wacs.Core.Runtime
                 // can't dispatch them. Nested calls also fall through for now; mixing the
                 // two dispatchers mid-call stack is possible but adds bookkeeping we don't
                 // need for the primary correctness/benchmark use cases.
-                if (UseSwitchRuntime && GetExecContext().OpStack.Count == 0 && funcInst is FunctionInstance wasmFn)
+                if (UseSwitchRuntime && ctx.OpStack.Count == 0 && funcInst is FunctionInstance wasmFn)
                 {
-                    return InvokeViaSwitch(wasmFn, funcType, args);
+                    return InvokeViaSwitch(ctx, wasmFn, funcType, args);
                 }
 
                 // Detect if this is a nested call by checking if stack has values
-                bool isNestedCall = GetExecContext().OpStack.Count > 0;
+                bool isNestedCall = ctx.OpStack.Count > 0;
 
                 // Only enforce empty stack for top-level calls
 
-                GetExecContext().OpStack.PushScalars(funcType.ParameterTypes, args);
+                ctx.OpStack.PushScalars(funcType.ParameterTypes, args);
 
                 if (options.CollectStats != StatsDetail.None)
                 {
-                    GetExecContext().ResetStats();
-                    GetExecContext().InstructionTimer.Reset();
+                    ctx.ResetStats();
+                    ctx.InstructionTimer.Reset();
                 }
 
-                GetExecContext().ProcessTimer.Restart();
-                GetExecContext().InstructionTimer.Restart();
+                ctx.ProcessTimer.Restart();
+                ctx.InstructionTimer.Restart();
 
                 // Save instruction pointer for nested calls
-                int savedInstructionPointer = GetExecContext().InstructionPointer;
-                GetExecContext().InstructionPointer = ExecContext.AbortSequence;
+                int savedInstructionPointer = ctx.InstructionPointer;
+                ctx.InstructionPointer = ExecContext.AbortSequence;
 
-                GetExecContext().steps = 0;
+                ctx.steps = 0;
                 bool fastPath = options.UseFastPath();
                 try
                 {
                     if (options.SynchronousExecution)
                     {
-                        GetExecContext().Invoke(funcAddr);
+                        ctx.Invoke(funcAddr);
                     }
                     else
                     {
-                        var task = GetExecContext().InvokeAsync(funcAddr);
+                        var task = ctx.InvokeAsync(funcAddr);
                         task.Wait();
                     }
                     if (fastPath)
                     {
-                        Task thread = ProcessThreadAsync(options.GasLimit);
+                        Task thread = ProcessThreadAsync(ctx, options.GasLimit);
                         thread.Wait();
                     }
                     else
                     {
-                        Task thread = ProcessThreadWithOptions(options);
+                        Task thread = ProcessThreadWithOptions(ctx, options);
                         thread.Wait();
                     }
                 }
                 catch (AggregateException agg)
                 {
                     var exc = agg.InnerException;
-                    GetExecContext().ProcessTimer.Stop();
-                    GetExecContext().InstructionTimer.Stop();
+                    ctx.ProcessTimer.Stop();
+                    ctx.InstructionTimer.Stop();
                     if (options.LogProgressEvery > 0)
                         Console.Error.WriteLine();
                     if (options.CollectStats != StatsDetail.None)
                         PrintStats(options);
                     if (options.LogGas)
-                        Console.Error.WriteLine($"Process used {GetExecContext().steps} gas. {GetExecContext().ProcessTimer.Elapsed}");
+                        Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
                     if (options.CalculateLineNumbers)
                     {
-                        var ptr = GetExecContext().ComputePointerPath();
+                        var ptr = ctx.ComputePointerPath();
                         var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = GetExecContext().Frame.Module.Repr.CalculateLine(path);
+                        (int line, string instruction) = ctx.Frame.Module.Repr.CalculateLine(path);
 
-                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{GetExecContext().steps}\n{path}"));
+                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{ctx.steps}\n{path}"));
                     }
 
                     // For nested calls, restore state; for top-level, flush
                     if (isNestedCall)
                     {
-                        GetExecContext().InstructionPointer = savedInstructionPointer;
+                        ctx.InstructionPointer = savedInstructionPointer;
                     }
                     else
                     {
-                        GetExecContext().FlushCallStack();
+                        ctx.FlushCallStack();
                     }
                     ExceptionDispatchInfo.Throw(exc);
                 }
                 catch (TrapException exc)
                 {
-                    GetExecContext().ProcessTimer.Stop();
-                    GetExecContext().InstructionTimer.Stop();
+                    ctx.ProcessTimer.Stop();
+                    ctx.InstructionTimer.Stop();
                     if (options.LogProgressEvery > 0)
                         Console.Error.WriteLine();
                     if (options.CollectStats != StatsDetail.None)
                         PrintStats(options);
                     if (options.LogGas)
-                        Console.Error.WriteLine($"Process used {GetExecContext().steps} gas. {GetExecContext().ProcessTimer.Elapsed}");
+                        Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
                     if (options.CalculateLineNumbers)
                     {
-                        var ptr = GetExecContext().ComputePointerPath();
+                        var ptr = ctx.ComputePointerPath();
                         var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = GetExecContext().Frame.Module.Repr.CalculateLine(path);
+                        (int line, string instruction) = ctx.Frame.Module.Repr.CalculateLine(path);
 
-                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{GetExecContext().steps}\n{path}"));
+                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{ctx.steps}\n{path}"));
                     }
 
                     if (isNestedCall)
                     {
-                        GetExecContext().InstructionPointer = savedInstructionPointer;
+                        ctx.InstructionPointer = savedInstructionPointer;
                     }
                     else
                     {
-                        GetExecContext().FlushCallStack();
+                        ctx.FlushCallStack();
                     }
                     ExceptionDispatchInfo.Throw(exc);
                 }
                 catch (SignalException exc)
                 {
-                    GetExecContext().ProcessTimer.Stop();
-                    GetExecContext().InstructionTimer.Stop();
+                    ctx.ProcessTimer.Stop();
+                    ctx.InstructionTimer.Stop();
                     if (options.LogProgressEvery > 0)
                         Console.Error.WriteLine();
                     if (options.CollectStats != StatsDetail.None)
                         PrintStats(options);
                     if (options.LogGas)
-                        Console.Error.WriteLine($"Process used {GetExecContext().steps} gas. {GetExecContext().ProcessTimer.Elapsed}");
+                        Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
                     string message = exc.Message;
                     if (options.CalculateLineNumbers)
                     {
-                        var ptr = GetExecContext().ComputePointerPath();
+                        var ptr = ctx.ComputePointerPath();
                         var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = GetExecContext().Frame.Module.Repr.CalculateLine(path);
-                        message = exc.Message + $":line {line} instruction #{GetExecContext().steps}\n{path}";
+                        (int line, string instruction) = ctx.Frame.Module.Repr.CalculateLine(path);
+                        message = exc.Message + $":line {line} instruction #{ctx.steps}\n{path}";
                     }
 
                     if (isNestedCall)
                     {
-                        GetExecContext().InstructionPointer = savedInstructionPointer;
+                        ctx.InstructionPointer = savedInstructionPointer;
                     }
                     else
                     {
-                        GetExecContext().FlushCallStack();
+                        ctx.FlushCallStack();
                     }
 
                     var exType = exc.GetType();
@@ -445,34 +455,34 @@ namespace Wacs.Core.Runtime
                 {
                     if (isNestedCall)
                     {
-                        GetExecContext().InstructionPointer = savedInstructionPointer;
+                        ctx.InstructionPointer = savedInstructionPointer;
                     }
                     else
                     {
-                        GetExecContext().FlushCallStack();
+                        ctx.FlushCallStack();
                     }
                     throw;
                 }
 
-                GetExecContext().ProcessTimer.Stop();
-                GetExecContext().InstructionTimer.Stop();
+                ctx.ProcessTimer.Stop();
+                ctx.InstructionTimer.Stop();
                 if (options.LogProgressEvery > 0) Console.Error.WriteLine("done.");
                 if (options.CollectStats != StatsDetail.None) PrintStats(options);
-                if (options.LogGas) Console.Error.WriteLine($"Process used {GetExecContext().steps} gas. {GetExecContext().ProcessTimer.Elapsed}");
+                if (options.LogGas) Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
                 Value[] results = new Value[funcType.ResultType.Arity];
                 var span = results.AsSpan();
-                GetExecContext().OpStack.PopScalars(funcType.ResultType, span);
+                ctx.OpStack.PopScalars(funcType.ResultType, span);
 
-                GetExecContext().GetModule(funcAddr)?.DerefTypes(span);
+                ctx.GetModule(funcAddr)?.DerefTypes(span);
 
                 if (isNestedCall)
                 {
-                    RestoreInstructionPointer(savedInstructionPointer, results);
+                    RestoreInstructionPointer(ctx, savedInstructionPointer, results);
                 }
                 else
                 {
-                    FlushCallStack();
+                    FlushCallStack(ctx);
                 }
 
                 return results;
@@ -482,66 +492,74 @@ namespace Wacs.Core.Runtime
         /// <summary>
         /// Restores the instruction pointer and pushes results back onto the stack for nested calls.
         /// </summary>
-        private void RestoreInstructionPointer(int savedInstructionPointer, Value[] results)
-            {
-                GetExecContext().OpStack.PushValues(results);
-                GetExecContext().InstructionPointer = savedInstructionPointer;
-            }
+        private void RestoreInstructionPointer(ExecContext ctx, int savedInstructionPointer, Value[] results)
+        {
+            ctx.OpStack.PushValues(results);
+            ctx.InstructionPointer = savedInstructionPointer;
+        }
 
         /// <summary>
         /// Clears any remaining stack values for top-level calls.
         /// </summary>
-        private void FlushCallStack()
+        private void FlushCallStack(ExecContext ctx)
         {
-            while (GetExecContext().OpStack.HasValue)
-                GetExecContext().OpStack.PopAny();
+            while (ctx.OpStack.HasValue)
+                ctx.OpStack.PopAny();
         }
 
-        public async Task ProcessThreadAsync(long gasLimit)
+        public Task ProcessThreadAsync(long gasLimit) =>
+            ProcessThreadAsync(GetExecContext(), gasLimit);
+
+        public async Task ProcessThreadAsync(ExecContext ctx, long gasLimit)
         {
+            // Hot dispatch loop. The caller (invoker delegate body) resolves the
+            // per-thread ExecContext once and passes it in — referencing `ctx` here
+            // rather than calling GetExecContext() per-instruction is mandatory for
+            // concurrent invocation (avoids repeated dictionary lookups on every
+            // wasm instruction) and for sequential instantiation (avoids waste).
             InstructionBase inst;
             if (gasLimit <= 0)
             {
-                while (++GetExecContext().InstructionPointer >= 0)
+                while (++ctx.InstructionPointer >= 0)
                 {
-                    inst = GetExecContext()._currentSequence[GetExecContext().InstructionPointer];
+                    inst = ctx._currentSequence[ctx.InstructionPointer];
                     if (inst.PointerAdvance > 0)
-                        GetExecContext().InstructionPointer += inst.PointerAdvance;
+                        ctx.InstructionPointer += inst.PointerAdvance;
                     if (inst.Nop)
                         continue;
-                    
+
                     if (inst.IsAsync)
                     {
-                        await inst.ExecuteAsync(GetExecContext());
+                        await inst.ExecuteAsync(ctx);
                     }
                     else
                     {
-                        inst.Execute(GetExecContext());
+                        inst.Execute(ctx);
                     }
                 }
             }
             else
             {
-                while (++GetExecContext().InstructionPointer >= 0)
+                while (++ctx.InstructionPointer >= 0)
                 {
-                    inst = GetExecContext()._currentSequence[GetExecContext().InstructionPointer];
+                    inst = ctx._currentSequence[ctx.InstructionPointer];
                     //Counting gas costs about 18% throughput!
-                    GetExecContext().steps += inst.Size;
+                    ctx.steps += inst.Size;
                     if (inst.PointerAdvance > 0)
-                        GetExecContext().InstructionPointer += inst.PointerAdvance;
+                        ctx.InstructionPointer += inst.PointerAdvance;
                     if (inst.Nop)
                         continue;
-                    
+
                     if (inst.IsAsync)
                     {
-                        await inst.ExecuteAsync(GetExecContext());
+                        await inst.ExecuteAsync(ctx);
                     }
                     else
                     {
-                        inst.Execute(GetExecContext());
+                        inst.Execute(ctx);
                     }
-                    
-                    if (GetExecContext().steps >= gasLimit)
+
+                    if (ctx.steps >= gasLimit)
                     {
                         throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
                     }
@@ -549,16 +567,22 @@ namespace Wacs.Core.Runtime
             }
         }
 
-        public async Task ProcessThreadWithOptions(InvokerOptions options) 
+        public Task ProcessThreadWithOptions(InvokerOptions options) =>
+            ProcessThreadWithOptions(GetExecContext(), options);
+
+        public async Task ProcessThreadWithOptions(ExecContext ctx, InvokerOptions options)
         {
+            // Hot dispatch loop — ctx is passed in so we don't pay per-instruction
+            // dictionary lookups when resolving per-thread ExecContext. See
+            // <see cref="ProcessThreadAsync(ExecContext,long)"/> for rationale.
             long highwatermark = 0;
             long gasLimit = options.GasLimit > 0 ? options.GasLimit : long.MaxValue;
             InstructionBase inst;
-            
-            while (++GetExecContext().InstructionPointer >= 0)
+
+            while (++ctx.InstructionPointer >= 0)
             {
-                inst = GetExecContext()._currentSequence[GetExecContext().InstructionPointer];
-            
+                inst = ctx._currentSequence[ctx.InstructionPointer];
+
                 //Trace execution
                 if (options.LogInstructionExecution != InstructionLogging.None)
                 {
@@ -567,72 +591,72 @@ namespace Wacs.Core.Runtime
 
                 if (options.CollectStats == StatsDetail.Instruction)
                 {
-                    GetExecContext().InstructionTimer.Restart();
+                    ctx.InstructionTimer.Restart();
                     if (inst.PointerAdvance > 0)
-                        GetExecContext().InstructionPointer += inst.PointerAdvance;
+                        ctx.InstructionPointer += inst.PointerAdvance;
                     if (inst.Nop)
                         continue;
-                    
+
                     if (inst.IsAsync)
-                        await inst.ExecuteAsync(GetExecContext());
+                        await inst.ExecuteAsync(ctx);
                     else
-                        inst.Execute(GetExecContext());
+                        inst.Execute(ctx);
 
-                    GetExecContext().InstructionTimer.Stop();
-                    GetExecContext().steps += inst.Size;
+                    ctx.InstructionTimer.Stop();
+                    ctx.steps += inst.Size;
 
-                    var st = GetExecContext().Stats[(ushort)inst.Op];
+                    var st = ctx.Stats[(ushort)inst.Op];
                     st.count += inst.Size;
-                    st.duration += GetExecContext().InstructionTimer.ElapsedTicks;
-                    GetExecContext().Stats[(ushort)inst.Op] = st;
+                    st.duration += ctx.InstructionTimer.ElapsedTicks;
+                    ctx.Stats[(ushort)inst.Op] = st;
                 }
                 else if (options.CollectStats == StatsDetail.Function)
                 {
-                    GetExecContext().InstructionTimer.Restart();
+                    ctx.InstructionTimer.Restart();
                     if (inst.PointerAdvance > 0)
-                        GetExecContext().InstructionPointer += inst.PointerAdvance;
+                        ctx.InstructionPointer += inst.PointerAdvance;
                     if (inst.Nop)
                         continue;
-                    
+
                     if (inst.IsAsync)
-                        await inst.ExecuteAsync(GetExecContext());
+                        await inst.ExecuteAsync(ctx);
                     else
-                        inst.Execute(GetExecContext());
+                        inst.Execute(ctx);
 
-                    GetExecContext().InstructionTimer.Stop();
-                    GetExecContext().steps += inst.Size;
+                    ctx.InstructionTimer.Stop();
+                    ctx.steps += inst.Size;
 
-                    var st = GetExecContext().Stats[GetExecContext().Frame.FuncAddr];
+                    var st = ctx.Stats[ctx.Frame.FuncAddr];
                     st.count += inst.Size;
-                    st.duration += GetExecContext().InstructionTimer.ElapsedTicks;
-                    GetExecContext().Stats[GetExecContext().Frame.FuncAddr] = st;
+                    st.duration += ctx.InstructionTimer.ElapsedTicks;
+                    ctx.Stats[ctx.Frame.FuncAddr] = st;
                 }
                 else
                 {
-                    GetExecContext().InstructionTimer.Start();
+                    ctx.InstructionTimer.Start();
                     if (inst.PointerAdvance > 0)
-                        GetExecContext().InstructionPointer += inst.PointerAdvance;
+                        ctx.InstructionPointer += inst.PointerAdvance;
                     if (inst.Nop)
                         continue;
-                    
+
                     if (inst.IsAsync)
-                        await inst.ExecuteAsync(GetExecContext());
+                        await inst.ExecuteAsync(ctx);
                     else
-                        inst.Execute(GetExecContext());
-                    GetExecContext().InstructionTimer.Stop();
-                    GetExecContext().steps += inst.Size;
+                        inst.Execute(ctx);
+                    ctx.InstructionTimer.Stop();
+                    ctx.steps += inst.Size;
                 }
 
                 if (((int)options.LogInstructionExecution & (int)InstructionLogging.Computes) != 0)
                 {
                     LogPostInstruction(options, inst);
                 }
-            
+
                 lastInstruction = inst;
-                
-                if (GetExecContext().steps >= gasLimit)
+
+                if (ctx.steps >= gasLimit)
                     throw new InsufficientGasException($"Invocation ran out of gas (limit:{gasLimit}).");
-                
+
                 if (options.LogProgressEvery > 0)
                 {
                     highwatermark += inst.Size;
@@ -654,9 +678,9 @@ namespace Wacs.Core.Runtime
                 case var _ when InstructionBase.IsVar(inst): break;
                 case var _ when InstructionBase.IsLoad(inst): break;
                 
-                case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && InstructionBase.IsBound(GetExecContext(), inst):
-                case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && InstructionBase.IsBound(GetExecContext(), inst):
-                // case OpCode.CallRef when options.LogInstructionExecution&(int)InstructionLogging.Binds) && InstructionBase.IsBound(GetExecContext(), inst):
+                case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && InstructionBase.IsBound(Context, inst):
+                case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Binds)!=0 && InstructionBase.IsBound(Context, inst):
+                // case OpCode.CallRef when options.LogInstructionExecution&(int)InstructionLogging.Binds) && InstructionBase.IsBound(Context, inst):
                 
                 case OpCode.Call when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
                 case OpCode.CallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
@@ -664,13 +688,13 @@ namespace Wacs.Core.Runtime
                 case OpCode.Return when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
                 case OpCode.ReturnCallIndirect when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
                 case OpCode.ReturnCall when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0:
-                case OpCode.End when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0 && GetExecContext().GetEndFor() == OpCode.Func:
+                case OpCode.End when ((int)options.LogInstructionExecution&(int)InstructionLogging.Calls)!=0 && Context.GetEndFor() == OpCode.Func:
                         
                 case OpCode.Block when ((int)options.LogInstructionExecution&(int)InstructionLogging.Blocks)!=0:
                 case OpCode.Loop when ((int)options.LogInstructionExecution&(int)InstructionLogging.Blocks)!=0:
                 case OpCode.If when ((int)options.LogInstructionExecution&(int)InstructionLogging.Blocks)!=0:
                 case OpCode.Else when ((int)options.LogInstructionExecution&(int)InstructionLogging.Blocks)!=0:
-                case OpCode.End when ((int)options.LogInstructionExecution&(int)InstructionLogging.Blocks)!=0 && GetExecContext().GetEndFor() == OpCode.Block:
+                case OpCode.End when ((int)options.LogInstructionExecution&(int)InstructionLogging.Blocks)!=0 && Context.GetEndFor() == OpCode.Block:
                             
                 case OpCode.Br when ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
                 case OpCode.BrIf when ((int)options.LogInstructionExecution&(int)InstructionLogging.Branches)!=0:
@@ -681,19 +705,19 @@ namespace Wacs.Core.Runtime
                     string location = "";
                     if (options.CalculateLineNumbers)
                     {
-                        var ptr = GetExecContext().ComputePointerPath();
+                        var ptr = Context.ComputePointerPath();
                         var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = GetExecContext().Frame.Module.Repr.CalculateLine(path);
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
                         location = $"line {line.ToString().PadLeft(7,' ')}";
                         if (options.ShowPath)
                             location += $":{path}";
                             
-                        var log = $"{location}: {inst.RenderText(GetExecContext())}".PadRight(40, ' ');
+                        var log = $"{location}: {inst.RenderText(Context)}".PadRight(40, ' ');
                         Console.Error.WriteLine(log);
                     }
                     else
                     {
-                        var log = $"Inst[0x{GetExecContext().InstructionPointer:x8}]: {inst.RenderText(GetExecContext())}".PadRight(40, ' ') + location;
+                        var log = $"Inst[0x{Context.InstructionPointer:x8}]: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
                         Console.Error.WriteLine(log);
                     }
                     break; 
@@ -713,19 +737,19 @@ namespace Wacs.Core.Runtime
                     string location = "";
                     if (options.CalculateLineNumbers)
                     {
-                        var ptr = GetExecContext().ComputePointerPath();
+                        var ptr = Context.ComputePointerPath();
                         var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = GetExecContext().Frame.Module.Repr.CalculateLine(path);
+                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
                         location = $"line {line.ToString().PadLeft(7,' ')}";
                         if (options.ShowPath)
                             location += $":{path}";
                             
-                        var log = $"{location}: {inst.RenderText(GetExecContext())}".PadRight(40, ' ');
+                        var log = $"{location}: {inst.RenderText(Context)}".PadRight(40, ' ');
                         Console.Error.WriteLine(log);
                     }
                     else
                     {
-                        var log = $"Inst[0x{GetExecContext().InstructionPointer:x8}]: {inst.RenderText(GetExecContext())}".PadRight(40, ' ') + location;
+                        var log = $"Inst[0x{Context.InstructionPointer:x8}]: {inst.RenderText(Context)}".PadRight(40, ' ') + location;
                         Console.Error.WriteLine(log);
                     }
                     break; 
@@ -735,13 +759,13 @@ namespace Wacs.Core.Runtime
 
         private void PrintStats(InvokerOptions options)
         {
-            long procTicks = GetExecContext().ProcessTimer.ElapsedTicks;
+            long procTicks = Context.ProcessTimer.ElapsedTicks;
             long totalExecs = options.CollectStats is StatsDetail.Instruction or StatsDetail.Function
-                ? GetExecContext().Stats.Values.Sum(dc => dc.count)
-                : GetExecContext().steps;
+                ? Context.Stats.Values.Sum(dc => dc.count)
+                : Context.steps;
             long execTicks = options.CollectStats is StatsDetail.Instruction or StatsDetail.Function
-                ? GetExecContext().Stats.Values.Sum(dc => dc.duration)
-                : GetExecContext().InstructionTimer.ElapsedTicks;
+                ? Context.Stats.Values.Sum(dc => dc.duration)
+                : Context.InstructionTimer.ElapsedTicks;
             long overheadTicks = procTicks - execTicks;
 
             long scale = Stopwatch.Frequency / 1000_000_0; //100ns ticks
@@ -768,7 +792,7 @@ namespace Wacs.Core.Runtime
             
             Console.Error.WriteLine($"Execution Stats:");
             Console.Error.WriteLine($"{totalLabel}: {totalInst}|{totalPercent} {execTime.TotalSeconds:#0.###}s {avgTime} {velocity}{overheadLabel} proctime:{totalTime.TotalSeconds:#0.###}s");
-            var orderedStats = GetExecContext().Stats
+            var orderedStats = Context.Stats
                 .Where(bdc => bdc.Value.count != 0)
                 .OrderBy(bdc => -bdc.Value.count);
             
@@ -783,7 +807,7 @@ namespace Wacs.Core.Runtime
                 string instAve;
                 if (options.CollectStats == StatsDetail.Function)
                 {
-                    if (GetExecContext().Store[new FuncAddr(opcode)] is FunctionInstance func)
+                    if (Context.Store[new FuncAddr(opcode)] is FunctionInstance func)
                     {
                         count = func.CallCount;
                         label = $"{func.ModuleName}[{func.Index.Value}]".PadLeft(totalLabel.Length, ' ');
