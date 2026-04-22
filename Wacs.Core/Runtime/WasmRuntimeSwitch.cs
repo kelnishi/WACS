@@ -43,9 +43,11 @@ namespace Wacs.Core.Runtime
         /// call occupies a normal-sized method frame, so the default process stack is
         /// enough for the spec suite.</para>
         /// </summary>
-        internal Value[] InvokeViaSwitch(FunctionInstance func, FunctionType funcType, object[] args)
+        internal Value[] InvokeViaSwitch(ExecContext ctx, FunctionInstance func, FunctionType funcType, object[] args)
         {
-            var ctx = GetExecContext();
+            // Caller passes the per-thread ExecContext resolved once at the invoker
+            // entry point — see GenericDelegate in WasmRuntimeExecution.cs. Avoids
+            // repeated dictionary lookups on the hot switch-dispatch path.
             ctx.CheckInterrupt();
             ctx.OpStack.PushScalars(funcType.ParameterTypes, args);
             ctx.SwitchCallDepth = 0;
@@ -56,7 +58,7 @@ namespace Wacs.Core.Runtime
             }
             catch (WasmException we)
             {
-                FlushCallStackForSwitch();
+                FlushCallStackForSwitch(ctx);
                 throw new UnhandledWasmException($"Unhandled exception {we.Exn}");
             }
             catch (IndexOutOfRangeException ioe)
@@ -65,30 +67,30 @@ namespace Wacs.Core.Runtime
                 // a fixed-size Value[] rather than going through the polymorphic
                 // throw-on-overflow path. Re-surface as a WasmRuntimeException so
                 // assert_exhaustion tests see the type they expect.
-                FlushCallStackForSwitch();
+                FlushCallStackForSwitch(ctx);
                 throw new Wacs.Core.Runtime.Exceptions.WasmRuntimeException(
                     "Operand stack exhausted: " + ioe.Message);
             }
             catch
             {
-                FlushCallStackForSwitch();
+                FlushCallStackForSwitch(ctx);
                 throw;
             }
 
             Value[] results = new Value[funcType.ResultType.Arity];
             var span = results.AsSpan();
-            GetExecContext().OpStack.PopScalars(funcType.ResultType, span);
+            ctx.OpStack.PopScalars(funcType.ResultType, span);
 
-            GetExecContext().GetModule(func.Address)?.DerefTypes(span);
+            ctx.GetModule(func.Address)?.DerefTypes(span);
 
             // Drain any leftover stack values (shouldn't happen for well-formed modules,
             // but the polymorphic path does the same defensive flush for top-level calls).
-            FlushCallStackForSwitch();
+            FlushCallStackForSwitch(ctx);
 
             return results;
         }
 
-        private void FlushCallStackForSwitch()
+        private void FlushCallStackForSwitch(ExecContext ctx)
         {
             // A push-overflow (hit during the iterative recursion path — each active
             // frame leaves its leftover stack values on the shared OpStack, so deep
@@ -96,7 +98,7 @@ namespace Wacs.Core.Runtime
             // or any other check fires) leaves Count in an out-of-range state. The
             // naïve PopAny loop would re-throw IOOR on the first read. Zero the stack
             // unconditionally here — we're on an abort path, the data is already gone.
-            GetExecContext().OpStack.Count = 0;
+            ctx.OpStack.Count = 0;
         }
     }
 }
