@@ -51,6 +51,8 @@ namespace Wacs.Core.Types
             set => _space[(int)idx.Value] = value;
         }
 
+        public int Count => _space.Count;
+
         public bool Contains(TableIdx idx) => idx.Value < _space.Count;
 
         public void Add(TableAddr element) => _space.Add(element);
@@ -63,6 +65,13 @@ namespace Wacs.Core.Types
         private MemAddr[]? _space;
 
         public MemAddr this[MemIdx idx] => _space![(int)idx.Value];
+
+        /// <summary>Count of allocated memory addresses. Only valid post-finalize.</summary>
+        public int Count => _space?.Length ?? _build!.Count;
+
+        /// <summary>Access by plain-int index (for iteration). Use the
+        /// <see cref="this[MemIdx]"/> indexer for typed access in hot paths.</summary>
+        public MemAddr At(int idx) => _space![idx];
 
         public bool Contains(MemIdx idx) => idx.Value < _space!.Length;
 
@@ -94,6 +103,8 @@ namespace Wacs.Core.Types
             get => _space[(int)idx.Value];
             set => _space[(int)idx.Value] = value;
         }
+
+        public int Count => _space.Count;
 
         public bool Contains(GlobalIdx idx) => idx.Value < _space.Count;
 
