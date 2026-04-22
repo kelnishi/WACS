@@ -26,6 +26,22 @@ namespace Wacs.Core.Runtime.Types
         private Value _value;
 
         /// <summary>
+        /// Per-instance lock used to serialize reads and writes of
+        /// <see cref="Value"/> on shared globals. Null until
+        /// <see cref="EnableConcurrentAccess"/> fires — non-shared globals pay
+        /// nothing on the hot path.
+        ///
+        /// <para>Why a lock at all: <see cref="Value"/> is a 24-byte struct
+        /// (ValType + DUnion + GcRef). A plain field assignment is not atomic on
+        /// any supported platform — concurrent writer and reader can observe a
+        /// mix of bytes from two different values (torn read). Future: narrow
+        /// numeric globals to <see cref="Volatile.Read{T}"/> on the 8-byte data
+        /// union for a lock-free fast path; v128 and ref-typed globals stay
+        /// under lock.</para>
+        /// </summary>
+        private object? _lock;
+
+        /// <summary>
         /// True when this global is reachable from host threads running concurrently
         /// against the owning runtime. Set by
         /// <see cref="EnableConcurrentAccess"/> at module instantiation time —
@@ -47,20 +63,37 @@ namespace Wacs.Core.Runtime.Types
         /// <summary>
         /// Mark this global as shared across host threads. Idempotent. Must be
         /// called during instantiation, before any concurrent execution can begin.
-        /// Layer 2c will wire the per-instance lock used by the Value property.
         /// </summary>
         internal void EnableConcurrentAccess()
         {
-            IsShared = true;
+            if (_lock == null)
+            {
+                _lock = new object();
+                IsShared = true;
+            }
         }
 
         public Value Value
         {
-            get => _value;
-            set {
+            get
+            {
+                var l = _lock;
+                if (l == null) return _value;
+                lock (l) return _value;
+            }
+            set
+            {
                 if (Type.Mutability == Mutability.Immutable)
                     throw new InvalidOperationException("Global is immutable");
-                _value = value;
+                var l = _lock;
+                if (l == null)
+                {
+                    _value = value;
+                }
+                else
+                {
+                    lock (l) _value = value;
+                }
             }
         }
     }
