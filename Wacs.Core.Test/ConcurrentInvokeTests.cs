@@ -166,6 +166,168 @@ namespace Wacs.Core.Test
         }
 
         [Fact]
+        public void Concurrent_global_read_write_never_tears()
+        {
+            // i64 global backed by a shared-memory module → IsShared fires at
+            // instantiation (Layer 2b). Two distinctive 64-bit bit patterns are
+            // written in alternation. Readers assert every read equals one of
+            // those exact patterns — never a mix of bytes from each (which a
+            // pre-Layer-2c torn write could produce on platforms where the
+            // struct write is non-atomic).
+            var src = @"
+                (module
+                  (memory (export ""m"") 1 1 shared)
+                  (global $g (export ""g"") (mut i64) (i64.const 0))
+                  (func (export ""set_g"") (param $v i64)
+                    local.get $v
+                    global.set $g)
+                  (func (export ""get_g"") (result i64)
+                    global.get $g))";
+            var runtime = new WasmRuntime();
+            var module = TextModuleParser.ParseWat(src);
+            var inst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("M", inst);
+            var setAddr = runtime.GetExportedFunction(("M", "set_g"));
+            var getAddr = runtime.GetExportedFunction(("M", "get_g"));
+
+            const long patternA = unchecked((long)0x0123456789ABCDEF);
+            const long patternB = unchecked((long)0xFEDCBA9876543210);
+            const int writerCount = 4;
+            const int readerCount = 4;
+            const int iterations = 5000;
+
+            var torn = 0;
+            var stop = false;
+            var barrier = new Barrier(writerCount + readerCount);
+
+            var threads = new Thread[writerCount + readerCount];
+            for (int w = 0; w < writerCount; w++)
+            {
+                int which = w;
+                threads[w] = new Thread(() =>
+                {
+                    var invoker = runtime.CreateStackInvoker(setAddr);
+                    long val = (which % 2 == 0) ? patternA : patternB;
+                    barrier.SignalAndWait();
+                    for (int i = 0; i < iterations; i++)
+                    {
+                        invoker(new Value[] { (Value)val });
+                        val = val == patternA ? patternB : patternA;
+                    }
+                });
+            }
+            for (int r = 0; r < readerCount; r++)
+            {
+                threads[writerCount + r] = new Thread(() =>
+                {
+                    var invoker = runtime.CreateStackInvoker(getAddr);
+                    barrier.SignalAndWait();
+                    while (!Volatile.Read(ref stop))
+                    {
+                        var v = (long)invoker(Array.Empty<Value>())[0];
+                        if (v != patternA && v != patternB && v != 0)
+                            Interlocked.Increment(ref torn);
+                    }
+                });
+            }
+
+            foreach (var th in threads) th.Start();
+            // Let writers finish; then stop readers.
+            for (int w = 0; w < writerCount; w++) threads[w].Join();
+            Volatile.Write(ref stop, true);
+            for (int r = 0; r < readerCount; r++) threads[writerCount + r].Join();
+
+            Assert.Equal(0, torn);
+        }
+
+        [Fact]
+        public void Concurrent_table_grow_never_crashes()
+        {
+            // Multiple threads calling table.grow on the same shared table
+            // + other threads calling call_indirect into the stable prefix.
+            // Pre-Layer-2d, a reader hitting List<T>.Elements[i] during another
+            // thread's List<T>.Add-triggered internal resize could OOB or see
+            // stale backing. Post-2d, Grow pre-allocates capacity atomically
+            // and readers stay lock-free on valid indices.
+            var src = @"
+                (module
+                  (memory (export ""m"") 1 1 shared)
+                  (table (export ""t"") 4 funcref)
+                  (elem (i32.const 0) $fa $fb $fc $fd)
+                  (func $fa (result i32) i32.const 10)
+                  (func $fb (result i32) i32.const 20)
+                  (func $fc (result i32) i32.const 30)
+                  (func $fd (result i32) i32.const 40)
+                  (type $ret_i32 (func (result i32)))
+                  (func (export ""call_n"") (param $i i32) (result i32)
+                    local.get $i
+                    call_indirect (type $ret_i32))
+                  (func (export ""grow_one"") (result i32)
+                    ref.func $fa
+                    i32.const 1
+                    table.grow 0))";
+            var runtime = new WasmRuntime();
+            var module = TextModuleParser.ParseWat(src);
+            var inst = runtime.InstantiateModule(module);
+            runtime.RegisterModule("M", inst);
+            var callAddr = runtime.GetExportedFunction(("M", "call_n"));
+            var growAddr = runtime.GetExportedFunction(("M", "grow_one"));
+
+            const int growerCount = 4;
+            const int readerCount = 4;
+            const int iterations = 500;
+
+            var exceptions = 0;
+            var wrongResults = 0;
+            var stop = false;
+            var barrier = new Barrier(growerCount + readerCount);
+
+            var threads = new Thread[growerCount + readerCount];
+            for (int g = 0; g < growerCount; g++)
+            {
+                threads[g] = new Thread(() =>
+                {
+                    var invoker = runtime.CreateStackInvoker(growAddr);
+                    barrier.SignalAndWait();
+                    for (int i = 0; i < iterations; i++)
+                    {
+                        try { invoker(Array.Empty<Value>()); }
+                        catch { Interlocked.Increment(ref exceptions); }
+                    }
+                });
+            }
+            for (int r = 0; r < readerCount; r++)
+            {
+                int rid = r;
+                threads[growerCount + r] = new Thread(() =>
+                {
+                    var invoker = runtime.CreateStackInvoker(callAddr);
+                    barrier.SignalAndWait();
+                    int idx = rid & 3; // stable prefix: always one of fa/fb/fc/fd
+                    int[] expected = { 10, 20, 30, 40 };
+                    while (!Volatile.Read(ref stop))
+                    {
+                        try
+                        {
+                            var result = (int)invoker(new Value[] { (Value)idx })[0];
+                            if (result != expected[idx])
+                                Interlocked.Increment(ref wrongResults);
+                        }
+                        catch { Interlocked.Increment(ref exceptions); }
+                    }
+                });
+            }
+
+            foreach (var th in threads) th.Start();
+            for (int g = 0; g < growerCount; g++) threads[g].Join();
+            Volatile.Write(ref stop, true);
+            for (int r = 0; r < readerCount; r++) threads[growerCount + r].Join();
+
+            Assert.Equal(0, exceptions);
+            Assert.Equal(0, wrongResults);
+        }
+
+        [Fact]
         public async Task WasmThread_runs_entry_and_completes_task()
         {
             var runtime = new WasmRuntime();
