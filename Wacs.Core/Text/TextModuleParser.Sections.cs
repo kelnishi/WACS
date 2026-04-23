@@ -717,6 +717,33 @@ namespace Wacs.Core.Text
         {
             if (index >= parent.Children.Count)
                 throw new FormatException($"line {parent.Token.Line}: globaltype missing");
+
+            // Layer 5a/5c: shared-everything-threads globaltype qualifiers.
+            //   (global (shared) ...)         — sharable across host threads
+            //   (global (thread_local) ...)   — per-host-thread instance
+            // Mutually exclusive; at most one appears before the valtype / (mut ...) form.
+            // Feature-flag enforcement happens at module allocation time
+            // (WasmRuntimeInstantiation) — the parser just records the annotation.
+            bool shared = false;
+            bool threadLocal = false;
+            var head = parent.Children[index];
+            if (head.IsForm("shared"))
+            {
+                if (head.Children.Count != 1)
+                    throw new FormatException($"line {head.Token.Line}: (shared) takes no operands");
+                shared = true;
+                index++;
+            }
+            else if (head.IsForm("thread_local"))
+            {
+                if (head.Children.Count != 1)
+                    throw new FormatException($"line {head.Token.Line}: (thread_local) takes no operands");
+                threadLocal = true;
+                index++;
+            }
+
+            if (index >= parent.Children.Count)
+                throw new FormatException($"line {parent.Token.Line}: globaltype missing valtype after qualifier");
             var child = parent.Children[index];
             if (child.IsForm("mut"))
             {
@@ -724,11 +751,11 @@ namespace Wacs.Core.Text
                     throw new FormatException($"line {child.Token.Line}: (mut …) must wrap one valtype");
                 var vt = ParseValType(ctx, child.Children[1]);
                 index++;
-                return new GlobalType(vt, Mutability.Mutable);
+                return new GlobalType(vt, Mutability.Mutable, shared, threadLocal);
             }
             var constType = ParseValType(ctx, child);
             index++;
-            return new GlobalType(constType, Mutability.Immutable);
+            return new GlobalType(constType, Mutability.Immutable, shared, threadLocal);
         }
 
         // ---- (export "name" (kind idx)) -----------------------------------
