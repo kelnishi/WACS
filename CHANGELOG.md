@@ -1,5 +1,96 @@
 # Changelog
 
+## [Unreleased] — Concurrent wasm execution
+
+Makes the WACS runtime reentrant under concurrent host threads,
+hardens shared-mutable state, adds a wasi-threads host adapter, and
+lands the type-system foundation for shared-everything-threads.
+Five stacked layers, 24 commits. No backwards-incompatible changes
+to baseline wasm — all new behavior is opt-in or gated behind a
+host-visible primitive.
+
+**Layer 1 — Per-thread execution substrate.** The `WasmRuntime.Context`
+singleton `ExecContext` became a `ConcurrentDictionary<ThreadId,
+ExecContext>` keyed by `ManagedThreadId`. Each host thread entering the
+runtime lazily gets its own operand stack, frame pool, locals pool,
+and call stack while sharing a new `SharedRuntimeState` (Store,
+Attributes, linked instruction arrays) by reference. `WasmThread` +
+`IWasmThreadHost` primitives in `Wacs.Core/Runtime/Concurrency/` —
+thread-spawn with task-based completion, cancellation-token
+observation at call boundaries, `InterruptedException : TrapException`
+propagating through existing trap handlers to `WasmThread.Completion`.
+`IConcurrencyPolicy` grows async default-methods
+(`Wait32Async`/`Wait64Async`/`NotifyAsync`) that wrap the sync versions
+— shape only, enables a truly-yielding wait implementation as a later
+additive change.
+
+**Layer 2 — Shared-mutable state hardening.** `GlobalInstance.Value`
+(24-byte struct) now serializes concurrent read/write through a
+lazy per-instance lock when `IsShared` — non-shared globals stay on
+the zero-overhead direct path. `TableInstance.Grow` pre-allocates
+`List<T>.Capacity` in a single atomic field-swap before appending,
+so concurrent `call_indirect` readers never see a mid-resize state;
+readers stay lock-free even for shared tables. `TranspiledFunction`
+swaps its reused `_paramBuffer` for `ArrayPool<object?>.Shared.Rent/
+Return` per call. Dead `_asideVals` static stacks removed.
+`Store.ReplaceFunction` documented as init-only.
+
+**Layer 3 — wasi-threads adapter.** New sibling project
+`Wacs.WASI.Threads` with `WasiThreads : IBindable`, 30 lines of actual
+logic wiring the `wasi:thread-spawn` host import onto
+`IWasmThreadHost.Spawn`. Monotonic positive-i32 tid allocation;
+`wasi_thread_start` resolution via `ctx.Frame.Module.Exports` — no
+explicit module registration. AOT-compatible (net8.0 + netstandard2.1,
+`IsAotCompatible`). Hosts that don't want threads don't pay for them.
+
+**Layer 4 — Soak + integration testing.** 13 new tests:
+atomic-op-variety stress matrix (every RMW family × i32/i64 +
+subword rmw8/rmw16 under 16-thread × 1k-iter contention), end-to-end
+wait/notify producer-consumer through `HostDefinedPolicy` (with
+timeout and not-equal precheck paths), and a 60-runtime soak that
+would have caught the original Layer 1c `ThreadLocal<ExecContext>`
+slot-exhaustion crash.
+
+**Layer 5 — Shared-everything-threads foundation.** Feature-flag
+`RuntimeAttributes.EnableSharedEverythingThreads` (default false) gates
+the Phase-1-proposal subset that's stable enough to ship:
+- `shared` annotations on globals (binary bit 1 of the mutability byte;
+  text `(global (shared) ...)`) and tables (leveraging existing Limits
+  Shared infrastructure).
+- `thread_local` annotations on globals (binary bit 2; text
+  `(global (thread_local) ...)`). Each host thread sees its own slot,
+  initialized from the declared initializer on first access; storage
+  lives on the per-thread `ExecContext` from Layer 1c.
+- Declaration-driven `IsShared` wiring through to
+  `GlobalInstance.EnableConcurrentAccess` / `TableInstance.EnableConcurrentAccess`.
+  Layer 2b's "any shared memory → all globals/tables shared"
+  approximation stays as a fallback for threads-1.0 modules that
+  predate per-declaration annotations.
+- Import-type matching: shared/thread_local must match exactly; a
+  non-shared host global can't satisfy a shared import.
+
+Deferred in Layer 5 because the proposal hasn't assigned canonical
+opcode bytes: `global.atomic.{get,set,rmw.*}` instructions and
+`pause`. Shared globals still work correctly through regular
+`global.get`/`global.set` via the locking foundation — atomic ops are
+a performance refinement on top.
+
+Deferred as separate programs of work:
+- **Emscripten pthreads ABI** (complex Web-flavored runtime surface;
+  converging wasi-threads is the forward direction for most workflows).
+- **Component Model canonical builtins** (`thread.spawn_ref`,
+  `thread.spawn_indirect`) — will wire onto the same
+  `IWasmThreadHost.Spawn` primitive when Component Model support lands.
+- **Shared struct/array types**, **shared function references** —
+  type-system discipline still evolving in the proposal.
+
+**Verification:**
+- Wacs.Core.Test: **366/366** (+28 new concurrent-execution tests)
+- Wacs.Transpiler.Test: 561/561
+- Spec.Test (full wasm-3.0 suite): 723/723
+- `dotnet publish -p:PublishAot=true` produces a clean 15MB native
+  binary.
+
 ## [0.8.3] + WACS.Transpiler / Transpiler.Lib [0.2.1] — Threads proposal
 
 Implements the [WebAssembly threads proposal](https://github.com/webassembly/threads)
