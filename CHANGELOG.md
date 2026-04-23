@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] — Concurrent wasm execution
+## [0.9.0] + WACS.Transpiler / Transpiler.Lib [0.3.0] + WACS.WASI.Threads [0.1.0] — Concurrent wasm execution
 
 Makes the WACS runtime reentrant under concurrent host threads,
 hardens shared-mutable state, adds a wasi-threads host adapter, and
