@@ -18,10 +18,13 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.ObjectPool;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Concurrency;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -50,22 +53,59 @@ namespace Wacs.Core.Runtime
 
         private readonly Stack<BlockTarget> _linkLabelStack = new();
         private readonly ArrayPool<Value> _localsDataPool;
-        public readonly RuntimeAttributes Attributes;
         public readonly Stopwatch InstructionTimer = new();
 
-        public readonly InstructionSequence linkedInstructions = new();
         public readonly OpStack OpStack;
 
         public readonly Stopwatch ProcessTimer = new();
 
-        public readonly Store Store;
+        /// <summary>
+        /// Shared runtime state owned by the <see cref="WasmRuntime"/> and referenced
+        /// by every <see cref="ExecContext"/> bound to it. Contains the <see cref="Store"/>,
+        /// <see cref="RuntimeAttributes"/>, and linked-instruction arrays — all treated as
+        /// read-only post-instantiation so multiple per-thread ExecContexts (Layer 1c)
+        /// can share it safely without locks.
+        /// </summary>
+        internal readonly SharedRuntimeState Shared;
 
-        public InstructionBase[] _currentSequence;
+        public Store Store => Shared.Store;
+        public RuntimeAttributes Attributes => Shared.Attributes;
+        public InstructionSequence linkedInstructions => Shared.LinkedInstructions;
+
+        /// <summary>
+        /// Hot-path dispatch reads this property; the JIT inlines the Shared-field
+        /// delegation into a single load. Set once by <see cref="CacheInstructions"/>
+        /// during instantiation.
+        /// </summary>
+        public InstructionBase[] _currentSequence
+        {
+            get => Shared.CurrentSequence!;
+            set => Shared.CurrentSequence = value;
+        }
         // public List<InstructionBase> _sequenceInstructions;
 
 
         public Frame Frame = NullFrame;
         public int InstructionPointer;
+
+        /// <summary>
+        /// Optional cancellation signal observed at function-call boundaries
+        /// (Layer 1f). When set and cancelled, the invoke path throws
+        /// <see cref="InterruptedException"/> with <see cref="InterruptReason"/>
+        /// so the trap propagates through to <c>WasmThread.Completion</c>.
+        ///
+        /// <para>Set by <see cref="ThreadBasedHost"/> on the per-thread ExecContext
+        /// before dispatching the entry point. Default <see cref="CancellationToken.None"/>
+        /// — single-threaded callers pay no observation cost.</para>
+        /// </summary>
+        public CancellationToken Ct;
+
+        /// <summary>
+        /// Reason string stamped by the cancellation source (e.g. from
+        /// <see cref="WasmThread.RequestTrap"/>). Reported through the thrown
+        /// <see cref="InterruptedException"/>.
+        /// </summary>
+        public string InterruptReason = "cancelled";
         public int LinkOpStackHeight;
         public int MaxLinkOpStackHeight;
         public bool LinkUnreachable;
@@ -74,6 +114,40 @@ namespace Wacs.Core.Runtime
 
         public Dictionary<ushort, ExecStat> Stats = new();
         public long steps;
+
+        /// <summary>
+        /// Per-thread storage for thread-local globals (Layer 5c). Each
+        /// <see cref="ExecContext"/> is per-host-thread (Layer 1c), so
+        /// keying thread-local global slots off the context gives us
+        /// natural per-thread scoping without a cross-thread dictionary.
+        /// Null until a thread-local global is first accessed on this
+        /// thread; thereafter, lazy-initialized from the module's declared
+        /// initializer (<see cref="Types.GlobalInstance.Value"/>) on first
+        /// touch per-global per-thread.
+        /// </summary>
+        private Dictionary<GlobalAddr, Value>? _threadLocalGlobals;
+
+        /// <summary>Read a thread-local global's current value for this
+        /// host thread. On first access, initializes from the supplied
+        /// initializer (the module's declared initial value).</summary>
+        public Value GetThreadLocalGlobalValue(GlobalAddr addr, Value initialValue)
+        {
+            _threadLocalGlobals ??= new Dictionary<GlobalAddr, Value>();
+            if (!_threadLocalGlobals.TryGetValue(addr, out var v))
+            {
+                v = initialValue;
+                _threadLocalGlobals[addr] = v;
+            }
+            return v;
+        }
+
+        /// <summary>Write a thread-local global's value for this host
+        /// thread; other threads' slots are unaffected.</summary>
+        public void SetThreadLocalGlobalValue(GlobalAddr addr, Value value)
+        {
+            _threadLocalGlobals ??= new Dictionary<GlobalAddr, Value>();
+            _threadLocalGlobals[addr] = value;
+        }
 
         /// <summary>
         /// Legacy — unused after phase M. Was the native-recursion depth counter
@@ -129,25 +203,35 @@ namespace Wacs.Core.Runtime
         /// </summary>
         internal System.Collections.Generic.Stack<Compilation.SwitchCallFrame> _switchCallStack;
 
+        /// <summary>
+        /// Legacy constructor — builds a fresh <see cref="SharedRuntimeState"/> from
+        /// the given store/attributes. Used by callers that haven't been migrated to
+        /// hold a SharedRuntimeState directly.
+        /// </summary>
         public ExecContext(Store store, RuntimeAttributes? attributes = default)
+            : this(new SharedRuntimeState(store, attributes ?? new RuntimeAttributes()))
         {
-            Store = store;
-            Attributes = attributes ?? new RuntimeAttributes();
+        }
+
+        /// <summary>
+        /// Primary constructor — per-thread <see cref="ExecContext"/> instances
+        /// (Layer 1c) will call this with a SharedRuntimeState owned by the runtime
+        /// so each thread has its own operand stack, frame pool, locals pool, and
+        /// call stack while sharing the Store, Attributes, and linked-instruction
+        /// arrays.
+        /// </summary>
+        public ExecContext(SharedRuntimeState shared)
+        {
+            Shared = shared;
 
             _framePool = new DefaultObjectPool<Frame>(new StackPoolPolicy<Frame>(), Attributes.MaxCallStack)
                 .Prime(Attributes.InitialCallStack);
-            
+
             _localsDataPool = ArrayPool<Value>.Create(Attributes.MaxFunctionLocals, Attributes.LocalPoolSize);
-            
+
             _callStack = new (Attributes.InitialCallStack);
             _switchCallStack = new System.Collections.Generic.Stack<Compilation.SwitchCallFrame>(Attributes.InitialCallStack);
-            
-            // _hostReturnSequence = InstructionSequence.Empty;
-            
-            // _currentSequence = _hostReturnSequence;
-            
-            // _sequenceCount = _currentSequence.Count;
-            // _sequenceInstructions = _currentSequence._instructions;
+
             InstructionPointer = -1;
 
             OpStack = new(Attributes.MaxOpStack);
@@ -353,9 +437,25 @@ namespace Wacs.Core.Runtime
         public BlockTarget PeekLabel() => _linkLabelStack.Peek();
 
 
+        /// <summary>
+        /// Observes the cancellation signal set by
+        /// <see cref="ThreadBasedHost"/> / <see cref="WasmThread.RequestTrap"/>.
+        /// Called at function-call boundaries (Layer 1f); <see cref="Ct"/> defaults
+        /// to <see cref="CancellationToken.None"/> for callers that don't opt in,
+        /// so the observation is a single cheap field read + branch.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CheckInterrupt()
+        {
+            if (Ct.IsCancellationRequested)
+                throw new InterruptedException(InterruptReason);
+        }
+
         // @Spec 4.4.10.1 Function Invocation
         public async Task InvokeAsync(FuncAddr addr)
         {
+            CheckInterrupt();
+
             //1.
             Assert( Store.Contains(addr),
                 $"Failure in Function Invocation. Address does not exist {addr}");
@@ -382,6 +482,8 @@ namespace Wacs.Core.Runtime
 
         public void Invoke(FuncAddr addr)
         {
+            CheckInterrupt();
+
             //1.
             Assert( Store.Contains(addr),
                 $"Failure in Function Invocation. Address does not exist {addr}");

@@ -27,8 +27,6 @@ namespace Wacs.Core.Runtime.Types
     /// </summary>
     public class FunctionInstance : IFunctionInstance
     {
-        private static Stack<Value> _asideVals = new();
-
         private readonly static ByteCode LabelInst = OpCode.Func;
 
         /// <summary>
@@ -117,6 +115,8 @@ namespace Wacs.Core.Runtime.Types
 
         public void Invoke(ExecContext context)
         {
+            context.CheckInterrupt();
+
             //3.
             var funcType = Type;
             //4.
@@ -127,9 +127,6 @@ namespace Wacs.Core.Runtime.Types
 #if STRICT_EXECUTION
             context.Assert( context.OpStack.Count >= funcType.ParameterTypes.Arity,
                 $"Function invocation failed. Operand Stack underflow.");
-            //7.
-            context.Assert(_asideVals.Count == 0,
-                $"Shared temporary stack had values left in it.");
 #endif
             //8.
             //Push the frame and operate on the frame on the stack.

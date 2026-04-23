@@ -70,6 +70,17 @@ namespace Wacs.Core.Runtime
         /// Replace the function instance at the given address.
         /// Used by the AOT transpiler to swap interpreter-backed functions
         /// with transpiled implementations.
+        ///
+        /// <para>Not thread-safe against concurrent execution. The sole caller
+        /// is <c>Wacs.Transpiler.AOT</c> during module-load, before any host
+        /// thread has had a chance to invoke the module — no reader-writer
+        /// race is possible in the supported call pattern. A runtime that
+        /// wants to swap function instances while concurrent host threads are
+        /// already executing would need to extend this to take the same
+        /// per-instance lock pattern <see cref="Runtime.Types.MemoryInstance"/>,
+        /// <see cref="Runtime.Types.GlobalInstance"/>, and
+        /// <see cref="Runtime.Types.TableInstance"/> use for their shared paths
+        /// (Layers 2c/2d).</para>
         /// </summary>
         public void ReplaceFunction(FuncAddr addr, IFunctionInstance replacement) =>
             Funcs[addr.Value] = replacement;

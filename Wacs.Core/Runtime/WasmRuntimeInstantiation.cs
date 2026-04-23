@@ -18,10 +18,12 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.ExceptionServices;
+using System.Threading;
 using FluentValidation;
 using Wacs.Core.Instructions;
 using Wacs.Core.Instructions.Numeric;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Concurrency;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -38,11 +40,69 @@ namespace Wacs.Core.Runtime
         private readonly List<ModuleInstance> _moduleInstances = new();
         private readonly Dictionary<string, ModuleInstance> _registeredModules = new();
 
-        private readonly ExecContext Context;
-        public ExecContext ExecContext => Context;
+        private readonly SharedRuntimeState _shared;
 
-        private readonly Store Store;
-        public Store RuntimeStore => Store;
+        /// <summary>
+        /// Instantiation-time <see cref="ExecContext"/>. Owns the link-time state
+        /// (<c>_linkLabelStack</c>, <c>LinkConstants</c>, etc.) and is the slot bound
+        /// to the thread that constructed the <see cref="WasmRuntime"/>.
+        /// <para>Module instantiation is single-threaded and always runs against this
+        /// context; see <see cref="InstantiateModule"/>.</para>
+        /// </summary>
+        private readonly ExecContext Context;
+
+        /// <summary>
+        /// Per-thread <see cref="ExecContext"/> slots. Each host thread that enters
+        /// the runtime (e.g. via <c>CreateInvoker</c>) lazily gets its own context
+        /// on first access — with its own operand stack, frame pool, locals pool,
+        /// call stack — while sharing <see cref="_shared"/> (Store, Attributes,
+        /// linked instruction arrays) by reference.
+        ///
+        /// <para>The constructing thread's slot is pre-bound to <see cref="Context"/>
+        /// so the single-threaded case preserves existing behavior exactly.</para>
+        ///
+        /// <para>Keyed by <see cref="Thread.CurrentThread.ManagedThreadId"/> rather
+        /// than using <see cref="ThreadLocal{T}"/> — the latter's managed-slot
+        /// allocation crashed .NET's test host when many short-lived
+        /// <see cref="WasmRuntime"/> instances were created in sequence
+        /// (observed during spec-suite runs). The dictionary approach has the
+        /// same per-thread lookup semantics with bounded-lifetime storage.</para>
+        /// </summary>
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<int, ExecContext> _threadContext
+            = new();
+
+        public ExecContext ExecContext => GetExecContext();
+
+        private IWasmThreadHost? _threadHost;
+
+        /// <summary>
+        /// Spawn wasm threads against this runtime. Lazily creates a default
+        /// <see cref="ThreadBasedHost"/> on first access; hosts that need a custom
+        /// thread strategy (e.g. a Unity main-thread-aware host, or a pooled
+        /// thread-dispatching host) can assign their own implementation.
+        ///
+        /// <para>Both wasi-threads (via a <c>thread-spawn</c> host import adapter
+        /// that calls into this) and shared-everything's future <c>thread.spawn</c>
+        /// instruction dispatch through the same primitive.</para>
+        /// </summary>
+        public IWasmThreadHost ThreadHost
+        {
+            get => _threadHost ??= new ThreadBasedHost(this);
+            set => _threadHost = value ?? throw new ArgumentNullException(nameof(value));
+        }
+
+        /// <summary>
+        /// Returns the calling thread's <see cref="ExecContext"/>, lazily creating
+        /// one on first access for non-constructing threads. Handlers take
+        /// <c>ExecContext ctx</c> as a parameter and stay on one thread — this helper
+        /// is only called from the runtime's outer entry points (CreateInvoker,
+        /// InstantiateModule glue, binding lookups).
+        /// </summary>
+        private ExecContext GetExecContext() =>
+            _threadContext.GetOrAdd(Thread.CurrentThread.ManagedThreadId, _ => new ExecContext(_shared));
+
+        private Store Store => _shared.Store;
+        public Store RuntimeStore => _shared.Store;
 
         //Cached instructions for module initialization
         private readonly InstElemDrop _dropInst;
@@ -53,9 +113,14 @@ namespace Wacs.Core.Runtime
 
         public WasmRuntime(RuntimeAttributes? attributes = null)
         {
-            Store = new Store();
-            Context = new ExecContext(Store, attributes);
-            
+            _shared = new SharedRuntimeState(new Store(), attributes ?? new RuntimeAttributes());
+            Context = new ExecContext(_shared);
+
+            // Pre-bind the constructing thread's slot to Context so existing
+            // single-threaded use sees identical behavior; any other thread gets
+            // its own fresh ExecContext on first access, sharing _shared by reference.
+            _threadContext[Thread.CurrentThread.ManagedThreadId] = Context;
+
             //Cached instructions for module initialization
             _dropInst = SpecFactory.Factory.CreateInstruction<InstElemDrop>(ExtCode.ElemDrop);
             _i32ConstInst = SpecFactory.Factory.CreateInstruction<InstI32Const>(OpCode.I32Const);
@@ -272,7 +337,67 @@ namespace Wacs.Core.Runtime
                 }
             }
 
+            // Layer 5a/5b: shared-everything-threads declared-per-instance flags.
+            // Rejects globals/tables that advertise `shared` or
+            // `thread_local` without the runtime opting into the proposal.
+            // Preserves baseline behavior when the flag is off.
+            for (int i = 0; i < moduleInstance.GlobalAddrs.Count; i++)
+            {
+                var g = Store[moduleInstance.GlobalAddrs[(GlobalIdx)(uint)i]];
+                if ((g.Type.Shared || g.Type.ThreadLocal)
+                    && !_shared.Attributes.EnableSharedEverythingThreads)
+                {
+                    throw new NotSupportedException(
+                        $"Global {i} uses a shared-everything-threads annotation (shared/thread_local) " +
+                        "but the runtime has not opted in via RuntimeAttributes.EnableSharedEverythingThreads.");
+                }
+            }
+            for (int i = 0; i < moduleInstance.TableAddrs.Count; i++)
+            {
+                var t = Store[moduleInstance.TableAddrs[(TableIdx)(uint)i]];
+                if (t.Type.Limits.Shared
+                    && !_shared.Attributes.EnableSharedEverythingThreads)
+                {
+                    throw new NotSupportedException(
+                        $"Table {i} is declared shared but the runtime has not opted in " +
+                        "via RuntimeAttributes.EnableSharedEverythingThreads.");
+                }
+            }
+
+            // Mark globals/tables as shared based on:
+            //   - Layer 5a/5b: declared-per-instance `shared` flag (authoritative when present).
+            //   - Layer 2b: module-has-shared-memory approximation (fallback for
+            //     threads-1.0 modules that predate per-declaration annotations).
+            // Either source flips IsShared; declaration-driven instances are
+            // also concurrent-accessible under threads-1.0 runtimes.
+            bool moduleThreadingActive =
+                _shared.Attributes.ConcurrencyPolicy.Mode == Concurrency.ConcurrencyPolicyMode.HostDefined
+                && ModuleHasSharedMemory(moduleInstance);
+
+            for (int i = 0; i < moduleInstance.GlobalAddrs.Count; i++)
+            {
+                var g = Store[moduleInstance.GlobalAddrs[(GlobalIdx)(uint)i]];
+                if (g.Type.Shared || moduleThreadingActive)
+                    g.EnableConcurrentAccess();
+            }
+            for (int i = 0; i < moduleInstance.TableAddrs.Count; i++)
+            {
+                var t = Store[moduleInstance.TableAddrs[(TableIdx)(uint)i]];
+                if (t.Type.Limits.Shared || moduleThreadingActive)
+                    t.EnableConcurrentAccess();
+            }
+
             return moduleInstance;
+        }
+
+        private bool ModuleHasSharedMemory(ModuleInstance moduleInstance)
+        {
+            for (int i = 0; i < moduleInstance.MemAddrs.Count; i++)
+            {
+                if (Store[moduleInstance.MemAddrs.At(i)].Type.Limits.Shared)
+                    return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -293,7 +418,7 @@ namespace Wacs.Core.Runtime
             {
                 //1
                 if (!options.SkipModuleValidation)
-                    module.ValidateAndThrow(Context.Attributes);
+                    module.ValidateAndThrow(GetExecContext().Attributes);
             }
             catch (ValidationException exc)
             {
@@ -305,16 +430,16 @@ namespace Wacs.Core.Runtime
             {
                 Store.OpenTransaction();
                 
-                if (Context.OpStack.Count != 0)
+                if (GetExecContext().OpStack.Count != 0)
                     throw new WasmRuntimeException("OpStack should be empty");
 
                 //2, 3, 4 Checks if imports are satisfied
                 moduleInstance = AllocateModule(module);
 
                 //12.
-                var auxFrame = Context.ReserveFrame(moduleInstance, 0);
+                var auxFrame = GetExecContext().ReserveFrame(moduleInstance, 0);
                 //13.
-                Context.PushFrame(auxFrame);
+                GetExecContext().PushFrame(auxFrame);
                 try
                 {
                     //14, 15
@@ -360,7 +485,7 @@ namespace Wacs.Core.Runtime
                     //Linking may succeed, so we commit the transaction
                     Store.CommitTransaction();
                     Store.OpenTransaction();
-                    Context.FlushCallStack();
+                    GetExecContext().FlushCallStack();
                     ExceptionDispatchInfo.Throw(exc);
                 }
                 finally
@@ -370,7 +495,7 @@ namespace Wacs.Core.Runtime
 
                     LinkModule(moduleInstance);
 
-                    Context.CacheInstructions();
+                    GetExecContext().CacheInstructions();
                 }
                 
                 //17. 
@@ -380,7 +505,7 @@ namespace Wacs.Core.Runtime
                         throw new ValidationException("Module StartFunction index was invalid");
                     
                     var startAddr = moduleInstance.FuncAddrs[module.StartIndex];
-                    if (!Context.Store.Contains(startAddr))
+                    if (!GetExecContext().Store.Contains(startAddr))
                         throw new WasmRuntimeException("Module StartFunction address not found in the Store.");
 
                     moduleInstance.StartFunc = startAddr;
@@ -405,10 +530,10 @@ namespace Wacs.Core.Runtime
                 }
 
                 //18.
-                if (Context.Frame != auxFrame)
+                if (GetExecContext().Frame != auxFrame)
                     throw new InstantiationException("Execution fault in Module Instantiation.");
                 //19.
-                Context.PopFrame();
+                GetExecContext().PopFrame();
 
                 _moduleInstances.Add(moduleInstance);
                 
@@ -417,7 +542,7 @@ namespace Wacs.Core.Runtime
             {
                 Store.DiscardTransaction();
                 Store.OpenTransaction();
-                Context.FlushCallStack();
+                GetExecContext().FlushCallStack();
                 ExceptionDispatchInfo.Throw(exc);
             }
             catch (OutOfBoundsTableAccessException exc)
@@ -426,7 +551,7 @@ namespace Wacs.Core.Runtime
                 // see linking.wast:264
                 Store.CommitTransaction();
                 Store.OpenTransaction();
-                Context.FlushCallStack();
+                GetExecContext().FlushCallStack();
                 ExceptionDispatchInfo.Throw(exc);
             }
             catch (TrapException exc)
@@ -434,7 +559,7 @@ namespace Wacs.Core.Runtime
                 //Linking may succeed, so we commit the transaction
                 Store.CommitTransaction();
                 Store.OpenTransaction();
-                Context.FlushCallStack();
+                GetExecContext().FlushCallStack();
                 ExceptionDispatchInfo.Throw(exc);
             }
             catch (NotSupportedException exc)
@@ -442,7 +567,7 @@ namespace Wacs.Core.Runtime
                 //Unlinkable
                 Store.DiscardTransaction();
                 Store.OpenTransaction();
-                Context.FlushCallStack();
+                GetExecContext().FlushCallStack();
                 ExceptionDispatchInfo.Throw(exc);
             }
             finally
@@ -478,7 +603,7 @@ namespace Wacs.Core.Runtime
                 {
                     if (functionInstance.Module != moduleInstance)
                         continue;
-                    Context.LinkFunction(functionInstance);
+                    GetExecContext().LinkFunction(functionInstance);
 
                     if (eagerCompile && functionInstance.SwitchCompiled == null)
                     {
@@ -486,7 +611,7 @@ namespace Wacs.Core.Runtime
                             functionInstance.Body.Instructions.Flatten().ToArray(),
                             functionInstance.Type,
                             localsCount: functionInstance.Type.ParameterTypes.Arity + functionInstance.Locals.Length,
-                            useSuperInstructions: Context.Attributes.UseSwitchSuperInstructions,
+                            useSuperInstructions: GetExecContext().Attributes.UseSwitchSuperInstructions,
                             declaredLocalTypes: functionInstance.Locals);
                     }
                 }
@@ -573,15 +698,15 @@ namespace Wacs.Core.Runtime
         /// </summary>
         private Value EvaluateInitializer(ModuleInstance module, Expression ini)
         {
-            Frame initFrame = Context.ReserveFrame(module, 1);
-            Context.PushFrame(initFrame);
+            Frame initFrame = GetExecContext().ReserveFrame(module, 1);
+            GetExecContext().PushFrame(initFrame);
 
             ini.ExecuteInitializer(Context);
-            var value = Context.OpStack.PopAny();
-            if (Context.OpStack.Count > 0)
+            var value = GetExecContext().OpStack.PopAny();
+            if (GetExecContext().OpStack.Count > 0)
                 throw new WasmRuntimeException("Values left on stack");
             
-            Context.FlushCallStack();
+            GetExecContext().FlushCallStack();
             return value;
         }
 

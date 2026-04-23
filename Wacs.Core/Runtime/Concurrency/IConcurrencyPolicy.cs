@@ -6,6 +6,8 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using System.Threading;
+using System.Threading.Tasks;
 using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Core.Runtime.Concurrency
@@ -53,5 +55,44 @@ namespace Wacs.Core.Runtime.Concurrency
         /// woken.
         /// </summary>
         int Notify(MemoryInstance mem, long addr, int maxWaiters);
+
+        // ----- Async surface (Layer 1e) -----
+        //
+        // Default-implemented async variants wrap the synchronous ones on the
+        // calling thread. They exist so a future policy implementation can
+        // override them with a truly-yielding async wait — letting a wasm thread
+        // blocked on atomic.wait release its host thread back to the pool and
+        // resume on a different thread when notified. ExecContext is movable
+        // across host threads (nothing stack-allocated), so this is a real option.
+        //
+        // Layer 1 ships only the surface; no async implementation is wired yet.
+        // Introducing the interface now keeps later additions purely additive —
+        // existing implementations (NotSupportedPolicy, HostDefinedPolicy) get
+        // the default wrapper for free.
+
+        /// <summary>
+        /// Async counterpart to <see cref="Wait32"/>. Default implementation
+        /// calls the synchronous version on the calling thread. Override for a
+        /// truly-yielding implementation.
+        /// </summary>
+        ValueTask<int> Wait32Async(MemoryInstance mem, long addr, int expected,
+            long timeoutNs, CancellationToken ct = default)
+            => new ValueTask<int>(Wait32(mem, addr, expected, timeoutNs));
+
+        /// <summary>
+        /// Async counterpart to <see cref="Wait64"/>. Default implementation
+        /// calls the synchronous version on the calling thread.
+        /// </summary>
+        ValueTask<int> Wait64Async(MemoryInstance mem, long addr, long expected,
+            long timeoutNs, CancellationToken ct = default)
+            => new ValueTask<int>(Wait64(mem, addr, expected, timeoutNs));
+
+        /// <summary>
+        /// Async counterpart to <see cref="Notify"/>. Default implementation
+        /// calls the synchronous version on the calling thread.
+        /// </summary>
+        ValueTask<int> NotifyAsync(MemoryInstance mem, long addr, int maxWaiters,
+            CancellationToken ct = default)
+            => new ValueTask<int>(Notify(mem, addr, maxWaiters));
     }
 }

@@ -25,19 +25,86 @@ namespace Wacs.Core.Runtime.Types
         public readonly GlobalType Type;
         private Value _value;
 
+        /// <summary>
+        /// Per-instance lock used to serialize reads and writes of
+        /// <see cref="Value"/> on shared globals. Null until
+        /// <see cref="EnableConcurrentAccess"/> fires — non-shared globals pay
+        /// nothing on the hot path.
+        ///
+        /// <para>Why a lock at all: <see cref="Value"/> is a 24-byte struct
+        /// (ValType + DUnion + GcRef). A plain field assignment is not atomic on
+        /// any supported platform — concurrent writer and reader can observe a
+        /// mix of bytes from two different values (torn read). Future: narrow
+        /// numeric globals to <see cref="Volatile.Read{T}"/> on the 8-byte data
+        /// union for a lock-free fast path; v128 and ref-typed globals stay
+        /// under lock.</para>
+        /// </summary>
+        private object? _lock;
+
+        /// <summary>
+        /// True when this global is reachable from host threads running concurrently
+        /// against the owning runtime. Set by
+        /// <see cref="EnableConcurrentAccess"/> at module instantiation time —
+        /// currently driven by "the module declares a shared memory" as a
+        /// threads-1.0 approximation; shared-everything-threads will flip this
+        /// per-declaration when that proposal lands.
+        /// <para>While false, the hot-path <see cref="Value"/> getter/setter bypass
+        /// the synchronization machinery entirely — non-threaded modules pay
+        /// nothing.</para>
+        /// </summary>
+        public bool IsShared { get; private set; }
+
+        /// <summary>
+        /// Shared-everything-threads (Layer 5c): when true, each host
+        /// thread sees its own copy of this global, initialized from
+        /// the declared initializer on first access. Cannot be both
+        /// shared and thread-local; validated at parse time.
+        /// <para>Storage lives on <see cref="ExecContext"/> (keyed by
+        /// global address); <see cref="Value"/> on the instance holds
+        /// the initializer value that every new thread starts with.</para>
+        /// </summary>
+        public bool IsThreadLocal => Type.ThreadLocal;
+
         public GlobalInstance(GlobalType type, Value initialValue)
         {
             Type = type;
             _value = initialValue;
         }
 
+        /// <summary>
+        /// Mark this global as shared across host threads. Idempotent. Must be
+        /// called during instantiation, before any concurrent execution can begin.
+        /// </summary>
+        internal void EnableConcurrentAccess()
+        {
+            if (_lock == null)
+            {
+                _lock = new object();
+                IsShared = true;
+            }
+        }
+
         public Value Value
         {
-            get => _value;
-            set {
+            get
+            {
+                var l = _lock;
+                if (l == null) return _value;
+                lock (l) return _value;
+            }
+            set
+            {
                 if (Type.Mutability == Mutability.Immutable)
                     throw new InvalidOperationException("Global is immutable");
-                _value = value;
+                var l = _lock;
+                if (l == null)
+                {
+                    _value = value;
+                }
+                else
+                {
+                    lock (l) _value = value;
+                }
             }
         }
     }
