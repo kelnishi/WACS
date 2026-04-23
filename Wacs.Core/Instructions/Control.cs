@@ -466,8 +466,6 @@ namespace Wacs.Core.Instructions
     {
         public InstBranch() : base(ByteCode.Br) { }
 
-        private static Stack<Value> _asideVals = new();
-
         private LabelIdx L;
         // Populated by Link() with the resolved block this branch targets. Consumed by
         // Wacs.Core.Compilation.BytecodeCompiler when emitting the annotated-stream form.
@@ -527,8 +525,6 @@ namespace Wacs.Core.Instructions
             
             context.Assert( context.OpStack.Count >= label.Arity,
                 $"Instruction br failed. Not enough values on the stack.");
-            context.Assert(_asideVals.Count == 0,
-                "Shared temporary stack had values left in it.");
             
             int targetStackHeight = label.StackHeight + label.Arity;
             if (label != context.Frame.ReturnLabel)

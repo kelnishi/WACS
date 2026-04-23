@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI Threads</Title>
+        <PackageId>WACS.WASI.Threads</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>wasi-threads host-import adapter for WACS. Binds `wasi:thread-spawn` onto the core IWasmThreadHost primitive so wasm modules with shared memory can spawn worker threads.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.Threads</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+        <IsAotCompatible>true</IsAotCompatible>
+        <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    </PropertyGroup>
+
+    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+      <DebugSymbols>true</DebugSymbols>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
+    </ItemGroup>
+
+</Project>

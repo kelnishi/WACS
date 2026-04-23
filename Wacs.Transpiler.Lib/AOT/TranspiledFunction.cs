@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Buffers;
 using System.Reflection;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Exceptions;
@@ -36,7 +37,13 @@ namespace Wacs.Transpiler.AOT
         private readonly MethodInfo _method;
         public MethodInfo Method => _method;
         private readonly ThinContext _ctx;
-        private readonly object?[] _paramBuffer;
+        /// <summary>
+        /// Total slot count (1 ThinContext + _paramCount + _outParamCount). Used to
+        /// size the per-call buffer rented from <see cref="ArrayPool{T}.Shared"/>.
+        /// Previously this was a reused instance field — racy under concurrent
+        /// entry of the same function (Layer 2).
+        /// </summary>
+        private readonly int _bufferLength;
         private readonly int _paramCount;
         private readonly int _resultCount;
 
@@ -59,62 +66,81 @@ namespace Wacs.Transpiler.AOT
             _paramCount = type.ParameterTypes.Arity;
             _resultCount = type.ResultType.Arity;
             _outParamCount = _resultCount > 1 ? _resultCount - 1 : 0;
-            // +1 for ThinContext + out params
-            _paramBuffer = new object?[1 + _paramCount + _outParamCount];
-            _paramBuffer[0] = ctx;
+            // +1 for ThinContext + params + out params
+            _bufferLength = 1 + _paramCount + _outParamCount;
         }
 
         public void SetName(string name) => Name = name;
 
         public void Invoke(ExecContext context)
         {
-            // Pop parameters from the interpreter's OpStack (reverse order)
-            for (int i = _paramCount; i > 0; i--)
-            {
-                var val = context.OpStack.PopAny();
-                _paramBuffer[i] = ConvertFromValue(val, Type.ParameterTypes.Types[i - 1]);
-            }
-
-            // Invoke the transpiled method
-            object? result;
+            // Per-call param buffer (Layer 2e). Previously this was an instance
+            // field reused across invocations, which raced under concurrent entry
+            // of the same TranspiledFunction — thread A's PopAny could be
+            // overwritten by thread B mid-MethodInfo.Invoke. ArrayPool gives us
+            // bounded-lifetime per-call storage with no per-call allocation on
+            // the steady-state hot path (uncontended Rent/Return is ~10ns).
+            //
+            // ArrayPool.Rent may return a larger array than requested — we only
+            // index the prefix [0, _bufferLength). clearArray: true on return
+            // wipes the references so GC can reclaim any boxed values we wrote.
+            var paramBuffer = ArrayPool<object?>.Shared.Rent(_bufferLength);
             try
             {
-                result = _method.Invoke(null, _paramBuffer);
-            }
-            catch (System.Reflection.TargetInvocationException tie)
-            {
-                var inner = tie.InnerException;
-                if (inner is TrapException or WasmRuntimeException)
-                {
-                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
-                }
-                // Wrap CLR arithmetic/memory exceptions as WASM traps
-                if (inner is DivideByZeroException)
-                    throw new TrapException("integer divide by zero");
-                if (inner is OverflowException)
-                    throw new TrapException("integer overflow");
-                if (inner is IndexOutOfRangeException)
-                    throw new TrapException("out of bounds memory access");
+                paramBuffer[0] = _ctx;
 
-                if (inner != null)
-                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
-                throw;
-            }
-
-            // Push results back onto OpStack
-            if (_resultCount >= 1)
-            {
-                if (result == null)
-                    throw new System.InvalidOperationException(
-                        $"TranspiledFunction '{Name}' expected {_resultCount} result(s) but method returned null");
-                // Result 0 is the CLR return value
-                context.OpStack.PushValue(ConvertToValue(result, Type.ResultType.Types[0]));
-                // Results 1..N are in the out param slots of _paramBuffer
-                for (int i = 0; i < _outParamCount; i++)
+                // Pop parameters from the interpreter's OpStack (reverse order)
+                for (int i = _paramCount; i > 0; i--)
                 {
-                    var outVal = _paramBuffer[1 + _paramCount + i];
-                    context.OpStack.PushValue(ConvertToValue(outVal!, Type.ResultType.Types[i + 1]));
+                    var val = context.OpStack.PopAny();
+                    paramBuffer[i] = ConvertFromValue(val, Type.ParameterTypes.Types[i - 1]);
                 }
+
+                // Invoke the transpiled method
+                object? result;
+                try
+                {
+                    result = _method.Invoke(null, paramBuffer);
+                }
+                catch (System.Reflection.TargetInvocationException tie)
+                {
+                    var inner = tie.InnerException;
+                    if (inner is TrapException or WasmRuntimeException)
+                    {
+                        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
+                    }
+                    // Wrap CLR arithmetic/memory exceptions as WASM traps
+                    if (inner is DivideByZeroException)
+                        throw new TrapException("integer divide by zero");
+                    if (inner is OverflowException)
+                        throw new TrapException("integer overflow");
+                    if (inner is IndexOutOfRangeException)
+                        throw new TrapException("out of bounds memory access");
+
+                    if (inner != null)
+                        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
+                    throw;
+                }
+
+                // Push results back onto OpStack
+                if (_resultCount >= 1)
+                {
+                    if (result == null)
+                        throw new System.InvalidOperationException(
+                            $"TranspiledFunction '{Name}' expected {_resultCount} result(s) but method returned null");
+                    // Result 0 is the CLR return value
+                    context.OpStack.PushValue(ConvertToValue(result, Type.ResultType.Types[0]));
+                    // Results 1..N are in the out param slots of paramBuffer
+                    for (int i = 0; i < _outParamCount; i++)
+                    {
+                        var outVal = paramBuffer[1 + _paramCount + i];
+                        context.OpStack.PushValue(ConvertToValue(outVal!, Type.ResultType.Types[i + 1]));
+                    }
+                }
+            }
+            finally
+            {
+                ArrayPool<object?>.Shared.Return(paramBuffer, clearArray: true);
             }
         }
 

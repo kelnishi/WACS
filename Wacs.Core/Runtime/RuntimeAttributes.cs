@@ -39,6 +39,25 @@ namespace Wacs.Core.Runtime
         /// </summary>
         public bool RelaxAtomicSharedCheck { get; set; } = false;
 
+        /// <summary>
+        /// Enable parsing + validation of the shared-everything-threads
+        /// Phase-1 proposal subset (Layer 5): <c>shared</c> annotations on
+        /// globals and tables, thread-local globals, <c>global.atomic.*</c>
+        /// opcodes, and <c>pause</c>.
+        ///
+        /// <para>Default <c>false</c> so baseline wasm binaries reject the
+        /// new encoding bits as invalid — the proposal is pre-standard
+        /// (Phase 1 at time of writing, github.com/WebAssembly/shared-everything-threads)
+        /// and its binary/text format may shift before standardization.
+        /// Opt-in per runtime when working with shared-everything-aware
+        /// toolchains.</para>
+        ///
+        /// <para>Does <em>not</em> enable Component-Model canonical
+        /// builtins like <c>thread.spawn_ref</c> — those ship via a
+        /// future Component Threads adapter, not at the core wasm level.</para>
+        /// </summary>
+        public bool EnableSharedEverythingThreads { get; set; } = false;
+
         // Cache the Unity detection result to avoid reflecting on every
         // new RuntimeAttributes().
         private static readonly bool _isUnity = ProbeUnity();

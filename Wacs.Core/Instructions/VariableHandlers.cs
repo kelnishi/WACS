@@ -45,7 +45,12 @@ namespace Wacs.Core.Instructions
         private static void GlobalGet(ExecContext ctx, [Imm] uint idx)
         {
             var addr = ctx.Frame.Module.GlobalAddrs[(GlobalIdx)idx];
-            ctx.OpStack.PushValue(ctx.Store[addr].Value);
+            var glob = ctx.Store[addr];
+            // Layer 5c: thread-local globals route through the per-thread slot.
+            var val = glob.IsThreadLocal
+                ? ctx.GetThreadLocalGlobalValue(addr, glob.Value)
+                : glob.Value;
+            ctx.OpStack.PushValue(val);
         }
 
         // 0x24 global.set — stream: [u32 global index]; pops one value.
@@ -53,7 +58,15 @@ namespace Wacs.Core.Instructions
         private static void GlobalSet(ExecContext ctx, [Imm] uint idx, Value v)
         {
             var addr = ctx.Frame.Module.GlobalAddrs[(GlobalIdx)idx];
-            ctx.Store[addr].Value = v;
+            var glob = ctx.Store[addr];
+            if (glob.IsThreadLocal)
+            {
+                ctx.SetThreadLocalGlobalValue(addr, v);
+            }
+            else
+            {
+                glob.Value = v;
+            }
         }
     }
 }
