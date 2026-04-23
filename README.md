@@ -85,43 +85,16 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |[Sign-extension operators](https://github.com/WebAssembly/sign-extension-ops)||✅|
 |[Tail call](https://github.com/webassembly/tail-call)|tail_call|✅|
 |[Typed Function References](https://github.com/WebAssembly/function-references)|function-references|✅|
+|**Phase 5 — Standardized (not yet merged)**|
+|_(no current entries — proposals progress directly from Phase 4 to merged)_|
 |**Phase 4 — Standardize**|
 |[JS Promise Integration](https://github.com/WebAssembly/js-promise-integration)|jspi|<span title="Browser idiom, but conceptually supported">✳️</span>|
 |[Threads](https://github.com/webassembly/threads)|threads|✅|
 |[Web Content Security Policy](https://github.com/WebAssembly/content-security-policy)||<span title="Browser idioms, not directly supported">🌐</span>|
-|**Phase 3 — Implementation**|
-|[Compact Import Section](https://github.com/WebAssembly/compact-import-section)||❌|
-|[Custom Descriptors and JS Interop](https://github.com/WebAssembly/custom-descriptors)||<span title="Browser idioms, not directly supported">🌐</span>|
-|[Custom Page Sizes](https://github.com/WebAssembly/custom-page-sizes)||❌|
-|[ESM Integration](https://github.com/WebAssembly/esm-integration)||<span title="Browser idioms, not directly supported">🌐</span>|
-|[Stack Switching](https://github.com/WebAssembly/stack-switching)||❌|
-|[Wide Arithmetic](https://github.com/WebAssembly/wide-arithmetic)||❌|
-|**Phase 2 — Proposed Spec Text**|
-|[Compilation Hints](https://github.com/WebAssembly/compilation-hints)||❌|
-|[Extended Name Section](https://github.com/WebAssembly/extended-name-section)||❌|
-|[JS Primitive Builtins](https://github.com/WebAssembly/js-primitive-builtins)||<span title="Browser idioms, not directly supported">🌐</span>|
-|[Numeric Values in WAT Data Segments](https://github.com/WebAssembly/wat-numeric-values)||❌|
-|[Relaxed dead code validation](https://github.com/WebAssembly/relaxed-dead-code-validation)||❌|
-|[Rounding Variants](https://github.com/WebAssembly/rounding-mode-control)||❌|
-|**Phase 1 — Feature Proposal**|
-|[Component Model](https://github.com/WebAssembly/component-model)||❌|
-|[Flexible Vectors](https://github.com/WebAssembly/flexible-vectors)||❌|
-|[Frozen Values](https://github.com/WebAssembly/frozen-values)||❌|
-|[Half Precision](https://github.com/WebAssembly/half-precision)||❌|
-|[Memory control](https://github.com/WebAssembly/memory-control)||❌|
-|[More Array Constructors](https://github.com/WebAssembly/more-array-constructors)||❌|
-|[Multibyte Array Access](https://github.com/WebAssembly/multibyte-array-access)||❌|
-|[Reference-Typed Strings](https://github.com/WebAssembly/stringref)||❌|
-|[Shared-Everything Threads](https://github.com/WebAssembly/shared-everything-threads)||<span title="Foundation shipped: shared/thread_local annotations, IsShared wiring, lock discipline. Canonical instructions (global.atomic.*, pause) deferred until the proposal assigns opcode bytes.">🟡</span>|
-|[Type Imports](https://github.com/WebAssembly/type-imports)||❌|
-|[Type Reflection for WebAssembly JavaScript API](https://github.com/WebAssembly/js-types)|type-reflection|<span title="Browser idioms, not directly supported">🌐</span>|
-|**Not a proposal (WACS out-of-scope)**|
-|[Legacy Exception Handling](https://github.com/WebAssembly/exception-handling)|exceptions|❌|
-|[Streaming Compilation](https://webassembly.github.io/spec/web-api/index.html#streaming-modules)|streaming_compilation|<span title="Browser idioms, not directly supported">🌐</span>|
 
-Legend: ✅ supported · 🟡 partial · ❌ not yet · ✳️ conceptually supported (browser idiom) · 🌐 browser-only / N/A for non-web hosts
+Legend: ✅ supported · ❌ not yet · ✳️ conceptually supported (browser idiom) · 🌐 browser-only / N/A for non-web hosts
 
-###### Phase assignments cross-checked against [WebAssembly/proposals@1584fdf](https://github.com/WebAssembly/proposals/commit/1584fdf) (2026-03-24) and [WebAssembly/proposals/finished-proposals.md](https://github.com/WebAssembly/proposals/blob/main/finished-proposals.md). Browser-idiom ✳️/🌐 results harnessed from [wasm-feature-detect](https://github.com/GoogleChromeLabs/wasm-feature-detect) via the [Feature.Detect](./Feature.Detect) test harness.
+###### Table limited to Phase 4, Phase 5, and merged proposals. Phase assignments cross-checked against [WebAssembly/proposals@1584fdf](https://github.com/WebAssembly/proposals/commit/1584fdf) (2026-03-24) and [WebAssembly/proposals/finished-proposals.md](https://github.com/WebAssembly/proposals/blob/main/finished-proposals.md). Browser-idiom ✳️/🌐 results harnessed from [wasm-feature-detect](https://github.com/GoogleChromeLabs/wasm-feature-detect) via the [Feature.Detect](./Feature.Detect) test harness.
 
 ## Getting Started
 
