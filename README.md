@@ -65,7 +65,7 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 
 |Proposal |Features|    |
 |------|-------|----|
-|**Finished — merged to wasm-3.0 core spec**|
+|**Phase 5 – Standardized**|
 |[Branch Hinting](https://github.com/WebAssembly/branch-hinting)||<span title="Custom section ignored; no behavior impact">✅</span>|
 |[Bulk memory operations](https://github.com/webassembly/bulk-memory-operations)||✅|
 |[Custom Annotation Syntax in the Text Format](https://github.com/WebAssembly/annotations)||✅|
@@ -85,16 +85,14 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |[Sign-extension operators](https://github.com/WebAssembly/sign-extension-ops)||✅|
 |[Tail call](https://github.com/webassembly/tail-call)|tail_call|✅|
 |[Typed Function References](https://github.com/WebAssembly/function-references)|function-references|✅|
-|**Phase 5 — Standardized (not yet merged)**|
-|_(no current entries — proposals progress directly from Phase 4 to merged)_|
-|**Phase 4 — Standardize**|
+|**Phase 4 – Standardize**|
 |[JS Promise Integration](https://github.com/WebAssembly/js-promise-integration)|jspi|<span title="Browser idiom, but conceptually supported">✳️</span>|
 |[Threads](https://github.com/webassembly/threads)|threads|✅|
 |[Web Content Security Policy](https://github.com/WebAssembly/content-security-policy)||<span title="Browser idioms, not directly supported">🌐</span>|
 
 Legend: ✅ supported · ❌ not yet · ✳️ conceptually supported (browser idiom) · 🌐 browser-only / N/A for non-web hosts
 
-###### Table limited to Phase 4, Phase 5, and merged proposals. Phase assignments cross-checked against [WebAssembly/proposals@1584fdf](https://github.com/WebAssembly/proposals/commit/1584fdf) (2026-03-24) and [WebAssembly/proposals/finished-proposals.md](https://github.com/WebAssembly/proposals/blob/main/finished-proposals.md). Browser-idiom ✳️/🌐 results harnessed from [wasm-feature-detect](https://github.com/GoogleChromeLabs/wasm-feature-detect) via the [Feature.Detect](./Feature.Detect) test harness.
+###### Grouping follows [webassembly.org/features](https://webassembly.org/features/): Phase 5 is the combined standardized set (including finished proposals merged to the core spec) and Phase 4 is the active standardize queue. Phase assignments cross-checked against [WebAssembly/proposals@1584fdf](https://github.com/WebAssembly/proposals/commit/1584fdf) (2026-03-24) and [WebAssembly/proposals/finished-proposals.md](https://github.com/WebAssembly/proposals/blob/main/finished-proposals.md). Browser-idiom ✳️/🌐 results harnessed from [wasm-feature-detect](https://github.com/GoogleChromeLabs/wasm-feature-detect) via the [Feature.Detect](./Feature.Detect) test harness.
 
 ## Getting Started
 
