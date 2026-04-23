@@ -13,8 +13,8 @@
         <!-- Package identity -->
         <PackageId>WACS.Transpiler</PackageId>
         <Title>WACS Transpiler</Title>
-        <Version>0.2.1</Version>
-        <AssemblyVersion>0.2.1</AssemblyVersion>
+        <Version>0.3.0</Version>
+        <AssemblyVersion>0.3.0</AssemblyVersion>
         <Authors>Kelvin Nishikawa</Authors>
         <Copyright>(c) 2025 Kelvin Nishikawa</Copyright>
         <Description>Ahead-of-time WebAssembly-to-.NET IL transpiler for WACS. Installs the `wasm-transpile` CLI tool. For programmatic use, reference WACS.Transpiler.Lib.</Description>
