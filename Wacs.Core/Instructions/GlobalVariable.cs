@@ -121,7 +121,14 @@ namespace Wacs.Core.Instructions
             //5.
             var glob = context.Store[a];
             //6.
-            var val = glob.Value;
+            // Layer 5c: thread-local globals route through the per-thread
+            // ExecContext slot; initial value comes from the module's
+            // declared initializer (stored in glob.Value, unchanged across
+            // threads). Shared / unshared globals use the instance's
+            // Value field directly.
+            var val = glob.IsThreadLocal
+                ? context.GetThreadLocalGlobalValue(a, glob.Value)
+                : glob.Value;
             //7.
             return val;
         }
@@ -211,9 +218,19 @@ namespace Wacs.Core.Instructions
                 $"Runtime Store did not contain Global at address {a} in global.set");
             //5.
             var glob = context.Store[a];
-            
+
             //8.
-            glob.Value = value;
+            // Layer 5c: thread-local writes stay in the per-thread slot;
+            // the instance's Value field keeps the initializer for other
+            // threads' future first-access.
+            if (glob.IsThreadLocal)
+            {
+                context.SetThreadLocalGlobalValue(a, value);
+            }
+            else
+            {
+                glob.Value = value;
+            }
         }
     }
     

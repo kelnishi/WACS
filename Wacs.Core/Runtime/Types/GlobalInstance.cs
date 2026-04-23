@@ -54,6 +54,17 @@ namespace Wacs.Core.Runtime.Types
         /// </summary>
         public bool IsShared { get; private set; }
 
+        /// <summary>
+        /// Shared-everything-threads (Layer 5c): when true, each host
+        /// thread sees its own copy of this global, initialized from
+        /// the declared initializer on first access. Cannot be both
+        /// shared and thread-local; validated at parse time.
+        /// <para>Storage lives on <see cref="ExecContext"/> (keyed by
+        /// global address); <see cref="Value"/> on the instance holds
+        /// the initializer value that every new thread starts with.</para>
+        /// </summary>
+        public bool IsThreadLocal => Type.ThreadLocal;
+
         public GlobalInstance(GlobalType type, Value initialValue)
         {
             Type = type;

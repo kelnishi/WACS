@@ -116,6 +116,40 @@ namespace Wacs.Core.Runtime
         public long steps;
 
         /// <summary>
+        /// Per-thread storage for thread-local globals (Layer 5c). Each
+        /// <see cref="ExecContext"/> is per-host-thread (Layer 1c), so
+        /// keying thread-local global slots off the context gives us
+        /// natural per-thread scoping without a cross-thread dictionary.
+        /// Null until a thread-local global is first accessed on this
+        /// thread; thereafter, lazy-initialized from the module's declared
+        /// initializer (<see cref="Types.GlobalInstance.Value"/>) on first
+        /// touch per-global per-thread.
+        /// </summary>
+        private Dictionary<GlobalAddr, Value>? _threadLocalGlobals;
+
+        /// <summary>Read a thread-local global's current value for this
+        /// host thread. On first access, initializes from the supplied
+        /// initializer (the module's declared initial value).</summary>
+        public Value GetThreadLocalGlobalValue(GlobalAddr addr, Value initialValue)
+        {
+            _threadLocalGlobals ??= new Dictionary<GlobalAddr, Value>();
+            if (!_threadLocalGlobals.TryGetValue(addr, out var v))
+            {
+                v = initialValue;
+                _threadLocalGlobals[addr] = v;
+            }
+            return v;
+        }
+
+        /// <summary>Write a thread-local global's value for this host
+        /// thread; other threads' slots are unaffected.</summary>
+        public void SetThreadLocalGlobalValue(GlobalAddr addr, Value value)
+        {
+            _threadLocalGlobals ??= new Dictionary<GlobalAddr, Value>();
+            _threadLocalGlobals[addr] = value;
+        }
+
+        /// <summary>
         /// Legacy — unused after phase M. Was the native-recursion depth counter
         /// for the old switch-runtime model where every WASM <c>call</c> grew the
         /// native thread stack. Phase M replaced native recursion with
