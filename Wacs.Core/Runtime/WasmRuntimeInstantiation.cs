@@ -337,10 +337,10 @@ namespace Wacs.Core.Runtime
                 }
             }
 
-            // Layer 5a: shared-everything-threads declared-per-global flag.
-            // Rejects globals that advertise `shared` or `thread_local`
-            // without the runtime opting into the proposal. Preserves
-            // baseline behavior when the flag is off.
+            // Layer 5a/5b: shared-everything-threads declared-per-instance flags.
+            // Rejects globals/tables that advertise `shared` or
+            // `thread_local` without the runtime opting into the proposal.
+            // Preserves baseline behavior when the flag is off.
             for (int i = 0; i < moduleInstance.GlobalAddrs.Count; i++)
             {
                 var g = Store[moduleInstance.GlobalAddrs[(GlobalIdx)(uint)i]];
@@ -352,9 +352,20 @@ namespace Wacs.Core.Runtime
                         "but the runtime has not opted in via RuntimeAttributes.EnableSharedEverythingThreads.");
                 }
             }
+            for (int i = 0; i < moduleInstance.TableAddrs.Count; i++)
+            {
+                var t = Store[moduleInstance.TableAddrs[(TableIdx)(uint)i]];
+                if (t.Type.Limits.Shared
+                    && !_shared.Attributes.EnableSharedEverythingThreads)
+                {
+                    throw new NotSupportedException(
+                        $"Table {i} is declared shared but the runtime has not opted in " +
+                        "via RuntimeAttributes.EnableSharedEverythingThreads.");
+                }
+            }
 
             // Mark globals/tables as shared based on:
-            //   - Layer 5a: declared-per-global `shared` flag (authoritative when present).
+            //   - Layer 5a/5b: declared-per-instance `shared` flag (authoritative when present).
             //   - Layer 2b: module-has-shared-memory approximation (fallback for
             //     threads-1.0 modules that predate per-declaration annotations).
             // Either source flips IsShared; declaration-driven instances are
@@ -369,10 +380,11 @@ namespace Wacs.Core.Runtime
                 if (g.Type.Shared || moduleThreadingActive)
                     g.EnableConcurrentAccess();
             }
-            if (moduleThreadingActive)
+            for (int i = 0; i < moduleInstance.TableAddrs.Count; i++)
             {
-                for (int i = 0; i < moduleInstance.TableAddrs.Count; i++)
-                    Store[moduleInstance.TableAddrs[(TableIdx)(uint)i]].EnableConcurrentAccess();
+                var t = Store[moduleInstance.TableAddrs[(TableIdx)(uint)i]];
+                if (t.Type.Limits.Shared || moduleThreadingActive)
+                    t.EnableConcurrentAccess();
             }
 
             return moduleInstance;
