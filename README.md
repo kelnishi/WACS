@@ -45,7 +45,7 @@ WACS supports the latest standardized webassembly feature extensions including *
 - **Godot Compatibility**: Compatible with **Godot Engine - [.NET](https://docs.godotengine.org/en/stable/tutorials/scripting/c_sharp/c_sharp_basics.html)**. 
 - **Pure C# Implementation**: Written in C# 9.0/.NET Standard 2.1. (No `unsafe` keyword blocks, no raw pointer arithmetic — see [notes on `System.Runtime.CompilerServices.Unsafe` in the switch dispatcher](#running-wacsconsole).)
 - **No Complex Dependencies**: Uses [FluentValidation](https://github.com/FluentValidation/FluentValidation) and [Microsoft.Extensions.ObjectPool](https://www.nuget.org/packages/Microsoft.Extensions.ObjectPool) as its only dependencies.
-- **WebAssembly 3.0 Spec Compliance**: Passes the [WebAssembly 3.0](https://webassembly.github.io/spec/versions/core/WebAssembly-3.0-draft.pdf) spec [test suite](https://github.com/WebAssembly/spec/tree/wasm-3.0).
+- **WebAssembly 3.0 Spec Compliance**: Passes the [WebAssembly 3.0](https://webassembly.github.io/spec/versions/core/WebAssembly-3.0.pdf) spec [test suite](https://github.com/WebAssembly/spec/tree/wasm-3.0).
 - **First-class WAT / WAST**: Pure-C# reader and writer for the WebAssembly text format. `Wacs.Console` takes `.wat` directly; the spec `.wast` suite parses natively with no external `wast2json` / wabt dependency.
 - **Magical Interop**: Host bindings are validated with reflection, no boilerplate code required.
 - **Async Tasks**: [JSPI](https://github.com/WebAssembly/js-promise-integration)-like non-blocking calls for async functions.
@@ -57,7 +57,7 @@ Because WebAssembly is memory-safe and can be ahead-of-time validated, WACS make
 UGC, DLC, or plugin systems that include executable logic.
 
 ## WebAssembly Feature Extensions
-WACS is based on the [WebAssembly Core 3 draft spec](https://webassembly.github.io/spec/versions/core/WebAssembly-3.0-draft.pdf) and passes the associated [test suite](https://github.com/WebAssembly/spec/tree/wasm-3.0).
+WACS is based on the [WebAssembly Core 3 spec](https://webassembly.github.io/spec/versions/core/WebAssembly-3.0.pdf) and passes the associated [test suite](https://github.com/WebAssembly/spec/tree/wasm-3.0).
 
 Support for all standardized extensions is listed below.
 
@@ -65,34 +65,34 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 
 |Proposal |Features|    |
 |------|-------|----|
-|Phase 5|
-|[JavaScript BigInt to WebAssembly i64 integration](https://github.com/WebAssembly/JS-BigInt-integration)||<span title="Browser idiom, but conceptually supported">✳️</span>|
+|**Phase 5 – Standardized**|
+|[Branch Hinting](https://github.com/WebAssembly/branch-hinting)||<span title="Custom section ignored; no behavior impact">✅</span>|
 |[Bulk memory operations](https://github.com/webassembly/bulk-memory-operations)||✅|
+|[Custom Annotation Syntax in the Text Format](https://github.com/WebAssembly/annotations)||✅|
+|[Exception handling](https://github.com/WebAssembly/exception-handling)|exceptions|✅|
 |[Extended Constant Expressions](https://github.com/WebAssembly/extended-const)|extended_const|✅|
+|[Fixed-width SIMD](https://github.com/webassembly/simd)||✅|
 |[Garbage collection](https://github.com/WebAssembly/gc)|gc|✅|
+|[Import/Export of Mutable Globals](https://github.com/WebAssembly/mutable-global)||✅|
+|[JavaScript BigInt to WebAssembly i64 integration](https://github.com/WebAssembly/JS-BigInt-integration)||<span title="Browser idiom, but conceptually supported">✳️</span>|
+|[JS String Builtins](https://github.com/WebAssembly/js-string-builtins)||<span title="Browser idioms, not directly supported">🌐</span>|
+|[Memory64](https://github.com/WebAssembly/memory64)|memory64|✅|
 |[Multiple memories](https://github.com/WebAssembly/multi-memory)|multi-memory|✅|
 |[Multi-value](https://github.com/WebAssembly/multi-value)|multi_value|✅|
-|[Import/Export of Mutable Globals](https://github.com/WebAssembly/mutable-global)||✅|
+|[Non-trapping float-to-int conversions](https://github.com/WebAssembly/nontrapping-float-to-int-conversions)||✅|
 |[Reference Types](https://github.com/WebAssembly/reference-types)||✅|
 |[Relaxed SIMD](https://github.com/webassembly/relaxed-simd)|relaxed_simd|✅|
-|[Non-trapping float-to-int conversions](https://github.com/WebAssembly/nontrapping-float-to-int-conversions)||✅|
 |[Sign-extension operators](https://github.com/WebAssembly/sign-extension-ops)||✅|
-|[Fixed-width SIMD](https://github.com/webassembly/simd)||✅|
 |[Tail call](https://github.com/webassembly/tail-call)|tail_call|✅|
 |[Typed Function References](https://github.com/WebAssembly/function-references)|function-references|✅|
-|Phase 4|
-|[Exception handling](https://github.com/WebAssembly/exception-handling)|exceptions|✅|
-|[JS String Builtins](https://github.com/WebAssembly/js-string-builtins)||❌|
-|[Memory64](https://github.com/WebAssembly/memory64)|memory64|✅|
-|[Threads](https://github.com/webassembly/threads)|threads|✅|
-|Phase 3|
+|**Phase 4 – Standardize**|
 |[JS Promise Integration](https://github.com/WebAssembly/js-promise-integration)|jspi|<span title="Browser idiom, but conceptually supported">✳️</span>|
-|[Type Reflection for WebAssembly JavaScript API](https://github.com/WebAssembly/js-types)|type-reflection|<span title="Browser idioms, not directly supported">🌐</span>|
-||
-|[Legacy Exception Handling]( https://github.com/WebAssembly/exception-handling)|exceptions|❌|
-|[Streaming Compilation](https://webassembly.github.io/spec/web-api/index.html#streaming-modules)|streaming_compilation|<span title="Browser idioms, not directly supported">🌐</span>|
+|[Threads](https://github.com/webassembly/threads)|threads|✅|
+|[Web Content Security Policy](https://github.com/WebAssembly/content-security-policy)||<span title="Browser idioms, not directly supported">🌐</span>|
 
-###### This table was generated with the Feature.Detect test harness.
+Legend: ✅ supported · ❌ not yet · ✳️ conceptually supported (browser idiom) · 🌐 browser-only / N/A for non-web hosts
+
+###### Grouping follows [webassembly.org/features](https://webassembly.org/features/): Phase 5 is the combined standardized set (including finished proposals merged to the core spec) and Phase 4 is the active standardize queue. Phase assignments cross-checked against [WebAssembly/proposals@1584fdf](https://github.com/WebAssembly/proposals/commit/1584fdf) (2026-03-24) and [WebAssembly/proposals/finished-proposals.md](https://github.com/WebAssembly/proposals/blob/main/finished-proposals.md). Browser-idiom ✳️/🌐 results harnessed from [wasm-feature-detect](https://github.com/GoogleChromeLabs/wasm-feature-detect) via the [Feature.Detect](./Feature.Detect) test harness.
 
 ## Getting Started
 

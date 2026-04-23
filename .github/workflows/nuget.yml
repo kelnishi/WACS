@@ -6,6 +6,7 @@ on:
       - 'WACS-v*.*.*'
       - 'WASIp1-v*.*.*'
       - 'WACS-Transpiler-v*.*.*'
+      - 'WACS-WASI-Threads-v*.*.*'
 
 jobs:
   build-and-publish:
@@ -29,6 +30,9 @@ jobs:
           - path: Wacs.Transpiler.Lib
             package_name: WACS.Transpiler.Lib
             tag_prefix: WACS-Transpiler-v
+          - path: Wacs.WASI.Threads
+            package_name: WACS.WASI.Threads
+            tag_prefix: WACS-WASI-Threads-v
 
     steps:
       - name: Checkout code
