@@ -75,7 +75,7 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |[Garbage collection](https://github.com/WebAssembly/gc)|gc|✅|
 |[Import/Export of Mutable Globals](https://github.com/WebAssembly/mutable-global)||✅|
 |[JavaScript BigInt to WebAssembly i64 integration](https://github.com/WebAssembly/JS-BigInt-integration)||<span title="Browser idiom, but conceptually supported">✳️</span>|
-|[JS String Builtins](https://github.com/WebAssembly/js-string-builtins)||<span title="Browser idioms, not directly supported">🌐</span>|
+|[JS String Builtins](https://github.com/WebAssembly/js-string-builtins)||✅|
 |[Memory64](https://github.com/WebAssembly/memory64)|memory64|✅|
 |[Multiple memories](https://github.com/WebAssembly/multi-memory)|multi-memory|✅|
 |[Multi-value](https://github.com/WebAssembly/multi-value)|multi_value|✅|
