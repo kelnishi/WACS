@@ -407,6 +407,18 @@ namespace Wacs.Core.Runtime
             _entityBindings[id] = funcAddr;
         }
 
+        // Bind a pre-built IFunctionInstance at a given (module, entity) name.
+        // Used by recognized-import builtins (e.g. wasm:js-string) that need
+        // operand-stack access for ref-typed params the delegate marshaler
+        // doesn't cover.
+        public void BindHostFunction((string module, string entity) id, IFunctionInstance func)
+        {
+            Store.OpenTransaction();
+            var funcAddr = Store.AddFunction(func);
+            Store.CommitTransaction();
+            _entityBindings[id] = funcAddr;
+        }
+
         public string GetFunctionName(FuncAddr funcAddr)
         {
             if (!GetExecContext().Store.Contains(funcAddr))

@@ -822,7 +822,12 @@ namespace Wacs.Core.Instructions
         public FuncIdx X;
         private bool IsHostFunction = false;
         private FunctionInstance? linkedFunctionInstance;
-        private HostFunction? linkedHostFunction;
+        // Any non-wasm callable. Holds a HostFunction for delegate-marshaled
+        // hosts (WASI, user BindHostFunction) and any other IFunctionInstance
+        // for recognized-import builtins (wasm:js-string) that access the
+        // OpStack directly. The async path casts back to HostFunction when
+        // it needs the delegate-based InvokeAsync.
+        private IFunctionInstance? linkedHostFunction;
 
         public InstCall() : base(ByteCode.Call)
         {
@@ -872,6 +877,14 @@ namespace Wacs.Core.Instructions
                     linkedHostFunction = hostFunction;
                     IsHostFunction = true;
                     break;
+                default:
+                    // Any other IFunctionInstance — recognized-import builtins
+                    // and similar. Dispatched through the IFunctionInstance
+                    // interface on the sync path.
+                    IsAsync = inst.IsAsync;
+                    linkedHostFunction = inst;
+                    IsHostFunction = true;
+                    break;
             }
 
             var funcType = inst.Type;
@@ -899,8 +912,10 @@ namespace Wacs.Core.Instructions
         {
             if (IsHostFunction)
             {
-                if (linkedHostFunction!.IsAsync)
-                    await linkedHostFunction!.InvokeAsync(context);
+                // InvokeAsync lives on HostFunction, not the interface.
+                // Generic IFunctionInstance builtins are always sync.
+                if (linkedHostFunction!.IsAsync && linkedHostFunction is HostFunction hf)
+                    await hf.InvokeAsync(context);
                 else
                     linkedHostFunction!.Invoke(context);
             }
