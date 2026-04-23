@@ -12,6 +12,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
+      <ProjectReference Include="..\Wacs.WASI.Threads\Wacs.WASI.Threads.csproj" />
     </ItemGroup>
 
     <ItemGroup>
