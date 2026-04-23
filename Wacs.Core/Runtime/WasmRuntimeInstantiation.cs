@@ -337,19 +337,40 @@ namespace Wacs.Core.Runtime
                 }
             }
 
-            // Layer 2b: mark globals/tables as shared if the module declares any
-            // shared memory. Threads-1.0 doesn't define "shared global" or
-            // "shared table" — this is the pragmatic approximation that lets
-            // concurrent host threads safely reach any global/table in a module
-            // whose memory they can also reach. Shared-everything-threads
-            // (future) will flip IsShared per-declaration from the wasm binary.
-            // Only activates when the host policy supports concurrency at all;
-            // NotSupportedPolicy modules (IL2CPP default) pay nothing.
-            if (_shared.Attributes.ConcurrencyPolicy.Mode == Concurrency.ConcurrencyPolicyMode.HostDefined
-                && ModuleHasSharedMemory(moduleInstance))
+            // Layer 5a: shared-everything-threads declared-per-global flag.
+            // Rejects globals that advertise `shared` or `thread_local`
+            // without the runtime opting into the proposal. Preserves
+            // baseline behavior when the flag is off.
+            for (int i = 0; i < moduleInstance.GlobalAddrs.Count; i++)
             {
-                for (int i = 0; i < moduleInstance.GlobalAddrs.Count; i++)
-                    Store[moduleInstance.GlobalAddrs[(GlobalIdx)(uint)i]].EnableConcurrentAccess();
+                var g = Store[moduleInstance.GlobalAddrs[(GlobalIdx)(uint)i]];
+                if ((g.Type.Shared || g.Type.ThreadLocal)
+                    && !_shared.Attributes.EnableSharedEverythingThreads)
+                {
+                    throw new NotSupportedException(
+                        $"Global {i} uses a shared-everything-threads annotation (shared/thread_local) " +
+                        "but the runtime has not opted in via RuntimeAttributes.EnableSharedEverythingThreads.");
+                }
+            }
+
+            // Mark globals/tables as shared based on:
+            //   - Layer 5a: declared-per-global `shared` flag (authoritative when present).
+            //   - Layer 2b: module-has-shared-memory approximation (fallback for
+            //     threads-1.0 modules that predate per-declaration annotations).
+            // Either source flips IsShared; declaration-driven instances are
+            // also concurrent-accessible under threads-1.0 runtimes.
+            bool moduleThreadingActive =
+                _shared.Attributes.ConcurrencyPolicy.Mode == Concurrency.ConcurrencyPolicyMode.HostDefined
+                && ModuleHasSharedMemory(moduleInstance);
+
+            for (int i = 0; i < moduleInstance.GlobalAddrs.Count; i++)
+            {
+                var g = Store[moduleInstance.GlobalAddrs[(GlobalIdx)(uint)i]];
+                if (g.Type.Shared || moduleThreadingActive)
+                    g.EnableConcurrentAccess();
+            }
+            if (moduleThreadingActive)
+            {
                 for (int i = 0; i < moduleInstance.TableAddrs.Count; i++)
                     Store[moduleInstance.TableAddrs[(TableIdx)(uint)i]].EnableConcurrentAccess();
             }
