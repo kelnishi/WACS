@@ -1,5 +1,78 @@
 # Changelog
 
+## [0.9.1] — JS String Builtins
+
+Implements the full [JS String Builtins
+proposal](https://github.com/WebAssembly/js-string-builtins)
+(WebAssembly 3.0, Phase 5) backed by `System.String`. Modules compiled
+with `--enable-js-string-builtins` (Binaryen) or equivalent now run on
+WACS without modification — wasm manipulates host-owned UTF-16 strings
+directly, without copying through linear memory on every boundary
+crossing.
+
+**Why it works.** The proposal's 13 imports under `wasm:js-string` are
+defined observationally against UTF-16 code units — length is the
+code-unit count, `charCodeAt` yields a code unit (not a code point),
+`substring` is half-open, and surrogate pairs are preserved verbatim.
+`System.String` is also UTF-16 with identical indexing and surrogate
+semantics, so a pure environment swap yields observably identical
+behavior. Nothing in the spec constrains the underlying representation
+— only the input/output behavior.
+
+**Host opt-in.** Register the namespace before instantiation, same
+idiom as `Wasi.BindToRuntime`:
+
+```csharp
+using Wacs.Core.Runtime.Builtins;
+
+var runtime = new WasmRuntime();
+JsStringBuiltins.BindTo(runtime);
+var modInst = runtime.InstantiateModule(module);
+```
+
+Hosts pass strings to wasm by wrapping as an externref:
+`new Value(ValType.Extern, 0L, new JsStringRef("hello"))`.
+
+**The 13 imports.** `test`, `cast`, `length`, `concat`, `substring`,
+`equals`, `compare`, `charCodeAt`, `codePointAt`, `fromCharCode`,
+`fromCodePoint` (11 simple i32 / externref functions) plus
+`fromCharCodeArray` and `intoCharCodeArray` (GC-array-typed bridge
+functions that read/write `StoreArray`). All 13 implemented as
+`IFunctionInstance` subclasses that pop directly off the operand stack
+— host-delegate marshaling can't carry externref through `PopScalars`,
+so the builtins bypass it entirely.
+
+**Infrastructure changes.** `InstCall.Link` generalized to dispatch
+any `IFunctionInstance`, not just `HostFunction` / `FunctionInstance`
+— opens the door for additional recognized-import namespaces in the
+future. A new `BindHostFunction((module, entity), IFunctionInstance)`
+overload on `WasmRuntime` for non-delegate registrations.
+
+**Transpiler, AOT.** No transpiler changes needed — the transpiler
+routes imports through `HostedRunner.BuildImportsProxy` →
+`CreateStackInvoker` → `ExecContext.Invoke`, which already dispatches
+any `IFunctionInstance`. Full AOT compatibility preserved
+(`IsAotCompatible=true`); no `Reflection.Emit`, `DynamicMethod`, or
+`Expression.Compile` anywhere in the new code path.
+
+**Docs.** JS String Builtins reclassified from ✅ to ✳️ in the feature
+matrix, alongside JS BigInt↔i64 and JSPI — the *wasm-level* semantics
+are observably supported, but the *JS-API surface* (the namespace
+name `wasm:js-string`, the JS-engine-recognized import handling) is a
+browser idiom WACS emulates rather than implements natively. New
+[`BROWSER_IDIOMS.md`](BROWSER_IDIOMS.md) explainer covers all three
+✳️ features: how each proposal maps to a native .NET primitive
+(`long`, `System.String`, `Task`/`async`) and the host-side API for
+each.
+
+**Tests.** 34 new tests in `Wacs.Core.Test/JsStringBuiltinsTests.cs`:
+28 WAT-based integration tests exercising the 11 simple builtins
+through the runtime's standard dispatch (happy path, OOB sentinels,
+traps, surrogate round-trip), plus 6 direct-invoke tests for the
+GC-array-typed builtins (WAT parser doesn't yet support
+`array.new_fixed`, so these construct `StoreArray` directly in C# and
+drive the bound `IFunctionInstance` via `CreateStackInvoker`).
+
 ## [0.9.0] + WACS.Transpiler / Transpiler.Lib [0.3.0] + WACS.WASI.Threads [0.1.0] — Concurrent wasm execution
 
 Makes the WACS runtime reentrant under concurrent host threads,
