@@ -49,6 +49,13 @@ namespace Wacs.ComponentModel.CSharpEmit
                 CtOptionType o => EmitParam(o.Inner) + "?",
                 CtResultType r => EmitResultParam(r),
                 CtTupleType t => EmitTuple(t),
+                // own<T> / borrow<T> — C# has no handle-type
+                // distinction; the resource class itself carries
+                // the handle internally, so both collapse to the
+                // resource's PascalCase name (same-interface) or
+                // its fully qualified path (cross-interface).
+                CtOwnType o => EmitParam(o.Resource),
+                CtBorrowType b => EmitParam(b.Resource),
                 // Same-interface refs emit unqualified; cross-interface
                 // refs emit a fully qualified `global::...` path.
                 CtTypeRef r => EmitTypeRef(r),

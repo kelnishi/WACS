@@ -137,6 +137,22 @@ namespace Wacs.ComponentModel.CSharpEmit
                 // instead of a Span-byte read.
                 EmitElidedResultWrapperBody(sb, stubClassName, methodName, fn.Type);
             }
+            else if (fn.Type.Result != null && IsOwnedResource(fn.Type.Result))
+            {
+                // own<R> return — stub returns i32 handle; wrapper
+                // builds a resource wrapper via
+                // `new R(new R.THandle(handle))` and returns it.
+                sb.Append("            var result =  ");
+                sb.Append(stubClassName).Append(".wasmImport").Append(methodName);
+                sb.Append('(');
+                EmitLoweredArgs(sb, fn.Type);
+                sb.Append(");\n");
+                var target = ResolveOwnedResource(fn.Type.Result);
+                var qualified = TypeRefEmit.EmitQualifiedPath(target);
+                sb.Append("            var resource = new ").Append(qualified);
+                sb.Append("(new ").Append(qualified).Append(".THandle(result));\n");
+                sb.Append("            return resource;\n");
+            }
             else
             {
                 // Stub call — note the double-space after `=` in
@@ -751,6 +767,11 @@ namespace Wacs.ComponentModel.CSharpEmit
                     flat[i] = StubTypesFor(rec.Fields[i].Type)[0];
                 return flat;
             }
+            if (IsOwnedResource(t))
+            {
+                // own<R> lowers to an i32 handle on the wire.
+                return new[] { "int" };
+            }
             throw new NotImplementedException(
                 "Interop stub type for " + t.GetType().Name +
                 " is a Phase 1a.2 follow-up.");
@@ -828,6 +849,56 @@ namespace Wacs.ComponentModel.CSharpEmit
                 if (!IsSmallPrim(ep.Kind)) return false;
             }
             return true;
+        }
+
+        /// <summary>
+        /// True when <paramref name="t"/> denotes an owned handle
+        /// to a resource — either explicitly as <c>own&lt;R&gt;</c>
+        /// or as a bare <c>R</c> identifier (the WIT grammar treats
+        /// a resource reference in a value-type position as
+        /// implicitly <c>own</c>). The resource handle lowers to an
+        /// i32 on the wire; at the C# layer the wrapper constructs
+        /// <c>new Resource(new Resource.THandle(int))</c> to package
+        /// it back into the resource wrapper class.
+        /// </summary>
+        internal static bool IsOwnedResource(CtValType t)
+        {
+            CtTypeRef? r = t switch
+            {
+                CtOwnType o => o.Resource as CtTypeRef,
+                CtTypeRef tr => tr,
+                _ => null,
+            };
+            if (r == null || r.Target == null) return false;
+            var target = r.Target;
+            while (target.Type is CtTypeRef innerRef
+                   && innerRef.Target != null
+                   && innerRef.Target != target)
+            {
+                target = innerRef.Target;
+            }
+            return target.Type is CtResourceType;
+        }
+
+        /// <summary>Resolve an owned-handle type to its concrete
+        /// resource named-type (alias chain unwound).</summary>
+        private static CtNamedType ResolveOwnedResource(CtValType t)
+        {
+            var r = t switch
+            {
+                CtOwnType o => (CtTypeRef)o.Resource,
+                CtTypeRef tr => tr,
+                _ => throw new System.InvalidOperationException(
+                    "ResolveOwnedResource called on " + t.GetType().Name),
+            };
+            var target = r.Target!;
+            while (target.Type is CtTypeRef innerRef
+                   && innerRef.Target != null
+                   && innerRef.Target != target)
+            {
+                target = innerRef.Target;
+            }
+            return target;
         }
 
         /// <summary>
