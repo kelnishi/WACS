@@ -152,6 +152,20 @@ namespace Wacs.Transpiler.AOT.Component
             ComponentAssemblyEmit.EmitComponentMetadataClass(
                 result.ModuleBuilder, assemblyNamespace, parsed.EmbeddedWit);
 
+            // Generate the component-level public surface — one
+            // static method per exported function, typed per the
+            // component's own type section (u32 vs int32 etc.).
+            // For primitive signatures this is straight
+            // delegation to the core IExports; aggregates wait
+            // on the canonical-ABI IL emitter.
+            if (result.ExportsInterface != null && result.ModuleClass != null)
+            {
+                ComponentExportsEmit.EmitComponentExportsClass(
+                    result.ModuleBuilder, assemblyNamespace,
+                    parsed.Component, result.ExportsInterface,
+                    result.ModuleClass);
+            }
+
             return result;
         }
     }
