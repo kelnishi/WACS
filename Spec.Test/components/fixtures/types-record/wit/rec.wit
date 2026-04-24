@@ -1,0 +1,9 @@
+package local:rec;
+interface def {
+    record point { x: u32, y: u32 }
+    record person { name: string, age: u8 }
+
+    origin: func() -> point;
+    translate: func(p: point, dx: s32, dy: s32) -> point;
+}
+world rec-world { export def; }
