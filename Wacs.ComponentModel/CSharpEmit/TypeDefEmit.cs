@@ -654,7 +654,29 @@ namespace Wacs.ComponentModel.CSharpEmit
 
             if (usesReturnArea)
             {
-                EmitResourceMethodReturnArea(sb, stubClass, methodName, sig);
+                // Blank separator before the retArea block matches
+                // the wit-bindgen shape for resource methods (the
+                // handle declaration just above is separated from
+                // the body).
+                sb.Append("\n");
+                InteropEmit.EmitReturnAreaWrapperBody(
+                    sb, stubClass, methodName, sig, leadingStubArg: "handle");
+            }
+            else if (InteropEmit.IsElidedResultType(sig.Result))
+            {
+                // result<_, _> — stub returns i32 discriminant
+                // directly; capture into `result` then emit the
+                // shared switch + throw body.
+                sb.Append("            var result =  ");
+                sb.Append(stubClass).Append(".wasmImport").Append(methodName);
+                sb.Append("(handle");
+                if (sig.Params.Count > 0)
+                {
+                    sb.Append(", ");
+                    InteropEmit.EmitLoweredArgs(sb, sig);
+                }
+                sb.Append(");\n");
+                InteropEmit.EmitElidedResultTail(sb);
             }
             else
             {
@@ -705,65 +727,21 @@ namespace Wacs.ComponentModel.CSharpEmit
         {
             if (sig.HasNoResult) return "void";
             if (sig.Result == null) return "void";
+            // Totally-elided result<_,_> — stub returns the
+            // discriminant directly as i32.
+            if (sig.Result is CtResultType r
+                && r.Ok == null && r.Err == null) return "int";
             return PrimStubType(sig.Result);
         }
 
         /// <summary>
-        /// True when a resource method needs a return-area buffer
-        /// (string / list&lt;u8&gt; / other aggregate return). Same
-        /// predicate family as <see cref="InteropEmit.UsesReturnArea"/>
-        /// but scoped to resource methods — additional shape
-        /// support lands here as aggregate returns arrive.
+        /// True when a resource method needs a return-area buffer.
+        /// Delegates to <see cref="InteropEmit.UsesReturnArea"/> so
+        /// resource methods transparently pick up every aggregate
+        /// return shape the free-function emitter supports.
         /// </summary>
-        private static bool MethodUsesReturnArea(CtFunctionType sig)
-        {
-            if (sig.HasNoResult || sig.Result == null) return false;
-            if (sig.Result is CtPrimType p && p.Kind == CtPrim.String) return true;
-            if (InteropEmit.IsByteList(sig.Result)) return true;
-            return false;
-        }
-
-        /// <summary>
-        /// Emit the return-area-using body of a resource method.
-        /// <c>handle</c> is already declared by the caller;
-        /// allocates the retArea, pins, calls the stub with
-        /// <c>(handle, args…, ptr)</c>, and lifts the result.
-        /// </summary>
-        private static void EmitResourceMethodReturnArea(
-            StringBuilder sb,
-            string stubClass,
-            string methodName,
-            CtFunctionType sig)
-        {
-            sb.Append("\n");
-            sb.Append("            var retArea = new uint[2];\n");
-            sb.Append("            fixed (uint* retAreaByte0 = &retArea[0])\n");
-            sb.Append("            {\n");
-            sb.Append("                var ptr = (nint)retAreaByte0;\n");
-            sb.Append("                ").Append(stubClass).Append(".wasmImport").Append(methodName);
-            sb.Append("(handle");
-            if (sig.Params.Count > 0)
-            {
-                sb.Append(", ");
-                InteropEmit.EmitLoweredArgs(sb, sig);
-            }
-            sb.Append(", ptr);\n");
-
-            if (sig.Result is CtPrimType rp && rp.Kind == CtPrim.String)
-            {
-                sb.Append("                return Encoding.UTF8.GetString(");
-                sb.Append("(byte*)BitConverter.ToInt32(new Span<byte>((void*)(ptr + 0), 4)), ");
-                sb.Append("BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4)));\n");
-            }
-            else if (InteropEmit.IsByteList(sig.Result!))
-            {
-                sb.Append("\n");
-                sb.Append("                var array = new byte[BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))];\n");
-                sb.Append("                new Span<byte>((void*)(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 0), 4))), BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))).CopyTo(new Span<byte>(array));\n");
-                sb.Append("                return array;\n");
-            }
-            sb.Append("            }\n");
-        }
+        private static bool MethodUsesReturnArea(CtFunctionType sig) =>
+            InteropEmit.UsesReturnArea(sig);
 
 
         private static string FlagsBackingType(int flagCount)

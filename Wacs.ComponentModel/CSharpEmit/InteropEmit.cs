@@ -169,10 +169,11 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// trailing <c>nint</c> stub param, then lifts the
         /// return-typed value from the buffer.
         /// </summary>
-        private static void EmitReturnAreaWrapperBody(StringBuilder sb,
-                                                       string stubClassName,
-                                                       string methodName,
-                                                       CtFunctionType sig)
+        internal static void EmitReturnAreaWrapperBody(StringBuilder sb,
+                                                        string stubClassName,
+                                                        string methodName,
+                                                        CtFunctionType sig,
+                                                        string? leadingStubArg = null)
         {
             var words = ReturnAreaUintCount(sig);
             sb.Append("            var retArea = new uint[").Append(words).Append("];\n");
@@ -181,8 +182,13 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append("                var ptr = (nint)retAreaByte0;\n");
             sb.Append("                ").Append(stubClassName).Append(".wasmImport").Append(methodName);
             sb.Append('(');
+            if (leadingStubArg != null)
+            {
+                sb.Append(leadingStubArg);
+                if (sig.Params.Count > 0) sb.Append(", ");
+            }
             EmitLoweredArgs(sb, sig);
-            if (sig.Params.Count > 0) sb.Append(", ");
+            if (sig.Params.Count > 0 || leadingStubArg != null) sb.Append(", ");
             sb.Append("ptr");
             sb.Append(");\n");
 
@@ -317,30 +323,19 @@ namespace Wacs.ComponentModel.CSharpEmit
 
         /// <summary>True for <c>result&lt;_, _&gt;</c> (both sides
         /// absent) — the direct i32-discriminant return shape.</summary>
-        private static bool IsElidedResultType(CtValType? t) =>
+        internal static bool IsElidedResultType(CtValType? t) =>
             t is CtResultType r && r.Ok == null && r.Err == null;
 
         /// <summary>
-        /// Emit the wrapper body for <c>result&lt;_, _&gt;</c> — the
-        /// totally-elided case. Stub returns i32 directly (no return
-        /// area); wrapper captures it, switches on it to build a
-        /// <c>Result&lt;None, None&gt;</c>, then branches on
-        /// <c>IsOk</c>: ok → <c>return ;</c>; err → <c>throw new
-        /// WitException(lifted.AsErr!, 0)</c>.
+        /// Emit the <c>Result&lt;None, None&gt;</c> switch + throw
+        /// body that follows the stub call in the totally-elided
+        /// result path. Assumes the stub's int return was captured
+        /// into the local named <c>result</c>. Shared by the free-
+        /// function and resource-method emitters.
         /// </summary>
-        private static void EmitElidedResultWrapperBody(StringBuilder sb,
-                                                         string stubClassName,
-                                                         string methodName,
-                                                         CtFunctionType sig)
+        internal static void EmitElidedResultTail(StringBuilder sb)
         {
-            // Direct-call capture (no blank between `{` and this line).
-            sb.Append("            var result =  ");
-            sb.Append(stubClassName).Append(".wasmImport").Append(methodName);
-            sb.Append('(');
-            EmitLoweredArgs(sb, sig);
-            sb.Append(");\n");
             sb.Append("\n");
-
             var worldNs = EmitAmbient.WorldNamespace ?? "UNSET_WORLD_NAMESPACE";
             sb.Append("            Result<None, None> lifted;\n");
             sb.Append("\n");
@@ -366,6 +361,28 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append("            } else {\n");
             sb.Append("                throw new WitException(lifted.AsErr!, 0);\n");
             sb.Append("            }\n");
+        }
+
+        /// <summary>
+        /// Emit the wrapper body for <c>result&lt;_, _&gt;</c> — the
+        /// totally-elided case. Stub returns i32 directly (no return
+        /// area); wrapper captures it, switches on it to build a
+        /// <c>Result&lt;None, None&gt;</c>, then branches on
+        /// <c>IsOk</c>: ok → <c>return ;</c>; err → <c>throw new
+        /// WitException(lifted.AsErr!, 0)</c>.
+        /// </summary>
+        private static void EmitElidedResultWrapperBody(StringBuilder sb,
+                                                         string stubClassName,
+                                                         string methodName,
+                                                         CtFunctionType sig)
+        {
+            // Direct-call capture (no blank between `{` and this line).
+            sb.Append("            var result =  ");
+            sb.Append(stubClassName).Append(".wasmImport").Append(methodName);
+            sb.Append('(');
+            EmitLoweredArgs(sb, sig);
+            sb.Append(");\n");
+            EmitElidedResultTail(sb);
         }
 
         /// <summary>

@@ -530,15 +530,16 @@ using System.Diagnostics.CodeAnalysis;
                         }
                         // Result is allowed when:
                         //   * null (void)
-                        //   * a primitive (including string via
-                        //     return-area)
-                        //   * list<u8> (byte[]) via return-area
+                        //   * an emitable stub return (primitive,
+                        //     string, list<prim>, option/tuple/record
+                        //     of small-prims, result<prim-or-none>,
+                        //     elided result) — the shared Interop
+                        //     return-area emitter handles the lift
                         //   * a reference to the owning resource
                         //     (constructor / static factory returning
                         //     a fresh handle of the same type)
                         if (m.Function.Result == null) continue;
-                        if (m.Function.Result is CtPrimType) continue;
-                        if (InteropEmit.IsByteList(m.Function.Result)) continue;
+                        if (IsEmitableStubReturn(m.Function.Result)) continue;
                         if (m.Function.Result is CtTypeRef tr
                             && tr.Name == res.Name) continue;
                         if (m.Function.Result is CtOwnType own
