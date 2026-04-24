@@ -1,0 +1,14 @@
+package local:typ;
+
+interface def {
+    enum color { red, green, blue }
+    enum status { ok, warn, err }
+
+    flags perm { read, write, execute }
+    flags level { debug, info, warn, error, fatal }
+
+    pick: func(c: color) -> color;
+    check: func(p: perm) -> perm;
+}
+
+world typ-world { export def; }

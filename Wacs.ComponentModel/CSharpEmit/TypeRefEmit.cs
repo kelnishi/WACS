@@ -49,6 +49,12 @@ namespace Wacs.ComponentModel.CSharpEmit
                 CtOptionType o => EmitParam(o.Inner) + "?",
                 CtResultType r => EmitResultParam(r),
                 CtTupleType t => EmitTuple(t),
+                // Named type in the same interface — emits as the
+                // PascalCase type name. wit-bindgen-csharp omits the
+                // global:: qualifier within the interface's own
+                // namespace; cross-interface references get the full
+                // qualifier (follow-up).
+                CtTypeRef r => NameConventions.ToPascalCase(r.Name),
                 _ => throw new NotImplementedException(
                     "CSharp emission for " + type.GetType().Name +
                     " is a Phase 1a.2 follow-up."),
