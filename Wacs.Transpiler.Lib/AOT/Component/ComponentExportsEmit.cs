@@ -145,10 +145,12 @@ namespace Wacs.Transpiler.AOT.Component
             if (fn.Results.Count != 1) return false;
             var r = fn.Results[0];
             if (r.IsPrimitive) return true;
-            // Type-table ref — list<prim>, option<prim>, result<prim>.
+            // Type-table ref — list<prim>, option<prim>,
+            // result<prim>, tuple<prims>.
             if (TryResolveListOfPrim(r, types, out _)) return true;
             if (TryResolveOptionOfPrim(r, types, out _)) return true;
             if (TryResolveResultOfPrim(r, types, out _, out _)) return true;
+            if (TryResolveTupleOfPrims(r, types, out _)) return true;
             return false;
         }
 
@@ -183,6 +185,29 @@ namespace Wacs.Transpiler.AOT.Component
             if (!(types[(int)t.TypeIdx] is ComponentOptionType opt)) return false;
             if (!opt.Inner.IsPrimitive) return false;
             innerPrim = opt.Inner.Prim;
+            return true;
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a type-ref
+        /// to <c>tuple&lt;prim, prim, …&gt;</c>. All-primitive
+        /// elements for v0; aggregates inside tuples are
+        /// follow-ups once the underlying adapter helpers handle
+        /// them.</summary>
+        private static bool TryResolveTupleOfPrims(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            out ComponentPrim[] elementPrims)
+        {
+            elementPrims = Array.Empty<ComponentPrim>();
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentTupleType tup)) return false;
+            var prims = new ComponentPrim[tup.Elements.Count];
+            for (int i = 0; i < prims.Length; i++)
+            {
+                if (!tup.Elements[i].IsPrimitive) return false;
+                prims[i] = tup.Elements[i].Prim;
+            }
+            elementPrims = prims;
             return true;
         }
 
@@ -239,10 +264,12 @@ namespace Wacs.Transpiler.AOT.Component
             bool isListReturn = false;
             bool isOptionReturn = false;
             bool isResultReturn = false;
+            bool isTupleReturn = false;
             ComponentPrim listElemPrim = default;
             ComponentPrim optionInnerPrim = default;
             ComponentPrim? resultOkPrim = null;
             ComponentPrim? resultErrPrim = null;
+            ComponentPrim[] tupleElemPrims = Array.Empty<ComponentPrim>();
             Type returnType;
             if (export.Signature.Results.Count == 0)
             {
@@ -266,6 +293,15 @@ namespace Wacs.Transpiler.AOT.Component
                 // mapping for option<primitive>.
                 returnType = typeof(Nullable<>).MakeGenericType(
                     PrimToCs(optionInnerPrim));
+            }
+            else if (TryResolveTupleOfPrims(
+                export.Signature.Results[0], types, out tupleElemPrims))
+            {
+                isTupleReturn = true;
+                var csTypes = new Type[tupleElemPrims.Length];
+                for (int i = 0; i < csTypes.Length; i++)
+                    csTypes[i] = PrimToCs(tupleElemPrims[i]);
+                returnType = MakeValueTuple(csTypes);
             }
             else if (TryResolveResultOfPrim(
                 export.Signature.Results[0], types,
@@ -298,7 +334,12 @@ namespace Wacs.Transpiler.AOT.Component
                                        CamelCase(export.Signature.Params[i].Name));
 
             var il = method.GetILGenerator();
-            if (isResultReturn)
+            if (isTupleReturn)
+            {
+                EmitTupleReturnBody(il, instanceField, coreMethod,
+                                    tupleElemPrims, returnType);
+            }
+            else if (isResultReturn)
             {
                 EmitResultReturnBody(il, instanceField, coreMethod, export,
                                      resultOkPrim, resultErrPrim, returnType);
@@ -691,6 +732,83 @@ namespace Wacs.Transpiler.AOT.Component
                 // 32-bit prims (S32/U32/F32/Char) load as-is.
                 // Wide prims + strings + aggregates — follow-up.
             }
+        }
+
+        /// <summary>
+        /// IL body for a <c>() -&gt; tuple&lt;prim, prim, …&gt;</c>
+        /// export. No discriminant — the payload is a flat
+        /// sequence of elements at their natural-aligned offsets.
+        /// For all-32-bit-primitive tuples the offsets are 0, 4,
+        /// 8, … . Wide prims (8-byte) + mixed-width alignment
+        /// are incremental follow-ups.
+        /// </summary>
+        private static void EmitTupleReturnBody(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, ComponentPrim[] elementPrims,
+            Type tupleType)
+        {
+            var memoryProp = instanceField.FieldType.GetProperty("Memory");
+            if (memoryProp == null)
+                throw new InvalidOperationException(
+                    "Tuple-returning component requires Module.Memory.");
+
+            var retAreaLocal = il.DeclareLocal(typeof(int));
+            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+            var resultLocal = il.DeclareLocal(tupleType);
+
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, coreMethod, null);
+            il.Emit(OpCodes.Stloc, retAreaLocal);
+
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.Emit(OpCodes.Stloc, memoryLocal);
+
+            il.Emit(OpCodes.Ldloca, resultLocal);
+            il.Emit(OpCodes.Initobj, tupleType);
+
+            // Emit one field-store per tuple element. Offsets are
+            // cumulative based on each element's width — for all-
+            // 32-bit primitive v0 that's 4-byte stride.
+            int offset = 0;
+            for (int i = 0; i < elementPrims.Length; i++)
+            {
+                var fld = tupleType.GetField("Item" + (i + 1))!;
+                il.Emit(OpCodes.Ldloca, resultLocal);
+                EmitReadPayloadAtOffset(il, memoryLocal, retAreaLocal,
+                                        offset, elementPrims[i]);
+                il.Emit(OpCodes.Stfld, fld);
+                offset += 4;   // v0: all small-prim → 4-byte stride
+            }
+
+            il.Emit(OpCodes.Ldloc, resultLocal);
+            il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// Build a <c>ValueTuple&lt;…&gt;</c> type from a flat
+        /// list of element types. Handles 1-7 elements directly;
+        /// 8+ elements nest via the <c>TRest</c> convention.
+        /// </summary>
+        private static Type MakeValueTuple(Type[] elements)
+        {
+            if (elements.Length == 0)
+                throw new ArgumentException("Empty tuple not supported.");
+            if (elements.Length > 7)
+                throw new NotImplementedException(
+                    "8+-element tuples (nested TRest) not yet supported.");
+            var openGeneric = elements.Length switch
+            {
+                1 => typeof(ValueTuple<>),
+                2 => typeof(ValueTuple<,>),
+                3 => typeof(ValueTuple<,,>),
+                4 => typeof(ValueTuple<,,,>),
+                5 => typeof(ValueTuple<,,,,>),
+                6 => typeof(ValueTuple<,,,,,>),
+                7 => typeof(ValueTuple<,,,,,,>),
+                _ => throw new InvalidOperationException(),
+            };
+            return openGeneric.MakeGenericType(elements);
         }
 
         /// <summary>Case-insensitive search for the core-level

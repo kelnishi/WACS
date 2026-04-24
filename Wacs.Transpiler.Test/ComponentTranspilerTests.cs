@@ -105,6 +105,37 @@ namespace Wacs.Transpiler.Test
             Assert.False(value.HasValue);
         }
 
+        private static string FindTupleReturnComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "tuple-return-component", "wasm",
+                                "t.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_tuple_u32_u32_return()
+        {
+            // tuple-return-component exports
+            // `pair() -> tuple<u32, u32>`. Core returns retArea
+            // ptr 200; memory[200..204] = 7, memory[204..208] = 35.
+            // Expect (7u, 35u) as ValueTuple<uint, uint>.
+            using var fs = File.OpenRead(FindTupleReturnComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var pair = componentExports!.GetMethod("Pair");
+            Assert.NotNull(pair);
+            Assert.Equal(typeof(System.ValueTuple<uint, uint>), pair!.ReturnType);
+
+            var tuple = ((uint, uint))pair.Invoke(null, null)!;
+            Assert.Equal(7u, tuple.Item1);
+            Assert.Equal(35u, tuple.Item2);
+        }
+
         private static string FindResultReturnComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());

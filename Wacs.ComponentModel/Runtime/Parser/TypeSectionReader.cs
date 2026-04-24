@@ -120,6 +120,18 @@ namespace Wacs.ComponentModel.Runtime.Parser
     }
 
     /// <summary>
+    /// <c>tuple&lt;T1, T2, …&gt;</c> type (tag 0x6f). Flat
+    /// positional vector of value types, laid out consecutively
+    /// per each element's natural alignment. No discriminant.
+    /// </summary>
+    public sealed class ComponentTupleType : DefTypeEntry
+    {
+        public IReadOnlyList<ComponentValType> Elements { get; }
+        public ComponentTupleType(IReadOnlyList<ComponentValType> elements)
+        { Elements = elements; }
+    }
+
+    /// <summary>
     /// Function type (tag 0x40): ordered param list (each with a
     /// name) + ordered unnamed result list. Matches <c>functype</c>
     /// in the Component Model binary spec.
@@ -185,6 +197,7 @@ namespace Wacs.ComponentModel.Runtime.Parser
         public const byte ListTypeTag = 0x70;
         public const byte OptionTypeTag = 0x6B;
         public const byte ResultTypeTag = 0x6A;
+        public const byte TupleTypeTag = 0x6F;
 
         public static List<DefTypeEntry> Decode(byte[] payload)
         {
@@ -209,6 +222,8 @@ namespace Wacs.ComponentModel.Runtime.Parser
                     return new ComponentOptionType(DecodeValType(r));
                 case ResultTypeTag:
                     return DecodeResultType(r);
+                case TupleTypeTag:
+                    return DecodeTupleType(r);
                 default:
                     // Unknown structural tag — capture the rest
                     // of the payload so the type slot occupies
@@ -266,6 +281,15 @@ namespace Wacs.ComponentModel.Runtime.Parser
             var ok = DecodeOptionalValType(r);
             var err = DecodeOptionalValType(r);
             return new ComponentResultType(ok, err);
+        }
+
+        private static ComponentTupleType DecodeTupleType(ComponentBinaryReader r)
+        {
+            var n = r.ReadVarU32();
+            var elements = new ComponentValType[n];
+            for (uint i = 0; i < n; i++)
+                elements[i] = DecodeValType(r);
+            return new ComponentTupleType(elements);
         }
 
         private static ComponentValType? DecodeOptionalValType(ComponentBinaryReader r)
