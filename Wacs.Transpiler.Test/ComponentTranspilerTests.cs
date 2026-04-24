@@ -6,6 +6,8 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System.IO;
+using Wacs.Core.Runtime;
+using Wacs.Transpiler.AOT;
 using Wacs.Transpiler.AOT.Component;
 using Xunit;
 
@@ -43,6 +45,29 @@ namespace Wacs.Transpiler.Test
             var core = result.CoreModules[0];
             Assert.NotNull(core);
             Assert.Contains(core.Exports, e => e.Name == "greet");
+        }
+
+        [Fact]
+        public void Embedded_core_module_transpiles_through_existing_pipeline()
+        {
+            // End-to-end: component binary → embedded core module
+            // → Wacs.Core parse → runtime instantiate →
+            // ModuleTranspiler.Transpile. Verifies the component
+            // transpiler's output is directly consumable by the
+            // existing per-module IL emitter — no further
+            // adaptation needed for the core-module layer.
+            var result = ComponentTranspiler.ParseFile(FindTinyComponentPath());
+            Assert.Single(result.CoreModules);
+
+            var runtime = new WasmRuntime();
+            var moduleInst = runtime.InstantiateModule(result.CoreModules[0]);
+
+            var transpiler = new ModuleTranspiler("Wacs.Transpiled.Tiny");
+            var transpileResult = transpiler.Transpile(
+                moduleInst, runtime, moduleName: "TinyModule");
+
+            Assert.NotNull(transpileResult);
+            Assert.NotNull(transpileResult.FunctionsType);
         }
 
         [Fact]
