@@ -1,0 +1,8 @@
+package local:al;
+interface env {
+    type count = u32;
+    type name = string;
+    record entry { id: count, label: name }
+    lookup: func(id: count) -> option<entry>;
+}
+world al-world { import env; }
