@@ -107,26 +107,82 @@ namespace Wacs.ComponentModel.CSharpEmit
             // Emitted before the stub call.
             EmitWrapperPrelude(sb, fn.Type);
 
-            // Stub call — note the double-space after `=` in
-            // "var result =  {call}" in the wit-bindgen reference.
-            sb.Append("            ");
-            if (!isVoid) sb.Append("var result =  ");
-            sb.Append(stubClassName).Append(".wasmImport").Append(methodName);
-            sb.Append('(');
-            EmitLoweredArgs(sb, fn.Type);
-            sb.Append(");\n");
-
-            if (!isVoid)
+            var usesReturnArea = UsesReturnArea(fn.Type);
+            if (usesReturnArea)
             {
-                sb.Append("            return ");
-                sb.Append(EmitLift(fn.Type.Result!, "result"));
-                sb.Append(";\n");
+                EmitReturnAreaWrapperBody(sb, stubClassName, methodName, fn.Type);
+            }
+            else
+            {
+                // Stub call — note the double-space after `=` in
+                // "var result =  {call}" in the wit-bindgen reference.
+                sb.Append("            ");
+                if (!isVoid) sb.Append("var result =  ");
+                sb.Append(stubClassName).Append(".wasmImport").Append(methodName);
+                sb.Append('(');
+                EmitLoweredArgs(sb, fn.Type);
+                sb.Append(");\n");
+
+                if (!isVoid)
+                {
+                    sb.Append("            return ");
+                    sb.Append(EmitLift(fn.Type.Result!, "result"));
+                    sb.Append(";\n");
+                }
             }
 
             sb.Append("\n");
             sb.Append("            //TODO: free alloc handle (interopString) if exists\n");
             sb.Append("        }\n");
             sb.Append("\n");
+        }
+
+        /// <summary>
+        /// Emit the wrapper body when the function lowers its
+        /// return through a return-area buffer. Allocates a
+        /// stack-pinned <c>uint[N]</c>, passes its address as the
+        /// trailing <c>nint</c> stub param, then lifts the
+        /// return-typed value from the buffer.
+        /// </summary>
+        private static void EmitReturnAreaWrapperBody(StringBuilder sb,
+                                                       string stubClassName,
+                                                       string methodName,
+                                                       CtFunctionType sig)
+        {
+            var words = ReturnAreaUintCount(sig);
+            sb.Append("            var retArea = new uint[").Append(words).Append("];\n");
+            sb.Append("            fixed (uint* retAreaByte0 = &retArea[0])\n");
+            sb.Append("            {\n");
+            sb.Append("                var ptr = (nint)retAreaByte0;\n");
+            sb.Append("                ").Append(stubClassName).Append(".wasmImport").Append(methodName);
+            sb.Append('(');
+            EmitLoweredArgs(sb, sig);
+            if (sig.Params.Count > 0) sb.Append(", ");
+            sb.Append("ptr");
+            sb.Append(");\n");
+            sb.Append("                return ");
+            sb.Append(EmitReturnAreaLift(sig.Result!));
+            sb.Append(";\n");
+            sb.Append("            }\n");
+        }
+
+        /// <summary>
+        /// Read a return-typed value out of the return area at
+        /// local <c>ptr</c>. Currently handles <c>string</c> —
+        /// reads (ptr, len) at offsets 0 and 4 and decodes UTF-8.
+        /// Follow-ups: list, record, option, result, tuple.
+        /// </summary>
+        private static string EmitReturnAreaLift(CtValType t)
+        {
+            if (t is CtPrimType p && p.Kind == CtPrim.String)
+            {
+                return "Encoding.UTF8.GetString("
+                    + "(byte*)BitConverter.ToInt32(new Span<byte>((void*)(ptr + 0), 4)), "
+                    + "BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4)))";
+            }
+            throw new NotImplementedException(
+                "Return-area lift for " + t.GetType().Name +
+                " is a follow-up.");
         }
 
         /// <summary>
@@ -194,13 +250,15 @@ namespace Wacs.ComponentModel.CSharpEmit
         {
             if (sig.HasNoResult) return "void";
             if (sig.Result == null) return "void";
-            // Phase 1a.2: string / list / option / result / tuple
-            // returns require a return-area pointer param on the
-            // stub — not yet implemented; gate keeps them out.
+            // Returns that lower to multiple words (string, list,
+            // record, option, result with payload) get a return-area
+            // pointer param on the stub instead — the stub's C#
+            // return becomes void.
+            if (UsesReturnArea(sig)) return "void";
             var types = StubTypesFor(sig.Result);
             if (types.Length != 1)
                 throw new NotImplementedException(
-                    "Multi-word return lowering is a follow-up.");
+                    "Multi-word non-return-area return lowering is a follow-up.");
             return types[0];
         }
 
@@ -216,6 +274,39 @@ namespace Wacs.ComponentModel.CSharpEmit
                     stubIdx++;
                 }
             }
+            // Trailing return-area pointer if the return is a
+            // multi-word aggregate.
+            if (UsesReturnArea(sig))
+            {
+                if (stubIdx > 0) sb.Append(", ");
+                sb.Append("nint p").Append(stubIdx);
+            }
+        }
+
+        /// <summary>
+        /// True when the function return needs a return-area
+        /// pointer param on the stub. Currently only <c>string</c>
+        /// (ptr + len, 2 u32s). Follow-up aggregates (list, record,
+        /// option, result, tuple) slot in here with their own
+        /// return-area sizes.
+        /// </summary>
+        internal static bool UsesReturnArea(CtFunctionType sig)
+        {
+            if (sig.HasNoResult || sig.Result == null) return false;
+            return sig.Result is CtPrimType p && p.Kind == CtPrim.String;
+        }
+
+        /// <summary>
+        /// Return-area byte size for a function's return type, in
+        /// multiples of 4 bytes (uints). <c>string</c> = 2 (ptr +
+        /// len). Other aggregates plug in as they're supported.
+        /// </summary>
+        private static int ReturnAreaUintCount(CtFunctionType sig)
+        {
+            if (sig.Result is CtPrimType p && p.Kind == CtPrim.String) return 2;
+            throw new NotImplementedException(
+                "Return area sizing for " + sig.Result?.GetType().Name +
+                " is a follow-up.");
         }
 
         private static void EmitWrapperParams(StringBuilder sb, CtFunctionType sig)

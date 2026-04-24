@@ -1,0 +1,6 @@
+package local:sr;
+interface env {
+    get-name: func() -> string;
+    greet: func(name: string) -> string;
+}
+world sr-world { import env; }

@@ -766,6 +766,43 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, content);
         }
 
+        // ---- Interop: string-return marshaling ----------------------------
+
+        private static string FindInteropStringReturnFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-string-return");
+        }
+
+        /// <summary>
+        /// String return marshaling — via the return-area buffer.
+        /// Stub signature changes: void return + trailing
+        /// <c>nint</c> return-area pointer. Wrapper allocates
+        /// <c>uint[2]</c>, fixes a pointer, calls the stub with
+        /// the return-area <c>ptr</c>, then decodes
+        /// <c>Encoding.UTF8.GetString(bytes, len)</c> from the
+        /// ptr/len pair written at offsets 0 and 4.
+        /// </summary>
+        [Fact]
+        public void InteropEmit_string_return_uses_return_area()
+        {
+            var fixtureDir = FindInteropStringReturnFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "sr.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "sr-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "expected",
+                "SrWorldWorld.wit.imports.local.sr.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Interop: primitive-only import Interop file ------------------
 
         private static string FindInteropPrimitivesFixtureDir()

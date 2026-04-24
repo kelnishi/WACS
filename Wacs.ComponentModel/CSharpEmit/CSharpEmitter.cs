@@ -585,8 +585,7 @@ using System.Diagnostics.CodeAnalysis;
                 foreach (var p in fn.Type.Params)
                     if (!IsEmitableStubParam(p.Type)) return false;
                 if (fn.Type.Result != null
-                    && !(fn.Type.Result is CtPrimType)
-                    && !IsElidedResult(fn.Type.Result))
+                    && !IsEmitableStubReturn(fn.Type.Result))
                     return false;
             }
             return true;
@@ -601,6 +600,21 @@ using System.Diagnostics.CodeAnalysis;
         /// </summary>
         private static bool IsEmitableStubParam(CtValType t) =>
             t is CtPrimType;
+
+        /// <summary>
+        /// Return types supported by the current Interop emitter.
+        /// Primitives (direct return) and <c>string</c> (via
+        /// return-area buffer); <c>result&lt;_, _&gt;</c> in
+        /// return position maps to void at the interface level
+        /// (handled by trampoline emission, not InteropEmit, but
+        /// the gate accepts it uniformly).
+        /// </summary>
+        private static bool IsEmitableStubReturn(CtValType t)
+        {
+            if (t is CtPrimType) return true;
+            if (IsElidedResult(t)) return true;
+            return false;
+        }
 
         /// <summary>
         /// <c>result</c> with both sides elided — the "plain
