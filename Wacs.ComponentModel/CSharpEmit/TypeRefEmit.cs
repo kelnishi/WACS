@@ -109,6 +109,14 @@ namespace Wacs.ComponentModel.CSharpEmit
                 target = inner.Target;
             }
 
+            // Always-qualify mode (Interop files — siblings of the
+            // interface, not nested inside it) → emit global:: path
+            // regardless of same/cross-interface status.
+            if (EmitAmbient.AlwaysQualifyTypeRefs && target.Owner != null)
+            {
+                return EmitCrossInterfaceRef(target);
+            }
+
             // Cross-interface: target's owner differs from the
             // current emitting interface → emit fully qualified.
             if (emittingIface != null
@@ -120,6 +128,16 @@ namespace Wacs.ComponentModel.CSharpEmit
 
             return NameConventions.ToPascalCase(target.Name);
         }
+
+        /// <summary>
+        /// Emit the fully-qualified <c>global::…</c> path for a
+        /// named type. Interop files (which sit in a sibling static
+        /// class, not inside the interface) use this for every
+        /// named-type reference regardless of same-/cross-interface
+        /// status — there's no nested scope to elide.
+        /// </summary>
+        internal static string EmitQualifiedPath(CtNamedType target) =>
+            EmitCrossInterfaceRef(target);
 
         private static string EmitCrossInterfaceRef(CtNamedType target)
         {

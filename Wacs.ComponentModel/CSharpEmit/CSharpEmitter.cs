@@ -607,7 +607,8 @@ using System.Diagnostics.CodeAnalysis;
             || InteropEmit.IsListOfPrim(t)
             || InteropEmit.IsOptionOfSmallPrim(t)
             || InteropEmit.IsOptionOfString(t)
-            || InteropEmit.IsTupleOfSmallPrims(t);
+            || InteropEmit.IsTupleOfSmallPrims(t)
+            || InteropEmit.IsRecordOfSmallPrims(t);
 
         /// <summary>
         /// Return types supported by the current Interop emitter.
@@ -625,6 +626,7 @@ using System.Diagnostics.CodeAnalysis;
             if (InteropEmit.IsOptionOfSmallPrim(t)) return true;
             if (InteropEmit.IsOptionOfString(t)) return true;
             if (InteropEmit.IsTupleOfSmallPrims(t)) return true;
+            if (InteropEmit.IsRecordOfSmallPrims(t)) return true;
             if (InteropEmit.IsResultOfPrimOrNone(t)) return true;
             if (IsElidedResult(t)) return true;
             return false;
