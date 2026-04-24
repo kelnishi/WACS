@@ -946,6 +946,53 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Interop: option<primitive> marshaling -----------------------
+
+        private static string FindInteropOptionU32FixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-option-u32");
+        }
+
+        /// <summary>
+        /// <c>option&lt;u32&gt;</c> parameter and return marshaling.
+        /// Param lowers to a <c>(discriminant, payload)</c> pair —
+        /// the wrapper emits a null-check that sets locals
+        /// <c>{arg}Tag</c> / <c>{arg}Val</c>; the stub takes
+        /// <c>(int, int)</c>. Return uses the return-area buffer —
+        /// discriminant at byte offset 0, payload at byte offset 4,
+        /// both u32-slotted. Wrapper switches on the discriminant
+        /// and lifts <c>null</c> or the payload cast appropriately.
+        ///
+        /// <para>Param-side local naming diverges from wit-bindgen
+        /// (which allocates shared-counter names like
+        /// <c>lowered</c> / <c>lowered3</c>); we use per-arg
+        /// naming. Return-side body matches wit-bindgen 0.30.0
+        /// byte-for-byte. Expected output is hand-written (via
+        /// <c>expected/</c>) to capture the divergence; the
+        /// <c>reference/</c> file preserves the wit-bindgen
+        /// original for diff-tracking against upstream.</para>
+        /// </summary>
+        [Fact]
+        public void InteropEmit_option_u32_matches_expected()
+        {
+            var fixtureDir = FindInteropOptionU32FixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "opt.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "opt-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "expected",
+                "OptWorldWorld.wit.imports.local.opt.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Interop: primitive-only import Interop file ------------------
 
         private static string FindInteropPrimitivesFixtureDir()

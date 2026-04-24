@@ -178,6 +178,38 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append("                new Span<byte>((void*)(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 0), 4))), BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))).CopyTo(new Span<byte>(array));\n");
                 sb.Append("                return array;\n");
             }
+            else if (IsOptionOfSmallPrim(sig.Result!))
+            {
+                // option<prim> return — discriminant at offset 0
+                // (1 byte), payload at offset 4 (1 word). Switch
+                // on the discriminant, lift the payload on the
+                // Some branch, bind null on the None branch. The
+                // blank line between `{` and the declaration
+                // matches wit-bindgen's reference output.
+                sb.Append("\n");
+                var opt = (CtOptionType)sig.Result!;
+                var innerKind = ((CtPrimType)opt.Inner).Kind;
+                var cs = TypeRefEmit.EmitPrim(innerKind);
+                sb.Append("                ").Append(cs).Append("? lifted;\n");
+                sb.Append("\n");
+                sb.Append("                switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {\n");
+                sb.Append("                    case 0: {\n");
+                sb.Append("                        lifted = null;\n");
+                sb.Append("                        break;\n");
+                sb.Append("                    }\n");
+                sb.Append("\n");
+                sb.Append("                    case 1: {\n");
+                sb.Append("\n");
+                sb.Append("                        lifted = ");
+                sb.Append(EmitReturnAreaPrimLift(innerKind, offset: 4));
+                sb.Append(";\n");
+                sb.Append("                        break;\n");
+                sb.Append("                    }\n");
+                sb.Append("\n");
+                sb.Append("                    default: throw new ArgumentException(\"invalid discriminant: \" + (new Span<byte>((void*)(ptr + 0), 1)[0]));\n");
+                sb.Append("                }\n");
+                sb.Append("                return lifted;\n");
+            }
             else
             {
                 sb.Append("                return ");
@@ -185,6 +217,46 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append(";\n");
             }
             sb.Append("            }\n");
+        }
+
+        /// <summary>
+        /// Build the expression that reads a single-word primitive
+        /// value out of the return area at byte <paramref name="offset"/>.
+        /// Used by <c>option&lt;prim&gt;</c> lifting — the
+        /// discriminant branch has to read the payload at a fixed
+        /// (+4) offset. Values narrower than 32-bit (<c>bool</c>,
+        /// <c>s8..u16</c>) are read as an int and cast; 32-bit
+        /// primitives go through BitConverter.
+        /// </summary>
+        private static string EmitReturnAreaPrimLift(CtPrim kind, int offset)
+        {
+            var off = "ptr + " + offset;
+            return kind switch
+            {
+                CtPrim.S32 =>
+                    $"BitConverter.ToInt32(new Span<byte>((void*)({off}), 4))",
+                CtPrim.U32 =>
+                    $"unchecked((uint)(BitConverter.ToInt32(new Span<byte>((void*)({off}), 4))))",
+                CtPrim.F32 =>
+                    $"BitConverter.ToSingle(new Span<byte>((void*)({off}), 4))",
+                CtPrim.Bool =>
+                    $"(BitConverter.ToInt32(new Span<byte>((void*)({off}), 4)) != 0)",
+                // Narrower-than-32-bit primitives — wit-bindgen reads
+                // the full 4-byte slot then narrows. Cast expressions
+                // mirror EmitLift for direct-return primitives.
+                CtPrim.S8 =>
+                    $"((sbyte)(BitConverter.ToInt32(new Span<byte>((void*)({off}), 4))))",
+                CtPrim.U8 =>
+                    $"((byte)(BitConverter.ToInt32(new Span<byte>((void*)({off}), 4))))",
+                CtPrim.S16 =>
+                    $"((short)(BitConverter.ToInt32(new Span<byte>((void*)({off}), 4))))",
+                CtPrim.U16 =>
+                    $"((ushort)(BitConverter.ToInt32(new Span<byte>((void*)({off}), 4))))",
+                CtPrim.Char =>
+                    $"unchecked((uint)(BitConverter.ToInt32(new Span<byte>((void*)({off}), 4))))",
+                _ => throw new NotImplementedException(
+                    "Return-area lift for " + kind + " is a follow-up."),
+            };
         }
 
         /// <summary>
@@ -247,6 +319,7 @@ namespace Wacs.ComponentModel.CSharpEmit
                 if (p.Type is CtPrimType prim && prim.Kind == CtPrim.String)
                     return true;
                 if (IsByteList(p.Type)) return true;
+                if (IsOptionOfSmallPrim(p.Type)) return true;
             }
             return false;
         }
@@ -284,8 +357,63 @@ namespace Wacs.ComponentModel.CSharpEmit
                       .Append(bufName).Append(", ").Append(argName).Append(".Length));\n");
                     listIdx++;
                 }
+                else if (IsOptionOfSmallPrim(p.Type))
+                {
+                    // option<prim> lowers to (discriminant, payload)
+                    // pair. Emit per-param `{arg}Tag` (int disc) and
+                    // `{arg}Val` (inner stub type) locals and
+                    // populate them from a nullable-check branch.
+                    // Local-name divergence from wit-bindgen (they
+                    // allocate shared-counter names like `lowered` /
+                    // `lowered3`); our per-arg naming is clearer and
+                    // doesn't affect the DllImport signature —
+                    // the componentize-dotnet roundtrip never
+                    // inspects wrapper locals.
+                    var opt = (CtOptionType)p.Type;
+                    var innerPrim = (CtPrimType)opt.Inner;
+                    var innerStub = StubTypesFor(opt.Inner)[0];
+                    sb.Append("            int ").Append(argName).Append("Tag;\n");
+                    sb.Append("            ").Append(innerStub).Append(' ')
+                      .Append(argName).Append("Val;\n");
+                    sb.Append("            if (").Append(argName).Append(" != null) {\n");
+                    sb.Append("                ").Append(argName).Append("Tag = 1;\n");
+                    sb.Append("                ").Append(argName).Append("Val = ");
+                    sb.Append(EmitOptionPayloadLower(innerPrim.Kind, argName));
+                    sb.Append(";\n");
+                    sb.Append("            } else {\n");
+                    sb.Append("                ").Append(argName).Append("Tag = 0;\n");
+                    sb.Append("                ").Append(argName).Append("Val = ");
+                    sb.Append(OptionPayloadZero(innerStub));
+                    sb.Append(";\n");
+                    sb.Append("            }\n");
+                }
             }
         }
+
+        /// <summary>
+        /// Emit the payload-lowering expression for an
+        /// <c>option&lt;prim&gt;</c> param with non-null payload.
+        /// The outer null-check has already unwrapped to the
+        /// non-null arm; we cast through <c>(prim)argName</c> (to
+        /// force the <c>Nullable&lt;T&gt;.Value</c> unbox) then into
+        /// the stub's core-wasm type.
+        /// </summary>
+        private static string EmitOptionPayloadLower(CtPrim kind, string argName)
+        {
+            // Unwrap Nullable<T> to the primitive then reuse the
+            // primitive-lowering logic. The cast syntax `(uint)x`
+            // on a `uint?` is the idiomatic unwrap — equivalent to
+            // `x.Value` but matches wit-bindgen's form.
+            var unwrapped = "(" + TypeRefEmit.EmitPrim(kind) + ")" + argName;
+            return EmitLower(new CtPrimType(kind), unwrapped);
+        }
+
+        /// <summary>
+        /// Zero value of the stub payload type for the null branch.
+        /// Integer stubs take <c>0</c>; f32 stubs take <c>0f</c>.
+        /// </summary>
+        private static string OptionPayloadZero(string stubType) =>
+            stubType == "float" ? "0f" : "0";
 
         // ---- Stub type mapping (core wasm ABI) -----------------------------
 
@@ -315,6 +443,16 @@ namespace Wacs.ComponentModel.CSharpEmit
                 // without UTF-8 conversion.
                 return new[] { "nint", "int" };
             }
+            if (IsOptionOfSmallPrim(t))
+            {
+                // option<P> lowers to (discriminant, payload). The
+                // discriminant is always an i32; the payload slot
+                // takes the inner primitive's stub type (e.g. float
+                // for option<f32>).
+                var inner = ((CtOptionType)t).Inner;
+                var innerStub = StubTypesFor(inner);
+                return new[] { "int", innerStub[0] };
+            }
             throw new NotImplementedException(
                 "Interop stub type for " + t.GetType().Name +
                 " is a Phase 1a.2 follow-up.");
@@ -330,6 +468,28 @@ namespace Wacs.ComponentModel.CSharpEmit
             t is CtListType l
             && l.Element is CtPrimType pe
             && pe.Kind == CtPrim.U8;
+
+        /// <summary>
+        /// True when <paramref name="t"/> is <c>option&lt;P&gt;</c>
+        /// where <c>P</c> is a primitive that fits in one
+        /// core-wasm word (i32 / u32 / bool / char / f32 / s8 /
+        /// u8 / s16 / u16). 64-bit payloads and aggregate payloads
+        /// are a follow-up: the return area needs a 3-word layout
+        /// (discriminant + 2-word payload with 8-byte alignment) and
+        /// the lowering/lifting expressions differ.
+        /// </summary>
+        internal static bool IsOptionOfSmallPrim(CtValType t) =>
+            t is CtOptionType o
+            && o.Inner is CtPrimType op
+            && IsSmallPrim(op.Kind);
+
+        private static bool IsSmallPrim(CtPrim k) => k switch
+        {
+            CtPrim.Bool or CtPrim.S8 or CtPrim.U8 or CtPrim.S16
+                or CtPrim.U16 or CtPrim.S32 or CtPrim.U32
+                or CtPrim.F32 or CtPrim.Char => true,
+            _ => false,
+        };
 
         private static string EmitStubReturnType(CtFunctionType sig)
         {
@@ -380,6 +540,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             if (sig.HasNoResult || sig.Result == null) return false;
             if (sig.Result is CtPrimType p && p.Kind == CtPrim.String) return true;
             if (IsByteList(sig.Result)) return true;
+            if (IsOptionOfSmallPrim(sig.Result)) return true;
             return false;
         }
 
@@ -393,6 +554,9 @@ namespace Wacs.ComponentModel.CSharpEmit
         {
             if (sig.Result is CtPrimType p && p.Kind == CtPrim.String) return 2;
             if (IsByteList(sig.Result!)) return 2;
+            // option<small-prim>: discriminant word at offset 0,
+            // payload word at offset 4 — 2 uints total.
+            if (IsOptionOfSmallPrim(sig.Result!)) return 2;
             throw new NotImplementedException(
                 "Return area sizing for " + sig.Result?.GetType().Name +
                 " is a follow-up.");
@@ -433,6 +597,12 @@ namespace Wacs.ComponentModel.CSharpEmit
                     sb.Append("(int)").Append(bufName).Append(", ");
                     sb.Append('(').Append(argName).Append(").Length");
                     listIdx++;
+                }
+                else if (IsOptionOfSmallPrim(p.Type))
+                {
+                    // option<prim> lowered by the prelude to
+                    // `{arg}Tag, {arg}Val`.
+                    sb.Append(argName).Append("Tag, ").Append(argName).Append("Val");
                 }
                 else
                 {

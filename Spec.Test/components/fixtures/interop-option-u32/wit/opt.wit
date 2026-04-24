@@ -1,0 +1,6 @@
+package local:opt;
+interface env {
+    maybe-u32: func() -> option<u32>;
+    take-u32: func(x: option<u32>);
+}
+world opt-world { import env; }
