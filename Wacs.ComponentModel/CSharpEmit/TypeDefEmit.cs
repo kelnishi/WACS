@@ -60,27 +60,29 @@ namespace Wacs.ComponentModel.CSharpEmit
         }
 
         /// <summary>
-        /// Prepend a C# XML doc-comment block (<c>/// &lt;summary&gt;</c> +
-        /// one <c>///</c> line per WIT doc line + <c>/// &lt;/summary&gt;</c>)
-        /// when <paramref name="named"/> carries <see cref="CtNamedType.DocLines"/>.
-        /// The body is expected to begin at 4-space indent (the standard
-        /// nested-type indent); doc lines match that indent so the block
-        /// reads naturally above the declaration. No-op when there are
-        /// no doc lines.
+        /// Prepend a C# <c>/** … */</c> doc-comment block when
+        /// <paramref name="named"/> carries
+        /// <see cref="CtNamedType.DocLines"/>. Shape matches
+        /// wit-bindgen 0.30.0's output: opening <c>/**</c>, one
+        /// <c>* </c>-prefixed line per WIT doc line (no marker for
+        /// blank lines — just <c>*</c>), closing <c>*/</c>, then a
+        /// trailing blank line before the declaration. The body
+        /// is expected to begin at 4-space indent (standard nested
+        /// type indent). No-op when there are no doc lines.
         /// </summary>
         private static string PrependDocs(CtNamedType named, string body)
         {
             if (named.DocLines == null || named.DocLines.Count == 0)
                 return body;
             var sb = new StringBuilder();
-            sb.Append("    /// <summary>\n");
+            sb.Append("    /**\n");
             foreach (var line in named.DocLines)
             {
-                sb.Append("    /// ");
-                sb.Append(line);
-                sb.Append('\n');
+                if (line.Length == 0) sb.Append("    *\n");
+                else sb.Append("    * ").Append(line).Append('\n');
             }
-            sb.Append("    /// </summary>\n");
+            sb.Append("    */\n");
+            sb.Append("\n");
             sb.Append(body);
             return sb.ToString();
         }

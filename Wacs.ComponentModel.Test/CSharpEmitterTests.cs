@@ -556,11 +556,11 @@ world w { export def; }";
         }
 
         [Fact]
-        public void EmitExportInterfaceFile_wraps_doc_lines_in_summary_block()
+        public void EmitExportInterfaceFile_wraps_doc_lines_in_block_comment()
         {
-            // Doc comments from WIT → /// <summary> XML doc block in C#.
-            // The indent matches the nested-type indent (4 spaces) so the
-            // block reads naturally above the declaration.
+            // Doc comments from WIT → C# `/** */` block comment
+            // above the declaration, matching wit-bindgen 0.30.0's
+            // output. 4-space indent matches the nested-type indent.
             var src = @"package local:doc;
 interface def {
     /// A color of the rainbow.
@@ -574,19 +574,20 @@ world w { export def; }";
             var emitted = CSharpEmitter.EmitExportInterfaceFile(iface, "w");
 
             Assert.Contains(
-                "    /// <summary>\n" +
-                "    /// A color of the rainbow.\n" +
-                "    /// Accepts only primary hues.\n" +
-                "    /// </summary>\n" +
+                "    /**\n" +
+                "    * A color of the rainbow.\n" +
+                "    * Accepts only primary hues.\n" +
+                "    */\n" +
+                "\n" +
                 "    public enum Color",
                 emitted.Content);
         }
 
         [Fact]
-        public void EmitExportInterfaceFile_omits_summary_for_undocumented_types()
+        public void EmitExportInterfaceFile_omits_block_for_undocumented_types()
         {
-            // No WIT doc comment → no /// block. Makes sure we don't
-            // accidentally emit empty <summary> wrappers for types
+            // No WIT doc comment → no `/** */` block. Makes sure we
+            // don't accidentally emit empty wrappers for types
             // without DocLines.
             var src = @"package local:doc;
 interface def {
@@ -598,7 +599,7 @@ world w { export def; }";
 
             var emitted = CSharpEmitter.EmitExportInterfaceFile(iface, "w");
 
-            Assert.DoesNotContain("/// <summary>", emitted.Content);
+            Assert.DoesNotContain("/**", emitted.Content);
         }
 
         // ---- Types: record -----------------------------------------------
