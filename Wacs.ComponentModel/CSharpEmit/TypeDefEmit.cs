@@ -524,24 +524,11 @@ namespace Wacs.ComponentModel.CSharpEmit
 
         /// <summary>
         /// Reconstruct the world namespace for an interface owner.
-        /// The world name isn't stored on CtInterfaceType — we thread
-        /// it via a thread-local for this emission pass. If unset,
-        /// falls back to a placeholder that will cause a visible
-        /// compile error (never intended to ship in generated code).
+        /// Uses ambient thread-local state set by the top-level
+        /// emit entry (see <see cref="EmitAmbient"/>).
         /// </summary>
         private static string WorldNamespaceForOwner(CtInterfaceType _owner) =>
-            s_worldNamespace ?? "UNSET_WORLD_NAMESPACE";
-
-        [System.ThreadStatic]
-        private static string? s_worldNamespace;
-
-        /// <summary>
-        /// Set the ambient world namespace used by qualified type
-        /// references during this emit pass. Set once at the start
-        /// of each public emitter entry and reset on exit.
-        /// </summary>
-        internal static void SetWorldNamespace(string? worldNs) =>
-            s_worldNamespace = worldNs;
+            EmitAmbient.WorldNamespace ?? "UNSET_WORLD_NAMESPACE";
 
         private static void EmitResourceMethod(StringBuilder sb,
                                                CtResourceMethod m,

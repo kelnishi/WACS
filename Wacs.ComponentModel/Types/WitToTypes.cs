@@ -85,6 +85,7 @@ namespace Wacs.ComponentModel.Types
         {
             var symbols = new Dictionary<string, CtNamedType>();
             var types = new List<CtNamedType>();
+            var aliases = new List<CtNamedType>();
             var functions = new List<CtInterfaceFunction>();
             var uses = new List<CtUse>();
 
@@ -114,12 +115,17 @@ namespace Wacs.ComponentModel.Types
                         uses.Add(converted);
                         // Imported names enter the interface scope as
                         // unresolved type refs (external binding happens
-                        // during cross-file resolution).
+                        // during cross-file resolution). Tracked as
+                        // aliases so the resolver can bind them and the
+                        // emitter can follow them for cross-interface
+                        // qualifying — but they don't become nested
+                        // types in the emitted interface.
                         foreach (var n in converted.Names)
                         {
                             var named = new CtNamedType(n.LocalName,
                                                         new CtTypeRef(n.LocalName));
                             symbols[n.LocalName] = named;
+                            aliases.Add(named);
                         }
                         break;
                     }
@@ -151,10 +157,16 @@ namespace Wacs.ComponentModel.Types
                 }
             }
 
-            var iface = new CtInterfaceType(pkg, wi.Name, types, functions, uses);
+            var iface = new CtInterfaceType(pkg, wi.Name, types, functions,
+                                            uses, aliases);
 
-            // Back-link types to their owning interface.
+            // Back-link types + aliases to their owning interface.
+            // Aliases' Owner points at the using interface (not the
+            // declaring one) — the declaring interface's real type
+            // is reached via the alias body's CtTypeRef.Target after
+            // resolution.
             foreach (var nt in types) nt.Owner = iface;
+            foreach (var nt in aliases) nt.Owner = iface;
 
             return iface;
         }

@@ -641,6 +641,43 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, emitted.Content);
         }
 
+        // ---- Cross-interface type references ------------------------------
+
+        private static string FindCrossInterfaceFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "cross-interface");
+        }
+
+        [Fact]
+        public void EmitExportInterfaceFile_qualifies_cross_interface_type_refs()
+        {
+            // WIT with two interfaces in the same file: `errors`
+            // defines `kind`; `ops` uses `kind` in a function
+            // signature via `use errors.{kind}`. wit-bindgen-csharp
+            // emits the cross-interface reference as a fully
+            // qualified `global::XfWorldWorld.wit.imports.local.xf
+            // .IErrors.Kind` path — even though `errors` is not an
+            // explicit import (it's implicitly imported via the
+            // `use`).
+            var fixtureDir = FindCrossInterfaceFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "xface.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            WitResolver.Resolve(pkgs);
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "ops");
+
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(iface, "xf-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "XfWorldWorld.wit.exports.local.xf.IOps.cs"));
+            Assert.Equal(expected, emitted.Content);
+        }
+
         // ---- Interop: primitive-only import Interop file ------------------
 
         private static string FindInteropPrimitivesFixtureDir()
