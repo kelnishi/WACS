@@ -270,6 +270,17 @@ namespace Wacs.ComponentModel.CSharpEmit
             {
                 EmitResultReturnAreaLift(sb, (CtResultType)sig.Result!);
             }
+            else if (IsVariantOfSmallPrimOrNone(sig.Result!))
+            {
+                // Blank line between the stub call and the lift
+                // declaration matches wit-bindgen's formatting.
+                sb.Append("\n");
+                EmitVariantReturnAreaLift(sb, (CtTypeRef)sig.Result!,
+                                          discOffset: 0, payloadOffset: 4,
+                                          varName: "lifted",
+                                          indent: "                ");
+                sb.Append("                return lifted;\n");
+            }
             else if (IsOptionOfSmallPrim(sig.Result!))
             {
                 // option<prim> return — discriminant at offset 0
@@ -402,6 +413,66 @@ namespace Wacs.ComponentModel.CSharpEmit
         }
 
         /// <summary>
+        /// Emit the lift of a variant from the return area into a
+        /// local named <paramref name="varName"/>. Shape:
+        /// <code>
+        /// {QualifiedVariantType} {varName};
+        /// switch (ptr+discOffset byte) {
+        ///     case 0: {varName} = Type.case0(payload lift at payloadOffset); break;
+        ///     case 1: {varName} = Type.case1(); break;   // no-payload
+        ///     ...
+        ///     default: throw …;
+        /// }
+        /// </code>
+        /// The <paramref name="varName"/> must be declared
+        /// inside the caller's lexical scope but initialized here.
+        /// The caller decides what to do with it (return, wrap,
+        /// etc.). <paramref name="indent"/> is the leading whitespace
+        /// applied to every emitted line (e.g. 16 spaces inside a
+        /// fixed-area block, 24 spaces inside a nested switch arm).
+        /// </summary>
+        private static void EmitVariantReturnAreaLift(
+            StringBuilder sb,
+            CtTypeRef variantRef,
+            int discOffset,
+            int payloadOffset,
+            string varName,
+            string indent)
+        {
+            var target = ResolveVariant(variantRef);
+            var v = (CtVariantType)target.Type;
+            var qualified = TypeRefEmit.EmitQualifiedPath(target);
+
+            sb.Append(indent).Append(qualified).Append(' ').Append(varName).Append(";\n");
+            sb.Append("\n");
+            sb.Append(indent).Append("switch (new Span<byte>((void*)(ptr + ")
+              .Append(discOffset).Append("), 1)[0]) {\n");
+
+            var caseIndent = indent + "    ";
+            var bodyIndent = indent + "        ";
+            for (int i = 0; i < v.Cases.Count; i++)
+            {
+                var c = v.Cases[i];
+                sb.Append(caseIndent).Append("case ").Append(i).Append(": {\n");
+                sb.Append("\n");
+                sb.Append(bodyIndent).Append(varName).Append(" = ").Append(qualified);
+                sb.Append('.').Append(NameConventions.ToCamelCase(c.Name)).Append('(');
+                if (c.Payload != null)
+                {
+                    var payKind = ((CtPrimType)c.Payload).Kind;
+                    sb.Append(EmitReturnAreaPrimLift(payKind, payloadOffset));
+                }
+                sb.Append(");\n");
+                sb.Append(bodyIndent).Append("break;\n");
+                sb.Append(caseIndent).Append("}\n");
+            }
+            sb.Append("\n");
+            sb.Append(caseIndent).Append("default: throw new ArgumentException($\"invalid discriminant: {new Span<byte>((void*)(ptr + ")
+              .Append(discOffset).Append("), 1)[0]}\");\n");
+            sb.Append(indent).Append("}\n");
+        }
+
+        /// <summary>
         /// Emit the return-area lift for <c>result&lt;Ok, Err&gt;</c>
         /// where each side is either a small primitive or None
         /// (absent). Shape:
@@ -423,50 +494,108 @@ namespace Wacs.ComponentModel.CSharpEmit
         private static void EmitResultReturnAreaLift(StringBuilder sb, CtResultType r)
         {
             sb.Append("\n");
-            var okCs  = r.Ok  != null ? TypeRefEmit.EmitPrim(((CtPrimType)r.Ok).Kind)  : "None";
-            var errCs = r.Err != null ? TypeRefEmit.EmitPrim(((CtPrimType)r.Err).Kind) : "None";
+            var okCs  = r.Ok  != null ? ResultArmTypeName(r.Ok)  : "None";
+            var errCs = r.Err != null ? ResultArmTypeName(r.Err) : "None";
             var resultTy = "Result<" + okCs + ", " + errCs + ">";
-            sb.Append("                ").Append(resultTy).Append(" lifted;\n");
+
+            // Outer var name: when either arm is a variant that
+            // needs its own inner `lifted`, rename the outer to
+            // `liftedResult` to avoid collision. Simple cases keep
+            // the byte-for-byte `lifted` name.
+            bool nested = IsVariantArm(r.Ok) || IsVariantArm(r.Err);
+            var outerVar = nested ? "liftedResult" : "lifted";
+
+            sb.Append("                ").Append(resultTy).Append(' ')
+              .Append(outerVar).Append(";\n");
             sb.Append("\n");
             sb.Append("                switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {\n");
-            // case 0: ok
-            sb.Append("                    case 0: {\n");
-            sb.Append("\n");
-            sb.Append("                        lifted = ").Append(resultTy).Append(".ok(");
-            sb.Append(EmitResultArm(r.Ok, offset: 4));
-            sb.Append(");\n");
-            sb.Append("                        break;\n");
-            sb.Append("                    }\n");
-            // case 1: err
-            sb.Append("                    case 1: {\n");
-            sb.Append("\n");
-            sb.Append("                        lifted = ").Append(resultTy).Append(".err(");
-            sb.Append(EmitResultArm(r.Err, offset: 4));
-            sb.Append(");\n");
-            sb.Append("                        break;\n");
-            sb.Append("                    }\n");
+            EmitResultArmBody(sb, "ok", r.Ok, resultTy, outerVar,
+                              discCase: 0, payloadOffset: 4);
+            EmitResultArmBody(sb, "err", r.Err, resultTy, outerVar,
+                              discCase: 1, payloadOffset: 4);
             sb.Append("\n");
             sb.Append("                    default: throw new ArgumentException($\"invalid discriminant: {new Span<byte>((void*)(ptr + 0), 1)[0]}\");\n");
             sb.Append("                }\n");
             // Unwrap: ok → return (unwrapped or empty), err → throw.
-            sb.Append("                if (lifted.IsOk) {\n");
-            sb.Append("                    var tmp = lifted.AsOk;\n");
+            sb.Append("                if (").Append(outerVar).Append(".IsOk) {\n");
+            sb.Append("                    var tmp = ").Append(outerVar).Append(".AsOk;\n");
             if (r.Ok != null)
                 sb.Append("                    return tmp;\n");
             else
                 sb.Append("                    return ;\n");   // wit-bindgen quirk: space before semi
             sb.Append("                } else {\n");
-            sb.Append("                    throw new WitException(lifted.AsErr!, 0);\n");
+            sb.Append("                    throw new WitException(")
+              .Append(outerVar).Append(".AsErr!, 0);\n");
             sb.Append("                }\n");
         }
 
+        private static bool IsVariantArm(CtValType? t) =>
+            t != null && IsVariantOfSmallPrimOrNone(t);
+
+        /// <summary>Name to use for a result arm's Ok/Err type
+        /// parameter. Primitives use their C# name; variants use
+        /// the fully-qualified global:: path; None for absent.</summary>
+        private static string ResultArmTypeName(CtValType t)
+        {
+            if (t is CtPrimType p) return TypeRefEmit.EmitPrim(p.Kind);
+            if (IsVariantOfSmallPrimOrNone(t))
+                return TypeRefEmit.EmitQualifiedPath(ResolveVariant((CtTypeRef)t));
+            throw new NotImplementedException(
+                "ResultArmTypeName for " + t.GetType().Name + " is a follow-up.");
+        }
+
         /// <summary>
-        /// Emit the payload expression inside one arm of a
-        /// <c>Result&lt;Ok, Err&gt;.{ok,err}(…)</c> call. None slot
-        /// → <c>new global::{WorldNs}.None()</c>; prim slot → the
-        /// standard return-area prim lift at <paramref name="offset"/>.
+        /// Emit one arm of the outer result switch. Simple cases
+        /// (None / primitive) collapse to a single-line assignment
+        /// via <c>outer = Result.&lt;factory&gt;(&lt;expr&gt;);</c>. Variant
+        /// arms emit a nested switch building a local <c>lifted</c>,
+        /// then assign the outer from it.
         /// </summary>
-        private static string EmitResultArm(CtValType? side, int offset)
+        private static void EmitResultArmBody(StringBuilder sb,
+                                              string factory,
+                                              CtValType? arm,
+                                              string resultTy,
+                                              string outerVar,
+                                              int discCase,
+                                              int payloadOffset)
+        {
+            sb.Append("                    case ").Append(discCase).Append(": {\n");
+            sb.Append("\n");
+            if (arm != null && IsVariantOfSmallPrimOrNone(arm))
+            {
+                // Nested variant lift — declare inner `lifted`, run
+                // switch-by-disc-byte at payloadOffset (variant disc
+                // sits at result-payload start), then wrap the result
+                // into outer via Result.factory(lifted).
+                EmitVariantReturnAreaLift(
+                    sb, (CtTypeRef)arm,
+                    discOffset: payloadOffset,
+                    payloadOffset: payloadOffset + 4,
+                    varName: "lifted",
+                    indent: "                        ");
+                sb.Append("\n");
+                sb.Append("                        ").Append(outerVar)
+                  .Append(" = ").Append(resultTy).Append('.').Append(factory)
+                  .Append("(lifted);\n");
+            }
+            else
+            {
+                sb.Append("                        ").Append(outerVar)
+                  .Append(" = ").Append(resultTy).Append('.').Append(factory).Append('(');
+                sb.Append(EmitResultArmExpr(arm, payloadOffset));
+                sb.Append(");\n");
+            }
+            sb.Append("                        break;\n");
+            sb.Append("                    }\n");
+        }
+
+        /// <summary>
+        /// Build the payload expression inside a simple
+        /// <c>Result.&lt;factory&gt;(…)</c> call. None → <c>new
+        /// global::{WorldNs}.None()</c>; primitive → the standard
+        /// return-area prim lift.
+        /// </summary>
+        private static string EmitResultArmExpr(CtValType? side, int offset)
         {
             if (side == null)
             {
@@ -578,6 +707,7 @@ namespace Wacs.ComponentModel.CSharpEmit
                 if (IsListOfPrim(p.Type)) return true;
                 if (IsOptionOfSmallPrim(p.Type)) return true;
                 if (IsOptionOfString(p.Type)) return true;
+                if (IsVariantOfSmallPrimOrNone(p.Type)) return true;
             }
             return false;
         }
@@ -671,6 +801,59 @@ namespace Wacs.ComponentModel.CSharpEmit
                     sb.Append("                ").Append(argName).Append("Tag = 0;\n");
                     sb.Append("                ").Append(argName).Append("Ptr = 0;\n");
                     sb.Append("                ").Append(argName).Append("Len = 0;\n");
+                    sb.Append("            }\n");
+                }
+                else if (IsVariantOfSmallPrimOrNone(p.Type))
+                {
+                    // variant<…> param lowers to (i32 disc, i32
+                    // payload). Switch on arg.Tag to emit one case
+                    // per variant case: payload-carrying arms
+                    // unwrap via arg.AsCaseName and cast into the
+                    // payload slot; no-payload arms zero it.
+                    //
+                    // Local names diverge from wit-bindgen's
+                    // shared-counter scheme (`lowered` / `lowered6`);
+                    // per-arg `{arg}Tag` / `{arg}Val` is clearer.
+                    var vTarget = ResolveVariant((CtTypeRef)p.Type);
+                    var variant = (CtVariantType)vTarget.Type;
+                    sb.Append("            int ").Append(argName).Append("Tag;\n");
+                    sb.Append("            int ").Append(argName).Append("Val;\n");
+                    sb.Append("\n");
+                    sb.Append("            switch (").Append(argName).Append(".Tag) {\n");
+                    for (int i = 0; i < variant.Cases.Count; i++)
+                    {
+                        var c = variant.Cases[i];
+                        sb.Append("                case ").Append(i).Append(": {\n");
+                        if (c.Payload != null)
+                        {
+                            var payKind = ((CtPrimType)c.Payload).Kind;
+                            var asProp = "As" + NameConventions.ToPascalCase(c.Name);
+                            var payName = TypeRefEmit.EmitPrim(payKind);
+                            sb.Append("                    ").Append(payName)
+                              .Append(" payload = ").Append(argName).Append('.')
+                              .Append(asProp).Append(";\n");
+                            sb.Append("\n");
+                            sb.Append("                    ").Append(argName)
+                              .Append("Tag = ").Append(i).Append(";\n");
+                            sb.Append("                    ").Append(argName)
+                              .Append("Val = ").Append(EmitLower(c.Payload, "payload"))
+                              .Append(";\n");
+                        }
+                        else
+                        {
+                            sb.Append("\n");
+                            sb.Append("                    ").Append(argName)
+                              .Append("Tag = ").Append(i).Append(";\n");
+                            sb.Append("                    ").Append(argName)
+                              .Append("Val = 0;\n");
+                        }
+                        sb.Append("\n");
+                        sb.Append("                    break;\n");
+                        sb.Append("                }\n");
+                    }
+                    sb.Append("\n");
+                    sb.Append("                default: throw new ArgumentException($\"invalid discriminant: {")
+                      .Append(argName).Append("}\");\n");
                     sb.Append("            }\n");
                 }
             }
@@ -772,6 +955,13 @@ namespace Wacs.ComponentModel.CSharpEmit
                 // own<R> lowers to an i32 handle on the wire.
                 return new[] { "int" };
             }
+            if (IsVariantOfSmallPrimOrNone(t))
+            {
+                // variant with ≤1-small-prim-payload cases lowers
+                // to (i32 disc, i32 payload). No-payload cases
+                // pass 0 in the payload slot.
+                return new[] { "int", "int" };
+            }
             throw new NotImplementedException(
                 "Interop stub type for " + t.GetType().Name +
                 " is a Phase 1a.2 follow-up.");
@@ -827,28 +1017,37 @@ namespace Wacs.ComponentModel.CSharpEmit
 
         /// <summary>
         /// True when <paramref name="t"/> is <c>result&lt;Ok, Err&gt;</c>
-        /// where each side is either absent (None) or a small
-        /// primitive. Excludes the totally-elided
-        /// <c>result&lt;_, _&gt;</c> form — that uses a direct
-        /// i32-discriminant return (no return area) and takes a
-        /// different code path. 64-bit and aggregate payloads are a
-        /// follow-up (alignment + wider return area).
+        /// where each side is either absent (None), a small primitive,
+        /// or a variant-with-small-prim-or-none cases. Excludes the
+        /// totally-elided <c>result&lt;_, _&gt;</c> form — that uses
+        /// a direct i32-discriminant return (no return area) and
+        /// takes a different code path.
         /// </summary>
         internal static bool IsResultOfPrimOrNone(CtValType t)
         {
             if (!(t is CtResultType r)) return false;
             if (r.Ok == null && r.Err == null) return false;   // elided case
-            if (r.Ok != null)
-            {
-                if (!(r.Ok is CtPrimType op)) return false;
-                if (!IsSmallPrim(op.Kind)) return false;
-            }
-            if (r.Err != null)
-            {
-                if (!(r.Err is CtPrimType ep)) return false;
-                if (!IsSmallPrim(ep.Kind)) return false;
-            }
+            if (r.Ok != null && !IsResultArmEmitable(r.Ok)) return false;
+            if (r.Err != null && !IsResultArmEmitable(r.Err)) return false;
             return true;
+        }
+
+        private static bool IsResultArmEmitable(CtValType t)
+        {
+            if (t is CtPrimType p) return IsSmallPrim(p.Kind);
+            if (IsVariantOfSmallPrimOrNone(t)) return true;
+            return false;
+        }
+
+        /// <summary>Payload word count for a result Ok/Err side.
+        /// None = 0, primitive = 1, variant-with-small-prim-or-none
+        /// cases = 2 (variant disc + 1-word payload slot).</summary>
+        private static int ResultArmWords(CtValType? t)
+        {
+            if (t == null) return 0;
+            if (t is CtPrimType) return 1;
+            if (IsVariantOfSmallPrimOrNone(t)) return 2;
+            return 0;
         }
 
         /// <summary>
@@ -891,6 +1090,48 @@ namespace Wacs.ComponentModel.CSharpEmit
                 _ => throw new System.InvalidOperationException(
                     "ResolveOwnedResource called on " + t.GetType().Name),
             };
+            var target = r.Target!;
+            while (target.Type is CtTypeRef innerRef
+                   && innerRef.Target != null
+                   && innerRef.Target != target)
+            {
+                target = innerRef.Target;
+            }
+            return target;
+        }
+
+        /// <summary>
+        /// True when <paramref name="t"/> is a named-type reference
+        /// whose target is a <c>variant</c> with every case either
+        /// payloadless or carrying a single small primitive. Lowered
+        /// form: 1-word discriminant + 1-word payload (the payload
+        /// slot is wide enough for the largest case). No-payload
+        /// cases zero the payload slot.
+        /// </summary>
+        internal static bool IsVariantOfSmallPrimOrNone(CtValType t)
+        {
+            if (!(t is CtTypeRef r) || r.Target == null) return false;
+            var target = r.Target;
+            while (target.Type is CtTypeRef innerRef
+                   && innerRef.Target != null
+                   && innerRef.Target != target)
+            {
+                target = innerRef.Target;
+            }
+            if (!(target.Type is CtVariantType v)) return false;
+            foreach (var c in v.Cases)
+            {
+                if (c.Payload == null) continue;
+                if (!(c.Payload is CtPrimType p) || !IsSmallPrim(p.Kind))
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>Resolve a variant type-ref to its concrete
+        /// named-type (alias chain unwound).</summary>
+        private static CtNamedType ResolveVariant(CtTypeRef r)
+        {
             var target = r.Target!;
             while (target.Type is CtTypeRef innerRef
                    && innerRef.Target != null
@@ -1036,6 +1277,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             if (IsTupleOfSmallPrims(sig.Result)) return true;
             if (IsRecordOfSmallPrims(sig.Result)) return true;
             if (IsResultOfPrimOrNone(sig.Result)) return true;
+            if (IsVariantOfSmallPrimOrNone(sig.Result)) return true;
             return false;
         }
 
@@ -1054,6 +1296,18 @@ namespace Wacs.ComponentModel.CSharpEmit
             if (IsOptionOfSmallPrim(sig.Result!)) return 2;
             // option<string>: disc at offset 0, ptr at 4, len at 8.
             if (IsOptionOfString(sig.Result!)) return 3;
+            // result<Ok, Err>: 1 word for outer disc + max(ok, err)
+            // payload size. Simple prim/None = 1 word; variant =
+            // 2 words (disc + payload). Max is 2, so worst-case
+            // = 3 uints total.
+            if (IsResultOfPrimOrNone(sig.Result!))
+            {
+                var rr = (CtResultType)sig.Result!;
+                int maxPayload = System.Math.Max(
+                    ResultArmWords(rr.Ok),
+                    ResultArmWords(rr.Err));
+                return 1 + maxPayload;
+            }
             // tuple<small-prim, small-prim, …>: one word per element,
             // laid out at offsets 0, 4, 8, … .
             if (IsTupleOfSmallPrims(sig.Result!))
@@ -1061,6 +1315,11 @@ namespace Wacs.ComponentModel.CSharpEmit
             // record { … } with small-prim fields: one word per field.
             if (IsRecordOfSmallPrims(sig.Result!))
                 return ((CtRecordType)ResolveRecord((CtTypeRef)sig.Result!).Type).Fields.Count;
+            // variant with ≤1-small-prim-payload cases: 2 uints
+            // (disc + payload — payload slot always present even
+            // when every case is no-payload, matching wit-bindgen's
+            // uniform layout).
+            if (IsVariantOfSmallPrimOrNone(sig.Result!)) return 2;
             // result<PrimOrNone, PrimOrNone>: discriminant word at 0,
             // payload word at 4 — 2 uints. None branches write no
             // payload to memory but the return area still reserves
@@ -1121,6 +1380,13 @@ namespace Wacs.ComponentModel.CSharpEmit
                     sb.Append(argName).Append("Tag, ")
                       .Append(argName).Append("Ptr, ")
                       .Append(argName).Append("Len");
+                }
+                else if (IsVariantOfSmallPrimOrNone(p.Type))
+                {
+                    // variant<…> lowered by the prelude to
+                    // `{arg}Tag, {arg}Val`.
+                    sb.Append(argName).Append("Tag, ")
+                      .Append(argName).Append("Val");
                 }
                 else if (IsTupleOfSmallPrims(p.Type))
                 {
