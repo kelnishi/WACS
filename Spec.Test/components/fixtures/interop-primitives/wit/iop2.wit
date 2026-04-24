@@ -1,0 +1,10 @@
+package local:iop2;
+interface ops {
+    take-s8: func(x: s8) -> s8;
+    take-s16: func(x: s16) -> s16;
+    take-bool: func(x: bool) -> bool;
+    take-char: func(x: char) -> char;
+    take-u64: func(x: u64) -> u64;
+    take-f32: func(x: f32) -> f32;
+}
+world iop2-world { import ops; }

@@ -358,17 +358,6 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal("void", FunctionEmit.EmitReturnType(sig));
         }
 
-        // ---- End-to-end: parse + resolve + emit ---------------------------
-
-        /// <summary>
-        /// The full contract roundtrip: parse <c>hello.wit</c> and
-        /// wasi-cli's <c>run.wit</c> from the submodule, resolve
-        /// cross-file refs, then <c>EmitWorld</c> and assert
-        /// <c>IRun.cs</c> matches the pinned wit-bindgen-csharp 0.30.0
-        /// reference. This is the emitter gate for Phase 1a.2: when
-        /// it passes, we know a user can go from WIT source to
-        /// wit-bindgen-shape C# without any hand-crafted Types.
-        /// </summary>
         // ---- Aggregate type ref emission ----------------------------------
 
         [Fact]
@@ -463,6 +452,56 @@ namespace Wacs.ComponentModel.Test
                 fixtureDir, "reference",
                 "AggWorldWorld.wit.exports.local.agg.IOps.cs"));
             Assert.Equal(expected, emitted.Content);
+        }
+
+        // ---- Interop: primitive-only import Interop file ------------------
+
+        private static string FindInteropPrimitivesFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-primitives");
+        }
+
+        [Fact]
+        public void InteropEmit_matches_reference_EnvInterop_primitives()
+        {
+            var fixtureDir = FindInteropPrimitivesFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "iop.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "iop-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "IopWorldWorld.wit.imports.local.iop.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
+        /// <summary>
+        /// Coverage for the remaining primitive lift/lower shapes —
+        /// s8/s16 narrowing casts, bool ternary+compare, char's
+        /// asymmetric plain-cast lower, u64 unchecked cast, f32
+        /// direct.
+        /// </summary>
+        [Fact]
+        public void InteropEmit_matches_reference_OpsInterop_edge_primitives()
+        {
+            var fixtureDir = FindInteropPrimitivesFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "iop2.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "ops");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "iop2-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "Iop2WorldWorld.wit.imports.local.iop2.OpsInterop.cs"));
+            Assert.Equal(expected, content);
         }
 
         // ---- End-to-end: parse + resolve + emit ---------------------------
