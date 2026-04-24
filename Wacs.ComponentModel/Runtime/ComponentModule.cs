@@ -86,5 +86,27 @@ namespace Wacs.ComponentModel.Runtime
                         yield return Parser.CustomSection.FromRaw(s);
             }
         }
+
+        /// <summary>
+        /// Decoded component-level exports — <c>(name, sort,
+        /// index)</c> triples from the export section. The
+        /// transpiler / interpreter matches these against the
+        /// canon-section entries to know which core functions
+        /// each export lifts.
+        /// </summary>
+        public IReadOnlyList<Parser.ComponentExportEntry> Exports
+        {
+            get
+            {
+                if (_exports != null) return _exports;
+                var list = new List<Parser.ComponentExportEntry>();
+                foreach (var s in RawSections)
+                    if (s.Id == Parser.ComponentSectionId.Export)
+                        list.AddRange(Parser.ExportSectionReader.Decode(s.Payload));
+                _exports = list;
+                return list;
+            }
+        }
+        private IReadOnlyList<Parser.ComponentExportEntry>? _exports;
     }
 }
