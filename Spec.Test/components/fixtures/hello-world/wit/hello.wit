@@ -1,0 +1,17 @@
+// Reference WIT for Phase 1a hello-world slice.
+//
+// Minimal world exercising the Component Model surface we committed to
+// as the Phase 1a contract: `wasi:cli/run` exports, imports from
+// `wasi:cli/stdout` returning an output-stream resource from `wasi:io/streams`,
+// byte-array list<u8>, and result<_, stream-error>.
+//
+// This WIT is the input to wit-bindgen-csharp; the resulting C# is
+// checked in under ../reference as the pinned shape our CSharpEmit
+// utility must reproduce.
+package local:hello;
+
+world hello {
+    import wasi:cli/stdout@0.2.3;
+    import wasi:io/streams@0.2.3;
+    export wasi:cli/run@0.2.3;
+}
