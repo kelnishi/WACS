@@ -180,6 +180,34 @@ namespace Wacs.ComponentModel.Runtime.Parser
     }
 
     /// <summary>
+    /// <c>variant { case_name [(T)] [refines other], … }</c>
+    /// type (tag 0x71) — a tagged sum where each case carries an
+    /// optional payload type. Wire layout: a discriminant byte
+    /// (size determined by case count) followed by a payload
+    /// slot aligned and sized to the worst-case payload across
+    /// all cases.
+    /// </summary>
+    public sealed class ComponentVariantType : DefTypeEntry
+    {
+        public sealed class Case
+        {
+            public string Name { get; }
+            public ComponentValType? Payload { get; }
+            /// <summary>Optional <c>refines</c> reference — the
+            /// case's discriminant inherits from another's. Rare;
+            /// preserved for fidelity but unused at the IL emit
+            /// level.</summary>
+            public uint? RefinesIdx { get; }
+            public Case(string name, ComponentValType? payload, uint? refinesIdx)
+            { Name = name; Payload = payload; RefinesIdx = refinesIdx; }
+        }
+
+        public IReadOnlyList<Case> Cases { get; }
+        public ComponentVariantType(IReadOnlyList<Case> cases)
+        { Cases = cases; }
+    }
+
+    /// <summary>
     /// Function type (tag 0x40): ordered param list (each with a
     /// name) + ordered unnamed result list. Matches <c>functype</c>
     /// in the Component Model binary spec.
@@ -248,6 +276,7 @@ namespace Wacs.ComponentModel.Runtime.Parser
         public const byte TupleTypeTag = 0x6F;
         public const byte EnumTypeTag = 0x6D;
         public const byte FlagsTypeTag = 0x6E;
+        public const byte VariantTypeTag = 0x71;
         public const byte RecordTypeTag = 0x72;
 
         public static List<DefTypeEntry> Decode(byte[] payload)
@@ -281,6 +310,8 @@ namespace Wacs.ComponentModel.Runtime.Parser
                     return DecodeFlagsType(r);
                 case RecordTypeTag:
                     return DecodeRecordType(r);
+                case VariantTypeTag:
+                    return DecodeVariantType(r);
                 default:
                     // Unknown structural tag — capture the rest
                     // of the payload so the type slot occupies
@@ -378,6 +409,34 @@ namespace Wacs.ComponentModel.Runtime.Parser
                 fields[i] = new ComponentRecordType.Field(name, ty);
             }
             return new ComponentRecordType(fields);
+        }
+
+        private static ComponentVariantType DecodeVariantType(ComponentBinaryReader r)
+        {
+            var n = r.ReadVarU32();
+            var cases = new ComponentVariantType.Case[n];
+            for (uint i = 0; i < n; i++)
+            {
+                var name = r.ReadName();
+                var hasPayload = r.ReadByte();
+                ComponentValType? payload = null;
+                if (hasPayload == 0x01)
+                    payload = DecodeValType(r);
+                else if (hasPayload != 0x00)
+                    throw new FormatException(
+                        $"Variant case payload-presence byte 0x{hasPayload:X2} "
+                        + "is invalid (expected 0x00 or 0x01).");
+                var hasRefines = r.ReadByte();
+                uint? refinesIdx = null;
+                if (hasRefines == 0x01)
+                    refinesIdx = r.ReadVarU32();
+                else if (hasRefines != 0x00)
+                    throw new FormatException(
+                        $"Variant case refines-presence byte 0x{hasRefines:X2} "
+                        + "is invalid.");
+                cases[i] = new ComponentVariantType.Case(name, payload, refinesIdx);
+            }
+            return new ComponentVariantType(cases);
         }
 
         private static ComponentValType? DecodeOptionalValType(ComponentBinaryReader r)

@@ -712,6 +712,64 @@ namespace Wacs.Transpiler.Test
             Assert.Equal(11u, fieldY.GetValue(instance));
         }
 
+        private static string FindVariantComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-component", "wasm",
+                                "vt.component.wasm");
+        }
+
+        private static string FindVariantComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-component",
+                                "vt.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_named_variant_return_via_decoded_wit()
+        {
+            // variant-component declares
+            //   `variant lookup-result { not-found, access-denied, found(u32) }`
+            //   `export lookup: func() -> lookup-result`
+            // The transpiler emits a public C# `LookupResult` class
+            // with Tag (byte) + per-payload-case fields (just
+            // `Found` here for the u32 payload). Core returns the
+            // retArea pointer; bytes (disc=2, padding, payload=42)
+            // produce LookupResult(Tag=2, Found=42).
+            using var fs = File.OpenRead(FindVariantComponentPath());
+            var witBytes = File.ReadAllBytes(FindVariantComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var lookupResult = result.Assembly
+                .GetType("Wacs.Transpiled.Component.LookupResult");
+            Assert.NotNull(lookupResult);
+
+            var tagField = lookupResult!.GetField("Tag");
+            var foundField = lookupResult.GetField("Found");
+            Assert.NotNull(tagField);
+            Assert.NotNull(foundField);
+            Assert.Equal(typeof(byte), tagField!.FieldType);
+            Assert.Equal(typeof(uint), foundField!.FieldType);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var lookup = componentExports!.GetMethod("Lookup");
+            Assert.NotNull(lookup);
+            Assert.Equal(lookupResult, lookup!.ReturnType);
+
+            var instance = lookup.Invoke(null, null)!;
+            Assert.Equal((byte)2, tagField.GetValue(instance));
+            Assert.Equal(42u, foundField.GetValue(instance));
+        }
+
         private static string FindOptionStringNoneComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
