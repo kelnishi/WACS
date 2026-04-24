@@ -1,0 +1,4 @@
+package local:t;
+world t {
+    export pair: func() -> tuple<u32, u32>;
+}
