@@ -34,6 +34,13 @@ namespace Wacs.ComponentModel.CSharpEmit
                                                          CtFunctionType sig)
         {
             var sb = new StringBuilder();
+            if (EmitAmbient.IncludeWitMetadata
+                && NameConventions.ToPascalCase(wasmFunctionName)
+                   != wasmFunctionName)
+            {
+                sb.Append("    [global::Wacs.ComponentModel.WitName(\"")
+                  .Append(wasmFunctionName).Append("\")]\n");
+            }
             sb.Append("    static abstract ");
             sb.Append(EmitReturnType(sig));
             sb.Append(' ');

@@ -532,6 +532,33 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void IncludeWitMetadata_on_decorates_exported_methods_with_kebab_names()
+        {
+            var src = @"
+                package local:decor;
+                interface def {
+                    try-op: func() -> result;
+                    simple: func();
+                }
+                world w { export def; }";
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "def");
+
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(
+                iface, "w",
+                new EmitOptions { IncludeWitMetadata = true });
+
+            // try-op → TryOp — differs, gets attribute.
+            Assert.Contains(
+                "[global::Wacs.ComponentModel.WitName(\"try-op\")]",
+                emitted.Content);
+            // simple → Simple — also differs (case change), gets attribute.
+            Assert.Contains(
+                "[global::Wacs.ComponentModel.WitName(\"simple\")]",
+                emitted.Content);
+        }
+
+        [Fact]
         public void IncludeWitMetadata_on_decorates_record_fields_with_kebab_names()
         {
             // Record fields use camelCase in C#; WIT kebab-case is
