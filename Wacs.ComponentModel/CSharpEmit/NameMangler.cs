@@ -54,7 +54,14 @@ namespace Wacs.ComponentModel.CSharpEmit
         {
             var pascal = ToPascalCase(kebab);
             if (string.IsNullOrEmpty(pascal)) return pascal;
-            return char.ToLowerInvariant(pascal[0]) + pascal.Substring(1);
+            var camel = char.ToLowerInvariant(pascal[0]) + pascal.Substring(1);
+            // Single-word WIT names like `in`, `out`, `class`,
+            // `params`, … collide with C# keywords. Prefix with
+            // `@` so the output is a valid identifier. Multi-word
+            // kebab names can't collide — no C# keyword has an
+            // embedded capital — so this only fires for the
+            // single-segment case.
+            return EscapeIfKeyword(camel);
         }
 
         /// <summary>

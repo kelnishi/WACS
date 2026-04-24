@@ -45,6 +45,12 @@ namespace Wacs.ComponentModel.CSharpEmit
             return type switch
             {
                 CtPrimType p => EmitPrim(p.Kind),
+                // list<R> where R is a resource ref emits as
+                // System.Collections.Generic.List<R>, not R[] — the
+                // wrapper needs List's Count + indexer for the
+                // pin-and-write-handles prelude loop.
+                CtListType l when IsResourceRefEl(l.Element) =>
+                    "List<" + EmitParam(l.Element) + ">",
                 CtListType l => EmitParam(l.Element) + "[]",
                 CtOptionType o => EmitParam(o.Inner) + "?",
                 CtResultType r => EmitResultParam(r),
@@ -193,6 +199,13 @@ namespace Wacs.ComponentModel.CSharpEmit
             body is CtRecordType || body is CtVariantType
             || body is CtEnumType || body is CtFlagsType
             || body is CtResourceType;
+
+        /// <summary>True when a list's element type is a resource
+        /// reference (own, borrow, or bare identifier pointing at a
+        /// resource). Used to drive the <c>T[]</c> vs <c>List&lt;T&gt;</c>
+        /// choice in param/return type emission.</summary>
+        private static bool IsResourceRefEl(CtValType el) =>
+            InteropEmit.IsResourceRef(el);
 
         /// <summary>
         /// Emit the fully-qualified <c>global::…</c> path for a

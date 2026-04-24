@@ -778,7 +778,10 @@ using System.Diagnostics.CodeAnalysis;
         /// </summary>
         private static bool IsInterfaceInteropEmitable(CtInterfaceType iface)
         {
-            if (iface.Types.Count > 0) return false;
+            // Note: iface.Types can be non-empty — the Interop file
+            // only contains free-function stubs + wrappers; any
+            // type defs go into I{Iface}.cs separately. Gate on
+            // the free functions' shape, not on presence of types.
             foreach (var fn in iface.Functions)
             {
                 if (fn.Type.NamedResults != null) return false;
@@ -807,7 +810,8 @@ using System.Diagnostics.CodeAnalysis;
             || InteropEmit.IsTupleOfSmallPrims(t)
             || InteropEmit.IsRecordOfSmallPrims(t)
             || InteropEmit.IsVariantOfSmallPrimOrNone(t)
-            || InteropEmit.IsResourceRef(t);
+            || InteropEmit.IsResourceRef(t)
+            || InteropEmit.IsListOfResourceRef(t);
 
         /// <summary>
         /// Return types supported by the current Interop emitter.

@@ -47,6 +47,7 @@ namespace SrWorldWorld.wit.imports.local.sr
         {
 
             IntPtr namePtr = InteropString.FromString(name, out int nameLen);
+
             var retArea = new uint[2];
             fixed (uint* retAreaByte0 = &retArea[0])
             {

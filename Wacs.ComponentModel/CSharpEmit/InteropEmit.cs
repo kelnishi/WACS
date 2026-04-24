@@ -132,6 +132,12 @@ namespace Wacs.ComponentModel.CSharpEmit
             // list<u8> params stackalloc a buffer + CopyTo. Emitted
             // before the stub call.
             EmitWrapperPrelude(sb, fn.Type);
+            // When the prelude and return-area coexist, wit-bindgen
+            // separates them with a blank line. Preludes without a
+            // retArea don't need this (their output is flush against
+            // the stub call that follows); retArea-only cases
+            // already got their blank from the after-`{` rule.
+            if (hasPrelude && usesReturnArea) sb.Append("\n");
             if (usesReturnArea)
             {
                 EmitReturnAreaWrapperBody(sb, stubClassName, methodName, fn.Type);
@@ -236,6 +242,7 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append("                new Span<").Append(elemCs)
                   .Append(">((void*)(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 0), 4))), BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))).CopyTo(new Span<")
                   .Append(elemCs).Append(">(array));\n");
+                EmitPinnedHandleCleanup(sb, sig, "                ");
                 sb.Append("                return array;\n");
             }
             else if (IsTupleOfSmallPrims(sig.Result!))
@@ -782,8 +789,46 @@ namespace Wacs.ComponentModel.CSharpEmit
                 if (IsOptionOfSmallPrim(p.Type)) return true;
                 if (IsOptionOfString(p.Type)) return true;
                 if (IsVariantOfSmallPrimOrNone(p.Type)) return true;
+                if (IsListOfResourceRef(p.Type)) return true;
             }
             return false;
+        }
+
+        /// <summary>True when any param pins a GCHandle that needs
+        /// to be freed before the wrapper returns. Currently only
+        /// <c>list&lt;R&gt;</c> (resource-ref list) allocates a
+        /// pinned byte buffer; strings use a different pinning
+        /// mechanism that doesn't require explicit Free.</summary>
+        internal static bool HasPinnedHandleParam(CtFunctionType sig)
+        {
+            foreach (var p in sig.Params)
+                if (IsListOfResourceRef(p.Type)) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Emit <c>gcHandle.Free();</c> for each pinned-handle
+        /// param, at the indent the caller specifies. Called just
+        /// before the final <c>return</c> inside the return-area
+        /// body (or before the <c>if</c> branch in result-unwrap
+        /// tail). No-op when the signature has no pinned handles.
+        /// </summary>
+        internal static void EmitPinnedHandleCleanup(StringBuilder sb,
+                                                     CtFunctionType sig,
+                                                     string indent)
+        {
+            // Single-handle case — `gcHandle`. Multi-handle would
+            // count through `gcHandle`, `gcHandle1`, … but we
+            // don't emit multi yet; a second resource-list param
+            // would need an allocator-bump here.
+            foreach (var p in sig.Params)
+            {
+                if (IsListOfResourceRef(p.Type))
+                {
+                    sb.Append(indent).Append("gcHandle.Free();\n");
+                    return;
+                }
+            }
         }
 
         /// <summary>True when any param is a resource-ref — the
@@ -924,6 +969,32 @@ namespace Wacs.ComponentModel.CSharpEmit
                     sb.Append("                ").Append(argName).Append("Len = 0;\n");
                     sb.Append("            }\n");
                 }
+                else if (IsListOfResourceRef(p.Type))
+                {
+                    // list<R> (R a resource ref) — allocate a
+                    // byte[4*Count] buffer, GCHandle-pin it, then
+                    // loop over the C# List<R> writing each
+                    // element's .Handle as an i32 at index*4.
+                    // Stub takes (buffer-address, count); the pin
+                    // is freed in the post-call tail (see
+                    // EmitPinnedHandleCleanup).
+                    sb.Append("            byte[] buffer = new byte[4 * ")
+                      .Append(argName).Append(".Count];\n");
+                    sb.Append("            var gcHandle = GCHandle.Alloc(buffer, GCHandleType.Pinned);\n");
+                    sb.Append("            var address = gcHandle.AddrOfPinnedObject();\n");
+                    sb.Append("\n");
+                    sb.Append("            for (int index = 0; index < ")
+                      .Append(argName).Append(".Count; ++index) {\n");
+                    var elTarget = ResolveOwnedResource(((CtListType)p.Type).Element);
+                    var elQualified = TypeRefEmit.EmitQualifiedPath(elTarget);
+                    sb.Append("                ").Append(elQualified)
+                      .Append(" element = ").Append(argName).Append("[index];\n");
+                    sb.Append("                int basePtr = (int)address + (index * 4);\n");
+                    sb.Append("                var handle = element.Handle;\n");
+                    sb.Append("                BitConverter.TryWriteBytes(new Span<byte>((void*)(basePtr + 0), 4), unchecked((int)handle));\n");
+                    sb.Append("\n");
+                    sb.Append("            }\n");
+                }
                 else if (IsVariantOfSmallPrimOrNone(p.Type))
                 {
                     // variant<…> param lowers to (i32 disc, i32
@@ -1037,6 +1108,14 @@ namespace Wacs.ComponentModel.CSharpEmit
             {
                 // list<prim> lowers to (ptr, len) like string but
                 // without encoding conversion.
+                return new[] { "nint", "int" };
+            }
+            if (IsListOfResourceRef(t))
+            {
+                // list<R> (R a resource) lowers to (buffer-ptr, count)
+                // — same wire shape as list<prim> (ptr+len). The
+                // wrapper prelude builds a pinned i32-handle array
+                // from the `List<R>` and passes the pinned address.
                 return new[] { "nint", "int" };
             }
             if (IsOptionOfSmallPrim(t))
@@ -1242,6 +1321,17 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// resource reference usable as a value-type slot.</summary>
         internal static bool IsResourceRef(CtValType t) =>
             IsOwnedResource(t) || IsBorrowedResource(t);
+
+        /// <summary>
+        /// True when <paramref name="t"/> is <c>list&lt;R&gt;</c>
+        /// where <c>R</c> is a resource reference (own, borrow, or
+        /// bare identifier pointing at a resource). C# type:
+        /// <c>System.Collections.Generic.List&lt;R&gt;</c>. Lowered
+        /// on the wire to a pinned <c>byte[count*4]</c> buffer of
+        /// i32 handles + the element count.
+        /// </summary>
+        internal static bool IsListOfResourceRef(CtValType t) =>
+            t is CtListType l && IsResourceRef(l.Element);
 
         private static bool IsResourceRefCore(CtTypeRef? r)
         {
@@ -1611,6 +1701,15 @@ namespace Wacs.ComponentModel.CSharpEmit
                     sb.Append("(int)").Append(bufName).Append(", ");
                     sb.Append('(').Append(argName).Append(").Length");
                     listIdx++;
+                }
+                else if (IsListOfResourceRef(p.Type))
+                {
+                    // list<R> lowered to (pinned-address, count).
+                    // Address + count come from the prelude's
+                    // GCHandle-pinned buffer. wit-bindgen uses
+                    // `@in.Count` (not `.Length`) since the C#
+                    // type is System.Collections.Generic.List<R>.
+                    sb.Append("(int)address, ").Append(argName).Append(".Count");
                 }
                 else if (IsOptionOfSmallPrim(p.Type))
                 {
