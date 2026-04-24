@@ -4,10 +4,10 @@
 // you may not use this file except in compliance with the License.
 
 using System;
-using Wacs.Core.Components;
+using Wacs.ComponentModel.WIT;
 using Xunit;
 
-namespace Wacs.Core.Test
+namespace Wacs.ComponentModel.Test
 {
     public class WitParserTests
     {

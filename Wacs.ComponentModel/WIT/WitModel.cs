@@ -8,7 +8,7 @@
 
 using System.Collections.Generic;
 
-namespace Wacs.Core.Components
+namespace Wacs.ComponentModel.WIT
 {
     // AST for the WIT (WebAssembly Interface Types) IDL used by the component
     // model. Reference: https://github.com/WebAssembly/component-model/blob/

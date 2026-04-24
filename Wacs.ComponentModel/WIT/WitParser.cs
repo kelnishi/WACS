@@ -11,7 +11,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 
-namespace Wacs.Core.Components
+namespace Wacs.ComponentModel.WIT
 {
     /// <summary>
     /// Recursive-descent parser for WIT source. Consumes a
