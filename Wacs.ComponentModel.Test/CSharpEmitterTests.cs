@@ -454,6 +454,37 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, emitted.Content);
         }
 
+        // ---- Types: enum + flags nested in interface ----------------------
+
+        private static string FindTypesEnumFlagsFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "types-enum-flags");
+        }
+
+        [Fact]
+        public void EmitExportInterfaceFile_matches_reference_IDef_enum_and_flags()
+        {
+            var fixtureDir = FindTypesEnumFlagsFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "typ.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "def");
+
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(iface, "typ-world");
+
+            Assert.Equal(
+                "TypWorldWorld.wit.exports.local.typ.IDef.cs",
+                emitted.FileName);
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "TypWorldWorld.wit.exports.local.typ.IDef.cs"));
+            Assert.Equal(expected, emitted.Content);
+        }
+
         // ---- Interop: primitive-only import Interop file ------------------
 
         private static string FindInteropPrimitivesFixtureDir()

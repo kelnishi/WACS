@@ -379,20 +379,15 @@ using System.Diagnostics.CodeAnalysis;
         /// <summary>
         /// Phase 1a.2 emission gate: is this interface simple enough
         /// for our current emitter to produce bit-identical output?
-        /// True iff the interface has no nested type definitions
-        /// (records / variants / enums / flags / resources — those
-        /// need their own emitters) AND all function signatures use
-        /// types our <see cref="TypeRefEmit"/> can handle
-        /// (primitives + structural aggregates: list / option /
-        /// result / tuple).
-        ///
-        /// <para>As type / resource emitters land in follow-ups, this
-        /// gate relaxes until it always returns true for resolved
-        /// interfaces.</para>
+        /// True iff every type definition is emitable (currently
+        /// enum / flags; records / variants / resources are
+        /// follow-ups) AND every function signature uses only types
+        /// our <see cref="TypeRefEmit"/> can handle.
         /// </summary>
         private static bool IsInterfaceEmitable(CtInterfaceType iface)
         {
-            if (iface.Types.Count > 0) return false;
+            foreach (var nt in iface.Types)
+                if (!IsTypeDefEmitable(nt.Type)) return false;
             foreach (var fn in iface.Functions)
             {
                 if (fn.Type.NamedResults != null) return false;
@@ -403,6 +398,16 @@ using System.Diagnostics.CodeAnalysis;
             }
             return true;
         }
+
+        /// <summary>
+        /// Which WIT type definitions (the body of a
+        /// <see cref="CtNamedType"/>) our <see cref="TypeDefEmit"/>
+        /// can handle in Phase 1a.2 — currently enum and flags.
+        /// Records, variants, resources, and type aliases will relax
+        /// this as their emitters land.
+        /// </summary>
+        private static bool IsTypeDefEmitable(CtValType body) =>
+            body is CtEnumType || body is CtFlagsType;
 
         /// <summary>
         /// True for Phase 1a.2-supported value types: primitives,
@@ -522,6 +527,21 @@ using System.Diagnostics.CodeAnalysis;
             sb.Append("namespace ").Append(ifaceNs).Append(";\n\n");
 
             sb.Append("public interface ").Append(ifaceClassName).Append(" {\n");
+
+            // wit-bindgen layout inside the interface body:
+            //   * each type def is preceded by a blank line, then
+            //     emits its content ending with a single newline;
+            //   * each function emits its signature, then a blank
+            //     line (empty terminator → `\n\n`).
+            // Types before functions: last type ends with `}\n` and
+            // the next function starts immediately — no extra
+            // separator needed between the last type and the first
+            // function.
+            foreach (var nt in iface.Types)
+            {
+                sb.Append('\n');
+                sb.Append(TypeDefEmit.Emit(nt));
+            }
 
             foreach (var fn in iface.Functions)
             {
