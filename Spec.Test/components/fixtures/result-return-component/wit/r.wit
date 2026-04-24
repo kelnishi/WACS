@@ -1,0 +1,4 @@
+package local:r;
+world r {
+    export divide: func() -> result<u32, u32>;
+}

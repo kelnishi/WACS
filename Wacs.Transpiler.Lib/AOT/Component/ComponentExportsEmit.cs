@@ -145,9 +145,10 @@ namespace Wacs.Transpiler.AOT.Component
             if (fn.Results.Count != 1) return false;
             var r = fn.Results[0];
             if (r.IsPrimitive) return true;
-            // Type-table ref — list<primitive> or option<primitive>.
+            // Type-table ref — list<prim>, option<prim>, result<prim>.
             if (TryResolveListOfPrim(r, types, out _)) return true;
             if (TryResolveOptionOfPrim(r, types, out _)) return true;
+            if (TryResolveResultOfPrim(r, types, out _, out _)) return true;
             return false;
         }
 
@@ -185,6 +186,33 @@ namespace Wacs.Transpiler.AOT.Component
             return true;
         }
 
+        /// <summary>True iff <paramref name="t"/> is a type-ref
+        /// to <c>result&lt;prim-or-void, prim-or-void&gt;</c>.
+        /// Scoped to small-primitive Ok/Err payloads for now.
+        /// Aggregate payloads (string, list, variant) are
+        /// incremental follow-ups.</summary>
+        private static bool TryResolveResultOfPrim(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            out ComponentPrim? okPrim, out ComponentPrim? errPrim)
+        {
+            okPrim = null;
+            errPrim = null;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentResultType res)) return false;
+            if (res.Ok != null)
+            {
+                if (!res.Ok.Value.IsPrimitive) return false;
+                okPrim = res.Ok.Value.Prim;
+            }
+            if (res.Err != null)
+            {
+                if (!res.Err.Value.IsPrimitive) return false;
+                errPrim = res.Err.Value.Prim;
+            }
+            return true;
+        }
+
         private static bool IsStringReturn(ComponentFuncType fn) =>
             fn.Results.Count == 1 && fn.Results[0].IsPrimitive
                 && fn.Results[0].Prim == ComponentPrim.String;
@@ -210,8 +238,11 @@ namespace Wacs.Transpiler.AOT.Component
             // (disc switch + inline).
             bool isListReturn = false;
             bool isOptionReturn = false;
+            bool isResultReturn = false;
             ComponentPrim listElemPrim = default;
             ComponentPrim optionInnerPrim = default;
+            ComponentPrim? resultOkPrim = null;
+            ComponentPrim? resultErrPrim = null;
             Type returnType;
             if (export.Signature.Results.Count == 0)
             {
@@ -236,6 +267,22 @@ namespace Wacs.Transpiler.AOT.Component
                 returnType = typeof(Nullable<>).MakeGenericType(
                     PrimToCs(optionInnerPrim));
             }
+            else if (TryResolveResultOfPrim(
+                export.Signature.Results[0], types,
+                out resultOkPrim, out resultErrPrim))
+            {
+                isResultReturn = true;
+                // ValueTuple<bool, Ok, Err> — scope plan's
+                // `(bool ok, T value, E error)` mapping. Avoids
+                // coupling the transpiled .dll to a generated
+                // Result<Ok, Err> library type.
+                var okType = resultOkPrim.HasValue
+                    ? PrimToCs(resultOkPrim.Value) : typeof(object);
+                var errType = resultErrPrim.HasValue
+                    ? PrimToCs(resultErrPrim.Value) : typeof(object);
+                returnType = typeof(ValueTuple<,,>).MakeGenericType(
+                    typeof(bool), okType, errType);
+            }
             else
             {
                 return;   // shouldn't reach — IsEmittable rejects
@@ -251,7 +298,12 @@ namespace Wacs.Transpiler.AOT.Component
                                        CamelCase(export.Signature.Params[i].Name));
 
             var il = method.GetILGenerator();
-            if (isOptionReturn)
+            if (isResultReturn)
+            {
+                EmitResultReturnBody(il, instanceField, coreMethod, export,
+                                     resultOkPrim, resultErrPrim, returnType);
+            }
+            else if (isOptionReturn)
             {
                 EmitOptionReturnBody(il, instanceField, coreMethod, export,
                                      optionInnerPrim);
@@ -525,6 +577,120 @@ namespace Wacs.Transpiler.AOT.Component
             il.MarkLabel(endLabel);
             il.Emit(OpCodes.Ldloc, resultLocal);
             il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// IL body for a <c>() -&gt; result&lt;prim, prim&gt;</c>
+        /// export. Layout: byte 0 = disc (0 = Ok, 1 = Err),
+        /// payload at offset 4 (small-prim alignment). C# surface
+        /// is <c>ValueTuple&lt;bool, Ok, Err&gt;</c> per the scope
+        /// plan's error-taxonomy choice. Disc=0 → (true,
+        /// okPayload, default(Err)); Disc=1 → (false, default(Ok),
+        /// errPayload).
+        /// </summary>
+        private static void EmitResultReturnBody(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            ComponentPrim? okPrim, ComponentPrim? errPrim,
+            Type tupleType)
+        {
+            var memoryProp = instanceField.FieldType.GetProperty("Memory");
+            if (memoryProp == null)
+                throw new InvalidOperationException(
+                    "Result-returning component requires Module.Memory.");
+
+            var tupleFields = new[] {
+                tupleType.GetField("Item1")!,
+                tupleType.GetField("Item2")!,
+                tupleType.GetField("Item3")!,
+            };
+            var okType = tupleFields[1].FieldType;
+            var errType = tupleFields[2].FieldType;
+
+            var retAreaLocal = il.DeclareLocal(typeof(int));
+            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+            var resultLocal = il.DeclareLocal(tupleType);
+            var errLabel = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, coreMethod, null);
+            il.Emit(OpCodes.Stloc, retAreaLocal);
+
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.Emit(OpCodes.Stloc, memoryLocal);
+
+            // if (memory[P] != 0) goto errLabel;
+            il.Emit(OpCodes.Ldloc, memoryLocal);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldelem_U1);
+            il.Emit(OpCodes.Brtrue, errLabel);
+
+            // Ok branch: tuple = (true, okPayload, default(Err))
+            il.Emit(OpCodes.Ldloca, resultLocal);
+            il.Emit(OpCodes.Initobj, tupleType);           // zero-init → default
+            il.Emit(OpCodes.Ldloca, resultLocal);
+            il.Emit(OpCodes.Ldc_I4_1);
+            il.Emit(OpCodes.Stfld, tupleFields[0]);        // ok = true
+            if (okPrim.HasValue)
+            {
+                il.Emit(OpCodes.Ldloca, resultLocal);
+                EmitReadPayloadAtOffset(il, memoryLocal, retAreaLocal, 4, okPrim.Value);
+                il.Emit(OpCodes.Stfld, tupleFields[1]);    // Item2 = ok payload
+            }
+            il.Emit(OpCodes.Br, endLabel);
+
+            // Err branch: tuple = (false, default(Ok), errPayload)
+            il.MarkLabel(errLabel);
+            il.Emit(OpCodes.Ldloca, resultLocal);
+            il.Emit(OpCodes.Initobj, tupleType);           // ok = false default
+            if (errPrim.HasValue)
+            {
+                il.Emit(OpCodes.Ldloca, resultLocal);
+                EmitReadPayloadAtOffset(il, memoryLocal, retAreaLocal, 4, errPrim.Value);
+                il.Emit(OpCodes.Stfld, tupleFields[2]);    // Item3 = err payload
+            }
+
+            il.MarkLabel(endLabel);
+            il.Emit(OpCodes.Ldloc, resultLocal);
+            il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// Emit IL that pushes the primitive payload at
+        /// <c>memory[retArea + offset]</c> onto the stack,
+        /// typed per <paramref name="prim"/>. 32-bit prims load
+        /// via BitConverter.ToInt32; narrower apply Conv.*; wide
+        /// prims (s64/u64/f64) are a follow-up.
+        /// </summary>
+        private static void EmitReadPayloadAtOffset(
+            ILGenerator il, LocalBuilder memoryLocal,
+            LocalBuilder retAreaLocal, int offset, ComponentPrim prim)
+        {
+            var bitCToInt32 = typeof(BitConverter).GetMethod(
+                "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+            il.Emit(OpCodes.Ldloc, memoryLocal);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            if (offset != 0)
+            {
+                il.Emit(OpCodes.Ldc_I4, offset);
+                il.Emit(OpCodes.Add);
+            }
+            il.EmitCall(OpCodes.Call, bitCToInt32, null);
+            switch (prim)
+            {
+                case ComponentPrim.S8:  il.Emit(OpCodes.Conv_I1); break;
+                case ComponentPrim.U8:  il.Emit(OpCodes.Conv_U1); break;
+                case ComponentPrim.S16: il.Emit(OpCodes.Conv_I2); break;
+                case ComponentPrim.U16: il.Emit(OpCodes.Conv_U2); break;
+                case ComponentPrim.Bool:
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Cgt_Un);
+                    break;
+                // 32-bit prims (S32/U32/F32/Char) load as-is.
+                // Wide prims + strings + aggregates — follow-up.
+            }
         }
 
         /// <summary>Case-insensitive search for the core-level
