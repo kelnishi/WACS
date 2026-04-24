@@ -605,21 +605,24 @@ using System.Diagnostics.CodeAnalysis;
         private static bool IsEmitableStubParam(CtValType t) =>
             t is CtPrimType
             || InteropEmit.IsByteList(t)
-            || InteropEmit.IsOptionOfSmallPrim(t);
+            || InteropEmit.IsOptionOfSmallPrim(t)
+            || InteropEmit.IsTupleOfSmallPrims(t);
 
         /// <summary>
         /// Return types supported by the current Interop emitter.
         /// Primitives (direct return), <c>string</c> + <c>list&lt;u8&gt;</c>
         /// (via return-area buffer), <c>option&lt;primitive&gt;</c>
-        /// (32-bit payload; via return-area buffer), and
-        /// <c>result&lt;_, _&gt;</c> (elided to void at the interface
-        /// level; handled by trampoline emission).
+        /// and <c>tuple&lt;primitive…&gt;</c> (32-bit payloads; via
+        /// return-area buffer), and <c>result&lt;_, _&gt;</c>
+        /// (elided to void at the interface level; handled by
+        /// trampoline emission).
         /// </summary>
         private static bool IsEmitableStubReturn(CtValType t)
         {
             if (t is CtPrimType) return true;
             if (InteropEmit.IsByteList(t)) return true;
             if (InteropEmit.IsOptionOfSmallPrim(t)) return true;
+            if (InteropEmit.IsTupleOfSmallPrims(t)) return true;
             if (IsElidedResult(t)) return true;
             return false;
         }
