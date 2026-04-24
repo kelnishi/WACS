@@ -83,6 +83,46 @@ namespace Wacs.Transpiler.Test
                                 "bc.component.wasm");
         }
 
+        private static string FindAddComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "add-component", "wasm",
+                                "ad.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_forwards_primitive_params_to_core()
+        {
+            // add-component's `add(x: u32, y: u32) -> u32`
+            // exercises the param-forwarding path: two u32
+            // arguments thread through the component wrapper,
+            // land as i32s on the core module's stack, and the
+            // result comes back through the return path.
+            using var fs = File.OpenRead(FindAddComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var add = componentExports!.GetMethod("Add",
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.Static);
+            Assert.NotNull(add);
+            Assert.Equal(typeof(uint), add!.ReturnType);
+
+            var pars = add.GetParameters();
+            Assert.Equal(2, pars.Length);
+            Assert.Equal(typeof(uint), pars[0].ParameterType);
+            Assert.Equal(typeof(uint), pars[1].ParameterType);
+
+            var value = (uint)add.Invoke(null, new object[] { 7u, 35u })!;
+            Assert.Equal(42u, value);
+        }
+
         [Fact]
         public void TranspileSingleModule_casts_i32_to_bool_on_return()
         {
