@@ -341,6 +341,69 @@ using System.Diagnostics.CodeAnalysis;
             return sb.ToString();
         }
 
+        // ---- Per-interface file emission ------------------------------------
+
+        /// <summary>
+        /// Emit a per-interface file (the <c>I{Name}.cs</c> shape) for
+        /// a resolved <see cref="CtInterfaceType"/>. The caller is
+        /// responsible for cross-file name resolution — the interface
+        /// must have its functions' parameter / return types fully
+        /// bound by the time it reaches this emitter.
+        ///
+        /// <para><b>Phase 1a.2 scope:</b> export-side interface files
+        /// containing only free functions with primitive-typed
+        /// parameters and void-or-primitive returns. Interfaces with
+        /// resources, variants, records, enums, flags, or typed
+        /// references will throw through <see cref="TypeRefEmit"/> as
+        /// those types are encountered.</para>
+        ///
+        /// <para>Import-side and inline-interface variations, plus
+        /// the various nested-type emissions (variants, resources,
+        /// records, etc.), are separate follow-up commits.</para>
+        /// </summary>
+        public static EmittedSource EmitExportInterfaceFile(
+            CtInterfaceType iface,
+            string worldNameKebab,
+            EmitOptions? options = null)
+        {
+            options ??= new EmitOptions();
+            if (iface.Package == null)
+            {
+                throw new System.ArgumentException(
+                    "Interface emission requires a package; " +
+                    "inline (in-world) interfaces are a Phase 1a.2 follow-up.",
+                    nameof(iface));
+            }
+
+            var worldNs = NameConventions.WorldNamespaceName(worldNameKebab);
+            var ifaceNs = NameConventions.InterfaceNamespace(
+                worldNameKebab, isExport: true, iface.Package);
+            var ifaceClassName = "I" + NameConventions.ToPascalCase(iface.Name);
+
+            var sb = new StringBuilder();
+            sb.Append(Header);
+
+            // File-scoped namespace — `namespace X;` (not block form).
+            // Used by per-interface files but NOT by the world shell or
+            // Interop files; verified against the 0.30.0 reference.
+            sb.Append("namespace ").Append(ifaceNs).Append(";\n\n");
+
+            sb.Append("public interface ").Append(ifaceClassName).Append(" {\n");
+
+            foreach (var fn in iface.Functions)
+            {
+                sb.Append(FunctionEmit.EmitStaticAbstractSignature(fn.Name, fn.Type));
+                sb.Append("\n\n");
+            }
+
+            sb.Append("}\n");
+
+            var fileName = worldNs + ".wit.exports."
+                + JoinPackagePath(iface.Package) + "."
+                + ifaceClassName + ".cs";
+            return new EmittedSource(fileName, sb.ToString());
+        }
+
         // ---- WasmImportLinkage attribute file -------------------------------
 
         /// <summary>

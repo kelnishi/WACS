@@ -103,19 +103,17 @@ namespace Wacs.ComponentModel.CSharpEmit
 
         /// <summary>
         /// The namespace name for the world itself. wit-bindgen-csharp
-        /// takes the world name in kebab-case and produces
-        /// <c>{PascalCase}World</c> — except the suffix "World" is
-        /// elided if the original kebab name already ends in "world".
+        /// takes the PascalCase world name and <b>always</b> appends
+        /// <c>World</c> — even if the kebab name already ends in
+        /// <c>world</c>.
         /// <c>hello</c> → <c>HelloWorld</c>;
         /// <c>command</c> → <c>CommandWorld</c>;
-        /// <c>proxy-world</c> → <c>ProxyWorld</c>.
+        /// <c>prim-world</c> → <c>PrimWorldWorld</c> (confirmed against
+        /// wit-bindgen-csharp 0.30.0 output).
         /// </summary>
         public static string WorldNamespaceName(string worldNameKebab)
         {
-            var pascal = ToPascalCase(worldNameKebab);
-            if (!pascal.EndsWith("World"))
-                pascal += "World";
-            return pascal;
+            return ToPascalCase(worldNameKebab) + "World";
         }
 
         /// <summary>

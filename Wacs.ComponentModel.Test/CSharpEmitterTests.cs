@@ -187,8 +187,12 @@ namespace Wacs.ComponentModel.Test
         [Theory]
         [InlineData("hello", "HelloWorld")]
         [InlineData("command", "CommandWorld")]
-        [InlineData("proxy-world", "ProxyWorld")]
-        [InlineData("my-world", "MyWorld")]
+        // wit-bindgen-csharp 0.30.0 appends `World` unconditionally —
+        // even when the kebab name already ends in `world`. Verified
+        // by running wit-bindgen against a world literally named
+        // `prim-world` and observing namespace `PrimWorldWorld`.
+        [InlineData("prim-world", "PrimWorldWorld")]
+        [InlineData("my-world", "MyWorldWorld")]
         public void WorldNamespaceName_suffixes_World(string input, string expected)
         {
             Assert.Equal(expected, NameConventions.WorldNamespaceName(input));
@@ -221,6 +225,127 @@ namespace Wacs.ComponentModel.Test
                          NameConventions.InterfaceNamespace("hello",
                                                             isExport: true,
                                                             pkg));
+        }
+
+        // ---- Export interface file emission (IRun.cs shape) -----------------
+
+        /// <summary>
+        /// Hand-construct the <c>wasi:cli/run</c> interface — one
+        /// function <c>run: func() -&gt; result</c>, which wit-bindgen
+        /// lowers to <c>static abstract void Run()</c> on the guest
+        /// side (the result is implicit in the export trampoline and
+        /// doesn't appear on the interface method).
+        ///
+        /// <para>In Phase 1a.2's scope the interface file only carries
+        /// the method signature; the <c>result</c> lowering lives in
+        /// the <c>RunInterop</c> trampoline which is a separate
+        /// follow-up emitter. So the input to the interface emitter
+        /// is the void-returning signature, not the result-returning
+        /// one — matching how wit-bindgen internally threads the
+        /// shape through.</para>
+        /// </summary>
+        private static CtInterfaceType BuildRunInterface()
+        {
+            var pkg = new CtPackageName("wasi", new[] { "cli" }, "0.2.3");
+            var runFnType = new CtFunctionType(
+                new System.Collections.Generic.List<CtFuncParam>(),
+                result: null,
+                namedResults: null);
+            var runFn = new CtInterfaceFunction("run", runFnType);
+            return new CtInterfaceType(
+                pkg, "run",
+                new System.Collections.Generic.List<CtNamedType>(),
+                new[] { runFn },
+                new System.Collections.Generic.List<CtUse>());
+        }
+
+        [Fact]
+        public void EmitExportInterfaceFile_matches_reference_IRun()
+        {
+            var iface = BuildRunInterface();
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(iface, "hello");
+
+            Assert.Equal(
+                "HelloWorld.wit.exports.wasi.cli.v0_2_3.IRun.cs",
+                emitted.FileName);
+
+            var expected = LoadReference(
+                "HelloWorld.wit.exports.wasi.cli.v0_2_3.IRun.cs");
+            Assert.Equal(expected, emitted.Content);
+        }
+
+        // ---- Type-ref emission -------------------------------------------
+
+        [Theory]
+        [InlineData(CtPrim.Bool, "bool")]
+        [InlineData(CtPrim.S8, "sbyte")]
+        [InlineData(CtPrim.U8, "byte")]
+        [InlineData(CtPrim.S16, "short")]
+        [InlineData(CtPrim.U16, "ushort")]
+        [InlineData(CtPrim.S32, "int")]
+        [InlineData(CtPrim.U32, "uint")]
+        [InlineData(CtPrim.S64, "long")]
+        [InlineData(CtPrim.U64, "ulong")]
+        [InlineData(CtPrim.F32, "float")]
+        [InlineData(CtPrim.F64, "double")]
+        [InlineData(CtPrim.Char, "uint")]
+        [InlineData(CtPrim.String, "string")]
+        public void EmitPrim_maps_to_wit_bindgen_csharp_primitive(
+            CtPrim kind, string expected)
+        {
+            Assert.Equal(expected, TypeRefEmit.EmitPrim(kind));
+        }
+
+        // ---- Function signature emission ----------------------------------
+
+        [Fact]
+        public void EmitStaticAbstractSignature_void_no_args()
+        {
+            var sig = new CtFunctionType(
+                new System.Collections.Generic.List<CtFuncParam>(),
+                result: null, namedResults: null);
+            Assert.Equal(
+                "    static abstract void Run();",
+                FunctionEmit.EmitStaticAbstractSignature("run", sig));
+        }
+
+        [Fact]
+        public void EmitStaticAbstractSignature_primitive_return()
+        {
+            var sig = new CtFunctionType(
+                new[] { new CtFuncParam("x", CtPrimType.S32) },
+                result: CtPrimType.S32,
+                namedResults: null);
+            Assert.Equal(
+                "    static abstract int DoS32(int x);",
+                FunctionEmit.EmitStaticAbstractSignature("do-s32", sig));
+        }
+
+        [Fact]
+        public void EmitStaticAbstractSignature_multiple_args()
+        {
+            var sig = new CtFunctionType(
+                new[]
+                {
+                    new CtFuncParam("a", CtPrimType.U32),
+                    new CtFuncParam("b", CtPrimType.U32),
+                },
+                result: CtPrimType.U32,
+                namedResults: null);
+            Assert.Equal(
+                "    static abstract uint TwoArgs(uint a, uint b);",
+                FunctionEmit.EmitStaticAbstractSignature("two-args", sig));
+        }
+
+        [Fact]
+        public void EmitStaticAbstractSignature_kebab_arg_becomes_camelCase()
+        {
+            var sig = new CtFunctionType(
+                new[] { new CtFuncParam("max-length", CtPrimType.U64) },
+                result: null, namedResults: null);
+            Assert.Equal(
+                "    static abstract void Process(ulong maxLength);",
+                FunctionEmit.EmitStaticAbstractSignature("process", sig));
         }
     }
 }
