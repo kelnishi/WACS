@@ -160,7 +160,7 @@ namespace Wacs.Transpiler.AOT.Component
             if (TryResolveListOfString(r, types)) return true;
             if (TryResolveOptionOfPrim(r, types, out _)) return true;
             if (TryResolveOptionOfString(r, types)) return true;
-            if (TryResolveResultOfPrim(r, types, out _, out _)) return true;
+            if (TryResolveResult(r, types, out _, out _)) return true;
             if (TryResolveTupleOfPrims(r, types, out _)) return true;
             return false;
         }
@@ -259,30 +259,71 @@ namespace Wacs.Transpiler.AOT.Component
             return true;
         }
 
-        /// <summary>True iff <paramref name="t"/> is a type-ref
-        /// to <c>result&lt;prim-or-void, prim-or-void&gt;</c>.
-        /// Scoped to small-primitive Ok/Err payloads for now.
-        /// Aggregate payloads (string, list, variant) are
-        /// incremental follow-ups.</summary>
-        private static bool TryResolveResultOfPrim(
-            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
-            out ComponentPrim? okPrim, out ComponentPrim? errPrim)
+        /// <summary>
+        /// Classification for one side of a <c>result&lt;Ok, Err&gt;</c>.
+        /// Captures the shape (absent / primitive / string) + any
+        /// associated primitive kind. Larger aggregates (list,
+        /// variant, record) are follow-ups — they'd extend this
+        /// abstraction.
+        /// </summary>
+        private sealed class ResultSide
         {
-            okPrim = null;
-            errPrim = null;
+            public enum SideKind { Absent, Primitive, String }
+            public SideKind Kind { get; }
+            public ComponentPrim Prim { get; }
+
+            public static readonly ResultSide Absent =
+                new ResultSide(SideKind.Absent, default);
+            public static readonly ResultSide String =
+                new ResultSide(SideKind.String, default);
+            public static ResultSide Primitive(ComponentPrim p) =>
+                new ResultSide(SideKind.Primitive, p);
+
+            private ResultSide(SideKind kind, ComponentPrim prim)
+            {
+                Kind = kind; Prim = prim;
+            }
+
+            /// <summary>C# type for this side at the bound surface.
+            /// Absent maps to <c>object</c> so the
+            /// <c>ValueTuple&lt;bool, Ok, Err&gt;</c> generic
+            /// remains buildable (the field will only ever be null
+            /// / default). Primitive and string map direct.</summary>
+            public Type ToCsType() => Kind switch
+            {
+                SideKind.Absent => typeof(object),
+                SideKind.Primitive => PrimToCs(Prim),
+                SideKind.String => typeof(string),
+                _ => throw new InvalidOperationException(),
+            };
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a type-ref
+        /// to <c>result&lt;Ok, Err&gt;</c> where each side is
+        /// absent, a primitive, or a string. Aggregate payloads
+        /// (list, variant, record) are follow-ups.</summary>
+        private static bool TryResolveResult(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            out ResultSide okSide, out ResultSide errSide)
+        {
+            okSide = ResultSide.Absent;
+            errSide = ResultSide.Absent;
             if (t.IsPrimitive) return false;
             if (t.TypeIdx >= types.Count) return false;
             if (!(types[(int)t.TypeIdx] is ComponentResultType res)) return false;
-            if (res.Ok != null)
-            {
-                if (!res.Ok.Value.IsPrimitive) return false;
-                okPrim = res.Ok.Value.Prim;
-            }
-            if (res.Err != null)
-            {
-                if (!res.Err.Value.IsPrimitive) return false;
-                errPrim = res.Err.Value.Prim;
-            }
+            if (!TryResolveResultSide(res.Ok, out okSide)) return false;
+            if (!TryResolveResultSide(res.Err, out errSide)) return false;
+            return true;
+        }
+
+        private static bool TryResolveResultSide(
+            ComponentValType? raw, out ResultSide side)
+        {
+            if (raw == null) { side = ResultSide.Absent; return true; }
+            if (!raw.Value.IsPrimitive) { side = ResultSide.Absent; return false; }
+            side = raw.Value.Prim == ComponentPrim.String
+                ? ResultSide.String
+                : ResultSide.Primitive(raw.Value.Prim);
             return true;
         }
 
@@ -332,8 +373,8 @@ namespace Wacs.Transpiler.AOT.Component
             bool isTupleReturn = false;
             ComponentPrim listElemPrim = default;
             ComponentPrim optionInnerPrim = default;
-            ComponentPrim? resultOkPrim = null;
-            ComponentPrim? resultErrPrim = null;
+            ResultSide resultOkSide = ResultSide.Absent;
+            ResultSide resultErrSide = ResultSide.Absent;
             ComponentPrim[] tupleElemPrims = Array.Empty<ComponentPrim>();
             Type returnType;
             if (export.Signature.Results.Count == 0)
@@ -383,21 +424,19 @@ namespace Wacs.Transpiler.AOT.Component
                     csTypes[i] = PrimToCs(tupleElemPrims[i]);
                 returnType = MakeValueTuple(csTypes);
             }
-            else if (TryResolveResultOfPrim(
+            else if (TryResolveResult(
                 export.Signature.Results[0], types,
-                out resultOkPrim, out resultErrPrim))
+                out resultOkSide, out resultErrSide))
             {
                 isResultReturn = true;
                 // ValueTuple<bool, Ok, Err> — scope plan's
                 // `(bool ok, T value, E error)` mapping. Avoids
                 // coupling the transpiled .dll to a generated
                 // Result<Ok, Err> library type.
-                var okType = resultOkPrim.HasValue
-                    ? PrimToCs(resultOkPrim.Value) : typeof(object);
-                var errType = resultErrPrim.HasValue
-                    ? PrimToCs(resultErrPrim.Value) : typeof(object);
                 returnType = typeof(ValueTuple<,,>).MakeGenericType(
-                    typeof(bool), okType, errType);
+                    typeof(bool),
+                    resultOkSide.ToCsType(),
+                    resultErrSide.ToCsType());
             }
             else
             {
@@ -422,7 +461,7 @@ namespace Wacs.Transpiler.AOT.Component
             else if (isResultReturn)
             {
                 EmitResultReturnBody(il, instanceField, coreMethod, export,
-                                     types, resultOkPrim, resultErrPrim,
+                                     types, resultOkSide, resultErrSide,
                                      returnType);
             }
             else if (isOptionReturn)
@@ -1097,7 +1136,7 @@ namespace Wacs.Transpiler.AOT.Component
             ILGenerator il, FieldBuilder instanceField,
             MethodInfo coreMethod, EmittableExport export,
             IReadOnlyList<DefTypeEntry> types,
-            ComponentPrim? okPrim, ComponentPrim? errPrim,
+            ResultSide okSide, ResultSide errSide,
             Type tupleType)
         {
             var memoryProp = instanceField.FieldType.GetProperty("Memory");
@@ -1110,8 +1149,6 @@ namespace Wacs.Transpiler.AOT.Component
                 tupleType.GetField("Item2")!,
                 tupleType.GetField("Item3")!,
             };
-            var okType = tupleFields[1].FieldType;
-            var errType = tupleFields[2].FieldType;
 
             var retAreaLocal = il.DeclareLocal(typeof(int));
             var memoryLocal = il.DeclareLocal(typeof(byte[]));
@@ -1138,10 +1175,11 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldloca, resultLocal);
             il.Emit(OpCodes.Ldc_I4_1);
             il.Emit(OpCodes.Stfld, tupleFields[0]);        // ok = true
-            if (okPrim.HasValue)
+            if (okSide.Kind != ResultSide.SideKind.Absent)
             {
                 il.Emit(OpCodes.Ldloca, resultLocal);
-                EmitReadPayloadAtOffset(il, memoryLocal, retAreaLocal, 4, okPrim.Value);
+                EmitLoadResultPayload(il, memoryLocal, retAreaLocal,
+                                      /*offset*/ 4, okSide);
                 il.Emit(OpCodes.Stfld, tupleFields[1]);    // Item2 = ok payload
             }
             il.Emit(OpCodes.Br, endLabel);
@@ -1150,16 +1188,63 @@ namespace Wacs.Transpiler.AOT.Component
             il.MarkLabel(errLabel);
             il.Emit(OpCodes.Ldloca, resultLocal);
             il.Emit(OpCodes.Initobj, tupleType);           // ok = false default
-            if (errPrim.HasValue)
+            if (errSide.Kind != ResultSide.SideKind.Absent)
             {
                 il.Emit(OpCodes.Ldloca, resultLocal);
-                EmitReadPayloadAtOffset(il, memoryLocal, retAreaLocal, 4, errPrim.Value);
+                EmitLoadResultPayload(il, memoryLocal, retAreaLocal,
+                                      /*offset*/ 4, errSide);
                 il.Emit(OpCodes.Stfld, tupleFields[2]);    // Item3 = err payload
             }
 
             il.MarkLabel(endLabel);
             il.Emit(OpCodes.Ldloc, resultLocal);
             il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>Emit IL that pushes a result's payload onto
+        /// the stack at <c>retArea + offset</c>, typed per
+        /// <paramref name="side"/>. Primitive payloads use
+        /// <see cref="EmitReadPayloadAtOffset"/>; string payloads
+        /// read (strPtr, strLen) at the offset and route through
+        /// the StringMarshal UTF-8 chokepoint.</summary>
+        private static void EmitLoadResultPayload(
+            ILGenerator il, LocalBuilder memoryLocal,
+            LocalBuilder retAreaLocal, int offset, ResultSide side)
+        {
+            switch (side.Kind)
+            {
+                case ResultSide.SideKind.Primitive:
+                    EmitReadPayloadAtOffset(il, memoryLocal, retAreaLocal,
+                                            offset, side.Prim);
+                    return;
+                case ResultSide.SideKind.String:
+                {
+                    var bitCToInt32 = typeof(BitConverter).GetMethod(
+                        "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+                    var liftMethod = typeof(StringMarshal).GetMethod(
+                        nameof(StringMarshal.LiftUtf8),
+                        new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+                    // StringMarshal.LiftUtf8(memory,
+                    //   BitConverter.ToInt32(memory, retArea + off),
+                    //   BitConverter.ToInt32(memory, retArea + off + 4))
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    il.Emit(OpCodes.Ldloc, retAreaLocal);
+                    il.Emit(OpCodes.Ldc_I4, offset);
+                    il.Emit(OpCodes.Add);
+                    il.EmitCall(OpCodes.Call, bitCToInt32, null);
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    il.Emit(OpCodes.Ldloc, retAreaLocal);
+                    il.Emit(OpCodes.Ldc_I4, offset + 4);
+                    il.Emit(OpCodes.Add);
+                    il.EmitCall(OpCodes.Call, bitCToInt32, null);
+                    il.EmitCall(OpCodes.Call, liftMethod, null);
+                    return;
+                }
+                default:
+                    throw new InvalidOperationException(
+                        "Absent result side has no payload to load.");
+            }
         }
 
         /// <summary>

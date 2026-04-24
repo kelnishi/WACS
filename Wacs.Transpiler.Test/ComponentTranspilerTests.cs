@@ -403,6 +403,53 @@ namespace Wacs.Transpiler.Test
             Assert.Null(maybeNone.Invoke(null, null));
         }
 
+        private static string FindResultStringComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "result-string-component", "wasm",
+                                "rs.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_result_string_u32_both_branches()
+        {
+            // result-string-component exports two funcs each
+            // returning `result<string, u32>` — `greet()` takes
+            // the Ok branch ("fine") and `fail()` takes the Err
+            // branch (404). C# surface per the scope plan is
+            // ValueTuple<bool, string, uint>: Ok → (true, str,
+            // default(uint)); Err → (false, null, code).
+            using var fs = File.OpenRead(FindResultStringComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var greet = componentExports!.GetMethod("Greet");
+            var fail = componentExports.GetMethod("Fail");
+            Assert.NotNull(greet);
+            Assert.NotNull(fail);
+            var tupleType = typeof(System.ValueTuple<bool, string, uint>);
+            Assert.Equal(tupleType, greet!.ReturnType);
+            Assert.Equal(tupleType, fail!.ReturnType);
+
+            var okResult = ((bool ok, string msg, uint code))
+                greet.Invoke(null, null)!;
+            Assert.True(okResult.ok);
+            Assert.Equal("fine", okResult.msg);
+            Assert.Equal(0u, okResult.code);
+
+            var errResult = ((bool ok, string msg, uint code))
+                fail.Invoke(null, null)!;
+            Assert.False(errResult.ok);
+            Assert.Null(errResult.msg);
+            Assert.Equal(404u, errResult.code);
+        }
+
         private static string FindListStringComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
