@@ -83,6 +83,72 @@ namespace Wacs.Transpiler.Test
                                 "bc.component.wasm");
         }
 
+        private static string FindF64ComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "f64-component", "wasm",
+                                "p.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_f64_return_passes_through_precisely()
+        {
+            // f64-component exports `pi: func() -> f64` whose
+            // core returns the IEEE 754 64-bit constant for π.
+            // No canonical-ABI conversion — component f64 and
+            // core f64 share the IL double stack slot.
+            using var fs = File.OpenRead(FindF64ComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var pi = componentExports!.GetMethod("Pi");
+            Assert.NotNull(pi);
+            Assert.Equal(typeof(double), pi!.ReturnType);
+
+            var value = (double)pi.Invoke(null, null)!;
+            Assert.Equal(3.141592653589793, value);
+        }
+
+        private static string FindU64ComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "u64-component", "wasm",
+                                "u.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_u64_return_preserves_full_64_bits()
+        {
+            // u64-component exports `big: func() -> u64` whose
+            // core returns the i64 literal 0x0123456789ABCDEF.
+            // Exercises the 64-bit passthrough path — component
+            // u64 and core i64 share an IL stack slot, so the
+            // ComponentExports method returns ulong without an
+            // explicit conversion instruction.
+            using var fs = File.OpenRead(FindU64ComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var big = componentExports!.GetMethod("Big",
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.Static);
+            Assert.NotNull(big);
+            Assert.Equal(typeof(ulong), big!.ReturnType);
+
+            var value = (ulong)big.Invoke(null, null)!;
+            Assert.Equal(0x0123456789ABCDEFUL, value);
+        }
+
         private static string FindMemoryComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());

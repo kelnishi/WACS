@@ -1,0 +1,4 @@
+package local:u;
+world u {
+    export big: func() -> u64;
+}
