@@ -1,0 +1,4 @@
+package local:n;
+world n {
+    export missing: func() -> option<u32>;
+}
