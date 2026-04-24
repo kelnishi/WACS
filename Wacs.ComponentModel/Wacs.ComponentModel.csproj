@@ -30,4 +30,11 @@
       <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <!-- Test project uses internal CSharpEmit helpers (NameConventions,
+           EmitWorldShellFile and friends) to validate naming conventions
+           and individual file emissions in isolation. -->
+      <InternalsVisibleTo Include="Wacs.ComponentModel.Test" />
+    </ItemGroup>
+
 </Project>
