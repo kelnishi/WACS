@@ -457,15 +457,37 @@ namespace Wacs.ComponentModel.CSharpEmit
             {
                 var c = v.Cases[i];
                 sb.Append(caseIndent).Append("case ").Append(i).Append(": {\n");
-                sb.Append("\n");
-                sb.Append(bodyIndent).Append(varName).Append(" = ").Append(qualified);
-                sb.Append('.').Append(NameConventions.ToCamelCase(c.Name)).Append('(');
-                if (c.Payload != null)
+
+                var factoryName = NameConventions.ToCamelCase(c.Name);
+                if (c.Payload != null && IsOwnedResource(c.Payload))
                 {
-                    var payKind = ((CtPrimType)c.Payload).Kind;
-                    sb.Append(EmitReturnAreaPrimLift(payKind, payloadOffset));
+                    // Resource-handle payload: construct the wrapper
+                    // class inline as a named local, then feed it to
+                    // the variant's static factory. No blank line
+                    // before `var resource`; blank between the
+                    // `resource` decl and the variant assignment.
+                    var resTarget = ResolveOwnedResource(c.Payload);
+                    var resQualified = TypeRefEmit.EmitQualifiedPath(resTarget);
+                    sb.Append(bodyIndent).Append("var resource = new ")
+                      .Append(resQualified).Append("(new ")
+                      .Append(resQualified).Append(".THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + ")
+                      .Append(payloadOffset).Append("), 4))));\n");
+                    sb.Append("\n");
+                    sb.Append(bodyIndent).Append(varName).Append(" = ").Append(qualified)
+                      .Append('.').Append(factoryName).Append("(resource);\n");
                 }
-                sb.Append(");\n");
+                else
+                {
+                    sb.Append("\n");
+                    sb.Append(bodyIndent).Append(varName).Append(" = ").Append(qualified)
+                      .Append('.').Append(factoryName).Append('(');
+                    if (c.Payload != null)
+                    {
+                        var payKind = ((CtPrimType)c.Payload).Kind;
+                        sb.Append(EmitReturnAreaPrimLift(payKind, payloadOffset));
+                    }
+                    sb.Append(");\n");
+                }
                 sb.Append(bodyIndent).Append("break;\n");
                 sb.Append(caseIndent).Append("}\n");
             }
@@ -1157,10 +1179,22 @@ namespace Wacs.ComponentModel.CSharpEmit
             foreach (var c in v.Cases)
             {
                 if (c.Payload == null) continue;
-                if (!(c.Payload is CtPrimType p) || !IsSmallPrim(p.Kind))
-                    return false;
+                if (IsVariantPayloadEmitable(c.Payload)) continue;
+                return false;
             }
             return true;
+        }
+
+        /// <summary>True for variant case payloads the emitter
+        /// handles: small primitives (≤ 32-bit), and owned-resource
+        /// handles (cross-interface or same-interface). Wide
+        /// primitives, strings, lists, aggregates are a follow-up
+        /// (layout grows past the current 1-word payload slot).</summary>
+        private static bool IsVariantPayloadEmitable(CtValType t)
+        {
+            if (t is CtPrimType p) return IsSmallPrim(p.Kind);
+            if (IsOwnedResource(t)) return true;
+            return false;
         }
 
         /// <summary>Resolve a variant type-ref to its concrete

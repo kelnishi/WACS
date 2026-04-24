@@ -1059,6 +1059,46 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Variant with cross-interface resource payload --------------
+
+        private static string FindInteropVariantResourceFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-variant-resource");
+        }
+
+        /// <summary>
+        /// Variant with a cross-interface resource-handle payload
+        /// case (plus a primitive case and a no-payload case). The
+        /// resource-handle arm constructs the resource wrapper
+        /// inline as a local <c>resource</c> via
+        /// <c>new R(new R.THandle(…))</c>, then feeds it to the
+        /// variant's static factory. This is the shape WASI uses
+        /// pervasively — e.g. <c>stream-error.last-operation-failed(own&lt;error&gt;)</c>
+        /// where <c>error</c> lives in <c>wasi:io/error</c>.
+        /// Byte-for-byte match against wit-bindgen 0.30.0.
+        /// </summary>
+        [Fact]
+        public void InteropEmit_variant_with_resource_payload_matches_reference()
+        {
+            var fixtureDir = FindInteropVariantResourceFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "xv.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            WitResolver.Resolve(pkgs);
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "xv-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "XvWorldWorld.wit.imports.local.xv.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Wide primitive (u64/s64/f64) in option / result -------------
 
         private static string FindInteropWidePrimFixtureDir()
