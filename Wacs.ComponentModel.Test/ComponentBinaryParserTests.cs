@@ -124,6 +124,26 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Canons_decode_greet_lift_pointing_at_core_func_0()
+        {
+            // tiny-component's canon section declares one lift:
+            // component function 0 is the lift of core function 0
+            // (the `greet` export in the embedded core module).
+            // With no string / realloc params, the option vec is
+            // empty, and the type ascription points at the
+            // component's single function type `() -> u32`.
+            var path = FindTinyComponentPath();
+            using var stream = File.OpenRead(path);
+            var component = ComponentBinaryParser.Parse(stream);
+
+            var entry = Assert.Single(component.Canons);
+            var lift = Assert.IsType<CanonLift>(entry);
+            Assert.Equal(0u, lift.CoreFuncIdx);
+            Assert.Equal(0u, lift.TypeIdx);
+            Assert.Empty(lift.Options);
+        }
+
+        [Fact]
         public void Exports_decode_component_level_greet_export()
         {
             // tiny-component's export section declares one
