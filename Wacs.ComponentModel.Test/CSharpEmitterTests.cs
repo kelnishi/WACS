@@ -1059,6 +1059,45 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Interop: record<small-prim fields> in function bodies -------
+
+        private static string FindInteropRecordFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-record");
+        }
+
+        /// <summary>
+        /// <c>record</c> with small-primitive fields as function
+        /// param + return. Params flatten inline (one stub slot per
+        /// field; wrapper passes <c>p.x, p.y, …</c>). Returns use
+        /// the return area with one word per field; wrapper emits
+        /// <c>return new GlobalType (&lt;lift&gt;, &lt;lift&gt;);</c>.
+        /// Named-type refs in the wrapper signature always qualify
+        /// to the <c>global::{WorldNs}.wit.imports.{pkg}.I{Iface}</c>
+        /// path — the Interop file is a sibling static class with
+        /// no nested scope to elide to.
+        /// </summary>
+        [Fact]
+        public void InteropEmit_record_of_small_prims_matches_reference()
+        {
+            var fixtureDir = FindInteropRecordFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "rec.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "rec-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "RecWorldWorld.wit.imports.local.rec.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Interop: totally-elided result<_, _> -----------------------
 
         private static string FindInteropResultNoneFixtureDir()

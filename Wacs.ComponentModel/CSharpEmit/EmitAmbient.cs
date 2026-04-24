@@ -35,33 +35,49 @@ namespace Wacs.ComponentModel.CSharpEmit
         [System.ThreadStatic]
         private static EmitOptions? s_options;
 
+        [System.ThreadStatic]
+        private static bool s_alwaysQualifyTypeRefs;
+
         public static string? WorldNamespace => s_worldNs;
         public static CtInterfaceType? EmittingInterface => s_emittingIface;
         public static EmitOptions Options => s_options ?? s_default;
         public static bool IncludeWitMetadata => (s_options ?? s_default).IncludeWitMetadata;
 
+        /// <summary>
+        /// When true, <see cref="TypeRefEmit.EmitTypeRef"/> emits the
+        /// fully-qualified <c>global::…</c> path for every named-type
+        /// reference — even same-interface ones. Set by the Interop
+        /// (sibling-static-class) emitter, where the context has no
+        /// nested-scope shorthand; left off for interface-file
+        /// emitters which are already inside the target scope.
+        /// </summary>
+        public static bool AlwaysQualifyTypeRefs => s_alwaysQualifyTypeRefs;
+
         private static readonly EmitOptions s_default = new EmitOptions();
 
         public static Scope Push(string worldNs, CtInterfaceType iface,
-                                 EmitOptions? options = null)
+                                 EmitOptions? options = null,
+                                 bool alwaysQualifyTypeRefs = false)
         {
-            var prev = (s_worldNs, s_emittingIface, s_options);
+            var prev = (s_worldNs, s_emittingIface, s_options, s_alwaysQualifyTypeRefs);
             s_worldNs = worldNs;
             s_emittingIface = iface;
             s_options = options;
+            s_alwaysQualifyTypeRefs = alwaysQualifyTypeRefs;
             return new Scope(prev);
         }
 
         /// <summary>RAII restoration when emission scope ends.</summary>
         public readonly struct Scope : System.IDisposable
         {
-            private readonly (string? WorldNs, CtInterfaceType? Iface, EmitOptions? Options) _prev;
-            public Scope((string?, CtInterfaceType?, EmitOptions?) prev) { _prev = prev; }
+            private readonly (string? WorldNs, CtInterfaceType? Iface, EmitOptions? Options, bool AlwaysQualify) _prev;
+            public Scope((string?, CtInterfaceType?, EmitOptions?, bool) prev) { _prev = prev; }
             public void Dispose()
             {
                 s_worldNs = _prev.WorldNs;
                 s_emittingIface = _prev.Iface;
                 s_options = _prev.Options;
+                s_alwaysQualifyTypeRefs = _prev.AlwaysQualify;
             }
         }
     }

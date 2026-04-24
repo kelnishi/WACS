@@ -1,0 +1,6 @@
+package local:rec;
+interface env {
+    record point { x: u32, y: u32 }
+    translate: func(p: point, dx: s32, dy: s32) -> point;
+}
+world rec-world { import env; }

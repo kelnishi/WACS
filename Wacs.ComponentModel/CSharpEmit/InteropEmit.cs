@@ -52,8 +52,11 @@ namespace Wacs.ComponentModel.CSharpEmit
             // Push ambient scope so deep callers can reach the world
             // namespace (needed for `new global::{WorldNs}.None()`
             // inside result-lift arms, and cross-interface type ref
-            // qualification).
-            using var scope = EmitAmbient.Push(worldNs, iface);
+            // qualification). Interop files live in a sibling static
+            // class — they have no nested scope for type-name
+            // elision, so every named type ref must qualify.
+            using var scope = EmitAmbient.Push(worldNs, iface,
+                alwaysQualifyTypeRefs: true);
 
             var sb = new StringBuilder();
             sb.Append(CSharpEmitter.Header);
@@ -218,6 +221,28 @@ namespace Wacs.ComponentModel.CSharpEmit
                 }
                 sb.Append('\n');
                 sb.Append("                );\n");
+            }
+            else if (IsRecordOfSmallPrims(sig.Result!))
+            {
+                // record return — build via `new GlobalQualified (
+                //   arg0, arg1, ...);` — the record constructor
+                // takes positional field args. wit-bindgen quirks:
+                // (a) space between the type name and `(`; (b) the
+                // args land on a new line at 16-space indent; (c)
+                // the closing `);` is on the same line as the last
+                // arg.
+                var target = ResolveRecord((CtTypeRef)sig.Result!);
+                var rec = (CtRecordType)target.Type;
+                var qualified = TypeRefEmit.EmitQualifiedPath(target);
+                sb.Append("                return new ").Append(qualified).Append(" (\n");
+                sb.Append("                ");
+                for (int i = 0; i < rec.Fields.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    var kind = ((CtPrimType)rec.Fields[i].Type).Kind;
+                    sb.Append(EmitReturnAreaPrimLift(kind, offset: i * 4));
+                }
+                sb.Append(");\n");
             }
             else if (IsResultOfPrimOrNone(sig.Result!))
             {
@@ -699,6 +724,16 @@ namespace Wacs.ComponentModel.CSharpEmit
                     flat[i] = StubTypesFor(tup.Elements[i])[0];
                 return flat;
             }
+            if (IsRecordOfSmallPrims(t))
+            {
+                // record { f1: P1, f2: P2, … } — identical flattening
+                // to tuple; one word per small-primitive field.
+                var rec = (CtRecordType)ResolveRecord((CtTypeRef)t).Type;
+                var flat = new string[rec.Fields.Count];
+                for (int i = 0; i < rec.Fields.Count; i++)
+                    flat[i] = StubTypesFor(rec.Fields[i].Type)[0];
+                return flat;
+            }
             throw new NotImplementedException(
                 "Interop stub type for " + t.GetType().Name +
                 " is a Phase 1a.2 follow-up.");
@@ -776,6 +811,55 @@ namespace Wacs.ComponentModel.CSharpEmit
                 if (!IsSmallPrim(ep.Kind)) return false;
             }
             return true;
+        }
+
+        /// <summary>
+        /// True when <paramref name="t"/> is a named-type reference
+        /// whose target is a <c>record</c> with every field a small
+        /// primitive (≤ 1 core-wasm word). Same-shape as
+        /// <see cref="IsTupleOfSmallPrims"/> — flat field-by-field
+        /// lowering, one-word-per-field return area. Records with
+        /// aggregate or wide-primitive fields need stride/alignment
+        /// handling and are a follow-up.
+        /// </summary>
+        internal static bool IsRecordOfSmallPrims(CtValType t)
+        {
+            if (!(t is CtTypeRef r) || r.Target == null) return false;
+            // Follow a chain of same-interface alias refs to the
+            // concrete definition — matches TypeRefEmit's resolution.
+            var target = r.Target;
+            while (target.Type is CtTypeRef innerRef
+                   && innerRef.Target != null
+                   && innerRef.Target != target)
+            {
+                target = innerRef.Target;
+            }
+            if (!(target.Type is CtRecordType rec)) return false;
+            if (rec.Fields.Count == 0) return false;
+            foreach (var f in rec.Fields)
+            {
+                if (!(f.Type is CtPrimType fp)) return false;
+                if (!IsSmallPrim(fp.Kind)) return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Resolve a <see cref="CtTypeRef"/> through any alias
+        /// chain to the concrete <see cref="CtNamedType"/>. Used by
+        /// record emission to reach the record definition for field
+        /// iteration and for the qualified type name.
+        /// </summary>
+        private static CtNamedType ResolveRecord(CtTypeRef r)
+        {
+            var target = r.Target!;
+            while (target.Type is CtTypeRef innerRef
+                   && innerRef.Target != null
+                   && innerRef.Target != target)
+            {
+                target = innerRef.Target;
+            }
+            return target;
         }
 
         /// <summary>
@@ -862,6 +946,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             if (IsOptionOfSmallPrim(sig.Result)) return true;
             if (IsOptionOfString(sig.Result)) return true;
             if (IsTupleOfSmallPrims(sig.Result)) return true;
+            if (IsRecordOfSmallPrims(sig.Result)) return true;
             if (IsResultOfPrimOrNone(sig.Result)) return true;
             return false;
         }
@@ -885,6 +970,9 @@ namespace Wacs.ComponentModel.CSharpEmit
             // laid out at offsets 0, 4, 8, … .
             if (IsTupleOfSmallPrims(sig.Result!))
                 return ((CtTupleType)sig.Result!).Elements.Count;
+            // record { … } with small-prim fields: one word per field.
+            if (IsRecordOfSmallPrims(sig.Result!))
+                return ((CtRecordType)ResolveRecord((CtTypeRef)sig.Result!).Type).Fields.Count;
             // result<PrimOrNone, PrimOrNone>: discriminant word at 0,
             // payload word at 4 — 2 uints. None branches write no
             // payload to memory but the return area still reserves
@@ -958,6 +1046,20 @@ namespace Wacs.ComponentModel.CSharpEmit
                         if (i > 0) sb.Append(", ");
                         var elemArg = argName + ".Item" + (i + 1);
                         sb.Append(EmitLower(tup.Elements[i], elemArg));
+                    }
+                }
+                else if (IsRecordOfSmallPrims(p.Type))
+                {
+                    // record { f1: P1, f2: P2, … } lowered inline as
+                    // `{Lower(P1, argName.f1)}, {Lower(P2, argName.f2)}, …`.
+                    // Field names keep their WIT casing (wit-bindgen
+                    // emits them verbatim as the field identifier).
+                    var rec = (CtRecordType)ResolveRecord((CtTypeRef)p.Type).Type;
+                    for (int i = 0; i < rec.Fields.Count; i++)
+                    {
+                        if (i > 0) sb.Append(", ");
+                        var fieldArg = argName + "." + rec.Fields[i].Name;
+                        sb.Append(EmitLower(rec.Fields[i].Type, fieldArg));
                     }
                 }
                 else
