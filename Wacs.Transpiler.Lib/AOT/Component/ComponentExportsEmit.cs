@@ -228,31 +228,63 @@ namespace Wacs.Transpiler.AOT.Component
         /// <summary>Narrow / re-sign a C# value of the component
         /// primitive type into the core's wire-type before the
         /// core call. Empty for bitwise-compatible cases (u32 ↔
-        /// int32, etc. — same 32 bits, reinterpret is free).</summary>
+        /// int32, etc. — same 32 bits, reinterpret is free). The
+        /// narrow types (bool, s8, u8, s16, u16) widen implicitly
+        /// on the evaluation stack, so passing them to an i32
+        /// parameter requires no IL either — C#'s stack already
+        /// promotes.</summary>
         private static void EmitParamCast(ILGenerator il,
                                           ComponentPrim componentSide,
                                           Type coreWire)
         {
-            // u32 / s32 / bool / char <-> int32: no IL needed;
-            // the stack slot's content survives reinterpretation.
-            // u64 / s64 <-> int64: same.
-            // f32 / f64: no cast needed either.
-            // For narrower types (s8 / u8 / s16 / u16), the core
-            // wire type is still i32; widening is implicit in
-            // C#'s stack.
-            _ = componentSide;
-            _ = coreWire;
+            if (componentSide == ComponentPrim.Bool)
+            {
+                // bool → i32: true = 1, false = 0. C# bool on
+                // the stack is already 0/1 as a 32-bit int,
+                // but guarantee explicit conversion to i32.
+                il.Emit(OpCodes.Conv_I4);
+            }
+            // Other small-prim + wide-prim + float cases: the
+            // C# type and the core wire type share the same IL
+            // stack representation — no conversion needed.
         }
 
         /// <summary>Cast the core's return type into the
-        /// component-side primitive type. For bitwise-equal
-        /// shapes (u32 from int32, etc.) a no-op works at the IL
-        /// stack level.</summary>
+        /// component-side primitive type. For 32-bit types
+        /// (u32 from int32, bool from i32, char from i32) the
+        /// CLR stack treats them identically — no IL needed.
+        /// For narrow types (s8 / u8 / s16 / u16) emit the
+        /// corresponding Conv.* opcode so the caller sees the
+        /// truncated-and-resigned value.</summary>
         private static void EmitReturnCast(ILGenerator il, Type coreRet,
                                            ComponentPrim componentPrim)
         {
+            switch (componentPrim)
+            {
+                case ComponentPrim.S8:
+                    il.Emit(OpCodes.Conv_I1);
+                    break;
+                case ComponentPrim.U8:
+                    il.Emit(OpCodes.Conv_U1);
+                    break;
+                case ComponentPrim.S16:
+                    il.Emit(OpCodes.Conv_I2);
+                    break;
+                case ComponentPrim.U16:
+                    il.Emit(OpCodes.Conv_U2);
+                    break;
+                case ComponentPrim.Bool:
+                    // i32 → bool: compare-to-zero + invert.
+                    // `result != 0 ? true : false`.
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Cgt_Un);
+                    break;
+                // 32-bit + 64-bit + float: no conversion — the
+                // stack slot's bit pattern already matches the
+                // target. C#'s verifier accepts u32/i32 and
+                // u64/i64 interchangeably on the stack.
+            }
             _ = coreRet;
-            _ = componentPrim;
         }
 
         private static string PascalCase(string kebab)
