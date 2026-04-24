@@ -4,6 +4,8 @@ world rsrc {
     resource counter {
         constructor();
         value: func() -> u32;
+        add: func(n: u32) -> u32;
     }
     export make: func() -> counter;
+    export inspect: func(c: borrow<counter>) -> u32;
 }
