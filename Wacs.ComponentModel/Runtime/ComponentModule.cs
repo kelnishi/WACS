@@ -151,5 +151,95 @@ namespace Wacs.ComponentModel.Runtime
             }
         }
         private IReadOnlyList<Parser.DefTypeEntry>? _types;
+
+        /// <summary>
+        /// Map from component-func index to the
+        /// <see cref="Parser.CanonLift"/> that populated it.
+        /// Absent keys correspond to slots allocated by Func-sort
+        /// aliases or Func-kind exports (wasm-encoder bumps the
+        /// component-func counter on every export call — see
+        /// <c>ComponentBuilder::export</c> at
+        /// <c>wasm-encoder</c>).
+        ///
+        /// <para>Why this exists: wit-component produces
+        /// multi-export components with interleaved canon + alias
+        /// + export sections. A flat "index into <see cref="Canons"/>
+        /// by canon-list position" lookup breaks because the
+        /// component-func index space grows between canons via
+        /// each preceding export. This resolver walks
+        /// <see cref="RawSections"/> in file order and builds the
+        /// canonical map.</para>
+        /// </summary>
+        public IReadOnlyDictionary<uint, Parser.CanonLift> ComponentFuncToCanon
+        {
+            get
+            {
+                if (_componentFuncToCanon != null) return _componentFuncToCanon;
+                var map = new Dictionary<uint, Parser.CanonLift>();
+                uint funcIdx = 0;
+                foreach (var s in RawSections)
+                {
+                    switch (s.Id)
+                    {
+                        case Parser.ComponentSectionId.Canon:
+                        {
+                            var entries = Parser.CanonSectionReader.Decode(s.Payload);
+                            foreach (var e in entries)
+                            {
+                                if (e is Parser.CanonLift lift)
+                                {
+                                    map[funcIdx] = lift;
+                                    funcIdx++;
+                                }
+                                // canon lower adds to core-func
+                                // space (not component); canon
+                                // resource.* adds to core-func
+                                // space as well. Neither
+                                // increments funcIdx here.
+                            }
+                            break;
+                        }
+                        case Parser.ComponentSectionId.Alias:
+                        {
+                            var entries = Parser.AliasSectionReader.Decode(s.Payload);
+                            foreach (var e in entries)
+                                if (e.IsComponentFunc)
+                                    funcIdx++;   // anonymous slot
+                            break;
+                        }
+                        case Parser.ComponentSectionId.Export:
+                        {
+                            // wasm-encoder increments the
+                            // component-func counter for every
+                            // Func-kind export, allocating a new
+                            // slot that shadows the source item.
+                            // This slot is anonymous from our
+                            // resolver's perspective — the
+                            // canon behind the exported func is
+                            // already in the map keyed by the
+                            // export's `idx` field.
+                            var entries = Parser.ExportSectionReader.Decode(s.Payload);
+                            foreach (var e in entries)
+                                if (e.Sort == Parser.ComponentSort.Func)
+                                    funcIdx++;
+                            break;
+                        }
+                        case Parser.ComponentSectionId.Import:
+                        {
+                            // Func imports also grow the
+                            // component-func space. Deferred —
+                            // no fixtures exercise imports yet,
+                            // and decoding imports structurally
+                            // needs an ImportSectionReader.
+                            // Revisit once hello-world lands.
+                            break;
+                        }
+                    }
+                }
+                _componentFuncToCanon = map;
+                return map;
+            }
+        }
+        private IReadOnlyDictionary<uint, Parser.CanonLift>? _componentFuncToCanon;
     }
 }

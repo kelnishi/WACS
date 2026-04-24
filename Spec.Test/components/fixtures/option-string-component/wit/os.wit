@@ -1,4 +1,5 @@
 package local:os;
 world os {
-    export greeting: func() -> option<string>;
+    export maybe-some: func() -> option<string>;
+    export maybe-none: func() -> option<string>;
 }

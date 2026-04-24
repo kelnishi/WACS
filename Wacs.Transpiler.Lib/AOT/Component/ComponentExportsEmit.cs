@@ -113,13 +113,18 @@ namespace Wacs.Transpiler.AOT.Component
             ComponentModule component)
         {
             var list = new List<EmittableExport>();
-            var canons = component.Canons;
+            var funcToCanon = component.ComponentFuncToCanon;
             var types = component.Types;
             foreach (var export in component.Exports)
             {
                 if (export.Sort != ComponentSort.Func) continue;
-                if (export.Index >= canons.Count) continue;
-                if (!(canons[(int)export.Index] is CanonLift lift)) continue;
+                // Resolve via the RawSection-walking map, not a
+                // flat index into component.Canons — wit-component
+                // grows the component-func space through Func-kind
+                // exports too, so flat-index lookup drops real
+                // exports in multi-export components.
+                if (!funcToCanon.TryGetValue(export.Index, out var lift))
+                    continue;
                 if (lift.TypeIdx >= types.Count) continue;
                 if (!(types[(int)lift.TypeIdx] is ComponentFuncType fn))
                     continue;

@@ -369,15 +369,22 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
-        public void TranspileSingleModule_lifts_option_string_some()
+        public void TranspileSingleModule_lifts_option_string_some_and_none()
         {
-            // option-string-component exports `greeting() ->
-            // option<string>` whose core returns a pointer P at
-            // which bytes [P..P+12] are the canonical-ABI encoded
-            // value: disc byte, padding to 4, then (strPtr, strLen).
-            // Disc=1 selects the Some branch; the emitted IL lifts
-            // the (ptr, len) pair via StringMarshal.LiftUtf8.
-            // C# surface: `string` where null = None.
+            // option-string-component exports two zero-arg funcs,
+            // `maybe-some() -> option<string>` returning
+            // Some("greetings") and `maybe-none() -> option<string>`
+            // returning None. Core returns the retArea pointer;
+            // at that address the 1-byte discriminant picks the
+            // branch and offsets 4/8 hold (ptr, len) in the Some
+            // case. C# surface is plain `string` where null = None.
+            //
+            // Exercises both the option<string> lift path AND the
+            // component-func-idx resolver — wit-component emits
+            // this as interleaved canon + alias + export sections,
+            // making the second canon land at component-func idx 2
+            // (not 1). Flat-index lookup into Canons would drop
+            // maybe-none silently.
             using var fs = File.OpenRead(FindOptionStringComponentPath());
             var result = ComponentTranspiler.TranspileSingleModule(fs);
 
@@ -385,11 +392,15 @@ namespace Wacs.Transpiler.Test
                 .GetType("Wacs.Transpiled.Component.ComponentExports");
             Assert.NotNull(componentExports);
 
-            var greeting = componentExports!.GetMethod("Greeting");
-            Assert.NotNull(greeting);
-            Assert.Equal(typeof(string), greeting!.ReturnType);
+            var maybeSome = componentExports!.GetMethod("MaybeSome");
+            var maybeNone = componentExports.GetMethod("MaybeNone");
+            Assert.NotNull(maybeSome);
+            Assert.NotNull(maybeNone);
+            Assert.Equal(typeof(string), maybeSome!.ReturnType);
+            Assert.Equal(typeof(string), maybeNone!.ReturnType);
 
-            Assert.Equal("greetings", greeting.Invoke(null, null));
+            Assert.Equal("greetings", maybeSome.Invoke(null, null));
+            Assert.Null(maybeNone.Invoke(null, null));
         }
 
         private static string FindOptionStringNoneComponentPath()
