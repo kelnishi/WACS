@@ -74,6 +74,66 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
+        public void TranspileSingleModule_execute_greet_returns_42()
+        {
+            // End-to-end execution test: transpile the component,
+            // instantiate the generated Module class, invoke the
+            // exported `greet` via reflection on IExports, and
+            // assert the result is 42 — the value tiny.wat's
+            // core module is coded to return. Validates the full
+            // parse → transpile → load → invoke pipeline on real
+            // component bits.
+            using var fs = File.OpenRead(FindTinyComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            Assert.NotNull(result.ModuleClass);
+            Assert.NotNull(result.ExportsInterface);
+
+            // The generated Module class has an IImports-taking
+            // constructor (or a parameterless one when there are
+            // no imports). tiny-component has no imports, so a
+            // parameterless construction + IExports call works.
+            var ctor = result.ModuleClass!.GetConstructor(System.Type.EmptyTypes);
+            Assert.NotNull(ctor);
+            var moduleInstance = ctor!.Invoke(null);
+
+            var greetMethod = result.ExportsInterface!.GetMethods()
+                .First(m => string.Equals(m.Name, "greet",
+                            System.StringComparison.OrdinalIgnoreCase));
+            var value = greetMethod.Invoke(moduleInstance, null);
+
+            // Core module signature returns i32 → boxed as
+            // System.Int32. At the component level this is u32;
+            // bitwise-equivalent for small positive values.
+            Assert.Equal(42, System.Convert.ToInt32(value));
+        }
+
+        [Fact]
+        public void TranspileSingleModule_exposes_core_export_via_ExportsInterface()
+        {
+            // For primitive-only signatures, the component-level
+            // export and the core-module export have matching
+            // shapes (no canonical-ABI marshaling needed). The
+            // existing ModuleTranspiler's ExportsInterface
+            // captures the core export's `greet() -> u32` — we
+            // piggyback on that for v0. Proper component-level
+            // trampolines with canonical-ABI adapters will sit
+            // above this in follow-up commits.
+            using var fs = File.OpenRead(FindTinyComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            Assert.NotNull(result.ExportsInterface);
+            var methods = result.ExportsInterface!.GetMethods();
+            Assert.NotEmpty(methods);
+            // wit-bindgen-csharp emits PascalCase; existing
+            // transpiler uses the WIT name verbatim. Accept
+            // either: the point is that greet is visible.
+            Assert.Contains(methods,
+                m => string.Equals(m.Name, "greet",
+                        System.StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
         public void TranspileSingleModule_produces_valid_transpilation_result()
         {
             // Full path: parse component → instantiate embedded
