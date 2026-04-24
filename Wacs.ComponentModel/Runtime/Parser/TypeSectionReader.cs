@@ -159,6 +159,27 @@ namespace Wacs.ComponentModel.Runtime.Parser
     }
 
     /// <summary>
+    /// <c>record { f1: T1, f2: T2, … }</c> type (tag 0x72) —
+    /// a fixed-arity heterogeneous product with named fields.
+    /// Fields are laid out consecutively in declaration order,
+    /// each at its natural alignment per the canonical-ABI rule.
+    /// </summary>
+    public sealed class ComponentRecordType : DefTypeEntry
+    {
+        public sealed class Field
+        {
+            public string Name { get; }
+            public ComponentValType Type { get; }
+            public Field(string name, ComponentValType type)
+            { Name = name; Type = type; }
+        }
+
+        public IReadOnlyList<Field> Fields { get; }
+        public ComponentRecordType(IReadOnlyList<Field> fields)
+        { Fields = fields; }
+    }
+
+    /// <summary>
     /// Function type (tag 0x40): ordered param list (each with a
     /// name) + ordered unnamed result list. Matches <c>functype</c>
     /// in the Component Model binary spec.
@@ -227,6 +248,7 @@ namespace Wacs.ComponentModel.Runtime.Parser
         public const byte TupleTypeTag = 0x6F;
         public const byte EnumTypeTag = 0x6D;
         public const byte FlagsTypeTag = 0x6E;
+        public const byte RecordTypeTag = 0x72;
 
         public static List<DefTypeEntry> Decode(byte[] payload)
         {
@@ -257,6 +279,8 @@ namespace Wacs.ComponentModel.Runtime.Parser
                     return DecodeEnumType(r);
                 case FlagsTypeTag:
                     return DecodeFlagsType(r);
+                case RecordTypeTag:
+                    return DecodeRecordType(r);
                 default:
                     // Unknown structural tag — capture the rest
                     // of the payload so the type slot occupies
@@ -341,6 +365,19 @@ namespace Wacs.ComponentModel.Runtime.Parser
             for (uint i = 0; i < n; i++)
                 labels[i] = r.ReadName();
             return new ComponentFlagsType(labels);
+        }
+
+        private static ComponentRecordType DecodeRecordType(ComponentBinaryReader r)
+        {
+            var n = r.ReadVarU32();
+            var fields = new ComponentRecordType.Field[n];
+            for (uint i = 0; i < n; i++)
+            {
+                var name = r.ReadName();
+                var ty = DecodeValType(r);
+                fields[i] = new ComponentRecordType.Field(name, ty);
+            }
+            return new ComponentRecordType(fields);
         }
 
         private static ComponentValType? DecodeOptionalValType(ComponentBinaryReader r)
