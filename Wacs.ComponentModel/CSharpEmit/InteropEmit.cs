@@ -100,14 +100,20 @@ namespace Wacs.ComponentModel.CSharpEmit
 
             var retType = FunctionEmit.EmitReturnType(fn.Type);
             var isVoid = retType == "void";
+            var usesReturnArea = UsesReturnArea(fn.Type);
+            var hasPrelude = HasPrelude(fn.Type);
+
+            // wit-bindgen inserts a blank line between the opening
+            // `{` and the body when the body has either a prelude
+            // OR a return area.
+            if (hasPrelude || usesReturnArea) sb.Append("\n");
 
             // Prelude: for each string-typed param, pin a UTF-8
             // GCHandle via InteropString.FromString and bind its
             // (ptr, len) into `{paramName}Ptr` / `{paramName}Len`.
-            // Emitted before the stub call.
+            // list<u8> params stackalloc a buffer + CopyTo. Emitted
+            // before the stub call.
             EmitWrapperPrelude(sb, fn.Type);
-
-            var usesReturnArea = UsesReturnArea(fn.Type);
             if (usesReturnArea)
             {
                 EmitReturnAreaWrapperBody(sb, stubClassName, methodName, fn.Type);
@@ -160,9 +166,24 @@ namespace Wacs.ComponentModel.CSharpEmit
             if (sig.Params.Count > 0) sb.Append(", ");
             sb.Append("ptr");
             sb.Append(");\n");
-            sb.Append("                return ");
-            sb.Append(EmitReturnAreaLift(sig.Result!));
-            sb.Append(";\n");
+
+            if (IsByteList(sig.Result!))
+            {
+                // byte[] return — allocate managed array of the
+                // reported length, then Span-copy the wasm memory
+                // into it. Blank separator preceding matches
+                // wit-bindgen's formatting.
+                sb.Append("\n");
+                sb.Append("                var array = new byte[BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))];\n");
+                sb.Append("                new Span<byte>((void*)(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 0), 4))), BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))).CopyTo(new Span<byte>(array));\n");
+                sb.Append("                return array;\n");
+            }
+            else
+            {
+                sb.Append("                return ");
+                sb.Append(EmitReturnAreaLift(sig.Result!));
+                sb.Append(";\n");
+            }
             sb.Append("            }\n");
         }
 
@@ -179,6 +200,14 @@ namespace Wacs.ComponentModel.CSharpEmit
                 return "Encoding.UTF8.GetString("
                     + "(byte*)BitConverter.ToInt32(new Span<byte>((void*)(ptr + 0), 4)), "
                     + "BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4)))";
+            }
+            if (IsByteList(t))
+            {
+                // byte[] — need multi-statement body, not a single
+                // expression. Caller must handle via EmitReturnAreaLiftStmts.
+                throw new System.InvalidOperationException(
+                    "byte[] lift requires multi-statement emission; " +
+                    "use EmitReturnAreaWrapperBody's byte-list branch.");
             }
             throw new NotImplementedException(
                 "Return-area lift for " + t.GetType().Name +
@@ -204,17 +233,56 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// invariant with <c>componentize-dotnet</c> is preserved
         /// (it never inspects wrapper locals).</para>
         /// </summary>
-        private static void EmitWrapperPrelude(StringBuilder sb,
-                                               CtFunctionType sig)
+        /// <summary>
+        /// True if any param in the signature needs a
+        /// marshaling prelude (string or list&lt;u8&gt;).
+        /// Controls whether a blank line appears after the wrapper's
+        /// opening <c>{</c> — wit-bindgen emits one iff the body
+        /// has a prelude.
+        /// </summary>
+        private static bool HasPrelude(CtFunctionType sig)
         {
             foreach (var p in sig.Params)
             {
                 if (p.Type is CtPrimType prim && prim.Kind == CtPrim.String)
+                    return true;
+                if (IsByteList(p.Type)) return true;
+            }
+            return false;
+        }
+
+        private static void EmitWrapperPrelude(StringBuilder sb,
+                                               CtFunctionType sig)
+        {
+            // Index across list<u8> params — wit-bindgen names them
+            // `buffer`, `buffer1`, `buffer2`, … regardless of the
+            // arg name (string params use their own arg-derived
+            // naming).
+            int listIdx = 0;
+            foreach (var p in sig.Params)
+            {
+                var argName = NameConventions.ToCamelCase(p.Name);
+                if (p.Type is CtPrimType prim && prim.Kind == CtPrim.String)
                 {
-                    var argName = NameConventions.ToCamelCase(p.Name);
                     sb.Append("            IntPtr ").Append(argName).Append("Ptr = ");
                     sb.Append("InteropString.FromString(").Append(argName);
                     sb.Append(", out int ").Append(argName).Append("Len);\n");
+                }
+                else if (IsByteList(p.Type))
+                {
+                    // Stack-allocate a buffer sized to the managed
+                    // array, copy bytes in, pass buffer pointer +
+                    // length into the stub. Buffer name follows
+                    // wit-bindgen: `buffer` (unsuffixed) for the
+                    // first list<u8> param, `buffer1`/`buffer2`/…
+                    // for subsequent ones.
+                    var bufName = listIdx == 0 ? "buffer" : ("buffer" + listIdx);
+                    sb.Append("            void* ").Append(bufName).Append(" = ");
+                    sb.Append("stackalloc byte[(").Append(argName).Append(").Length];\n");
+                    sb.Append("            ").Append(argName);
+                    sb.Append(".AsSpan<byte>().CopyTo(new Span<byte>(")
+                      .Append(bufName).Append(", ").Append(argName).Append(".Length));\n");
+                    listIdx++;
                 }
             }
         }
@@ -224,8 +292,8 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// <summary>
         /// Stub-side core-wasm-ABI type(s) for one wrapper param.
         /// Most primitives lower to a single i32/i64/f32/f64. Strings
-        /// (and, in follow-ups, lists) lower to two stub params:
-        /// <c>nint ptr, int len</c>.
+        /// and <c>list&lt;u8&gt;</c> lower to two stub params:
+        /// <c>nint ptr, int len</c>. Other aggregates are follow-ups.
         /// </summary>
         private static string[] StubTypesFor(CtValType t)
         {
@@ -241,10 +309,27 @@ namespace Wacs.ComponentModel.CSharpEmit
                     _ => new[] { "int" },
                 };
             }
+            if (IsByteList(t))
+            {
+                // list<u8> lowers to (ptr, len) like string but
+                // without UTF-8 conversion.
+                return new[] { "nint", "int" };
+            }
             throw new NotImplementedException(
                 "Interop stub type for " + t.GetType().Name +
                 " is a Phase 1a.2 follow-up.");
         }
+
+        /// <summary>
+        /// True when <paramref name="t"/> is <c>list&lt;u8&gt;</c> —
+        /// the byte-array special case. Other <c>list&lt;T&gt;</c>
+        /// element types need stride-aware marshaling (list of
+        /// strings, list of records, etc.) and are a follow-up.
+        /// </summary>
+        internal static bool IsByteList(CtValType t) =>
+            t is CtListType l
+            && l.Element is CtPrimType pe
+            && pe.Kind == CtPrim.U8;
 
         private static string EmitStubReturnType(CtFunctionType sig)
         {
@@ -293,17 +378,21 @@ namespace Wacs.ComponentModel.CSharpEmit
         internal static bool UsesReturnArea(CtFunctionType sig)
         {
             if (sig.HasNoResult || sig.Result == null) return false;
-            return sig.Result is CtPrimType p && p.Kind == CtPrim.String;
+            if (sig.Result is CtPrimType p && p.Kind == CtPrim.String) return true;
+            if (IsByteList(sig.Result)) return true;
+            return false;
         }
 
         /// <summary>
         /// Return-area byte size for a function's return type, in
-        /// multiples of 4 bytes (uints). <c>string</c> = 2 (ptr +
-        /// len). Other aggregates plug in as they're supported.
+        /// multiples of 4 bytes (uints). <c>string</c> and
+        /// <c>list&lt;u8&gt;</c> = 2 (ptr + len). Other aggregates
+        /// plug in as they're supported.
         /// </summary>
         private static int ReturnAreaUintCount(CtFunctionType sig)
         {
             if (sig.Result is CtPrimType p && p.Kind == CtPrim.String) return 2;
+            if (IsByteList(sig.Result!)) return 2;
             throw new NotImplementedException(
                 "Return area sizing for " + sig.Result?.GetType().Name +
                 " is a follow-up.");
@@ -323,21 +412,31 @@ namespace Wacs.ComponentModel.CSharpEmit
         private static void EmitLoweredArgs(StringBuilder sb, CtFunctionType sig)
         {
             bool first = true;
+            int listIdx = 0;
             foreach (var p in sig.Params)
             {
                 var argName = NameConventions.ToCamelCase(p.Name);
+                if (!first) sb.Append(", ");
+                first = false;
                 if (p.Type is CtPrimType prim && prim.Kind == CtPrim.String)
                 {
                     // String lowered by the prelude to (ptr, len).
-                    if (!first) sb.Append(", ");
                     sb.Append(argName).Append("Ptr.ToInt32(), ").Append(argName).Append("Len");
-                    first = false;
+                }
+                else if (IsByteList(p.Type))
+                {
+                    // byte[] lowered to (buffer-ptr, length). Length
+                    // expression has extra parens — wit-bindgen emits
+                    // `(data).Length` here but `data.Length` inside
+                    // the CopyTo call; preserve the asymmetry.
+                    var bufName = listIdx == 0 ? "buffer" : ("buffer" + listIdx);
+                    sb.Append("(int)").Append(bufName).Append(", ");
+                    sb.Append('(').Append(argName).Append(").Length");
+                    listIdx++;
                 }
                 else
                 {
-                    if (!first) sb.Append(", ");
                     sb.Append(EmitLower(p.Type, argName));
-                    first = false;
                 }
             }
         }

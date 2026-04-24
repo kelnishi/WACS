@@ -24,6 +24,7 @@ namespace SrWorldWorld.wit.imports.local.sr
 
         public  static unsafe string GetName()
         {
+
             var retArea = new uint[2];
             fixed (uint* retAreaByte0 = &retArea[0])
             {
@@ -44,6 +45,7 @@ namespace SrWorldWorld.wit.imports.local.sr
 
         public  static unsafe string Greet(string name)
         {
+
             IntPtr namePtr = InteropString.FromString(name, out int nameLen);
             var retArea = new uint[2];
             fixed (uint* retAreaByte0 = &retArea[0])

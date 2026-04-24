@@ -1,0 +1,6 @@
+package local:lst;
+interface env {
+    write: func(data: list<u8>);
+    read: func() -> list<u8>;
+}
+world lst-world { import env; }

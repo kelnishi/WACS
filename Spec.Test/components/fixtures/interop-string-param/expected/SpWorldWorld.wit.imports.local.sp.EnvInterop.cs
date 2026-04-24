@@ -24,6 +24,7 @@ namespace SpWorldWorld.wit.imports.local.sp
 
         public  static unsafe void Log(string msg)
         {
+
             IntPtr msgPtr = InteropString.FromString(msg, out int msgLen);
             LogWasmInterop.wasmImportLog(msgPtr.ToInt32(), msgLen);
 
@@ -39,6 +40,7 @@ namespace SpWorldWorld.wit.imports.local.sp
 
         public  static unsafe void WriteTo(string path, uint data)
         {
+
             IntPtr pathPtr = InteropString.FromString(path, out int pathLen);
             WriteToWasmInterop.wasmImportWriteTo(pathPtr.ToInt32(), pathLen, unchecked((int)(data)));
 
