@@ -637,6 +637,7 @@ using System.Diagnostics.CodeAnalysis;
             if (InteropEmit.IsTupleOfSmallPrims(t)) return true;
             if (InteropEmit.IsRecordOfSmallPrims(t)) return true;
             if (InteropEmit.IsResultOfPrimOrNone(t)) return true;
+            if (InteropEmit.IsOwnedResource(t)) return true;
             if (IsElidedResult(t)) return true;
             return false;
         }

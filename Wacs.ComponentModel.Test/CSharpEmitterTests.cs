@@ -1059,6 +1059,42 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Free function returning own<resource> ----------------------
+
+        private static string FindInteropOwnResourceFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-own-resource");
+        }
+
+        /// <summary>
+        /// Free function returning a resource handle (bare
+        /// identifier in WIT, implicit <c>own</c>). Stub returns
+        /// i32 handle; wrapper constructs <c>new R(new R.THandle(result))</c>
+        /// to package it into the resource wrapper class. Exercises
+        /// the common "factory function returning a resource"
+        /// pattern used throughout WASI (e.g. <c>wasi:cli/stdout.get-stdout</c>).
+        /// </summary>
+        [Fact]
+        public void InteropEmit_own_resource_return_matches_reference()
+        {
+            var fixtureDir = FindInteropOwnResourceFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "ownr.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "ownr-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "OwnrWorldWorld.wit.imports.local.ownr.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Resource methods with result<…> returns --------------------
 
         private static string FindResourceResultFixtureDir()

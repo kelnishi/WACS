@@ -1,0 +1,8 @@
+package local:ownr;
+interface env {
+    resource widget {
+        constructor();
+    }
+    get-widget: func() -> widget;
+}
+world ownr-world { import env; }
