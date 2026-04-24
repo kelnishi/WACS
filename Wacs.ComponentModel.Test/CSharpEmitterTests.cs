@@ -1059,6 +1059,42 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Interop: totally-elided result<_, _> -----------------------
+
+        private static string FindInteropResultNoneFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-result-none");
+        }
+
+        /// <summary>
+        /// <c>result&lt;_, _&gt;</c> — the totally-elided case. No
+        /// return area: stub returns the discriminant directly as
+        /// i32. Wrapper captures the int, switches on the value
+        /// (not a Span-byte read), builds <c>Result&lt;None, None&gt;</c>,
+        /// and branches on <c>IsOk</c>: ok returns void
+        /// (<c>return ;</c>), err throws <c>WitException</c>.
+        /// </summary>
+        [Fact]
+        public void InteropEmit_result_none_matches_reference()
+        {
+            var fixtureDir = FindInteropResultNoneFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "rn.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "rn-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "RnWorldWorld.wit.imports.local.rn.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Interop: result with elided sides ---------------------------
 
         private static string FindInteropResultElidedFixtureDir()

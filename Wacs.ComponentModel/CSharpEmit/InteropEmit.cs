@@ -125,6 +125,15 @@ namespace Wacs.ComponentModel.CSharpEmit
             {
                 EmitReturnAreaWrapperBody(sb, stubClassName, methodName, fn.Type);
             }
+            else if (IsElidedResultType(fn.Type.Result))
+            {
+                // result<_, _> — stub returns an i32 discriminant;
+                // wrapper captures it, builds a Result<None, None>
+                // via the same switch + throw-on-err shape as the
+                // return-area result path, but with `switch (result)`
+                // instead of a Span-byte read.
+                EmitElidedResultWrapperBody(sb, stubClassName, methodName, fn.Type);
+            }
             else
             {
                 // Stub call — note the double-space after `=` in
@@ -278,6 +287,59 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append(EmitReturnAreaLift(sig.Result!));
                 sb.Append(";\n");
             }
+            sb.Append("            }\n");
+        }
+
+        /// <summary>True for <c>result&lt;_, _&gt;</c> (both sides
+        /// absent) — the direct i32-discriminant return shape.</summary>
+        private static bool IsElidedResultType(CtValType? t) =>
+            t is CtResultType r && r.Ok == null && r.Err == null;
+
+        /// <summary>
+        /// Emit the wrapper body for <c>result&lt;_, _&gt;</c> — the
+        /// totally-elided case. Stub returns i32 directly (no return
+        /// area); wrapper captures it, switches on it to build a
+        /// <c>Result&lt;None, None&gt;</c>, then branches on
+        /// <c>IsOk</c>: ok → <c>return ;</c>; err → <c>throw new
+        /// WitException(lifted.AsErr!, 0)</c>.
+        /// </summary>
+        private static void EmitElidedResultWrapperBody(StringBuilder sb,
+                                                         string stubClassName,
+                                                         string methodName,
+                                                         CtFunctionType sig)
+        {
+            // Direct-call capture (no blank between `{` and this line).
+            sb.Append("            var result =  ");
+            sb.Append(stubClassName).Append(".wasmImport").Append(methodName);
+            sb.Append('(');
+            EmitLoweredArgs(sb, sig);
+            sb.Append(");\n");
+            sb.Append("\n");
+
+            var worldNs = EmitAmbient.WorldNamespace ?? "UNSET_WORLD_NAMESPACE";
+            sb.Append("            Result<None, None> lifted;\n");
+            sb.Append("\n");
+            sb.Append("            switch (result) {\n");
+            sb.Append("                case 0: {\n");
+            sb.Append("\n");
+            sb.Append("                    lifted = Result<None, None>.ok(new global::")
+              .Append(worldNs).Append(".None());\n");
+            sb.Append("                    break;\n");
+            sb.Append("                }\n");
+            sb.Append("                case 1: {\n");
+            sb.Append("\n");
+            sb.Append("                    lifted = Result<None, None>.err(new global::")
+              .Append(worldNs).Append(".None());\n");
+            sb.Append("                    break;\n");
+            sb.Append("                }\n");
+            sb.Append("\n");
+            sb.Append("                default: throw new ArgumentException($\"invalid discriminant: {result}\");\n");
+            sb.Append("            }\n");
+            sb.Append("            if (lifted.IsOk) {\n");
+            sb.Append("                var tmp = lifted.AsOk;\n");
+            sb.Append("                return ;\n");
+            sb.Append("            } else {\n");
+            sb.Append("                throw new WitException(lifted.AsErr!, 0);\n");
             sb.Append("            }\n");
         }
 
@@ -754,6 +816,9 @@ namespace Wacs.ComponentModel.CSharpEmit
             // pointer param on the stub instead — the stub's C#
             // return becomes void.
             if (UsesReturnArea(sig)) return "void";
+            // result<_, _> (totally elided) — stub returns i32
+            // discriminant directly, no payload and no return area.
+            if (IsElidedResultType(sig.Result)) return "int";
             var types = StubTypesFor(sig.Result);
             if (types.Length != 1)
                 throw new NotImplementedException(
