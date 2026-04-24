@@ -525,10 +525,15 @@ namespace Wacs.ComponentModel.WIT
                 Expect(WitTokenKind.Semi, "';'");
                 return m;
             }
+            // Two accepted forms for static methods:
+            //   (a) prefix:  `static name: func(...)`  (wit-bindgen-tolerated)
+            //   (b) postfix: `name: static func(...)`  (canonical per WIT spec)
+            // Accept either; observed wit-bindgen 0.30.0 output uses (b).
             var isStatic = false;
             if (AtKeyword("static")) { Consume(); isStatic = true; }
             var name = ConsumeIdent("method name");
             Expect(WitTokenKind.Colon, "':'");
+            if (AtKeyword("static")) { Consume(); isStatic = true; }
             ExpectKeyword("func");
             Expect(WitTokenKind.LParen, "'('");
             var method = new WitResourceMethod

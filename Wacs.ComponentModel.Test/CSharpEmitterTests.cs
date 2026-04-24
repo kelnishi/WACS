@@ -600,6 +600,47 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, emitted.Content);
         }
 
+        // ---- Types: resource constructor + static -------------------------
+
+        private static string FindTypesResource2FixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "types-resource2");
+        }
+
+        [Fact]
+        public void EmitImportInterfaceFile_matches_reference_resource_constructor_static()
+        {
+            // Resource `counter` with:
+            //   * `constructor(initial: u32)` — EntryPoint
+            //     `[constructor]counter`, assigns to this.Handle.
+            //   * `from-bytes: static func(data: u32) -> counter` —
+            //     EntryPoint `[static]counter.from-bytes`, returns
+            //     a fresh Counter constructed from the handle.
+            //   * `get: func() -> u32` and `increment: func()` —
+            //     standard instance methods.
+            //
+            // Exercises: constructor factory shape, static factory
+            // with global:: qualified return, plus the existing
+            // instance method pattern — all in one resource.
+            var fixtureDir = FindTypesResource2FixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "res2.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var emitted = CSharpEmitter.EmitImportInterfaceFile(
+                iface, "res2-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "Res2WorldWorld.wit.imports.local.res2.IEnv.cs"));
+            Assert.Equal(expected, emitted.Content);
+        }
+
         // ---- Interop: primitive-only import Interop file ------------------
 
         private static string FindInteropPrimitivesFixtureDir()

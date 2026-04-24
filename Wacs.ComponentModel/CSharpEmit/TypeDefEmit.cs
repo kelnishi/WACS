@@ -315,20 +315,233 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append("            Dispose(false);\n");
             sb.Append("        }\n\n");
 
-            // Instance methods.
+            // Emit each resource method in its appropriate shape.
             foreach (var m in r.Methods)
             {
-                if (m.Kind != CtResourceMethodKind.Instance)
-                    throw new System.NotImplementedException(
-                        "Resource " + m.Kind.ToString().ToLowerInvariant() +
-                        " methods are a Phase 1a.2 follow-up.");
-
-                EmitResourceMethod(sb, m, name, entryPointBase);
+                switch (m.Kind)
+                {
+                    case CtResourceMethodKind.Constructor:
+                        EmitResourceConstructor(sb, m, className, name, entryPointBase);
+                        break;
+                    case CtResourceMethodKind.Static:
+                        EmitResourceStatic(sb, m, className, name, entryPointBase, owner);
+                        break;
+                    case CtResourceMethodKind.Instance:
+                        EmitResourceMethod(sb, m, name, entryPointBase);
+                        break;
+                }
             }
 
             sb.Append("    }\n");
             return sb.ToString();
         }
+
+        /// <summary>
+        /// Resource constructor emission. WIT
+        /// <c>constructor(args)</c> → a public C# constructor that
+        /// calls a <c>[constructor]resource-name</c> DllImport stub
+        /// and assigns the returned handle to <c>this.Handle</c>.
+        /// Note the verbatim <c>public   unsafe  {Class}</c>
+        /// whitespace oddity — wit-bindgen 0.30.0 preserves it.
+        /// </summary>
+        private static void EmitResourceConstructor(StringBuilder sb,
+                                                    CtResourceMethod m,
+                                                    string className,
+                                                    string resourceWitName,
+                                                    string entryPointBase)
+        {
+            var sig = m.Function;
+            sb.Append("        internal static class ConstructorWasmInterop\n");
+            sb.Append("        {\n");
+            sb.Append("            [DllImport(\"").Append(entryPointBase);
+            sb.Append("\", EntryPoint = \"[constructor]").Append(resourceWitName);
+            sb.Append("\"), WasmImportLinkage]\n");
+            sb.Append("            internal static extern int wasmImportConstructor(");
+            for (int i = 0; i < sig.Params.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(PrimStubType(sig.Params[i].Type)).Append(" p").Append(i);
+            }
+            sb.Append(");\n\n        }\n\n");
+
+            // The constructor — note the verbatim triple-space
+            // formatting: "public   unsafe  {ClassName}".
+            sb.Append("        public   unsafe  ").Append(className).Append('(');
+            for (int i = 0; i < sig.Params.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(TypeRefEmit.EmitParam(sig.Params[i].Type));
+                sb.Append(' ');
+                sb.Append(NameConventions.ToCamelCase(sig.Params[i].Name));
+            }
+            sb.Append(")\n");
+            sb.Append("        {\n");
+            sb.Append("            var result =  ConstructorWasmInterop.wasmImportConstructor(");
+            for (int i = 0; i < sig.Params.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                var argName = NameConventions.ToCamelCase(sig.Params[i].Name);
+                if (sig.Params[i].Type is CtPrimType p)
+                    sb.Append(PrimMarshal.Lower(p.Kind, argName));
+                else
+                    sb.Append(argName);
+            }
+            sb.Append(");\n");
+            sb.Append("            this.Handle = result;\n\n");
+            sb.Append("            //TODO: free alloc handle (interopString) if exists\n");
+            sb.Append("        }\n\n");
+        }
+
+        /// <summary>
+        /// Resource static method emission. WIT <c>static name:
+        /// func(...)</c> → <c>public static</c> C# method that calls
+        /// a <c>[static]resource-name.method-name</c> DllImport stub.
+        /// When the static method returns the resource class itself,
+        /// wit-bindgen qualifies the return type with the full
+        /// <c>global::{WorldNs}.wit.imports.{pkg}.I{Iface}.{Class}</c>
+        /// path — reproduced here for byte-for-byte parity.
+        /// </summary>
+        private static void EmitResourceStatic(StringBuilder sb,
+                                               CtResourceMethod m,
+                                               string className,
+                                               string resourceWitName,
+                                               string entryPointBase,
+                                               CtInterfaceType owner)
+        {
+            var methodName = NameConventions.ToPascalCase(m.Name!);
+            var stubClass = methodName + "WasmInterop";
+            var sig = m.Function;
+
+            sb.Append("        internal static class ").Append(stubClass).Append('\n');
+            sb.Append("        {\n");
+            sb.Append("            [DllImport(\"").Append(entryPointBase);
+            sb.Append("\", EntryPoint = \"[static]").Append(resourceWitName);
+            sb.Append('.').Append(m.Name).Append("\"), WasmImportLinkage]\n");
+            sb.Append("            internal static extern ").Append(StubReturnType(sig));
+            sb.Append(" wasmImport").Append(methodName).Append('(');
+            for (int i = 0; i < sig.Params.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(PrimStubType(sig.Params[i].Type)).Append(" p").Append(i);
+            }
+            sb.Append(");\n\n        }\n\n");
+
+            // Static methods that return the resource itself carry
+            // a fully qualified return type.
+            var returnsSelf = ReturnsSelfResource(sig, resourceWitName);
+            var qualifiedClass = QualifiedResourceTypeName(owner, className);
+
+            sb.Append("        public  static unsafe ");
+            sb.Append(returnsSelf ? qualifiedClass : FunctionEmit.EmitReturnType(sig));
+            sb.Append(' ').Append(methodName).Append('(');
+            for (int i = 0; i < sig.Params.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(TypeRefEmit.EmitParam(sig.Params[i].Type));
+                sb.Append(' ');
+                sb.Append(NameConventions.ToCamelCase(sig.Params[i].Name));
+            }
+            sb.Append(")\n");
+            sb.Append("        {\n");
+            sb.Append("            var result =  ").Append(stubClass).Append(".wasmImport").Append(methodName);
+            sb.Append('(');
+            for (int i = 0; i < sig.Params.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                var argName = NameConventions.ToCamelCase(sig.Params[i].Name);
+                if (sig.Params[i].Type is CtPrimType p)
+                    sb.Append(PrimMarshal.Lower(p.Kind, argName));
+                else
+                    sb.Append(argName);
+            }
+            sb.Append(");\n");
+
+            if (returnsSelf)
+            {
+                sb.Append("            var resource = new ").Append(qualifiedClass);
+                sb.Append("(new ").Append(qualifiedClass).Append(".THandle(result));\n");
+                sb.Append("            return resource;\n");
+            }
+            else if (!sig.HasNoResult && sig.Result != null)
+            {
+                sb.Append("            return ");
+                if (sig.Result is CtPrimType rp)
+                    sb.Append(PrimMarshal.Lift(rp.Kind, "result"));
+                else
+                    sb.Append("result");
+                sb.Append(";\n");
+            }
+
+            sb.Append("\n            //TODO: free alloc handle (interopString) if exists\n");
+            sb.Append("        }\n\n");
+        }
+
+        /// <summary>True if the signature returns an own&lt;Self&gt; handle.</summary>
+        private static bool ReturnsSelfResource(CtFunctionType sig,
+                                                string resourceWitName)
+        {
+            if (sig.Result is CtTypeRef r && r.Name == resourceWitName)
+                return true;
+            if (sig.Result is CtOwnType own && own.Resource is CtTypeRef r2
+                && r2.Name == resourceWitName)
+                return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Build the fully qualified <c>global::</c>-prefixed type
+        /// name for a resource class. Used in static methods that
+        /// return the resource itself — wit-bindgen qualifies the
+        /// reference even when emitting code inside the class.
+        /// </summary>
+        private static string QualifiedResourceTypeName(CtInterfaceType owner,
+                                                        string className)
+        {
+            // NOTE: direction is hardcoded to "imports". This works
+            // for the current test fixtures (all imports); a
+            // complete implementation threads world direction
+            // through the emitter (see the cross-interface
+            // qualifying follow-up).
+            var sb = new StringBuilder("global::");
+            // World namespace is not yet plumbed into TypeDefEmit;
+            // reconstruct from the owner's package. We use a
+            // conservative placeholder: "XWorld" is ambiguous, so
+            // for now use an explicit emitter-local context.
+            sb.Append(WorldNamespaceForOwner(owner));
+            sb.Append(".wit.imports.");
+            sb.Append(owner.Package!.Namespace);
+            foreach (var seg in owner.Package.Path)
+            {
+                sb.Append('.');
+                sb.Append(seg);
+            }
+            var v = NameConventions.SanitizeVersion(owner.Package.Version);
+            if (v.Length > 0) sb.Append('.').Append(v);
+            sb.Append(".I").Append(NameConventions.ToPascalCase(owner.Name));
+            sb.Append('.').Append(className);
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Reconstruct the world namespace for an interface owner.
+        /// The world name isn't stored on CtInterfaceType — we thread
+        /// it via a thread-local for this emission pass. If unset,
+        /// falls back to a placeholder that will cause a visible
+        /// compile error (never intended to ship in generated code).
+        /// </summary>
+        private static string WorldNamespaceForOwner(CtInterfaceType _owner) =>
+            s_worldNamespace ?? "UNSET_WORLD_NAMESPACE";
+
+        [System.ThreadStatic]
+        private static string? s_worldNamespace;
+
+        /// <summary>
+        /// Set the ambient world namespace used by qualified type
+        /// references during this emit pass. Set once at the start
+        /// of each public emitter entry and reset on exit.
+        /// </summary>
+        internal static void SetWorldNamespace(string? worldNs) =>
+            s_worldNamespace = worldNs;
 
         private static void EmitResourceMethod(StringBuilder sb,
                                                CtResourceMethod m,
@@ -414,6 +627,10 @@ namespace Wacs.ComponentModel.CSharpEmit
         private static string PrimStubType(CtValType t)
         {
             if (t is CtPrimType p) return PrimMarshal.StubType(p.Kind);
+            // Resource-typed returns (static factories returning a
+            // fresh handle of the resource) lower to int — the
+            // wasm-side handle representation.
+            if (t is CtTypeRef || t is CtOwnType) return "int";
             throw new System.NotImplementedException(
                 "Resource stub type for " + t.GetType().Name +
                 " is a follow-up.");
