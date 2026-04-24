@@ -982,6 +982,80 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Interop: result<prim, prim> marshaling ----------------------
+
+        private static string FindInteropResultPrimsFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-result-prims");
+        }
+
+        /// <summary>
+        /// <c>result&lt;prim, prim&gt;</c> return marshaling.
+        /// Wrapper unwraps to the Ok type on success and throws
+        /// <c>WitException</c> on failure. Return-area body builds
+        /// a <c>Result&lt;Ok, Err&gt;</c> via <c>.ok(…)</c> /
+        /// <c>.err(…)</c> factories in a discriminant switch,
+        /// then branches on <c>IsOk</c>.
+        /// </summary>
+        [Fact]
+        public void InteropEmit_result_prims_matches_reference()
+        {
+            var fixtureDir = FindInteropResultPrimsFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "res.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "res-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "ResWorldWorld.wit.imports.local.res.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
+        // ---- Interop: result with elided sides ---------------------------
+
+        private static string FindInteropResultElidedFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-result-elided");
+        }
+
+        /// <summary>
+        /// <c>result&lt;_, prim&gt;</c> (err-only) and
+        /// <c>result&lt;prim, _&gt;</c> (ok-only) — the None side
+        /// emits <c>new global::{WorldNs}.None()</c> inside the
+        /// corresponding <c>.ok(…)</c> / <c>.err(…)</c> arm; the
+        /// other arm lifts its payload normally. When Ok is None
+        /// the wrapper returns <c>void</c>, emitting
+        /// <c>return ;</c> (the wit-bindgen space-before-semi
+        /// quirk) inside the <c>IsOk</c> branch.
+        /// </summary>
+        [Fact]
+        public void InteropEmit_result_elided_matches_reference()
+        {
+            var fixtureDir = FindInteropResultElidedFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "re.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "re-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "ReWorldWorld.wit.imports.local.re.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Interop: tuple<prim, …> marshaling ---------------------------
 
         private static string FindInteropTuplePrimsFixtureDir()

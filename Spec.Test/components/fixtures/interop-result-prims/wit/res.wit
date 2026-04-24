@@ -1,0 +1,5 @@
+package local:res;
+interface env {
+    divide: func(n: u32, d: u32) -> result<u32, u32>;
+}
+world res-world { import env; }
