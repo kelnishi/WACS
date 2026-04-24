@@ -610,6 +610,42 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, emitted.Content);
         }
 
+        // ---- Resource methods with aggregate returns ---------------------
+
+        private static string FindTypesResourceStringFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "types-resource-string");
+        }
+
+        /// <summary>
+        /// Resource method with a string return. Uses the return-area
+        /// buffer pattern (same as import free functions), but with
+        /// <c>handle</c> declared first and passed as the first stub
+        /// arg. Stub signature: void return + trailing <c>nint</c>
+        /// ret-area pointer.
+        /// </summary>
+        [Fact]
+        public void Resource_method_string_return_uses_return_area()
+        {
+            var fixtureDir = FindTypesResourceStringFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "rs.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var emitted = CSharpEmitter.EmitImportInterfaceFile(
+                iface, "rs-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "RsWorldWorld.wit.imports.local.rs.IEnv.cs"));
+            Assert.Equal(expected, emitted.Content);
+        }
+
         // ---- Types: resource ----------------------------------------------
 
         private static string FindTypesResourceFixtureDir()
