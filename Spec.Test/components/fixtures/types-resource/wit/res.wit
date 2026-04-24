@@ -1,0 +1,13 @@
+package local:res;
+
+interface env {
+    resource clock {
+        tick: func() -> u64;
+        set-offset: func(offset: s32);
+        is-running: func() -> bool;
+    }
+}
+
+world res-world {
+    import env;
+}
