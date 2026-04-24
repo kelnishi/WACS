@@ -43,6 +43,9 @@ namespace Wacs.ComponentModel.Runtime.Parser
         /// section's element count.</summary>
         public bool AtEnd => _pos >= _bytes.Length;
 
+        /// <summary>Bytes still available to read.</summary>
+        public int Remaining => _bytes.Length - _pos;
+
         /// <summary>Read one byte, advancing the position.</summary>
         public byte ReadByte()
         {
