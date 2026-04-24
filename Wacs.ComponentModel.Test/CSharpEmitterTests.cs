@@ -564,6 +564,42 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, emitted.Content);
         }
 
+        // ---- Types: resource ----------------------------------------------
+
+        private static string FindTypesResourceFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "types-resource");
+        }
+
+        [Fact]
+        public void EmitImportInterfaceFile_matches_reference_resource_primitives()
+        {
+            // Resource `clock` with three primitive-only methods:
+            // tick (→ u64), set-offset (s32 →), is-running (→ bool).
+            // Exercises IDisposable pattern, resource-drop DllImport,
+            // per-method stub + wrapper with primitive lift/lower.
+            var fixtureDir = FindTypesResourceFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "res.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var emitted = CSharpEmitter.EmitImportInterfaceFile(
+                iface, "res-world");
+
+            Assert.Equal(
+                "ResWorldWorld.wit.imports.local.res.IEnv.cs",
+                emitted.FileName);
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "ResWorldWorld.wit.imports.local.res.IEnv.cs"));
+            Assert.Equal(expected, emitted.Content);
+        }
+
         // ---- Interop: primitive-only import Interop file ------------------
 
         private static string FindInteropPrimitivesFixtureDir()

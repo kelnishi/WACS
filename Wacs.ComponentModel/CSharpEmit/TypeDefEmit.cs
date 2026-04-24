@@ -43,6 +43,19 @@ namespace Wacs.ComponentModel.CSharpEmit
             };
         }
 
+        /// <summary>
+        /// Overload that takes the owning interface so resource
+        /// emission can derive the DllImport entry-point base. Use
+        /// this from the interface-file emitter; the ambient
+        /// <see cref="Emit(CtNamedType)"/> handles everything else.
+        /// </summary>
+        public static string Emit(CtNamedType named, CtInterfaceType owner)
+        {
+            if (named.Type is CtResourceType r)
+                return EmitResource(named.Name, r, owner);
+            return Emit(named);
+        }
+
         // ---- enum ----------------------------------------------------------
 
         /// <summary>
@@ -248,6 +261,186 @@ namespace Wacs.ComponentModel.CSharpEmit
             }
 
             sb.Append("    }\n");
+            return sb.ToString();
+        }
+
+        // ---- resource -----------------------------------------------------
+
+        /// <summary>
+        /// WIT <c>resource</c> → C# class : IDisposable with a
+        /// <c>Handle</c> property, <c>THandle</c> record struct,
+        /// resource-drop DllImport, Dispose/Finalizer pattern, and
+        /// one internal stub class + public wrapper method per
+        /// resource method.
+        ///
+        /// <para>Matches wit-bindgen-csharp 0.30.0's output for
+        /// instance methods with primitive params/return. Static
+        /// and constructor methods, plus aggregate-typed signatures,
+        /// are follow-ups.</para>
+        /// </summary>
+        private static string EmitResource(string name, CtResourceType r,
+                                           CtInterfaceType owner)
+        {
+            var className = NameConventions.ToPascalCase(name);
+            var entryPointBase = BuildEntryPointBase(owner);
+            var sb = new StringBuilder();
+
+            sb.Append("    public class ").Append(className).Append(": IDisposable {\n");
+            sb.Append("        internal int Handle { get; set; }\n\n");
+
+            sb.Append("        public readonly record struct THandle(int Handle);\n\n");
+
+            sb.Append("        public ").Append(className).Append("(THandle handle) {\n");
+            sb.Append("            Handle = handle.Handle;\n");
+            sb.Append("        }\n\n");
+
+            sb.Append("        public void Dispose() {\n");
+            sb.Append("            Dispose(true);\n");
+            sb.Append("            GC.SuppressFinalize(this);\n");
+            sb.Append("        }\n\n");
+
+            sb.Append("        [DllImport(\"").Append(entryPointBase);
+            sb.Append("\", EntryPoint = \"[resource-drop]").Append(name);
+            sb.Append("\"), WasmImportLinkage]\n");
+            sb.Append("        private static extern void wasmImportResourceDrop(int p0);\n\n");
+
+            sb.Append("        protected virtual void Dispose(bool disposing) {\n");
+            sb.Append("            if (Handle != 0) {\n");
+            sb.Append("                wasmImportResourceDrop(Handle);\n");
+            sb.Append("                Handle = 0;\n");
+            sb.Append("            }\n");
+            sb.Append("        }\n\n");
+
+            sb.Append("        ~").Append(className).Append("() {\n");
+            sb.Append("            Dispose(false);\n");
+            sb.Append("        }\n\n");
+
+            // Instance methods.
+            foreach (var m in r.Methods)
+            {
+                if (m.Kind != CtResourceMethodKind.Instance)
+                    throw new System.NotImplementedException(
+                        "Resource " + m.Kind.ToString().ToLowerInvariant() +
+                        " methods are a Phase 1a.2 follow-up.");
+
+                EmitResourceMethod(sb, m, name, entryPointBase);
+            }
+
+            sb.Append("    }\n");
+            return sb.ToString();
+        }
+
+        private static void EmitResourceMethod(StringBuilder sb,
+                                               CtResourceMethod m,
+                                               string resourceWitName,
+                                               string entryPointBase)
+        {
+            var methodName = NameConventions.ToPascalCase(m.Name!);
+            var stubClass = methodName + "WasmInterop";
+            var sig = m.Function;
+
+            // Stub class
+            sb.Append("        internal static class ").Append(stubClass).Append('\n');
+            sb.Append("        {\n");
+            sb.Append("            [DllImport(\"").Append(entryPointBase);
+            sb.Append("\", EntryPoint = \"[method]").Append(resourceWitName);
+            sb.Append('.').Append(m.Name).Append("\"), WasmImportLinkage]\n");
+
+            sb.Append("            internal static extern ");
+            sb.Append(StubReturnType(sig));
+            sb.Append(" wasmImport").Append(methodName).Append("(int p0");
+            for (int i = 0; i < sig.Params.Count; i++)
+            {
+                sb.Append(", ");
+                sb.Append(PrimStubType(sig.Params[i].Type));
+                sb.Append(" p").Append(i + 1);
+            }
+            sb.Append(");\n");
+            sb.Append("\n        }\n\n");
+
+            // Wrapper method. `public   unsafe` has the double
+            // space verbatim (wit-bindgen quirk preserved).
+            sb.Append("        public   unsafe ");
+            sb.Append(FunctionEmit.EmitReturnType(sig));
+            sb.Append(' ').Append(methodName).Append('(');
+            for (int i = 0; i < sig.Params.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(TypeRefEmit.EmitParam(sig.Params[i].Type));
+                sb.Append(' ');
+                sb.Append(NameConventions.ToCamelCase(sig.Params[i].Name));
+            }
+            sb.Append(")\n");
+            sb.Append("        {\n");
+            sb.Append("            var handle = this.Handle;\n");
+
+            var retType = FunctionEmit.EmitReturnType(sig);
+            var isVoid = retType == "void";
+
+            // Stub call — for resource methods, wit-bindgen uses
+            // `var result =  Stub.wasmImportX(handle, args)` with
+            // the same double-space quirk for non-void, and a plain
+            // `Stub.wasmImportX(handle, args);` for void.
+            sb.Append("            ");
+            if (!isVoid) sb.Append("var result =  ");
+            sb.Append(stubClass).Append(".wasmImport").Append(methodName);
+            sb.Append("(handle");
+            for (int i = 0; i < sig.Params.Count; i++)
+            {
+                sb.Append(", ");
+                var argName = NameConventions.ToCamelCase(sig.Params[i].Name);
+                if (sig.Params[i].Type is CtPrimType p)
+                    sb.Append(PrimMarshal.Lower(p.Kind, argName));
+                else
+                    sb.Append(argName);
+            }
+            sb.Append(");\n");
+
+            if (!isVoid)
+            {
+                sb.Append("            return ");
+                if (sig.Result is CtPrimType rp)
+                    sb.Append(PrimMarshal.Lift(rp.Kind, "result"));
+                else
+                    sb.Append("result");
+                sb.Append(";\n");
+            }
+
+            sb.Append("\n");
+            sb.Append("            //TODO: free alloc handle (interopString) if exists\n");
+            sb.Append("        }\n\n");
+        }
+
+        private static string PrimStubType(CtValType t)
+        {
+            if (t is CtPrimType p) return PrimMarshal.StubType(p.Kind);
+            throw new System.NotImplementedException(
+                "Resource stub type for " + t.GetType().Name +
+                " is a follow-up.");
+        }
+
+        private static string StubReturnType(CtFunctionType sig)
+        {
+            if (sig.HasNoResult) return "void";
+            if (sig.Result == null) return "void";
+            return PrimStubType(sig.Result);
+        }
+
+        private static string BuildEntryPointBase(CtInterfaceType iface)
+        {
+            // `{ns}:{path}/{iface-name}[@ver]` — same pattern as
+            // InteropEmit's private helper. Duplicate rather than
+            // thread-internal-shared through the API for now.
+            var sb = new StringBuilder();
+            sb.Append(iface.Package!.Namespace);
+            foreach (var seg in iface.Package.Path)
+            {
+                sb.Append(':');
+                sb.Append(seg);
+            }
+            sb.Append('/').Append(iface.Name);
+            if (iface.Package.Version != null)
+                sb.Append('@').Append(iface.Package.Version);
             return sb.ToString();
         }
 

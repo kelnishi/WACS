@@ -349,12 +349,25 @@ using System.Diagnostics.CodeAnalysis;
                     // scope (no type defs, only free functions with
                     // primitive/aggregate signatures). Otherwise
                     // skip the file and proceed to the Interop shell.
-                    if (iref.Target != null && isExport
-                        && IsInterfaceEmitable(iref.Target))
+                    if (iref.Target != null && IsInterfaceEmitable(iref.Target))
                     {
-                        result.Add(EmitExportInterfaceFile(iref.Target,
-                                                           world.Name,
-                                                           options));
+                        if (isExport)
+                        {
+                            result.Add(EmitExportInterfaceFile(iref.Target,
+                                                               world.Name,
+                                                               options));
+                        }
+                        else if (iref.Target.Types.Count > 0)
+                        {
+                            // Import-side interface file is only
+                            // emitted when there's something to put
+                            // in it — i.e., the interface has type
+                            // defs. Pure-free-function imports have
+                            // no I{Name}.cs, only the Interop file.
+                            result.Add(EmitImportInterfaceFile(iref.Target,
+                                                               world.Name,
+                                                               options));
+                        }
                     }
 
                     // Interop file:
@@ -501,6 +514,18 @@ using System.Diagnostics.CodeAnalysis;
                         if (c.Payload != null && !IsTypeEmitable(c.Payload))
                             return false;
                     return true;
+                case CtResourceType res:
+                    foreach (var m in res.Methods)
+                    {
+                        if (m.Kind != CtResourceMethodKind.Instance) return false;
+                        if (m.Function.NamedResults != null) return false;
+                        foreach (var p in m.Function.Params)
+                            if (!(p.Type is CtPrimType)) return false;
+                        if (m.Function.Result != null
+                            && !(m.Function.Result is CtPrimType))
+                            return false;
+                    }
+                    return true;
                 default: return false;
             }
         }
@@ -597,6 +622,50 @@ using System.Diagnostics.CodeAnalysis;
         }
 
         // ---- Per-interface file emission ------------------------------------
+
+        /// <summary>
+        /// Emit an import-side per-interface file. Contains the
+        /// interface's type definitions (enums, flags, records,
+        /// variants, resources) but no <c>static abstract</c>
+        /// function signatures — for imports, free functions live
+        /// in the Interop file. Matches wit-bindgen-csharp's
+        /// IPoll.cs / IError.cs shape for the types-only case.
+        /// </summary>
+        public static EmittedSource EmitImportInterfaceFile(
+            CtInterfaceType iface,
+            string worldNameKebab,
+            EmitOptions? options = null)
+        {
+            options ??= new EmitOptions();
+            if (iface.Package == null)
+                throw new System.ArgumentException(
+                    "Import interface emission requires a packaged interface.",
+                    nameof(iface));
+
+            var worldNs = NameConventions.WorldNamespaceName(worldNameKebab);
+            var ifaceNs = NameConventions.InterfaceNamespace(
+                worldNameKebab, isExport: false, iface.Package);
+            var ifaceClassName = "I" + NameConventions.ToPascalCase(iface.Name);
+
+            var sb = new StringBuilder();
+            sb.Append(Header);
+            sb.Append("namespace ").Append(ifaceNs).Append(";\n\n");
+            sb.Append("public interface ").Append(ifaceClassName).Append(" {\n");
+
+            foreach (var nt in iface.Types)
+            {
+                sb.Append('\n');
+                sb.Append(TypeDefEmit.Emit(nt, iface));
+            }
+
+            sb.Append("\n");  // blank line before closing — matches reference.
+            sb.Append("}\n");
+
+            var fileName = worldNs + ".wit.imports."
+                + JoinPackagePath(iface.Package) + "."
+                + ifaceClassName + ".cs";
+            return new EmittedSource(fileName, sb.ToString());
+        }
 
         /// <summary>
         /// Emit a per-interface file (the <c>I{Name}.cs</c> shape) for
