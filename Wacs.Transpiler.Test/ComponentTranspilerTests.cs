@@ -590,6 +590,68 @@ namespace Wacs.Transpiler.Test
             Assert.Equal("East", value!.ToString());
         }
 
+        private static string FindFlagsComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "flags-component", "wasm",
+                                "fl.component.wasm");
+        }
+
+        private static string FindFlagsComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "flags-component",
+                                "fl.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_named_flags_return_via_decoded_wit()
+        {
+            // flags-component declares `flags permissions { read,
+            // write, execute }` and exports `default-perms() ->
+            // permissions`. The transpiler emits a public C#
+            // `Permissions` enum with `[Flags]` and bit-power-
+            // of-two literals; `ComponentExports.DefaultPerms()`
+            // returns the bitmask `Read | Execute` (= 5).
+            using var fs = File.OpenRead(FindFlagsComponentPath());
+            var witBytes = File.ReadAllBytes(FindFlagsComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var perms = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Permissions");
+            Assert.NotNull(perms);
+            Assert.True(perms!.IsEnum);
+            Assert.Equal(typeof(byte), perms.GetEnumUnderlyingType());
+            Assert.NotNull(perms.GetCustomAttribute(
+                typeof(System.FlagsAttribute)));
+
+            var values = perms.GetEnumValues();
+            Assert.Equal((byte)1,
+                System.Convert.ToByte(values.GetValue(0)));
+            Assert.Equal((byte)2,
+                System.Convert.ToByte(values.GetValue(1)));
+            Assert.Equal((byte)4,
+                System.Convert.ToByte(values.GetValue(2)));
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var defaultPerms = componentExports!.GetMethod("DefaultPerms");
+            Assert.NotNull(defaultPerms);
+            Assert.Equal(perms, defaultPerms!.ReturnType);
+
+            var value = defaultPerms.Invoke(null, null);
+            Assert.Equal((byte)5, System.Convert.ToByte(value));
+            // [Flags] formatting: "Read, Execute".
+            Assert.Equal("Read, Execute", value!.ToString());
+        }
+
         private static string FindOptionStringNoneComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());

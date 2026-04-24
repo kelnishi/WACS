@@ -1,0 +1,9 @@
+package local:fl;
+world fl {
+    flags permissions {
+        read,
+        write,
+        execute,
+    }
+    export default-perms: func() -> permissions;
+}
