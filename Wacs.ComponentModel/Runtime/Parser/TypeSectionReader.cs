@@ -180,6 +180,47 @@ namespace Wacs.ComponentModel.Runtime.Parser
     }
 
     /// <summary>
+    /// <c>own&lt;R&gt;</c> handle type (tag 0x69). At the wire
+    /// level, an own handle is a single i32 — the index into the
+    /// component's per-resource handle table. Surfaces here so
+    /// IsEmittable can recognize own-typed returns and the
+    /// emitter can wrap the returned i32 in a generated C#
+    /// resource class.
+    /// </summary>
+    public sealed class ComponentOwnType : DefTypeEntry
+    {
+        public uint TypeIdx { get; }
+        public ComponentOwnType(uint typeIdx) { TypeIdx = typeIdx; }
+    }
+
+    /// <summary>
+    /// <c>borrow&lt;R&gt;</c> handle type (tag 0x68). Same wire
+    /// shape as <see cref="ComponentOwnType"/> but call-scoped —
+    /// the binding surface invalidates the handle on return so
+    /// the caller can't outlive the call.
+    /// </summary>
+    public sealed class ComponentBorrowType : DefTypeEntry
+    {
+        public uint TypeIdx { get; }
+        public ComponentBorrowType(uint typeIdx) { TypeIdx = typeIdx; }
+    }
+
+    /// <summary>
+    /// Fresh resource type definition (tag 0x3F). Carries no
+    /// structure of its own — the type is opaque, identified
+    /// solely by its slot. Optional destructor reference is
+    /// preserved for fidelity but unused at the IL emit level
+    /// (Dispose() routes through the canon resource.drop
+    /// intrinsic).
+    /// </summary>
+    public sealed class ComponentResourceType : DefTypeEntry
+    {
+        public uint? DtorFuncIdx { get; }
+        public ComponentResourceType(uint? dtorFuncIdx)
+        { DtorFuncIdx = dtorFuncIdx; }
+    }
+
+    /// <summary>
     /// <c>variant { case_name [(T)] [refines other], … }</c>
     /// type (tag 0x71) — a tagged sum where each case carries an
     /// optional payload type. Wire layout: a discriminant byte
@@ -278,6 +319,9 @@ namespace Wacs.ComponentModel.Runtime.Parser
         public const byte FlagsTypeTag = 0x6E;
         public const byte VariantTypeTag = 0x71;
         public const byte RecordTypeTag = 0x72;
+        public const byte BorrowTypeTag = 0x68;
+        public const byte OwnTypeTag = 0x69;
+        public const byte ResourceTypeTag = 0x3F;
 
         public static List<DefTypeEntry> Decode(byte[] payload)
         {
@@ -312,6 +356,22 @@ namespace Wacs.ComponentModel.Runtime.Parser
                     return DecodeRecordType(r);
                 case VariantTypeTag:
                     return DecodeVariantType(r);
+                case OwnTypeTag:
+                    return new ComponentOwnType(r.ReadVarU32());
+                case BorrowTypeTag:
+                    return new ComponentBorrowType(r.ReadVarU32());
+                case ResourceTypeTag:
+                {
+                    // Optional dtor presence byte: 0x00 absent,
+                    // 0x01 present + funcidx.
+                    var hasDtor = r.ReadByte();
+                    uint? dtor = null;
+                    if (hasDtor == 0x01) dtor = r.ReadVarU32();
+                    else if (hasDtor != 0x00)
+                        throw new FormatException(
+                            $"Unexpected resource dtor presence byte 0x{hasDtor:X2}.");
+                    return new ComponentResourceType(dtor);
+                }
                 default:
                     // Unknown structural tag — capture the rest
                     // of the payload so the type slot occupies

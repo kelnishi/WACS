@@ -719,18 +719,32 @@ namespace Wacs.ComponentModel.WIT
                     case InnerImport ii when ii.SortByte == SortType:
                     {
                         var slot = (uint)typeSpace.Count;
-                        typeSpace.Add(null);
-                        if (ii.TypeIdx != uint.MaxValue)
+                        if (ii.TypeIdx == uint.MaxValue)
+                        {
+                            // SubResource bound — fresh resource
+                            // type whose body is the slot itself.
+                            typeSpace.Add(new NestedResource());
+                        }
+                        else
+                        {
+                            typeSpace.Add(null);
                             typeAliasTo[(int)slot] = ii.TypeIdx;
+                        }
                         typeNames[slot] = ii.Name;
                         break;
                     }
                     case InnerExport ie when ie.SortByte == SortType:
                     {
                         var slot = (uint)typeSpace.Count;
-                        typeSpace.Add(null);
-                        if (ie.TypeIdx != uint.MaxValue)
+                        if (ie.TypeIdx == uint.MaxValue)
+                        {
+                            typeSpace.Add(new NestedResource());
+                        }
+                        else
+                        {
+                            typeSpace.Add(null);
                             typeAliasTo[(int)slot] = ie.TypeIdx;
+                        }
                         typeNames[slot] = ie.Name;
                         break;
                     }

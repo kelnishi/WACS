@@ -770,6 +770,64 @@ namespace Wacs.Transpiler.Test
             Assert.Equal(42u, foundField.GetValue(instance));
         }
 
+        private static string FindResourceComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "resource-component", "wasm",
+                                "rsrc.component.wasm");
+        }
+
+        private static string FindResourceComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "resource-component",
+                                "rsrc.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_named_resource_class_via_decoded_wit()
+        {
+            // resource-component declares a `counter` resource at
+            // world level and exports `make: func() -> own<counter>`.
+            // The transpiler emits a public C# `Counter` class
+            // (sealed, holding the wasm handle as a public
+            // readonly int) and types ComponentExports.Make() to
+            // return `Counter`. Core returns handle = 1; the
+            // emitted IL wraps it in `new Counter(1)`.
+            using var fs = File.OpenRead(FindResourceComponentPath());
+            var witBytes = File.ReadAllBytes(FindResourceComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var counter = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Counter");
+            Assert.NotNull(counter);
+            Assert.True(counter!.IsClass);
+            Assert.True(counter.IsSealed);
+
+            var handleField = counter.GetField("Handle");
+            Assert.NotNull(handleField);
+            Assert.Equal(typeof(int), handleField!.FieldType);
+
+            var ctor = counter.GetConstructor(new[] { typeof(int) });
+            Assert.NotNull(ctor);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var make = componentExports!.GetMethod("Make");
+            Assert.NotNull(make);
+            Assert.Equal(counter, make!.ReturnType);
+
+            var instance = make.Invoke(null, null)!;
+            Assert.Equal(1, handleField.GetValue(instance));
+        }
+
         private static string FindOptionStringNoneComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
