@@ -92,6 +92,47 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Invoke_lifts_list_of_u8_via_ListMarshal()
+        {
+            // list-return-component exports `bytes() -> list<u8>`.
+            // Same retArea + ListMarshal.LiftPrim<byte> path the
+            // transpiler's IL takes, just dispatched via runtime
+            // reflection (MakeGenericMethod) instead of an
+            // emitted Newobj/Callvirt sequence.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "list-return-component", "l.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            var value = (byte[])ci.Invoke("bytes")!;
+            Assert.Equal(new byte[] { 1, 2, 3, 4, 5 }, value);
+        }
+
+        [Fact]
+        public void Invoke_lifts_option_u32_some_branch()
+        {
+            // option-return-component's core writes
+            // `[disc=1, padding, payload=42]` to the retArea, so
+            // the lift takes the Some branch and returns
+            // (uint?)42. Mirrors
+            // TranspileSingleModule_lifts_option_u32_some_return.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "option-return-component", "o.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal((uint?)42u, ci.Invoke("find"));
+        }
+
+        [Fact]
+        public void Invoke_lifts_option_u32_none_branch()
+        {
+            // option-none-component: disc=0, payload undefined.
+            // The lift returns Nullable<uint>.HasValue=false
+            // without touching the payload bytes.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "option-none-component", "n.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Null(ci.Invoke("missing"));
+        }
+
+        [Fact]
         public void Invoke_dual_engine_equivalence_with_transpiler()
         {
             // The cheapest cross-check: run the same fixture
