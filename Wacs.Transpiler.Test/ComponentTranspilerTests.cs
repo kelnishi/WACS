@@ -74,6 +74,32 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
+        public void TranspileSingleModule_component_exports_class_exposes_typed_greet()
+        {
+            // Full stack: parse + decode exports/canons/types,
+            // emit the ComponentExports class, instantiate
+            // through it, get `uint` (not `int`) as the public
+            // return type. This is the component-level surface
+            // users actually consume.
+            using var fs = File.OpenRead(FindTinyComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var greet = componentExports!.GetMethod("Greet",
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.Static);
+            Assert.NotNull(greet);
+            Assert.Equal(typeof(uint), greet!.ReturnType);
+            Assert.Empty(greet.GetParameters());
+
+            var value = (uint)greet.Invoke(null, null)!;
+            Assert.Equal(42u, value);
+        }
+
+        [Fact]
         public void TranspileSingleModule_execute_greet_returns_42()
         {
             // End-to-end execution test: transpile the component,
