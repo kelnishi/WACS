@@ -84,6 +84,46 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void CoreModuleBinaries_feed_directly_into_Wacs_Core_parser()
+        {
+            // The component's embedded core module section's
+            // payload IS a complete core wasm binary — can be
+            // parsed by Wacs.Core's Module.ParseWasm without
+            // further adaptation. This is the gateway the
+            // transpiler uses: one component → one-or-more core
+            // modules → per-module transpilation.
+            var path = FindTinyComponentPath();
+            using var stream = File.OpenRead(path);
+            var component = ComponentBinaryParser.Parse(stream);
+
+            var coreBytes = component.CoreModuleBinaries.Single();
+            using var coreStream = new MemoryStream(coreBytes);
+            var coreModule = Wacs.Core.BinaryModuleParser.ParseWasm(coreStream);
+
+            // tiny.wat defines one export: `greet`. Post-parse the
+            // core module should expose that export among its
+            // function list (after module finalization).
+            Assert.NotNull(coreModule);
+            Assert.NotEmpty(coreModule.Exports);
+            Assert.Contains(coreModule.Exports, e => e.Name == "greet");
+        }
+
+        [Fact]
+        public void CustomSections_decode_producers_metadata()
+        {
+            // tiny.component.wasm carries a `producers` custom
+            // section written by wasm-tools. Verify we can read
+            // it back as name + raw bytes.
+            var path = FindTinyComponentPath();
+            using var stream = File.OpenRead(path);
+            var component = ComponentBinaryParser.Parse(stream);
+
+            var customs = component.CustomSections.ToArray();
+            Assert.NotEmpty(customs);
+            Assert.Contains(customs, c => c.Name == "producers");
+        }
+
+        [Fact]
         public void Parse_rejects_truncated_header()
         {
             // Valid magic + version but layer=0 → core module,

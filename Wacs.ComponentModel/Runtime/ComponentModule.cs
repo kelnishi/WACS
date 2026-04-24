@@ -54,5 +54,37 @@ namespace Wacs.ComponentModel.Runtime
         /// one.</summary>
         public int CoreModuleCount =>
             SectionsOf(ComponentSectionId.CoreModule).Count();
+
+        /// <summary>
+        /// Raw bytes of each embedded core-module section in
+        /// file order. Each entry is a complete core wasm binary
+        /// (starts with <c>\0asm</c> magic + version 1) that can
+        /// be fed directly to <c>Wacs.Core.Modules.Module.ParseWasm</c>
+        /// for transpilation / interpretation.
+        /// </summary>
+        public IEnumerable<byte[]> CoreModuleBinaries
+        {
+            get
+            {
+                foreach (var s in RawSections)
+                    if (s.Id == ComponentSectionId.CoreModule)
+                        yield return s.Payload;
+            }
+        }
+
+        /// <summary>
+        /// Decoded custom sections, parsed on demand. Useful for
+        /// inspecting <c>component-type:*</c> (the embedded WIT
+        /// text), <c>producers</c>, and user-defined annotations.
+        /// </summary>
+        public IEnumerable<Parser.CustomSection> CustomSections
+        {
+            get
+            {
+                foreach (var s in RawSections)
+                    if (s.Id == Parser.ComponentSectionId.Custom)
+                        yield return Parser.CustomSection.FromRaw(s);
+            }
+        }
     }
 }
