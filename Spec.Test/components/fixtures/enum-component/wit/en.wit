@@ -1,0 +1,10 @@
+package local:en;
+world en {
+    enum direction {
+        north,
+        south,
+        east,
+        west,
+    }
+    export current: func() -> direction;
+}

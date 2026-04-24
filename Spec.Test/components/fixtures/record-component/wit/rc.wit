@@ -1,0 +1,8 @@
+package local:rc;
+world rc {
+    record point {
+        x: u32,
+        y: u32,
+    }
+    export origin: func() -> point;
+}
