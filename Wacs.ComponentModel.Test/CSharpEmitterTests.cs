@@ -1059,6 +1059,45 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Resource methods with result<…> returns --------------------
+
+        private static string FindResourceResultFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "resource-result");
+        }
+
+        /// <summary>
+        /// Resource methods returning all three result shapes:
+        /// <c>result&lt;_, prim&gt;</c> (err-only),
+        /// <c>result&lt;prim, prim&gt;</c>, and the totally-elided
+        /// <c>result&lt;_, _&gt;</c>. The first two use the
+        /// return-area path; the third uses the direct-return path
+        /// (stub returns i32 discriminant). All three share the
+        /// same switch + `WitException` throw body with the
+        /// free-function emitter. Byte-for-byte match against
+        /// wit-bindgen 0.30.0.
+        /// </summary>
+        [Fact]
+        public void EmitImportInterfaceFile_resource_with_result_returns_matches_reference()
+        {
+            var fixtureDir = FindResourceResultFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "rr.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var emitted = CSharpEmitter.EmitImportInterfaceFile(iface, "rr-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "RrWorldWorld.wit.imports.local.rr.IEnv.cs"));
+            Assert.Equal(expected, emitted.Content);
+        }
+
         // ---- Resource methods with list<u8> params + returns ------------
 
         private static string FindResourceListU8FixtureDir()
