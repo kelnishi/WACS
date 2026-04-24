@@ -191,9 +191,11 @@ namespace Wacs.ComponentModel.CSharpEmit
                                                         CtFunctionType sig,
                                                         string? leadingStubArg = null)
         {
-            var words = ReturnAreaUintCount(sig);
-            sb.Append("            var retArea = new uint[").Append(words).Append("];\n");
-            sb.Append("            fixed (uint* retAreaByte0 = &retArea[0])\n");
+            var ra = GetRetAreaInfo(sig);
+            sb.Append("            var retArea = new ").Append(ra.Backing)
+              .Append('[').Append(ra.Count).Append("];\n");
+            sb.Append("            fixed (").Append(ra.Backing)
+              .Append("* retAreaByte0 = &retArea[0])\n");
             sb.Append("            {\n");
             sb.Append("                var ptr = (nint)retAreaByte0;\n");
             sb.Append("                ").Append(stubClassName).Append(".wasmImport").Append(methodName);
@@ -268,7 +270,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             }
             else if (IsResultOfPrimOrNone(sig.Result!))
             {
-                EmitResultReturnAreaLift(sb, (CtResultType)sig.Result!);
+                EmitResultReturnAreaLift(sb, (CtResultType)sig.Result!, ra.PayloadOffset);
             }
             else if (IsVariantOfSmallPrimOrNone(sig.Result!))
             {
@@ -276,7 +278,8 @@ namespace Wacs.ComponentModel.CSharpEmit
                 // declaration matches wit-bindgen's formatting.
                 sb.Append("\n");
                 EmitVariantReturnAreaLift(sb, (CtTypeRef)sig.Result!,
-                                          discOffset: 0, payloadOffset: 4,
+                                          discOffset: 0,
+                                          payloadOffset: ra.PayloadOffset,
                                           varName: "lifted",
                                           indent: "                ");
                 sb.Append("                return lifted;\n");
@@ -284,11 +287,11 @@ namespace Wacs.ComponentModel.CSharpEmit
             else if (IsOptionOfSmallPrim(sig.Result!))
             {
                 // option<prim> return — discriminant at offset 0
-                // (1 byte), payload at offset 4 (1 word). Switch
-                // on the discriminant, lift the payload on the
-                // Some branch, bind null on the None branch. The
-                // blank line between `{` and the declaration
-                // matches wit-bindgen's reference output.
+                // (1 byte), payload at the inner prim's natural
+                // alignment: 4 for 32-bit, 8 for 64-bit. Switch on
+                // the discriminant, lift payload on Some, null on
+                // None. Blank line between `{` and declaration
+                // matches wit-bindgen formatting.
                 sb.Append("\n");
                 var opt = (CtOptionType)sig.Result!;
                 var innerKind = ((CtPrimType)opt.Inner).Kind;
@@ -304,7 +307,7 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append("                    case 1: {\n");
                 sb.Append("\n");
                 sb.Append("                        lifted = ");
-                sb.Append(EmitReturnAreaPrimLift(innerKind, offset: 4));
+                sb.Append(EmitReturnAreaPrimLift(innerKind, ra.PayloadOffset));
                 sb.Append(";\n");
                 sb.Append("                        break;\n");
                 sb.Append("                    }\n");
@@ -491,7 +494,7 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// <c>var tmp = lifted.AsOk; return ;</c> to match
         /// wit-bindgen's formatting quirk).
         /// </summary>
-        private static void EmitResultReturnAreaLift(StringBuilder sb, CtResultType r)
+        private static void EmitResultReturnAreaLift(StringBuilder sb, CtResultType r, int payloadOffset)
         {
             sb.Append("\n");
             var okCs  = r.Ok  != null ? ResultArmTypeName(r.Ok)  : "None";
@@ -510,9 +513,9 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append("\n");
             sb.Append("                switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {\n");
             EmitResultArmBody(sb, "ok", r.Ok, resultTy, outerVar,
-                              discCase: 0, payloadOffset: 4);
+                              discCase: 0, payloadOffset: payloadOffset);
             EmitResultArmBody(sb, "err", r.Err, resultTy, outerVar,
-                              discCase: 1, payloadOffset: 4);
+                              discCase: 1, payloadOffset: payloadOffset);
             sb.Append("\n");
             sb.Append("                    default: throw new ArgumentException($\"invalid discriminant: {new Span<byte>((void*)(ptr + 0), 1)[0]}\");\n");
             sb.Append("                }\n");
@@ -640,6 +643,14 @@ namespace Wacs.ComponentModel.CSharpEmit
                     $"((ushort)(BitConverter.ToInt32(new Span<byte>((void*)({off}), 4))))",
                 CtPrim.Char =>
                     $"unchecked((uint)(BitConverter.ToInt32(new Span<byte>((void*)({off}), 4))))",
+                // 64-bit reads — 8-byte span. The payload slot is
+                // already aligned to 8 by the return-area layout.
+                CtPrim.S64 =>
+                    $"BitConverter.ToInt64(new Span<byte>((void*)({off}), 8))",
+                CtPrim.U64 =>
+                    $"unchecked((ulong)(BitConverter.ToInt64(new Span<byte>((void*)({off}), 8))))",
+                CtPrim.F64 =>
+                    $"BitConverter.ToDouble(new Span<byte>((void*)({off}), 8))",
                 _ => throw new NotImplementedException(
                     "Return-area lift for " + kind + " is a follow-up."),
             };
@@ -879,10 +890,16 @@ namespace Wacs.ComponentModel.CSharpEmit
 
         /// <summary>
         /// Zero value of the stub payload type for the null branch.
-        /// Integer stubs take <c>0</c>; f32 stubs take <c>0f</c>.
+        /// Integer stubs take <c>0</c>; f32 stubs take <c>0f</c>;
+        /// long stubs take <c>0L</c>; double stubs take <c>0d</c>.
         /// </summary>
-        private static string OptionPayloadZero(string stubType) =>
-            stubType == "float" ? "0f" : "0";
+        private static string OptionPayloadZero(string stubType) => stubType switch
+        {
+            "float" => "0f",
+            "long" => "0L",
+            "double" => "0d",
+            _ => "0",
+        };
 
         // ---- Stub type mapping (core wasm ABI) -----------------------------
 
@@ -916,8 +933,9 @@ namespace Wacs.ComponentModel.CSharpEmit
             {
                 // option<P> lowers to (discriminant, payload). The
                 // discriminant is always an i32; the payload slot
-                // takes the inner primitive's stub type (e.g. float
-                // for option<f32>).
+                // takes the inner primitive's stub type — `long`
+                // for 64-bit payloads, `int`/`float`/etc. for
+                // smaller ones.
                 var inner = ((CtOptionType)t).Inner;
                 var innerStub = StubTypesFor(inner);
                 return new[] { "int", innerStub[0] };
@@ -1002,7 +1020,7 @@ namespace Wacs.ComponentModel.CSharpEmit
         internal static bool IsOptionOfSmallPrim(CtValType t) =>
             t is CtOptionType o
             && o.Inner is CtPrimType op
-            && IsSmallPrim(op.Kind);
+            && IsFlatPrim(op.Kind);
 
         /// <summary>
         /// True when <paramref name="t"/> is <c>option&lt;string&gt;</c>.
@@ -1034,20 +1052,37 @@ namespace Wacs.ComponentModel.CSharpEmit
 
         private static bool IsResultArmEmitable(CtValType t)
         {
-            if (t is CtPrimType p) return IsSmallPrim(p.Kind);
+            if (t is CtPrimType p) return IsFlatPrim(p.Kind);
             if (IsVariantOfSmallPrimOrNone(t)) return true;
             return false;
         }
 
-        /// <summary>Payload word count for a result Ok/Err side.
-        /// None = 0, primitive = 1, variant-with-small-prim-or-none
-        /// cases = 2 (variant disc + 1-word payload slot).</summary>
-        private static int ResultArmWords(CtValType? t)
+        /// <summary>Payload byte size for a result Ok/Err side.
+        /// None = 0, 32-bit primitive = 4, 64-bit primitive = 8,
+        /// variant-with-small-prim-or-none cases = 8 (variant disc
+        /// at +0 + 1-word payload at +4 — effective max extent
+        /// within its arm is 8 bytes).</summary>
+        private static int ResultArmBytes(CtValType? t)
         {
             if (t == null) return 0;
-            if (t is CtPrimType) return 1;
-            if (IsVariantOfSmallPrimOrNone(t)) return 2;
+            if (t is CtPrimType p)
+                return IsWidePrim(p.Kind) ? 8 : 4;
+            if (IsVariantOfSmallPrimOrNone(t)) return 8;
             return 0;
+        }
+
+        /// <summary>Byte alignment for a result Ok/Err side —
+        /// drives the outer payload offset (rounded up from the
+        /// 1-byte discriminant). 32-bit primitive = 4-byte align;
+        /// 64-bit primitive = 8-byte align; variant = 4 (its own
+        /// disc aligns to 4, payload slot is 32-bit).</summary>
+        private static int ResultArmAlign(CtValType? t)
+        {
+            if (t == null) return 1;
+            if (t is CtPrimType p)
+                return IsWidePrim(p.Kind) ? 8 : 4;
+            if (IsVariantOfSmallPrimOrNone(t)) return 4;
+            return 1;
         }
 
         /// <summary>
@@ -1220,6 +1255,19 @@ namespace Wacs.ComponentModel.CSharpEmit
             _ => false,
         };
 
+        /// <summary>8-byte-aligned primitive — s64/u64/f64. Relevant
+        /// for return-area layout: a payload containing any wide
+        /// prim forces the whole return area to <c>ulong[]</c>
+        /// backing with payload offset rounded up to 8.</summary>
+        private static bool IsWidePrim(CtPrim k) =>
+            k == CtPrim.S64 || k == CtPrim.U64 || k == CtPrim.F64;
+
+        /// <summary>Any primitive with a direct flat lowering
+        /// (everything except string, which flattens to (ptr, len)
+        /// and is handled separately).</summary>
+        private static bool IsFlatPrim(CtPrim k) =>
+            IsSmallPrim(k) || IsWidePrim(k);
+
         private static string EmitStubReturnType(CtFunctionType sig)
         {
             if (sig.HasNoResult) return "void";
@@ -1287,44 +1335,74 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// <c>list&lt;u8&gt;</c> = 2 (ptr + len). Other aggregates
         /// plug in as they're supported.
         /// </summary>
-        private static int ReturnAreaUintCount(CtFunctionType sig)
+        /// <summary>
+        /// Return-area allocation: backing type (<c>uint</c> or
+        /// <c>ulong</c>), element count in that backing, and the
+        /// byte offset at which the payload (for discriminated
+        /// shapes) starts. For shapes without an outer discriminant
+        /// (string / list / tuple / record), <c>PayloadOffset</c>
+        /// is 0 and the elements live at the front.
+        /// </summary>
+        private readonly struct RetAreaInfo
         {
-            if (sig.Result is CtPrimType p && p.Kind == CtPrim.String) return 2;
-            if (IsListOfPrim(sig.Result!)) return 2;
-            // option<small-prim>: discriminant word at offset 0,
-            // payload word at offset 4 — 2 uints total.
-            if (IsOptionOfSmallPrim(sig.Result!)) return 2;
-            // option<string>: disc at offset 0, ptr at 4, len at 8.
-            if (IsOptionOfString(sig.Result!)) return 3;
-            // result<Ok, Err>: 1 word for outer disc + max(ok, err)
-            // payload size. Simple prim/None = 1 word; variant =
-            // 2 words (disc + payload). Max is 2, so worst-case
-            // = 3 uints total.
+            public readonly string Backing;
+            public readonly int Count;
+            public readonly int PayloadOffset;
+            public RetAreaInfo(string backing, int count, int payloadOffset)
+            { Backing = backing; Count = count; PayloadOffset = payloadOffset; }
+        }
+
+        /// <summary>Byte size of a return-area backing element:
+        /// 4 for <c>uint</c>, 8 for <c>ulong</c>.</summary>
+        private static int BackingSize(string backing) =>
+            backing == "ulong" ? 8 : 4;
+
+        private static RetAreaInfo GetRetAreaInfo(CtFunctionType sig)
+        {
+            if (sig.Result is CtPrimType p && p.Kind == CtPrim.String)
+                return new RetAreaInfo("uint", 2, 0);
+            if (IsListOfPrim(sig.Result!))
+                return new RetAreaInfo("uint", 2, 0);
+            if (IsOptionOfString(sig.Result!))
+                return new RetAreaInfo("uint", 3, 0);
+            if (IsOptionOfSmallPrim(sig.Result!))
+            {
+                // option<prim>: disc at 0, payload at align(1, psz)
+                // = 4 or 8. Total bytes = payload-off + payload-size.
+                var k = ((CtPrimType)((CtOptionType)sig.Result!).Inner).Kind;
+                bool wide = IsWidePrim(k);
+                int payOff = wide ? 8 : 4;
+                int total  = payOff + (wide ? 8 : 4);
+                string bk  = wide ? "ulong" : "uint";
+                return new RetAreaInfo(bk, total / BackingSize(bk), payOff);
+            }
             if (IsResultOfPrimOrNone(sig.Result!))
             {
+                // result<Ok, Err>: disc at 0, payload at align(1, A)
+                // where A = max(okAlign, errAlign). Payload slot
+                // size = max(okSize, errSize). Backing flips to
+                // ulong[] when any arm forces 8-byte alignment.
                 var rr = (CtResultType)sig.Result!;
-                int maxPayload = System.Math.Max(
-                    ResultArmWords(rr.Ok),
-                    ResultArmWords(rr.Err));
-                return 1 + maxPayload;
+                int align = System.Math.Max(
+                    ResultArmAlign(rr.Ok), ResultArmAlign(rr.Err));
+                int payOff = (1 + align - 1) / align * align;
+                int size = System.Math.Max(
+                    ResultArmBytes(rr.Ok), ResultArmBytes(rr.Err));
+                int total = payOff + size;
+                string bk = align == 8 ? "ulong" : "uint";
+                int bs = BackingSize(bk);
+                int count = (total + bs - 1) / bs;
+                return new RetAreaInfo(bk, count, payOff);
             }
-            // tuple<small-prim, small-prim, …>: one word per element,
-            // laid out at offsets 0, 4, 8, … .
             if (IsTupleOfSmallPrims(sig.Result!))
-                return ((CtTupleType)sig.Result!).Elements.Count;
-            // record { … } with small-prim fields: one word per field.
+                return new RetAreaInfo("uint",
+                    ((CtTupleType)sig.Result!).Elements.Count, 0);
             if (IsRecordOfSmallPrims(sig.Result!))
-                return ((CtRecordType)ResolveRecord((CtTypeRef)sig.Result!).Type).Fields.Count;
-            // variant with ≤1-small-prim-payload cases: 2 uints
-            // (disc + payload — payload slot always present even
-            // when every case is no-payload, matching wit-bindgen's
-            // uniform layout).
-            if (IsVariantOfSmallPrimOrNone(sig.Result!)) return 2;
-            // result<PrimOrNone, PrimOrNone>: discriminant word at 0,
-            // payload word at 4 — 2 uints. None branches write no
-            // payload to memory but the return area still reserves
-            // the full 2-word slot (canonical-ABI alignment).
-            if (IsResultOfPrimOrNone(sig.Result!)) return 2;
+                return new RetAreaInfo("uint",
+                    ((CtRecordType)ResolveRecord((CtTypeRef)sig.Result!).Type).Fields.Count,
+                    0);
+            if (IsVariantOfSmallPrimOrNone(sig.Result!))
+                return new RetAreaInfo("uint", 2, 4);
             throw new NotImplementedException(
                 "Return area sizing for " + sig.Result?.GetType().Name +
                 " is a follow-up.");

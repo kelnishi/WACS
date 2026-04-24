@@ -1059,6 +1059,45 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Wide primitive (u64/s64/f64) in option / result -------------
+
+        private static string FindInteropWidePrimFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-wide-prim");
+        }
+
+        /// <summary>
+        /// <c>option&lt;u64&gt;</c> and <c>result&lt;u64, u32&gt;</c>
+        /// exercise 8-byte alignment in the return area: the
+        /// backing switches from <c>uint[N]</c> to <c>ulong[N]</c>
+        /// and the payload offset jumps from 4 to 8 to satisfy
+        /// canonical-ABI alignment for the wide primitive. Stub
+        /// payload slot is <c>long</c> / <c>double</c> as
+        /// appropriate. Return-side body matches wit-bindgen 0.30.0
+        /// byte-for-byte; param-side locals diverge (our
+        /// <c>{arg}Tag</c> / <c>{arg}Val</c> naming).
+        /// </summary>
+        [Fact]
+        public void InteropEmit_wide_prim_matches_expected()
+        {
+            var fixtureDir = FindInteropWidePrimFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "o64.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "o64-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "expected",
+                "O64WorldWorld.wit.imports.local.o64.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Variant<small-prim-or-none payloads> in function bodies -----
 
         private static string FindInteropVariantFixtureDir()
