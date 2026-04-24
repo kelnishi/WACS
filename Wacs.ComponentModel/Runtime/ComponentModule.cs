@@ -108,5 +108,27 @@ namespace Wacs.ComponentModel.Runtime
             }
         }
         private IReadOnlyList<Parser.ComponentExportEntry>? _exports;
+
+        /// <summary>
+        /// Decoded canon-section entries — lifts, lowers, and
+        /// resource-op intrinsics. The component's function
+        /// index space is populated by these entries; matching
+        /// them against <see cref="Exports"/> tells you which
+        /// core function each export's lift resolves to.
+        /// </summary>
+        public IReadOnlyList<Parser.CanonEntry> Canons
+        {
+            get
+            {
+                if (_canons != null) return _canons;
+                var list = new List<Parser.CanonEntry>();
+                foreach (var s in RawSections)
+                    if (s.Id == Parser.ComponentSectionId.Canon)
+                        list.AddRange(Parser.CanonSectionReader.Decode(s.Payload));
+                _canons = list;
+                return list;
+            }
+        }
+        private IReadOnlyList<Parser.CanonEntry>? _canons;
     }
 }
