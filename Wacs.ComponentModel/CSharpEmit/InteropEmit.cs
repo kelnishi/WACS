@@ -167,15 +167,23 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append("ptr");
             sb.Append(");\n");
 
-            if (IsByteList(sig.Result!))
+            if (IsListOfPrim(sig.Result!))
             {
-                // byte[] return — allocate managed array of the
+                // list<prim> return — allocate managed array of the
                 // reported length, then Span-copy the wasm memory
-                // into it. Blank separator preceding matches
-                // wit-bindgen's formatting.
+                // into it. Length is always read via
+                // BitConverter.ToInt32 (the length word is u32
+                // regardless of element type); the Span<T> element
+                // type matches the primitive's C# name.
+                // Blank separator preceding matches wit-bindgen.
+                var elemKind = ((CtPrimType)((CtListType)sig.Result!).Element).Kind;
+                var elemCs = TypeRefEmit.EmitPrim(elemKind);
                 sb.Append("\n");
-                sb.Append("                var array = new byte[BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))];\n");
-                sb.Append("                new Span<byte>((void*)(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 0), 4))), BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))).CopyTo(new Span<byte>(array));\n");
+                sb.Append("                var array = new ").Append(elemCs)
+                  .Append("[BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))];\n");
+                sb.Append("                new Span<").Append(elemCs)
+                  .Append(">((void*)(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 0), 4))), BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))).CopyTo(new Span<")
+                  .Append(elemCs).Append(">(array));\n");
                 sb.Append("                return array;\n");
             }
             else if (IsTupleOfSmallPrims(sig.Result!))
@@ -335,7 +343,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             {
                 if (p.Type is CtPrimType prim && prim.Kind == CtPrim.String)
                     return true;
-                if (IsByteList(p.Type)) return true;
+                if (IsListOfPrim(p.Type)) return true;
                 if (IsOptionOfSmallPrim(p.Type)) return true;
             }
             return false;
@@ -358,19 +366,25 @@ namespace Wacs.ComponentModel.CSharpEmit
                     sb.Append("InteropString.FromString(").Append(argName);
                     sb.Append(", out int ").Append(argName).Append("Len);\n");
                 }
-                else if (IsByteList(p.Type))
+                else if (IsListOfPrim(p.Type))
                 {
                     // Stack-allocate a buffer sized to the managed
-                    // array, copy bytes in, pass buffer pointer +
+                    // array, copy elements in, pass buffer pointer +
                     // length into the stub. Buffer name follows
                     // wit-bindgen: `buffer` (unsuffixed) for the
-                    // first list<u8> param, `buffer1`/`buffer2`/…
-                    // for subsequent ones.
+                    // first list<prim> param, `buffer1`/`buffer2`/…
+                    // for subsequent ones. The C# element type
+                    // (byte/uint/ulong/…) comes from the WIT
+                    // primitive via TypeRefEmit.EmitPrim.
+                    var elemKind = ((CtPrimType)((CtListType)p.Type).Element).Kind;
+                    var elemCs = TypeRefEmit.EmitPrim(elemKind);
                     var bufName = listIdx == 0 ? "buffer" : ("buffer" + listIdx);
                     sb.Append("            void* ").Append(bufName).Append(" = ");
-                    sb.Append("stackalloc byte[(").Append(argName).Append(").Length];\n");
+                    sb.Append("stackalloc ").Append(elemCs)
+                      .Append("[(").Append(argName).Append(").Length];\n");
                     sb.Append("            ").Append(argName);
-                    sb.Append(".AsSpan<byte>().CopyTo(new Span<byte>(")
+                    sb.Append(".AsSpan<").Append(elemCs).Append(">().CopyTo(new Span<")
+                      .Append(elemCs).Append(">(")
                       .Append(bufName).Append(", ").Append(argName).Append(".Length));\n");
                     listIdx++;
                 }
@@ -454,10 +468,10 @@ namespace Wacs.ComponentModel.CSharpEmit
                     _ => new[] { "int" },
                 };
             }
-            if (IsByteList(t))
+            if (IsListOfPrim(t))
             {
-                // list<u8> lowers to (ptr, len) like string but
-                // without UTF-8 conversion.
+                // list<prim> lowers to (ptr, len) like string but
+                // without encoding conversion.
                 return new[] { "nint", "int" };
             }
             if (IsOptionOfSmallPrim(t))
@@ -487,11 +501,23 @@ namespace Wacs.ComponentModel.CSharpEmit
         }
 
         /// <summary>
-        /// True when <paramref name="t"/> is <c>list&lt;u8&gt;</c> —
-        /// the byte-array special case. Other <c>list&lt;T&gt;</c>
-        /// element types need stride-aware marshaling (list of
-        /// strings, list of records, etc.) and are a follow-up.
+        /// True when <paramref name="t"/> is <c>list&lt;prim&gt;</c>
+        /// for any numeric primitive (bool / s8 / u8 / s16 / u16 /
+        /// s32 / u32 / s64 / u64 / f32 / f64 / char). All lower via
+        /// the same <c>stackalloc</c> + <c>AsSpan().CopyTo</c>
+        /// pattern that wit-bindgen emits — the only difference is
+        /// the element type name. <c>list&lt;string&gt;</c> and
+        /// <c>list&lt;aggregate&gt;</c> need element-wise marshaling
+        /// and are a follow-up.
         /// </summary>
+        internal static bool IsListOfPrim(CtValType t) =>
+            t is CtListType l
+            && l.Element is CtPrimType pe
+            && pe.Kind != CtPrim.String;
+
+        /// <summary>Back-compat alias; byte lists are the historical
+        /// first-supported case. Now handled identically to any
+        /// other <see cref="IsListOfPrim"/> list.</summary>
         internal static bool IsByteList(CtValType t) =>
             t is CtListType l
             && l.Element is CtPrimType pe
@@ -588,7 +614,7 @@ namespace Wacs.ComponentModel.CSharpEmit
         {
             if (sig.HasNoResult || sig.Result == null) return false;
             if (sig.Result is CtPrimType p && p.Kind == CtPrim.String) return true;
-            if (IsByteList(sig.Result)) return true;
+            if (IsListOfPrim(sig.Result)) return true;
             if (IsOptionOfSmallPrim(sig.Result)) return true;
             if (IsTupleOfSmallPrims(sig.Result)) return true;
             return false;
@@ -603,7 +629,7 @@ namespace Wacs.ComponentModel.CSharpEmit
         private static int ReturnAreaUintCount(CtFunctionType sig)
         {
             if (sig.Result is CtPrimType p && p.Kind == CtPrim.String) return 2;
-            if (IsByteList(sig.Result!)) return 2;
+            if (IsListOfPrim(sig.Result!)) return 2;
             // option<small-prim>: discriminant word at offset 0,
             // payload word at offset 4 — 2 uints total.
             if (IsOptionOfSmallPrim(sig.Result!)) return 2;
@@ -641,12 +667,13 @@ namespace Wacs.ComponentModel.CSharpEmit
                     // String lowered by the prelude to (ptr, len).
                     sb.Append(argName).Append("Ptr.ToInt32(), ").Append(argName).Append("Len");
                 }
-                else if (IsByteList(p.Type))
+                else if (IsListOfPrim(p.Type))
                 {
-                    // byte[] lowered to (buffer-ptr, length). Length
-                    // expression has extra parens — wit-bindgen emits
-                    // `(data).Length` here but `data.Length` inside
-                    // the CopyTo call; preserve the asymmetry.
+                    // list<prim> lowered to (buffer-ptr, length).
+                    // Length expression has extra parens —
+                    // wit-bindgen emits `(data).Length` here but
+                    // `data.Length` inside the CopyTo call;
+                    // preserve the asymmetry.
                     var bufName = listIdx == 0 ? "buffer" : ("buffer" + listIdx);
                     sb.Append("(int)").Append(bufName).Append(", ");
                     sb.Append('(').Append(argName).Append(").Length");

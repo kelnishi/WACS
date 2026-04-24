@@ -604,7 +604,7 @@ using System.Diagnostics.CodeAnalysis;
         /// </summary>
         private static bool IsEmitableStubParam(CtValType t) =>
             t is CtPrimType
-            || InteropEmit.IsByteList(t)
+            || InteropEmit.IsListOfPrim(t)
             || InteropEmit.IsOptionOfSmallPrim(t)
             || InteropEmit.IsTupleOfSmallPrims(t);
 
@@ -620,7 +620,7 @@ using System.Diagnostics.CodeAnalysis;
         private static bool IsEmitableStubReturn(CtValType t)
         {
             if (t is CtPrimType) return true;
-            if (InteropEmit.IsByteList(t)) return true;
+            if (InteropEmit.IsListOfPrim(t)) return true;
             if (InteropEmit.IsOptionOfSmallPrim(t)) return true;
             if (InteropEmit.IsTupleOfSmallPrims(t)) return true;
             if (IsElidedResult(t)) return true;
