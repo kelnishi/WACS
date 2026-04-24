@@ -1,0 +1,7 @@
+package local:o64;
+interface env {
+    maybe-big: func() -> option<u64>;
+    take-big: func(x: option<u64>);
+    get-both: func() -> result<u64, u32>;
+}
+world o64-world { import env; }
