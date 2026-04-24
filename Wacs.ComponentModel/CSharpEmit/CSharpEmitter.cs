@@ -96,28 +96,178 @@ using System.Diagnostics.CodeAnalysis;
             // 1. World shell file.
             result.Add(EmitWorldShellFile(world, options));
 
-            // 2. Per-imported / -exported interface files.
-            //    Phase 1a.2 scope: only empty Interop shells for
-            //    interfaces with no free functions. Interfaces with
-            //    methods, resources, or types still throw
-            //    NotImplementedException on the caller-facing API
-            //    paths so incomplete emissions don't silently ship.
+            // 2. Per-imported / -exported interface files (direct).
+            //    Track which (package, interface-name) pairs we've
+            //    already emitted so transitive walk below doesn't
+            //    duplicate.
+            var emitted = new HashSet<string>();
             foreach (var imp in world.Imports)
             {
-                EmitExternPort(result, world, imp.Spec, isExport: false, options);
+                EmitExternPort(result, world, imp.Spec, isExport: false,
+                               options, emitted);
             }
             foreach (var exp in world.Exports)
             {
-                EmitExternPort(result, world, exp.Spec, isExport: true, options);
+                EmitExternPort(result, world, exp.Spec, isExport: true,
+                               options, emitted);
             }
 
-            // 3. Support files (unless SkipSupportFiles).
+            // 3. Transitive imports. When an interface's type graph
+            //    references a named type owned by a DIFFERENT
+            //    interface (reached through a `use` statement),
+            //    wit-bindgen pulls that interface in as an implicit
+            //    import: its IXxx.cs + XxxInterop.cs (empty or full)
+            //    ship alongside the direct imports. This is what
+            //    makes `use wasi:io/error.{error}` inside
+            //    `wasi:io/streams` cause `IError.cs` and
+            //    `ErrorInterop.cs` to materialize in hello-world.
+            var direct = new List<CtInterfaceType>();
+            foreach (var imp in world.Imports)
+                if (imp.Spec is CtExternInterfaceRef i1 && i1.Target != null)
+                    direct.Add(i1.Target);
+            foreach (var exp in world.Exports)
+                if (exp.Spec is CtExternInterfaceRef i2 && i2.Target != null)
+                    direct.Add(i2.Target);
+
+            foreach (var trans in CollectTransitiveInterfaces(direct, emitted))
+            {
+                EmitTransitiveImport(result, world, trans, options, emitted);
+            }
+
+            // 4. Support files (unless SkipSupportFiles).
             if (!options.SkipSupportFiles)
             {
                 result.Add(EmitWasmImportLinkageAttributeFile(world));
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Walk the type graph of each directly-imported/exported
+        /// interface and collect every other interface reached via
+        /// <see cref="CtTypeRef.Target"/> chains. Deduplicates
+        /// against the <paramref name="alreadyEmitted"/> key set so
+        /// directly-imported interfaces aren't re-added as
+        /// transitive imports.
+        /// </summary>
+        private static List<CtInterfaceType> CollectTransitiveInterfaces(
+            List<CtInterfaceType> direct,
+            HashSet<string> alreadyEmitted)
+        {
+            var out_ = new List<CtInterfaceType>();
+            var visited = new HashSet<CtInterfaceType>(direct);
+            var queue = new Queue<CtInterfaceType>(direct);
+            while (queue.Count > 0)
+            {
+                var iface = queue.Dequeue();
+                foreach (var nt in iface.Types)
+                    ScanForRefs(nt.Type, visited, queue, out_, alreadyEmitted);
+                foreach (var nt in iface.Aliases)
+                    ScanForRefs(nt.Type, visited, queue, out_, alreadyEmitted);
+                foreach (var fn in iface.Functions)
+                {
+                    foreach (var p in fn.Type.Params)
+                        ScanForRefs(p.Type, visited, queue, out_, alreadyEmitted);
+                    if (fn.Type.Result != null)
+                        ScanForRefs(fn.Type.Result, visited, queue, out_, alreadyEmitted);
+                }
+            }
+            return out_;
+        }
+
+        private static void ScanForRefs(
+            CtValType t,
+            HashSet<CtInterfaceType> visited,
+            Queue<CtInterfaceType> queue,
+            List<CtInterfaceType> transitive,
+            HashSet<string> alreadyEmitted)
+        {
+            switch (t)
+            {
+                case CtTypeRef r when r.Target != null:
+                    var target = r.Target;
+                    while (target.Type is CtTypeRef innerRef
+                           && innerRef.Target != null
+                           && innerRef.Target != target)
+                        target = innerRef.Target;
+                    if (target.Owner != null && visited.Add(target.Owner))
+                    {
+                        queue.Enqueue(target.Owner);
+                        if (target.Owner.Package != null)
+                        {
+                            var key = InterfaceKey(target.Owner.Package,
+                                                   target.Owner.Name);
+                            if (!alreadyEmitted.Contains(key))
+                                transitive.Add(target.Owner);
+                        }
+                    }
+                    // Also recurse into the target's body — a
+                    // resource method's result may itself be a ref.
+                    if (target.Type != null) ScanForRefs(target.Type, visited,
+                                                        queue, transitive,
+                                                        alreadyEmitted);
+                    break;
+                case CtListType l: ScanForRefs(l.Element, visited, queue, transitive, alreadyEmitted); break;
+                case CtOptionType o: ScanForRefs(o.Inner, visited, queue, transitive, alreadyEmitted); break;
+                case CtResultType res:
+                    if (res.Ok != null) ScanForRefs(res.Ok, visited, queue, transitive, alreadyEmitted);
+                    if (res.Err != null) ScanForRefs(res.Err, visited, queue, transitive, alreadyEmitted);
+                    break;
+                case CtTupleType tup:
+                    foreach (var el in tup.Elements)
+                        ScanForRefs(el, visited, queue, transitive, alreadyEmitted);
+                    break;
+                case CtRecordType rec:
+                    foreach (var f in rec.Fields)
+                        ScanForRefs(f.Type, visited, queue, transitive, alreadyEmitted);
+                    break;
+                case CtVariantType v:
+                    foreach (var c in v.Cases)
+                        if (c.Payload != null)
+                            ScanForRefs(c.Payload, visited, queue, transitive, alreadyEmitted);
+                    break;
+                case CtResourceType rr:
+                    foreach (var m in rr.Methods)
+                    {
+                        foreach (var p in m.Function.Params)
+                            ScanForRefs(p.Type, visited, queue, transitive, alreadyEmitted);
+                        if (m.Function.Result != null)
+                            ScanForRefs(m.Function.Result, visited, queue, transitive, alreadyEmitted);
+                    }
+                    break;
+                case CtOwnType own: ScanForRefs(own.Resource, visited, queue, transitive, alreadyEmitted); break;
+                case CtBorrowType bor: ScanForRefs(bor.Resource, visited, queue, transitive, alreadyEmitted); break;
+            }
+        }
+
+        private static string InterfaceKey(CtPackageName pkg, string ifaceName) =>
+            pkg.ToString() + "/" + ifaceName;
+
+        /// <summary>
+        /// Emit the I{Name}.cs + {Name}Interop.cs pair for an
+        /// interface pulled in transitively via another interface's
+        /// type graph. Same emission paths as direct imports;
+        /// always import-side.
+        /// </summary>
+        private static void EmitTransitiveImport(List<EmittedSource> result,
+                                                  CtWorldType world,
+                                                  CtInterfaceType iface,
+                                                  EmitOptions options,
+                                                  HashSet<string> emitted)
+        {
+            if (iface.Package == null) return;
+            var key = InterfaceKey(iface.Package, iface.Name);
+            if (!emitted.Add(key)) return;
+
+            if (IsInterfaceEmitable(iface) && iface.Types.Count > 0)
+                result.Add(EmitImportInterfaceFile(iface, world.Name, options));
+            if (IsInterfaceInteropEmitable(iface))
+                result.Add(EmitFullImportInteropFile(
+                    world, iface, iface.Package, iface.Name));
+            else
+                result.Add(EmitEmptyInteropFile(
+                    world, iface.Package, iface.Name, isExport: false));
         }
 
         // ---- World shell file ------------------------------------------------
@@ -328,20 +478,21 @@ using System.Diagnostics.CodeAnalysis;
                                            CtWorldType world,
                                            CtExternType spec,
                                            bool isExport,
-                                           EmitOptions options)
+                                           EmitOptions options,
+                                           HashSet<string> emitted)
         {
             switch (spec)
             {
                 case CtExternInterfaceRef iref:
                 {
-                    if (iref.Package == null)
-                    {
-                        // In-document interface reference. For hello-world
-                        // scope we don't hit this — all our imports/exports
-                        // reference external packages. Defer.
-                        return;
-                    }
+                    // In-document imports (e.g. `import env;` where
+                    // env lives in the same package as the world) get
+                    // their package from the world. External imports
+                    // carry their own package explicitly.
+                    var pkg = iref.Package ?? world.Package;
+                    if (pkg == null) return;
                     var ifaceName = iref.InterfaceName;
+                    emitted.Add(InterfaceKey(pkg, ifaceName));
 
                     // Per-interface file (I{Name}.cs) — emit only if
                     // the ref has been resolved AND the target
@@ -385,19 +536,19 @@ using System.Diagnostics.CodeAnalysis;
                         if (isExport)
                         {
                             result.Add(EmitFullExportTrampolineFile(
-                                world, iref.Target, iref.Package,
+                                world, iref.Target, pkg,
                                 ifaceName));
                         }
                         else
                         {
                             result.Add(EmitFullImportInteropFile(
-                                world, iref.Target, iref.Package,
+                                world, iref.Target, pkg,
                                 ifaceName));
                         }
                     }
                     else
                     {
-                        result.Add(EmitEmptyInteropFile(world, iref.Package,
+                        result.Add(EmitEmptyInteropFile(world, pkg,
                                                         ifaceName, isExport));
                     }
                     break;
@@ -577,6 +728,18 @@ using System.Diagnostics.CodeAnalysis;
                         if (!IsTypeEmitable(el)) return false;
                     return true;
                 }
+                // Named-type references are emitable when the
+                // target is a shape the interface-file emitter
+                // already supports as a declared type — record,
+                // variant, enum, flags, resource. We delegate to
+                // IsTypeDefEmitable which carries the authoritative
+                // per-body gate.
+                case CtTypeRef r when r.Target != null:
+                    if (InteropEmit.IsResourceRef(r)) return true;
+                    return IsTypeDefEmitable(r.Target.Type);
+                case CtOwnType:
+                case CtBorrowType:
+                    return InteropEmit.IsResourceRef(t);
                 default: return false;
             }
         }
