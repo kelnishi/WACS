@@ -312,6 +312,14 @@ namespace Wacs.ComponentModel.Types
         /// </summary>
         public CtInterfaceType? Owner { get; set; }
 
+        /// <summary>
+        /// Doc-comment lines harvested from the WIT source (the <c>///</c>
+        /// block immediately preceding the declaration). One entry per
+        /// source line with the leading <c>///</c> and one optional
+        /// following space stripped. Null when no doc comment was present.
+        /// </summary>
+        public IReadOnlyList<string>? DocLines { get; set; }
+
         public CtNamedType(string name, CtValType type) { Name = name; Type = type; }
     }
 }

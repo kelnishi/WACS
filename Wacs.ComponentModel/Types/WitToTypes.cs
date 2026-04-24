@@ -105,6 +105,7 @@ namespace Wacs.ComponentModel.Types
                         // references the resource itself).
                         var named = new CtNamedType(td.Name,
                                                     new CtTypeRef("__placeholder__"));
+                        named.DocLines = td.DocLines;
                         symbols[td.Name] = named;
                         types.Add(named);
                         break;
@@ -191,6 +192,7 @@ namespace Wacs.ComponentModel.Types
                     {
                         var placeholder = new CtNamedType(wtd.TypeDef.Name,
                                                           new CtTypeRef("__placeholder__"));
+                        placeholder.DocLines = wtd.TypeDef.DocLines;
                         symbols[wtd.TypeDef.Name] = placeholder;
                         types.Add(placeholder);
                         break;

@@ -531,6 +531,76 @@ namespace Wacs.ComponentModel.Test
                 emitted.Content);
         }
 
+        // ---- Doc-comment passthrough --------------------------------------
+
+        [Fact]
+        public void WitTypeDef_doc_comments_propagate_to_AST()
+        {
+            // Multi-line /// block before a type def becomes
+            // CtNamedType.DocLines.
+            var src = @"package local:doc;
+interface def {
+    /// A color of the rainbow.
+    /// Accepts only primary hues.
+    enum color { red, green, blue }
+}
+world w { export def; }";
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "def");
+            var color = iface.Types.Single(t => t.Name == "color");
+
+            Assert.NotNull(color.DocLines);
+            Assert.Equal(2, color.DocLines!.Count);
+            Assert.Equal("A color of the rainbow.", color.DocLines[0]);
+            Assert.Equal("Accepts only primary hues.", color.DocLines[1]);
+        }
+
+        [Fact]
+        public void EmitExportInterfaceFile_wraps_doc_lines_in_summary_block()
+        {
+            // Doc comments from WIT → /// <summary> XML doc block in C#.
+            // The indent matches the nested-type indent (4 spaces) so the
+            // block reads naturally above the declaration.
+            var src = @"package local:doc;
+interface def {
+    /// A color of the rainbow.
+    /// Accepts only primary hues.
+    enum color { red, green, blue }
+}
+world w { export def; }";
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "def");
+
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(iface, "w");
+
+            Assert.Contains(
+                "    /// <summary>\n" +
+                "    /// A color of the rainbow.\n" +
+                "    /// Accepts only primary hues.\n" +
+                "    /// </summary>\n" +
+                "    public enum Color",
+                emitted.Content);
+        }
+
+        [Fact]
+        public void EmitExportInterfaceFile_omits_summary_for_undocumented_types()
+        {
+            // No WIT doc comment → no /// block. Makes sure we don't
+            // accidentally emit empty <summary> wrappers for types
+            // without DocLines.
+            var src = @"package local:doc;
+interface def {
+    enum color { red, green, blue }
+}
+world w { export def; }";
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "def");
+
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(iface, "w");
+
+            Assert.DoesNotContain("/// <summary>", emitted.Content);
+        }
+
         // ---- Types: record -----------------------------------------------
 
         private static string FindTypesRecordFixtureDir()

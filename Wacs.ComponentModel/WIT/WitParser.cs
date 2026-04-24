@@ -97,11 +97,18 @@ namespace Wacs.ComponentModel.WIT
         /// looking for a keyword. v0 discards the payload; Phase 1a may
         /// promote annotations to typed AST nodes when the emitter needs
         /// them for doc-comment generation or conditional shape.
+        ///
+        /// <para>Also transparently skips any <see cref="WitTokenKind.DocComment"/>
+        /// tokens interleaved with or trailing the annotation sequence.
+        /// The *leading* doc block (before any annotation) is captured
+        /// separately by <see cref="TakeDocs"/> at item-dispatch sites;
+        /// anything past that is discarded here.</para>
         /// </summary>
         private void SkipAnnotations()
         {
-            while (At(WitTokenKind.At))
+            while (At(WitTokenKind.At) || At(WitTokenKind.DocComment))
             {
+                if (At(WitTokenKind.DocComment)) { Consume(); continue; }
                 Consume(); // '@'
                 if (At(WitTokenKind.Ident) || _toks[_i].Kind == WitTokenKind.Keyword)
                     Consume(); // annotation name (since, unstable, deprecated, …)
@@ -121,6 +128,22 @@ namespace Wacs.ComponentModel.WIT
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Consume a contiguous run of <see cref="WitTokenKind.DocComment"/>
+        /// tokens at the current position and return the decoded lines.
+        /// Returns <c>null</c> when no doc comment is present. Call this
+        /// at item-dispatch points to capture the doc block that
+        /// introduces the next AST node.
+        /// </summary>
+        private List<string>? TakeDocs()
+        {
+            if (!At(WitTokenKind.DocComment)) return null;
+            var lines = new List<string>();
+            while (At(WitTokenKind.DocComment))
+                lines.Add(_lex.DecodeDocLine(Consume()));
+            return lines;
         }
 
         /// <summary>
@@ -310,17 +333,25 @@ namespace Wacs.ComponentModel.WIT
 
         private WitInterfaceItem ParseInterfaceItem()
         {
+            // Doc-comment block attaches to the item that follows it.
+            // Capture before SkipAnnotations — real WIT sources place
+            // `/// …` before `@since(…)`, and SkipAnnotations discards
+            // any interleaved docs past the first block.
+            var docs = TakeDocs();
             SkipAnnotations();
-            if (AtKeyword("use"))      return ParseUse();
-            if (AtKeyword("type"))     return ParseTypeAlias();
-            if (AtKeyword("record"))   return ParseRecordDef();
-            if (AtKeyword("variant"))  return ParseVariantDef();
-            if (AtKeyword("enum"))     return ParseEnumDef();
-            if (AtKeyword("flags"))    return ParseFlagsDef();
-            if (AtKeyword("resource")) return ParseResourceDef();
+            WitInterfaceItem item;
+            if      (AtKeyword("use"))      item = ParseUse();
+            else if (AtKeyword("type"))     item = ParseTypeAlias();
+            else if (AtKeyword("record"))   item = ParseRecordDef();
+            else if (AtKeyword("variant"))  item = ParseVariantDef();
+            else if (AtKeyword("enum"))     item = ParseEnumDef();
+            else if (AtKeyword("flags"))    item = ParseFlagsDef();
+            else if (AtKeyword("resource")) item = ParseResourceDef();
+            else                            item = ParseFunctionItem();
 
-            // Otherwise: `name: func(...)` form
-            return ParseFunctionItem();
+            if (docs != null && item is WitTypeDef td)
+                td.DocLines = docs;
+            return item;
         }
 
         // ---- Use statement ------------------------------------------------
@@ -572,9 +603,14 @@ namespace Wacs.ComponentModel.WIT
 
         private void ParseParamList(List<WitParam> outList)
         {
+            // Tolerate doc comments and annotations before the list and
+            // between params. WIT lets authors doc each param individually;
+            // v0 discards the text (parameters don't yet carry DocLines).
+            SkipAnnotations();
             if (At(WitTokenKind.RParen)) return;   // empty
             while (true)
             {
+                SkipAnnotations();
                 var tk = Current;
                 var p = new WitParam { Span = SpanOf(tk), Name = ConsumeIdent("parameter name") };
                 Expect(WitTokenKind.Colon, "':'");
@@ -583,6 +619,7 @@ namespace Wacs.ComponentModel.WIT
                 if (At(WitTokenKind.Comma))
                 {
                     Consume();
+                    SkipAnnotations();
                     // Tolerate trailing comma — real WIT sources use it
                     // liberally, especially with doc-comment-wrapped params.
                     if (At(WitTokenKind.RParen)) break;
@@ -733,6 +770,7 @@ namespace Wacs.ComponentModel.WIT
 
         private WitWorldItem ParseWorldItem()
         {
+            var docs = TakeDocs();
             SkipAnnotations();
             if (AtKeyword("import"))  return ParseImportOrExport(isExport: false);
             if (AtKeyword("export"))  return ParseImportOrExport(isExport: true);
@@ -741,7 +779,9 @@ namespace Wacs.ComponentModel.WIT
             if (AtKeyword("type") || AtKeyword("record") || AtKeyword("variant")
                 || AtKeyword("enum") || AtKeyword("flags") || AtKeyword("resource"))
             {
-                return new WitWorldTypeDef { TypeDef = (WitTypeDef)ParseInterfaceItem() };
+                var td = (WitTypeDef)ParseInterfaceItem();
+                if (docs != null) td.DocLines = docs;
+                return new WitWorldTypeDef { TypeDef = td };
             }
             var t = Current;
             throw new FormatException($"line {t.Line}:{t.Column}: expected 'import', 'export', 'use', 'include', or type in world, got '{_lex.Slice(t)}'");
