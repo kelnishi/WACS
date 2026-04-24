@@ -139,9 +139,15 @@ namespace Wacs.Transpiler.AOT.Component
                     emittedTypes[named.Name] =
                         EmitRecordType(module, @namespace, named.Name, rec);
                     return;
-                // Variants, resources land in follow-ups — each
-                // needs its own IL emit strategy (discriminated
-                // class hierarchy, IDisposable wrapper).
+                case CtVariantType vr:
+                    var emitted = EmitVariantType(module, @namespace,
+                                                   named.Name, vr);
+                    if (emitted != null)
+                        emittedTypes[named.Name] = emitted;
+                    return;
+                // Resources land in #299 — IDisposable wrapper
+                // around an i32 handle plus a per-instance handle
+                // table.
             }
         }
 
@@ -170,6 +176,100 @@ namespace Wacs.Transpiler.AOT.Component
                 enumBuilder.DefineLiteral(PascalCase(en.Cases[i]), value);
             }
             return enumBuilder.CreateType()!;
+        }
+
+        /// <summary>Emit a public C# class for a WIT variant
+        /// declaration. Shape: a sealed class with a public
+        /// readonly <c>Tag</c> (byte / ushort / uint depending on
+        /// case count), a public readonly field per
+        /// payload-bearing case named after that case, and a
+        /// public constructor taking (tag, all payload values
+        /// positionally). Static factory methods land per case
+        /// for ergonomic construction at the host side.
+        ///
+        /// <para>v0 supports primitive payloads only — variants
+        /// with aggregate payloads (lists, records, nested
+        /// variants) are Phase 2.</para>
+        /// </summary>
+        private static Type? EmitVariantType(
+            ModuleBuilder module, string @namespace,
+            string witName, CtVariantType vr)
+        {
+            // Bail on aggregate payloads — same constraint as
+            // record fields. Caller skips the export.
+            foreach (var c in vr.Cases)
+                if (c.Payload != null && !(c.Payload is CtPrimType))
+                    return null;
+
+            var caseCount = vr.Cases.Count;
+            var tagType = caseCount <= 256 ? typeof(byte)
+                : caseCount <= 65536 ? typeof(ushort)
+                : typeof(uint);
+
+            var typeName = @namespace + "." + PascalCase(witName);
+            var classBuilder = module.DefineType(typeName,
+                TypeAttributes.Public | TypeAttributes.Sealed
+                    | TypeAttributes.Class | TypeAttributes.AutoClass
+                    | TypeAttributes.AnsiClass | TypeAttributes.BeforeFieldInit,
+                typeof(object));
+
+            // Tag field.
+            var tagField = classBuilder.DefineField(
+                "Tag", tagType,
+                FieldAttributes.Public | FieldAttributes.InitOnly);
+
+            // Per-payload-case fields (only the cases with
+            // payloads). Each named after the case in PascalCase.
+            var payloadFieldByIdx = new Dictionary<int, FieldBuilder>();
+            for (int i = 0; i < caseCount; i++)
+            {
+                if (!(vr.Cases[i].Payload is CtPrimType prim)) continue;
+                var fld = classBuilder.DefineField(
+                    PascalCase(vr.Cases[i].Name),
+                    CtPrimToCs(prim.Kind),
+                    FieldAttributes.Public | FieldAttributes.InitOnly);
+                payloadFieldByIdx[i] = fld;
+            }
+
+            // Constructor: (tag, payload_field_0, payload_field_1, …)
+            // — payload args appear in case order, omitting
+            // no-payload cases.
+            var ctorParamTypes = new List<Type> { tagType };
+            var orderedPayloadIndices = new List<int>();
+            for (int i = 0; i < caseCount; i++)
+            {
+                if (payloadFieldByIdx.ContainsKey(i))
+                {
+                    ctorParamTypes.Add(payloadFieldByIdx[i].FieldType);
+                    orderedPayloadIndices.Add(i);
+                }
+            }
+            var ctor = classBuilder.DefineConstructor(
+                MethodAttributes.Public | MethodAttributes.SpecialName
+                    | MethodAttributes.RTSpecialName,
+                CallingConventions.Standard, ctorParamTypes.ToArray());
+            ctor.DefineParameter(1, ParameterAttributes.None, "tag");
+            for (int i = 0; i < orderedPayloadIndices.Count; i++)
+                ctor.DefineParameter(i + 2, ParameterAttributes.None,
+                    CamelCase(vr.Cases[orderedPayloadIndices[i]].Name));
+            var ctorIl = ctor.GetILGenerator();
+            ctorIl.Emit(OpCodes.Ldarg_0);
+            ctorIl.Emit(OpCodes.Call,
+                typeof(object).GetConstructor(Type.EmptyTypes)!);
+            // tag = arg1
+            ctorIl.Emit(OpCodes.Ldarg_0);
+            ctorIl.Emit(OpCodes.Ldarg_1);
+            ctorIl.Emit(OpCodes.Stfld, tagField);
+            for (int i = 0; i < orderedPayloadIndices.Count; i++)
+            {
+                ctorIl.Emit(OpCodes.Ldarg_0);
+                ctorIl.Emit(OpCodes.Ldarg, i + 2);
+                ctorIl.Emit(OpCodes.Stfld,
+                    payloadFieldByIdx[orderedPayloadIndices[i]]);
+            }
+            ctorIl.Emit(OpCodes.Ret);
+
+            return classBuilder.CreateType()!;
         }
 
         /// <summary>Emit a public C# class for a WIT record
@@ -362,6 +462,8 @@ namespace Wacs.Transpiler.AOT.Component
             if (TryResolveEnumReturn(r, types, out _)) return true;
             if (TryResolveFlagsReturn(r, types, out _)) return true;
             if (TryResolveRecordOfPrims(r, types, out _, out _)) return true;
+            if (TryResolveVariantReturn(r, types, out var vrShape)
+                && !vrShape.HasAggregatePayload) return true;
             return false;
         }
 
@@ -447,6 +549,63 @@ namespace Wacs.Transpiler.AOT.Component
             if (t.TypeIdx >= types.Count) return false;
             if (!(types[(int)t.TypeIdx] is ComponentFlagsType fl)) return false;
             flagCount = fl.Flags.Count;
+            return true;
+        }
+
+        /// <summary>Description of a structural variant viewed
+        /// from the binary type section: case names paired with
+        /// optional primitive payloads. Aggregate-payload variants
+        /// (Phase 2) signal as <see cref="HasAggregatePayload"/>;
+        /// the IL emitter rejects them.</summary>
+        private sealed class VariantShape
+        {
+            public IReadOnlyList<string> CaseNames { get; }
+            public IReadOnlyList<ComponentPrim?> CasePayloadPrims { get; }
+            public bool HasAggregatePayload { get; }
+            public VariantShape(IReadOnlyList<string> names,
+                                IReadOnlyList<ComponentPrim?> payloads,
+                                bool hasAggregate)
+            {
+                CaseNames = names;
+                CasePayloadPrims = payloads;
+                HasAggregatePayload = hasAggregate;
+            }
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a type-ref
+        /// to a structural variant where every payload-bearing
+        /// case carries a primitive (or no payload at all).
+        /// Aggregate-payload variants are Phase 2 — rejected via
+        /// <see cref="VariantShape.HasAggregatePayload"/>.</summary>
+        private static bool TryResolveVariantReturn(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            out VariantShape shape)
+        {
+            shape = null!;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentVariantType vr)) return false;
+            var names = new string[vr.Cases.Count];
+            var payloads = new ComponentPrim?[vr.Cases.Count];
+            bool aggregate = false;
+            for (int i = 0; i < vr.Cases.Count; i++)
+            {
+                names[i] = vr.Cases[i].Name;
+                if (vr.Cases[i].Payload == null)
+                {
+                    payloads[i] = null;
+                }
+                else if (vr.Cases[i].Payload!.Value.IsPrimitive)
+                {
+                    payloads[i] = vr.Cases[i].Payload!.Value.Prim;
+                }
+                else
+                {
+                    aggregate = true;
+                    payloads[i] = null;
+                }
+            }
+            shape = new VariantShape(names, payloads, aggregate);
             return true;
         }
 
@@ -633,6 +792,7 @@ namespace Wacs.Transpiler.AOT.Component
             bool isEnumReturn = false;
             bool isFlagsReturn = false;
             bool isRecordReturn = false;
+            bool isVariantReturn = false;
             ComponentPrim listElemPrim = default;
             ComponentPrim optionInnerPrim = default;
             ResultSide resultOkSide = ResultSide.Absent;
@@ -642,6 +802,7 @@ namespace Wacs.Transpiler.AOT.Component
             int flagCount = 0;
             ComponentPrim[] recordFieldPrims = Array.Empty<ComponentPrim>();
             string[] recordFieldNames = Array.Empty<string>();
+            VariantShape? variantShape = null;
             Type returnType;
             if (export.Signature.Results.Count == 0)
             {
@@ -739,6 +900,18 @@ namespace Wacs.Transpiler.AOT.Component
                 if (named == null) return;
                 returnType = named;
             }
+            else if (TryResolveVariantReturn(
+                export.Signature.Results[0], types, out variantShape)
+                && !variantShape.HasAggregatePayload)
+            {
+                isVariantReturn = true;
+                // Variants need a generated class — reject
+                // unnamed cases.
+                var named = TryFindNamedReturn(decodedWit, emittedTypes,
+                                                export.Name);
+                if (named == null) return;
+                returnType = named;
+            }
             else
             {
                 return;   // shouldn't reach — IsEmittable rejects
@@ -804,6 +977,11 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 EmitRecordReturnBody(il, instanceField, coreMethod, export,
                                      types, returnType, recordFieldPrims);
+            }
+            else if (isVariantReturn)
+            {
+                EmitVariantReturnBody(il, instanceField, coreMethod, export,
+                                      types, returnType, variantShape!);
             }
             else
             {
@@ -1710,6 +1888,96 @@ namespace Wacs.Transpiler.AOT.Component
         {
             var rem = offset % alignment;
             return rem == 0 ? offset : offset + (alignment - rem);
+        }
+
+        /// <summary>
+        /// IL body for a variant return. Reads the disc byte at
+        /// retArea, then for each payload-bearing case reads its
+        /// payload at the variant payload offset (max alignment
+        /// of payload types, applied to disc-width). All payload
+        /// reads happen unconditionally — the cases that don't
+        /// match the disc just produce default values that the
+        /// constructor stores into their fields anyway. The cost
+        /// of an always-unused field load is negligible vs. a
+        /// per-case branch table; the user dispatches on Tag at
+        /// the C# level.
+        /// </summary>
+        private static void EmitVariantReturnBody(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types, Type variantType,
+            VariantShape shape)
+        {
+            var memoryProp = instanceField.FieldType.GetProperty("Memory");
+            if (memoryProp == null)
+                throw new InvalidOperationException(
+                    "Variant-returning component requires Module.Memory.");
+
+            var retAreaLocal = il.DeclareLocal(typeof(int));
+            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
+            il.Emit(OpCodes.Stloc, retAreaLocal);
+
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.Emit(OpCodes.Stloc, memoryLocal);
+
+            // Discriminant width tracks case count.
+            var caseCount = shape.CaseNames.Count;
+            var discWidth = caseCount <= 256 ? 1
+                : caseCount <= 65536 ? 2 : 4;
+            // Payload alignment: max alignment over all
+            // payload-bearing cases; 1 if none.
+            int payloadAlign = 1;
+            foreach (var p in shape.CasePayloadPrims)
+                if (p.HasValue)
+                    payloadAlign = System.Math.Max(payloadAlign,
+                        PrimByteSize(p.Value));
+            var payloadOffset = AlignUp(discWidth, payloadAlign);
+
+            // Push tag (read disc byte, narrow as needed).
+            il.Emit(OpCodes.Ldloc, memoryLocal);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            if (discWidth == 1)
+            {
+                il.Emit(OpCodes.Ldelem_U1);
+            }
+            else
+            {
+                var bitC = typeof(BitConverter).GetMethod(
+                    discWidth == 2 ? "ToUInt16" : "ToUInt32",
+                    new[] { typeof(byte[]), typeof(int) })!;
+                il.EmitCall(OpCodes.Call, bitC, null);
+            }
+
+            // For each payload-bearing case, read its payload
+            // value at the shared payload offset. Order matches
+            // the variant's case-order in the binary which the
+            // ctor expects.
+            for (int i = 0; i < caseCount; i++)
+            {
+                if (!shape.CasePayloadPrims[i].HasValue) continue;
+                EmitReadPayloadAtOffset(il, memoryLocal, retAreaLocal,
+                    payloadOffset, shape.CasePayloadPrims[i]!.Value);
+            }
+
+            // new VariantClass(tag, payload0, payload1, …)
+            var ctorParamTypes = new List<Type>();
+            ctorParamTypes.Add(discWidth == 1 ? typeof(byte)
+                : discWidth == 2 ? typeof(ushort)
+                : typeof(uint));
+            for (int i = 0; i < caseCount; i++)
+                if (shape.CasePayloadPrims[i].HasValue)
+                    ctorParamTypes.Add(PrimToCs(shape.CasePayloadPrims[i]!.Value));
+            var ctor = variantType.GetConstructor(ctorParamTypes.ToArray());
+            if (ctor == null)
+                throw new InvalidOperationException(
+                    "Variant class missing matching constructor for "
+                    + export.Name + " — emitter parameter list must "
+                    + "align with EmitVariantType's ctor signature.");
+            il.Emit(OpCodes.Newobj, ctor);
+            il.Emit(OpCodes.Ret);
         }
 
         /// <summary>
