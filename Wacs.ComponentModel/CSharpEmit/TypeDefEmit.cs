@@ -41,7 +41,7 @@ namespace Wacs.ComponentModel.CSharpEmit
                     "Type emission for " + named.Type.GetType().Name +
                     " is a Phase 1a.2 follow-up."),
             };
-            return MaybePrependWitName(named.Name, body);
+            return PrependDocs(named, MaybePrependWitName(named.Name, body));
         }
 
         /// <summary>
@@ -60,6 +60,32 @@ namespace Wacs.ComponentModel.CSharpEmit
         }
 
         /// <summary>
+        /// Prepend a C# XML doc-comment block (<c>/// &lt;summary&gt;</c> +
+        /// one <c>///</c> line per WIT doc line + <c>/// &lt;/summary&gt;</c>)
+        /// when <paramref name="named"/> carries <see cref="CtNamedType.DocLines"/>.
+        /// The body is expected to begin at 4-space indent (the standard
+        /// nested-type indent); doc lines match that indent so the block
+        /// reads naturally above the declaration. No-op when there are
+        /// no doc lines.
+        /// </summary>
+        private static string PrependDocs(CtNamedType named, string body)
+        {
+            if (named.DocLines == null || named.DocLines.Count == 0)
+                return body;
+            var sb = new StringBuilder();
+            sb.Append("    /// <summary>\n");
+            foreach (var line in named.DocLines)
+            {
+                sb.Append("    /// ");
+                sb.Append(line);
+                sb.Append('\n');
+            }
+            sb.Append("    /// </summary>\n");
+            sb.Append(body);
+            return sb.ToString();
+        }
+
+        /// <summary>
         /// Overload that takes the owning interface so resource
         /// emission can derive the DllImport entry-point base. Use
         /// this from the interface-file emitter; the ambient
@@ -68,8 +94,9 @@ namespace Wacs.ComponentModel.CSharpEmit
         public static string Emit(CtNamedType named, CtInterfaceType owner)
         {
             if (named.Type is CtResourceType r)
-                return MaybePrependWitName(named.Name,
-                    EmitResource(named.Name, r, owner));
+                return PrependDocs(named,
+                    MaybePrependWitName(named.Name,
+                        EmitResource(named.Name, r, owner)));
             return Emit(named);
         }
 

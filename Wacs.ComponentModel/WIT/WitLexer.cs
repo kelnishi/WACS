@@ -40,6 +40,14 @@ namespace Wacs.ComponentModel.WIT
 
         // Reserved word (context-specific — resolve by lexeme in parser)
         Keyword,
+
+        /// <summary>
+        /// A single <c>/// …</c> doc-comment line. The token's slice
+        /// includes the leading <c>///</c>; callers strip it (plus
+        /// optionally one space) to get the doc text. Adjacent
+        /// DocComment tokens belong to the same comment block.
+        /// </summary>
+        DocComment,
     }
 
     /// <summary>
@@ -105,6 +113,27 @@ namespace Wacs.ComponentModel.WIT
         public string Slice(WitToken tok) => _source.Substring(tok.Start, tok.Length);
 
         /// <summary>
+        /// Extract the doc text from a <see cref="WitTokenKind.DocComment"/>
+        /// token — strips the leading <c>///</c> and up to one
+        /// following space. Multi-line doc blocks are joined by
+        /// the parser; this helper handles one line at a time.
+        /// </summary>
+        public string DecodeDocLine(WitToken tok)
+        {
+            if (tok.Kind != WitTokenKind.DocComment)
+                throw new InvalidOperationException($"not a doc comment: {tok}");
+            // Token slice starts with `///`. Skip those 3 chars + an
+            // optional one space (the conventional formatter space).
+            int i = tok.Start + 3;
+            int end = tok.Start + tok.Length;
+            if (i < end && _source[i] == ' ') i++;
+            // Trim trailing CR (Windows line endings).
+            int trimEnd = end;
+            while (trimEnd > i && _source[trimEnd - 1] == '\r') trimEnd--;
+            return _source.Substring(i, trimEnd - i);
+        }
+
+        /// <summary>
         /// Materialize a <see cref="WitTokenKind.String"/> token as a .NET
         /// string. Handles backslash escapes (\n \t \r \" \\ \0).
         /// </summary>
@@ -144,7 +173,7 @@ namespace Wacs.ComponentModel.WIT
             var toks = new List<WitToken>(Math.Max(16, _source.Length / 8));
             while (true)
             {
-                SkipTrivia();
+                SkipTrivia(toks);
                 int line = _line, col = _col, start = _pos;
                 if (_pos >= _source.Length)
                 {
@@ -245,7 +274,7 @@ namespace Wacs.ComponentModel.WIT
             throw new FormatException($"line {startLine}:{startCol}: unterminated string");
         }
 
-        private void SkipTrivia()
+        private void SkipTrivia(List<WitToken> toks)
         {
             while (_pos < _source.Length)
             {
@@ -254,10 +283,24 @@ namespace Wacs.ComponentModel.WIT
                 if (c == '\n') { _pos++; _line++; _col = 1; continue; }
                 if (c == '/' && _pos + 1 < _source.Length && _source[_pos + 1] == '/')
                 {
-                    // Line comment. WIT doc-comments start with /// but the
-                    // lexer collapses both to trivia for now — preserving
-                    // them is a future concern.
-                    while (_pos < _source.Length && _source[_pos] != '\n') Advance();
+                    // `///` → doc comment (emit token). `//` →
+                    // regular line comment (trivia). Checking the
+                    // third char disambiguates; must not go past
+                    // end-of-source.
+                    bool isDoc = _pos + 2 < _source.Length
+                        && _source[_pos + 2] == '/';
+                    if (isDoc)
+                    {
+                        int sLine = _line, sCol = _col;
+                        int start = _pos;
+                        while (_pos < _source.Length && _source[_pos] != '\n') Advance();
+                        toks.Add(new WitToken(WitTokenKind.DocComment, start,
+                                              _pos - start, sLine, sCol));
+                    }
+                    else
+                    {
+                        while (_pos < _source.Length && _source[_pos] != '\n') Advance();
+                    }
                     continue;
                 }
                 if (c == '/' && _pos + 1 < _source.Length && _source[_pos + 1] == '*')

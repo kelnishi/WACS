@@ -123,6 +123,15 @@ namespace Wacs.ComponentModel.WIT
     {
         public string Name { get; set; } = "";
         public WitType Type { get; set; } = null!;
+
+        /// <summary>
+        /// Block of <c>///</c> doc-comment lines immediately
+        /// preceding the declaration. Preserved verbatim (one
+        /// entry per source line, leading <c>///</c> + optional
+        /// one space stripped). Null when no doc comment is
+        /// present.
+        /// </summary>
+        public List<string>? DocLines { get; set; }
     }
 
     /// <summary>
