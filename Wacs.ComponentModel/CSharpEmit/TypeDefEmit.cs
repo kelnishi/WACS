@@ -190,6 +190,16 @@ namespace Wacs.ComponentModel.CSharpEmit
 
             foreach (var f in r.Fields)
             {
+                if (EmitAmbient.IncludeWitMetadata
+                    && NameConventions.ToCamelCase(f.Name) != f.Name)
+                {
+                    // Emit WitName when the kebab WIT name differs
+                    // from the camelCase C# field name. Same-case
+                    // names (already lowercase-simple) don't need
+                    // the attribute — keeps output tidy.
+                    sb.Append("        [global::Wacs.ComponentModel.WitName(\"")
+                      .Append(f.Name).Append("\")]\n");
+                }
                 sb.Append("        public readonly ");
                 sb.Append(TypeRefEmit.EmitParam(f.Type));
                 sb.Append(' ');

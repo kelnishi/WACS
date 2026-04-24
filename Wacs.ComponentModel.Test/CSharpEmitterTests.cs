@@ -531,6 +531,39 @@ namespace Wacs.ComponentModel.Test
                 emitted.Content);
         }
 
+        [Fact]
+        public void IncludeWitMetadata_on_decorates_record_fields_with_kebab_names()
+        {
+            // Record fields use camelCase in C#; WIT kebab-case is
+            // preserved via WitName when IncludeWitMetadata is on
+            // AND the camelCase form differs from the WIT name.
+            var src = @"
+                package local:decor;
+                interface def {
+                    record web-address { host-name: string, port: u16, active: bool }
+                }
+                world w { export def; }";
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "def");
+
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(
+                iface, "w",
+                new EmitOptions { IncludeWitMetadata = true });
+
+            // host-name → hostName — differs from WIT, gets attribute.
+            Assert.Contains(
+                "[global::Wacs.ComponentModel.WitName(\"host-name\")]",
+                emitted.Content);
+            // port → port — same name, no attribute (keeps output tidy).
+            Assert.DoesNotContain(
+                "[global::Wacs.ComponentModel.WitName(\"port\")]",
+                emitted.Content);
+            // active → active — same name, no attribute.
+            Assert.DoesNotContain(
+                "[global::Wacs.ComponentModel.WitName(\"active\")]",
+                emitted.Content);
+        }
+
         // ---- Doc-comment passthrough --------------------------------------
 
         [Fact]
