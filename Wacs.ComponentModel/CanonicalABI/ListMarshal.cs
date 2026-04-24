@@ -115,5 +115,35 @@ namespace Wacs.ComponentModel.CanonicalABI
             var src = MemoryMarshal.AsBytes(values.AsSpan());
             src.CopyTo(memory.AsSpan(dstPtr, byteLen));
         }
+
+        /// <summary>
+        /// Lift <c>list&lt;string&gt;</c> from guest memory. Each
+        /// element is an 8-byte (i32 strPtr, i32 strLen) pair at
+        /// 4-byte alignment, starting at
+        /// <paramref name="listPtr"/>. UTF-8 decode of each
+        /// element routes through
+        /// <see cref="StringMarshal.LiftUtf8(byte[], int, int)"/>
+        /// — the single chokepoint for string copy sites remains
+        /// intact so a future JS-string-externref path can swap
+        /// in additively.
+        /// </summary>
+        public static string[] LiftStringList(byte[] memory, int listPtr, int count)
+        {
+            if (count < 0)
+                throw new ArgumentOutOfRangeException(nameof(count),
+                    "list<string> count must be non-negative.");
+            if (count > 0 && (listPtr < 0 || (long)listPtr + count * 8 > memory.Length))
+                throw new ArgumentOutOfRangeException(nameof(listPtr),
+                    "list<string> element span out of range of guest memory.");
+            var result = new string[count];
+            for (int i = 0; i < count; i++)
+            {
+                var offset = listPtr + i * 8;
+                var strPtr = BitConverter.ToInt32(memory, offset);
+                var strLen = BitConverter.ToInt32(memory, offset + 4);
+                result[i] = StringMarshal.LiftUtf8(memory, strPtr, strLen);
+            }
+            return result;
+        }
     }
 }
