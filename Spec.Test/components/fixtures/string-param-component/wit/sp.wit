@@ -1,0 +1,4 @@
+package local:sp;
+world sp {
+    export echo: func(s: string) -> string;
+}

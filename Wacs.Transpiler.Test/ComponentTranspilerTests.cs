@@ -279,6 +279,47 @@ namespace Wacs.Transpiler.Test
             Assert.Equal("Hello", value);
         }
 
+        private static string FindStringParamComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "string-param-component", "wasm",
+                                "sp.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lowers_string_param_via_cabi_realloc()
+        {
+            // string-param-component exports `echo(s: string) -> string`.
+            // Core signature: `(i32, i32) -> i32` — the two i32s
+            // are (ptr, len) into guest memory, the return i32
+            // points at a 2-word return area holding (ptr, len).
+            // The guest bump-allocates via cabi_realloc and echoes
+            // the input back by pointing the return area at the
+            // freshly-copied bytes. Exercises the param-side
+            // canonical-ABI lower path: UTF-8 encode, call
+            // cabi_realloc, memcpy into guest memory, pass
+            // (ptr, len) to the core function — all through IL.
+            using var fs = File.OpenRead(FindStringParamComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var echo = componentExports!.GetMethod("Echo");
+            Assert.NotNull(echo);
+            Assert.Equal(typeof(string), echo!.ReturnType);
+            var pars = echo.GetParameters();
+            Assert.Single(pars);
+            Assert.Equal(typeof(string), pars[0].ParameterType);
+
+            var value = (string)echo.Invoke(null, new object[] { "roundtrip" })!;
+            Assert.Equal("roundtrip", value);
+        }
+
         private static string FindF64ComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());

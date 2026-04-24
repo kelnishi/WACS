@@ -85,5 +85,39 @@ namespace Wacs.ComponentModel.CanonicalABI
         {
             return Encoding.UTF8.GetString(bytes);
         }
+
+        /// <summary>
+        /// UTF-8 encode step, separated from the realloc+copy
+        /// step so the transpiler's emitted IL can thread the
+        /// byte count through a call to the guest's
+        /// <c>cabi_realloc</c> before any memcpy. The IL path
+        /// is: bytes = EncodeUtf8(s); len = bytes.Length;
+        /// ptr = core.CabiRealloc(0, 0, 1, len); CopyToGuest(
+        /// bytes, core.Memory, ptr). Keeping encode and copy
+        /// as separate chokepoint methods preserves the
+        /// "single UTF-8 site" discipline described in this
+        /// class summary — a future <c>Encode</c> / <c>Copy</c>
+        /// pair that consults a canonical-option bit for
+        /// JS-string-externref slots in here without rewriting
+        /// callers.
+        /// </summary>
+        public static byte[] EncodeUtf8(string value)
+        {
+            return Encoding.UTF8.GetBytes(value);
+        }
+
+        /// <summary>
+        /// Copy a pre-encoded UTF-8 byte array into guest
+        /// memory at <paramref name="dstPtr"/>. Companion to
+        /// <see cref="EncodeUtf8"/> for the transpiler's lower
+        /// path; see that method's remarks for the IL contract.
+        /// </summary>
+        public static void CopyToGuest(byte[] bytes, byte[] memory, int dstPtr)
+        {
+            if (dstPtr < 0 || dstPtr + bytes.Length > memory.Length)
+                throw new ArgumentOutOfRangeException(nameof(dstPtr),
+                    "UTF-8 copy span out of range of guest memory buffer.");
+            Array.Copy(bytes, 0, memory, dstPtr, bytes.Length);
+        }
     }
 }
