@@ -1059,6 +1059,48 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- result<list<prim>, variant> returns ------------------------
+
+        private static string FindInteropResultListFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-result-list");
+        }
+
+        /// <summary>
+        /// <c>result&lt;list&lt;prim&gt;, variant&gt;</c> — the shape
+        /// used by <c>wasi:io/streams.input-stream.read: func(u64)
+        /// -&gt; result&lt;list&lt;u8&gt;, stream-error&gt;</c>. The Ok
+        /// arm does a multi-statement list lift (allocate array of
+        /// reported length, then <c>Span.CopyTo</c> from the wasm
+        /// ptr); the Err arm does a nested variant switch. Return
+        /// area is 3 uints — disc + list's (ptr, len) at 4 and 8.
+        /// Because both arms need multi-statement bodies, the
+        /// outer result var renames to <c>liftedResult</c>
+        /// (divergent from wit-bindgen's counter-allocated
+        /// <c>lifted6</c>).
+        /// </summary>
+        [Fact]
+        public void InteropEmit_result_of_list_variant_matches_expected()
+        {
+            var fixtureDir = FindInteropResultListFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "rl.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            WitResolver.Resolve(pkgs);
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "rl-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "expected",
+                "RlWorldWorld.wit.imports.local.rl.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Variant with cross-interface resource payload --------------
 
         private static string FindInteropVariantResourceFixtureDir()
