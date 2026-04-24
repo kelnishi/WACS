@@ -485,6 +485,52 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, emitted.Content);
         }
 
+        // ---- WitName metadata emission ------------------------------------
+
+        [Fact]
+        public void IncludeWitMetadata_off_omits_WitName_attributes()
+        {
+            var src = @"
+                package local:decor;
+                interface def {
+                    enum color { red, green, blue }
+                }
+                world w { export def; }";
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "def");
+
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(iface, "w");
+
+            Assert.DoesNotContain("WitName", emitted.Content);
+        }
+
+        [Fact]
+        public void IncludeWitMetadata_on_decorates_type_defs()
+        {
+            var src = @"
+                package local:decor;
+                interface def {
+                    enum my-kind { one, two }
+                    record web-address { host-name: string, port: u16 }
+                }
+                world w { export def; }";
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "def");
+
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(
+                iface, "w",
+                new EmitOptions { IncludeWitMetadata = true });
+
+            // Enum decorated with original kebab name.
+            Assert.Contains(
+                "[global::Wacs.ComponentModel.WitName(\"my-kind\")]",
+                emitted.Content);
+            // Record decorated.
+            Assert.Contains(
+                "[global::Wacs.ComponentModel.WitName(\"web-address\")]",
+                emitted.Content);
+        }
+
         // ---- Types: record -----------------------------------------------
 
         private static string FindTypesRecordFixtureDir()

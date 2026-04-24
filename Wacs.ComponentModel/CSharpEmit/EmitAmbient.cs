@@ -32,26 +32,36 @@ namespace Wacs.ComponentModel.CSharpEmit
         [System.ThreadStatic]
         private static CtInterfaceType? s_emittingIface;
 
+        [System.ThreadStatic]
+        private static EmitOptions? s_options;
+
         public static string? WorldNamespace => s_worldNs;
         public static CtInterfaceType? EmittingInterface => s_emittingIface;
+        public static EmitOptions Options => s_options ?? s_default;
+        public static bool IncludeWitMetadata => (s_options ?? s_default).IncludeWitMetadata;
 
-        public static Scope Push(string worldNs, CtInterfaceType iface)
+        private static readonly EmitOptions s_default = new EmitOptions();
+
+        public static Scope Push(string worldNs, CtInterfaceType iface,
+                                 EmitOptions? options = null)
         {
-            var prev = (s_worldNs, s_emittingIface);
+            var prev = (s_worldNs, s_emittingIface, s_options);
             s_worldNs = worldNs;
             s_emittingIface = iface;
+            s_options = options;
             return new Scope(prev);
         }
 
         /// <summary>RAII restoration when emission scope ends.</summary>
         public readonly struct Scope : System.IDisposable
         {
-            private readonly (string? WorldNs, CtInterfaceType? Iface) _prev;
-            public Scope((string?, CtInterfaceType?) prev) { _prev = prev; }
+            private readonly (string? WorldNs, CtInterfaceType? Iface, EmitOptions? Options) _prev;
+            public Scope((string?, CtInterfaceType?, EmitOptions?) prev) { _prev = prev; }
             public void Dispose()
             {
                 s_worldNs = _prev.WorldNs;
                 s_emittingIface = _prev.Iface;
+                s_options = _prev.Options;
             }
         }
     }

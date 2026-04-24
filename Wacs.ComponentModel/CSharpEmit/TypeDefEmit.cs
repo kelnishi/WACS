@@ -31,7 +31,7 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// </summary>
         public static string Emit(CtNamedType named)
         {
-            return named.Type switch
+            var body = named.Type switch
             {
                 CtEnumType e => EmitEnum(named.Name, e),
                 CtFlagsType f => EmitFlags(named.Name, f),
@@ -41,6 +41,22 @@ namespace Wacs.ComponentModel.CSharpEmit
                     "Type emission for " + named.Type.GetType().Name +
                     " is a Phase 1a.2 follow-up."),
             };
+            return MaybePrependWitName(named.Name, body);
+        }
+
+        /// <summary>
+        /// If <see cref="EmitAmbient.IncludeWitMetadata"/> is on,
+        /// prepend a <c>[global::Wacs.ComponentModel.WitName("kebab")]</c>
+        /// attribute line to the emitted type declaration.
+        /// Fully qualified path so consumers don't need a
+        /// <c>using Wacs.ComponentModel;</c> directive in the
+        /// generated file.
+        /// </summary>
+        private static string MaybePrependWitName(string kebabName, string body)
+        {
+            if (!EmitAmbient.IncludeWitMetadata) return body;
+            return "    [global::Wacs.ComponentModel.WitName(\""
+                + kebabName + "\")]\n" + body;
         }
 
         /// <summary>
@@ -52,7 +68,8 @@ namespace Wacs.ComponentModel.CSharpEmit
         public static string Emit(CtNamedType named, CtInterfaceType owner)
         {
             if (named.Type is CtResourceType r)
-                return EmitResource(named.Name, r, owner);
+                return MaybePrependWitName(named.Name,
+                    EmitResource(named.Name, r, owner));
             return Emit(named);
         }
 
@@ -282,7 +299,7 @@ namespace Wacs.ComponentModel.CSharpEmit
                                            CtInterfaceType owner)
         {
             var className = NameConventions.ToPascalCase(name);
-            var entryPointBase = BuildEntryPointBase(owner);
+            var entryPointBase = EntryPoints.InterfaceBase(owner);
             var sb = new StringBuilder();
 
             sb.Append("    public class ").Append(className).Append(": IDisposable {\n");
@@ -300,8 +317,9 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append("        }\n\n");
 
             sb.Append("        [DllImport(\"").Append(entryPointBase);
-            sb.Append("\", EntryPoint = \"[resource-drop]").Append(name);
-            sb.Append("\"), WasmImportLinkage]\n");
+            sb.Append("\", EntryPoint = \"")
+              .Append(EntryPoints.ResourceDrop(name))
+              .Append("\"), WasmImportLinkage]\n");
             sb.Append("        private static extern void wasmImportResourceDrop(int p0);\n\n");
 
             sb.Append("        protected virtual void Dispose(bool disposing) {\n");
@@ -354,8 +372,9 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append("        internal static class ConstructorWasmInterop\n");
             sb.Append("        {\n");
             sb.Append("            [DllImport(\"").Append(entryPointBase);
-            sb.Append("\", EntryPoint = \"[constructor]").Append(resourceWitName);
-            sb.Append("\"), WasmImportLinkage]\n");
+            sb.Append("\", EntryPoint = \"")
+              .Append(EntryPoints.ResourceConstructor(resourceWitName))
+              .Append("\"), WasmImportLinkage]\n");
             sb.Append("            internal static extern int wasmImportConstructor(");
             for (int i = 0; i < sig.Params.Count; i++)
             {
@@ -415,8 +434,9 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append("        internal static class ").Append(stubClass).Append('\n');
             sb.Append("        {\n");
             sb.Append("            [DllImport(\"").Append(entryPointBase);
-            sb.Append("\", EntryPoint = \"[static]").Append(resourceWitName);
-            sb.Append('.').Append(m.Name).Append("\"), WasmImportLinkage]\n");
+            sb.Append("\", EntryPoint = \"")
+              .Append(EntryPoints.ResourceStatic(resourceWitName, m.Name!))
+              .Append("\"), WasmImportLinkage]\n");
             sb.Append("            internal static extern ").Append(StubReturnType(sig));
             sb.Append(" wasmImport").Append(methodName).Append('(');
             for (int i = 0; i < sig.Params.Count; i++)
@@ -543,8 +563,9 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append("        internal static class ").Append(stubClass).Append('\n');
             sb.Append("        {\n");
             sb.Append("            [DllImport(\"").Append(entryPointBase);
-            sb.Append("\", EntryPoint = \"[method]").Append(resourceWitName);
-            sb.Append('.').Append(m.Name).Append("\"), WasmImportLinkage]\n");
+            sb.Append("\", EntryPoint = \"")
+              .Append(EntryPoints.ResourceMethod(resourceWitName, m.Name!))
+              .Append("\"), WasmImportLinkage]\n");
 
             sb.Append("            internal static extern ");
             sb.Append(StubReturnType(sig));
@@ -630,23 +651,6 @@ namespace Wacs.ComponentModel.CSharpEmit
             return PrimStubType(sig.Result);
         }
 
-        private static string BuildEntryPointBase(CtInterfaceType iface)
-        {
-            // `{ns}:{path}/{iface-name}[@ver]` — same pattern as
-            // InteropEmit's private helper. Duplicate rather than
-            // thread-internal-shared through the API for now.
-            var sb = new StringBuilder();
-            sb.Append(iface.Package!.Namespace);
-            foreach (var seg in iface.Package.Path)
-            {
-                sb.Append(':');
-                sb.Append(seg);
-            }
-            sb.Append('/').Append(iface.Name);
-            if (iface.Package.Version != null)
-                sb.Append('@').Append(iface.Package.Version);
-            return sb.ToString();
-        }
 
         private static string FlagsBackingType(int flagCount)
         {

@@ -46,7 +46,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             var ifaceNs = NameConventions.InterfaceNamespace(
                 worldNameKebab, isExport: false, iface.Package);
             var className = NameConventions.ToPascalCase(iface.Name) + "Interop";
-            var entryPointBase = BuildEntryPointBase(iface);
+            var entryPointBase = EntryPoints.InterfaceBase(iface);
 
             var sb = new StringBuilder();
             sb.Append(CSharpEmitter.Header);
@@ -63,34 +63,6 @@ namespace Wacs.ComponentModel.CSharpEmit
             return sb.ToString();
         }
 
-        /// <summary>
-        /// Build the <c>DllImport</c> EntryPoint base: for
-        /// <c>wasi:cli/stdout@0.2.3</c> the base is exactly that
-        /// string; free-function stubs append <c>, EntryPoint =
-        /// "{wit-func-name}"</c> around it. Versionless packages
-        /// drop the <c>@</c> suffix.
-        /// </summary>
-        private static string BuildEntryPointBase(CtInterfaceType iface)
-        {
-            // `{ns}:{path0}:{path1}.../{iface-name}` — colon-joined
-            // namespace + path segments, then `/` before interface.
-            var sb = new StringBuilder();
-            sb.Append(iface.Package!.Namespace);
-            foreach (var seg in iface.Package.Path)
-            {
-                sb.Append(':');
-                sb.Append(seg);
-            }
-            sb.Append('/');
-            sb.Append(iface.Name);
-            if (iface.Package.Version != null)
-            {
-                sb.Append('@');
-                sb.Append(iface.Package.Version);
-            }
-            return sb.ToString();
-        }
-
         // ---- Per-function emission ----------------------------------------
 
         private static void EmitFreeFunction(StringBuilder sb,
@@ -104,7 +76,9 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append("        internal static class ").Append(stubClassName).Append('\n');
             sb.Append("        {\n");
             sb.Append("            [DllImport(\"").Append(entryPointBase);
-            sb.Append("\", EntryPoint = \"").Append(fn.Name).Append("\"), WasmImportLinkage]\n");
+            sb.Append("\", EntryPoint = \"")
+              .Append(EntryPoints.ImportFreeFunction(fn.Name))
+              .Append("\"), WasmImportLinkage]\n");
             sb.Append("            internal static extern ");
             sb.Append(EmitStubReturnType(fn.Type));
             sb.Append(" wasmImport").Append(methodName).Append('(');
