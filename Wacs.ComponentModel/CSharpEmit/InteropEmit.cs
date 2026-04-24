@@ -523,11 +523,13 @@ namespace Wacs.ComponentModel.CSharpEmit
             var errCs = r.Err != null ? ResultArmTypeName(r.Err) : "None";
             var resultTy = "Result<" + okCs + ", " + errCs + ">";
 
-            // Outer var name: when either arm is a variant that
-            // needs its own inner `lifted`, rename the outer to
-            // `liftedResult` to avoid collision. Simple cases keep
-            // the byte-for-byte `lifted` name.
-            bool nested = IsVariantArm(r.Ok) || IsVariantArm(r.Err);
+            // Outer var name: when either arm needs a
+            // multi-statement body (variant nested switch or
+            // list-ptr/len lift into a local `array`), rename the
+            // outer to `liftedResult` to avoid name collision.
+            // Simple cases keep the byte-for-byte `lifted` name.
+            bool nested = NeedsMultiStatementArm(r.Ok)
+                       || NeedsMultiStatementArm(r.Err);
             var outerVar = nested ? "liftedResult" : "lifted";
 
             sb.Append("                ").Append(resultTy).Append(' ')
@@ -554,17 +556,23 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append("                }\n");
         }
 
-        private static bool IsVariantArm(CtValType? t) =>
-            t != null && IsVariantOfSmallPrimOrNone(t);
+        private static bool NeedsMultiStatementArm(CtValType? t) =>
+            t != null && (IsVariantOfSmallPrimOrNone(t) || IsListOfPrim(t));
 
         /// <summary>Name to use for a result arm's Ok/Err type
         /// parameter. Primitives use their C# name; variants use
-        /// the fully-qualified global:: path; None for absent.</summary>
+        /// the fully-qualified global:: path; list&lt;prim&gt; uses
+        /// <c>primCs[]</c>; None for absent.</summary>
         private static string ResultArmTypeName(CtValType t)
         {
             if (t is CtPrimType p) return TypeRefEmit.EmitPrim(p.Kind);
             if (IsVariantOfSmallPrimOrNone(t))
                 return TypeRefEmit.EmitQualifiedPath(ResolveVariant((CtTypeRef)t));
+            if (IsListOfPrim(t))
+            {
+                var elemKind = ((CtPrimType)((CtListType)t).Element).Kind;
+                return TypeRefEmit.EmitPrim(elemKind) + "[]";
+            }
             throw new NotImplementedException(
                 "ResultArmTypeName for " + t.GetType().Name + " is a follow-up.");
         }
@@ -602,6 +610,30 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append("                        ").Append(outerVar)
                   .Append(" = ").Append(resultTy).Append('.').Append(factory)
                   .Append("(lifted);\n");
+            }
+            else if (arm != null && IsListOfPrim(arm))
+            {
+                // list<prim> arm — allocate managed array of the
+                // reported length, then span-copy guest memory into
+                // it. (ptr, len) pair lives at payloadOffset and
+                // payloadOffset+4. Trailing blank line matches
+                // wit-bindgen's formatting before the outer
+                // assignment.
+                var elemKind = ((CtPrimType)((CtListType)arm).Element).Kind;
+                var elemCs = TypeRefEmit.EmitPrim(elemKind);
+                sb.Append("                        var array = new ").Append(elemCs)
+                  .Append("[BitConverter.ToInt32(new Span<byte>((void*)(ptr + ")
+                  .Append(payloadOffset + 4).Append("), 4))];\n");
+                sb.Append("                        new Span<").Append(elemCs)
+                  .Append(">((void*)(BitConverter.ToInt32(new Span<byte>((void*)(ptr + ")
+                  .Append(payloadOffset)
+                  .Append("), 4))), BitConverter.ToInt32(new Span<byte>((void*)(ptr + ")
+                  .Append(payloadOffset + 4).Append("), 4))).CopyTo(new Span<")
+                  .Append(elemCs).Append(">(array));\n");
+                sb.Append("\n");
+                sb.Append("                        ").Append(outerVar)
+                  .Append(" = ").Append(resultTy).Append('.').Append(factory)
+                  .Append("(array);\n");
             }
             else
             {
@@ -1076,6 +1108,7 @@ namespace Wacs.ComponentModel.CSharpEmit
         {
             if (t is CtPrimType p) return IsFlatPrim(p.Kind);
             if (IsVariantOfSmallPrimOrNone(t)) return true;
+            if (IsListOfPrim(t)) return true;
             return false;
         }
 
@@ -1083,13 +1116,15 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// None = 0, 32-bit primitive = 4, 64-bit primitive = 8,
         /// variant-with-small-prim-or-none cases = 8 (variant disc
         /// at +0 + 1-word payload at +4 — effective max extent
-        /// within its arm is 8 bytes).</summary>
+        /// within its arm is 8 bytes), list&lt;prim&gt; = 8 (ptr +
+        /// len).</summary>
         private static int ResultArmBytes(CtValType? t)
         {
             if (t == null) return 0;
             if (t is CtPrimType p)
                 return IsWidePrim(p.Kind) ? 8 : 4;
             if (IsVariantOfSmallPrimOrNone(t)) return 8;
+            if (IsListOfPrim(t)) return 8;
             return 0;
         }
 
@@ -1097,13 +1132,15 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// drives the outer payload offset (rounded up from the
         /// 1-byte discriminant). 32-bit primitive = 4-byte align;
         /// 64-bit primitive = 8-byte align; variant = 4 (its own
-        /// disc aligns to 4, payload slot is 32-bit).</summary>
+        /// disc aligns to 4, payload slot is 32-bit); list = 4
+        /// (ptr and len are both 32-bit).</summary>
         private static int ResultArmAlign(CtValType? t)
         {
             if (t == null) return 1;
             if (t is CtPrimType p)
                 return IsWidePrim(p.Kind) ? 8 : 4;
             if (IsVariantOfSmallPrimOrNone(t)) return 4;
+            if (IsListOfPrim(t)) return 4;
             return 1;
         }
 
