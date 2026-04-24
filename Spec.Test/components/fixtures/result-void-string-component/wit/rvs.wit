@@ -1,0 +1,5 @@
+package local:rvs;
+world rvs {
+    export ok:  func() -> result<_, string>;
+    export err: func() -> result<_, string>;
+}
