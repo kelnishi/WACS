@@ -834,6 +834,46 @@ namespace Wacs.Transpiler.Test
             // and returns.
             Assert.True(typeof(System.IDisposable).IsAssignableFrom(counter));
             ((System.IDisposable)instance).Dispose();
+
+            // The fixture also exports `inspect: func(c: borrow<counter>)
+            // -> u32` returning 42 from the core. ComponentExports.Inspect
+            // takes a Counter, extracts its handle, and returns the u32.
+            var inspect = componentExports.GetMethod("Inspect");
+            Assert.NotNull(inspect);
+            var pars = inspect!.GetParameters();
+            Assert.Single(pars);
+            Assert.Equal(counter, pars[0].ParameterType);
+            Assert.Equal(typeof(uint), inspect.ReturnType);
+            var result2 = (uint)inspect.Invoke(null, new[] { instance })!;
+            Assert.Equal(42u, result2);
+
+            // The WIT declares `constructor()` and instance methods
+            // `value() -> u32` + `add(n: u32) -> u32` on the
+            // counter resource. The transpiler projects these from
+            // [constructor]counter / [method]counter.value /
+            // [method]counter.add core exports onto the Counter
+            // class.
+            var publicCtor = counter.GetConstructor(System.Type.EmptyTypes);
+            Assert.NotNull(publicCtor);
+            var fresh = publicCtor!.Invoke(null);
+            Assert.Equal(1, handleField.GetValue(fresh));   // [constructor] returns 1
+
+            var valueMethod = counter.GetMethod("Value", System.Type.EmptyTypes);
+            Assert.NotNull(valueMethod);
+            // Resource methods use the core IExports' CLR types
+            // for params + return — int rather than uint here.
+            // Surfacing the WIT-decoded signed/unsigned + named-
+            // type mapping is the natural followup once
+            // BinaryWitDecoder populates `CtResourceType.Methods`.
+            Assert.Equal(typeof(int), valueMethod!.ReturnType);
+            Assert.Equal(42, (int)valueMethod.Invoke(fresh, null)!);
+
+            var addMethod = counter.GetMethod("Add", new[] { typeof(int) });
+            Assert.NotNull(addMethod);
+            Assert.Equal(typeof(int), addMethod!.ReturnType);
+            // [method]counter.add returns n + 100; passing 5
+            // expects 105.
+            Assert.Equal(105, (int)addMethod.Invoke(fresh, new object[] { 5 })!);
         }
 
         private static string FindOptionStringNoneComponentPath()

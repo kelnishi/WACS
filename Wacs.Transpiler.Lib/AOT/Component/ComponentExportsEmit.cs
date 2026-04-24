@@ -208,11 +208,18 @@ namespace Wacs.Transpiler.AOT.Component
             Type coreIExports, Type coreModuleClass)
         {
             var typeName = @namespace + "." + PascalCase(witName);
-            // Wire IDisposable when the core module exports the
-            // matching `[resource-drop]<Type>` function. Without
-            // it the wrapper is non-disposable — the handle
-            // leaks until the component instance is replaced.
+
+            // Discover resource members on the core IExports.
             var dropMethod = FindResourceDropMethod(coreIExports, witName);
+            var ctorCoreMethod = FindResourceConstructorMethod(coreIExports, witName);
+            var instanceMethods = FindResourceInstanceMethods(coreIExports, witName);
+            var staticMethods = FindResourceStaticMethods(coreIExports, witName);
+
+            var needsInstance = dropMethod != null
+                || ctorCoreMethod != null
+                || instanceMethods.Count > 0
+                || staticMethods.Count > 0;
+
             var interfaces = dropMethod != null
                 ? new[] { typeof(System.IDisposable) }
                 : Type.EmptyTypes;
@@ -227,14 +234,13 @@ namespace Wacs.Transpiler.AOT.Component
                 FieldAttributes.Public | FieldAttributes.InitOnly);
 
             FieldBuilder? instanceField = null;
-            ConstructorBuilder? cctor = null;
-            if (dropMethod != null)
+            if (needsInstance)
             {
                 instanceField = classBuilder.DefineField(
                     "_instance", coreModuleClass,
                     FieldAttributes.Private | FieldAttributes.Static
                         | FieldAttributes.InitOnly);
-                cctor = classBuilder.DefineTypeInitializer();
+                var cctor = classBuilder.DefineTypeInitializer();
                 var cctorIl = cctor.GetILGenerator();
                 var coreCtor = coreModuleClass.GetConstructor(Type.EmptyTypes);
                 if (coreCtor != null)
@@ -245,25 +251,59 @@ namespace Wacs.Transpiler.AOT.Component
                 cctorIl.Emit(OpCodes.Ret);
             }
 
-            var ctor = classBuilder.DefineConstructor(
+            // (int handle) constructor — used by the
+            // ComponentExports emitter when wrapping a handle
+            // returned from a host call (e.g. ComponentExports.Make).
+            var handleCtor = classBuilder.DefineConstructor(
                 MethodAttributes.Public | MethodAttributes.SpecialName
                     | MethodAttributes.RTSpecialName,
                 CallingConventions.Standard, new[] { typeof(int) });
-            ctor.DefineParameter(1, ParameterAttributes.None, "handle");
-            var ctorIl = ctor.GetILGenerator();
-            ctorIl.Emit(OpCodes.Ldarg_0);
-            ctorIl.Emit(OpCodes.Call,
+            handleCtor.DefineParameter(1, ParameterAttributes.None, "handle");
+            var handleCtorIl = handleCtor.GetILGenerator();
+            handleCtorIl.Emit(OpCodes.Ldarg_0);
+            handleCtorIl.Emit(OpCodes.Call,
                 typeof(object).GetConstructor(Type.EmptyTypes)!);
-            ctorIl.Emit(OpCodes.Ldarg_0);
-            ctorIl.Emit(OpCodes.Ldarg_1);
-            ctorIl.Emit(OpCodes.Stfld, handleField);
-            ctorIl.Emit(OpCodes.Ret);
+            handleCtorIl.Emit(OpCodes.Ldarg_0);
+            handleCtorIl.Emit(OpCodes.Ldarg_1);
+            handleCtorIl.Emit(OpCodes.Stfld, handleField);
+            handleCtorIl.Emit(OpCodes.Ret);
 
+            // Public WIT-defined constructor (if any). Restricted
+            // to constructors taking only primitive params in v0
+            // — list/string/resource constructor params are
+            // follow-ups (each adds its own param-lowering shape).
+            if (ctorCoreMethod != null && instanceField != null
+                && AllPrimitiveOrSelfParams(ctorCoreMethod, skipFirst: false))
+            {
+                EmitResourceCtorPublic(classBuilder, instanceField,
+                    handleField, ctorCoreMethod);
+            }
+
+            // Instance methods — each takes self handle as first
+            // core param. Restricted to primitive params + return
+            // for v0.
+            foreach (var (memberName, method) in instanceMethods)
+            {
+                if (!AllPrimitiveOrSelfParams(method, skipFirst: true)) continue;
+                if (!IsPrimitiveOrVoid(method.ReturnType)) continue;
+                if (instanceField == null) continue;
+                EmitResourceInstanceMethod(classBuilder, instanceField,
+                    handleField, memberName, method);
+            }
+
+            // Static methods.
+            foreach (var (memberName, method) in staticMethods)
+            {
+                if (!AllPrimitiveOrSelfParams(method, skipFirst: false)) continue;
+                if (!IsPrimitiveOrVoid(method.ReturnType)) continue;
+                if (instanceField == null) continue;
+                EmitResourceStaticMethod(classBuilder, instanceField,
+                    memberName, method);
+            }
+
+            // IDisposable.Dispose() routes through [resource-drop].
             if (dropMethod != null && instanceField != null)
             {
-                // public void Dispose() {
-                //     _instance.[resource-drop]<Type>(this.Handle);
-                // }
                 var dispose = classBuilder.DefineMethod(
                     "Dispose",
                     MethodAttributes.Public | MethodAttributes.Virtual
@@ -280,8 +320,126 @@ namespace Wacs.Transpiler.AOT.Component
                     typeof(System.IDisposable).GetMethod("Dispose")!);
             }
 
-            _ = res;   // explicit-dtor field is followup
+            _ = res;
             return classBuilder.CreateType()!;
+        }
+
+        /// <summary>True when every param of <paramref name="m"/>
+        /// is a primitive CLR type — restricts v0's resource-method
+        /// emission to the simple cases. <paramref name="skipFirst"/>
+        /// drops the implicit self handle for instance methods.</summary>
+        private static bool AllPrimitiveOrSelfParams(
+            MethodInfo m, bool skipFirst)
+        {
+            var pars = m.GetParameters();
+            for (int i = skipFirst ? 1 : 0; i < pars.Length; i++)
+                if (!IsPrimitiveOrVoid(pars[i].ParameterType))
+                    return false;
+            return true;
+        }
+
+        private static bool IsPrimitiveOrVoid(Type t) =>
+            t == typeof(void) || t.IsPrimitive;
+
+        /// <summary>
+        /// Emit a public parameterless C# constructor that
+        /// allocates a fresh handle by calling
+        /// <c>[constructor]&lt;type&gt;</c> on the core module.
+        /// User-supplied constructor args are a follow-up — for
+        /// v0, only no-arg constructors emit (the WIT
+        /// <c>constructor()</c> form).
+        /// </summary>
+        private static void EmitResourceCtorPublic(
+            TypeBuilder classBuilder, FieldBuilder instanceField,
+            FieldBuilder handleField, MethodInfo coreCtor)
+        {
+            // Skip when the core constructor takes user params —
+            // v0 only handles the WIT `constructor()` no-arg form.
+            if (coreCtor.GetParameters().Length != 0) return;
+
+            var ctor = classBuilder.DefineConstructor(
+                MethodAttributes.Public | MethodAttributes.SpecialName
+                    | MethodAttributes.RTSpecialName,
+                CallingConventions.Standard, Type.EmptyTypes);
+            var il = ctor.GetILGenerator();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Call,
+                typeof(object).GetConstructor(Type.EmptyTypes)!);
+            // this.Handle = _instance.[constructor]<type>();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, coreCtor, null);
+            il.Emit(OpCodes.Stfld, handleField);
+            il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// Emit a public instance method on the resource class
+        /// that delegates to <c>_instance.[method]&lt;type&gt;.&lt;name&gt;</c>,
+        /// passing <c>this.Handle</c> as the first core param.
+        /// User params follow positionally — primitives only in
+        /// v0.
+        /// </summary>
+        private static void EmitResourceInstanceMethod(
+            TypeBuilder classBuilder, FieldBuilder instanceField,
+            FieldBuilder handleField, string memberName,
+            MethodInfo coreMethod)
+        {
+            var corePars = coreMethod.GetParameters();
+            // Skip the first core param (the i32 self handle) at
+            // the C# surface — it's threaded through this.Handle.
+            var userParams = new Type[corePars.Length - 1];
+            for (int i = 1; i < corePars.Length; i++)
+                userParams[i - 1] = corePars[i].ParameterType;
+
+            var method = classBuilder.DefineMethod(
+                PascalCase(memberName),
+                MethodAttributes.Public | MethodAttributes.HideBySig,
+                coreMethod.ReturnType, userParams);
+            for (int i = 0; i < userParams.Length; i++)
+                method.DefineParameter(i + 1, ParameterAttributes.None,
+                    "arg" + i);
+
+            var il = method.GetILGenerator();
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, handleField);
+            for (int i = 0; i < userParams.Length; i++)
+                il.Emit(OpCodes.Ldarg, i + 1);
+            il.EmitCall(OpCodes.Callvirt, coreMethod, null);
+            il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// Emit a public static method on the resource class
+        /// that delegates to <c>_instance.[static]&lt;type&gt;.&lt;name&gt;</c>.
+        /// No self handle — user params + return value flow direct
+        /// (primitives only in v0).
+        /// </summary>
+        private static void EmitResourceStaticMethod(
+            TypeBuilder classBuilder, FieldBuilder instanceField,
+            string memberName, MethodInfo coreMethod)
+        {
+            var corePars = coreMethod.GetParameters();
+            var userParams = new Type[corePars.Length];
+            for (int i = 0; i < corePars.Length; i++)
+                userParams[i] = corePars[i].ParameterType;
+
+            var method = classBuilder.DefineMethod(
+                PascalCase(memberName),
+                MethodAttributes.Public | MethodAttributes.Static
+                    | MethodAttributes.HideBySig,
+                coreMethod.ReturnType, userParams);
+            for (int i = 0; i < userParams.Length; i++)
+                method.DefineParameter(i + 1, ParameterAttributes.None,
+                    "arg" + i);
+
+            var il = method.GetILGenerator();
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            for (int i = 0; i < userParams.Length; i++)
+                il.Emit(OpCodes.Ldarg, i);
+            il.EmitCall(OpCodes.Callvirt, coreMethod, null);
+            il.Emit(OpCodes.Ret);
         }
 
         /// <summary>Find the core IExports method matching the
@@ -307,6 +465,52 @@ namespace Wacs.Transpiler.AOT.Component
                     return m;
             }
             return null;
+        }
+
+        /// <summary>Find the core <c>[constructor]<i>witName</i></c>
+        /// export. Sanitized form: <c>_constructor_<i>witName</i></c>.</summary>
+        private static MethodInfo? FindResourceConstructorMethod(
+            Type iExports, string witName)
+        {
+            var sanitized = SanitizeExportName("[constructor]" + witName);
+            foreach (var m in iExports.GetMethods())
+                if (string.Equals(m.Name, sanitized,
+                                  StringComparison.OrdinalIgnoreCase))
+                    return m;
+            return null;
+        }
+
+        /// <summary>Find core <c>[method]<i>witName</i>.<i>X</i></c>
+        /// exports. Returns (memberName, method) pairs where
+        /// <c>memberName</c> is the part after the resource name.</summary>
+        private static List<(string Member, MethodInfo Method)>
+            FindResourceInstanceMethods(Type iExports, string witName)
+        {
+            var prefix = SanitizeExportName("[method]" + witName) + "_";
+            var list = new List<(string, MethodInfo)>();
+            foreach (var m in iExports.GetMethods())
+            {
+                if (m.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    && m.Name.Length > prefix.Length)
+                    list.Add((m.Name.Substring(prefix.Length), m));
+            }
+            return list;
+        }
+
+        /// <summary>Find core <c>[static]<i>witName</i>.<i>X</i></c>
+        /// exports.</summary>
+        private static List<(string Member, MethodInfo Method)>
+            FindResourceStaticMethods(Type iExports, string witName)
+        {
+            var prefix = SanitizeExportName("[static]" + witName) + "_";
+            var list = new List<(string, MethodInfo)>();
+            foreach (var m in iExports.GetMethods())
+            {
+                if (m.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    && m.Name.Length > prefix.Length)
+                    list.Add((m.Name.Substring(prefix.Length), m));
+            }
+            return list;
         }
 
         /// <summary>Emit a public C# class for a WIT variant
@@ -527,6 +731,12 @@ namespace Wacs.Transpiler.AOT.Component
             public string Name;
             public ComponentFuncType Signature;
             public uint CoreFuncIdx;
+            /// <summary>C# param types resolved by the emitter
+            /// before IL generation — populated by EmitExportMethod
+            /// once it computes <c>paramTypes</c>. Read by
+            /// EmitCoreCall when it needs to extract <c>.Handle</c>
+            /// from resource-class params.</summary>
+            public Type[]? CsParamTypes;
 
             public EmittableExport(string name, ComponentFuncType sig,
                                    uint coreFuncIdx)
@@ -576,6 +786,7 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 if (p.Type.IsPrimitive) continue;
                 if (TryResolveListOfPrim(p.Type, types, out _)) continue;
+                if (TryResolveResourceHandleParam(p.Type, types, out _)) continue;
                 return false;
             }
             if (fn.Results.Count == 0) return true;
@@ -762,6 +973,34 @@ namespace Wacs.Transpiler.AOT.Component
         }
 
         /// <summary>True iff <paramref name="t"/> is a type-ref
+        /// to <c>own&lt;R&gt;</c> or <c>borrow&lt;R&gt;</c> —
+        /// either way the wire form is an i32 handle and the C#
+        /// surface is the resource class. Distinguishing the two
+        /// matters at the binding-discipline level (own transfers
+        /// ownership; borrow doesn't) but not for the IL the
+        /// emitter generates today — the user's resource instance
+        /// passes through both paths the same way (extract
+        /// <c>.Handle</c>, push as i32).</summary>
+        private static bool TryResolveResourceHandleParam(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            out uint resourceTypeIdx)
+        {
+            resourceTypeIdx = 0;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            uint inner;
+            if (types[(int)t.TypeIdx] is ComponentOwnType own)
+                inner = own.TypeIdx;
+            else if (types[(int)t.TypeIdx] is ComponentBorrowType borrow)
+                inner = borrow.TypeIdx;
+            else return false;
+            if (inner >= types.Count) return false;
+            if (!(types[(int)inner] is ComponentResourceType)) return false;
+            resourceTypeIdx = inner;
+            return true;
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a type-ref
         /// to a structural record whose fields are all
         /// primitives. Records with aggregate fields land in a
         /// follow-up — each adds its own marshaling shape.</summary>
@@ -912,7 +1151,9 @@ namespace Wacs.Transpiler.AOT.Component
             if (coreMethod == null) return;
 
             // C#-side types per the COMPONENT signature. Primitive
-            // params map direct; list<prim> params map to T[].
+            // params map direct; list<prim> params map to T[];
+            // own<R>/borrow<R> params map to the emitted resource
+            // class, looked up via the decoded WIT.
             var paramTypes = new Type[export.Signature.Params.Count];
             for (int i = 0; i < paramTypes.Length; i++)
             {
@@ -925,11 +1166,19 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     paramTypes[i] = PrimToCs(listElem).MakeArrayType();
                 }
+                else if (TryResolveResourceHandleParam(pt, types, out _))
+                {
+                    var named = TryFindNamedParamType(
+                        decodedWit, emittedTypes, export.Name, i);
+                    if (named == null) return;
+                    paramTypes[i] = named;
+                }
                 else
                 {
                     return;   // shouldn't reach — IsEmittable rejects
                 }
             }
+            export.CsParamTypes = paramTypes;
 
             // Return-type dispatch: void / primitive (inline),
             // string (StringMarshal chokepoint), list<prim>
@@ -1225,6 +1474,26 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldloc, ptrLocals[i]!);
                     il.Emit(OpCodes.Ldloc, countLocals[i]!);
                     coreParamIdx += 2;
+                }
+                else if (export.CsParamTypes != null
+                    && !pt.IsPrimitive
+                    && TryResolveResourceHandleParam(pt, types, out _))
+                {
+                    // own<R> / borrow<R> param — load the user's
+                    // resource instance, then `ldfld Handle` to
+                    // unwrap the i32 handle the core method
+                    // expects. The Handle field is the public
+                    // readonly int the resource class emitter
+                    // defines on every CtResourceType.
+                    var resourceClass = export.CsParamTypes[i];
+                    var handleField = resourceClass.GetField("Handle");
+                    if (handleField == null)
+                        throw new InvalidOperationException(
+                            "Resource class missing Handle field for "
+                            + export.Name + " param " + i);
+                    il.Emit(OpCodes.Ldarg, i);
+                    il.Emit(OpCodes.Ldfld, handleField);
+                    coreParamIdx++;
                 }
                 else
                 {
@@ -2239,6 +2508,31 @@ namespace Wacs.Transpiler.AOT.Component
             CtBorrowType bo => NamedTypeFor(bo.Resource),
             _ => null,
         };
+
+        /// <summary>Look up the C# type bound to an export's
+        /// <paramref name="paramIdx"/>th param via the decoded
+        /// WIT. Used to resolve resource-handle params
+        /// (<c>own&lt;R&gt;</c> / <c>borrow&lt;R&gt;</c>) — both
+        /// surface the underlying resource's name + emitted C#
+        /// class.</summary>
+        private static Type? TryFindNamedParamType(
+            CtPackage? decodedWit, Dictionary<string, Type> emittedTypes,
+            string exportName, int paramIdx)
+        {
+            if (decodedWit == null) return null;
+            foreach (var world in decodedWit.Worlds)
+                foreach (var ex in world.Exports)
+                {
+                    if (ex.Name != exportName) continue;
+                    if (!(ex.Spec is CtExternFunc fn)) continue;
+                    if (paramIdx >= fn.Function.Params.Count) continue;
+                    var refName = NamedTypeFor(fn.Function.Params[paramIdx].Type);
+                    if (refName != null
+                        && emittedTypes.TryGetValue(refName, out var t))
+                        return t;
+                }
+            return null;
+        }
 
         private static void EmitTupleReturnBody(
             ILGenerator il, FieldBuilder instanceField,
