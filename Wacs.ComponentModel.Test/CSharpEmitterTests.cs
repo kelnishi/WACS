@@ -946,6 +946,48 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Interop: tuple<prim, …> marshaling ---------------------------
+
+        private static string FindInteropTuplePrimsFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-tuple-prims");
+        }
+
+        /// <summary>
+        /// <c>tuple&lt;prim, prim, …&gt;</c> param + return. Params
+        /// flatten inline — stub takes one arg per element; wrapper
+        /// passes <c>p.Item1</c>, <c>p.Item2</c>, … after the
+        /// usual primitive lower. Returns via return-area (one
+        /// word per element) — wrapper emits
+        /// <c>return (lift(+0), lift(+4), …);</c> with the closing
+        /// <c>)</c> on its own line (a wit-bindgen 0.30.0 formatting
+        /// quirk we match byte-for-byte).
+        ///
+        /// <para>Scoped to small primitives only (every element
+        /// must fit in one core-wasm word). 64-bit and aggregate
+        /// elements need alignment-aware stride handling.</para>
+        /// </summary>
+        [Fact]
+        public void InteropEmit_tuple_prims_matches_reference()
+        {
+            var fixtureDir = FindInteropTuplePrimsFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "tup.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "tup-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "TupWorldWorld.wit.imports.local.tup.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Interop: option<primitive> marshaling -----------------------
 
         private static string FindInteropOptionU32FixtureDir()

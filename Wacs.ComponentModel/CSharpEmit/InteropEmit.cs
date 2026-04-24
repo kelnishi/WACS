@@ -178,6 +178,23 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append("                new Span<byte>((void*)(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 0), 4))), BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))).CopyTo(new Span<byte>(array));\n");
                 sb.Append("                return array;\n");
             }
+            else if (IsTupleOfSmallPrims(sig.Result!))
+            {
+                // tuple<P1, P2, …> return — lift each element
+                // inline at its 4-byte offset. The closing `)`
+                // lands on its own line — preserved from the
+                // wit-bindgen 0.30.0 reference formatting quirk.
+                var tup = (CtTupleType)sig.Result!;
+                sb.Append("                return (");
+                for (int i = 0; i < tup.Elements.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    var kind = ((CtPrimType)tup.Elements[i]).Kind;
+                    sb.Append(EmitReturnAreaPrimLift(kind, offset: i * 4));
+                }
+                sb.Append('\n');
+                sb.Append("                );\n");
+            }
             else if (IsOptionOfSmallPrim(sig.Result!))
             {
                 // option<prim> return — discriminant at offset 0
@@ -453,6 +470,17 @@ namespace Wacs.ComponentModel.CSharpEmit
                 var innerStub = StubTypesFor(inner);
                 return new[] { "int", innerStub[0] };
             }
+            if (IsTupleOfSmallPrims(t))
+            {
+                // tuple<P1, P2, …> flattens to the concatenation of
+                // each element's stub types. Every element is small-
+                // prim so each contributes exactly one word.
+                var tup = (CtTupleType)t;
+                var flat = new string[tup.Elements.Count];
+                for (int i = 0; i < tup.Elements.Count; i++)
+                    flat[i] = StubTypesFor(tup.Elements[i])[0];
+                return flat;
+            }
             throw new NotImplementedException(
                 "Interop stub type for " + t.GetType().Name +
                 " is a Phase 1a.2 follow-up.");
@@ -482,6 +510,27 @@ namespace Wacs.ComponentModel.CSharpEmit
             t is CtOptionType o
             && o.Inner is CtPrimType op
             && IsSmallPrim(op.Kind);
+
+        /// <summary>
+        /// True when <paramref name="t"/> is a <c>tuple</c> whose
+        /// every element is a small primitive (≤ 1 core-wasm word).
+        /// Such tuples flatten directly into the stub signature — no
+        /// alignment-padding concerns — and lift from the return
+        /// area as a flat sequence at offsets 0, 4, 8, … . Tuples
+        /// with 64-bit, aggregate, or resource-valued elements need
+        /// alignment + stride-aware emission (a follow-up).
+        /// </summary>
+        internal static bool IsTupleOfSmallPrims(CtValType t)
+        {
+            if (!(t is CtTupleType tup)) return false;
+            if (tup.Elements.Count == 0) return false;
+            foreach (var e in tup.Elements)
+            {
+                if (!(e is CtPrimType p)) return false;
+                if (!IsSmallPrim(p.Kind)) return false;
+            }
+            return true;
+        }
 
         private static bool IsSmallPrim(CtPrim k) => k switch
         {
@@ -541,6 +590,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             if (sig.Result is CtPrimType p && p.Kind == CtPrim.String) return true;
             if (IsByteList(sig.Result)) return true;
             if (IsOptionOfSmallPrim(sig.Result)) return true;
+            if (IsTupleOfSmallPrims(sig.Result)) return true;
             return false;
         }
 
@@ -557,6 +607,10 @@ namespace Wacs.ComponentModel.CSharpEmit
             // option<small-prim>: discriminant word at offset 0,
             // payload word at offset 4 — 2 uints total.
             if (IsOptionOfSmallPrim(sig.Result!)) return 2;
+            // tuple<small-prim, small-prim, …>: one word per element,
+            // laid out at offsets 0, 4, 8, … .
+            if (IsTupleOfSmallPrims(sig.Result!))
+                return ((CtTupleType)sig.Result!).Elements.Count;
             throw new NotImplementedException(
                 "Return area sizing for " + sig.Result?.GetType().Name +
                 " is a follow-up.");
@@ -603,6 +657,20 @@ namespace Wacs.ComponentModel.CSharpEmit
                     // option<prim> lowered by the prelude to
                     // `{arg}Tag, {arg}Val`.
                     sb.Append(argName).Append("Tag, ").Append(argName).Append("Val");
+                }
+                else if (IsTupleOfSmallPrims(p.Type))
+                {
+                    // tuple<P1, P2, …> lowered inline as
+                    // `{Lower(P1, argName.Item1)}, {Lower(P2, argName.Item2)}, …`.
+                    // No prelude needed — the C# tuple gives direct
+                    // field access on the fly.
+                    var tup = (CtTupleType)p.Type;
+                    for (int i = 0; i < tup.Elements.Count; i++)
+                    {
+                        if (i > 0) sb.Append(", ");
+                        var elemArg = argName + ".Item" + (i + 1);
+                        sb.Append(EmitLower(tup.Elements[i], elemArg));
+                    }
                 }
                 else
                 {
