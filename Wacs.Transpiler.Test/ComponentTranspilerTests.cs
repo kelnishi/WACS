@@ -83,6 +83,42 @@ namespace Wacs.Transpiler.Test
                                 "bc.component.wasm");
         }
 
+        private static string FindListReturnComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "list-return-component", "wasm",
+                                "l.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_list_u8_return_from_guest_memory()
+        {
+            // list-return-component exports `bytes() -> list<u8>`.
+            // Core sig: `() -> i32`, returning the retArea ptr.
+            // Memory layout:
+            //   [100..105] = 01 02 03 04 05 (list payload)
+            //   [200..204] = 100 (dataPtr)
+            //   [204..208] = 5   (count)
+            // ComponentExports.Bytes() reads (dataPtr, count)
+            // from the return area and lifts via ListMarshal.LiftPrim<byte>.
+            using var fs = File.OpenRead(FindListReturnComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var bytes = componentExports!.GetMethod("Bytes");
+            Assert.NotNull(bytes);
+            Assert.Equal(typeof(byte[]), bytes!.ReturnType);
+
+            var value = (byte[])bytes.Invoke(null, null)!;
+            Assert.Equal(new byte[] { 1, 2, 3, 4, 5 }, value);
+        }
+
         private static string FindStringReturnComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
