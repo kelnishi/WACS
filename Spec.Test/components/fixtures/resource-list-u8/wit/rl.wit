@@ -1,0 +1,9 @@
+package local:rl;
+interface env {
+    resource buffer {
+        constructor();
+        append: func(data: list<u8>);
+        take: func() -> list<u8>;
+    }
+}
+world rl-world { import env; }

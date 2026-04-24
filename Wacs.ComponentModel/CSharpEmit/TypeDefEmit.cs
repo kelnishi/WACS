@@ -600,15 +600,22 @@ namespace Wacs.ComponentModel.CSharpEmit
             // actual value comes back via the trailing nint param.
             sb.Append(usesReturnArea ? "void" : StubReturnType(sig));
             sb.Append(" wasmImport").Append(methodName).Append("(int p0");
+            // Multi-slot params (list<u8>, string, option<...>, etc.)
+            // contribute more than one stub slot; use StubTypesFor to
+            // flatten each param into its core-wasm slot types. The
+            // stub-index counter advances across flattened slots.
+            int stubIdx = 1;
             for (int i = 0; i < sig.Params.Count; i++)
             {
-                sb.Append(", ");
-                sb.Append(PrimStubType(sig.Params[i].Type));
-                sb.Append(" p").Append(i + 1);
+                foreach (var slotTy in InteropEmit.StubTypesFor(sig.Params[i].Type))
+                {
+                    sb.Append(", ").Append(slotTy).Append(" p").Append(stubIdx);
+                    stubIdx++;
+                }
             }
             if (usesReturnArea)
             {
-                sb.Append(", nint p").Append(sig.Params.Count + 1);
+                sb.Append(", nint p").Append(stubIdx);
             }
             sb.Append(");\n");
             sb.Append("\n        }\n\n");
@@ -631,6 +638,19 @@ namespace Wacs.ComponentModel.CSharpEmit
 
             var retType = FunctionEmit.EmitReturnType(sig);
             var isVoid = retType == "void";
+            var hasPrelude = InteropEmit.HasPrelude(sig);
+
+            // Aggregate-param prelude (stackalloc for list<T>,
+            // InteropString.FromString for string, option lowering
+            // branches). Shared with the free-function path in
+            // InteropEmit so the shape is identical. wit-bindgen
+            // inserts a blank line between `var handle = this.Handle;`
+            // and the prelude — match it.
+            if (hasPrelude)
+            {
+                sb.Append("\n");
+                InteropEmit.EmitWrapperPrelude(sb, sig);
+            }
 
             if (usesReturnArea)
             {
@@ -638,22 +658,18 @@ namespace Wacs.ComponentModel.CSharpEmit
             }
             else
             {
-                // Stub call — for resource methods, wit-bindgen uses
-                // `var result =  Stub.wasmImportX(handle, args)` with
-                // the same double-space quirk for non-void, and a plain
-                // `Stub.wasmImportX(handle, args);` for void.
+                // Stub call — resource-method shape: first arg is
+                // always `handle`, then per-param lowered args.
+                // wit-bindgen quirk: double-space after `=` in
+                // `var result =  …` for non-void.
                 sb.Append("            ");
                 if (!isVoid) sb.Append("var result =  ");
                 sb.Append(stubClass).Append(".wasmImport").Append(methodName);
                 sb.Append("(handle");
-                for (int i = 0; i < sig.Params.Count; i++)
+                if (sig.Params.Count > 0)
                 {
                     sb.Append(", ");
-                    var argName = NameConventions.ToCamelCase(sig.Params[i].Name);
-                    if (sig.Params[i].Type is CtPrimType p)
-                        sb.Append(PrimMarshal.Lower(p.Kind, argName));
-                    else
-                        sb.Append(argName);
+                    InteropEmit.EmitLoweredArgs(sb, sig);
                 }
                 sb.Append(");\n");
 
@@ -726,14 +742,10 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append("                var ptr = (nint)retAreaByte0;\n");
             sb.Append("                ").Append(stubClass).Append(".wasmImport").Append(methodName);
             sb.Append("(handle");
-            for (int i = 0; i < sig.Params.Count; i++)
+            if (sig.Params.Count > 0)
             {
                 sb.Append(", ");
-                var argName = NameConventions.ToCamelCase(sig.Params[i].Name);
-                if (sig.Params[i].Type is CtPrimType p)
-                    sb.Append(PrimMarshal.Lower(p.Kind, argName));
-                else
-                    sb.Append(argName);
+                InteropEmit.EmitLoweredArgs(sb, sig);
             }
             sb.Append(", ptr);\n");
 
