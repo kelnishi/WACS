@@ -47,7 +47,7 @@ namespace Wacs.ComponentModel.CSharpEmit
                 worldNameKebab, isExport: true, iface.Package);
             var className = NameConventions.ToPascalCase(iface.Name) + "Interop";
             var implClassName = NameConventions.ToPascalCase(iface.Name) + "Impl";
-            var entryPointBase = BuildEntryPointBase(iface);
+            var entryPointBase = EntryPoints.InterfaceBase(iface);
 
             var sb = new StringBuilder();
             sb.Append(CSharpEmitter.Header);
@@ -64,30 +64,6 @@ namespace Wacs.ComponentModel.CSharpEmit
             return sb.ToString();
         }
 
-        /// <summary>
-        /// <c>{ns}:{path0}:{path1}/{iface-name}@{ver}</c> — the
-        /// shared prefix for per-function entry points. Each
-        /// function trampoline appends <c>#{fn-name}</c>.
-        /// </summary>
-        private static string BuildEntryPointBase(CtInterfaceType iface)
-        {
-            var sb = new StringBuilder();
-            sb.Append(iface.Package!.Namespace);
-            foreach (var seg in iface.Package.Path)
-            {
-                sb.Append(':');
-                sb.Append(seg);
-            }
-            sb.Append('/');
-            sb.Append(iface.Name);
-            if (iface.Package.Version != null)
-            {
-                sb.Append('@');
-                sb.Append(iface.Package.Version);
-            }
-            return sb.ToString();
-        }
-
         // ---- Per-function emission ----------------------------------------
 
         private static void EmitFreeFunctionTrampoline(
@@ -97,7 +73,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             string implClassName)
         {
             var methodName = NameConventions.ToPascalCase(fn.Name);
-            var entryPoint = entryPointBase + "#" + fn.Name;
+            var entryPoint = EntryPoints.ExportFreeFunction(entryPointBase, fn.Name);
 
             var stubRet = StubReturnType(fn.Type);
             var stubIsVoid = stubRet == "void";
@@ -148,12 +124,13 @@ namespace Wacs.ComponentModel.CSharpEmit
             // when the canonical-ABI dealloc emitters land.
             if (!stubIsVoid)
             {
-                sb.Append("        [UnmanagedCallersOnly(EntryPoint = \"cabi_post_");
-                sb.Append(entryPoint).Append("\")]\n");
+                var cabiPostEntry = EntryPoints.CabiPost(entryPointBase, fn.Name);
+                sb.Append("        [UnmanagedCallersOnly(EntryPoint = \"");
+                sb.Append(cabiPostEntry).Append("\")]\n");
                 sb.Append("        public static void cabi_post_wasmExport").Append(methodName);
                 sb.Append('(').Append(stubRet).Append(" returnValue) {\n");
-                sb.Append("            Console.WriteLine(\"TODO: cabi_post_");
-                sb.Append(entryPoint).Append("\");\n");
+                sb.Append("            Console.WriteLine(\"TODO: ");
+                sb.Append(cabiPostEntry).Append("\");\n");
                 sb.Append("        }\n");
                 sb.Append("\n");
             }

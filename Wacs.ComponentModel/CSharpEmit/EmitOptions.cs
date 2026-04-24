@@ -49,6 +49,20 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// assembly in the solution already provides them.
         /// </summary>
         public bool SkipSupportFiles { get; set; } = false;
+
+        /// <summary>
+        /// When true, emit <see cref="WitNameAttribute"/> decorators
+        /// on generated types and members carrying the original
+        /// kebab-case WIT name. Default <b>false</b> to preserve
+        /// byte-for-byte parity with wit-bindgen-csharp 0.30.0
+        /// snapshots; enable for WACS-native artifacts that need
+        /// runtime reflection back to WIT identifiers.
+        ///
+        /// <para>Emission is additive — componentize-dotnet and
+        /// downstream toolchains treat unknown attributes as
+        /// metadata and don't object to their presence.</para>
+        /// </summary>
+        public bool IncludeWitMetadata { get; set; } = false;
     }
 
     public enum CSharpRuntime

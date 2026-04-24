@@ -672,7 +672,7 @@ using System.Diagnostics.CodeAnalysis;
             sb.Append("namespace ").Append(ifaceNs).Append(";\n\n");
             sb.Append("public interface ").Append(ifaceClassName).Append(" {\n");
 
-            using (EmitAmbient.Push(worldNs, iface))
+            using (EmitAmbient.Push(worldNs, iface, options))
             {
                 foreach (var nt in iface.Types)
                 {
@@ -746,7 +746,7 @@ using System.Diagnostics.CodeAnalysis;
             // the next function starts immediately — no extra
             // separator needed between the last type and the first
             // function.
-            using (EmitAmbient.Push(worldNs, iface))
+            using (EmitAmbient.Push(worldNs, iface, options))
             {
                 foreach (var nt in iface.Types)
                 {
