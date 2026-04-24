@@ -46,14 +46,23 @@ namespace Wacs.ComponentModel.CSharpEmit
 
         /// <summary>
         /// Convert a <see cref="CtFunctionType"/>'s result to a C# return
-        /// type. No result → <c>void</c>; single anonymous result → the
-        /// result's C# type; named results → <b>not yet implemented</b>
-        /// (wit-bindgen emits these as tuple-returning methods; shape
-        /// lands in a follow-up commit).
+        /// type. Rules, verified against wit-bindgen-csharp 0.30.0:
+        /// <list type="bullet">
+        /// <item><description>No result → <c>void</c>.</description></item>
+        /// <item><description><c>result</c> with both sides elided
+        /// (<c>func() -&gt; result</c>) → <c>void</c> at the interface
+        /// level. The result discriminant is materialized in the
+        /// Interop trampoline, not the interface signature.</description></item>
+        /// <item><description>Single anonymous non-result → that type.</description></item>
+        /// <item><description>Named results — <b>not yet</b>; wit-bindgen
+        /// emits tuple returns.</description></item>
+        /// </list>
         /// </summary>
         public static string EmitReturnType(CtFunctionType sig)
         {
             if (sig.HasNoResult) return "void";
+            if (sig.Result is CtResultType r && r.Ok == null && r.Err == null)
+                return "void";
             if (sig.Result != null) return TypeRefEmit.Emit(sig.Result);
             // Named results — not yet supported; defer.
             throw new System.NotImplementedException(

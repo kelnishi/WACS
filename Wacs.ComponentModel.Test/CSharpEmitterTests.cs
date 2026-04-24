@@ -347,5 +347,58 @@ namespace Wacs.ComponentModel.Test
                 "    static abstract void Process(ulong maxLength);",
                 FunctionEmit.EmitStaticAbstractSignature("process", sig));
         }
+
+        [Fact]
+        public void EmitReturnType_result_with_no_payload_lowers_to_void()
+        {
+            var sig = new CtFunctionType(
+                new System.Collections.Generic.List<CtFuncParam>(),
+                result: new CtResultType(null, null),
+                namedResults: null);
+            Assert.Equal("void", FunctionEmit.EmitReturnType(sig));
+        }
+
+        // ---- End-to-end: parse + resolve + emit ---------------------------
+
+        /// <summary>
+        /// The full contract roundtrip: parse <c>hello.wit</c> and
+        /// wasi-cli's <c>run.wit</c> from the submodule, resolve
+        /// cross-file refs, then <c>EmitWorld</c> and assert
+        /// <c>IRun.cs</c> matches the pinned wit-bindgen-csharp 0.30.0
+        /// reference. This is the emitter gate for Phase 1a.2: when
+        /// it passes, we know a user can go from WIT source to
+        /// wit-bindgen-shape C# without any hand-crafted Types.
+        /// </summary>
+        [Fact]
+        public void EmitWorld_from_hello_wit_produces_IRun_matching_reference()
+        {
+            var root = FindFixturesDir();
+            var helloWit = File.ReadAllText(
+                Path.Combine(root, "wit", "hello.wit"));
+
+            var submoduleRoot = new DirectoryInfo(root).Parent!.Parent!.FullName;
+            var runWit = File.ReadAllText(
+                Path.Combine(submoduleRoot, "wasi-cli", "wit", "run.wit"));
+
+            var packages = new System.Collections.Generic.List<CtPackage>();
+            packages.AddRange(WitToTypes.Convert(WitParser.Parse(helloWit)));
+            packages.AddRange(WitToTypes.Convert(WitParser.Parse(
+                "package wasi:cli@0.2.3;\n" + runWit)));
+
+            WitResolver.Resolve(packages);
+
+            var helloPkg = packages.First(p => p.Name.Namespace == "local"
+                && p.Name.Path.Single() == "hello");
+            var world = helloPkg.Worlds.Single();
+
+            var sources = CSharpEmitter.EmitWorld(world);
+            var irunFile = sources.SingleOrDefault(s =>
+                s.FileName == "HelloWorld.wit.exports.wasi.cli.v0_2_3.IRun.cs");
+            Assert.NotNull(irunFile);
+
+            var expected = LoadReference(
+                "HelloWorld.wit.exports.wasi.cli.v0_2_3.IRun.cs");
+            Assert.Equal(expected, irunFile!.Content);
+        }
     }
 }
