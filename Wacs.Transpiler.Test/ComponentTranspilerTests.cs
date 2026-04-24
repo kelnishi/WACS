@@ -403,6 +403,42 @@ namespace Wacs.Transpiler.Test
             Assert.Null(maybeNone.Invoke(null, null));
         }
 
+        private static string FindListStringComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "list-string-component", "wasm",
+                                "ls.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_list_of_strings_from_guest_memory()
+        {
+            // list-string-component exports `words() -> list<string>`.
+            // Return area at retArea P carries (listPtr, count).
+            // Each element at listPtr + i*8 is a (strPtr, strLen)
+            // pair. Three pre-allocated UTF-8 strings get lifted
+            // via ListMarshal.LiftStringList, which walks the
+            // 8-byte pair array and calls StringMarshal.LiftUtf8
+            // per element — keeps the UTF-8 copy chokepoint
+            // discipline intact.
+            using var fs = File.OpenRead(FindListStringComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var words = componentExports!.GetMethod("Words");
+            Assert.NotNull(words);
+            Assert.Equal(typeof(string[]), words!.ReturnType);
+
+            var value = (string[])words.Invoke(null, null)!;
+            Assert.Equal(new[] { "alpha", "beta", "gamma" }, value);
+        }
+
         private static string FindOptionStringNoneComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());

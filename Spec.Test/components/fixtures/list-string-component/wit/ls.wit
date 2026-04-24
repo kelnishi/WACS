@@ -1,0 +1,4 @@
+package local:ls;
+world ls {
+    export words: func() -> list<string>;
+}

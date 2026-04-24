@@ -157,6 +157,7 @@ namespace Wacs.Transpiler.AOT.Component
             // Type-table ref — list<prim>, option<prim>,
             // result<prim>, tuple<prims>.
             if (TryResolveListOfPrim(r, types, out _)) return true;
+            if (TryResolveListOfString(r, types)) return true;
             if (TryResolveOptionOfPrim(r, types, out _)) return true;
             if (TryResolveOptionOfString(r, types)) return true;
             if (TryResolveResultOfPrim(r, types, out _, out _)) return true;
@@ -167,7 +168,10 @@ namespace Wacs.Transpiler.AOT.Component
         /// <summary>True iff <paramref name="t"/> is a type-ref
         /// to a list<primitive> in <paramref name="types"/>;
         /// when so, <paramref name="elemPrim"/> captures the
-        /// primitive element kind.</summary>
+        /// primitive element kind. Strings are excluded — they
+        /// go through the <see cref="TryResolveListOfString"/>
+        /// predicate since each element is a two-i32 pair rather
+        /// than a raw primitive slot.</summary>
         private static bool TryResolveListOfPrim(
             ComponentValType t, IReadOnlyList<DefTypeEntry> types,
             out ComponentPrim elemPrim)
@@ -177,8 +181,24 @@ namespace Wacs.Transpiler.AOT.Component
             if (t.TypeIdx >= types.Count) return false;
             if (!(types[(int)t.TypeIdx] is ComponentListType list)) return false;
             if (!list.Element.IsPrimitive) return false;
+            if (list.Element.Prim == ComponentPrim.String) return false;
             elemPrim = list.Element.Prim;
             return true;
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a type-ref
+        /// to <c>list&lt;string&gt;</c>. Each element is a
+        /// (strPtr, strLen) i32 pair at 4-byte alignment — the
+        /// retArea holds (listPtr, count) at offsets 0/4, with
+        /// the element array at listPtr.</summary>
+        private static bool TryResolveListOfString(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types)
+        {
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentListType list)) return false;
+            if (!list.Element.IsPrimitive) return false;
+            return list.Element.Prim == ComponentPrim.String;
         }
 
         /// <summary>True iff <paramref name="t"/> is a type-ref
@@ -305,6 +325,7 @@ namespace Wacs.Transpiler.AOT.Component
             // (ListMarshal closed generic), option<prim>
             // (disc switch + inline).
             bool isListReturn = false;
+            bool isListStringReturn = false;
             bool isOptionReturn = false;
             bool isOptionStringReturn = false;
             bool isResultReturn = false;
@@ -328,6 +349,12 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 isListReturn = true;
                 returnType = PrimToCs(listElemPrim).MakeArrayType();
+            }
+            else if (TryResolveListOfString(
+                export.Signature.Results[0], types))
+            {
+                isListStringReturn = true;
+                returnType = typeof(string[]);
             }
             else if (TryResolveOptionOfPrim(
                 export.Signature.Results[0], types, out optionInnerPrim))
@@ -412,6 +439,11 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 EmitListReturnBody(il, instanceField, coreMethod, export,
                                    types, listElemPrim);
+            }
+            else if (isListStringReturn)
+            {
+                EmitListStringReturnBody(il, instanceField, coreMethod,
+                                         export, types);
             }
             else if (IsStringReturn(export.Signature))
             {
@@ -836,6 +868,55 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Add);                           // P+4
             il.EmitCall(OpCodes.Call, bitCToInt32!, null);  // count
             il.EmitCall(OpCodes.Call, liftClosed, null);    // T[]
+            il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// IL body for a <c>() -&gt; list&lt;string&gt;</c> export.
+        /// Core returns the retArea pointer P; at P live
+        /// (listPtr, count) as two i32s. Each element at
+        /// listPtr + i*8 is a (strPtr, strLen) pair — delegated
+        /// to <see cref="ListMarshal.LiftStringList"/> which
+        /// iterates and calls through the StringMarshal UTF-8
+        /// chokepoint per element.
+        /// </summary>
+        private static void EmitListStringReturnBody(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types)
+        {
+            var memoryProp = instanceField.FieldType.GetProperty("Memory");
+            if (memoryProp == null)
+                throw new InvalidOperationException(
+                    "list<string>-returning component requires Module.Memory.");
+
+            var retAreaLocal = il.DeclareLocal(typeof(int));
+            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
+            il.Emit(OpCodes.Stloc, retAreaLocal);
+
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.Emit(OpCodes.Stloc, memoryLocal);
+
+            var bitCToInt32 = typeof(BitConverter).GetMethod(
+                "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+            var liftStringList = typeof(ListMarshal).GetMethod(
+                nameof(ListMarshal.LiftStringList),
+                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+
+            // ListMarshal.LiftStringList(memory, listPtr, count)
+            il.Emit(OpCodes.Ldloc, memoryLocal);             // arg 1
+            il.Emit(OpCodes.Ldloc, memoryLocal);             // for BitConv 1
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.EmitCall(OpCodes.Call, bitCToInt32, null);    // listPtr
+            il.Emit(OpCodes.Ldloc, memoryLocal);             // for BitConv 2
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldc_I4_4);
+            il.Emit(OpCodes.Add);
+            il.EmitCall(OpCodes.Call, bitCToInt32, null);    // count
+            il.EmitCall(OpCodes.Call, liftStringList, null); // string[]
             il.Emit(OpCodes.Ret);
         }
 
