@@ -9,6 +9,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
+using Wacs.ComponentModel.CanonicalABI;
 using Wacs.ComponentModel.Runtime;
 using Wacs.ComponentModel.Runtime.Parser;
 
@@ -129,14 +130,28 @@ namespace Wacs.Transpiler.AOT.Component
             return list;
         }
 
+        /// <summary>Gate for whether the emitter can handle this
+        /// function type. Primitive params (all kinds) + either a
+        /// primitive return or a single-result string return are
+        /// in scope for v0. Other aggregate returns / aggregate
+        /// params land as further canonical-ABI IL support
+        /// arrives.</summary>
         private static bool AllPrimitive(ComponentFuncType fn)
         {
             foreach (var p in fn.Params)
                 if (!p.Type.IsPrimitive) return false;
-            foreach (var r in fn.Results)
-                if (!r.IsPrimitive) return false;
+            if (fn.Results.Count == 0) return true;
+            if (fn.Results.Count != 1) return false;
+            var r = fn.Results[0];
+            if (!r.IsPrimitive) return false;
+            // String return uses the return-area lift path; all
+            // other primitives pass through directly.
             return true;
         }
+
+        private static bool IsStringReturn(ComponentFuncType fn) =>
+            fn.Results.Count == 1 && fn.Results[0].IsPrimitive
+                && fn.Results[0].Prim == ComponentPrim.String;
 
         private static void EmitExportMethod(
             TypeBuilder typeBuilder,
@@ -165,9 +180,34 @@ namespace Wacs.Transpiler.AOT.Component
                                        CamelCase(export.Signature.Params[i].Name));
 
             var il = method.GetILGenerator();
-            // Load the cached instance for the interface-method call.
+            if (IsStringReturn(export.Signature))
+            {
+                EmitStringReturnBody(il, instanceField, coreMethod, export);
+            }
+            else
+            {
+                EmitPrimitiveBody(il, instanceField, coreMethod, export,
+                                  returnType);
+            }
+        }
+
+        /// <summary>
+        /// IL body for primitive-signature exports. Direct call
+        /// into the core IExports method, with per-param +
+        /// return-side canonical-ABI casts applied at the IL
+        /// stack level (mostly no-op; narrow ints + bool get
+        /// real conversion ops).
+        /// </summary>
+        private static void EmitPrimitiveBody(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            Type returnType)
+        {
+            var paramTypes = new Type[export.Signature.Params.Count];
+            for (int i = 0; i < paramTypes.Length; i++)
+                paramTypes[i] = PrimToCs(export.Signature.Params[i].Type.Prim);
+
             il.Emit(OpCodes.Ldsfld, instanceField);
-            // Load each arg, applying the canonical-ABI param cast.
             for (int i = 0; i < paramTypes.Length; i++)
             {
                 il.Emit(OpCodes.Ldarg, i);
@@ -175,12 +215,82 @@ namespace Wacs.Transpiler.AOT.Component
                               coreMethod.GetParameters()[i].ParameterType);
             }
             il.EmitCall(OpCodes.Callvirt, coreMethod, null);
-            // Apply the canonical-ABI return cast (if non-void).
             if (returnType != typeof(void))
             {
                 EmitReturnCast(il, coreMethod.ReturnType,
                                export.Signature.Results[0].Prim);
             }
+            il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// IL body for a <c>() -&gt; string</c> export — the
+        /// return-area lift path. Core function returns an i32
+        /// pointer P into linear memory; the 8 bytes at P are
+        /// (strPtr, strLen). Dispatch:
+        /// <code>
+        ///     int P = core.hello();
+        ///     byte[] memory = instance.Memory;
+        ///     int strPtr = BitConverter.ToInt32(memory, P);
+        ///     int strLen = BitConverter.ToInt32(memory, P + 4);
+        ///     return StringMarshal.LiftUtf8(memory, strPtr, strLen);
+        /// </code>
+        /// Param-taking string returns follow the same shape —
+        /// load args before the core call. Not yet exercised;
+        /// primitive-only params are the v0 gate.
+        /// </summary>
+        private static void EmitStringReturnBody(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export)
+        {
+            var memoryProp = instanceField.FieldType.GetProperty("Memory");
+            if (memoryProp == null)
+                throw new InvalidOperationException(
+                    "String-returning component requires the core module to "
+                    + "declare a memory — Module.Memory accessor is missing.");
+
+            var paramTypes = new Type[export.Signature.Params.Count];
+            for (int i = 0; i < paramTypes.Length; i++)
+                paramTypes[i] = PrimToCs(export.Signature.Params[i].Type.Prim);
+
+            var retAreaLocal = il.DeclareLocal(typeof(int));
+            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+
+            // int P = core.hello(args...);
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            for (int i = 0; i < paramTypes.Length; i++)
+            {
+                il.Emit(OpCodes.Ldarg, i);
+                EmitParamCast(il, export.Signature.Params[i].Type.Prim,
+                              coreMethod.GetParameters()[i].ParameterType);
+            }
+            il.EmitCall(OpCodes.Callvirt, coreMethod, null);
+            il.Emit(OpCodes.Stloc, retAreaLocal);
+
+            // byte[] memory = instance.Memory;
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.Emit(OpCodes.Stloc, memoryLocal);
+
+            // StringMarshal.LiftUtf8(memory, strPtr, strLen)
+            //   where strPtr = BitConverter.ToInt32(memory, P)
+            //         strLen = BitConverter.ToInt32(memory, P+4)
+            var bitCToInt32 = typeof(BitConverter).GetMethod(
+                "ToInt32", new[] { typeof(byte[]), typeof(int) });
+            var liftMethod = typeof(StringMarshal).GetMethod(
+                nameof(StringMarshal.LiftUtf8),
+                new[] { typeof(byte[]), typeof(int), typeof(int) });
+
+            il.Emit(OpCodes.Ldloc, memoryLocal);            // source
+            il.Emit(OpCodes.Ldloc, memoryLocal);            // strPtr arg: memory
+            il.Emit(OpCodes.Ldloc, retAreaLocal);           //             P
+            il.EmitCall(OpCodes.Call, bitCToInt32!, null);  // → strPtr
+            il.Emit(OpCodes.Ldloc, memoryLocal);            // strLen arg: memory
+            il.Emit(OpCodes.Ldloc, retAreaLocal);           //             P
+            il.Emit(OpCodes.Ldc_I4_4);
+            il.Emit(OpCodes.Add);                           //             P+4
+            il.EmitCall(OpCodes.Call, bitCToInt32!, null);  // → strLen
+            il.EmitCall(OpCodes.Call, liftMethod!, null);   // → string
             il.Emit(OpCodes.Ret);
         }
 

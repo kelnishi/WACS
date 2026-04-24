@@ -83,6 +83,44 @@ namespace Wacs.Transpiler.Test
                                 "bc.component.wasm");
         }
 
+        private static string FindStringReturnComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "string-return-component", "wasm",
+                                "h.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_string_return_from_guest_memory()
+        {
+            // string-return-component exports `hello() -> string`.
+            // Core signature: `() -> i32`, returning a pointer P
+            // into linear memory where bytes [P..P+4] hold the
+            // string's ptr (= 100, pointing at "Hello") and
+            // bytes [P+4..P+8] hold its length (= 5).
+            // ComponentExports.Hello() reads (strPtr, strLen)
+            // from the return area and routes through
+            // StringMarshal.LiftUtf8 to get "Hello" as a C# string.
+            // First real exercise of the canonical-ABI return-
+            // area lift path through IL emission.
+            using var fs = File.OpenRead(FindStringReturnComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var hello = componentExports!.GetMethod("Hello");
+            Assert.NotNull(hello);
+            Assert.Equal(typeof(string), hello!.ReturnType);
+
+            var value = (string)hello.Invoke(null, null)!;
+            Assert.Equal("Hello", value);
+        }
+
         private static string FindF64ComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
