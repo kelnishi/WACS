@@ -1,0 +1,4 @@
+package local:tiny;
+world tiny {
+    export greet: func() -> u32;
+}
