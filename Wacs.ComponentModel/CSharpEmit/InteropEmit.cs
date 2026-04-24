@@ -45,8 +45,15 @@ namespace Wacs.ComponentModel.CSharpEmit
 
             var ifaceNs = NameConventions.InterfaceNamespace(
                 worldNameKebab, isExport: false, iface.Package);
+            var worldNs = NameConventions.WorldNamespaceName(worldNameKebab);
             var className = NameConventions.ToPascalCase(iface.Name) + "Interop";
             var entryPointBase = EntryPoints.InterfaceBase(iface);
+
+            // Push ambient scope so deep callers can reach the world
+            // namespace (needed for `new global::{WorldNs}.None()`
+            // inside result-lift arms, and cross-interface type ref
+            // qualification).
+            using var scope = EmitAmbient.Push(worldNs, iface);
 
             var sb = new StringBuilder();
             sb.Append(CSharpEmitter.Header);
@@ -203,6 +210,10 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append('\n');
                 sb.Append("                );\n");
             }
+            else if (IsResultOfPrimOrNone(sig.Result!))
+            {
+                EmitResultReturnAreaLift(sb, (CtResultType)sig.Result!);
+            }
             else if (IsOptionOfSmallPrim(sig.Result!))
             {
                 // option<prim> return — discriminant at offset 0
@@ -242,6 +253,81 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append(";\n");
             }
             sb.Append("            }\n");
+        }
+
+        /// <summary>
+        /// Emit the return-area lift for <c>result&lt;Ok, Err&gt;</c>
+        /// where each side is either a small primitive or None
+        /// (absent). Shape:
+        /// <code>
+        /// Result&lt;Ok, Err&gt; lifted;
+        /// switch (disc-byte) {
+        ///     case 0: { lifted = Result&lt;...&gt;.ok(payload-or-None); break; }
+        ///     case 1: { lifted = Result&lt;...&gt;.err(payload-or-None); break; }
+        ///     default: throw new ArgumentException($"...");
+        /// }
+        /// if (lifted.IsOk) { var tmp = lifted.AsOk; return tmp; }
+        /// else { throw new WitException(lifted.AsErr!, 0); }
+        /// </code>
+        /// The wrapper return type is the Ok type (or <c>void</c>
+        /// when Ok is None — in which case we still emit
+        /// <c>var tmp = lifted.AsOk; return ;</c> to match
+        /// wit-bindgen's formatting quirk).
+        /// </summary>
+        private static void EmitResultReturnAreaLift(StringBuilder sb, CtResultType r)
+        {
+            sb.Append("\n");
+            var okCs  = r.Ok  != null ? TypeRefEmit.EmitPrim(((CtPrimType)r.Ok).Kind)  : "None";
+            var errCs = r.Err != null ? TypeRefEmit.EmitPrim(((CtPrimType)r.Err).Kind) : "None";
+            var resultTy = "Result<" + okCs + ", " + errCs + ">";
+            sb.Append("                ").Append(resultTy).Append(" lifted;\n");
+            sb.Append("\n");
+            sb.Append("                switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {\n");
+            // case 0: ok
+            sb.Append("                    case 0: {\n");
+            sb.Append("\n");
+            sb.Append("                        lifted = ").Append(resultTy).Append(".ok(");
+            sb.Append(EmitResultArm(r.Ok, offset: 4));
+            sb.Append(");\n");
+            sb.Append("                        break;\n");
+            sb.Append("                    }\n");
+            // case 1: err
+            sb.Append("                    case 1: {\n");
+            sb.Append("\n");
+            sb.Append("                        lifted = ").Append(resultTy).Append(".err(");
+            sb.Append(EmitResultArm(r.Err, offset: 4));
+            sb.Append(");\n");
+            sb.Append("                        break;\n");
+            sb.Append("                    }\n");
+            sb.Append("\n");
+            sb.Append("                    default: throw new ArgumentException($\"invalid discriminant: {new Span<byte>((void*)(ptr + 0), 1)[0]}\");\n");
+            sb.Append("                }\n");
+            // Unwrap: ok → return (unwrapped or empty), err → throw.
+            sb.Append("                if (lifted.IsOk) {\n");
+            sb.Append("                    var tmp = lifted.AsOk;\n");
+            if (r.Ok != null)
+                sb.Append("                    return tmp;\n");
+            else
+                sb.Append("                    return ;\n");   // wit-bindgen quirk: space before semi
+            sb.Append("                } else {\n");
+            sb.Append("                    throw new WitException(lifted.AsErr!, 0);\n");
+            sb.Append("                }\n");
+        }
+
+        /// <summary>
+        /// Emit the payload expression inside one arm of a
+        /// <c>Result&lt;Ok, Err&gt;.{ok,err}(…)</c> call. None slot
+        /// → <c>new global::{WorldNs}.None()</c>; prim slot → the
+        /// standard return-area prim lift at <paramref name="offset"/>.
+        /// </summary>
+        private static string EmitResultArm(CtValType? side, int offset)
+        {
+            if (side == null)
+            {
+                var worldNs = EmitAmbient.WorldNamespace ?? "UNSET_WORLD_NAMESPACE";
+                return "new global::" + worldNs + ".None()";
+            }
+            return EmitReturnAreaPrimLift(((CtPrimType)side).Kind, offset);
         }
 
         /// <summary>
@@ -538,6 +624,32 @@ namespace Wacs.ComponentModel.CSharpEmit
             && IsSmallPrim(op.Kind);
 
         /// <summary>
+        /// True when <paramref name="t"/> is <c>result&lt;Ok, Err&gt;</c>
+        /// where each side is either absent (None) or a small
+        /// primitive. Excludes the totally-elided
+        /// <c>result&lt;_, _&gt;</c> form — that uses a direct
+        /// i32-discriminant return (no return area) and takes a
+        /// different code path. 64-bit and aggregate payloads are a
+        /// follow-up (alignment + wider return area).
+        /// </summary>
+        internal static bool IsResultOfPrimOrNone(CtValType t)
+        {
+            if (!(t is CtResultType r)) return false;
+            if (r.Ok == null && r.Err == null) return false;   // elided case
+            if (r.Ok != null)
+            {
+                if (!(r.Ok is CtPrimType op)) return false;
+                if (!IsSmallPrim(op.Kind)) return false;
+            }
+            if (r.Err != null)
+            {
+                if (!(r.Err is CtPrimType ep)) return false;
+                if (!IsSmallPrim(ep.Kind)) return false;
+            }
+            return true;
+        }
+
+        /// <summary>
         /// True when <paramref name="t"/> is a <c>tuple</c> whose
         /// every element is a small primitive (≤ 1 core-wasm word).
         /// Such tuples flatten directly into the stub signature — no
@@ -617,6 +729,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             if (IsListOfPrim(sig.Result)) return true;
             if (IsOptionOfSmallPrim(sig.Result)) return true;
             if (IsTupleOfSmallPrims(sig.Result)) return true;
+            if (IsResultOfPrimOrNone(sig.Result)) return true;
             return false;
         }
 
@@ -637,6 +750,11 @@ namespace Wacs.ComponentModel.CSharpEmit
             // laid out at offsets 0, 4, 8, … .
             if (IsTupleOfSmallPrims(sig.Result!))
                 return ((CtTupleType)sig.Result!).Elements.Count;
+            // result<PrimOrNone, PrimOrNone>: discriminant word at 0,
+            // payload word at 4 — 2 uints. None branches write no
+            // payload to memory but the return area still reserves
+            // the full 2-word slot (canonical-ABI alignment).
+            if (IsResultOfPrimOrNone(sig.Result!)) return 2;
             throw new NotImplementedException(
                 "Return area sizing for " + sig.Result?.GetType().Name +
                 " is a follow-up.");
