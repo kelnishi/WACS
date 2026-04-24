@@ -650,10 +650,33 @@ using System.Diagnostics.CodeAnalysis;
         /// resources, and type aliases will relax this as their
         /// emitters land.
         /// </summary>
+        /// <summary>True when a named-type body corresponds to a
+        /// standalone C# declaration (record / variant / enum / flags
+        /// / resource). Aliases to primitives, lists, options, etc.
+        /// return false — they don't get their own declaration.</summary>
+        internal static bool IsDeclarableTypeBody(CtValType body) =>
+            body is CtRecordType || body is CtVariantType
+            || body is CtEnumType || body is CtFlagsType
+            || body is CtResourceType;
+
         private static bool IsTypeDefEmitable(CtValType body)
         {
             switch (body)
             {
+                // Type alias (anything not a declarable body) —
+                // no C# declaration is emitted; aliases resolve at
+                // use sites. Check that the alias target is itself
+                // emitable so the gate stays conservative.
+                case CtTypeRef r when r.Target != null:
+                    return IsTypeEmitable(r);
+                case CtPrimType:
+                case CtListType:
+                case CtOptionType:
+                case CtResultType:
+                case CtTupleType:
+                case CtOwnType:
+                case CtBorrowType:
+                    return IsTypeEmitable(body);
                 case CtEnumType: return true;
                 case CtFlagsType: return true;
                 case CtRecordType rec:
@@ -894,6 +917,14 @@ using System.Diagnostics.CodeAnalysis;
             {
                 foreach (var nt in iface.Types)
                 {
+                    // Skip type aliases — wit-bindgen resolves them
+                    // at use sites rather than emitting a
+                    // declaration. An alias is any named type whose
+                    // body is not itself a declarable shape (record,
+                    // variant, enum, flags, resource). Primitives,
+                    // lists, options, tuples, results, and bare
+                    // refs all fall through.
+                    if (!IsDeclarableTypeBody(nt.Type)) continue;
                     sb.Append('\n');
                     sb.Append(TypeDefEmit.Emit(nt, iface));
                 }
@@ -968,6 +999,10 @@ using System.Diagnostics.CodeAnalysis;
             {
                 foreach (var nt in iface.Types)
                 {
+                    // Skip type aliases — same rationale as the
+                    // import path: wit-bindgen inlines aliases at
+                    // use sites rather than emitting a declaration.
+                    if (nt.Type is CtTypeRef) continue;
                     sb.Append('\n');
                     sb.Append(TypeDefEmit.Emit(nt));
                 }

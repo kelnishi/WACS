@@ -1060,6 +1060,43 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Type aliases ------------------------------------------------
+
+        private static string FindTypesAliasFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "types-alias");
+        }
+
+        /// <summary>
+        /// Type aliases (<c>type count = u32; type name = string;</c>)
+        /// don't get standalone C# declarations — they inline at
+        /// use sites. A record whose field is typed <c>count</c>
+        /// emits as <c>public readonly uint id;</c>, not
+        /// <c>public readonly Count id;</c>. Byte-for-byte vs
+        /// wit-bindgen 0.30.0.
+        /// </summary>
+        [Fact]
+        public void EmitImportInterfaceFile_inlines_type_aliases_at_use_sites()
+        {
+            var fixtureDir = FindTypesAliasFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "al.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            WitResolver.Resolve(pkgs);
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var emitted = CSharpEmitter.EmitImportInterfaceFile(iface, "al-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "AlWorldWorld.wit.imports.local.al.IEnv.cs"));
+            Assert.Equal(expected, emitted.Content);
+        }
+
         // ---- Transitive interface imports --------------------------------
 
         /// <summary>

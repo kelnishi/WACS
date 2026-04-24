@@ -155,6 +155,15 @@ namespace Wacs.ComponentModel.CSharpEmit
                 target = inner.Target;
             }
 
+            // Type alias to a non-declarable body (primitive, list,
+            // option, tuple, result, etc.) — inline the underlying
+            // type at the use site rather than using the alias name.
+            // Matches wit-bindgen: `type count = u32; record { x:
+            // count }` emits `public readonly uint x;` not
+            // `readonly Count x;`.
+            if (target.Type != null && !IsDeclarableBody(target.Type))
+                return EmitParam(target.Type);
+
             // Always-qualify mode (Interop files — siblings of the
             // interface, not nested inside it) → emit global:: path
             // regardless of same/cross-interface status.
@@ -174,6 +183,16 @@ namespace Wacs.ComponentModel.CSharpEmit
 
             return NameConventions.ToPascalCase(target.Name);
         }
+
+        /// <summary>True for bodies that get their own standalone
+        /// C# class/struct/enum declaration — record, variant, enum,
+        /// flags, resource. Everything else (primitives, lists, and
+        /// aggregate combinators without a named declaration) inlines
+        /// at the use site.</summary>
+        private static bool IsDeclarableBody(CtValType body) =>
+            body is CtRecordType || body is CtVariantType
+            || body is CtEnumType || body is CtFlagsType
+            || body is CtResourceType;
 
         /// <summary>
         /// Emit the fully-qualified <c>global::…</c> path for a
