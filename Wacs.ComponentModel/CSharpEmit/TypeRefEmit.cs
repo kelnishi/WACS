@@ -4,34 +4,105 @@
 // you may not use this file except in compliance with the License.
 
 using System;
+using System.Text;
 using Wacs.ComponentModel.Types;
 
 namespace Wacs.ComponentModel.CSharpEmit
 {
     /// <summary>
     /// Emits a C# type reference for a <see cref="CtValType"/>.
-    /// Matches wit-bindgen-csharp's primitive mapping (confirmed
-    /// against wit-bindgen 0.30.0 output for a function-per-primitive
-    /// WIT).
+    /// Matches wit-bindgen-csharp's mapping (confirmed against
+    /// wit-bindgen 0.30.0 output for function-per-aggregate WITs).
     ///
-    /// <para><b>Phase 1a.2 scope:</b> primitives only. Aggregates
-    /// (<c>list&lt;T&gt;</c>, <c>option&lt;T&gt;</c>, <c>result&lt;T, E&gt;</c>,
-    /// <c>tuple&lt;…&gt;</c>) and user-defined types
-    /// (records, variants, enums, flags, resources, own/borrow)
+    /// <para><b>Phase 1a.2 scope:</b> primitives plus structural
+    /// aggregates (<c>list&lt;T&gt;</c>, <c>option&lt;T&gt;</c>,
+    /// <c>result&lt;T, E&gt;</c>, <c>tuple&lt;…&gt;</c>). User-defined
+    /// types (records, variants, enums, flags, resources, own/borrow)
     /// throw <see cref="NotImplementedException"/> — they ship in
     /// follow-up commits as the corresponding type emitters land.</para>
+    ///
+    /// <para><b>Position matters for <c>result&lt;T, E&gt;</c>:</b>
+    /// wit-bindgen emits <c>result</c> asymmetrically — in the
+    /// return position it elides to the <c>Ok</c> type (<c>Err</c>
+    /// becomes a thrown exception in the Interop trampoline); in
+    /// the parameter position it emits the full
+    /// <c>Result&lt;Ok, Err&gt;</c> generic. Callers use
+    /// <see cref="EmitParam"/> vs <see cref="EmitReturn"/>
+    /// accordingly.</para>
     /// </summary>
     internal static class TypeRefEmit
     {
-        public static string Emit(CtValType type)
+        /// <summary>
+        /// Default emission — parameter-position. Use this when the
+        /// type appears in a parameter slot; for return slots use
+        /// <see cref="EmitReturn"/> so <c>result</c> unwraps.
+        /// </summary>
+        public static string Emit(CtValType type) => EmitParam(type);
+
+        /// <summary>Parameter-position emission.</summary>
+        public static string EmitParam(CtValType type)
         {
             return type switch
             {
                 CtPrimType p => EmitPrim(p.Kind),
+                CtListType l => EmitParam(l.Element) + "[]",
+                CtOptionType o => EmitParam(o.Inner) + "?",
+                CtResultType r => EmitResultParam(r),
+                CtTupleType t => EmitTuple(t),
                 _ => throw new NotImplementedException(
                     "CSharp emission for " + type.GetType().Name +
                     " is a Phase 1a.2 follow-up."),
             };
+        }
+
+        /// <summary>
+        /// Return-position emission. Differs from
+        /// <see cref="EmitParam"/> only for <c>result</c>:
+        /// <c>result&lt;T, E&gt;</c> unwraps to <c>T</c> (the trampoline
+        /// throws <c>WitException</c> with the <c>E</c> payload on
+        /// the err path); <c>result</c> with both sides elided
+        /// returns <c>void</c> — see
+        /// <see cref="FunctionEmit.EmitReturnType"/>.
+        /// </summary>
+        public static string EmitReturn(CtValType type)
+        {
+            if (type is CtResultType r)
+            {
+                if (r.Ok == null && r.Err == null)
+                    return "void";
+                if (r.Ok != null)
+                    return EmitReturn(r.Ok);
+                // result<_, E> — err-only — wit-bindgen emits `void`
+                // (trampoline throws on err; ok path is implicit).
+                return "void";
+            }
+            return EmitParam(type);
+        }
+
+        private static string EmitResultParam(CtResultType r)
+        {
+            // Result<Ok, Err> generic. Missing sides become the
+            // world-shell `None` type (see CSharpEmitter world
+            // shell emission).
+            var sb = new StringBuilder("Result<");
+            sb.Append(r.Ok != null ? EmitParam(r.Ok) : "None");
+            sb.Append(", ");
+            sb.Append(r.Err != null ? EmitParam(r.Err) : "None");
+            sb.Append('>');
+            return sb.ToString();
+        }
+
+        private static string EmitTuple(CtTupleType t)
+        {
+            // (T1, T2, ...) C# ValueTuple literal.
+            var sb = new StringBuilder("(");
+            for (int i = 0; i < t.Elements.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(EmitParam(t.Elements[i]));
+            }
+            sb.Append(')');
+            return sb.ToString();
         }
 
         /// <summary>

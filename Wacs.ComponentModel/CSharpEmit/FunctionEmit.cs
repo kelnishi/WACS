@@ -61,9 +61,7 @@ namespace Wacs.ComponentModel.CSharpEmit
         public static string EmitReturnType(CtFunctionType sig)
         {
             if (sig.HasNoResult) return "void";
-            if (sig.Result is CtResultType r && r.Ok == null && r.Err == null)
-                return "void";
-            if (sig.Result != null) return TypeRefEmit.Emit(sig.Result);
+            if (sig.Result != null) return TypeRefEmit.EmitReturn(sig.Result);
             // Named results — not yet supported; defer.
             throw new System.NotImplementedException(
                 "Multi-result function emission is a Phase 1a.2 follow-up.");

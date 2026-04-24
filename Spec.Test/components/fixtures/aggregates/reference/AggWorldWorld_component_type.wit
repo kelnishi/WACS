@@ -1,0 +1,25 @@
+package local:agg;
+
+interface ops {
+  make-list: func() -> list<u32>;
+
+  take-list: func(xs: list<u32>) -> u32;
+
+  make-opt: func() -> option<u32>;
+
+  take-opt: func(x: option<u32>) -> u32;
+
+  make-result: func() -> result<u32, string>;
+
+  take-result: func(r: result<u32, string>) -> u32;
+
+  make-tuple: func() -> tuple<u32, string>;
+
+  make-string: func() -> string;
+
+  take-string: func(s: string) -> u32;
+}
+
+world agg-world {
+  export ops;
+}

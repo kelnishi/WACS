@@ -369,6 +369,113 @@ namespace Wacs.ComponentModel.Test
         /// it passes, we know a user can go from WIT source to
         /// wit-bindgen-shape C# without any hand-crafted Types.
         /// </summary>
+        // ---- Aggregate type ref emission ----------------------------------
+
+        [Fact]
+        public void EmitParam_list_of_primitive()
+        {
+            var t = new CtListType(CtPrimType.U32);
+            Assert.Equal("uint[]", TypeRefEmit.EmitParam(t));
+        }
+
+        [Fact]
+        public void EmitParam_option_of_primitive()
+        {
+            var t = new CtOptionType(CtPrimType.U32);
+            Assert.Equal("uint?", TypeRefEmit.EmitParam(t));
+        }
+
+        [Fact]
+        public void EmitParam_result_with_both_sides_is_generic()
+        {
+            var t = new CtResultType(CtPrimType.U32, CtPrimType.String);
+            Assert.Equal("Result<uint, string>", TypeRefEmit.EmitParam(t));
+        }
+
+        [Fact]
+        public void EmitParam_result_with_missing_side_uses_None()
+        {
+            // result<u32> (err-elided) as parameter.
+            var t = new CtResultType(CtPrimType.U32, null);
+            Assert.Equal("Result<uint, None>", TypeRefEmit.EmitParam(t));
+        }
+
+        [Fact]
+        public void EmitReturn_result_with_ok_unwraps_to_ok()
+        {
+            var t = new CtResultType(CtPrimType.U32, CtPrimType.String);
+            Assert.Equal("uint", TypeRefEmit.EmitReturn(t));
+        }
+
+        [Fact]
+        public void EmitReturn_result_err_only_is_void()
+        {
+            var t = new CtResultType(null, CtPrimType.String);
+            Assert.Equal("void", TypeRefEmit.EmitReturn(t));
+        }
+
+        [Fact]
+        public void EmitParam_tuple_of_primitives()
+        {
+            var t = new CtTupleType(new CtValType[] { CtPrimType.U32, CtPrimType.String });
+            Assert.Equal("(uint, string)", TypeRefEmit.EmitParam(t));
+        }
+
+        [Fact]
+        public void EmitParam_nested_list_of_list()
+        {
+            var t = new CtListType(new CtListType(CtPrimType.U8));
+            Assert.Equal("byte[][]", TypeRefEmit.EmitParam(t));
+        }
+
+        // ---- Aggregate fixture snapshot -----------------------------------
+
+        private static string FindAggregatesFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "aggregates");
+        }
+
+        [Fact]
+        public void EmitExportInterfaceFile_matches_reference_IOps_aggregates()
+        {
+            // Parse the pinned agg.wit and convert to Types. The
+            // `ops` interface lives in the same file as the world, so
+            // no cross-file resolution is needed — we pull the
+            // CtInterfaceType straight out of the package.
+            var fixtureDir = FindAggregatesFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "agg.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "ops");
+
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(
+                iface, "agg-world");
+
+            Assert.Equal(
+                "AggWorldWorld.wit.exports.local.agg.IOps.cs",
+                emitted.FileName);
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "AggWorldWorld.wit.exports.local.agg.IOps.cs"));
+            Assert.Equal(expected, emitted.Content);
+        }
+
+        // ---- End-to-end: parse + resolve + emit ---------------------------
+
+        /// <summary>
+        /// The full contract roundtrip: parse <c>hello.wit</c> and
+        /// wasi-cli's <c>run.wit</c> from the submodule, resolve
+        /// cross-file refs, then <c>EmitWorld</c> and assert
+        /// <c>IRun.cs</c> matches the pinned wit-bindgen-csharp 0.30.0
+        /// reference. This is the emitter gate for Phase 1a.2: when
+        /// it passes, we know a user can go from WIT source to
+        /// wit-bindgen-shape C# without any hand-crafted Types.
+        /// </summary>
         [Fact]
         public void EmitWorld_from_hello_wit_produces_IRun_matching_reference()
         {
