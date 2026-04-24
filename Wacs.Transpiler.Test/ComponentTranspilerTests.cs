@@ -826,6 +826,14 @@ namespace Wacs.Transpiler.Test
 
             var instance = make.Invoke(null, null)!;
             Assert.Equal(1, handleField.GetValue(instance));
+
+            // The fixture's core module exports
+            // `[resource-drop]counter` (a no-op `nop`), so the
+            // generated Counter class implements IDisposable. Calls
+            // shouldn't throw — the body invokes the core export
+            // and returns.
+            Assert.True(typeof(System.IDisposable).IsAssignableFrom(counter));
+            ((System.IDisposable)instance).Dispose();
         }
 
         private static string FindOptionStringNoneComponentPath()
