@@ -79,11 +79,36 @@ namespace Wacs.ComponentModel.CSharpEmit
             foreach (var line in named.DocLines)
             {
                 if (line.Length == 0) sb.Append("    *\n");
-                else sb.Append("    * ").Append(line).Append('\n');
+                else sb.Append("    * ").Append(EscapeXml(line)).Append('\n');
             }
             sb.Append("    */\n");
             sb.Append("\n");
             sb.Append(body);
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Escape <c>&lt;</c> / <c>&gt;</c> / <c>&amp;</c> for
+        /// safe inclusion in a C# <c>/** */</c> doc-comment block.
+        /// Matches wit-bindgen 0.30.0 — real-world WIT doc comments
+        /// frequently use generics-like syntax (e.g.
+        /// <c>borrow&lt;error&gt;</c>) which would otherwise be
+        /// parsed as XML tags by the C# doc processor.
+        /// </summary>
+        private static string EscapeXml(string s)
+        {
+            if (s.IndexOfAny(new[] { '<', '>', '&' }) < 0) return s;
+            var sb = new StringBuilder(s.Length);
+            foreach (var c in s)
+            {
+                switch (c)
+                {
+                    case '<': sb.Append("&lt;"); break;
+                    case '>': sb.Append("&gt;"); break;
+                    case '&': sb.Append("&amp;"); break;
+                    default: sb.Append(c); break;
+                }
+            }
             return sb.ToString();
         }
 
