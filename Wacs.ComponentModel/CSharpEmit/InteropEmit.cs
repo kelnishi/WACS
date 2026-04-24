@@ -113,9 +113,17 @@ namespace Wacs.ComponentModel.CSharpEmit
             var usesReturnArea = UsesReturnArea(fn.Type);
             var hasPrelude = HasPrelude(fn.Type);
 
+            // Resource-ref params get `var handle{N} = arg.Handle;`
+            // (+ `arg.Handle = 0;` for own<R>) emitted first, with
+            // no blank line before. Comes BEFORE the prelude
+            // blank-line rule — wit-bindgen structures the body so
+            // handle extraction is flush against the opening brace.
+            EmitResourceRefHandles(sb, fn.Type, startingSlot: 0);
+
             // wit-bindgen inserts a blank line between the opening
-            // `{` and the body when the body has either a prelude
-            // OR a return area.
+            // `{` (or after the handle-extraction block) and the
+            // body when the body has either a prelude OR a return
+            // area.
             if (hasPrelude || usesReturnArea) sb.Append("\n");
 
             // Prelude: for each string-typed param, pin a UTF-8
@@ -189,7 +197,8 @@ namespace Wacs.ComponentModel.CSharpEmit
                                                         string stubClassName,
                                                         string methodName,
                                                         CtFunctionType sig,
-                                                        string? leadingStubArg = null)
+                                                        string? leadingStubArg = null,
+                                                        int resHandleStartingSlot = 0)
         {
             var ra = GetRetAreaInfo(sig);
             sb.Append("            var retArea = new ").Append(ra.Backing)
@@ -205,7 +214,7 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append(leadingStubArg);
                 if (sig.Params.Count > 0) sb.Append(", ");
             }
-            EmitLoweredArgs(sb, sig);
+            EmitLoweredArgs(sb, sig, resHandleStartingSlot);
             if (sig.Params.Count > 0 || leadingStubArg != null) sb.Append(", ");
             sb.Append("ptr");
             sb.Append(");\n");
@@ -777,6 +786,53 @@ namespace Wacs.ComponentModel.CSharpEmit
             return false;
         }
 
+        /// <summary>True when any param is a resource-ref — the
+        /// wrapper body gets per-param <c>var handle{N} = arg.Handle;</c>
+        /// extraction emitted before any other prelude work.</summary>
+        internal static bool HasResourceRefParam(CtFunctionType sig)
+        {
+            foreach (var p in sig.Params)
+                if (IsResourceRef(p.Type)) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Emit the resource-handle extraction block that precedes
+        /// all other wrapper-body code. For each resource-ref
+        /// param, emit <c>var handle{N} = arg.Handle;</c>
+        /// (counter-indexed: 0-th slot gets bare <c>handle</c>,
+        /// subsequent slots get <c>handle0</c>, <c>handle1</c>, …).
+        /// For <c>own&lt;R&gt;</c> params, also emit <c>arg.Handle = 0;</c>
+        /// to transfer ownership. <paramref name="startingSlot"/> is
+        /// the slot counter value; resource methods pass 1 because
+        /// their own <c>this.Handle</c> already occupies slot 0.
+        /// </summary>
+        internal static void EmitResourceRefHandles(StringBuilder sb,
+                                                     CtFunctionType sig,
+                                                     int startingSlot = 0)
+        {
+            int slot = startingSlot;
+            foreach (var p in sig.Params)
+            {
+                if (!IsResourceRef(p.Type)) continue;
+                var argName = NameConventions.ToCamelCase(p.Name);
+                sb.Append("            var ").Append(HandleLocalName(slot))
+                  .Append(" = ").Append(argName).Append(".Handle;\n");
+                // Ownership transfer: only for own<T>, not borrow<T>.
+                if (IsOwnedResource(p.Type))
+                {
+                    sb.Append("            ").Append(argName).Append(".Handle = 0;\n");
+                }
+                slot++;
+            }
+        }
+
+        /// <summary>Name of the k-th handle slot local: bare
+        /// <c>handle</c> for slot 0, <c>handle{k-1}</c> for k ≥ 1.
+        /// Matches wit-bindgen 0.30.0's counter.</summary>
+        internal static string HandleLocalName(int slot) =>
+            slot == 0 ? "handle" : ("handle" + (slot - 1));
+
         internal static void EmitWrapperPrelude(StringBuilder sb,
                                                 CtFunctionType sig)
         {
@@ -1022,9 +1078,12 @@ namespace Wacs.ComponentModel.CSharpEmit
                     flat[i] = StubTypesFor(rec.Fields[i].Type)[0];
                 return flat;
             }
-            if (IsOwnedResource(t))
+            if (IsOwnedResource(t) || IsBorrowedResource(t))
             {
-                // own<R> lowers to an i32 handle on the wire.
+                // own<R> / borrow<R> both lower to an i32 handle on
+                // the wire; ownership semantics only affect the
+                // param-side extraction (own zeroes the caller's
+                // handle field; borrow leaves it alone).
                 return new[] { "int" };
             }
             if (IsVariantOfSmallPrimOrNone(t))
@@ -1162,6 +1221,30 @@ namespace Wacs.ComponentModel.CSharpEmit
                 CtTypeRef tr => tr,
                 _ => null,
             };
+            return IsResourceRefCore(r);
+        }
+
+        /// <summary>
+        /// True when <paramref name="t"/> is a borrowed handle to
+        /// a resource (<c>borrow&lt;R&gt;</c>). At the wire level
+        /// the handle is identical to <c>own&lt;R&gt;</c> — an i32
+        /// slot — but the param-side wrapper does NOT null out the
+        /// caller's handle field (ownership stays with the caller).
+        /// </summary>
+        internal static bool IsBorrowedResource(CtValType t)
+        {
+            if (!(t is CtBorrowType b)) return false;
+            return IsResourceRefCore(b.Resource as CtTypeRef);
+        }
+
+        /// <summary>Either <see cref="IsOwnedResource"/> or
+        /// <see cref="IsBorrowedResource"/> — any i32-handle
+        /// resource reference usable as a value-type slot.</summary>
+        internal static bool IsResourceRef(CtValType t) =>
+            IsOwnedResource(t) || IsBorrowedResource(t);
+
+        private static bool IsResourceRefCore(CtTypeRef? r)
+        {
             if (r == null || r.Target == null) return false;
             var target = r.Target;
             while (target.Type is CtTypeRef innerRef
@@ -1173,13 +1256,15 @@ namespace Wacs.ComponentModel.CSharpEmit
             return target.Type is CtResourceType;
         }
 
-        /// <summary>Resolve an owned-handle type to its concrete
-        /// resource named-type (alias chain unwound).</summary>
+        /// <summary>Resolve any resource-ref-shaped type (own /
+        /// borrow / bare identifier) to its concrete resource
+        /// named-type with the alias chain unwound.</summary>
         private static CtNamedType ResolveOwnedResource(CtValType t)
         {
             var r = t switch
             {
                 CtOwnType o => (CtTypeRef)o.Resource,
+                CtBorrowType b => (CtTypeRef)b.Resource,
                 CtTypeRef tr => tr,
                 _ => throw new System.InvalidOperationException(
                     "ResolveOwnedResource called on " + t.GetType().Name),
@@ -1490,15 +1575,26 @@ namespace Wacs.ComponentModel.CSharpEmit
             }
         }
 
-        internal static void EmitLoweredArgs(StringBuilder sb, CtFunctionType sig)
+        internal static void EmitLoweredArgs(StringBuilder sb, CtFunctionType sig,
+                                             int resHandleStartingSlot = 0)
         {
             bool first = true;
             int listIdx = 0;
+            int resSlot = resHandleStartingSlot;
             foreach (var p in sig.Params)
             {
                 var argName = NameConventions.ToCamelCase(p.Name);
                 if (!first) sb.Append(", ");
                 first = false;
+                if (IsResourceRef(p.Type))
+                {
+                    // Handle extracted in the wrapper's resource-
+                    // handle prelude; pass by its slot-indexed local
+                    // name (handle / handle0 / handle1 / …).
+                    sb.Append(HandleLocalName(resSlot));
+                    resSlot++;
+                    continue;
+                }
                 if (p.Type is CtPrimType prim && prim.Kind == CtPrim.String)
                 {
                     // String lowered by the prelude to (ptr, len).

@@ -640,6 +640,12 @@ namespace Wacs.ComponentModel.CSharpEmit
             var isVoid = retType == "void";
             var hasPrelude = InteropEmit.HasPrelude(sig);
 
+            // Resource-ref params: `var handle{N} = arg.Handle;`
+            // (+ zero-out for own). Self already took slot 0, so
+            // per-param slots start at 1 — first resource-ref param
+            // is `handle0`, second is `handle1`, etc.
+            InteropEmit.EmitResourceRefHandles(sb, sig, startingSlot: 1);
+
             // Aggregate-param prelude (stackalloc for list<T>,
             // InteropString.FromString for string, option lowering
             // branches). Shared with the free-function path in
@@ -660,7 +666,8 @@ namespace Wacs.ComponentModel.CSharpEmit
                 // the body).
                 sb.Append("\n");
                 InteropEmit.EmitReturnAreaWrapperBody(
-                    sb, stubClass, methodName, sig, leadingStubArg: "handle");
+                    sb, stubClass, methodName, sig, leadingStubArg: "handle",
+                    resHandleStartingSlot: 1);
             }
             else if (InteropEmit.IsElidedResultType(sig.Result))
             {
@@ -673,7 +680,7 @@ namespace Wacs.ComponentModel.CSharpEmit
                 if (sig.Params.Count > 0)
                 {
                     sb.Append(", ");
-                    InteropEmit.EmitLoweredArgs(sb, sig);
+                    InteropEmit.EmitLoweredArgs(sb, sig, resHandleStartingSlot: 1);
                 }
                 sb.Append(");\n");
                 InteropEmit.EmitElidedResultTail(sb);
@@ -691,7 +698,7 @@ namespace Wacs.ComponentModel.CSharpEmit
                 if (sig.Params.Count > 0)
                 {
                     sb.Append(", ");
-                    InteropEmit.EmitLoweredArgs(sb, sig);
+                    InteropEmit.EmitLoweredArgs(sb, sig, resHandleStartingSlot: 1);
                 }
                 sb.Append(");\n");
 
