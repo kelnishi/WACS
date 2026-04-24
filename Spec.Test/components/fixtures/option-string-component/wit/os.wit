@@ -1,0 +1,4 @@
+package local:os;
+world os {
+    export greeting: func() -> option<string>;
+}

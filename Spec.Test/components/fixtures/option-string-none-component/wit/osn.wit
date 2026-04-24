@@ -1,0 +1,4 @@
+package local:osn;
+world osn {
+    export greeting: func() -> option<string>;
+}

@@ -153,6 +153,7 @@ namespace Wacs.Transpiler.AOT.Component
             // result<prim>, tuple<prims>.
             if (TryResolveListOfPrim(r, types, out _)) return true;
             if (TryResolveOptionOfPrim(r, types, out _)) return true;
+            if (TryResolveOptionOfString(r, types)) return true;
             if (TryResolveResultOfPrim(r, types, out _, out _)) return true;
             if (TryResolveTupleOfPrims(r, types, out _)) return true;
             return false;
@@ -188,8 +189,26 @@ namespace Wacs.Transpiler.AOT.Component
             if (t.TypeIdx >= types.Count) return false;
             if (!(types[(int)t.TypeIdx] is ComponentOptionType opt)) return false;
             if (!opt.Inner.IsPrimitive) return false;
+            if (opt.Inner.Prim == ComponentPrim.String) return false;
             innerPrim = opt.Inner.Prim;
             return true;
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a type-ref
+        /// to <c>option&lt;string&gt;</c>. Separate predicate
+        /// from <see cref="TryResolveOptionOfPrim"/> because the
+        /// lift path is structurally different: the payload is
+        /// (ptr, len) at offset 4 instead of a raw primitive
+        /// value, and the C# surface is a nullable reference
+        /// type (<c>string</c>) instead of <c>Nullable&lt;T&gt;</c>.</summary>
+        private static bool TryResolveOptionOfString(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types)
+        {
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentOptionType opt)) return false;
+            if (!opt.Inner.IsPrimitive) return false;
+            return opt.Inner.Prim == ComponentPrim.String;
         }
 
         /// <summary>True iff <paramref name="t"/> is a type-ref
@@ -282,6 +301,7 @@ namespace Wacs.Transpiler.AOT.Component
             // (disc switch + inline).
             bool isListReturn = false;
             bool isOptionReturn = false;
+            bool isOptionStringReturn = false;
             bool isResultReturn = false;
             bool isTupleReturn = false;
             ComponentPrim listElemPrim = default;
@@ -312,6 +332,15 @@ namespace Wacs.Transpiler.AOT.Component
                 // mapping for option<primitive>.
                 returnType = typeof(Nullable<>).MakeGenericType(
                     PrimToCs(optionInnerPrim));
+            }
+            else if (TryResolveOptionOfString(
+                export.Signature.Results[0], types))
+            {
+                isOptionStringReturn = true;
+                // wit-bindgen's option<string> maps to nullable
+                // reference `string?`. At IL level that's a plain
+                // string — null represents None.
+                returnType = typeof(string);
             }
             else if (TryResolveTupleOfPrims(
                 export.Signature.Results[0], types, out tupleElemPrims))
@@ -368,6 +397,11 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 EmitOptionReturnBody(il, instanceField, coreMethod, export,
                                      types, optionInnerPrim);
+            }
+            else if (isOptionStringReturn)
+            {
+                EmitOptionStringReturnBody(il, instanceField, coreMethod,
+                                           export, types);
             }
             else if (isListReturn)
             {
@@ -893,6 +927,78 @@ namespace Wacs.Transpiler.AOT.Component
         }
 
         /// <summary>
+        /// IL body for <c>() -&gt; option&lt;string&gt;</c>.
+        /// Layout per canonical-ABI alignment rules: disc byte at
+        /// offset 0, payload aligned to 4 (pointer alignment),
+        /// payload is (strPtr: i32, strLen: i32) at offsets 4, 8.
+        /// C# surface: plain <c>string</c> where <c>null</c> =
+        /// None and non-null = Some(value) — wit-bindgen-csharp's
+        /// nullable-reference mapping.
+        /// </summary>
+        private static void EmitOptionStringReturnBody(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types)
+        {
+            var memoryProp = instanceField.FieldType.GetProperty("Memory");
+            if (memoryProp == null)
+                throw new InvalidOperationException(
+                    "option<string>-returning component requires Module.Memory.");
+
+            var retAreaLocal = il.DeclareLocal(typeof(int));
+            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+            var resultLocal = il.DeclareLocal(typeof(string));
+            var noneLabel = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
+            il.Emit(OpCodes.Stloc, retAreaLocal);
+
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.Emit(OpCodes.Stloc, memoryLocal);
+
+            // disc = memory[retArea];  if disc == 0 goto none
+            il.Emit(OpCodes.Ldloc, memoryLocal);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldelem_U1);
+            il.Emit(OpCodes.Brfalse, noneLabel);
+
+            // Some: StringMarshal.LiftUtf8(memory,
+            //    BitConverter.ToInt32(memory, retArea + 4),
+            //    BitConverter.ToInt32(memory, retArea + 8))
+            var bitCToInt32 = typeof(BitConverter).GetMethod(
+                "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+            var liftMethod = typeof(StringMarshal).GetMethod(
+                nameof(StringMarshal.LiftUtf8),
+                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+
+            il.Emit(OpCodes.Ldloc, memoryLocal);      // LiftUtf8 arg 1
+            il.Emit(OpCodes.Ldloc, memoryLocal);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldc_I4_4);
+            il.Emit(OpCodes.Add);
+            il.EmitCall(OpCodes.Call, bitCToInt32, null);   // strPtr
+            il.Emit(OpCodes.Ldloc, memoryLocal);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldc_I4_8);
+            il.Emit(OpCodes.Add);
+            il.EmitCall(OpCodes.Call, bitCToInt32, null);   // strLen
+            il.EmitCall(OpCodes.Call, liftMethod, null);    // string
+            il.Emit(OpCodes.Stloc, resultLocal);
+            il.Emit(OpCodes.Br, endLabel);
+
+            // None: result = null
+            il.MarkLabel(noneLabel);
+            il.Emit(OpCodes.Ldnull);
+            il.Emit(OpCodes.Stloc, resultLocal);
+
+            il.MarkLabel(endLabel);
+            il.Emit(OpCodes.Ldloc, resultLocal);
+            il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
         /// IL body for a <c>() -&gt; result&lt;prim, prim&gt;</c>
         /// export. Layout: byte 0 = disc (0 = Ok, 1 = Err),
         /// payload at offset 4 (small-prim alignment). C# surface
@@ -1088,9 +1194,18 @@ namespace Wacs.Transpiler.AOT.Component
         /// varying casings (kebab / camelCase / PascalCase).</summary>
         private static MethodInfo? FindCoreMethod(Type iExports, string exportName)
         {
+            // Try progressively looser matches — the core method
+            // name has been through the transpiler's
+            // <c>SanitizeName</c> (hyphen → underscore) while the
+            // component export name is the raw WIT identifier,
+            // so exact equality doesn't always hold.
+            var sanitized = SanitizeExportName(exportName);
             foreach (var m in iExports.GetMethods())
             {
                 if (string.Equals(m.Name, exportName,
+                        StringComparison.OrdinalIgnoreCase))
+                    return m;
+                if (string.Equals(m.Name, sanitized,
                         StringComparison.OrdinalIgnoreCase))
                     return m;
                 if (string.Equals(m.Name, PascalCase(exportName),
@@ -1101,6 +1216,24 @@ namespace Wacs.Transpiler.AOT.Component
                     return m;
             }
             return null;
+        }
+
+        /// <summary>Replicates the transpiler's
+        /// <c>InterfaceGenerator.SanitizeName</c> — replaces any
+        /// non-identifier char with <c>_</c>. Used to bridge
+        /// component-level export names (which may carry hyphens)
+        /// back to the core IExports method the transpiler
+        /// already generated under the sanitized spelling.</summary>
+        private static string SanitizeExportName(string wasmName)
+        {
+            if (string.IsNullOrEmpty(wasmName)) return wasmName;
+            var chars = wasmName.ToCharArray();
+            for (int i = 0; i < chars.Length; i++)
+            {
+                if (!char.IsLetterOrDigit(chars[i]) && chars[i] != '_')
+                    chars[i] = '_';
+            }
+            return new string(chars);
         }
 
         /// <summary>C# type for a component primitive, matching
