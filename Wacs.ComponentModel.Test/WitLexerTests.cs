@@ -5,10 +5,10 @@
 
 using System;
 using System.Linq;
-using Wacs.Core.Components;
+using Wacs.ComponentModel.WIT;
 using Xunit;
 
-namespace Wacs.Core.Test
+namespace Wacs.ComponentModel.Test
 {
     public class WitLexerTests
     {

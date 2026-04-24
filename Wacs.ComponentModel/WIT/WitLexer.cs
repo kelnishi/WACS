@@ -10,7 +10,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Wacs.Core.Components
+namespace Wacs.ComponentModel.WIT
 {
     public enum WitTokenKind : byte
     {

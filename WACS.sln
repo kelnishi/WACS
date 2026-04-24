@@ -27,6 +27,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Core.Test", "Wacs.Core
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Threads", "Wacs.WASI.Threads\Wacs.WASI.Threads.csproj", "{29E1FED0-1867-43DF-A473-EB7871C32EBB}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel", "Wacs.ComponentModel\Wacs.ComponentModel.csproj", "{5C50513B-BD3A-48D6-A196-9EC8FCB72AE7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Test", "Wacs.ComponentModel.Test\Wacs.ComponentModel.Test.csproj", "{3A1F1B47-654C-436C-BE0E-158A923AACF3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -85,5 +89,13 @@ Global
 		{29E1FED0-1867-43DF-A473-EB7871C32EBB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{29E1FED0-1867-43DF-A473-EB7871C32EBB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{29E1FED0-1867-43DF-A473-EB7871C32EBB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5C50513B-BD3A-48D6-A196-9EC8FCB72AE7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5C50513B-BD3A-48D6-A196-9EC8FCB72AE7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5C50513B-BD3A-48D6-A196-9EC8FCB72AE7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5C50513B-BD3A-48D6-A196-9EC8FCB72AE7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3A1F1B47-654C-436C-BE0E-158A923AACF3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3A1F1B47-654C-436C-BE0E-158A923AACF3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3A1F1B47-654C-436C-BE0E-158A923AACF3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3A1F1B47-654C-436C-BE0E-158A923AACF3}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
