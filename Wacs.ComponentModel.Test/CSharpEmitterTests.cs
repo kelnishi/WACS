@@ -821,6 +821,35 @@ namespace Wacs.ComponentModel.Test
         /// wit-bindgen-shape C# without any hand-crafted Types.
         /// </summary>
         [Fact]
+        public void EmitWorld_from_hello_wit_produces_RunInterop_matching_reference()
+        {
+            // Full export trampoline for wasi:cli/run — exercises
+            // the result<_, _> elision rule: interface sees void,
+            // stub returns int discriminant via try/catch/switch.
+            var root = FindFixturesDir();
+            var helloWit = File.ReadAllText(Path.Combine(root, "wit", "hello.wit"));
+            var submoduleRoot = new DirectoryInfo(root).Parent!.Parent!.FullName;
+            var runWit = File.ReadAllText(Path.Combine(
+                submoduleRoot, "wasi-cli", "wit", "run.wit"));
+
+            var packages = new System.Collections.Generic.List<CtPackage>();
+            packages.AddRange(WitToTypes.Convert(WitParser.Parse(helloWit)));
+            packages.AddRange(WitToTypes.Convert(WitParser.Parse(
+                "package wasi:cli@0.2.3;\n" + runWit)));
+            WitResolver.Resolve(packages);
+
+            var world = packages.First(p => p.Name.Namespace == "local"
+                && p.Name.Path.Single() == "hello").Worlds.Single();
+            var sources = CSharpEmitter.EmitWorld(world);
+            var runInterop = sources.Single(s => s.FileName ==
+                "HelloWorld.wit.exports.wasi.cli.v0_2_3.RunInterop.cs");
+
+            var expected = LoadReference(
+                "HelloWorld.wit.exports.wasi.cli.v0_2_3.RunInterop.cs");
+            Assert.Equal(expected, runInterop.Content);
+        }
+
+        [Fact]
         public void EmitWorld_from_hello_wit_produces_IRun_matching_reference()
         {
             var root = FindFixturesDir();

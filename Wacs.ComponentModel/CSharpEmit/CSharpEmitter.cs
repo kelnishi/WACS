@@ -574,11 +574,21 @@ using System.Diagnostics.CodeAnalysis;
                 if (fn.Type.NamedResults != null) return false;
                 foreach (var p in fn.Type.Params)
                     if (!(p.Type is CtPrimType)) return false;
-                if (fn.Type.Result != null && !(fn.Type.Result is CtPrimType))
+                if (fn.Type.Result != null
+                    && !(fn.Type.Result is CtPrimType)
+                    && !IsElidedResult(fn.Type.Result))
                     return false;
             }
             return true;
         }
+
+        /// <summary>
+        /// <c>result</c> with both sides elided — the "plain
+        /// <c>result</c>" shape that's void at the interface level
+        /// but int (discriminant) at the stub level.
+        /// </summary>
+        private static bool IsElidedResult(CtValType t) =>
+            t is CtResultType r && r.Ok == null && r.Err == null;
 
         /// <summary>
         /// Emit the full Interop file — with DllImport stubs and
