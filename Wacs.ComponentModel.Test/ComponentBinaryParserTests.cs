@@ -124,6 +124,24 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Types_decode_greet_function_signature_as_void_to_u32()
+        {
+            // tiny-component's type section declares one type:
+            // a function with no params returning u32 — the
+            // component-level signature of `greet: func() -> u32`.
+            var path = FindTinyComponentPath();
+            using var stream = File.OpenRead(path);
+            var component = ComponentBinaryParser.Parse(stream);
+
+            var entry = Assert.Single(component.Types);
+            var fn = Assert.IsType<ComponentFuncType>(entry);
+            Assert.Empty(fn.Params);
+            var result = Assert.Single(fn.Results);
+            Assert.True(result.IsPrimitive);
+            Assert.Equal(ComponentPrim.U32, result.Prim);
+        }
+
+        [Fact]
         public void Canons_decode_greet_lift_pointing_at_core_func_0()
         {
             // tiny-component's canon section declares one lift:

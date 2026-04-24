@@ -130,5 +130,26 @@ namespace Wacs.ComponentModel.Runtime
             }
         }
         private IReadOnlyList<Parser.CanonEntry>? _canons;
+
+        /// <summary>
+        /// Decoded deftype table — the component's type space.
+        /// <see cref="Parser.CanonLift.TypeIdx"/> /
+        /// <see cref="Parser.ComponentExportEntry.TypeAscription"/>
+        /// index into this list.
+        /// </summary>
+        public IReadOnlyList<Parser.DefTypeEntry> Types
+        {
+            get
+            {
+                if (_types != null) return _types;
+                var list = new List<Parser.DefTypeEntry>();
+                foreach (var s in RawSections)
+                    if (s.Id == Parser.ComponentSectionId.Type)
+                        list.AddRange(Parser.TypeSectionReader.Decode(s.Payload));
+                _types = list;
+                return list;
+            }
+        }
+        private IReadOnlyList<Parser.DefTypeEntry>? _types;
     }
 }
