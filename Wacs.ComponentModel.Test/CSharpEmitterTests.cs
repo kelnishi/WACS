@@ -532,6 +532,40 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void IncludeWitMetadata_on_decorates_parameters_with_kebab_names()
+        {
+            var src = @"
+                package local:decor;
+                interface def {
+                    lookup: func(table-name: string, record-id: u32);
+                    plain: func(x: u32, y: u32);
+                }
+                world w { export def; }";
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "def");
+
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(
+                iface, "w",
+                new EmitOptions { IncludeWitMetadata = true });
+
+            // Kebab → camel — differs → attribute emitted inline
+            // before the param.
+            Assert.Contains(
+                "[global::Wacs.ComponentModel.WitName(\"table-name\")]",
+                emitted.Content);
+            Assert.Contains(
+                "[global::Wacs.ComponentModel.WitName(\"record-id\")]",
+                emitted.Content);
+            // Single-word param names — no change → no attribute.
+            Assert.DoesNotContain(
+                "[global::Wacs.ComponentModel.WitName(\"x\")]",
+                emitted.Content);
+            Assert.DoesNotContain(
+                "[global::Wacs.ComponentModel.WitName(\"y\")]",
+                emitted.Content);
+        }
+
+        [Fact]
         public void IncludeWitMetadata_on_decorates_exported_methods_with_kebab_names()
         {
             var src = @"

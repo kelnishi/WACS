@@ -1659,6 +1659,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             for (int i = 0; i < sig.Params.Count; i++)
             {
                 if (i > 0) sb.Append(", ");
+                FunctionEmit.EmitParamWitName(sb, sig.Params[i].Name);
                 sb.Append(TypeRefEmit.EmitParam(sig.Params[i].Type));
                 sb.Append(' ');
                 sb.Append(NameConventions.ToCamelCase(sig.Params[i].Name));
