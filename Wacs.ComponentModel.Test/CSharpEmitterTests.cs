@@ -535,6 +535,58 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, content);
         }
 
+        // ---- Trampolines: primitive-only export trampolines ---------------
+
+        private static string FindTrampolinesPrimitivesFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "trampolines-primitives");
+        }
+
+        [Fact]
+        public void TrampolineEmit_matches_reference_OpsInterop_add_square_ping()
+        {
+            var fixtureDir = FindTrampolinesPrimitivesFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "tramp.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "ops");
+
+            var content = TrampolineEmit.EmitExportTrampolineContent(
+                iface, "tramp-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "TrampWorldWorld.wit.exports.local.tramp.OpsInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
+        /// <summary>
+        /// Edge-primitive trampolines: bool (ternary lower,
+        /// compare lift), signed narrowing (s8), char asymmetry
+        /// (unchecked lift, plain-cast lower), u64 (unchecked
+        /// both ways).
+        /// </summary>
+        [Fact]
+        public void TrampolineEmit_matches_reference_OpsInterop_edge_primitives()
+        {
+            var fixtureDir = FindTrampolinesPrimitivesFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "tramp2.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "ops");
+
+            var content = TrampolineEmit.EmitExportTrampolineContent(
+                iface, "tramp2-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "Tramp2WorldWorld.wit.exports.local.tramp2.OpsInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Helpers: conditional Option<T> / InteropString ---------------
 
         /// <summary>

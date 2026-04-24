@@ -1,0 +1,8 @@
+package local:tramp2;
+interface ops {
+    take-bool: func(x: bool) -> bool;
+    take-s8: func(x: s8) -> s8;
+    take-char: func(x: char) -> char;
+    take-u64: func(x: u64) -> u64;
+}
+world tramp2-world { export ops; }

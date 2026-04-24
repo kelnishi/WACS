@@ -358,20 +358,29 @@ using System.Diagnostics.CodeAnalysis;
                     }
 
                     // Interop file:
-                    //  * If import-side AND target is resolved AND
-                    //    all free functions use only primitive types
-                    //    we know how to marshal → emit a full Interop
-                    //    with DllImport stubs + wrapper methods.
+                    //  * Import-side, resolved, primitive-only →
+                    //    full DllImport stubs + wrapper methods.
+                    //  * Export-side, resolved, primitive-only →
+                    //    full UnmanagedCallersOnly trampolines +
+                    //    cabi_post cleanup stubs.
                     //  * Otherwise → empty shell (Phase 1a.2 follow-ups
-                    //    will replace this with full trampoline
-                    //    emission for aggregate / resource / export
-                    //    cases).
-                    if (!isExport && iref.Target != null
+                    //    will fill in aggregate / resource / cabi_post
+                    //    body emissions).
+                    if (iref.Target != null
                         && IsInterfaceInteropEmitable(iref.Target))
                     {
-                        result.Add(EmitFullImportInteropFile(
-                            world, iref.Target, iref.Package,
-                            ifaceName));
+                        if (isExport)
+                        {
+                            result.Add(EmitFullExportTrampolineFile(
+                                world, iref.Target, iref.Package,
+                                ifaceName));
+                        }
+                        else
+                        {
+                            result.Add(EmitFullImportInteropFile(
+                                world, iref.Target, iref.Package,
+                                ifaceName));
+                        }
                     }
                     else
                     {
@@ -545,6 +554,27 @@ using System.Diagnostics.CodeAnalysis;
             var className = NameConventions.ToPascalCase(interfaceName) + "Interop";
             var content = InteropEmit.EmitImportInteropContent(target, world.Name);
             var fileName = worldNs + ".wit.imports."
+                + JoinPackagePath(pkg) + "." + className + ".cs";
+            return new EmittedSource(fileName, content);
+        }
+
+        /// <summary>
+        /// Emit the full export Interop — with
+        /// <c>[UnmanagedCallersOnly]</c> trampolines and
+        /// <c>cabi_post_*</c> stubs — for a resolved primitive-only
+        /// export interface.
+        /// </summary>
+        internal static EmittedSource EmitFullExportTrampolineFile(
+            CtWorldType world,
+            CtInterfaceType target,
+            CtPackageName pkg,
+            string interfaceName)
+        {
+            var worldNs = NameConventions.WorldNamespaceName(world.Name);
+            var className = NameConventions.ToPascalCase(interfaceName) + "Interop";
+            var content = TrampolineEmit.EmitExportTrampolineContent(
+                target, world.Name);
+            var fileName = worldNs + ".wit.exports."
                 + JoinPackagePath(pkg) + "." + className + ".cs";
             return new EmittedSource(fileName, content);
         }
