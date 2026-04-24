@@ -450,6 +450,52 @@ namespace Wacs.Transpiler.Test
             Assert.Equal(404u, errResult.code);
         }
 
+        private static string FindResultVoidStringComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "result-void-string-component", "wasm",
+                                "rvs.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_result_void_string_both_branches()
+        {
+            // result-void-string-component exports `ok() -> result<_, string>`
+            // taking the Ok branch (void payload) and `err() ->
+            // result<_, string>` taking the Err branch with
+            // "permission denied". Absent Ok side maps to `object`
+            // at the C# surface — will always be null.
+            using var fs = File.OpenRead(FindResultVoidStringComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var ok = componentExports!.GetMethod("Ok");
+            var err = componentExports.GetMethod("Err");
+            Assert.NotNull(ok);
+            Assert.NotNull(err);
+            var tupleType = typeof(System.ValueTuple<bool, object, string>);
+            Assert.Equal(tupleType, ok!.ReturnType);
+            Assert.Equal(tupleType, err!.ReturnType);
+
+            var okResult = ((bool ok, object val, string error))
+                ok.Invoke(null, null)!;
+            Assert.True(okResult.ok);
+            Assert.Null(okResult.val);
+            Assert.Null(okResult.error);
+
+            var errResult = ((bool ok, object val, string error))
+                err.Invoke(null, null)!;
+            Assert.False(errResult.ok);
+            Assert.Null(errResult.val);
+            Assert.Equal("permission denied", errResult.error);
+        }
+
         private static string FindListStringComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
