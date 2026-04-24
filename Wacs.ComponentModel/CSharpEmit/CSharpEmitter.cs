@@ -517,13 +517,23 @@ using System.Diagnostics.CodeAnalysis;
                 case CtResourceType res:
                     foreach (var m in res.Methods)
                     {
-                        if (m.Kind != CtResourceMethodKind.Instance) return false;
                         if (m.Function.NamedResults != null) return false;
                         foreach (var p in m.Function.Params)
                             if (!(p.Type is CtPrimType)) return false;
-                        if (m.Function.Result != null
-                            && !(m.Function.Result is CtPrimType))
-                            return false;
+                        // Result is allowed when:
+                        //   * null (void)
+                        //   * a primitive
+                        //   * a reference to the owning resource
+                        //     (constructor / static factory returning
+                        //     a fresh handle of the same type)
+                        if (m.Function.Result == null) continue;
+                        if (m.Function.Result is CtPrimType) continue;
+                        if (m.Function.Result is CtTypeRef tr
+                            && tr.Name == res.Name) continue;
+                        if (m.Function.Result is CtOwnType own
+                            && own.Resource is CtTypeRef trOwn
+                            && trOwn.Name == res.Name) continue;
+                        return false;
                     }
                     return true;
                 default: return false;
@@ -662,10 +672,18 @@ using System.Diagnostics.CodeAnalysis;
             sb.Append("namespace ").Append(ifaceNs).Append(";\n\n");
             sb.Append("public interface ").Append(ifaceClassName).Append(" {\n");
 
-            foreach (var nt in iface.Types)
+            TypeDefEmit.SetWorldNamespace(worldNs);
+            try
             {
-                sb.Append('\n');
-                sb.Append(TypeDefEmit.Emit(nt, iface));
+                foreach (var nt in iface.Types)
+                {
+                    sb.Append('\n');
+                    sb.Append(TypeDefEmit.Emit(nt, iface));
+                }
+            }
+            finally
+            {
+                TypeDefEmit.SetWorldNamespace(null);
             }
 
             sb.Append("\n");  // blank line before closing — matches reference.
