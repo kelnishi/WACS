@@ -10,6 +10,7 @@ using System.IO;
 using Wacs.ComponentModel.Runtime;
 using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.Core;
+using Wacs.Core.Runtime;
 using WacsCoreModule = Wacs.Core.Module;
 
 namespace Wacs.Transpiler.AOT.Component
@@ -111,6 +112,47 @@ namespace Wacs.Transpiler.AOT.Component
         {
             using var fs = File.OpenRead(path);
             return Parse(fs);
+        }
+
+        /// <summary>
+        /// Full component transpilation pass for single-core-module
+        /// components (the common case — hello-world, tiny-component,
+        /// any componentize-dotnet output). Parses the component,
+        /// hands the embedded core module to
+        /// <see cref="ModuleTranspiler"/>, and bakes the component's
+        /// WIT metadata into the resulting assembly via
+        /// <see cref="ComponentAssemblyEmit.EmitComponentMetadataClass"/>.
+        ///
+        /// <para>Multi-core-module components (nested composition,
+        /// multiple inner modules) are a follow-up — each inner
+        /// module needs its own type namespace within the shared
+        /// assembly, and canonical-ABI adapters wire them together.</para>
+        /// </summary>
+        public static TranspilationResult TranspileSingleModule(
+            Stream componentStream,
+            string assemblyNamespace = "Wacs.Transpiled.Component",
+            string moduleName = "ComponentModule")
+        {
+            var parsed = Parse(componentStream);
+            if (parsed.CoreModules.Count != 1)
+                throw new System.InvalidOperationException(
+                    "TranspileSingleModule requires exactly one embedded core "
+                    + "module; got " + parsed.CoreModules.Count
+                    + ". Use the lower-level Parse + per-module transpile for "
+                    + "multi-module components.");
+
+            var runtime = new WasmRuntime();
+            var instance = runtime.InstantiateModule(parsed.CoreModules[0]);
+            var transpiler = new ModuleTranspiler(assemblyNamespace);
+            var result = transpiler.Transpile(instance, runtime, moduleName);
+
+            // Bake the component-type:* bytes so the reverse
+            // bindgen direction can recover the WIT from the
+            // transpiled `.dll` without the original `.component.wasm`.
+            ComponentAssemblyEmit.EmitComponentMetadataClass(
+                result.ModuleBuilder, assemblyNamespace, parsed.EmbeddedWit);
+
+            return result;
         }
     }
 }
