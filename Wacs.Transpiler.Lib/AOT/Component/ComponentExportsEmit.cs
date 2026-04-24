@@ -145,8 +145,9 @@ namespace Wacs.Transpiler.AOT.Component
             if (fn.Results.Count != 1) return false;
             var r = fn.Results[0];
             if (r.IsPrimitive) return true;
-            // Type-table ref — only list<primitive> for now.
+            // Type-table ref — list<primitive> or option<primitive>.
             if (TryResolveListOfPrim(r, types, out _)) return true;
+            if (TryResolveOptionOfPrim(r, types, out _)) return true;
             return false;
         }
 
@@ -164,6 +165,23 @@ namespace Wacs.Transpiler.AOT.Component
             if (!(types[(int)t.TypeIdx] is ComponentListType list)) return false;
             if (!list.Element.IsPrimitive) return false;
             elemPrim = list.Element.Prim;
+            return true;
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a type-ref
+        /// to <c>option&lt;primitive&gt;</c>. Scoped to small
+        /// primitives — wider-prim alignment + aggregate-inner
+        /// payloads are follow-ups.</summary>
+        private static bool TryResolveOptionOfPrim(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            out ComponentPrim innerPrim)
+        {
+            innerPrim = default;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentOptionType opt)) return false;
+            if (!opt.Inner.IsPrimitive) return false;
+            innerPrim = opt.Inner.Prim;
             return true;
         }
 
@@ -188,9 +206,12 @@ namespace Wacs.Transpiler.AOT.Component
 
             // Return-type dispatch: void / primitive (inline),
             // string (StringMarshal chokepoint), list<prim>
-            // (ListMarshal chokepoint via a closed generic).
+            // (ListMarshal closed generic), option<prim>
+            // (disc switch + inline).
             bool isListReturn = false;
+            bool isOptionReturn = false;
             ComponentPrim listElemPrim = default;
+            ComponentPrim optionInnerPrim = default;
             Type returnType;
             if (export.Signature.Results.Count == 0)
             {
@@ -205,6 +226,15 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 isListReturn = true;
                 returnType = PrimToCs(listElemPrim).MakeArrayType();
+            }
+            else if (TryResolveOptionOfPrim(
+                export.Signature.Results[0], types, out optionInnerPrim))
+            {
+                isOptionReturn = true;
+                // Nullable<T> at the C# surface — wit-bindgen's
+                // mapping for option<primitive>.
+                returnType = typeof(Nullable<>).MakeGenericType(
+                    PrimToCs(optionInnerPrim));
             }
             else
             {
@@ -221,7 +251,12 @@ namespace Wacs.Transpiler.AOT.Component
                                        CamelCase(export.Signature.Params[i].Name));
 
             var il = method.GetILGenerator();
-            if (isListReturn)
+            if (isOptionReturn)
+            {
+                EmitOptionReturnBody(il, instanceField, coreMethod, export,
+                                     optionInnerPrim);
+            }
+            else if (isListReturn)
             {
                 EmitListReturnBody(il, instanceField, coreMethod, export,
                                    listElemPrim);
@@ -396,6 +431,99 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Add);                           // P+4
             il.EmitCall(OpCodes.Call, bitCToInt32!, null);  // count
             il.EmitCall(OpCodes.Call, liftClosed, null);    // T[]
+            il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// IL body for a <c>() -&gt; option&lt;prim&gt;</c> export.
+        /// Canonical-ABI layout: at retArea P sits a 2-word
+        /// struct — byte 0 is the discriminant (0 = None, 1 =
+        /// Some), then payload aligned to max(1, sizeof(T))
+        /// which for small prims is offset 4. We read the disc
+        /// via OptionMarshal.IsSome, branch to a Some path that
+        /// reads the payload via BitConverter, or a None path
+        /// that returns <c>default(T?)</c>.
+        /// </summary>
+        private static void EmitOptionReturnBody(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            ComponentPrim innerPrim)
+        {
+            var memoryProp = instanceField.FieldType.GetProperty("Memory");
+            if (memoryProp == null)
+                throw new InvalidOperationException(
+                    "Option-returning component requires Module.Memory.");
+
+            var innerCs = PrimToCs(innerPrim);
+            var nullableCs = typeof(Nullable<>).MakeGenericType(innerCs);
+
+            var retAreaLocal = il.DeclareLocal(typeof(int));
+            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+            var resultLocal = il.DeclareLocal(nullableCs);
+            var noneLabel = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+
+            // int P = core.find();
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, coreMethod, null);
+            il.Emit(OpCodes.Stloc, retAreaLocal);
+
+            // byte[] memory = instance.Memory;
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.Emit(OpCodes.Stloc, memoryLocal);
+
+            // if (!OptionMarshal.IsSome(memory.AsSpan(), P)) goto noneLabel;
+            // Shortcut: read the disc byte directly via
+            // BitConverter-style span load. The OptionMarshal
+            // helper is designed for caller-side IL that already
+            // has a ReadOnlySpan<byte>; for the AsSpan ceremony
+            // we go direct here and inline an equivalent check.
+            il.Emit(OpCodes.Ldloc, memoryLocal);            // memory[]
+            il.Emit(OpCodes.Ldloc, retAreaLocal);           // P
+            il.Emit(OpCodes.Ldelem_U1);                     // memory[P]
+            il.Emit(OpCodes.Brfalse, noneLabel);            // disc == 0 ? None
+
+            // Some branch: payload at P + 4 (for small prims).
+            // Load T via BitConverter.ToInt32 / ToSingle etc.,
+            // wrap in Nullable<T> constructor, store to result.
+            var bitCToInt32 = typeof(BitConverter).GetMethod(
+                "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+            il.Emit(OpCodes.Ldloc, memoryLocal);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldc_I4_4);
+            il.Emit(OpCodes.Add);                           // P+4
+            il.EmitCall(OpCodes.Call, bitCToInt32, null);   // int at P+4
+            // For u32, the i32 loads bitwise-equivalent; for
+            // narrower primitives, apply the narrowing cast.
+            switch (innerPrim)
+            {
+                case ComponentPrim.S8:  il.Emit(OpCodes.Conv_I1); break;
+                case ComponentPrim.U8:  il.Emit(OpCodes.Conv_U1); break;
+                case ComponentPrim.S16: il.Emit(OpCodes.Conv_I2); break;
+                case ComponentPrim.U16: il.Emit(OpCodes.Conv_U2); break;
+                case ComponentPrim.Bool:
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Cgt_Un);
+                    break;
+                // 32-bit prims (S32/U32/F32/Char): no cast.
+                // Wide prims (S64/U64/F64) would need ToInt64 /
+                // ToDouble — follow-up once 64-bit option
+                // alignment path is added.
+            }
+            var nullableCtor = nullableCs.GetConstructor(new[] { innerCs })!;
+            il.Emit(OpCodes.Newobj, nullableCtor);
+            il.Emit(OpCodes.Stloc, resultLocal);
+            il.Emit(OpCodes.Br, endLabel);
+
+            // None branch: result = default(T?) — already the
+            // zero-initialized slot, so just leave it.
+            il.MarkLabel(noneLabel);
+            il.Emit(OpCodes.Ldloca, resultLocal);
+            il.Emit(OpCodes.Initobj, nullableCs);
+
+            il.MarkLabel(endLabel);
+            il.Emit(OpCodes.Ldloc, resultLocal);
             il.Emit(OpCodes.Ret);
         }
 

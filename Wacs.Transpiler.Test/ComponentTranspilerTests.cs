@@ -83,6 +83,61 @@ namespace Wacs.Transpiler.Test
                                 "bc.component.wasm");
         }
 
+        [Fact]
+        public void TranspileSingleModule_lifts_option_u32_none_return()
+        {
+            // option-none-component exports `missing() -> option<u32>`
+            // with disc byte = 0 at offset 200. Should return
+            // the default value of uint? (null / HasValue = false).
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            var path = Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                     "fixtures", "option-none-component", "wasm",
+                                     "n.component.wasm");
+            using var fs = File.OpenRead(path);
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var missing = componentExports!.GetMethod("Missing");
+            var value = (uint?)missing!.Invoke(null, null);
+            Assert.False(value.HasValue);
+        }
+
+        private static string FindOptionReturnComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "option-return-component", "wasm",
+                                "o.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_option_u32_some_return()
+        {
+            // option-return-component exports `find() -> option<u32>`.
+            // Core returns retArea ptr = 200; memory[200] = 0x01
+            // (Some tag); memory[204..208] = 0x2a (payload = 42).
+            // ComponentExports.Find() → uint? with value 42u.
+            using var fs = File.OpenRead(FindOptionReturnComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var find = componentExports!.GetMethod("Find");
+            Assert.NotNull(find);
+            Assert.Equal(typeof(uint?), find!.ReturnType);
+
+            var value = (uint?)find.Invoke(null, null);
+            Assert.True(value.HasValue);
+            Assert.Equal(42u, value.Value);
+        }
+
         private static string FindListReturnComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());

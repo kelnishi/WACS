@@ -90,6 +90,36 @@ namespace Wacs.ComponentModel.Runtime.Parser
     }
 
     /// <summary>
+    /// <c>option&lt;T&gt;</c> type (tag 0x6b). The inner is any
+    /// <see cref="ComponentValType"/>. Lowers to a
+    /// (discriminant-byte, payload-slot) pair where the payload
+    /// is either zero-initialized (None) or holds T (Some).
+    /// </summary>
+    public sealed class ComponentOptionType : DefTypeEntry
+    {
+        public ComponentValType Inner { get; }
+        public ComponentOptionType(ComponentValType inner) { Inner = inner; }
+    }
+
+    /// <summary>
+    /// <c>result&lt;Ok, Err&gt;</c> type (tag 0x6a). Either side
+    /// may be absent (encoded as the 0x00 "no value" prefix
+    /// instead of a value type). Lowers to (discriminant-byte,
+    /// payload-slot) where the payload slot is sized to the
+    /// larger of Ok / Err's lowered widths.
+    /// </summary>
+    public sealed class ComponentResultType : DefTypeEntry
+    {
+        public ComponentValType? Ok { get; }
+        public ComponentValType? Err { get; }
+        public ComponentResultType(ComponentValType? ok, ComponentValType? err)
+        {
+            Ok = ok;
+            Err = err;
+        }
+    }
+
+    /// <summary>
     /// Function type (tag 0x40): ordered param list (each with a
     /// name) + ordered unnamed result list. Matches <c>functype</c>
     /// in the Component Model binary spec.
@@ -153,6 +183,8 @@ namespace Wacs.ComponentModel.Runtime.Parser
     {
         public const byte FuncTypeTag = 0x40;
         public const byte ListTypeTag = 0x70;
+        public const byte OptionTypeTag = 0x6B;
+        public const byte ResultTypeTag = 0x6A;
 
         public static List<DefTypeEntry> Decode(byte[] payload)
         {
@@ -173,6 +205,10 @@ namespace Wacs.ComponentModel.Runtime.Parser
                     return DecodeFuncType(r);
                 case ListTypeTag:
                     return new ComponentListType(DecodeValType(r));
+                case OptionTypeTag:
+                    return new ComponentOptionType(DecodeValType(r));
+                case ResultTypeTag:
+                    return DecodeResultType(r);
                 default:
                     // Unknown structural tag — capture the rest
                     // of the payload so the type slot occupies
@@ -219,6 +255,27 @@ namespace Wacs.ComponentModel.Runtime.Parser
                     $"Unexpected functype result-kind byte 0x{resultKind:X2}.");
             }
             return new ComponentFuncType(pars, results);
+        }
+
+        /// <summary>Decode a result's optional sides. Each side
+        /// is prefixed by a presence byte: 0x00 = absent, 0x01 =
+        /// present (followed by a value type). Matches the spec's
+        /// <c>result</c> encoding.</summary>
+        private static ComponentResultType DecodeResultType(ComponentBinaryReader r)
+        {
+            var ok = DecodeOptionalValType(r);
+            var err = DecodeOptionalValType(r);
+            return new ComponentResultType(ok, err);
+        }
+
+        private static ComponentValType? DecodeOptionalValType(ComponentBinaryReader r)
+        {
+            var present = r.ReadByte();
+            if (present == 0x00) return null;
+            if (present != 0x01)
+                throw new FormatException(
+                    $"Unexpected optional-valtype presence byte 0x{present:X2}.");
+            return DecodeValType(r);
         }
 
         /// <summary>Read a value type (signed LEB128) — negative
