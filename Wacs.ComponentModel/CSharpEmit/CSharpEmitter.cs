@@ -593,25 +593,26 @@ using System.Diagnostics.CodeAnalysis;
 
         /// <summary>
         /// Parameter types supported by the current Interop emitter.
-        /// Primitives (all kinds including string). Aggregates
-        /// (list / option / result / tuple / records / variants)
-        /// are follow-ups — each requires dedicated marshaling
-        /// emission in <c>InteropEmit</c>.
+        /// Primitives (all kinds including string) and
+        /// <c>list&lt;u8&gt;</c> (byte-array special case).
+        /// Other aggregates (general list, option, result, tuple,
+        /// records, variants) are follow-ups — each requires
+        /// dedicated marshaling emission in <c>InteropEmit</c>.
         /// </summary>
         private static bool IsEmitableStubParam(CtValType t) =>
-            t is CtPrimType;
+            t is CtPrimType || InteropEmit.IsByteList(t);
 
         /// <summary>
         /// Return types supported by the current Interop emitter.
-        /// Primitives (direct return) and <c>string</c> (via
-        /// return-area buffer); <c>result&lt;_, _&gt;</c> in
-        /// return position maps to void at the interface level
-        /// (handled by trampoline emission, not InteropEmit, but
-        /// the gate accepts it uniformly).
+        /// Primitives (direct return), <c>string</c> + <c>list&lt;u8&gt;</c>
+        /// (via return-area buffer), and <c>result&lt;_, _&gt;</c>
+        /// (elided to void at the interface level; handled by
+        /// trampoline emission).
         /// </summary>
         private static bool IsEmitableStubReturn(CtValType t)
         {
             if (t is CtPrimType) return true;
+            if (InteropEmit.IsByteList(t)) return true;
             if (IsElidedResult(t)) return true;
             return false;
         }

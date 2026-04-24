@@ -803,6 +803,43 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, content);
         }
 
+        // ---- Interop: list<u8> marshaling ---------------------------------
+
+        private static string FindInteropListU8FixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-list-u8");
+        }
+
+        /// <summary>
+        /// <c>list&lt;u8&gt;</c> — the byte-array special case.
+        /// Params lower via <c>stackalloc byte[len]</c> +
+        /// <c>AsSpan().CopyTo</c>; returns via the return-area
+        /// buffer and <c>new byte[len]</c> + <c>Span.CopyTo</c>.
+        /// Snapshot matches wit-bindgen 0.30.0 output byte-for-byte
+        /// (the canonical ABI for list&lt;u8&gt; is (ptr, len) with
+        /// no naming allocator we'd have to reverse-engineer).
+        /// </summary>
+        [Fact]
+        public void InteropEmit_list_u8_matches_reference()
+        {
+            var fixtureDir = FindInteropListU8FixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "lst.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "lst-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "LstWorldWorld.wit.imports.local.lst.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Interop: primitive-only import Interop file ------------------
 
         private static string FindInteropPrimitivesFixtureDir()
