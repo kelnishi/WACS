@@ -358,6 +358,72 @@ namespace Wacs.Transpiler.Test
             Assert.Equal(15u, value);
         }
 
+        private static string FindOptionStringComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "option-string-component", "wasm",
+                                "os.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_option_string_some()
+        {
+            // option-string-component exports `greeting() ->
+            // option<string>` whose core returns a pointer P at
+            // which bytes [P..P+12] are the canonical-ABI encoded
+            // value: disc byte, padding to 4, then (strPtr, strLen).
+            // Disc=1 selects the Some branch; the emitted IL lifts
+            // the (ptr, len) pair via StringMarshal.LiftUtf8.
+            // C# surface: `string` where null = None.
+            using var fs = File.OpenRead(FindOptionStringComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var greeting = componentExports!.GetMethod("Greeting");
+            Assert.NotNull(greeting);
+            Assert.Equal(typeof(string), greeting!.ReturnType);
+
+            Assert.Equal("greetings", greeting.Invoke(null, null));
+        }
+
+        private static string FindOptionStringNoneComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "option-string-none-component", "wasm",
+                                "osn.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_option_string_none()
+        {
+            // Companion to the option-string Some test — same
+            // shape, but the return-area discriminant is 0
+            // (None). The emitted IL's brfalse branch returns
+            // null without touching the payload slot, avoiding
+            // any UTF-8 decode on garbage bytes.
+            using var fs = File.OpenRead(FindOptionStringNoneComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var greeting = componentExports!.GetMethod("Greeting");
+            Assert.NotNull(greeting);
+            Assert.Equal(typeof(string), greeting!.ReturnType);
+
+            Assert.Null(greeting.Invoke(null, null));
+        }
+
         private static string FindF64ComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
