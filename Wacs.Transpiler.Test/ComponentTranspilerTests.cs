@@ -105,6 +105,42 @@ namespace Wacs.Transpiler.Test
             Assert.False(value.HasValue);
         }
 
+        private static string FindResultReturnComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "result-return-component", "wasm",
+                                "r.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_result_u32_u32_ok_branch()
+        {
+            // result-return-component exports
+            // `divide() -> result<u32, u32>`. Core returns retArea
+            // ptr 200; memory[200..204] = 0 (Ok disc);
+            // memory[204..208] = 42 (payload). Expect tuple
+            // (true, 42u, 0u).
+            using var fs = File.OpenRead(FindResultReturnComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var divide = componentExports!.GetMethod("Divide");
+            Assert.NotNull(divide);
+            Assert.Equal(
+                typeof(System.ValueTuple<bool, uint, uint>),
+                divide!.ReturnType);
+
+            var tuple = ((bool ok, uint value, uint error))
+                divide.Invoke(null, null)!;
+            Assert.True(tuple.ok);
+            Assert.Equal(42u, tuple.value);
+            Assert.Equal(0u, tuple.error);
+        }
+
         private static string FindOptionReturnComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
