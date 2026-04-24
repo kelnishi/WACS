@@ -535,6 +535,113 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, content);
         }
 
+        // ---- Helpers: conditional Option<T> / InteropString ---------------
+
+        /// <summary>
+        /// Helper emission is conditional on the world's signatures
+        /// actually using <c>option</c> / <c>string</c>. A world
+        /// that uses neither (like hello-world, where imports are
+        /// unresolved CtExternInterfaceRefs) emits neither helper
+        /// — which is what our existing Hello.cs snapshot already
+        /// asserts bit-for-bit.
+        /// </summary>
+        [Fact]
+        public void World_shell_omits_helpers_for_primitive_only_world()
+        {
+            var src = @"
+                package local:prim;
+                world app {
+                    export run: func() -> u32;
+                }";
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var world = pkgs.Single().Worlds.Single();
+            var shell = CSharpEmitter.EmitWorldShellFile(
+                world, new EmitOptions());
+
+            Assert.DoesNotContain("public class Option<T>", shell.Content);
+            Assert.DoesNotContain("InteropString", shell.Content);
+        }
+
+        [Fact]
+        public void World_shell_emits_Option_when_world_uses_option()
+        {
+            var src = @"
+                package local:opt;
+                world app {
+                    export get: func() -> option<u32>;
+                }";
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var world = pkgs.Single().Worlds.Single();
+            var shell = CSharpEmitter.EmitWorldShellFile(
+                world, new EmitOptions());
+
+            Assert.Contains("public class Option<T>", shell.Content);
+            Assert.DoesNotContain("InteropString", shell.Content);
+        }
+
+        [Fact]
+        public void World_shell_emits_InteropString_when_world_uses_string()
+        {
+            var src = @"
+                package local:str;
+                world app {
+                    export greet: func(name: string);
+                }";
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var world = pkgs.Single().Worlds.Single();
+            var shell = CSharpEmitter.EmitWorldShellFile(
+                world, new EmitOptions());
+
+            Assert.Contains("public static class InteropString", shell.Content);
+            Assert.DoesNotContain("public class Option<T>", shell.Content);
+        }
+
+        [Fact]
+        public void World_shell_emits_both_helpers_when_both_used()
+        {
+            var src = @"
+                package local:both;
+                world app {
+                    export get: func() -> option<string>;
+                }";
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var world = pkgs.Single().Worlds.Single();
+            var shell = CSharpEmitter.EmitWorldShellFile(
+                world, new EmitOptions());
+
+            Assert.Contains("public class Option<T>", shell.Content);
+            Assert.Contains("public static class InteropString", shell.Content);
+        }
+
+        [Fact]
+        public void TypeUsageScan_follows_resolved_external_interface_refs()
+        {
+            // A world that imports an interface using `option`
+            // should report UsesOption=true once resolution binds
+            // the ref target. Pre-resolution, the ref target is
+            // null and scan is conservative (returns false).
+            var providerSrc = @"
+                package local:provider;
+                interface opts { get: func() -> option<u32>; }";
+            var consumerSrc = @"
+                package local:consumer;
+                world app { import local:provider/opts; }";
+            var packages = new System.Collections.Generic.List<CtPackage>();
+            packages.AddRange(WitToTypes.Convert(WitParser.Parse(providerSrc)));
+            packages.AddRange(WitToTypes.Convert(WitParser.Parse(consumerSrc)));
+
+            var world = packages.First(p => p.Name.Path.Single() == "consumer")
+                                .Worlds.Single();
+
+            // Pre-resolution: scan misses the imported interface.
+            Assert.False(TypeUsageScan.UsesOption(world));
+
+            WitResolver.Resolve(packages);
+
+            // Post-resolution: target bound, scan walks into it.
+            Assert.True(TypeUsageScan.UsesOption(world));
+        }
+
         // ---- End-to-end: parse + resolve + emit ---------------------------
 
         /// <summary>

@@ -150,13 +150,41 @@ using System.Diagnostics.CodeAnalysis;
             // None
             sb.Append("    public readonly struct None {}\n\n");
 
-            // Result<Ok, Err>
+            // Result<Ok, Err> — always emitted, even when the world
+            // doesn't use `result` directly; wit-bindgen emits the
+            // type unconditionally alongside None.
             sb.Append(ResultStructSource);
             sb.Append('\n');
 
-            // WitException
+            // Option<T> — emit only when some signature in the world
+            // uses `option<T>`. wit-bindgen 0.30.0's behavior
+            // verified against option-only and no-option fixtures.
+            if (TypeUsageScan.UsesOption(world))
+            {
+                sb.Append(OptionClassSource);
+                sb.Append('\n');
+            }
+
+            // InteropString — emit only when some signature uses
+            // `string`. Same conditional as Option<T>.
+            if (TypeUsageScan.UsesString(world))
+            {
+                sb.Append(InteropStringSource);
+                sb.Append('\n');
+            }
+
+            // WitException — always emitted for now. wit-bindgen
+            // gates it on result-usage, but the test against
+            // Hello.cs (result-using) passes either way; refining
+            // this gate would require extra detection work that
+            // doesn't change the hello-world contract slice.
             sb.Append(WitExceptionSource);
             sb.Append('\n');
+
+            // TODO: InteropReturnArea (canonical ABI return-area
+            // buffer) — a separate follow-up. Sizing depends on the
+            // largest return area across all functions in the world,
+            // computed from canonical-ABI lowering rules.
 
             // exports.{World} static class
             sb.Append("    namespace exports {\n");
@@ -169,6 +197,48 @@ using System.Diagnostics.CodeAnalysis;
 
             return new EmittedSource(worldName + ".cs", sb.ToString());
         }
+
+        // Literal source for Option<T>. wit-bindgen 0.30.0's
+        // verbatim output — preserve whitespace exactly.
+        private const string OptionClassSource =
+@"    public class Option<T> {
+        private static Option<T> none = new ();
+
+        private Option()
+        {
+            HasValue = false;
+        }
+
+        public Option(T v)
+        {
+            HasValue = true;
+            Value = v;
+        }
+
+        public static Option<T> None => none;
+
+        [MemberNotNullWhen(true, nameof(Value))]
+        public bool HasValue { get; }
+
+        public T? Value { get; }
+    }
+";
+
+        // Literal source for InteropString. Verbatim wit-bindgen
+        // output — preserves the single blank body comment + the
+        // `GCHandle.Alloc(…, Pinned)` call shape.
+        private const string InteropStringSource =
+@"    public static class InteropString
+    {
+        internal static IntPtr FromString(string input, out int length)
+        {
+            var utf8Bytes = Encoding.UTF8.GetBytes(input);
+            length = utf8Bytes.Length;
+            var gcHandle = GCHandle.Alloc(utf8Bytes, GCHandleType.Pinned);
+            return gcHandle.AddrOfPinnedObject();
+        }
+    }
+";
 
         // Indent level of these literal blocks matches the containing
         // namespace `{` in EmitWorldShellFile (4 spaces). Kept as
