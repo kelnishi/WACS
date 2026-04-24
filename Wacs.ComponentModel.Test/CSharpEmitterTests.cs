@@ -946,6 +946,42 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Interop: list<u32> (non-byte list of primitives) -------------
+
+        private static string FindInteropListU32FixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-list-u32");
+        }
+
+        /// <summary>
+        /// <c>list&lt;u32&gt;</c> marshaling — the non-byte
+        /// primitive-list case. Verifies the element-type
+        /// parameterization: <c>stackalloc uint[…]</c> +
+        /// <c>Span&lt;uint&gt;</c> instead of <c>Span&lt;byte&gt;</c>,
+        /// and <c>new uint[…]</c> on the return path. The length
+        /// word stays u32 regardless of element type.
+        /// </summary>
+        [Fact]
+        public void InteropEmit_list_u32_matches_reference()
+        {
+            var fixtureDir = FindInteropListU32FixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "l32.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "l32-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "L32WorldWorld.wit.imports.local.l32.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Interop: tuple<prim, …> marshaling ---------------------------
 
         private static string FindInteropTuplePrimsFixtureDir()
