@@ -73,6 +73,41 @@ namespace Wacs.Transpiler.Test
             Assert.NotNull(transpileResult.FunctionsType);
         }
 
+        private static string FindPrimCastComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "prim-cast-component", "wasm",
+                                "bc.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_casts_i32_to_bool_on_return()
+        {
+            // prim-cast-component's core module returns i32
+            // constant 1 for `check`. The component signature
+            // says `check() -> bool`, so the ComponentExports
+            // method must cast the i32 to bool (via `!= 0`).
+            // Verifies the new primitive-cast IL actually runs.
+            using var fs = File.OpenRead(FindPrimCastComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var check = componentExports!.GetMethod("Check",
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.Static);
+            Assert.NotNull(check);
+            Assert.Equal(typeof(bool), check!.ReturnType);
+
+            var value = (bool)check.Invoke(null, null)!;
+            Assert.True(value);
+        }
+
         [Fact]
         public void TranspileSingleModule_component_exports_class_exposes_typed_greet()
         {
