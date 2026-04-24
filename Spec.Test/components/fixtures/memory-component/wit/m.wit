@@ -1,0 +1,4 @@
+package local:m;
+world m {
+    export ping: func() -> u32;
+}
