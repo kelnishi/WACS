@@ -52,17 +52,56 @@ namespace Wacs.ComponentModel.CSharpEmit
                 // own<T> / borrow<T> — C# has no handle-type
                 // distinction; the resource class itself carries
                 // the handle internally, so both collapse to the
-                // resource's PascalCase name (same-interface) or
-                // its fully qualified path (cross-interface).
-                CtOwnType o => EmitParam(o.Resource),
-                CtBorrowType b => EmitParam(b.Resource),
+                // resource's class name. wit-bindgen 0.30.0 always
+                // emits the fully-qualified `global::…` path for
+                // resource-typed parameters / returns — even when
+                // the reference is to the enclosing class or to a
+                // same-interface resource. We mirror that.
+                CtOwnType o => EmitResourceRefQualified(o.Resource),
+                CtBorrowType b => EmitResourceRefQualified(b.Resource),
                 // Same-interface refs emit unqualified; cross-interface
                 // refs emit a fully qualified `global::...` path.
-                CtTypeRef r => EmitTypeRef(r),
+                // Bare identifier pointing at a resource type is
+                // treated like <c>own&lt;R&gt;</c> — always qualify.
+                CtTypeRef r => EmitTypeRefHandlingResource(r),
                 _ => throw new NotImplementedException(
                     "CSharp emission for " + type.GetType().Name +
                     " is a Phase 1a.2 follow-up."),
             };
+        }
+
+        private static string EmitResourceRefQualified(CtValType inner)
+        {
+            if (inner is CtTypeRef r && r.Target != null)
+            {
+                var target = r.Target;
+                while (target.Type is CtTypeRef innerRef
+                       && innerRef.Target != null
+                       && innerRef.Target != target)
+                {
+                    target = innerRef.Target;
+                }
+                if (target.Type is CtResourceType)
+                    return EmitQualifiedPath(target);
+            }
+            return EmitParam(inner);
+        }
+
+        private static string EmitTypeRefHandlingResource(CtTypeRef r)
+        {
+            if (r.Target != null)
+            {
+                var target = r.Target;
+                while (target.Type is CtTypeRef innerRef
+                       && innerRef.Target != null
+                       && innerRef.Target != target)
+                {
+                    target = innerRef.Target;
+                }
+                if (target.Type is CtResourceType)
+                    return EmitQualifiedPath(target);
+            }
+            return EmitTypeRef(r);
         }
 
         /// <summary>

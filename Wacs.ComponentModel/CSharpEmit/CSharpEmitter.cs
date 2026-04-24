@@ -523,9 +523,11 @@ using System.Diagnostics.CodeAnalysis;
                             // Resource method params: primitives plus
                             // list<prim> (byte[]/uint[]/… — lowered
                             // to pinned-buffer ptr+len via the shared
-                            // Interop prelude helpers).
+                            // Interop prelude helpers) plus owned /
+                            // borrowed resource-handle refs.
                             if (p.Type is CtPrimType) continue;
                             if (InteropEmit.IsListOfPrim(p.Type)) continue;
+                            if (InteropEmit.IsResourceRef(p.Type)) continue;
                             return false;
                         }
                         // Result is allowed when:
@@ -618,7 +620,8 @@ using System.Diagnostics.CodeAnalysis;
             || InteropEmit.IsOptionOfString(t)
             || InteropEmit.IsTupleOfSmallPrims(t)
             || InteropEmit.IsRecordOfSmallPrims(t)
-            || InteropEmit.IsVariantOfSmallPrimOrNone(t);
+            || InteropEmit.IsVariantOfSmallPrimOrNone(t)
+            || InteropEmit.IsResourceRef(t);
 
         /// <summary>
         /// Return types supported by the current Interop emitter.
