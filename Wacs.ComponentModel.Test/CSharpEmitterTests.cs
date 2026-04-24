@@ -485,6 +485,53 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, emitted.Content);
         }
 
+        // ---- Types: record -----------------------------------------------
+
+        private static string FindTypesRecordFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "types-record");
+        }
+
+        [Fact]
+        public void EmitExportInterfaceFile_matches_reference_record_primitives()
+        {
+            var fixtureDir = FindTypesRecordFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "rec.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "def");
+
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(iface, "rec-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "RecWorldWorld.wit.exports.local.rec.IDef.cs"));
+            Assert.Equal(expected, emitted.Content);
+        }
+
+        [Fact]
+        public void EmitExportInterfaceFile_matches_reference_record_kebab_fields()
+        {
+            // Exercises kebab-case field names (host-name →
+            // hostName, port-number → portNumber) and kebab-case
+            // record name (web-address → WebAddress).
+            var fixtureDir = FindTypesRecordFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "rec2.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "def");
+
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(iface, "rec2-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "Rec2WorldWorld.wit.exports.local.rec2.IDef.cs"));
+            Assert.Equal(expected, emitted.Content);
+        }
+
         // ---- Interop: primitive-only import Interop file ------------------
 
         private static string FindInteropPrimitivesFixtureDir()

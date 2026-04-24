@@ -481,12 +481,24 @@ using System.Diagnostics.CodeAnalysis;
         /// <summary>
         /// Which WIT type definitions (the body of a
         /// <see cref="CtNamedType"/>) our <see cref="TypeDefEmit"/>
-        /// can handle in Phase 1a.2 — currently enum and flags.
-        /// Records, variants, resources, and type aliases will relax
-        /// this as their emitters land.
+        /// can handle in Phase 1a.2 — currently enum, flags, and
+        /// records (where every field type is emitable). Variants,
+        /// resources, and type aliases will relax this as their
+        /// emitters land.
         /// </summary>
-        private static bool IsTypeDefEmitable(CtValType body) =>
-            body is CtEnumType || body is CtFlagsType;
+        private static bool IsTypeDefEmitable(CtValType body)
+        {
+            switch (body)
+            {
+                case CtEnumType: return true;
+                case CtFlagsType: return true;
+                case CtRecordType rec:
+                    foreach (var f in rec.Fields)
+                        if (!IsTypeEmitable(f.Type)) return false;
+                    return true;
+                default: return false;
+            }
+        }
 
         /// <summary>
         /// True for Phase 1a.2-supported value types: primitives,

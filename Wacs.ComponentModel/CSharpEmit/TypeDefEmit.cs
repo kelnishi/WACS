@@ -35,6 +35,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             {
                 CtEnumType e => EmitEnum(named.Name, e),
                 CtFlagsType f => EmitFlags(named.Name, f),
+                CtRecordType r => EmitRecord(named.Name, r),
                 _ => throw new NotImplementedException(
                     "Type emission for " + named.Type.GetType().Name +
                     " is a Phase 1a.2 follow-up."),
@@ -96,6 +97,63 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append(i);
                 sb.Append(",\n");
             }
+            sb.Append("    }\n");
+            return sb.ToString();
+        }
+
+        // ---- record --------------------------------------------------------
+
+        /// <summary>
+        /// WIT <c>record</c> → plain C# class with
+        /// <c>public readonly</c> fields + a positional constructor.
+        /// Field names are kebab→camelCase; the type name is
+        /// kebab→PascalCase. Verified against wit-bindgen-csharp
+        /// 0.30.0 on two fixtures.
+        /// <code>
+        ///     public class WebAddress {
+        ///         public readonly string hostName;
+        ///         public readonly ushort portNumber;
+        ///
+        ///         public WebAddress(string hostName, ushort portNumber) {
+        ///             this.hostName = hostName;
+        ///             this.portNumber = portNumber;
+        ///         }
+        ///     }
+        /// </code>
+        /// </summary>
+        private static string EmitRecord(string name, CtRecordType r)
+        {
+            var className = NameConventions.ToPascalCase(name);
+            var sb = new StringBuilder();
+            sb.Append("    public class ");
+            sb.Append(className).Append(" {\n");
+
+            foreach (var f in r.Fields)
+            {
+                sb.Append("        public readonly ");
+                sb.Append(TypeRefEmit.EmitParam(f.Type));
+                sb.Append(' ');
+                sb.Append(NameConventions.ToCamelCase(f.Name));
+                sb.Append(";\n");
+            }
+
+            sb.Append("\n");
+            sb.Append("        public ").Append(className).Append('(');
+            for (int i = 0; i < r.Fields.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(TypeRefEmit.EmitParam(r.Fields[i].Type));
+                sb.Append(' ');
+                sb.Append(NameConventions.ToCamelCase(r.Fields[i].Name));
+            }
+            sb.Append(") {\n");
+            foreach (var f in r.Fields)
+            {
+                var fld = NameConventions.ToCamelCase(f.Name);
+                sb.Append("            this.").Append(fld);
+                sb.Append(" = ").Append(fld).Append(";\n");
+            }
+            sb.Append("        }\n");
             sb.Append("    }\n");
             return sb.ToString();
         }

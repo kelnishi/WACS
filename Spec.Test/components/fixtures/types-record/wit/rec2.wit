@@ -1,0 +1,10 @@
+package local:rec2;
+interface def {
+    record web-address {
+        host-name: string,
+        port-number: u16,
+        is-secure: bool,
+    }
+    connect: func(addr: web-address) -> bool;
+}
+world rec2-world { export def; }
