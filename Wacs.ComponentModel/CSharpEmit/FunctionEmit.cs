@@ -80,10 +80,27 @@ namespace Wacs.ComponentModel.CSharpEmit
             {
                 if (i > 0) sb.Append(", ");
                 var p = sig.Params[i];
+                EmitParamWitName(sb, p.Name);
                 sb.Append(TypeRefEmit.Emit(p.Type));
                 sb.Append(' ');
                 sb.Append(NameConventions.ToCamelCase(p.Name));
             }
+        }
+
+        /// <summary>
+        /// Emit <c>[global::Wacs.ComponentModel.WitName("kebab-name")]</c>
+        /// inline before a parameter declaration when
+        /// <see cref="EmitAmbient.IncludeWitMetadata"/> is on and
+        /// the camelCase C# param name differs from the WIT source
+        /// name. C# supports parameter-attribute syntax inline:
+        /// <c>Foo([Attr] int x, string y)</c>.
+        /// </summary>
+        internal static void EmitParamWitName(StringBuilder sb, string witName)
+        {
+            if (!EmitAmbient.IncludeWitMetadata) return;
+            if (NameConventions.ToCamelCase(witName) == witName) return;
+            sb.Append("[global::Wacs.ComponentModel.WitName(\"")
+              .Append(witName).Append("\")] ");
         }
     }
 }
