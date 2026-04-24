@@ -9,6 +9,8 @@ using System.Collections.Generic;
 using System.IO;
 using Wacs.ComponentModel.Runtime;
 using Wacs.ComponentModel.Runtime.Parser;
+using Wacs.ComponentModel.Types;
+using Wacs.ComponentModel.WIT;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using WacsCoreModule = Wacs.Core.Module;
@@ -47,14 +49,29 @@ namespace Wacs.Transpiler.AOT.Component
         /// </summary>
         public byte[]? EmbeddedWit { get; }
 
+        /// <summary>
+        /// Decoded form of <see cref="EmbeddedWit"/>, when the
+        /// bytes parse cleanly through
+        /// <see cref="BinaryWitDecoder"/>. Carries the WIT-level
+        /// names (enum/record/variant/resource type names, their
+        /// case/field names, the world's qualified package name)
+        /// that the structural component sections drop. Null when
+        /// no <c>component-type:*</c> section is present (e.g.
+        /// <c>wasm-tools component new</c> output) or when the
+        /// section's payload couldn't be decoded.
+        /// </summary>
+        public CtPackage? DecodedWit { get; }
+
         public ComponentTranspilationResult(
             ComponentModule component,
             IReadOnlyList<WacsCoreModule> coreModules,
-            byte[]? embeddedWit)
+            byte[]? embeddedWit,
+            CtPackage? decodedWit = null)
         {
             Component = component;
             CoreModules = coreModules;
             EmbeddedWit = embeddedWit;
+            DecodedWit = decodedWit;
         }
     }
 
@@ -104,7 +121,14 @@ namespace Wacs.Transpiler.AOT.Component
                 }
             }
 
-            return new ComponentTranspilationResult(component, cores, wit);
+            CtPackage? decoded = null;
+            if (wit != null)
+            {
+                try { decoded = BinaryWitDecoder.DecodeComponentType(wit); }
+                catch (System.FormatException) { decoded = null; }
+            }
+
+            return new ComponentTranspilationResult(component, cores, wit, decoded);
         }
 
         /// <summary>Convenience overload — read from a path.</summary>
@@ -131,7 +155,8 @@ namespace Wacs.Transpiler.AOT.Component
         public static TranspilationResult TranspileSingleModule(
             Stream componentStream,
             string assemblyNamespace = "Wacs.Transpiled.Component",
-            string moduleName = "ComponentModule")
+            string moduleName = "ComponentModule",
+            byte[]? componentTypeOverride = null)
         {
             var parsed = Parse(componentStream);
             if (parsed.CoreModules.Count != 1)
@@ -140,6 +165,19 @@ namespace Wacs.Transpiler.AOT.Component
                     + "module; got " + parsed.CoreModules.Count
                     + ". Use the lower-level Parse + per-module transpile for "
                     + "multi-module components.");
+
+            // The override path lets callers feed in a separately-
+            // sourced `component-type:*` blob — useful for
+            // `wasm-tools component new` output (which strips the
+            // section) when the WIT-shape names are needed for the
+            // emitted C# surface.
+            var witBytes = componentTypeOverride ?? parsed.EmbeddedWit;
+            CtPackage? decodedWit = parsed.DecodedWit;
+            if (componentTypeOverride != null)
+            {
+                try { decodedWit = BinaryWitDecoder.DecodeComponentType(componentTypeOverride); }
+                catch (System.FormatException) { decodedWit = null; }
+            }
 
             var runtime = new WasmRuntime();
             var instance = runtime.InstantiateModule(parsed.CoreModules[0]);
@@ -150,20 +188,20 @@ namespace Wacs.Transpiler.AOT.Component
             // bindgen direction can recover the WIT from the
             // transpiled `.dll` without the original `.component.wasm`.
             ComponentAssemblyEmit.EmitComponentMetadataClass(
-                result.ModuleBuilder, assemblyNamespace, parsed.EmbeddedWit);
+                result.ModuleBuilder, assemblyNamespace, witBytes);
 
             // Generate the component-level public surface — one
             // static method per exported function, typed per the
             // component's own type section (u32 vs int32 etc.).
-            // For primitive signatures this is straight
-            // delegation to the core IExports; aggregates wait
-            // on the canonical-ABI IL emitter.
+            // When DecodedWit is available, named types
+            // (enum / record / variant / resource) emit with their
+            // wit-bindgen-csharp-shaped C# names.
             if (result.ExportsInterface != null && result.ModuleClass != null)
             {
                 ComponentExportsEmit.EmitComponentExportsClass(
                     result.ModuleBuilder, assemblyNamespace,
                     parsed.Component, result.ExportsInterface,
-                    result.ModuleClass);
+                    result.ModuleClass, decodedWit);
             }
 
             return result;

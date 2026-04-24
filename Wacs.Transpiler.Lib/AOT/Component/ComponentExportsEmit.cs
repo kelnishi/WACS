@@ -12,6 +12,7 @@ using System.Reflection.Emit;
 using Wacs.ComponentModel.CanonicalABI;
 using Wacs.ComponentModel.Runtime;
 using Wacs.ComponentModel.Runtime.Parser;
+using Wacs.ComponentModel.Types;
 
 namespace Wacs.Transpiler.AOT.Component
 {
@@ -50,7 +51,8 @@ namespace Wacs.Transpiler.AOT.Component
             string @namespace,
             ComponentModule component,
             Type coreIExports,
-            Type coreModuleClass)
+            Type coreModuleClass,
+            CtPackage? decodedWit = null)
         {
             var emittable = FindEmittableExports(component);
             if (emittable.Count == 0) return null;
@@ -79,13 +81,88 @@ namespace Wacs.Transpiler.AOT.Component
             cctorIl.Emit(OpCodes.Stsfld, instanceField);
             cctorIl.Emit(OpCodes.Ret);
 
+            // Pre-emit named C# types from the decoded WIT so
+            // `ComponentExports` methods can reference them as
+            // return / param types. Cache by WIT type name.
+            var emittedTypes = new Dictionary<string, Type>();
+            if (decodedWit != null)
+                EmitNamedTypes(module, @namespace, decodedWit, emittedTypes);
+
             foreach (var slot in emittable)
             {
                 EmitExportMethod(typeBuilder, instanceField,
-                                 coreIExports, slot, component.Types);
+                                 coreIExports, slot, component.Types,
+                                 emittedTypes, decodedWit);
             }
 
             return typeBuilder.CreateType();
+        }
+
+        /// <summary>Pre-emit C# types for every named WIT type
+        /// (enum / variant / record / flags / resource) declared
+        /// in the world. Each lands in the assembly under
+        /// <paramref name="namespace"/>; the cache maps WIT-level
+        /// names to the emitted <see cref="Type"/> so export
+        /// methods can use them as return / param types.</summary>
+        private static void EmitNamedTypes(
+            ModuleBuilder module, string @namespace,
+            CtPackage pkg, Dictionary<string, Type> emittedTypes)
+        {
+            // Worlds + interfaces both contribute named types.
+            // Phase 1b focuses on worlds; cross-interface types
+            // (declared in `interface foo { … }` and used by a
+            // world) land when interface emission catches up.
+            foreach (var world in pkg.Worlds)
+                foreach (var named in world.Types)
+                    EmitNamedType(module, @namespace, named, emittedTypes);
+            foreach (var iface in pkg.Interfaces)
+                foreach (var named in iface.Types)
+                    EmitNamedType(module, @namespace, named, emittedTypes);
+        }
+
+        private static void EmitNamedType(
+            ModuleBuilder module, string @namespace,
+            CtNamedType named, Dictionary<string, Type> emittedTypes)
+        {
+            if (emittedTypes.ContainsKey(named.Name)) return;
+            switch (named.Type)
+            {
+                case CtEnumType en:
+                    emittedTypes[named.Name] =
+                        EmitEnumType(module, @namespace, en);
+                    return;
+                // Records, variants, flags, resources land in
+                // follow-ups — each needs its own IL emit
+                // strategy (class with fields, class with
+                // discriminant, [Flags] enum, IDisposable wrapper).
+            }
+        }
+
+        /// <summary>Emit a public C# enum type for a WIT enum
+        /// declaration. Backing storage is u8/u16/u32 per the
+        /// canonical-ABI discriminant-size rule (≤256 cases →
+        /// byte, ≤65536 → ushort, else uint).</summary>
+        private static Type EmitEnumType(
+            ModuleBuilder module, string @namespace, CtEnumType en)
+        {
+            var underlying = en.Cases.Count <= 256 ? typeof(byte)
+                : en.Cases.Count <= 65536 ? typeof(ushort)
+                : typeof(uint);
+            var typeName = @namespace + "." + PascalCase(en.Name);
+            var enumBuilder = module.DefineEnum(typeName,
+                TypeAttributes.Public, underlying);
+            for (int i = 0; i < en.Cases.Count; i++)
+            {
+                // Use the exact case's underlying integer literal
+                // so reflection-driven callers can round-trip the
+                // canonical-ABI discriminant byte to the named
+                // case directly.
+                object value = underlying == typeof(byte) ? (object)(byte)i
+                    : underlying == typeof(ushort) ? (object)(ushort)i
+                    : (object)(uint)i;
+                enumBuilder.DefineLiteral(PascalCase(en.Cases[i]), value);
+            }
+            return enumBuilder.CreateType()!;
         }
 
         /// <summary>
@@ -162,6 +239,7 @@ namespace Wacs.Transpiler.AOT.Component
             if (TryResolveOptionOfString(r, types)) return true;
             if (TryResolveResult(r, types, out _, out _)) return true;
             if (TryResolveTupleOfPrims(r, types, out _)) return true;
+            if (TryResolveEnumReturn(r, types, out _)) return true;
             return false;
         }
 
@@ -216,6 +294,22 @@ namespace Wacs.Transpiler.AOT.Component
             if (!opt.Inner.IsPrimitive) return false;
             if (opt.Inner.Prim == ComponentPrim.String) return false;
             innerPrim = opt.Inner.Prim;
+            return true;
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a type-ref
+        /// to a structural enum type. Returns the case count via
+        /// <paramref name="caseCount"/> so the caller can pick the
+        /// right Conv.* opcode (byte / ushort / uint underlying).</summary>
+        private static bool TryResolveEnumReturn(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            out int caseCount)
+        {
+            caseCount = 0;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentEnumType en)) return false;
+            caseCount = en.Cases.Count;
             return true;
         }
 
@@ -336,7 +430,9 @@ namespace Wacs.Transpiler.AOT.Component
             FieldBuilder instanceField,
             Type coreIExports,
             EmittableExport export,
-            IReadOnlyList<DefTypeEntry> types)
+            IReadOnlyList<DefTypeEntry> types,
+            Dictionary<string, Type> emittedTypes,
+            CtPackage? decodedWit)
         {
             var coreMethod = FindCoreMethod(coreIExports, export.Name);
             if (coreMethod == null) return;
@@ -371,11 +467,13 @@ namespace Wacs.Transpiler.AOT.Component
             bool isOptionStringReturn = false;
             bool isResultReturn = false;
             bool isTupleReturn = false;
+            bool isEnumReturn = false;
             ComponentPrim listElemPrim = default;
             ComponentPrim optionInnerPrim = default;
             ResultSide resultOkSide = ResultSide.Absent;
             ResultSide resultErrSide = ResultSide.Absent;
             ComponentPrim[] tupleElemPrims = Array.Empty<ComponentPrim>();
+            int enumCaseCount = 0;
             Type returnType;
             if (export.Signature.Results.Count == 0)
             {
@@ -438,6 +536,18 @@ namespace Wacs.Transpiler.AOT.Component
                     resultOkSide.ToCsType(),
                     resultErrSide.ToCsType());
             }
+            else if (TryResolveEnumReturn(
+                export.Signature.Results[0], types, out enumCaseCount))
+            {
+                isEnumReturn = true;
+                // Look up the WIT-decoded enum name to bind a
+                // pre-emitted C# enum type. Without the decoder,
+                // fall back to the underlying integer (byte/
+                // ushort/uint per case count).
+                returnType = ResolveEnumReturnType(
+                    decodedWit, emittedTypes, export.Name,
+                    enumCaseCount);
+            }
             else
             {
                 return;   // shouldn't reach — IsEmittable rejects
@@ -488,6 +598,11 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 EmitStringReturnBody(il, instanceField, coreMethod, export,
                                      types);
+            }
+            else if (isEnumReturn)
+            {
+                EmitEnumReturnBody(il, instanceField, coreMethod, export,
+                                   types, returnType, enumCaseCount);
             }
             else
             {
@@ -1291,6 +1406,65 @@ namespace Wacs.Transpiler.AOT.Component
         /// 8, … . Wide prims (8-byte) + mixed-width alignment
         /// are incremental follow-ups.
         /// </summary>
+        /// <summary>
+        /// IL body for an enum return. Core returns the enum's
+        /// integer discriminant on the stack as i32. Cast to the
+        /// enum's underlying width (byte/ushort) when narrower
+        /// than i32, then return — the CLR treats an enum value
+        /// and its underlying integer as bit-identical on the
+        /// evaluation stack, so no explicit "boxed enum" step is
+        /// needed.
+        /// </summary>
+        private static void EmitEnumReturnBody(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types, Type returnType,
+            int caseCount)
+        {
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
+            // Narrow the i32 to the enum's underlying width when
+            // smaller. ≤256 cases → byte → Conv_U1; ≤65536 →
+            // ushort → Conv_U2; else uint → no conversion needed.
+            if (caseCount <= 256)
+                il.Emit(OpCodes.Conv_U1);
+            else if (caseCount <= 65536)
+                il.Emit(OpCodes.Conv_U2);
+            il.Emit(OpCodes.Ret);
+            _ = returnType;   // type-check happens at the method signature
+        }
+
+        /// <summary>
+        /// Resolve the C# return type for an enum export. When
+        /// <paramref name="decodedWit"/> is available and names the
+        /// export's result type, look up the pre-emitted enum Type
+        /// in <paramref name="emittedTypes"/>. Otherwise fall back
+        /// to the underlying integer matching the discriminant
+        /// width — sufficient for callers that don't need the
+        /// named enum surface.
+        /// </summary>
+        private static Type ResolveEnumReturnType(
+            CtPackage? decodedWit, Dictionary<string, Type> emittedTypes,
+            string exportName, int caseCount)
+        {
+            if (decodedWit != null)
+            {
+                foreach (var world in decodedWit.Worlds)
+                {
+                    foreach (var ex in world.Exports)
+                    {
+                        if (ex.Name != exportName) continue;
+                        if (ex.Spec is CtExternFunc fn
+                            && fn.Function.Result is CtTypeRef tref
+                            && emittedTypes.TryGetValue(tref.Name, out var t))
+                            return t;
+                    }
+                }
+            }
+            return caseCount <= 256 ? typeof(byte)
+                : caseCount <= 65536 ? typeof(ushort)
+                : typeof(uint);
+        }
+
         private static void EmitTupleReturnBody(
             ILGenerator il, FieldBuilder instanceField,
             MethodInfo coreMethod, EmittableExport export,
