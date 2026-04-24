@@ -1179,7 +1179,7 @@ world w { export def; }";
                 if (File.ReadAllText(refPath) == s.Content)
                     matching++;
             }
-            Assert.True(matching >= 7,
+            Assert.True(matching >= 10,
                 $"Byte-for-byte-matching file count regressed to {matching}");
         }
 
