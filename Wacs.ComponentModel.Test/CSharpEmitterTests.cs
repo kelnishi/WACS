@@ -1059,6 +1059,59 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- borrow<R> / own<R> resource-ref params ---------------------
+
+        private static string FindInteropBorrowResourceFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-borrow-resource");
+        }
+
+        /// <summary>
+        /// Resource-handle parameters on both a free function
+        /// (<c>scan(borrow&lt;alpha&gt;, borrow&lt;alpha&gt;)</c>)
+        /// and a resource method
+        /// (<c>alpha.poke(borrow&lt;alpha&gt;)</c>). Exercises the
+        /// counter-indexed handle extraction:
+        /// <code>
+        /// var handle = a.Handle;        // slot 0 — free fn's first
+        /// var handle0 = b.Handle;       // slot 1
+        /// </code>
+        /// and the resource-method equivalent where slot 0 is taken
+        /// by <c>this.Handle</c> so the first param lands at
+        /// <c>handle0</c>. Byte-for-byte match against wit-bindgen
+        /// 0.30.0.
+        /// </summary>
+        [Fact]
+        public void InteropEmit_borrow_resource_params_matches_reference()
+        {
+            var fixtureDir = FindInteropBorrowResourceFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "bor2.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            WitResolver.Resolve(pkgs);
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            // Interop file — exercises free-function handle extraction.
+            var interopContent = InteropEmit.EmitImportInteropContent(iface, "bor2-world");
+            var interopExpected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "Bor2WorldWorld.wit.imports.local.bor2.EnvInterop.cs"));
+            Assert.Equal(interopExpected, interopContent);
+
+            // Interface file — exercises resource-method handle
+            // extraction (slot 1 start) and always-qualify for
+            // same-interface resource refs in method signatures.
+            var ifaceFile = CSharpEmitter.EmitImportInterfaceFile(iface, "bor2-world");
+            var ifaceExpected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "Bor2WorldWorld.wit.imports.local.bor2.IEnv.cs"));
+            Assert.Equal(ifaceExpected, ifaceFile.Content);
+        }
+
         // ---- result<list<prim>, variant> returns ------------------------
 
         private static string FindInteropResultListFixtureDir()
