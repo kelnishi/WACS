@@ -276,9 +276,9 @@ using System.Diagnostics.CodeAnalysis;
                     // Per-interface file (I{Name}.cs) — emit only if
                     // the ref has been resolved AND the target
                     // interface is within our Phase 1a.2 emission
-                    // scope (no types, only free functions using
-                    // types we can emit). Otherwise skip the file and
-                    // proceed to the Interop shell.
+                    // scope (no type defs, only free functions with
+                    // primitive/aggregate signatures). Otherwise
+                    // skip the file and proceed to the Interop shell.
                     if (iref.Target != null && isExport
                         && IsInterfaceEmitable(iref.Target))
                     {
@@ -301,37 +301,6 @@ using System.Diagnostics.CodeAnalysis;
             }
         }
 
-        /// <summary>
-        /// Phase 1a.2 emission gate: is this interface simple enough
-        /// for our current emitter to produce bit-identical output?
-        /// True iff the interface has no nested types (no records,
-        /// variants, enums, flags, resources — those all need their
-        /// own emitters) and all functions only use types the
-        /// primitive <see cref="TypeRefEmit"/> can handle.
-        /// </summary>
-        private static bool IsInterfaceEmitable(CtInterfaceType iface)
-        {
-            if (iface.Types.Count > 0) return false;
-            foreach (var fn in iface.Functions)
-            {
-                if (fn.Type.NamedResults != null) return false;
-                foreach (var p in fn.Type.Params)
-                    if (!IsTypeRefEmitable(p.Type)) return false;
-                if (fn.Type.Result != null && !IsReturnTypeEmitable(fn.Type.Result))
-                    return false;
-            }
-            return true;
-        }
-
-        private static bool IsTypeRefEmitable(CtValType t) => t is CtPrimType;
-
-        private static bool IsReturnTypeEmitable(CtValType t)
-        {
-            if (t is CtPrimType) return true;
-            // result<_,_> is elided to void at the interface level.
-            if (t is CtResultType r && r.Ok == null && r.Err == null) return true;
-            return false;
-        }
 
         // ---- Empty Interop file ---------------------------------------------
 
@@ -391,6 +360,61 @@ using System.Diagnostics.CodeAnalysis;
                 sb.Append(v);
             }
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Phase 1a.2 emission gate: is this interface simple enough
+        /// for our current emitter to produce bit-identical output?
+        /// True iff the interface has no nested type definitions
+        /// (records / variants / enums / flags / resources — those
+        /// need their own emitters) AND all function signatures use
+        /// types our <see cref="TypeRefEmit"/> can handle
+        /// (primitives + structural aggregates: list / option /
+        /// result / tuple).
+        ///
+        /// <para>As type / resource emitters land in follow-ups, this
+        /// gate relaxes until it always returns true for resolved
+        /// interfaces.</para>
+        /// </summary>
+        private static bool IsInterfaceEmitable(CtInterfaceType iface)
+        {
+            if (iface.Types.Count > 0) return false;
+            foreach (var fn in iface.Functions)
+            {
+                if (fn.Type.NamedResults != null) return false;
+                foreach (var p in fn.Type.Params)
+                    if (!IsTypeEmitable(p.Type)) return false;
+                if (fn.Type.Result != null && !IsTypeEmitable(fn.Type.Result))
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// True for Phase 1a.2-supported value types: primitives,
+        /// structural aggregates over supported types, and
+        /// <c>result</c> with supported sides. Named type refs,
+        /// own/borrow, and user-defined aggregates (records,
+        /// variants, enums, flags) are still out of scope.
+        /// </summary>
+        private static bool IsTypeEmitable(CtValType t)
+        {
+            switch (t)
+            {
+                case CtPrimType: return true;
+                case CtListType l: return IsTypeEmitable(l.Element);
+                case CtOptionType o: return IsTypeEmitable(o.Inner);
+                case CtResultType r:
+                    return (r.Ok == null || IsTypeEmitable(r.Ok))
+                        && (r.Err == null || IsTypeEmitable(r.Err));
+                case CtTupleType tup:
+                {
+                    foreach (var el in tup.Elements)
+                        if (!IsTypeEmitable(el)) return false;
+                    return true;
+                }
+                default: return false;
+            }
         }
 
         // ---- Per-interface file emission ------------------------------------
