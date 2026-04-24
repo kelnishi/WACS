@@ -101,6 +101,12 @@ namespace Wacs.ComponentModel.CSharpEmit
             var retType = FunctionEmit.EmitReturnType(fn.Type);
             var isVoid = retType == "void";
 
+            // Prelude: for each string-typed param, pin a UTF-8
+            // GCHandle via InteropString.FromString and bind its
+            // (ptr, len) into `{paramName}Ptr` / `{paramName}Len`.
+            // Emitted before the stub call.
+            EmitWrapperPrelude(sb, fn.Type);
+
             // Stub call — note the double-space after `=` in
             // "var result =  {call}" in the wit-bindgen reference.
             sb.Append("            ");
@@ -123,24 +129,60 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append("\n");
         }
 
+        /// <summary>
+        /// Emit the wrapper body's "lower prelude" — per-param
+        /// setup that precedes the stub call. Current coverage:
+        /// <c>string</c> params, which pin a UTF-8 GCHandle and
+        /// bind <c>{paramName}Ptr</c> + <c>{paramName}Len</c>
+        /// locals. Other aggregate lowerings (list, option,
+        /// result, tuple) land as follow-ups here.
+        ///
+        /// <para><b>Local-variable naming diverges from
+        /// wit-bindgen-csharp.</b> Upstream uses a local-allocator
+        /// with inconsistent suffix rules (<c>result</c> /
+        /// <c>result1</c> vs. <c>interopString</c> /
+        /// <c>interopString0</c>); we use simple
+        /// <c>{paramName}Ptr</c> / <c>{paramName}Len</c> pairs.
+        /// The public API / DllImport signatures match byte-for-
+        /// byte; only wrapper-body locals differ, so the roundtrip
+        /// invariant with <c>componentize-dotnet</c> is preserved
+        /// (it never inspects wrapper locals).</para>
+        /// </summary>
+        private static void EmitWrapperPrelude(StringBuilder sb,
+                                               CtFunctionType sig)
+        {
+            foreach (var p in sig.Params)
+            {
+                if (p.Type is CtPrimType prim && prim.Kind == CtPrim.String)
+                {
+                    var argName = NameConventions.ToCamelCase(p.Name);
+                    sb.Append("            IntPtr ").Append(argName).Append("Ptr = ");
+                    sb.Append("InteropString.FromString(").Append(argName);
+                    sb.Append(", out int ").Append(argName).Append("Len);\n");
+                }
+            }
+        }
+
         // ---- Stub type mapping (core wasm ABI) -----------------------------
 
         /// <summary>
-        /// Stub-side core-wasm-ABI type for a parameter. i32 for
-        /// bool/all 8/16/32-bit ints/char, i64 for 64-bit ints,
-        /// f32/f64 as-is.
+        /// Stub-side core-wasm-ABI type(s) for one wrapper param.
+        /// Most primitives lower to a single i32/i64/f32/f64. Strings
+        /// (and, in follow-ups, lists) lower to two stub params:
+        /// <c>nint ptr, int len</c>.
         /// </summary>
-        private static string StubTypeOf(CtValType t)
+        private static string[] StubTypesFor(CtValType t)
         {
             if (t is CtPrimType p)
             {
                 return p.Kind switch
                 {
-                    CtPrim.F32 => "float",
-                    CtPrim.F64 => "double",
-                    CtPrim.S64 => "long",
-                    CtPrim.U64 => "long",
-                    _ => "int",
+                    CtPrim.String => new[] { "nint", "int" },
+                    CtPrim.F32 => new[] { "float" },
+                    CtPrim.F64 => new[] { "double" },
+                    CtPrim.S64 => new[] { "long" },
+                    CtPrim.U64 => new[] { "long" },
+                    _ => new[] { "int" },
                 };
             }
             throw new NotImplementedException(
@@ -152,16 +194,27 @@ namespace Wacs.ComponentModel.CSharpEmit
         {
             if (sig.HasNoResult) return "void";
             if (sig.Result == null) return "void";
-            return StubTypeOf(sig.Result);
+            // Phase 1a.2: string / list / option / result / tuple
+            // returns require a return-area pointer param on the
+            // stub — not yet implemented; gate keeps them out.
+            var types = StubTypesFor(sig.Result);
+            if (types.Length != 1)
+                throw new NotImplementedException(
+                    "Multi-word return lowering is a follow-up.");
+            return types[0];
         }
 
         private static void EmitStubParams(StringBuilder sb, CtFunctionType sig)
         {
-            for (int i = 0; i < sig.Params.Count; i++)
+            int stubIdx = 0;
+            foreach (var p in sig.Params)
             {
-                if (i > 0) sb.Append(", ");
-                sb.Append(StubTypeOf(sig.Params[i].Type));
-                sb.Append(" p").Append(i);  // positional names p0, p1, ...
+                foreach (var stubType in StubTypesFor(p.Type))
+                {
+                    if (stubIdx > 0) sb.Append(", ");
+                    sb.Append(stubType).Append(" p").Append(stubIdx);
+                    stubIdx++;
+                }
             }
         }
 
@@ -178,11 +231,23 @@ namespace Wacs.ComponentModel.CSharpEmit
 
         private static void EmitLoweredArgs(StringBuilder sb, CtFunctionType sig)
         {
-            for (int i = 0; i < sig.Params.Count; i++)
+            bool first = true;
+            foreach (var p in sig.Params)
             {
-                if (i > 0) sb.Append(", ");
-                var argName = NameConventions.ToCamelCase(sig.Params[i].Name);
-                sb.Append(EmitLower(sig.Params[i].Type, argName));
+                var argName = NameConventions.ToCamelCase(p.Name);
+                if (p.Type is CtPrimType prim && prim.Kind == CtPrim.String)
+                {
+                    // String lowered by the prelude to (ptr, len).
+                    if (!first) sb.Append(", ");
+                    sb.Append(argName).Append("Ptr.ToInt32(), ").Append(argName).Append("Len");
+                    first = false;
+                }
+                else
+                {
+                    if (!first) sb.Append(", ");
+                    sb.Append(EmitLower(p.Type, argName));
+                    first = false;
+                }
             }
         }
 

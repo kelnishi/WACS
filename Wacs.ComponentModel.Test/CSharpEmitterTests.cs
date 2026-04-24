@@ -724,6 +724,48 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, emitted.Content);
         }
 
+        // ---- Interop: string-param marshaling -----------------------------
+
+        private static string FindInteropStringParamFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-string-param");
+        }
+
+        /// <summary>
+        /// String param marshaling — diverges from wit-bindgen's
+        /// local-variable naming by design. Public API + DllImport
+        /// stub signatures match; wrapper body uses our clean
+        /// <c>{paramName}Ptr</c> / <c>{paramName}Len</c> locals
+        /// instead of wit-bindgen's <c>result</c> /
+        /// <c>interopString</c> / <c>lengthresult</c> scheme.
+        ///
+        /// <para>Expected output is hand-written in the
+        /// <c>expected/</c> directory (distinct from the
+        /// wit-bindgen-pinned <c>reference/</c> used by primitive
+        /// fixtures). Diff against the expected form locks down
+        /// our emitter's shape.</para>
+        /// </summary>
+        [Fact]
+        public void InteropEmit_string_params_marshals_via_InteropString()
+        {
+            var fixtureDir = FindInteropStringParamFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "sp.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "sp-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "expected",
+                "SpWorldWorld.wit.imports.local.sp.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Interop: primitive-only import Interop file ------------------
 
         private static string FindInteropPrimitivesFixtureDir()

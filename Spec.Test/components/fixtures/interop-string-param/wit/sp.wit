@@ -1,0 +1,6 @@
+package local:sp;
+interface env {
+    log: func(msg: string);
+    write-to: func(path: string, data: u32);
+}
+world sp-world { import env; }
