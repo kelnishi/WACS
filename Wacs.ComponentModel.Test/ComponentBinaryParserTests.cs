@@ -124,6 +124,23 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Exports_decode_component_level_greet_export()
+        {
+            // tiny-component's export section declares one
+            // entry: `greet` pointing at component-func index 0.
+            // The lift through canon wires it back to the core
+            // module's greet function.
+            var path = FindTinyComponentPath();
+            using var stream = File.OpenRead(path);
+            var component = ComponentBinaryParser.Parse(stream);
+
+            var export = Assert.Single(component.Exports);
+            Assert.Equal("greet", export.Name);
+            Assert.Equal(ComponentSort.Func, export.Sort);
+            Assert.Equal(0u, export.Index);
+        }
+
+        [Fact]
         public void Parse_rejects_truncated_header()
         {
             // Valid magic + version but layer=0 → core module,
