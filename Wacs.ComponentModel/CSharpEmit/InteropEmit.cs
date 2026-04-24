@@ -246,6 +246,32 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append("                }\n");
                 sb.Append("                return lifted;\n");
             }
+            else if (IsOptionOfString(sig.Result!))
+            {
+                // option<string> return — disc at offset 0,
+                // payload (ptr, len) at offsets 4 and 8. Same
+                // switch shape as option<prim>; Some arm lifts via
+                // Encoding.UTF8.GetString(ptr, len) at the matching
+                // offsets.
+                sb.Append("\n");
+                sb.Append("                string? lifted;\n");
+                sb.Append("\n");
+                sb.Append("                switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {\n");
+                sb.Append("                    case 0: {\n");
+                sb.Append("                        lifted = null;\n");
+                sb.Append("                        break;\n");
+                sb.Append("                    }\n");
+                sb.Append("\n");
+                sb.Append("                    case 1: {\n");
+                sb.Append("\n");
+                sb.Append("                        lifted = Encoding.UTF8.GetString((byte*)BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4)), BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4)));\n");
+                sb.Append("                        break;\n");
+                sb.Append("                    }\n");
+                sb.Append("\n");
+                sb.Append("                    default: throw new ArgumentException(\"invalid discriminant: \" + (new Span<byte>((void*)(ptr + 0), 1)[0]));\n");
+                sb.Append("                }\n");
+                sb.Append("                return lifted;\n");
+            }
             else
             {
                 sb.Append("                return ");
@@ -431,6 +457,7 @@ namespace Wacs.ComponentModel.CSharpEmit
                     return true;
                 if (IsListOfPrim(p.Type)) return true;
                 if (IsOptionOfSmallPrim(p.Type)) return true;
+                if (IsOptionOfString(p.Type)) return true;
             }
             return false;
         }
@@ -504,6 +531,28 @@ namespace Wacs.ComponentModel.CSharpEmit
                     sb.Append(";\n");
                     sb.Append("            }\n");
                 }
+                else if (IsOptionOfString(p.Type))
+                {
+                    // option<string> lowers to (disc, ptr, len).
+                    // Three locals — per-arg named Tag / Ptr / Len
+                    // — populated from a Some/None branch. Some
+                    // path pins the UTF-8 GCHandle via
+                    // InteropString.FromString; None zeros all
+                    // three slots.
+                    sb.Append("            int ").Append(argName).Append("Tag;\n");
+                    sb.Append("            nint ").Append(argName).Append("Ptr;\n");
+                    sb.Append("            int ").Append(argName).Append("Len;\n");
+                    sb.Append("            if (").Append(argName).Append(" != null) {\n");
+                    sb.Append("                ").Append(argName).Append("Tag = 1;\n");
+                    sb.Append("                ").Append(argName).Append("Ptr = ");
+                    sb.Append("InteropString.FromString(").Append(argName);
+                    sb.Append(", out ").Append(argName).Append("Len).ToInt32();\n");
+                    sb.Append("            } else {\n");
+                    sb.Append("                ").Append(argName).Append("Tag = 0;\n");
+                    sb.Append("                ").Append(argName).Append("Ptr = 0;\n");
+                    sb.Append("                ").Append(argName).Append("Len = 0;\n");
+                    sb.Append("            }\n");
+                }
             }
         }
 
@@ -570,6 +619,13 @@ namespace Wacs.ComponentModel.CSharpEmit
                 var innerStub = StubTypesFor(inner);
                 return new[] { "int", innerStub[0] };
             }
+            if (IsOptionOfString(t))
+            {
+                // option<string> lowers to (disc, ptr, len) —
+                // concat of i32 discriminant + string's flat
+                // representation.
+                return new[] { "int", "nint", "int" };
+            }
             if (IsTupleOfSmallPrims(t))
             {
                 // tuple<P1, P2, …> flattens to the concatenation of
@@ -622,6 +678,17 @@ namespace Wacs.ComponentModel.CSharpEmit
             t is CtOptionType o
             && o.Inner is CtPrimType op
             && IsSmallPrim(op.Kind);
+
+        /// <summary>
+        /// True when <paramref name="t"/> is <c>option&lt;string&gt;</c>.
+        /// Lowering adds a 3-slot stub signature (disc + ptr + len) +
+        /// 3-uint return area. Param prelude allocates the pinned
+        /// UTF-8 handle inside the Some branch; None branch zeros.
+        /// </summary>
+        internal static bool IsOptionOfString(CtValType t) =>
+            t is CtOptionType o
+            && o.Inner is CtPrimType op
+            && op.Kind == CtPrim.String;
 
         /// <summary>
         /// True when <paramref name="t"/> is <c>result&lt;Ok, Err&gt;</c>
@@ -728,6 +795,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             if (sig.Result is CtPrimType p && p.Kind == CtPrim.String) return true;
             if (IsListOfPrim(sig.Result)) return true;
             if (IsOptionOfSmallPrim(sig.Result)) return true;
+            if (IsOptionOfString(sig.Result)) return true;
             if (IsTupleOfSmallPrims(sig.Result)) return true;
             if (IsResultOfPrimOrNone(sig.Result)) return true;
             return false;
@@ -746,6 +814,8 @@ namespace Wacs.ComponentModel.CSharpEmit
             // option<small-prim>: discriminant word at offset 0,
             // payload word at offset 4 — 2 uints total.
             if (IsOptionOfSmallPrim(sig.Result!)) return 2;
+            // option<string>: disc at offset 0, ptr at 4, len at 8.
+            if (IsOptionOfString(sig.Result!)) return 3;
             // tuple<small-prim, small-prim, …>: one word per element,
             // laid out at offsets 0, 4, 8, … .
             if (IsTupleOfSmallPrims(sig.Result!))
@@ -802,6 +872,14 @@ namespace Wacs.ComponentModel.CSharpEmit
                     // option<prim> lowered by the prelude to
                     // `{arg}Tag, {arg}Val`.
                     sb.Append(argName).Append("Tag, ").Append(argName).Append("Val");
+                }
+                else if (IsOptionOfString(p.Type))
+                {
+                    // option<string> lowered by the prelude to
+                    // `{arg}Tag, {arg}Ptr, {arg}Len`.
+                    sb.Append(argName).Append("Tag, ")
+                      .Append(argName).Append("Ptr, ")
+                      .Append(argName).Append("Len");
                 }
                 else if (IsTupleOfSmallPrims(p.Type))
                 {

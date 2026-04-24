@@ -1,0 +1,6 @@
+package local:os;
+interface env {
+    maybe-name: func() -> option<string>;
+    take-name: func(n: option<string>);
+}
+world os-world { import env; }
