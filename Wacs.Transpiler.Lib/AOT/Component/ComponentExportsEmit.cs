@@ -82,7 +82,7 @@ namespace Wacs.Transpiler.AOT.Component
             foreach (var slot in emittable)
             {
                 EmitExportMethod(typeBuilder, instanceField,
-                                 coreIExports, slot);
+                                 coreIExports, slot, component.Types);
             }
 
             return typeBuilder.CreateType();
@@ -123,7 +123,7 @@ namespace Wacs.Transpiler.AOT.Component
                 if (lift.TypeIdx >= types.Count) continue;
                 if (!(types[(int)lift.TypeIdx] is ComponentFuncType fn))
                     continue;
-                if (!AllPrimitive(fn)) continue;
+                if (!IsEmittable(fn, types)) continue;
                 list.Add(new EmittableExport(export.Name, fn,
                                              lift.CoreFuncIdx));
             }
@@ -132,20 +132,38 @@ namespace Wacs.Transpiler.AOT.Component
 
         /// <summary>Gate for whether the emitter can handle this
         /// function type. Primitive params (all kinds) + either a
-        /// primitive return or a single-result string return are
-        /// in scope for v0. Other aggregate returns / aggregate
-        /// params land as further canonical-ABI IL support
-        /// arrives.</summary>
-        private static bool AllPrimitive(ComponentFuncType fn)
+        /// primitive return, a single-result string return, or a
+        /// single-result list&lt;primitive&gt; return are in scope
+        /// for v0. Other aggregate returns / aggregate params
+        /// land as further canonical-ABI IL support arrives.</summary>
+        private static bool IsEmittable(
+            ComponentFuncType fn, IReadOnlyList<DefTypeEntry> types)
         {
             foreach (var p in fn.Params)
                 if (!p.Type.IsPrimitive) return false;
             if (fn.Results.Count == 0) return true;
             if (fn.Results.Count != 1) return false;
             var r = fn.Results[0];
-            if (!r.IsPrimitive) return false;
-            // String return uses the return-area lift path; all
-            // other primitives pass through directly.
+            if (r.IsPrimitive) return true;
+            // Type-table ref — only list<primitive> for now.
+            if (TryResolveListOfPrim(r, types, out _)) return true;
+            return false;
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a type-ref
+        /// to a list<primitive> in <paramref name="types"/>;
+        /// when so, <paramref name="elemPrim"/> captures the
+        /// primitive element kind.</summary>
+        private static bool TryResolveListOfPrim(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            out ComponentPrim elemPrim)
+        {
+            elemPrim = default;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentListType list)) return false;
+            if (!list.Element.IsPrimitive) return false;
+            elemPrim = list.Element.Prim;
             return true;
         }
 
@@ -157,7 +175,8 @@ namespace Wacs.Transpiler.AOT.Component
             TypeBuilder typeBuilder,
             FieldBuilder instanceField,
             Type coreIExports,
-            EmittableExport export)
+            EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types)
         {
             var coreMethod = FindCoreMethod(coreIExports, export.Name);
             if (coreMethod == null) return;
@@ -166,9 +185,31 @@ namespace Wacs.Transpiler.AOT.Component
             var paramTypes = new Type[export.Signature.Params.Count];
             for (int i = 0; i < paramTypes.Length; i++)
                 paramTypes[i] = PrimToCs(export.Signature.Params[i].Type.Prim);
-            var returnType = export.Signature.Results.Count == 0
-                ? typeof(void)
-                : PrimToCs(export.Signature.Results[0].Prim);
+
+            // Return-type dispatch: void / primitive (inline),
+            // string (StringMarshal chokepoint), list<prim>
+            // (ListMarshal chokepoint via a closed generic).
+            bool isListReturn = false;
+            ComponentPrim listElemPrim = default;
+            Type returnType;
+            if (export.Signature.Results.Count == 0)
+            {
+                returnType = typeof(void);
+            }
+            else if (export.Signature.Results[0].IsPrimitive)
+            {
+                returnType = PrimToCs(export.Signature.Results[0].Prim);
+            }
+            else if (TryResolveListOfPrim(
+                export.Signature.Results[0], types, out listElemPrim))
+            {
+                isListReturn = true;
+                returnType = PrimToCs(listElemPrim).MakeArrayType();
+            }
+            else
+            {
+                return;   // shouldn't reach — IsEmittable rejects
+            }
 
             var methodName = PascalCase(export.Name);
             var method = typeBuilder.DefineMethod(
@@ -180,7 +221,12 @@ namespace Wacs.Transpiler.AOT.Component
                                        CamelCase(export.Signature.Params[i].Name));
 
             var il = method.GetILGenerator();
-            if (IsStringReturn(export.Signature))
+            if (isListReturn)
+            {
+                EmitListReturnBody(il, instanceField, coreMethod, export,
+                                   listElemPrim);
+            }
+            else if (IsStringReturn(export.Signature))
             {
                 EmitStringReturnBody(il, instanceField, coreMethod, export);
             }
@@ -291,6 +337,65 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Add);                           //             P+4
             il.EmitCall(OpCodes.Call, bitCToInt32!, null);  // → strLen
             il.EmitCall(OpCodes.Call, liftMethod!, null);   // → string
+            il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// IL body for a <c>() -&gt; list&lt;prim&gt;</c> export.
+        /// Structurally identical to the string-return path: core
+        /// returns the retArea pointer P, then (ptr, count) live
+        /// at memory[P..P+8]. The element type is a primitive; we
+        /// resolve <see cref="ListMarshal.LiftPrim{T}"/> as a
+        /// closed generic and call it with (memory, byteOffset,
+        /// count) to pull a <c>T[]</c> back out of guest memory.
+        /// </summary>
+        private static void EmitListReturnBody(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            ComponentPrim elemPrim)
+        {
+            var memoryProp = instanceField.FieldType.GetProperty("Memory");
+            if (memoryProp == null)
+                throw new InvalidOperationException(
+                    "List-returning component requires the core module to "
+                    + "declare a memory — Module.Memory accessor is missing.");
+
+            var retAreaLocal = il.DeclareLocal(typeof(int));
+            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+
+            // int P = core.bytes();
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, coreMethod, null);
+            il.Emit(OpCodes.Stloc, retAreaLocal);
+
+            // byte[] memory = instance.Memory;
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.Emit(OpCodes.Stloc, memoryLocal);
+
+            // var elemCs = PrimToCs(elemPrim);
+            // return ListMarshal.LiftPrim<elemCs>(memory, dataPtr, count)
+            //   where dataPtr = BitConverter.ToInt32(memory, P)
+            //         count   = BitConverter.ToInt32(memory, P + 4)
+            var elemType = PrimToCs(elemPrim);
+            var bitCToInt32 = typeof(BitConverter).GetMethod(
+                "ToInt32", new[] { typeof(byte[]), typeof(int) });
+            var liftOpen = typeof(ListMarshal).GetMethod(
+                nameof(ListMarshal.LiftPrim),
+                1,
+                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+            var liftClosed = liftOpen.MakeGenericMethod(elemType);
+
+            il.Emit(OpCodes.Ldloc, memoryLocal);            // source
+            il.Emit(OpCodes.Ldloc, memoryLocal);            // for BitConv 1
+            il.Emit(OpCodes.Ldloc, retAreaLocal);           // P
+            il.EmitCall(OpCodes.Call, bitCToInt32!, null);  // dataPtr
+            il.Emit(OpCodes.Ldloc, memoryLocal);            // for BitConv 2
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldc_I4_4);
+            il.Emit(OpCodes.Add);                           // P+4
+            il.EmitCall(OpCodes.Call, bitCToInt32!, null);  // count
+            il.EmitCall(OpCodes.Call, liftClosed, null);    // T[]
             il.Emit(OpCodes.Ret);
         }
 

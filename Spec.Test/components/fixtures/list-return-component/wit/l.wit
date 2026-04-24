@@ -1,0 +1,4 @@
+package local:l;
+world l {
+    export bytes: func() -> list<u8>;
+}

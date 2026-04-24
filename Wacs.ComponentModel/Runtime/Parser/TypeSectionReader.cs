@@ -68,14 +68,26 @@ namespace Wacs.ComponentModel.Runtime.Parser
 
     /// <summary>
     /// A deftype entry — one slot of the component's type table.
-    /// v0 decodes only function types (tag 0x40). Aggregate
-    /// types (record, variant, list, option, result, tuple,
-    /// enum, flags), resource types, and nested component /
-    /// instance types land as opaque <see cref="RawDefType"/>
-    /// entries so downstream consumers can at least see their
-    /// presence without the parser choking.
+    /// v0 decodes function types (tag 0x40) and list types
+    /// (tag 0x70). Other aggregate types (record, variant,
+    /// option, result, tuple, enum, flags), resource types, and
+    /// nested component / instance types land as opaque
+    /// <see cref="RawDefType"/> entries so downstream consumers
+    /// can at least see their presence without the parser
+    /// choking.
     /// </summary>
     public abstract class DefTypeEntry { }
+
+    /// <summary>
+    /// <c>list&lt;T&gt;</c> type (tag 0x70). The element is any
+    /// <see cref="ComponentValType"/> — primitive or a
+    /// reference to another deftype.
+    /// </summary>
+    public sealed class ComponentListType : DefTypeEntry
+    {
+        public ComponentValType Element { get; }
+        public ComponentListType(ComponentValType element) { Element = element; }
+    }
 
     /// <summary>
     /// Function type (tag 0x40): ordered param list (each with a
@@ -140,6 +152,7 @@ namespace Wacs.ComponentModel.Runtime.Parser
     public static class TypeSectionReader
     {
         public const byte FuncTypeTag = 0x40;
+        public const byte ListTypeTag = 0x70;
 
         public static List<DefTypeEntry> Decode(byte[] payload)
         {
@@ -158,13 +171,15 @@ namespace Wacs.ComponentModel.Runtime.Parser
             {
                 case FuncTypeTag:
                     return DecodeFuncType(r);
+                case ListTypeTag:
+                    return new ComponentListType(DecodeValType(r));
                 default:
                     // Unknown structural tag — capture the rest
                     // of the payload so the type slot occupies
-                    // the right index in the table. In practice
-                    // this shouldn't happen for tiny-component;
-                    // aggregate/resource decoders land as they're
-                    // needed for larger components.
+                    // the right index in the table. Other
+                    // aggregate decoders (record, variant, option,
+                    // result, tuple, enum, flags, resource) land
+                    // as their shapes are needed.
                     return new RawDefType(tag, System.Array.Empty<byte>());
             }
         }
