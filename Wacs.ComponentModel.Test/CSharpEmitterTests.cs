@@ -1120,6 +1120,76 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Multi-file WIT package merging ------------------------------
+
+        /// <summary>
+        /// A WIT package can span multiple <c>.wit</c> files: some
+        /// declare the <c>package foo:bar@ver;</c> header, others
+        /// don't (implicit members of the same package). The
+        /// <see cref="WitLoader"/> discovers the dominant package
+        /// name across a directory's files and merges everything
+        /// into one <see cref="CtPackage"/>.
+        /// </summary>
+        [Fact]
+        public void WitLoader_merges_headerless_files_into_named_package()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            var root = dir!.FullName;
+            var witDir = Path.Combine(root, "Spec.Test", "components",
+                                      "wasi-cli", "wit");
+
+            var packages = WitLoader.LoadDirectory(witDir);
+
+            // Direct `wasi:cli/wit/` files include both headerful
+            // (command.wit, imports.wit) and headerless (run.wit,
+            // environment.wit, exit.wit, stdio.wit, terminal.wit).
+            // All should merge into a single wasi:cli package with
+            // every interface visible.
+            var cli = Assert.Single(packages);
+            Assert.Equal("wasi:cli@0.2.3", cli.Name.ToString());
+            Assert.Contains(cli.Interfaces, i => i.Name == "run");
+            Assert.Contains(cli.Interfaces, i => i.Name == "environment");
+            Assert.Contains(cli.Interfaces, i => i.Name == "stdin");
+            Assert.Contains(cli.Interfaces, i => i.Name == "terminal-input");
+        }
+
+        /// <summary>
+        /// <see cref="WitLoader.LoadDirectoryTree"/> descends into
+        /// <c>deps/</c> subdirectories, each contributing its own
+        /// independently-named package to the merged result.
+        /// Exercised against the full WASI CLI tree.
+        /// </summary>
+        [Fact]
+        public void WitLoader_loads_full_wasi_cli_tree_with_deps()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            var root = dir!.FullName;
+            var witDir = Path.Combine(root, "Spec.Test", "components",
+                                      "wasi-cli", "wit");
+
+            var packages = WitLoader.LoadDirectoryTree(witDir);
+
+            var names = packages.Select(p => p.Name.ToString()).ToArray();
+            Assert.Contains("wasi:cli@0.2.3", names);
+            Assert.Contains("wasi:io@0.2.3", names);
+            Assert.Contains("wasi:clocks@0.2.3", names);
+            Assert.Contains("wasi:filesystem@0.2.3", names);
+            Assert.Contains("wasi:sockets@0.2.3", names);
+            Assert.Contains("wasi:random@0.2.3", names);
+
+            // wasi:io has streams/error/poll interfaces —
+            // transitively reachable from wasi:io/streams's
+            // type graph.
+            var io = packages.Single(p => p.Name.ToString() == "wasi:io@0.2.3");
+            Assert.Contains(io.Interfaces, i => i.Name == "streams");
+            Assert.Contains(io.Interfaces, i => i.Name == "error");
+            Assert.Contains(io.Interfaces, i => i.Name == "poll");
+        }
+
         // ---- Type aliases ------------------------------------------------
 
         private static string FindTypesAliasFixtureDir()
