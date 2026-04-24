@@ -982,6 +982,47 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Interop: option<string> marshaling --------------------------
+
+        private static string FindInteropOptionStringFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-option-string");
+        }
+
+        /// <summary>
+        /// <c>option&lt;string&gt;</c> param + return. Stub takes
+        /// (disc, ptr, len); return area is 3 uints (disc at 0,
+        /// ptr at 4, len at 8). Param lowering emits
+        /// <c>{arg}Tag</c> / <c>{arg}Ptr</c> / <c>{arg}Len</c>
+        /// locals; the Some branch pins the UTF-8 GCHandle via
+        /// <c>InteropString.FromString</c>. Return lifting switches
+        /// on the discriminant and decodes with
+        /// <c>Encoding.UTF8.GetString</c>. Param-side locals diverge
+        /// from wit-bindgen's <c>lowered</c> / <c>lowered3</c> /
+        /// <c>lowered4</c> shared-counter names (expected file
+        /// rather than reference).
+        /// </summary>
+        [Fact]
+        public void InteropEmit_option_string_matches_expected()
+        {
+            var fixtureDir = FindInteropOptionStringFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "os.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "os-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "expected",
+                "OsWorldWorld.wit.imports.local.os.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Interop: result<prim, prim> marshaling ----------------------
 
         private static string FindInteropResultPrimsFixtureDir()

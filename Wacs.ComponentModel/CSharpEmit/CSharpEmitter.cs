@@ -606,6 +606,7 @@ using System.Diagnostics.CodeAnalysis;
             t is CtPrimType
             || InteropEmit.IsListOfPrim(t)
             || InteropEmit.IsOptionOfSmallPrim(t)
+            || InteropEmit.IsOptionOfString(t)
             || InteropEmit.IsTupleOfSmallPrims(t);
 
         /// <summary>
@@ -622,6 +623,7 @@ using System.Diagnostics.CodeAnalysis;
             if (t is CtPrimType) return true;
             if (InteropEmit.IsListOfPrim(t)) return true;
             if (InteropEmit.IsOptionOfSmallPrim(t)) return true;
+            if (InteropEmit.IsOptionOfString(t)) return true;
             if (InteropEmit.IsTupleOfSmallPrims(t)) return true;
             if (InteropEmit.IsResultOfPrimOrNone(t)) return true;
             if (IsElidedResult(t)) return true;
