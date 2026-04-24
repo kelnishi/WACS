@@ -132,6 +132,21 @@ namespace Wacs.ComponentModel.Runtime.Parser
     }
 
     /// <summary>
+    /// <c>enum { foo, bar, baz }</c> type (tag 0x6D) — a fixed
+    /// set of named cases, no payloads. Stored as a single
+    /// integer of width determined by case count: ≤256 → u8,
+    /// ≤65536 → u16, else u32. Case names are intrinsic to the
+    /// type's structural encoding; the type name itself only
+    /// surfaces via the WIT-side metadata (the embedded
+    /// <c>component-type:*</c> section).
+    /// </summary>
+    public sealed class ComponentEnumType : DefTypeEntry
+    {
+        public IReadOnlyList<string> Cases { get; }
+        public ComponentEnumType(IReadOnlyList<string> cases) { Cases = cases; }
+    }
+
+    /// <summary>
     /// Function type (tag 0x40): ordered param list (each with a
     /// name) + ordered unnamed result list. Matches <c>functype</c>
     /// in the Component Model binary spec.
@@ -198,6 +213,7 @@ namespace Wacs.ComponentModel.Runtime.Parser
         public const byte OptionTypeTag = 0x6B;
         public const byte ResultTypeTag = 0x6A;
         public const byte TupleTypeTag = 0x6F;
+        public const byte EnumTypeTag = 0x6D;
 
         public static List<DefTypeEntry> Decode(byte[] payload)
         {
@@ -224,6 +240,8 @@ namespace Wacs.ComponentModel.Runtime.Parser
                     return DecodeResultType(r);
                 case TupleTypeTag:
                     return DecodeTupleType(r);
+                case EnumTypeTag:
+                    return DecodeEnumType(r);
                 default:
                     // Unknown structural tag — capture the rest
                     // of the payload so the type slot occupies
@@ -290,6 +308,15 @@ namespace Wacs.ComponentModel.Runtime.Parser
             for (uint i = 0; i < n; i++)
                 elements[i] = DecodeValType(r);
             return new ComponentTupleType(elements);
+        }
+
+        private static ComponentEnumType DecodeEnumType(ComponentBinaryReader r)
+        {
+            var n = r.ReadVarU32();
+            var labels = new string[n];
+            for (uint i = 0; i < n; i++)
+                labels[i] = r.ReadName();
+            return new ComponentEnumType(labels);
         }
 
         private static ComponentValType? DecodeOptionalValType(ComponentBinaryReader r)

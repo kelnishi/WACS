@@ -532,6 +532,64 @@ namespace Wacs.Transpiler.Test
             Assert.Equal(new[] { "alpha", "beta", "gamma" }, value);
         }
 
+        private static string FindEnumComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "enum-component", "wasm",
+                                "en.component.wasm");
+        }
+
+        private static string FindEnumComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "enum-component",
+                                "en.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_named_enum_return_via_decoded_wit()
+        {
+            // enum-component declares `enum direction { north, south,
+            // east, west }` and exports `current() -> direction`.
+            // The .component.wasm strips the component-type custom
+            // section (wasm-tools component new behavior), so we
+            // pass the extracted blob via componentTypeOverride.
+            // The transpiler decodes the WIT, emits a public C#
+            // `Direction` enum into the assembly, and types the
+            // ComponentExports.Current method's return as that
+            // enum. Core returns i32=2 → C# value `Direction.East`.
+            using var fs = File.OpenRead(FindEnumComponentPath());
+            var witBytes = File.ReadAllBytes(FindEnumComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var direction = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Direction");
+            Assert.NotNull(direction);
+            Assert.True(direction!.IsEnum);
+            Assert.Equal(typeof(byte), direction.GetEnumUnderlyingType());
+
+            var members = direction.GetEnumNames();
+            Assert.Equal(new[] { "North", "South", "East", "West" }, members);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+            var current = componentExports!.GetMethod("Current");
+            Assert.NotNull(current);
+            Assert.Equal(direction, current!.ReturnType);
+
+            var value = current.Invoke(null, null);
+            Assert.NotNull(value);
+            Assert.Equal("East", value!.ToString());
+        }
+
         private static string FindOptionStringNoneComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());

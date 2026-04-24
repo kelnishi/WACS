@@ -142,10 +142,50 @@ namespace Wacs.ComponentModel.Runtime
             get
             {
                 if (_types != null) return _types;
-                var list = new List<Parser.DefTypeEntry>();
+                // List positions align with the binary's
+                // component-type index space — the index space
+                // grows by Type-section entries AND by component-
+                // level imports/exports of sort=Type (wit-component
+                // uses these to introduce named type aliases).
+                // Slots whose index corresponds to a non-Type-
+                // section allocation get an opaque sentinel so
+                // consumers indexing by type-idx don't go OOB.
+                var map = ComponentTypeIndexToDef;
+                var len = 0;
+                foreach (var k in map.Keys)
+                    if ((int)k + 1 > len) len = (int)k + 1;
+                // The type-space "high-water mark" can also include
+                // import/export type slots whose target didn't
+                // resolve (rare). Re-walk RawSections to ensure
+                // every allocation is counted.
+                uint allocs = 0;
                 foreach (var s in RawSections)
-                    if (s.Id == Parser.ComponentSectionId.Type)
-                        list.AddRange(Parser.TypeSectionReader.Decode(s.Payload));
+                {
+                    switch (s.Id)
+                    {
+                        case Parser.ComponentSectionId.Type:
+                            allocs += (uint)Parser.TypeSectionReader.Decode(s.Payload).Count;
+                            break;
+                        case Parser.ComponentSectionId.Import:
+                            foreach (var e in Parser.ImportSectionReader.Decode(s.Payload))
+                                if (e.Sort == Parser.ComponentSort.Type) allocs++;
+                            break;
+                        case Parser.ComponentSectionId.Export:
+                            foreach (var e in Parser.ExportSectionReader.Decode(s.Payload))
+                                if (e.Sort == Parser.ComponentSort.Type) allocs++;
+                            break;
+                    }
+                }
+                if ((int)allocs > len) len = (int)allocs;
+
+                var list = new Parser.DefTypeEntry[len];
+                var sentinel = new Parser.RawDefType(
+                    0xFF, System.Array.Empty<byte>());
+                for (int i = 0; i < len; i++)
+                {
+                    list[i] = map.TryGetValue((uint)i, out var entry)
+                        ? entry : sentinel;
+                }
                 _types = list;
                 return list;
             }
@@ -170,6 +210,96 @@ namespace Wacs.ComponentModel.Runtime
         /// <see cref="RawSections"/> in file order and builds the
         /// canonical map.</para>
         /// </summary>
+        /// <summary>
+        /// Map from component-type index to the
+        /// <see cref="Parser.DefTypeEntry"/> that lives at that
+        /// slot. Walks <see cref="RawSections"/> in file order to
+        /// honor wit-component's convention of introducing named
+        /// type aliases via component-level type imports
+        /// (<c>(import "direction" (type (eq 0)))</c>) — without
+        /// this resolver, type-section indices and func-signature
+        /// type-refs misalign on any non-trivial fixture.
+        ///
+        /// <para>Each Type-section entry takes its own slot. Each
+        /// component-level import / export of sort=Type also takes
+        /// a slot, with the body resolving to the bounded source
+        /// type. Resource sub-bounds (<c>SubResource</c>) leave
+        /// the slot empty (the type is opaque).</para>
+        /// </summary>
+        public IReadOnlyDictionary<uint, Parser.DefTypeEntry> ComponentTypeIndexToDef
+        {
+            get
+            {
+                if (_componentTypeIndex != null) return _componentTypeIndex;
+                var map = new Dictionary<uint, Parser.DefTypeEntry>();
+                var aliases = new Dictionary<uint, uint>();
+                uint typeIdx = 0;
+                foreach (var s in RawSections)
+                {
+                    switch (s.Id)
+                    {
+                        case Parser.ComponentSectionId.Type:
+                        {
+                            var entries = Parser.TypeSectionReader.Decode(s.Payload);
+                            foreach (var e in entries)
+                            {
+                                map[typeIdx] = e;
+                                typeIdx++;
+                            }
+                            break;
+                        }
+                        case Parser.ComponentSectionId.Import:
+                        {
+                            var entries = Parser.ImportSectionReader.Decode(s.Payload);
+                            foreach (var e in entries)
+                            {
+                                if (e.Sort != Parser.ComponentSort.Type) continue;
+                                if (!e.IsSubResource)
+                                    aliases[typeIdx] = e.Index;
+                                typeIdx++;
+                            }
+                            break;
+                        }
+                        case Parser.ComponentSectionId.Export:
+                        {
+                            var entries = Parser.ExportSectionReader.Decode(s.Payload);
+                            foreach (var e in entries)
+                            {
+                                if (e.Sort != Parser.ComponentSort.Type) continue;
+                                aliases[typeIdx] = e.Index;
+                                typeIdx++;
+                            }
+                            break;
+                        }
+                    }
+                }
+                // Resolve alias chains.
+                foreach (var kv in aliases)
+                {
+                    var resolved = ResolveAlias(kv.Key, aliases, map);
+                    if (resolved != null) map[kv.Key] = resolved;
+                }
+                _componentTypeIndex = map;
+                return map;
+            }
+        }
+        private IReadOnlyDictionary<uint, Parser.DefTypeEntry>? _componentTypeIndex;
+
+        private static Parser.DefTypeEntry? ResolveAlias(
+            uint idx,
+            Dictionary<uint, uint> aliases,
+            Dictionary<uint, Parser.DefTypeEntry> bodies)
+        {
+            var visited = new HashSet<uint>();
+            while (true)
+            {
+                if (!visited.Add(idx)) return null;   // cycle
+                if (bodies.TryGetValue(idx, out var body)) return body;
+                if (!aliases.TryGetValue(idx, out var next)) return null;
+                idx = next;
+            }
+        }
+
         public IReadOnlyDictionary<uint, Parser.CanonLift> ComponentFuncToCanon
         {
             get
