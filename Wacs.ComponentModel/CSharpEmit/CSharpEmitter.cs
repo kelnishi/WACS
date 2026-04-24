@@ -272,6 +272,26 @@ using System.Diagnostics.CodeAnalysis;
                         return;
                     }
                     var ifaceName = iref.InterfaceName;
+
+                    // Per-interface file (I{Name}.cs) — emit only if
+                    // the ref has been resolved AND the target
+                    // interface is within our Phase 1a.2 emission
+                    // scope (no types, only free functions using
+                    // types we can emit). Otherwise skip the file and
+                    // proceed to the Interop shell.
+                    if (iref.Target != null && isExport
+                        && IsInterfaceEmitable(iref.Target))
+                    {
+                        result.Add(EmitExportInterfaceFile(iref.Target,
+                                                           world.Name,
+                                                           options));
+                    }
+
+                    // Interop file — always emit a placeholder, even
+                    // empty. wit-bindgen emits one per interface
+                    // regardless of whether the interface has free
+                    // functions; Phase 1a.2 follow-ups fill in the
+                    // actual trampoline bodies.
                     result.Add(EmitEmptyInteropFile(world, iref.Package,
                                                     ifaceName, isExport));
                     break;
@@ -279,6 +299,38 @@ using System.Diagnostics.CodeAnalysis;
                 // case CtExternFunc:  // inline func — defer
                 // case CtExternInlineInterface:  // inline iface — defer
             }
+        }
+
+        /// <summary>
+        /// Phase 1a.2 emission gate: is this interface simple enough
+        /// for our current emitter to produce bit-identical output?
+        /// True iff the interface has no nested types (no records,
+        /// variants, enums, flags, resources — those all need their
+        /// own emitters) and all functions only use types the
+        /// primitive <see cref="TypeRefEmit"/> can handle.
+        /// </summary>
+        private static bool IsInterfaceEmitable(CtInterfaceType iface)
+        {
+            if (iface.Types.Count > 0) return false;
+            foreach (var fn in iface.Functions)
+            {
+                if (fn.Type.NamedResults != null) return false;
+                foreach (var p in fn.Type.Params)
+                    if (!IsTypeRefEmitable(p.Type)) return false;
+                if (fn.Type.Result != null && !IsReturnTypeEmitable(fn.Type.Result))
+                    return false;
+            }
+            return true;
+        }
+
+        private static bool IsTypeRefEmitable(CtValType t) => t is CtPrimType;
+
+        private static bool IsReturnTypeEmitable(CtValType t)
+        {
+            if (t is CtPrimType) return true;
+            // result<_,_> is elided to void at the interface level.
+            if (t is CtResultType r && r.Ok == null && r.Err == null) return true;
+            return false;
         }
 
         // ---- Empty Interop file ---------------------------------------------
