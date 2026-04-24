@@ -558,6 +558,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             var methodName = NameConventions.ToPascalCase(m.Name!);
             var stubClass = methodName + "WasmInterop";
             var sig = m.Function;
+            var usesReturnArea = MethodUsesReturnArea(sig);
 
             // Stub class
             sb.Append("        internal static class ").Append(stubClass).Append('\n');
@@ -568,13 +569,19 @@ namespace Wacs.ComponentModel.CSharpEmit
               .Append("\"), WasmImportLinkage]\n");
 
             sb.Append("            internal static extern ");
-            sb.Append(StubReturnType(sig));
+            // For return-area methods the stub returns void; the
+            // actual value comes back via the trailing nint param.
+            sb.Append(usesReturnArea ? "void" : StubReturnType(sig));
             sb.Append(" wasmImport").Append(methodName).Append("(int p0");
             for (int i = 0; i < sig.Params.Count; i++)
             {
                 sb.Append(", ");
                 sb.Append(PrimStubType(sig.Params[i].Type));
                 sb.Append(" p").Append(i + 1);
+            }
+            if (usesReturnArea)
+            {
+                sb.Append(", nint p").Append(sig.Params.Count + 1);
             }
             sb.Append(");\n");
             sb.Append("\n        }\n\n");
@@ -598,33 +605,40 @@ namespace Wacs.ComponentModel.CSharpEmit
             var retType = FunctionEmit.EmitReturnType(sig);
             var isVoid = retType == "void";
 
-            // Stub call — for resource methods, wit-bindgen uses
-            // `var result =  Stub.wasmImportX(handle, args)` with
-            // the same double-space quirk for non-void, and a plain
-            // `Stub.wasmImportX(handle, args);` for void.
-            sb.Append("            ");
-            if (!isVoid) sb.Append("var result =  ");
-            sb.Append(stubClass).Append(".wasmImport").Append(methodName);
-            sb.Append("(handle");
-            for (int i = 0; i < sig.Params.Count; i++)
+            if (usesReturnArea)
             {
-                sb.Append(", ");
-                var argName = NameConventions.ToCamelCase(sig.Params[i].Name);
-                if (sig.Params[i].Type is CtPrimType p)
-                    sb.Append(PrimMarshal.Lower(p.Kind, argName));
-                else
-                    sb.Append(argName);
+                EmitResourceMethodReturnArea(sb, stubClass, methodName, sig);
             }
-            sb.Append(");\n");
-
-            if (!isVoid)
+            else
             {
-                sb.Append("            return ");
-                if (sig.Result is CtPrimType rp)
-                    sb.Append(PrimMarshal.Lift(rp.Kind, "result"));
-                else
-                    sb.Append("result");
-                sb.Append(";\n");
+                // Stub call — for resource methods, wit-bindgen uses
+                // `var result =  Stub.wasmImportX(handle, args)` with
+                // the same double-space quirk for non-void, and a plain
+                // `Stub.wasmImportX(handle, args);` for void.
+                sb.Append("            ");
+                if (!isVoid) sb.Append("var result =  ");
+                sb.Append(stubClass).Append(".wasmImport").Append(methodName);
+                sb.Append("(handle");
+                for (int i = 0; i < sig.Params.Count; i++)
+                {
+                    sb.Append(", ");
+                    var argName = NameConventions.ToCamelCase(sig.Params[i].Name);
+                    if (sig.Params[i].Type is CtPrimType p)
+                        sb.Append(PrimMarshal.Lower(p.Kind, argName));
+                    else
+                        sb.Append(argName);
+                }
+                sb.Append(");\n");
+
+                if (!isVoid)
+                {
+                    sb.Append("            return ");
+                    if (sig.Result is CtPrimType rp)
+                        sb.Append(PrimMarshal.Lift(rp.Kind, "result"));
+                    else
+                        sb.Append("result");
+                    sb.Append(";\n");
+                }
             }
 
             sb.Append("\n");
@@ -649,6 +663,67 @@ namespace Wacs.ComponentModel.CSharpEmit
             if (sig.HasNoResult) return "void";
             if (sig.Result == null) return "void";
             return PrimStubType(sig.Result);
+        }
+
+        /// <summary>
+        /// True when a resource method needs a return-area buffer
+        /// (string / list&lt;u8&gt; / other aggregate return). Same
+        /// predicate family as <see cref="InteropEmit.UsesReturnArea"/>
+        /// but scoped to resource methods — additional shape
+        /// support lands here as aggregate returns arrive.
+        /// </summary>
+        private static bool MethodUsesReturnArea(CtFunctionType sig)
+        {
+            if (sig.HasNoResult || sig.Result == null) return false;
+            if (sig.Result is CtPrimType p && p.Kind == CtPrim.String) return true;
+            if (InteropEmit.IsByteList(sig.Result)) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Emit the return-area-using body of a resource method.
+        /// <c>handle</c> is already declared by the caller;
+        /// allocates the retArea, pins, calls the stub with
+        /// <c>(handle, args…, ptr)</c>, and lifts the result.
+        /// </summary>
+        private static void EmitResourceMethodReturnArea(
+            StringBuilder sb,
+            string stubClass,
+            string methodName,
+            CtFunctionType sig)
+        {
+            sb.Append("\n");
+            sb.Append("            var retArea = new uint[2];\n");
+            sb.Append("            fixed (uint* retAreaByte0 = &retArea[0])\n");
+            sb.Append("            {\n");
+            sb.Append("                var ptr = (nint)retAreaByte0;\n");
+            sb.Append("                ").Append(stubClass).Append(".wasmImport").Append(methodName);
+            sb.Append("(handle");
+            for (int i = 0; i < sig.Params.Count; i++)
+            {
+                sb.Append(", ");
+                var argName = NameConventions.ToCamelCase(sig.Params[i].Name);
+                if (sig.Params[i].Type is CtPrimType p)
+                    sb.Append(PrimMarshal.Lower(p.Kind, argName));
+                else
+                    sb.Append(argName);
+            }
+            sb.Append(", ptr);\n");
+
+            if (sig.Result is CtPrimType rp && rp.Kind == CtPrim.String)
+            {
+                sb.Append("                return Encoding.UTF8.GetString(");
+                sb.Append("(byte*)BitConverter.ToInt32(new Span<byte>((void*)(ptr + 0), 4)), ");
+                sb.Append("BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4)));\n");
+            }
+            else if (InteropEmit.IsByteList(sig.Result!))
+            {
+                sb.Append("\n");
+                sb.Append("                var array = new byte[BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))];\n");
+                sb.Append("                new Span<byte>((void*)(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 0), 4))), BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))).CopyTo(new Span<byte>(array));\n");
+                sb.Append("                return array;\n");
+            }
+            sb.Append("            }\n");
         }
 
 

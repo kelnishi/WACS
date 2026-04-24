@@ -522,12 +522,15 @@ using System.Diagnostics.CodeAnalysis;
                             if (!(p.Type is CtPrimType)) return false;
                         // Result is allowed when:
                         //   * null (void)
-                        //   * a primitive
+                        //   * a primitive (including string via
+                        //     return-area)
+                        //   * list<u8> (byte[]) via return-area
                         //   * a reference to the owning resource
                         //     (constructor / static factory returning
                         //     a fresh handle of the same type)
                         if (m.Function.Result == null) continue;
                         if (m.Function.Result is CtPrimType) continue;
+                        if (InteropEmit.IsByteList(m.Function.Result)) continue;
                         if (m.Function.Result is CtTypeRef tr
                             && tr.Name == res.Name) continue;
                         if (m.Function.Result is CtOwnType own
