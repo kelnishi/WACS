@@ -14,3 +14,6 @@
 [submodule "Feature.Detect/proposals"]
 	path = Feature.Detect/proposals
 	url = git@github.com:WebAssembly/proposals.git
+[submodule "Spec.Test/components/wasi-cli"]
+	path = Spec.Test/components/wasi-cli
+	url = https://github.com/WebAssembly/wasi-cli.git

@@ -89,6 +89,41 @@ namespace Wacs.ComponentModel.WIT
         private WitSpan SpanOf(WitToken t) => new WitSpan(t.Line, t.Column);
 
         /// <summary>
+        /// Consume and discard any leading gated-feature annotations —
+        /// <c>@since(version = 0.2.0)</c>, <c>@unstable(feature = X)</c>,
+        /// <c>@deprecated(version = 0.2.5)</c>, etc. Real-world WASI WIT
+        /// packages decorate virtually every item with these, so every
+        /// item-dispatch point in the parser must tolerate them before
+        /// looking for a keyword. v0 discards the payload; Phase 1a may
+        /// promote annotations to typed AST nodes when the emitter needs
+        /// them for doc-comment generation or conditional shape.
+        /// </summary>
+        private void SkipAnnotations()
+        {
+            while (At(WitTokenKind.At))
+            {
+                Consume(); // '@'
+                if (At(WitTokenKind.Ident) || _toks[_i].Kind == WitTokenKind.Keyword)
+                    Consume(); // annotation name (since, unstable, deprecated, …)
+                if (At(WitTokenKind.LParen))
+                {
+                    // Consume a balanced paren group. Nested parens are not
+                    // expected in the current annotation grammar but cheap
+                    // to tolerate.
+                    int depth = 1;
+                    Consume(); // '('
+                    while (depth > 0 && !At(WitTokenKind.Eof))
+                    {
+                        if (At(WitTokenKind.LParen)) depth++;
+                        else if (At(WitTokenKind.RParen)) depth--;
+                        if (depth == 0) { Consume(); break; }
+                        Consume();
+                    }
+                }
+            }
+        }
+
+        /// <summary>
         /// Consume the next token and interpret it as an identifier. Accepts
         /// plain <see cref="WitTokenKind.Ident"/>, and accepts a
         /// <see cref="WitTokenKind.Keyword"/> when the use-site name-space
@@ -115,6 +150,7 @@ namespace Wacs.ComponentModel.WIT
             // explicit `{ … }` body. In the file-level form subsequent items
             // attach to the declared package.
             WitPackage? currentPkg = null;
+            SkipAnnotations();
             if (AtKeyword("package"))
             {
                 var p = ParsePackageHeaderOrBlock();
@@ -124,15 +160,19 @@ namespace Wacs.ComponentModel.WIT
 
             // Top-level uses appear outside packages and apply to all
             // downstream worlds.
+            SkipAnnotations();
             while (AtKeyword("use"))
             {
                 doc.TopLevelUses.Add(ParseUse());
+                SkipAnnotations();
             }
 
             // File-level forms: interface / world forms, or another package
             // block.
             while (!At(WitTokenKind.Eof))
             {
+                SkipAnnotations();
+                if (At(WitTokenKind.Eof)) break;
                 if (AtKeyword("package"))
                 {
                     var p = ParsePackageHeaderOrBlock();
@@ -183,6 +223,8 @@ namespace Wacs.ComponentModel.WIT
                 pkg.HasExplicitBody = true;
                 while (!At(WitTokenKind.RBrace))
                 {
+                    SkipAnnotations();
+                    if (At(WitTokenKind.RBrace)) break;
                     if (AtKeyword("interface")) pkg.Interfaces.Add(ParseInterface());
                     else if (AtKeyword("world")) pkg.Worlds.Add(ParseWorld());
                     else
@@ -268,6 +310,7 @@ namespace Wacs.ComponentModel.WIT
 
         private WitInterfaceItem ParseInterfaceItem()
         {
+            SkipAnnotations();
             if (AtKeyword("use"))      return ParseUse();
             if (AtKeyword("type"))     return ParseTypeAlias();
             if (AtKeyword("record"))   return ParseRecordDef();
@@ -323,6 +366,12 @@ namespace Wacs.ComponentModel.WIT
                     Consume();
                     pkg.Path.Add(ConsumeIdent("use path segment"));
                 }
+                // WIT grammar permits the version (@ver) at two positions:
+                // (a) on the package path before '/': pkg:ns@ver/iface
+                // (b) on the full use-path after the interface name:
+                //     pkg:ns/iface@ver
+                // Real-world WASI files use (b); we accept both and store
+                // either placement on pkg.Version.
                 if (At(WitTokenKind.At))
                 {
                     Consume();
@@ -330,6 +379,11 @@ namespace Wacs.ComponentModel.WIT
                 }
                 Expect(WitTokenKind.Slash, "'/' between package and interface name");
                 var iface = ConsumeIdent("interface name");
+                if (At(WitTokenKind.At))
+                {
+                    Consume();
+                    pkg.Version = ParseSemver();
+                }
                 return new WitUsePath { Package = pkg, InterfaceName = iface, Span = SpanOf(startTok) };
             }
             return new WitUsePath { InterfaceName = _lex.Slice(first), Span = SpanOf(first) };
@@ -355,6 +409,8 @@ namespace Wacs.ComponentModel.WIT
             var rec = new WitRecordType { Span = SpanOf(kw) };
             while (!At(WitTokenKind.RBrace))
             {
+                SkipAnnotations();
+                if (At(WitTokenKind.RBrace)) break;
                 var fieldTok = Current;
                 var field = new WitField { Span = SpanOf(fieldTok), Name = ConsumeIdent("field name") };
                 Expect(WitTokenKind.Colon, "':'");
@@ -375,6 +431,8 @@ namespace Wacs.ComponentModel.WIT
             var variant = new WitVariantType { Span = SpanOf(kw) };
             while (!At(WitTokenKind.RBrace))
             {
+                SkipAnnotations();
+                if (At(WitTokenKind.RBrace)) break;
                 var caseTok = Current;
                 var c = new WitVariantCase { Span = SpanOf(caseTok), Name = ConsumeIdent("variant case") };
                 if (At(WitTokenKind.LParen))
@@ -399,6 +457,8 @@ namespace Wacs.ComponentModel.WIT
             var e = new WitEnumType { Span = SpanOf(kw) };
             while (!At(WitTokenKind.RBrace))
             {
+                SkipAnnotations();
+                if (At(WitTokenKind.RBrace)) break;
                 e.Cases.Add(ConsumeIdent("enum case"));
                 if (At(WitTokenKind.Comma)) Consume();
                 else break;
@@ -415,6 +475,8 @@ namespace Wacs.ComponentModel.WIT
             var f = new WitFlagsType { Span = SpanOf(kw) };
             while (!At(WitTokenKind.RBrace))
             {
+                SkipAnnotations();
+                if (At(WitTokenKind.RBrace)) break;
                 f.Flags.Add(ConsumeIdent("flag"));
                 if (At(WitTokenKind.Comma)) Consume();
                 else break;
@@ -451,6 +513,7 @@ namespace Wacs.ComponentModel.WIT
             //   constructor(params);
             //   static name: func(params) -> result;
             //   name: func(params) -> result;
+            SkipAnnotations();
             var startTok = Current;
             if (AtKeyword("constructor"))
             {
@@ -512,7 +575,13 @@ namespace Wacs.ComponentModel.WIT
                 Expect(WitTokenKind.Colon, "':'");
                 p.Type = ParseType();
                 outList.Add(p);
-                if (At(WitTokenKind.Comma)) Consume();
+                if (At(WitTokenKind.Comma))
+                {
+                    Consume();
+                    // Tolerate trailing comma — real WIT sources use it
+                    // liberally, especially with doc-comment-wrapped params.
+                    if (At(WitTokenKind.RParen)) break;
+                }
                 else break;
             }
         }
@@ -659,6 +728,7 @@ namespace Wacs.ComponentModel.WIT
 
         private WitWorldItem ParseWorldItem()
         {
+            SkipAnnotations();
             if (AtKeyword("import"))  return ParseImportOrExport(isExport: false);
             if (AtKeyword("export"))  return ParseImportOrExport(isExport: true);
             if (AtKeyword("use"))     return new WitWorldUse { Use = ParseUse(), Span = SpanOf(Current) };
