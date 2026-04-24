@@ -652,6 +652,66 @@ namespace Wacs.Transpiler.Test
             Assert.Equal("Read, Execute", value!.ToString());
         }
 
+        private static string FindRecordComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "record-component", "wasm",
+                                "rc.component.wasm");
+        }
+
+        private static string FindRecordComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "record-component",
+                                "rc.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_named_record_return_via_decoded_wit()
+        {
+            // record-component declares `record point { x: u32, y: u32 }`
+            // and exports `origin() -> point`. The transpiler emits
+            // a public C# `Point` class with `X`, `Y` readonly
+            // fields and a (uint, uint) constructor. The generated
+            // ComponentExports.Origin reads (7, 11) from the guest
+            // and constructs Point(7, 11).
+            using var fs = File.OpenRead(FindRecordComponentPath());
+            var witBytes = File.ReadAllBytes(FindRecordComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var pointType = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Point");
+            Assert.NotNull(pointType);
+            Assert.True(pointType!.IsClass);
+
+            var fieldX = pointType.GetField("X");
+            var fieldY = pointType.GetField("Y");
+            Assert.NotNull(fieldX);
+            Assert.NotNull(fieldY);
+            Assert.Equal(typeof(uint), fieldX!.FieldType);
+            Assert.Equal(typeof(uint), fieldY!.FieldType);
+
+            var ctor = pointType.GetConstructor(new[] { typeof(uint), typeof(uint) });
+            Assert.NotNull(ctor);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var origin = componentExports!.GetMethod("Origin");
+            Assert.NotNull(origin);
+            Assert.Equal(pointType, origin!.ReturnType);
+
+            var instance = origin.Invoke(null, null)!;
+            Assert.Equal(7u, fieldX.GetValue(instance));
+            Assert.Equal(11u, fieldY.GetValue(instance));
+        }
+
         private static string FindOptionStringNoneComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());

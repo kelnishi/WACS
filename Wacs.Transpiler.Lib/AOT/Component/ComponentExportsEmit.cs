@@ -135,10 +135,13 @@ namespace Wacs.Transpiler.AOT.Component
                     emittedTypes[named.Name] =
                         EmitFlagsType(module, @namespace, fl);
                     return;
-                // Records, variants, resources land in follow-ups
-                // — each needs its own IL emit strategy (class
-                // with fields, class with discriminant,
-                // IDisposable wrapper).
+                case CtRecordType rec:
+                    emittedTypes[named.Name] =
+                        EmitRecordType(module, @namespace, named.Name, rec);
+                    return;
+                // Variants, resources land in follow-ups — each
+                // needs its own IL emit strategy (discriminated
+                // class hierarchy, IDisposable wrapper).
             }
         }
 
@@ -168,6 +171,88 @@ namespace Wacs.Transpiler.AOT.Component
             }
             return enumBuilder.CreateType()!;
         }
+
+        /// <summary>Emit a public C# class for a WIT record
+        /// declaration. Each field becomes a public readonly
+        /// auto-property; a public constructor takes the fields
+        /// in declaration order. Restricted to records with
+        /// primitive fields in v0 — aggregate fields each need
+        /// their own marshaling tactics and arrive incrementally.
+        /// </summary>
+        private static Type EmitRecordType(
+            ModuleBuilder module, string @namespace,
+            string witName, CtRecordType rec)
+        {
+            var typeName = @namespace + "." + PascalCase(witName);
+            var classBuilder = module.DefineType(typeName,
+                TypeAttributes.Public | TypeAttributes.Sealed
+                    | TypeAttributes.AutoClass | TypeAttributes.Class
+                    | TypeAttributes.AnsiClass | TypeAttributes.BeforeFieldInit,
+                typeof(object));
+
+            var fieldCount = rec.Fields.Count;
+            var fieldBuilders = new FieldBuilder[fieldCount];
+            var fieldClrTypes = new Type[fieldCount];
+            for (int i = 0; i < fieldCount; i++)
+            {
+                if (!(rec.Fields[i].Type is CtPrimType prim))
+                    throw new NotSupportedException(
+                        "EmitRecordType: aggregate field types are a follow-up.");
+                fieldClrTypes[i] = CtPrimToCs(prim.Kind);
+                fieldBuilders[i] = classBuilder.DefineField(
+                    PascalCase(rec.Fields[i].Name),
+                    fieldClrTypes[i],
+                    FieldAttributes.Public | FieldAttributes.InitOnly);
+            }
+
+            // Constructor: Record(field0, field1, …) — assigns
+            // each parameter to its corresponding field.
+            var ctor = classBuilder.DefineConstructor(
+                MethodAttributes.Public | MethodAttributes.SpecialName
+                    | MethodAttributes.RTSpecialName,
+                CallingConventions.Standard, fieldClrTypes);
+            for (int i = 0; i < fieldCount; i++)
+                ctor.DefineParameter(i + 1, ParameterAttributes.None,
+                    CamelCase(rec.Fields[i].Name));
+            var ctorIl = ctor.GetILGenerator();
+            // Call object's parameterless ctor, then assign each
+            // field from its incoming arg.
+            ctorIl.Emit(OpCodes.Ldarg_0);
+            ctorIl.Emit(OpCodes.Call,
+                typeof(object).GetConstructor(Type.EmptyTypes)!);
+            for (int i = 0; i < fieldCount; i++)
+            {
+                ctorIl.Emit(OpCodes.Ldarg_0);
+                ctorIl.Emit(OpCodes.Ldarg, i + 1);
+                ctorIl.Emit(OpCodes.Stfld, fieldBuilders[i]);
+            }
+            ctorIl.Emit(OpCodes.Ret);
+
+            return classBuilder.CreateType()!;
+        }
+
+        /// <summary>Map a <see cref="CtPrim"/> to its CLR type.
+        /// Mirror of <see cref="PrimToCs(ComponentPrim)"/> but for
+        /// the WIT-decoded prim enum, which uses different
+        /// numbering than the binary's <see cref="ComponentPrim"/>.
+        /// </summary>
+        private static Type CtPrimToCs(CtPrim p) => p switch
+        {
+            CtPrim.Bool   => typeof(bool),
+            CtPrim.S8     => typeof(sbyte),
+            CtPrim.U8     => typeof(byte),
+            CtPrim.S16    => typeof(short),
+            CtPrim.U16    => typeof(ushort),
+            CtPrim.S32    => typeof(int),
+            CtPrim.U32    => typeof(uint),
+            CtPrim.S64    => typeof(long),
+            CtPrim.U64    => typeof(ulong),
+            CtPrim.F32    => typeof(float),
+            CtPrim.F64    => typeof(double),
+            CtPrim.Char   => typeof(uint),
+            CtPrim.String => typeof(string),
+            _ => throw new NotSupportedException("CtPrimToCs " + p),
+        };
 
         /// <summary>Emit a public C# enum type marked with
         /// <see cref="System.FlagsAttribute"/> for a WIT flags
@@ -276,6 +361,7 @@ namespace Wacs.Transpiler.AOT.Component
             if (TryResolveTupleOfPrims(r, types, out _)) return true;
             if (TryResolveEnumReturn(r, types, out _)) return true;
             if (TryResolveFlagsReturn(r, types, out _)) return true;
+            if (TryResolveRecordOfPrims(r, types, out _, out _)) return true;
             return false;
         }
 
@@ -361,6 +447,32 @@ namespace Wacs.Transpiler.AOT.Component
             if (t.TypeIdx >= types.Count) return false;
             if (!(types[(int)t.TypeIdx] is ComponentFlagsType fl)) return false;
             flagCount = fl.Flags.Count;
+            return true;
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a type-ref
+        /// to a structural record whose fields are all
+        /// primitives. Records with aggregate fields land in a
+        /// follow-up — each adds its own marshaling shape.</summary>
+        private static bool TryResolveRecordOfPrims(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            out ComponentPrim[] fieldPrims, out string[] fieldNames)
+        {
+            fieldPrims = Array.Empty<ComponentPrim>();
+            fieldNames = Array.Empty<string>();
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentRecordType rec)) return false;
+            var prims = new ComponentPrim[rec.Fields.Count];
+            var names = new string[rec.Fields.Count];
+            for (int i = 0; i < prims.Length; i++)
+            {
+                if (!rec.Fields[i].Type.IsPrimitive) return false;
+                prims[i] = rec.Fields[i].Type.Prim;
+                names[i] = rec.Fields[i].Name;
+            }
+            fieldPrims = prims;
+            fieldNames = names;
             return true;
         }
 
@@ -520,6 +632,7 @@ namespace Wacs.Transpiler.AOT.Component
             bool isTupleReturn = false;
             bool isEnumReturn = false;
             bool isFlagsReturn = false;
+            bool isRecordReturn = false;
             ComponentPrim listElemPrim = default;
             ComponentPrim optionInnerPrim = default;
             ResultSide resultOkSide = ResultSide.Absent;
@@ -527,6 +640,8 @@ namespace Wacs.Transpiler.AOT.Component
             ComponentPrim[] tupleElemPrims = Array.Empty<ComponentPrim>();
             int enumCaseCount = 0;
             int flagCount = 0;
+            ComponentPrim[] recordFieldPrims = Array.Empty<ComponentPrim>();
+            string[] recordFieldNames = Array.Empty<string>();
             Type returnType;
             if (export.Signature.Results.Count == 0)
             {
@@ -608,6 +723,22 @@ namespace Wacs.Transpiler.AOT.Component
                 returnType = ResolveFlagsReturnType(
                     decodedWit, emittedTypes, export.Name, flagCount);
             }
+            else if (TryResolveRecordOfPrims(
+                export.Signature.Results[0], types,
+                out recordFieldPrims, out recordFieldNames))
+            {
+                isRecordReturn = true;
+                // Resolve via decoded WIT — records need a
+                // generated class for the user-facing surface.
+                // Without a name we'd have no top-level type to
+                // emit; reject the export in that case (keeps the
+                // ComponentExports class clean of anonymous
+                // nested types).
+                var named = TryFindNamedReturn(decodedWit, emittedTypes,
+                                                export.Name);
+                if (named == null) return;
+                returnType = named;
+            }
             else
             {
                 return;   // shouldn't reach — IsEmittable rejects
@@ -668,6 +799,11 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 EmitFlagsReturnBody(il, instanceField, coreMethod, export,
                                     types, returnType, flagCount);
+            }
+            else if (isRecordReturn)
+            {
+                EmitRecordReturnBody(il, instanceField, coreMethod, export,
+                                     types, returnType, recordFieldPrims);
             }
             else
             {
@@ -1516,6 +1652,64 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Conv_U2);
             il.Emit(OpCodes.Ret);
             _ = returnType;
+        }
+
+        /// <summary>
+        /// IL body for a record return. Core returns the retArea
+        /// pointer P; each field lives at its naturally-aligned
+        /// offset starting from P. Read each field, push them on
+        /// the stack in declaration order, and call the generated
+        /// record constructor. v0 restricts to all-primitive
+        /// records; aggregate fields land as their marshaling
+        /// helpers fill in.
+        /// </summary>
+        private static void EmitRecordReturnBody(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types, Type recordType,
+            ComponentPrim[] fieldPrims)
+        {
+            var memoryProp = instanceField.FieldType.GetProperty("Memory");
+            if (memoryProp == null)
+                throw new InvalidOperationException(
+                    "Record-returning component requires Module.Memory.");
+
+            var retAreaLocal = il.DeclareLocal(typeof(int));
+            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
+            il.Emit(OpCodes.Stloc, retAreaLocal);
+
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.Emit(OpCodes.Stloc, memoryLocal);
+
+            // Field offsets follow canonical-ABI alignment: each
+            // field starts at the next multiple of its own
+            // alignment from the running offset.
+            int offset = 0;
+            for (int i = 0; i < fieldPrims.Length; i++)
+            {
+                var align = PrimByteSize(fieldPrims[i]);
+                offset = AlignUp(offset, align);
+                EmitReadPayloadAtOffset(il, memoryLocal, retAreaLocal,
+                                        offset, fieldPrims[i]);
+                offset += PrimByteSize(fieldPrims[i]);
+            }
+
+            // Call ctor matching the field types in order.
+            var ctorParams = new Type[fieldPrims.Length];
+            for (int i = 0; i < fieldPrims.Length; i++)
+                ctorParams[i] = PrimToCs(fieldPrims[i]);
+            var ctor = recordType.GetConstructor(ctorParams)!;
+            il.Emit(OpCodes.Newobj, ctor);
+            il.Emit(OpCodes.Ret);
+        }
+
+        private static int AlignUp(int offset, int alignment)
+        {
+            var rem = offset % alignment;
+            return rem == 0 ? offset : offset + (alignment - rem);
         }
 
         /// <summary>
