@@ -49,12 +49,9 @@ namespace Wacs.ComponentModel.CSharpEmit
                 CtOptionType o => EmitParam(o.Inner) + "?",
                 CtResultType r => EmitResultParam(r),
                 CtTupleType t => EmitTuple(t),
-                // Named type in the same interface — emits as the
-                // PascalCase type name. wit-bindgen-csharp omits the
-                // global:: qualifier within the interface's own
-                // namespace; cross-interface references get the full
-                // qualifier (follow-up).
-                CtTypeRef r => NameConventions.ToPascalCase(r.Name),
+                // Same-interface refs emit unqualified; cross-interface
+                // refs emit a fully qualified `global::...` path.
+                CtTypeRef r => EmitTypeRef(r),
                 _ => throw new NotImplementedException(
                     "CSharp emission for " + type.GetType().Name +
                     " is a Phase 1a.2 follow-up."),
@@ -83,6 +80,70 @@ namespace Wacs.ComponentModel.CSharpEmit
                 return "void";
             }
             return EmitParam(type);
+        }
+
+        /// <summary>
+        /// Emit a <see cref="CtTypeRef"/> either as a bare
+        /// PascalCase name (same-interface) or as a
+        /// <c>global::{WorldNs}.wit.imports.{pkg}.I{Iface}.{Name}</c>
+        /// path (cross-interface). Follows the local-alias
+        /// indirection that the WIT resolver leaves in place:
+        /// when the target is a same-interface alias whose body is
+        /// itself a CtTypeRef pointing elsewhere, traverse the
+        /// chain to the real definition.
+        /// </summary>
+        internal static string EmitTypeRef(CtTypeRef r)
+        {
+            if (r.Target == null)
+                return NameConventions.ToPascalCase(r.Name);
+
+            var emittingIface = EmitAmbient.EmittingInterface;
+            var target = r.Target;
+
+            // Follow the resolver's local-alias chain: if the target
+            // is a local alias in the current interface whose body is
+            // a cross-interface CtTypeRef, traverse it.
+            if (emittingIface != null && target.Owner == emittingIface
+                && target.Type is CtTypeRef inner && inner.Target != null)
+            {
+                target = inner.Target;
+            }
+
+            // Cross-interface: target's owner differs from the
+            // current emitting interface → emit fully qualified.
+            if (emittingIface != null
+                && target.Owner != null
+                && target.Owner != emittingIface)
+            {
+                return EmitCrossInterfaceRef(target);
+            }
+
+            return NameConventions.ToPascalCase(target.Name);
+        }
+
+        private static string EmitCrossInterfaceRef(CtNamedType target)
+        {
+            var ownerIface = target.Owner!;
+            var worldNs = EmitAmbient.WorldNamespace ?? "UNSET_WORLD_NAMESPACE";
+
+            // wit-bindgen treats any cross-interface reference as an
+            // implicit import of the owning interface — even from an
+            // export-side file. "wit.imports" matches the observed
+            // 0.30.0 output.
+            var sb = new System.Text.StringBuilder("global::");
+            sb.Append(worldNs);
+            sb.Append(".wit.imports.");
+            sb.Append(ownerIface.Package!.Namespace);
+            foreach (var seg in ownerIface.Package.Path)
+            {
+                sb.Append('.');
+                sb.Append(seg);
+            }
+            var v = NameConventions.SanitizeVersion(ownerIface.Package.Version);
+            if (v.Length > 0) sb.Append('.').Append(v);
+            sb.Append(".I").Append(NameConventions.ToPascalCase(ownerIface.Name));
+            sb.Append('.').Append(NameConventions.ToPascalCase(target.Name));
+            return sb.ToString();
         }
 
         private static string EmitResultParam(CtResultType r)

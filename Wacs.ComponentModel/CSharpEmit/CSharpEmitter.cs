@@ -672,18 +672,13 @@ using System.Diagnostics.CodeAnalysis;
             sb.Append("namespace ").Append(ifaceNs).Append(";\n\n");
             sb.Append("public interface ").Append(ifaceClassName).Append(" {\n");
 
-            TypeDefEmit.SetWorldNamespace(worldNs);
-            try
+            using (EmitAmbient.Push(worldNs, iface))
             {
                 foreach (var nt in iface.Types)
                 {
                     sb.Append('\n');
                     sb.Append(TypeDefEmit.Emit(nt, iface));
                 }
-            }
-            finally
-            {
-                TypeDefEmit.SetWorldNamespace(null);
             }
 
             sb.Append("\n");  // blank line before closing — matches reference.
@@ -751,16 +746,20 @@ using System.Diagnostics.CodeAnalysis;
             // the next function starts immediately — no extra
             // separator needed between the last type and the first
             // function.
-            foreach (var nt in iface.Types)
+            using (EmitAmbient.Push(worldNs, iface))
             {
-                sb.Append('\n');
-                sb.Append(TypeDefEmit.Emit(nt));
-            }
+                foreach (var nt in iface.Types)
+                {
+                    sb.Append('\n');
+                    sb.Append(TypeDefEmit.Emit(nt));
+                }
 
-            foreach (var fn in iface.Functions)
-            {
-                sb.Append(FunctionEmit.EmitStaticAbstractSignature(fn.Name, fn.Type));
-                sb.Append("\n\n");
+                foreach (var fn in iface.Functions)
+                {
+                    sb.Append(FunctionEmit.EmitStaticAbstractSignature(
+                        fn.Name, fn.Type));
+                    sb.Append("\n\n");
+                }
             }
 
             sb.Append("}\n");

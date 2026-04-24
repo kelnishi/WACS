@@ -168,8 +168,11 @@ namespace Wacs.ComponentModel.Types
         {
             foreach (var use in iface.Uses)
             {
-                if (use.Package == null) continue;
-                var targetKey = QualifiedKey(use.Package, use.InterfaceName);
+                // Bare-name `use foo.{...}` refers to an interface in
+                // the same package as the using interface.
+                var usePkg = use.Package ?? iface.Package;
+                if (usePkg == null) continue;
+                var targetKey = QualifiedKey(usePkg, use.InterfaceName);
                 if (!ifaceIndex.TryGetValue(targetKey, out var targetIface))
                     continue;
 
@@ -236,18 +239,22 @@ namespace Wacs.ComponentModel.Types
                                             string localName,
                                             CtNamedType externalTarget)
         {
-            // Find our placeholder CtNamedType with this local name.
+            // Find the placeholder CtNamedType with this local name —
+            // first in aliases (created from `use` imports), then in
+            // types (created from local defs; rarely matches a use'd
+            // name but we accept either).
+            foreach (var nt in iface.Aliases)
+            {
+                if (nt.Name != localName) continue;
+                if (nt.Type is CtTypeRef existing)
+                    existing.Target = externalTarget;
+                return;
+            }
             foreach (var nt in iface.Types)
             {
                 if (nt.Name != localName) continue;
-                // Replace the placeholder body (which is a CtTypeRef
-                // pointing at this same name) with a CtTypeRef whose
-                // Target is the real external type. Downstream
-                // consumers read `nt.Type` and get a resolved ref.
                 if (nt.Type is CtTypeRef existing)
-                {
                     existing.Target = externalTarget;
-                }
                 return;
             }
         }

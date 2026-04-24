@@ -88,18 +88,32 @@ namespace Wacs.ComponentModel.Types
         /// </summary>
         public IReadOnlyList<CtUse> Uses { get; }
 
+        /// <summary>
+        /// Local aliases introduced by <c>use</c> statements. Each
+        /// alias is a <see cref="CtNamedType"/> whose name is the
+        /// local (possibly renamed) form and whose body is a
+        /// <see cref="CtTypeRef"/> pointing at the external target
+        /// (resolved by <c>WitResolver</c>). These do NOT emit as
+        /// nested types; they exist for the resolver and the
+        /// cross-interface-qualifying emitter to follow the
+        /// external binding chain.
+        /// </summary>
+        public IReadOnlyList<CtNamedType> Aliases { get; }
+
         public CtInterfaceType(
             CtPackageName? package,
             string name,
             IReadOnlyList<CtNamedType> types,
             IReadOnlyList<CtInterfaceFunction> functions,
-            IReadOnlyList<CtUse> uses)
+            IReadOnlyList<CtUse> uses,
+            IReadOnlyList<CtNamedType>? aliases = null)
         {
             Package = package;
             Name = name;
             Types = types;
             Functions = functions;
             Uses = uses;
+            Aliases = aliases ?? System.Array.Empty<CtNamedType>();
         }
 
         /// <summary>
