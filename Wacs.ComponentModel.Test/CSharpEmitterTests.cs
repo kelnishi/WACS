@@ -1120,6 +1120,69 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- End-to-end: hello-world emission from WIT + WASI deps -------
+
+        /// <summary>
+        /// Integration test: load <c>hello.wit</c> plus the full
+        /// <c>wasi-cli/wit/</c> dependency tree, resolve, and emit
+        /// the world. Asserts the emitted file set matches the
+        /// wit-bindgen 0.30.0 reference filename-for-filename,
+        /// and content-diffs every matching file against the
+        /// reference — tracking how many remain byte-for-byte
+        /// identical as the emitter closes in on parity.
+        /// </summary>
+        [Fact]
+        public void EmitWorld_hello_world_with_wasi_deps_matches_reference_file_set()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            var root = dir!.FullName;
+
+            var allPkgs = new System.Collections.Generic.List<CtPackage>();
+            allPkgs.AddRange(WitLoader.LoadDirectory(Path.Combine(
+                root, "Spec.Test", "components", "fixtures",
+                "hello-world", "wit")));
+            allPkgs.AddRange(WitLoader.LoadDirectoryTree(Path.Combine(
+                root, "Spec.Test", "components", "wasi-cli", "wit")));
+            WitResolver.Resolve(allPkgs);
+            var world = allPkgs
+                .First(p => p.Worlds.Any(w => w.Name == "hello"))
+                .Worlds.Single(w => w.Name == "hello");
+
+            var sources = CSharpEmitter.EmitWorld(world);
+            var emittedNames = sources.Select(s => s.FileName)
+                                       .OrderBy(n => n)
+                                       .ToArray();
+
+            var referenceDir = Path.Combine(root, "Spec.Test", "components",
+                                            "fixtures", "hello-world",
+                                            "reference");
+            var referenceCsNames = Directory.GetFiles(referenceDir, "*.cs")
+                .Select(Path.GetFileName)
+                .OrderBy(n => n)
+                .ToArray();
+
+            // Filename set is an exact match — every .cs file in
+            // the reference is produced, no extras.
+            Assert.Equal(referenceCsNames, emittedNames);
+
+            // Fully-byte-for-byte files: at least half should
+            // currently match exactly. Raises over time as the
+            // last divergences (`liftedResult` counter, borrow
+            // list marshaling) close.
+            int matching = 0;
+            foreach (var s in sources)
+            {
+                var refPath = Path.Combine(referenceDir, s.FileName);
+                if (!File.Exists(refPath)) continue;
+                if (File.ReadAllText(refPath) == s.Content)
+                    matching++;
+            }
+            Assert.True(matching >= 7,
+                $"Byte-for-byte-matching file count regressed to {matching}");
+        }
+
         // ---- Multi-file WIT package merging ------------------------------
 
         /// <summary>
