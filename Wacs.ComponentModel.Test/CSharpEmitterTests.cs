@@ -532,6 +532,38 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, emitted.Content);
         }
 
+        // ---- Types: variant -----------------------------------------------
+
+        private static string FindTypesVariantFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "types-variant");
+        }
+
+        [Fact]
+        public void EmitExportInterfaceFile_matches_reference_variant_shape()
+        {
+            // Exercises: primitive-payload case (f32), tuple-payload
+            // case (tuple<f32,f32> → (float, float)), no-payload
+            // case (empty), string-payload case — covers the four
+            // variant-case shapes in wit-bindgen 0.30.0's output.
+            var fixtureDir = FindTypesVariantFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "var.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "def");
+
+            var emitted = CSharpEmitter.EmitExportInterfaceFile(iface, "var-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "VarWorldWorld.wit.exports.local.var.IDef.cs"));
+            Assert.Equal(expected, emitted.Content);
+        }
+
         // ---- Interop: primitive-only import Interop file ------------------
 
         private static string FindInteropPrimitivesFixtureDir()

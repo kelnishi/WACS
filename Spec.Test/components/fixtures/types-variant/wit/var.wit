@@ -1,0 +1,13 @@
+package local:var;
+interface def {
+    variant shape {
+        circle(f32),
+        rectangle(tuple<f32, f32>),
+        empty,
+        labeled(string),
+    }
+
+    draw: func(s: shape);
+    make-circle: func(r: f32) -> shape;
+}
+world var-world { export def; }

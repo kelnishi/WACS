@@ -36,6 +36,7 @@ namespace Wacs.ComponentModel.CSharpEmit
                 CtEnumType e => EmitEnum(named.Name, e),
                 CtFlagsType f => EmitFlags(named.Name, f),
                 CtRecordType r => EmitRecord(named.Name, r),
+                CtVariantType v => EmitVariant(named.Name, v),
                 _ => throw new NotImplementedException(
                     "Type emission for " + named.Type.GetType().Name +
                     " is a Phase 1a.2 follow-up."),
@@ -154,6 +155,98 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append(" = ").Append(fld).Append(";\n");
             }
             sb.Append("        }\n");
+            sb.Append("    }\n");
+            return sb.ToString();
+        }
+
+        // ---- variant -------------------------------------------------------
+
+        /// <summary>
+        /// WIT <c>variant</c> → C# class implementing a
+        /// discriminated union via a <c>byte Tag</c> field plus an
+        /// <c>object? value</c> payload. One static factory per
+        /// case (with or without payload), an <c>As{Case}</c>
+        /// property per payload-carrying case, and
+        /// <c>public const byte {CASE_UPPER} = i;</c> discriminant
+        /// constants at the bottom.
+        ///
+        /// <para>Verified against wit-bindgen-csharp 0.30.0 on a
+        /// fixture with primitive, tuple, string, and no-payload
+        /// cases. Cross-interface payload types (the
+        /// <c>global::X.Y.IError.Error</c>-style qualified reference
+        /// used for <c>StreamError.lastOperationFailed(error)</c>)
+        /// are a separate cross-interface-qualifier follow-up — for
+        /// now payloads are emitted through <c>TypeRefEmit.EmitParam</c>
+        /// and so same-interface and primitive/aggregate payloads
+        /// work; cross-interface refs produce an unqualified name
+        /// that won't compile until the qualifier lands.</para>
+        /// </summary>
+        private static string EmitVariant(string name, CtVariantType v)
+        {
+            var className = NameConventions.ToPascalCase(name);
+            var sb = new StringBuilder();
+            sb.Append("    public class ").Append(className).Append(" {\n");
+            sb.Append("        public readonly byte Tag;\n");
+            sb.Append("        private readonly object? value;\n\n");
+
+            sb.Append("        private ").Append(className)
+              .Append("(byte tag, object? value) {\n");
+            sb.Append("            this.Tag = tag;\n");
+            sb.Append("            this.value = value;\n");
+            sb.Append("        }\n\n");
+
+            // Static factories — one per case (payload or no-payload).
+            for (int i = 0; i < v.Cases.Count; i++)
+            {
+                var c = v.Cases[i];
+                var caseCamel = NameConventions.ToCamelCase(c.Name);
+                var caseUpper = NameConventions.ToUpperSnake(c.Name);
+
+                sb.Append("        public static ").Append(className)
+                  .Append(' ').Append(caseCamel).Append('(');
+                if (c.Payload != null)
+                {
+                    sb.Append(TypeRefEmit.EmitParam(c.Payload));
+                    sb.Append(' ').Append(caseCamel);
+                }
+                sb.Append(") {\n");
+                sb.Append("            return new ").Append(className)
+                  .Append('(').Append(caseUpper).Append(", ");
+                sb.Append(c.Payload != null ? caseCamel : "null");
+                sb.Append(");\n");
+                sb.Append("        }\n\n");
+            }
+
+            // As{Case} properties — only payload-carrying cases.
+            foreach (var c in v.Cases)
+            {
+                if (c.Payload == null) continue;
+                var casePascal = NameConventions.ToPascalCase(c.Name);
+                var caseUpper = NameConventions.ToUpperSnake(c.Name);
+                var payloadType = TypeRefEmit.EmitParam(c.Payload);
+
+                sb.Append("        public ").Append(payloadType)
+                  .Append(" As").Append(casePascal).Append('\n');
+                sb.Append("        {\n");
+                sb.Append("            get\n");
+                sb.Append("            {\n");
+                sb.Append("                if (Tag == ").Append(caseUpper).Append(")\n");
+                sb.Append("                return (").Append(payloadType).Append(")value!;\n");
+                sb.Append("                else\n");
+                sb.Append("                throw new ArgumentException(\"expected ")
+                  .Append(caseUpper).Append(", got \" + Tag);\n");
+                sb.Append("            }\n");
+                sb.Append("        }\n\n");
+            }
+
+            // Discriminant constants — no blank lines between.
+            for (int i = 0; i < v.Cases.Count; i++)
+            {
+                var caseUpper = NameConventions.ToUpperSnake(v.Cases[i].Name);
+                sb.Append("        public const byte ")
+                  .Append(caseUpper).Append(" = ").Append(i).Append(";\n");
+            }
+
             sb.Append("    }\n");
             return sb.ToString();
         }

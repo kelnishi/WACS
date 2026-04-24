@@ -496,6 +496,11 @@ using System.Diagnostics.CodeAnalysis;
                     foreach (var f in rec.Fields)
                         if (!IsTypeEmitable(f.Type)) return false;
                     return true;
+                case CtVariantType v:
+                    foreach (var c in v.Cases)
+                        if (c.Payload != null && !IsTypeEmitable(c.Payload))
+                            return false;
+                    return true;
                 default: return false;
             }
         }
