@@ -254,7 +254,9 @@ namespace Wacs.ComponentModel.Runtime
                             foreach (var e in entries)
                             {
                                 if (e.Sort != Parser.ComponentSort.Type) continue;
-                                if (!e.IsSubResource)
+                                if (e.IsSubResource)
+                                    map[typeIdx] = new Parser.ComponentResourceType(null);
+                                else
                                     aliases[typeIdx] = e.Index;
                                 typeIdx++;
                             }

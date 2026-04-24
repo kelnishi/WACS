@@ -132,6 +132,44 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void DecodeComponentType_recovers_resource_name()
+        {
+            // resource-component declares
+            //   resource counter { constructor; value: func() -> u32 }
+            //   export make: func() -> counter
+            // wit-component encodes the resource type as a
+            // SubResource type-import; the decoder should still
+            // surface "counter" as a named CtResourceType in the
+            // world's types, and the make export's result type
+            // should be CtOwnType pointing at the named resource.
+            var bytes = LoadFixture("resource-component", "rsrc.componenttype.bin");
+            var pkg = BinaryWitDecoder.DecodeComponentType(bytes);
+            Assert.NotNull(pkg);
+            var world = pkg!.Worlds[0];
+
+            var counter = world.Types.FirstOrDefault(t => t.Name == "counter");
+            Assert.NotNull(counter);
+            Assert.IsType<CtResourceType>(counter!.Type);
+
+            // make: func() -> own<counter>
+            var make = world.Exports.FirstOrDefault(e => e.Name == "make");
+            Assert.NotNull(make);
+            var fn = Assert.IsType<CtExternFunc>(make!.Spec);
+            // Result is either CtOwnType wrapping a TypeRef to
+            // counter, or a direct CtTypeRef — both shapes
+            // surface the resource's name.
+            var ret = fn.Function.Result;
+            Assert.NotNull(ret);
+            var resourceName = ret switch
+            {
+                CtOwnType own when own.Resource is CtTypeRef r => r.Name,
+                CtTypeRef r => r.Name,
+                _ => null,
+            };
+            Assert.Equal("counter", resourceName);
+        }
+
+        [Fact]
         public void DecodeComponentType_recovers_enum_name_and_cases()
         {
             // enum-component declares `enum direction { north, south,

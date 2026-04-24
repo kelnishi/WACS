@@ -1,0 +1,9 @@
+package local:rsrc;
+
+world rsrc {
+    resource counter {
+        constructor();
+        value: func() -> u32;
+    }
+    export make: func() -> counter;
+}

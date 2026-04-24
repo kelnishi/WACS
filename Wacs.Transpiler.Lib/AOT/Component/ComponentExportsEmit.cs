@@ -145,9 +145,10 @@ namespace Wacs.Transpiler.AOT.Component
                     if (emitted != null)
                         emittedTypes[named.Name] = emitted;
                     return;
-                // Resources land in #299 — IDisposable wrapper
-                // around an i32 handle plus a per-instance handle
-                // table.
+                case CtResourceType res:
+                    emittedTypes[named.Name] =
+                        EmitResourceType(module, @namespace, named.Name, res);
+                    return;
             }
         }
 
@@ -176,6 +177,55 @@ namespace Wacs.Transpiler.AOT.Component
                 enumBuilder.DefineLiteral(PascalCase(en.Cases[i]), value);
             }
             return enumBuilder.CreateType()!;
+        }
+
+        /// <summary>Emit a public C# class for a WIT resource
+        /// declaration. Shape: a sealed class holding the wasm
+        /// handle (i32) as a public readonly field. Internal
+        /// constructor takes the handle directly. The
+        /// <c>[resource-drop]Type</c> core export wires through
+        /// to <see cref="System.IDisposable"/> in a Phase 1b
+        /// follow-up — for now the wrapper is non-disposable
+        /// and the handle leaks until the component's instance
+        /// is replaced.
+        ///
+        /// <para>Resource methods (constructors, instance and
+        /// static methods declared inside the WIT
+        /// <c>resource</c> block) are also Phase 1b follow-ups —
+        /// each becomes a C# instance method delegating to its
+        /// matching <c>[method]Type.name</c> core export.</para>
+        /// </summary>
+        private static Type EmitResourceType(
+            ModuleBuilder module, string @namespace,
+            string witName, CtResourceType res)
+        {
+            var typeName = @namespace + "." + PascalCase(witName);
+            var classBuilder = module.DefineType(typeName,
+                TypeAttributes.Public | TypeAttributes.Sealed
+                    | TypeAttributes.Class | TypeAttributes.AutoClass
+                    | TypeAttributes.AnsiClass | TypeAttributes.BeforeFieldInit,
+                typeof(object));
+
+            var handleField = classBuilder.DefineField(
+                "Handle", typeof(int),
+                FieldAttributes.Public | FieldAttributes.InitOnly);
+
+            var ctor = classBuilder.DefineConstructor(
+                MethodAttributes.Public | MethodAttributes.SpecialName
+                    | MethodAttributes.RTSpecialName,
+                CallingConventions.Standard, new[] { typeof(int) });
+            ctor.DefineParameter(1, ParameterAttributes.None, "handle");
+            var ctorIl = ctor.GetILGenerator();
+            ctorIl.Emit(OpCodes.Ldarg_0);
+            ctorIl.Emit(OpCodes.Call,
+                typeof(object).GetConstructor(Type.EmptyTypes)!);
+            ctorIl.Emit(OpCodes.Ldarg_0);
+            ctorIl.Emit(OpCodes.Ldarg_1);
+            ctorIl.Emit(OpCodes.Stfld, handleField);
+            ctorIl.Emit(OpCodes.Ret);
+
+            _ = res;   // dtor wiring is a follow-up
+            return classBuilder.CreateType()!;
         }
 
         /// <summary>Emit a public C# class for a WIT variant
@@ -464,6 +514,7 @@ namespace Wacs.Transpiler.AOT.Component
             if (TryResolveRecordOfPrims(r, types, out _, out _)) return true;
             if (TryResolveVariantReturn(r, types, out var vrShape)
                 && !vrShape.HasAggregatePayload) return true;
+            if (TryResolveOwnReturn(r, types, out _)) return true;
             return false;
         }
 
@@ -606,6 +657,26 @@ namespace Wacs.Transpiler.AOT.Component
                 }
             }
             shape = new VariantShape(names, payloads, aggregate);
+            return true;
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a type-ref
+        /// to an <c>own&lt;R&gt;</c> handle pointing at a fresh
+        /// resource type. <paramref name="resourceTypeIdx"/>
+        /// captures the slot of the underlying resource so the
+        /// emitter can resolve the C# class via the WIT
+        /// decoder's named-type map.</summary>
+        private static bool TryResolveOwnReturn(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            out uint resourceTypeIdx)
+        {
+            resourceTypeIdx = 0;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentOwnType own)) return false;
+            if (own.TypeIdx >= types.Count) return false;
+            if (!(types[(int)own.TypeIdx] is ComponentResourceType)) return false;
+            resourceTypeIdx = own.TypeIdx;
             return true;
         }
 
@@ -793,6 +864,7 @@ namespace Wacs.Transpiler.AOT.Component
             bool isFlagsReturn = false;
             bool isRecordReturn = false;
             bool isVariantReturn = false;
+            bool isOwnReturn = false;
             ComponentPrim listElemPrim = default;
             ComponentPrim optionInnerPrim = default;
             ResultSide resultOkSide = ResultSide.Absent;
@@ -912,6 +984,17 @@ namespace Wacs.Transpiler.AOT.Component
                 if (named == null) return;
                 returnType = named;
             }
+            else if (TryResolveOwnReturn(
+                export.Signature.Results[0], types, out _))
+            {
+                isOwnReturn = true;
+                // own<R> returns require a generated resource
+                // class. Reject if no name is bound.
+                var named = TryFindNamedReturn(decodedWit, emittedTypes,
+                                                export.Name);
+                if (named == null) return;
+                returnType = named;
+            }
             else
             {
                 return;   // shouldn't reach — IsEmittable rejects
@@ -982,6 +1065,11 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 EmitVariantReturnBody(il, instanceField, coreMethod, export,
                                       types, returnType, variantShape!);
+            }
+            else if (isOwnReturn)
+            {
+                EmitOwnReturnBody(il, instanceField, coreMethod, export,
+                                  types, returnType);
             }
             else
             {
@@ -1891,6 +1979,31 @@ namespace Wacs.Transpiler.AOT.Component
         }
 
         /// <summary>
+        /// IL body for an <c>own&lt;R&gt;</c> return. Core
+        /// returns the handle as i32; the C# surface wraps that
+        /// in <c>new R(handle)</c>. Ownership semantics — the
+        /// host now owns the handle and is responsible for
+        /// dropping it via the resource-drop core export — are
+        /// surfaced through a follow-up <see cref="System.IDisposable"/>
+        /// implementation on the resource class.
+        /// </summary>
+        private static void EmitOwnReturnBody(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types, Type resourceType)
+        {
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
+            // Wrap the i32 handle in `new ResourceClass(handle)`.
+            var ctor = resourceType.GetConstructor(new[] { typeof(int) });
+            if (ctor == null)
+                throw new InvalidOperationException(
+                    "Resource class missing (int) constructor for "
+                    + export.Name + ".");
+            il.Emit(OpCodes.Newobj, ctor);
+            il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
         /// IL body for a variant return. Reads the disc byte at
         /// retArea, then for each payload-bearing case reads its
         /// payload at the variant payload offset (max alignment
@@ -2016,9 +2129,10 @@ namespace Wacs.Transpiler.AOT.Component
         }
 
         /// <summary>Look up the named C# Type bound to an
-        /// export's return type via the decoded WIT. Returns null
-        /// when the export isn't found, the result isn't a
-        /// CtTypeRef, or the named type isn't pre-emitted.</summary>
+        /// export's return type via the decoded WIT. Recognizes
+        /// direct CtTypeRef as well as CtOwnType /
+        /// CtBorrowType-wrapped refs (resource handles are still
+        /// surfaced by the underlying resource's name).</summary>
         private static Type? TryFindNamedReturn(
             CtPackage? decodedWit, Dictionary<string, Type> emittedTypes,
             string exportName)
@@ -2026,13 +2140,24 @@ namespace Wacs.Transpiler.AOT.Component
             if (decodedWit == null) return null;
             foreach (var world in decodedWit.Worlds)
                 foreach (var ex in world.Exports)
-                    if (ex.Name == exportName
-                        && ex.Spec is CtExternFunc fn
-                        && fn.Function.Result is CtTypeRef tref
-                        && emittedTypes.TryGetValue(tref.Name, out var t))
+                {
+                    if (ex.Name != exportName) continue;
+                    if (!(ex.Spec is CtExternFunc fn)) continue;
+                    var refName = NamedTypeFor(fn.Function.Result);
+                    if (refName != null
+                        && emittedTypes.TryGetValue(refName, out var t))
                         return t;
+                }
             return null;
         }
+
+        private static string? NamedTypeFor(CtValType? v) => v switch
+        {
+            CtTypeRef r => r.Name,
+            CtOwnType own => NamedTypeFor(own.Resource),
+            CtBorrowType bo => NamedTypeFor(bo.Resource),
+            _ => null,
+        };
 
         private static void EmitTupleReturnBody(
             ILGenerator il, FieldBuilder instanceField,
