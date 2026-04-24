@@ -1,0 +1,5 @@
+package local:rs;
+world rs {
+    export greet: func() -> result<string, u32>;
+    export fail:  func() -> result<string, u32>;
+}
