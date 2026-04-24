@@ -100,7 +100,8 @@ namespace Wacs.ComponentModel.CSharpEmit
             var entryPoint = entryPointBase + "#" + fn.Name;
 
             var stubRet = StubReturnType(fn.Type);
-            var isVoid = stubRet == "void";
+            var stubIsVoid = stubRet == "void";
+            var isElidedResult = IsElidedResult(fn.Type);
 
             sb.Append("        [UnmanagedCallersOnly(EntryPoint = \"");
             sb.Append(entryPoint).Append("\")]\n");
@@ -111,7 +112,18 @@ namespace Wacs.ComponentModel.CSharpEmit
             sb.Append(") {\n");
             sb.Append("\n");  // blank line inside
 
-            if (!isVoid)
+            if (isElidedResult)
+            {
+                EmitElidedResultTrampolineBody(sb, fn, implClassName, methodName);
+            }
+            else if (stubIsVoid)
+            {
+                sb.Append("            ").Append(implClassName).Append('.').Append(methodName);
+                sb.Append('(');
+                EmitLiftedArgs(sb, fn.Type);
+                sb.Append(");\n");
+            }
+            else
             {
                 sb.Append("            ");
                 sb.Append(TypeRefEmit.EmitReturn(fn.Type.Result!));
@@ -124,24 +136,17 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append(EmitLower(fn.Type.Result!, "ret"));
                 sb.Append(";\n");
             }
-            else
-            {
-                sb.Append("            ").Append(implClassName).Append('.').Append(methodName);
-                sb.Append('(');
-                EmitLiftedArgs(sb, fn.Type);
-                sb.Append(");\n");
-            }
 
             sb.Append("\n");  // blank line before closing
             sb.Append("        }\n");
             sb.Append("\n");
 
-            // cabi_post_* cleanup trampoline — only emitted for
-            // non-void returns. Phase 1a.2 body is a TODO stub
-            // (wit-bindgen 0.30.0 emits exactly this); real
-            // cleanup bodies come when the canonical-ABI
-            // return-area + dealloc emitters land.
-            if (!isVoid)
+            // cabi_post_* cleanup trampoline — emitted for any
+            // non-void stub return (including elided-result, which
+            // has stub return `int` for the discriminant). Phase
+            // 1a.2 body is a TODO stub; real cleanup bodies come
+            // when the canonical-ABI dealloc emitters land.
+            if (!stubIsVoid)
             {
                 sb.Append("        [UnmanagedCallersOnly(EntryPoint = \"cabi_post_");
                 sb.Append(entryPoint).Append("\")]\n");
@@ -152,6 +157,62 @@ namespace Wacs.ComponentModel.CSharpEmit
                 sb.Append("        }\n");
                 sb.Append("\n");
             }
+        }
+
+        /// <summary>
+        /// True when the function returns <c>result</c> with both
+        /// ok and err sides elided — <c>result</c> alone, no
+        /// payloads. Interface sees <c>void</c>; stub returns
+        /// <c>int</c> (discriminant: 0=ok, 1=err).
+        /// </summary>
+        private static bool IsElidedResult(CtFunctionType sig)
+        {
+            return sig.Result is CtResultType r
+                && r.Ok == null && r.Err == null;
+        }
+
+        /// <summary>
+        /// Emit the <c>result&lt;_, _&gt;</c> trampoline body.
+        /// Calls <c>Impl.Method</c> inside a try/catch, lifts the
+        /// outcome to <c>Result&lt;None, None&gt;</c>, then lowers
+        /// the Tag to an <c>int</c> discriminant (0=ok, 1=err).
+        /// Matches RunInterop.cs byte-for-byte.
+        /// </summary>
+        private static void EmitElidedResultTrampolineBody(
+            StringBuilder sb,
+            CtInterfaceFunction fn,
+            string implClassName,
+            string methodName)
+        {
+            sb.Append("            Result<None, None> ret;\n");
+            sb.Append("            try {\n");
+            sb.Append("                ").Append(implClassName).Append('.').Append(methodName);
+            sb.Append('(');
+            EmitLiftedArgs(sb, fn.Type);
+            sb.Append(");\n");
+            sb.Append("                ret = Result<None, None>.ok(new None());\n");
+            sb.Append("            } catch (WitException e) {\n");
+            sb.Append("                switch (e.NestingLevel) {\n");
+            sb.Append("                    case 0: {\n");
+            sb.Append("                        ret = Result<None, None>.err((None) e.Value);\n");
+            sb.Append("                        break;\n");
+            sb.Append("                    }\n\n");
+            sb.Append("                    default: throw new ArgumentException($\"invalid nesting level: {e.NestingLevel}\");\n");
+            sb.Append("                }\n");
+            sb.Append("            }\n\n");
+            sb.Append("            int lowered;\n\n");
+            sb.Append("            switch (ret.Tag) {\n");
+            sb.Append("                case 0: {\n\n");
+            sb.Append("                    lowered = 0;\n\n");
+            sb.Append("                    break;\n");
+            sb.Append("                }\n");
+            sb.Append("                case 1: {\n\n");
+            sb.Append("                    lowered = 1;\n\n");
+            sb.Append("                    break;\n");
+            sb.Append("                }\n\n");
+            sb.Append("                default: throw new ArgumentException($\"invalid discriminant: {ret}\");\n");
+            sb.Append("            }\n");
+            sb.Append("            return lowered;\n");
         }
 
         // ---- Stub ABI mapping ---------------------------------------------
@@ -169,6 +230,9 @@ namespace Wacs.ComponentModel.CSharpEmit
                     _ => "int",
                 };
             }
+            // result<_, _> stub returns int — the discriminant.
+            if (t is CtResultType r && r.Ok == null && r.Err == null)
+                return "int";
             throw new NotImplementedException(
                 "Trampoline stub type for " + t.GetType().Name +
                 " is a follow-up.");
