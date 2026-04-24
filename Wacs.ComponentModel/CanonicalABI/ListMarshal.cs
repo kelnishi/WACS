@@ -95,5 +95,25 @@ namespace Wacs.ComponentModel.CanonicalABI
             MemoryMarshal.Cast<byte, T>(bytes).CopyTo(result);
             return result;
         }
+
+        /// <summary>
+        /// Byte-copy a primitive-element array into guest memory
+        /// at <paramref name="dstPtr"/>. The bytes mirror the
+        /// array's native little-endian representation — the same
+        /// layout <see cref="LiftPrim{T}(byte[], int, int)"/>
+        /// reads back. Used by the transpiler's lower path after
+        /// calling the guest's <c>cabi_realloc</c>.
+        /// </summary>
+        public static void CopyArrayToGuest<T>(T[] values, byte[] memory, int dstPtr)
+            where T : unmanaged
+        {
+            var elemSize = global::System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
+            var byteLen = values.Length * elemSize;
+            if (dstPtr < 0 || dstPtr + byteLen > memory.Length)
+                throw new ArgumentOutOfRangeException(nameof(dstPtr),
+                    "List copy span out of range of guest memory buffer.");
+            var src = MemoryMarshal.AsBytes(values.AsSpan());
+            src.CopyTo(memory.AsSpan(dstPtr, byteLen));
+        }
     }
 }

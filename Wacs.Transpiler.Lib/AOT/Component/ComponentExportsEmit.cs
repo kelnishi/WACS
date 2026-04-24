@@ -140,7 +140,11 @@ namespace Wacs.Transpiler.AOT.Component
             ComponentFuncType fn, IReadOnlyList<DefTypeEntry> types)
         {
             foreach (var p in fn.Params)
-                if (!p.Type.IsPrimitive) return false;
+            {
+                if (p.Type.IsPrimitive) continue;
+                if (TryResolveListOfPrim(p.Type, types, out _)) continue;
+                return false;
+            }
             if (fn.Results.Count == 0) return true;
             if (fn.Results.Count != 1) return false;
             var r = fn.Results[0];
@@ -252,10 +256,25 @@ namespace Wacs.Transpiler.AOT.Component
             var coreMethod = FindCoreMethod(coreIExports, export.Name);
             if (coreMethod == null) return;
 
-            // C#-side types per the COMPONENT signature.
+            // C#-side types per the COMPONENT signature. Primitive
+            // params map direct; list<prim> params map to T[].
             var paramTypes = new Type[export.Signature.Params.Count];
             for (int i = 0; i < paramTypes.Length; i++)
-                paramTypes[i] = PrimToCs(export.Signature.Params[i].Type.Prim);
+            {
+                var pt = export.Signature.Params[i].Type;
+                if (pt.IsPrimitive)
+                {
+                    paramTypes[i] = PrimToCs(pt.Prim);
+                }
+                else if (TryResolveListOfPrim(pt, types, out var listElem))
+                {
+                    paramTypes[i] = PrimToCs(listElem).MakeArrayType();
+                }
+                else
+                {
+                    return;   // shouldn't reach — IsEmittable rejects
+                }
+            }
 
             // Return-type dispatch: void / primitive (inline),
             // string (StringMarshal chokepoint), list<prim>
@@ -337,31 +356,33 @@ namespace Wacs.Transpiler.AOT.Component
             if (isTupleReturn)
             {
                 EmitTupleReturnBody(il, instanceField, coreMethod, export,
-                                    tupleElemPrims, returnType);
+                                    types, tupleElemPrims, returnType);
             }
             else if (isResultReturn)
             {
                 EmitResultReturnBody(il, instanceField, coreMethod, export,
-                                     resultOkPrim, resultErrPrim, returnType);
+                                     types, resultOkPrim, resultErrPrim,
+                                     returnType);
             }
             else if (isOptionReturn)
             {
                 EmitOptionReturnBody(il, instanceField, coreMethod, export,
-                                     optionInnerPrim);
+                                     types, optionInnerPrim);
             }
             else if (isListReturn)
             {
                 EmitListReturnBody(il, instanceField, coreMethod, export,
-                                   listElemPrim);
+                                   types, listElemPrim);
             }
             else if (IsStringReturn(export.Signature))
             {
-                EmitStringReturnBody(il, instanceField, coreMethod, export);
+                EmitStringReturnBody(il, instanceField, coreMethod, export,
+                                     types);
             }
             else
             {
                 EmitPrimitiveBody(il, instanceField, coreMethod, export,
-                                  returnType);
+                                  types, returnType);
             }
         }
 
@@ -375,9 +396,9 @@ namespace Wacs.Transpiler.AOT.Component
         private static void EmitPrimitiveBody(
             ILGenerator il, FieldBuilder instanceField,
             MethodInfo coreMethod, EmittableExport export,
-            Type returnType)
+            IReadOnlyList<DefTypeEntry> types, Type returnType)
         {
-            EmitCoreCall(il, instanceField, coreMethod, export);
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
             if (returnType != typeof(void))
             {
                 EmitReturnCast(il, coreMethod.ReturnType,
@@ -410,28 +431,32 @@ namespace Wacs.Transpiler.AOT.Component
         /// </summary>
         private static void EmitCoreCall(
             ILGenerator il, FieldBuilder instanceField,
-            MethodInfo coreMethod, EmittableExport export)
+            MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types)
         {
-            EmitPrecomputeStringParamLocals(
-                il, instanceField, coreMethod, export,
-                out var stringPtrLocals, out var stringLenLocals);
+            EmitPrecomputeBufferParamLocals(
+                il, instanceField, coreMethod, export, types,
+                out var ptrLocals, out var countLocals);
 
             il.Emit(OpCodes.Ldsfld, instanceField);
             var coreParams = coreMethod.GetParameters();
             int coreParamIdx = 0;
             for (int i = 0; i < export.Signature.Params.Count; i++)
             {
-                var prim = export.Signature.Params[i].Type.Prim;
-                if (prim == ComponentPrim.String)
+                var pt = export.Signature.Params[i].Type;
+                if (ptrLocals[i] != null)
                 {
-                    il.Emit(OpCodes.Ldloc, stringPtrLocals[i]!);
-                    il.Emit(OpCodes.Ldloc, stringLenLocals[i]!);
+                    // String or list<prim> — the precompute step
+                    // stashed (ptr, count) in locals. Push them
+                    // as the two core args.
+                    il.Emit(OpCodes.Ldloc, ptrLocals[i]!);
+                    il.Emit(OpCodes.Ldloc, countLocals[i]!);
                     coreParamIdx += 2;
                 }
                 else
                 {
                     il.Emit(OpCodes.Ldarg, i);
-                    EmitParamCast(il, prim,
+                    EmitParamCast(il, pt.Prim,
                                   coreParams[coreParamIdx].ParameterType);
                     coreParamIdx++;
                 }
@@ -440,44 +465,89 @@ namespace Wacs.Transpiler.AOT.Component
         }
 
         /// <summary>
-        /// For each string-typed component param, emit the UTF-8
-        /// encode + <c>cabi_realloc</c> + memcpy sequence and
-        /// store (ptr, len) in locals. Leaves primitive params
+        /// For each aggregate-buffer-typed component param
+        /// (string or list&lt;primitive&gt;), emit the encode +
+        /// <c>cabi_realloc</c> + memcpy sequence and store
+        /// (ptr, count) in locals. Primitive params stay
         /// untouched — they flow through as direct Ldarg+cast.
         /// Locals for primitive slots stay null.
+        ///
+        /// <para>For <c>string</c>: count = UTF-8 byte length
+        /// (the canonical form both sides of the ABI agree on).
+        /// For <c>list&lt;T&gt;</c>: count = element count (also
+        /// canonical — core functions take count, not byte
+        /// length, since element size is known from the type).</para>
         /// </summary>
-        private static void EmitPrecomputeStringParamLocals(
+        private static void EmitPrecomputeBufferParamLocals(
             ILGenerator il, FieldBuilder instanceField,
             MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types,
             out LocalBuilder?[] ptrLocals,
-            out LocalBuilder?[] lenLocals)
+            out LocalBuilder?[] countLocals)
         {
             var paramCount = export.Signature.Params.Count;
             ptrLocals = new LocalBuilder?[paramCount];
-            lenLocals = new LocalBuilder?[paramCount];
+            countLocals = new LocalBuilder?[paramCount];
 
-            bool anyString = false;
+            bool anyBuffer = false;
             for (int i = 0; i < paramCount; i++)
             {
-                if (export.Signature.Params[i].Type.IsPrimitive
-                    && export.Signature.Params[i].Type.Prim == ComponentPrim.String)
+                var pt = export.Signature.Params[i].Type;
+                if (pt.IsPrimitive && pt.Prim == ComponentPrim.String)
                 {
-                    anyString = true;
+                    anyBuffer = true;
+                    break;
+                }
+                if (!pt.IsPrimitive && TryResolveListOfPrim(pt, types, out _))
+                {
+                    anyBuffer = true;
                     break;
                 }
             }
-            if (!anyString) return;
+            if (!anyBuffer) return;
 
             var reallocMethod = FindCoreReallocMethod(coreMethod.DeclaringType!);
             if (reallocMethod == null)
                 throw new InvalidOperationException(
-                    "String-param component requires the core module to export "
-                    + "`cabi_realloc` — not found on the core IExports.");
+                    "Aggregate-param component requires the core module to "
+                    + "export `cabi_realloc` — not found on the core IExports.");
             var memoryProp = instanceField.FieldType.GetProperty("Memory");
             if (memoryProp == null)
                 throw new InvalidOperationException(
-                    "String-param component requires Module.Memory.");
+                    "Aggregate-param component requires Module.Memory.");
 
+            for (int i = 0; i < paramCount; i++)
+            {
+                var pt = export.Signature.Params[i].Type;
+                if (pt.IsPrimitive && pt.Prim == ComponentPrim.String)
+                {
+                    EmitLowerStringParamToLocals(
+                        il, instanceField, reallocMethod, memoryProp,
+                        i, out ptrLocals[i], out countLocals[i]);
+                }
+                else if (!pt.IsPrimitive
+                         && TryResolveListOfPrim(pt, types, out var elemPrim))
+                {
+                    EmitLowerListParamToLocals(
+                        il, instanceField, reallocMethod, memoryProp,
+                        i, elemPrim,
+                        out ptrLocals[i], out countLocals[i]);
+                }
+            }
+        }
+
+        /// <summary>
+        /// IL for the string-param lower path: UTF-8 encode →
+        /// <c>cabi_realloc</c>(0, 0, 1, byteLen) → byte-copy.
+        /// Stashes (ptr, byteLen) in locals for the caller to
+        /// push at core-call time.
+        /// </summary>
+        private static void EmitLowerStringParamToLocals(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo reallocMethod, PropertyInfo memoryProp,
+            int argIdx, out LocalBuilder ptrLocal,
+            out LocalBuilder countLocal)
+        {
             var encode = typeof(StringMarshal).GetMethod(
                 nameof(StringMarshal.EncodeUtf8),
                 new[] { typeof(string) })!;
@@ -485,47 +555,115 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(StringMarshal.CopyToGuest),
                 new[] { typeof(byte[]), typeof(byte[]), typeof(int) })!;
 
-            for (int i = 0; i < paramCount; i++)
-            {
-                if (!export.Signature.Params[i].Type.IsPrimitive) continue;
-                if (export.Signature.Params[i].Type.Prim != ComponentPrim.String)
-                    continue;
+            var bytesLocal = il.DeclareLocal(typeof(byte[]));
+            countLocal = il.DeclareLocal(typeof(int));
+            ptrLocal = il.DeclareLocal(typeof(int));
 
-                var bytesLocal = il.DeclareLocal(typeof(byte[]));
-                var lenLocal = il.DeclareLocal(typeof(int));
-                var ptrLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldarg, argIdx);
+            il.EmitCall(OpCodes.Call, encode, null);
+            il.Emit(OpCodes.Stloc, bytesLocal);
 
-                // bytes = StringMarshal.EncodeUtf8(arg_i)
-                il.Emit(OpCodes.Ldarg, i);
-                il.EmitCall(OpCodes.Call, encode, null);
-                il.Emit(OpCodes.Stloc, bytesLocal);
+            il.Emit(OpCodes.Ldloc, bytesLocal);
+            il.Emit(OpCodes.Ldlen);
+            il.Emit(OpCodes.Conv_I4);
+            il.Emit(OpCodes.Stloc, countLocal);
 
-                // len = bytes.Length
-                il.Emit(OpCodes.Ldloc, bytesLocal);
-                il.Emit(OpCodes.Ldlen);
-                il.Emit(OpCodes.Conv_I4);
-                il.Emit(OpCodes.Stloc, lenLocal);
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.Emit(OpCodes.Ldc_I4_0);     // oldPtr
+            il.Emit(OpCodes.Ldc_I4_0);     // oldLen
+            il.Emit(OpCodes.Ldc_I4_1);     // align = 1 (byte-aligned UTF-8)
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.EmitCall(OpCodes.Callvirt, reallocMethod, null);
+            il.Emit(OpCodes.Stloc, ptrLocal);
 
-                // ptr = instance.CabiRealloc(0, 0, 1, len)
-                il.Emit(OpCodes.Ldsfld, instanceField);
-                il.Emit(OpCodes.Ldc_I4_0);     // oldPtr
-                il.Emit(OpCodes.Ldc_I4_0);     // oldLen
-                il.Emit(OpCodes.Ldc_I4_1);     // align = 1 for byte-aligned UTF-8
-                il.Emit(OpCodes.Ldloc, lenLocal);
-                il.EmitCall(OpCodes.Callvirt, reallocMethod, null);
-                il.Emit(OpCodes.Stloc, ptrLocal);
-
-                // StringMarshal.CopyToGuest(bytes, instance.Memory, ptr)
-                il.Emit(OpCodes.Ldloc, bytesLocal);
-                il.Emit(OpCodes.Ldsfld, instanceField);
-                il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
-                il.Emit(OpCodes.Ldloc, ptrLocal);
-                il.EmitCall(OpCodes.Call, copy, null);
-
-                ptrLocals[i] = ptrLocal;
-                lenLocals[i] = lenLocal;
-            }
+            il.Emit(OpCodes.Ldloc, bytesLocal);
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.Emit(OpCodes.Ldloc, ptrLocal);
+            il.EmitCall(OpCodes.Call, copy, null);
         }
+
+        /// <summary>
+        /// IL for the <c>list&lt;prim&gt;</c>-param lower path:
+        /// <c>cabi_realloc</c>(0, 0, elemSize, count * elemSize)
+        /// → byte-copy the array's native little-endian bytes
+        /// into guest memory. Stashes (ptr, count) in locals so
+        /// the caller can push them at core-call time. Alignment
+        /// equals element size — the canonical-ABI rule for
+        /// primitive-element lists.
+        /// </summary>
+        private static void EmitLowerListParamToLocals(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo reallocMethod, PropertyInfo memoryProp,
+            int argIdx, ComponentPrim elemPrim,
+            out LocalBuilder ptrLocal, out LocalBuilder countLocal)
+        {
+            var elemCs = PrimToCs(elemPrim);
+            var elemSize = PrimByteSize(elemPrim);
+            var arrayType = elemCs.MakeArrayType();
+
+            // ListMarshal.CopyArrayToGuest is the unique generic
+            // method on the class — plain GetMethod resolves it
+            // cleanly (the open generic has a single overload).
+            var copyOpen = typeof(ListMarshal).GetMethod(
+                nameof(ListMarshal.CopyArrayToGuest))!;
+            var copyClosed = copyOpen.MakeGenericMethod(elemCs);
+
+            countLocal = il.DeclareLocal(typeof(int));
+            var byteLenLocal = il.DeclareLocal(typeof(int));
+            ptrLocal = il.DeclareLocal(typeof(int));
+
+            // count = values.Length
+            il.Emit(OpCodes.Ldarg, argIdx);
+            il.Emit(OpCodes.Ldlen);
+            il.Emit(OpCodes.Conv_I4);
+            il.Emit(OpCodes.Stloc, countLocal);
+
+            // byteLen = count * elemSize
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Ldc_I4, elemSize);
+            il.Emit(OpCodes.Mul);
+            il.Emit(OpCodes.Stloc, byteLenLocal);
+
+            // ptr = instance.CabiRealloc(0, 0, elemSize, byteLen)
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldc_I4, elemSize);
+            il.Emit(OpCodes.Ldloc, byteLenLocal);
+            il.EmitCall(OpCodes.Callvirt, reallocMethod, null);
+            il.Emit(OpCodes.Stloc, ptrLocal);
+
+            // ListMarshal.CopyArrayToGuest<T>(values, instance.Memory, ptr)
+            il.Emit(OpCodes.Ldarg, argIdx);
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.Emit(OpCodes.Ldloc, ptrLocal);
+            il.EmitCall(OpCodes.Call, copyClosed, null);
+
+            _ = arrayType;
+        }
+
+        /// <summary>Byte size of a primitive type's native
+        /// little-endian encoding. Used for alignment + byte-len
+        /// computation at list-param lower time.</summary>
+        private static int PrimByteSize(ComponentPrim p) => p switch
+        {
+            ComponentPrim.Bool => 1,
+            ComponentPrim.S8   => 1,
+            ComponentPrim.U8   => 1,
+            ComponentPrim.S16  => 2,
+            ComponentPrim.U16  => 2,
+            ComponentPrim.S32  => 4,
+            ComponentPrim.U32  => 4,
+            ComponentPrim.F32  => 4,
+            ComponentPrim.Char => 4,
+            ComponentPrim.S64  => 8,
+            ComponentPrim.U64  => 8,
+            ComponentPrim.F64  => 8,
+            _ => throw new NotSupportedException(
+                "PrimByteSize for " + p + " is a follow-up."),
+        };
 
         /// <summary>
         /// Substring-match find for the core IExports'
@@ -561,7 +699,8 @@ namespace Wacs.Transpiler.AOT.Component
         /// </summary>
         private static void EmitStringReturnBody(
             ILGenerator il, FieldBuilder instanceField,
-            MethodInfo coreMethod, EmittableExport export)
+            MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types)
         {
             var memoryProp = instanceField.FieldType.GetProperty("Memory");
             if (memoryProp == null)
@@ -573,7 +712,7 @@ namespace Wacs.Transpiler.AOT.Component
             var memoryLocal = il.DeclareLocal(typeof(byte[]));
 
             // int P = core.hello(args...);  (args lowered via cabi_realloc if string)
-            EmitCoreCall(il, instanceField, coreMethod, export);
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             // byte[] memory = instance.Memory;
@@ -615,7 +754,7 @@ namespace Wacs.Transpiler.AOT.Component
         private static void EmitListReturnBody(
             ILGenerator il, FieldBuilder instanceField,
             MethodInfo coreMethod, EmittableExport export,
-            ComponentPrim elemPrim)
+            IReadOnlyList<DefTypeEntry> types, ComponentPrim elemPrim)
         {
             var memoryProp = instanceField.FieldType.GetProperty("Memory");
             if (memoryProp == null)
@@ -627,7 +766,7 @@ namespace Wacs.Transpiler.AOT.Component
             var memoryLocal = il.DeclareLocal(typeof(byte[]));
 
             // int P = core.bytes(args...);
-            EmitCoreCall(il, instanceField, coreMethod, export);
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             // byte[] memory = instance.Memory;
@@ -674,7 +813,7 @@ namespace Wacs.Transpiler.AOT.Component
         private static void EmitOptionReturnBody(
             ILGenerator il, FieldBuilder instanceField,
             MethodInfo coreMethod, EmittableExport export,
-            ComponentPrim innerPrim)
+            IReadOnlyList<DefTypeEntry> types, ComponentPrim innerPrim)
         {
             var memoryProp = instanceField.FieldType.GetProperty("Memory");
             if (memoryProp == null)
@@ -691,7 +830,7 @@ namespace Wacs.Transpiler.AOT.Component
             var endLabel = il.DefineLabel();
 
             // int P = core.find(args...);
-            EmitCoreCall(il, instanceField, coreMethod, export);
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             // byte[] memory = instance.Memory;
@@ -765,6 +904,7 @@ namespace Wacs.Transpiler.AOT.Component
         private static void EmitResultReturnBody(
             ILGenerator il, FieldBuilder instanceField,
             MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types,
             ComponentPrim? okPrim, ComponentPrim? errPrim,
             Type tupleType)
         {
@@ -787,7 +927,7 @@ namespace Wacs.Transpiler.AOT.Component
             var errLabel = il.DefineLabel();
             var endLabel = il.DefineLabel();
 
-            EmitCoreCall(il, instanceField, coreMethod, export);
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             il.Emit(OpCodes.Ldsfld, instanceField);
@@ -877,6 +1017,7 @@ namespace Wacs.Transpiler.AOT.Component
         private static void EmitTupleReturnBody(
             ILGenerator il, FieldBuilder instanceField,
             MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types,
             ComponentPrim[] elementPrims, Type tupleType)
         {
             var memoryProp = instanceField.FieldType.GetProperty("Memory");
@@ -888,7 +1029,7 @@ namespace Wacs.Transpiler.AOT.Component
             var memoryLocal = il.DeclareLocal(typeof(byte[]));
             var resultLocal = il.DeclareLocal(tupleType);
 
-            EmitCoreCall(il, instanceField, coreMethod, export);
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             il.Emit(OpCodes.Ldsfld, instanceField);

@@ -320,6 +320,44 @@ namespace Wacs.Transpiler.Test
             Assert.Equal("roundtrip", value);
         }
 
+        private static string FindListParamComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "list-param-component", "wasm",
+                                "lp.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lowers_list_u32_param_via_cabi_realloc()
+        {
+            // list-param-component exports `sum(xs: list<u32>) -> u32`.
+            // Core signature: `(ptr: i32, count: i32) -> i32`.
+            // The emitted component adapter must byte-copy the
+            // input uint[] into guest memory via cabi_realloc and
+            // pass (ptr, count) — not (ptr, byteLen) — to the
+            // core function. Core then iterates and sums.
+            using var fs = File.OpenRead(FindListParamComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var sum = componentExports!.GetMethod("Sum");
+            Assert.NotNull(sum);
+            Assert.Equal(typeof(uint), sum!.ReturnType);
+            var pars = sum.GetParameters();
+            Assert.Single(pars);
+            Assert.Equal(typeof(uint[]), pars[0].ParameterType);
+
+            var value = (uint)sum.Invoke(null,
+                new object[] { new uint[] { 1, 2, 3, 4, 5 } })!;
+            Assert.Equal(15u, value);
+        }
+
         private static string FindF64ComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
