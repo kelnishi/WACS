@@ -131,10 +131,14 @@ namespace Wacs.Transpiler.AOT.Component
                     emittedTypes[named.Name] =
                         EmitEnumType(module, @namespace, en);
                     return;
-                // Records, variants, flags, resources land in
-                // follow-ups — each needs its own IL emit
-                // strategy (class with fields, class with
-                // discriminant, [Flags] enum, IDisposable wrapper).
+                case CtFlagsType fl:
+                    emittedTypes[named.Name] =
+                        EmitFlagsType(module, @namespace, fl);
+                    return;
+                // Records, variants, resources land in follow-ups
+                // — each needs its own IL emit strategy (class
+                // with fields, class with discriminant,
+                // IDisposable wrapper).
             }
         }
 
@@ -162,6 +166,37 @@ namespace Wacs.Transpiler.AOT.Component
                     : (object)(uint)i;
                 enumBuilder.DefineLiteral(PascalCase(en.Cases[i]), value);
             }
+            return enumBuilder.CreateType()!;
+        }
+
+        /// <summary>Emit a public C# enum type marked with
+        /// <see cref="System.FlagsAttribute"/> for a WIT flags
+        /// declaration. Each flag gets a literal value of
+        /// <c>1 &lt;&lt; i</c>. Underlying width tracks the
+        /// canonical-ABI flag wire encoding: ≤8 → byte, ≤16 →
+        /// ushort, ≤32 → uint.</summary>
+        private static Type EmitFlagsType(
+            ModuleBuilder module, string @namespace, CtFlagsType fl)
+        {
+            var underlying = fl.Flags.Count <= 8 ? typeof(byte)
+                : fl.Flags.Count <= 16 ? typeof(ushort)
+                : typeof(uint);
+            var typeName = @namespace + "." + PascalCase(fl.Name);
+            var enumBuilder = module.DefineEnum(typeName,
+                TypeAttributes.Public, underlying);
+            for (int i = 0; i < fl.Flags.Count; i++)
+            {
+                ulong bit = 1UL << i;
+                object value = underlying == typeof(byte) ? (object)(byte)bit
+                    : underlying == typeof(ushort) ? (object)(ushort)bit
+                    : (object)(uint)bit;
+                enumBuilder.DefineLiteral(PascalCase(fl.Flags[i]), value);
+            }
+            // Apply [Flags] so ToString() formats as bitmask.
+            var flagsCtor = typeof(System.FlagsAttribute)
+                .GetConstructor(Type.EmptyTypes)!;
+            enumBuilder.SetCustomAttribute(
+                new CustomAttributeBuilder(flagsCtor, Array.Empty<object>()));
             return enumBuilder.CreateType()!;
         }
 
@@ -240,6 +275,7 @@ namespace Wacs.Transpiler.AOT.Component
             if (TryResolveResult(r, types, out _, out _)) return true;
             if (TryResolveTupleOfPrims(r, types, out _)) return true;
             if (TryResolveEnumReturn(r, types, out _)) return true;
+            if (TryResolveFlagsReturn(r, types, out _)) return true;
             return false;
         }
 
@@ -310,6 +346,21 @@ namespace Wacs.Transpiler.AOT.Component
             if (t.TypeIdx >= types.Count) return false;
             if (!(types[(int)t.TypeIdx] is ComponentEnumType en)) return false;
             caseCount = en.Cases.Count;
+            return true;
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a type-ref
+        /// to a structural flags type. Wire width is determined
+        /// by flag count (≤8 → u8, ≤16 → u16, ≤32 → u32).</summary>
+        private static bool TryResolveFlagsReturn(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            out int flagCount)
+        {
+            flagCount = 0;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentFlagsType fl)) return false;
+            flagCount = fl.Flags.Count;
             return true;
         }
 
@@ -468,12 +519,14 @@ namespace Wacs.Transpiler.AOT.Component
             bool isResultReturn = false;
             bool isTupleReturn = false;
             bool isEnumReturn = false;
+            bool isFlagsReturn = false;
             ComponentPrim listElemPrim = default;
             ComponentPrim optionInnerPrim = default;
             ResultSide resultOkSide = ResultSide.Absent;
             ResultSide resultErrSide = ResultSide.Absent;
             ComponentPrim[] tupleElemPrims = Array.Empty<ComponentPrim>();
             int enumCaseCount = 0;
+            int flagCount = 0;
             Type returnType;
             if (export.Signature.Results.Count == 0)
             {
@@ -548,6 +601,13 @@ namespace Wacs.Transpiler.AOT.Component
                     decodedWit, emittedTypes, export.Name,
                     enumCaseCount);
             }
+            else if (TryResolveFlagsReturn(
+                export.Signature.Results[0], types, out flagCount))
+            {
+                isFlagsReturn = true;
+                returnType = ResolveFlagsReturnType(
+                    decodedWit, emittedTypes, export.Name, flagCount);
+            }
             else
             {
                 return;   // shouldn't reach — IsEmittable rejects
@@ -603,6 +663,11 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 EmitEnumReturnBody(il, instanceField, coreMethod, export,
                                    types, returnType, enumCaseCount);
+            }
+            else if (isFlagsReturn)
+            {
+                EmitFlagsReturnBody(il, instanceField, coreMethod, export,
+                                    types, returnType, flagCount);
             }
             else
             {
@@ -1434,6 +1499,26 @@ namespace Wacs.Transpiler.AOT.Component
         }
 
         /// <summary>
+        /// IL body for a flags return. Same wire as enum (small
+        /// integer holding the bitmask); narrow per the canonical-
+        /// ABI width rule (≤8 flags → u8, ≤16 → u16, ≤32 → u32).
+        /// </summary>
+        private static void EmitFlagsReturnBody(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types, Type returnType,
+            int flagCount)
+        {
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
+            if (flagCount <= 8)
+                il.Emit(OpCodes.Conv_U1);
+            else if (flagCount <= 16)
+                il.Emit(OpCodes.Conv_U2);
+            il.Emit(OpCodes.Ret);
+            _ = returnType;
+        }
+
+        /// <summary>
         /// Resolve the C# return type for an enum export. When
         /// <paramref name="decodedWit"/> is available and names the
         /// export's result type, look up the pre-emitted enum Type
@@ -1446,23 +1531,45 @@ namespace Wacs.Transpiler.AOT.Component
             CtPackage? decodedWit, Dictionary<string, Type> emittedTypes,
             string exportName, int caseCount)
         {
-            if (decodedWit != null)
-            {
-                foreach (var world in decodedWit.Worlds)
-                {
-                    foreach (var ex in world.Exports)
-                    {
-                        if (ex.Name != exportName) continue;
-                        if (ex.Spec is CtExternFunc fn
-                            && fn.Function.Result is CtTypeRef tref
-                            && emittedTypes.TryGetValue(tref.Name, out var t))
-                            return t;
-                    }
-                }
-            }
+            var named = TryFindNamedReturn(decodedWit, emittedTypes, exportName);
+            if (named != null) return named;
             return caseCount <= 256 ? typeof(byte)
                 : caseCount <= 65536 ? typeof(ushort)
                 : typeof(uint);
+        }
+
+        /// <summary>Resolve the C# return type for a flags export
+        /// — same shape as enum but with [Flags]-attributed
+        /// underlying. Falls back to the bitmask-width integer
+        /// type when the WIT decoder hasn't named it.</summary>
+        private static Type ResolveFlagsReturnType(
+            CtPackage? decodedWit, Dictionary<string, Type> emittedTypes,
+            string exportName, int flagCount)
+        {
+            var named = TryFindNamedReturn(decodedWit, emittedTypes, exportName);
+            if (named != null) return named;
+            return flagCount <= 8 ? typeof(byte)
+                : flagCount <= 16 ? typeof(ushort)
+                : typeof(uint);
+        }
+
+        /// <summary>Look up the named C# Type bound to an
+        /// export's return type via the decoded WIT. Returns null
+        /// when the export isn't found, the result isn't a
+        /// CtTypeRef, or the named type isn't pre-emitted.</summary>
+        private static Type? TryFindNamedReturn(
+            CtPackage? decodedWit, Dictionary<string, Type> emittedTypes,
+            string exportName)
+        {
+            if (decodedWit == null) return null;
+            foreach (var world in decodedWit.Worlds)
+                foreach (var ex in world.Exports)
+                    if (ex.Name == exportName
+                        && ex.Spec is CtExternFunc fn
+                        && fn.Function.Result is CtTypeRef tref
+                        && emittedTypes.TryGetValue(tref.Name, out var t))
+                        return t;
+            return null;
         }
 
         private static void EmitTupleReturnBody(

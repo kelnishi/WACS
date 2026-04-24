@@ -147,6 +147,18 @@ namespace Wacs.ComponentModel.Runtime.Parser
     }
 
     /// <summary>
+    /// <c>flags { a, b, c }</c> type (tag 0x6E) — a bitfield
+    /// where each named flag occupies one bit. Wire width is
+    /// determined by flag count: ≤8 → u8, ≤16 → u16, ≤32 → u32,
+    /// >32 → packed across multiple u32s (rare in practice).
+    /// </summary>
+    public sealed class ComponentFlagsType : DefTypeEntry
+    {
+        public IReadOnlyList<string> Flags { get; }
+        public ComponentFlagsType(IReadOnlyList<string> flags) { Flags = flags; }
+    }
+
+    /// <summary>
     /// Function type (tag 0x40): ordered param list (each with a
     /// name) + ordered unnamed result list. Matches <c>functype</c>
     /// in the Component Model binary spec.
@@ -214,6 +226,7 @@ namespace Wacs.ComponentModel.Runtime.Parser
         public const byte ResultTypeTag = 0x6A;
         public const byte TupleTypeTag = 0x6F;
         public const byte EnumTypeTag = 0x6D;
+        public const byte FlagsTypeTag = 0x6E;
 
         public static List<DefTypeEntry> Decode(byte[] payload)
         {
@@ -242,6 +255,8 @@ namespace Wacs.ComponentModel.Runtime.Parser
                     return DecodeTupleType(r);
                 case EnumTypeTag:
                     return DecodeEnumType(r);
+                case FlagsTypeTag:
+                    return DecodeFlagsType(r);
                 default:
                     // Unknown structural tag — capture the rest
                     // of the payload so the type slot occupies
@@ -317,6 +332,15 @@ namespace Wacs.ComponentModel.Runtime.Parser
             for (uint i = 0; i < n; i++)
                 labels[i] = r.ReadName();
             return new ComponentEnumType(labels);
+        }
+
+        private static ComponentFlagsType DecodeFlagsType(ComponentBinaryReader r)
+        {
+            var n = r.ReadVarU32();
+            var labels = new string[n];
+            for (uint i = 0; i < n; i++)
+                labels[i] = r.ReadName();
+            return new ComponentFlagsType(labels);
         }
 
         private static ComponentValType? DecodeOptionalValType(ComponentBinaryReader r)
