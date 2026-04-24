@@ -287,13 +287,27 @@ using System.Diagnostics.CodeAnalysis;
                                                            options));
                     }
 
-                    // Interop file — always emit a placeholder, even
-                    // empty. wit-bindgen emits one per interface
-                    // regardless of whether the interface has free
-                    // functions; Phase 1a.2 follow-ups fill in the
-                    // actual trampoline bodies.
-                    result.Add(EmitEmptyInteropFile(world, iref.Package,
-                                                    ifaceName, isExport));
+                    // Interop file:
+                    //  * If import-side AND target is resolved AND
+                    //    all free functions use only primitive types
+                    //    we know how to marshal → emit a full Interop
+                    //    with DllImport stubs + wrapper methods.
+                    //  * Otherwise → empty shell (Phase 1a.2 follow-ups
+                    //    will replace this with full trampoline
+                    //    emission for aggregate / resource / export
+                    //    cases).
+                    if (!isExport && iref.Target != null
+                        && IsInterfaceInteropEmitable(iref.Target))
+                    {
+                        result.Add(EmitFullImportInteropFile(
+                            world, iref.Target, iref.Package,
+                            ifaceName));
+                    }
+                    else
+                    {
+                        result.Add(EmitEmptyInteropFile(world, iref.Package,
+                                                        ifaceName, isExport));
+                    }
                     break;
                 }
                 // case CtExternFunc:  // inline func — defer
@@ -415,6 +429,49 @@ using System.Diagnostics.CodeAnalysis;
                 }
                 default: return false;
             }
+        }
+
+        /// <summary>
+        /// Stricter gate for Interop (import-side) emission: only
+        /// free functions whose params and return are all
+        /// primitives. Aggregates / strings / lists / options
+        /// require canonical-ABI marshaling emission which is a
+        /// separate follow-up. Resource-method free functions don't
+        /// exist (resource methods live inside resource classes,
+        /// handled by the types emitter).
+        /// </summary>
+        private static bool IsInterfaceInteropEmitable(CtInterfaceType iface)
+        {
+            if (iface.Types.Count > 0) return false;
+            foreach (var fn in iface.Functions)
+            {
+                if (fn.Type.NamedResults != null) return false;
+                foreach (var p in fn.Type.Params)
+                    if (!(p.Type is CtPrimType)) return false;
+                if (fn.Type.Result != null && !(fn.Type.Result is CtPrimType))
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Emit the full Interop file — with DllImport stubs and
+        /// user-facing wrappers — for an import interface whose
+        /// resolved target passes
+        /// <see cref="IsInterfaceInteropEmitable"/>.
+        /// </summary>
+        internal static EmittedSource EmitFullImportInteropFile(
+            CtWorldType world,
+            CtInterfaceType target,
+            CtPackageName pkg,
+            string interfaceName)
+        {
+            var worldNs = NameConventions.WorldNamespaceName(world.Name);
+            var className = NameConventions.ToPascalCase(interfaceName) + "Interop";
+            var content = InteropEmit.EmitImportInteropContent(target, world.Name);
+            var fileName = worldNs + ".wit.imports."
+                + JoinPackagePath(pkg) + "." + className + ".cs";
+            return new EmittedSource(fileName, content);
         }
 
         // ---- Per-interface file emission ------------------------------------
