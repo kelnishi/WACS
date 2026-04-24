@@ -1,0 +1,12 @@
+package local:pv;
+interface env {
+    variant msg {
+        info(u32),
+        warning,
+        error(u32),
+    }
+    send: func(m: msg);
+    fetch: func() -> msg;
+    try-op: func(x: u32) -> result<u32, msg>;
+}
+world pv-world { import env; }

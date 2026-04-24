@@ -1059,6 +1059,52 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Variant<small-prim-or-none payloads> in function bodies -----
+
+        private static string FindInteropVariantFixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "interop-variant");
+        }
+
+        /// <summary>
+        /// <c>variant</c> with mixed payload / no-payload cases used
+        /// as param, return, and <c>result</c> err type. Exercises:
+        /// (a) variant param lowering — switch on <c>.Tag</c> to
+        /// populate disc+payload locals; (b) variant return lift —
+        /// switch on disc byte at return-area offset, build via
+        /// <c>Type.case(payload)</c> / <c>Type.case()</c> static
+        /// factories; (c) nested variant inside
+        /// <c>result&lt;prim, variant&gt;</c> — inner switch builds
+        /// local <c>lifted</c>, outer <c>liftedResult</c> wraps it.
+        ///
+        /// <para>Local-name divergence from wit-bindgen's
+        /// counter-allocated <c>lowered</c>/<c>lowered6</c>/
+        /// <c>payload5</c>/<c>lifted8</c> naming — we use per-arg
+        /// stable names. Expected file captures our shape; the
+        /// reference file preserves wit-bindgen's original for
+        /// upstream-drift detection.</para>
+        /// </summary>
+        [Fact]
+        public void InteropEmit_variant_matches_expected()
+        {
+            var fixtureDir = FindInteropVariantFixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "pv.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var content = InteropEmit.EmitImportInteropContent(iface, "pv-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "expected",
+                "PvWorldWorld.wit.imports.local.pv.EnvInterop.cs"));
+            Assert.Equal(expected, content);
+        }
+
         // ---- Free function returning own<resource> ----------------------
 
         private static string FindInteropOwnResourceFixtureDir()
