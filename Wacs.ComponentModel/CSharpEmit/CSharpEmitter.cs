@@ -583,7 +583,7 @@ using System.Diagnostics.CodeAnalysis;
             {
                 if (fn.Type.NamedResults != null) return false;
                 foreach (var p in fn.Type.Params)
-                    if (!(p.Type is CtPrimType)) return false;
+                    if (!IsEmitableStubParam(p.Type)) return false;
                 if (fn.Type.Result != null
                     && !(fn.Type.Result is CtPrimType)
                     && !IsElidedResult(fn.Type.Result))
@@ -591,6 +591,16 @@ using System.Diagnostics.CodeAnalysis;
             }
             return true;
         }
+
+        /// <summary>
+        /// Parameter types supported by the current Interop emitter.
+        /// Primitives (all kinds including string). Aggregates
+        /// (list / option / result / tuple / records / variants)
+        /// are follow-ups — each requires dedicated marshaling
+        /// emission in <c>InteropEmit</c>.
+        /// </summary>
+        private static bool IsEmitableStubParam(CtValType t) =>
+            t is CtPrimType;
 
         /// <summary>
         /// <c>result</c> with both sides elided — the "plain
