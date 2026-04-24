@@ -241,15 +241,133 @@ namespace Wacs.ComponentModel.Runtime
             if (r.IsPrimitive)
                 return LiftPrimitiveFromValue(r.Prim, coreResult);
 
-            // Other aggregates (list, option, result, tuple, …)
-            // route through the same StringMarshal / ListMarshal
-            // helpers the transpiler emits IL against — not yet
-            // wired through the interpreter path.
+            // Type-ref aggregates. These each share a pattern:
+            // core returns the retArea pointer P; the lift reads
+            // bytes from memory at P and routes them through the
+            // same *Marshal helpers the transpiler emits IL
+            // against — so the two engines share a single source
+            // of truth for ABI semantics.
+            if (TryLiftListOfPrim(r, coreResult.Data.Int32,
+                    out var listResult))
+                return listResult;
+            if (TryLiftOptionOfPrim(r, coreResult.Data.Int32,
+                    out var optionResult))
+                return optionResult;
+
             throw new NotSupportedException(
-                "Lift of non-string aggregate return via the "
+                "Lift of this aggregate return shape via the "
                 + "interpreter is a follow-up. The transpiler "
-                + "path covers these end-to-end.");
+                + "path covers all Phase 1b fixtures end-to-end; "
+                + "the interpreter v0 covers primitives + string + "
+                + "list<prim> + option<prim> only.");
         }
+
+        /// <summary>Attempt <c>list&lt;primitive&gt;</c> lift —
+        /// returns false for any other type-ref shape so the
+        /// caller can fall through to the next candidate.</summary>
+        private bool TryLiftListOfPrim(
+            ComponentValType t, int retAreaPtr, out object? result)
+        {
+            result = null;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= _component.Types.Count) return false;
+            if (!(_component.Types[(int)t.TypeIdx] is ComponentListType list))
+                return false;
+            if (!list.Element.IsPrimitive) return false;
+            if (list.Element.Prim == ComponentPrim.String) return false;
+            if (_memory == null) return false;
+
+            var header = ReadMemoryBytes(retAreaPtr, 8);
+            var dataPtr = BitConverter.ToInt32(header, 0);
+            var count = BitConverter.ToInt32(header, 4);
+
+            // Closed-generic dispatch: the transpiler's IL does
+            // the same MakeGenericMethod step, so this is pure
+            // runtime reflection — the transpiler's AOT path is
+            // the fast lane; the interpreter pays the reflection
+            // cost per call.
+            var elemCs = PrimToCs(list.Element.Prim);
+            var liftOpen = typeof(ListMarshal).GetMethod(
+                nameof(ListMarshal.LiftPrim),
+                1,
+                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+            var liftClosed = liftOpen.MakeGenericMethod(elemCs);
+            // Pass the full memory snapshot so the helper's
+            // bounds checks run against the real buffer length.
+            result = liftClosed.Invoke(null,
+                new object[] { _memory.Data, dataPtr, count });
+            return true;
+        }
+
+        /// <summary>Attempt <c>option&lt;primitive&gt;</c> lift.</summary>
+        private bool TryLiftOptionOfPrim(
+            ComponentValType t, int retAreaPtr, out object? result)
+        {
+            result = null;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= _component.Types.Count) return false;
+            if (!(_component.Types[(int)t.TypeIdx] is ComponentOptionType opt))
+                return false;
+            if (!opt.Inner.IsPrimitive) return false;
+            if (opt.Inner.Prim == ComponentPrim.String) return false;
+            if (_memory == null) return false;
+
+            var disc = _memory.Data[retAreaPtr];
+            var innerCs = PrimToCs(opt.Inner.Prim);
+            var nullableT = typeof(Nullable<>).MakeGenericType(innerCs);
+            if (disc == 0)
+            {
+                // Default Nullable<T> (HasValue = false).
+                result = Activator.CreateInstance(nullableT);
+                return true;
+            }
+            if (disc != 1)
+                throw new FormatException(
+                    $"Invalid option discriminant 0x{disc:X2}; expected 0 or 1.");
+
+            // Some: payload at offset 4 for small prims (≤4 bytes).
+            var payloadBytes = ReadMemoryBytes(retAreaPtr + 4, 4);
+            object payload = opt.Inner.Prim switch
+            {
+                ComponentPrim.Bool => (object)(payloadBytes[0] != 0),
+                ComponentPrim.S8   => (object)(sbyte)payloadBytes[0],
+                ComponentPrim.U8   => (object)payloadBytes[0],
+                ComponentPrim.S16  => (object)BitConverter.ToInt16(payloadBytes, 0),
+                ComponentPrim.U16  => (object)BitConverter.ToUInt16(payloadBytes, 0),
+                ComponentPrim.S32  => (object)BitConverter.ToInt32(payloadBytes, 0),
+                ComponentPrim.U32  => (object)BitConverter.ToUInt32(payloadBytes, 0),
+                ComponentPrim.F32  => (object)BitConverter.ToSingle(payloadBytes, 0),
+                ComponentPrim.Char => (object)BitConverter.ToUInt32(payloadBytes, 0),
+                _ => throw new NotSupportedException(
+                    "option<" + opt.Inner.Prim + "> lift is a follow-up "
+                    + "(wide primitives + strings need extra offset math)."),
+            };
+            result = Activator.CreateInstance(nullableT, payload);
+            return true;
+        }
+
+        /// <summary>C# type for a component primitive — parallel
+        /// to the transpiler's <c>PrimToCs</c>. Duplicated here
+        /// rather than shared to keep the interpreter path from
+        /// reaching into transpiler-only code.</summary>
+        private static Type PrimToCs(ComponentPrim p) => p switch
+        {
+            ComponentPrim.Bool   => typeof(bool),
+            ComponentPrim.S8     => typeof(sbyte),
+            ComponentPrim.U8     => typeof(byte),
+            ComponentPrim.S16    => typeof(short),
+            ComponentPrim.U16    => typeof(ushort),
+            ComponentPrim.S32    => typeof(int),
+            ComponentPrim.U32    => typeof(uint),
+            ComponentPrim.S64    => typeof(long),
+            ComponentPrim.U64    => typeof(ulong),
+            ComponentPrim.F32    => typeof(float),
+            ComponentPrim.F64    => typeof(double),
+            ComponentPrim.Char   => typeof(uint),
+            ComponentPrim.String => typeof(string),
+            _ => throw new NotSupportedException(
+                "PrimToCs for " + p + " is a follow-up."),
+        };
 
         private static object? LiftPrimitiveFromValue(
             ComponentPrim prim, Wacs.Core.Runtime.Value v) =>
