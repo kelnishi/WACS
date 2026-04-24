@@ -1059,6 +1059,58 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Transitive interface imports --------------------------------
+
+        /// <summary>
+        /// When a directly-imported interface uses types from
+        /// another interface (via <c>use</c>), the emitter should
+        /// pull that other interface in as a transitive import —
+        /// its <c>I{Name}.cs</c> + <c>{Name}Interop.cs</c> ship
+        /// alongside the direct imports. This matches wit-bindgen:
+        /// <c>use wasi:io/error.{error}</c> inside wasi:io/streams
+        /// causes <c>IError.cs</c> / <c>ErrorInterop.cs</c> to
+        /// materialize in the hello-world output.
+        /// </summary>
+        [Fact]
+        public void EmitWorld_pulls_transitive_interface_via_use()
+        {
+            // errs::fail (a resource) is used from env::status
+            // (a variant); the world imports env directly but not
+            // errs. Transitive pulling should cause IErrs.cs +
+            // ErrsInterop.cs to emit anyway.
+            var src = @"package local:trans;
+interface errs {
+    resource fail;
+}
+interface env {
+    use errs.{fail};
+    variant status {
+        ok,
+        failed(fail),
+    }
+    query: func() -> status;
+}
+world trans-world { import env; }";
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            WitResolver.Resolve(pkgs);
+            var world = pkgs.Single().Worlds.Single();
+
+            var sources = CSharpEmitter.EmitWorld(world);
+            var names = sources.Select(s => s.FileName).OrderBy(n => n).ToArray();
+
+            // Direct: env (IEnv + EnvInterop). Transitive via use:
+            // errs (IErrs since it has the fail resource type +
+            // ErrsInterop empty). Plus world shell + linkage attr.
+            Assert.Contains(
+                "TransWorldWorld.wit.imports.local.trans.IEnv.cs", names);
+            Assert.Contains(
+                "TransWorldWorld.wit.imports.local.trans.EnvInterop.cs", names);
+            Assert.Contains(
+                "TransWorldWorld.wit.imports.local.trans.IErrs.cs", names);
+            Assert.Contains(
+                "TransWorldWorld.wit.imports.local.trans.ErrsInterop.cs", names);
+        }
+
         // ---- borrow<R> / own<R> resource-ref params ---------------------
 
         private static string FindInteropBorrowResourceFixtureDir()

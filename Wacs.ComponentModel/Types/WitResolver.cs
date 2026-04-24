@@ -96,20 +96,26 @@ namespace Wacs.ComponentModel.Types
             IReadOnlyDictionary<string, CtInterfaceType> ifaceIndex)
         {
             foreach (var imp in world.Imports)
-                TryBindExternRef(imp.Spec, ifaceIndex);
+                TryBindExternRef(imp.Spec, world.Package, ifaceIndex);
             foreach (var exp in world.Exports)
-                TryBindExternRef(exp.Spec, ifaceIndex);
+                TryBindExternRef(exp.Spec, world.Package, ifaceIndex);
         }
 
         private static void TryBindExternRef(
             CtExternType spec,
+            CtPackageName? fallbackPackage,
             IReadOnlyDictionary<string, CtInterfaceType> ifaceIndex)
         {
             if (spec is CtExternInterfaceRef iref && iref.Target == null)
             {
-                if (iref.Package != null)
+                // In-document imports (e.g. `import env;` where env
+                // lives in the same package as the world) lack an
+                // explicit package. Fall back to the world's
+                // package for the lookup.
+                var pkg = iref.Package ?? fallbackPackage;
+                if (pkg != null)
                 {
-                    var key = QualifiedKey(iref.Package, iref.InterfaceName);
+                    var key = QualifiedKey(pkg, iref.InterfaceName);
                     if (ifaceIndex.TryGetValue(key, out var target))
                     {
                         iref.Target = target;
@@ -121,7 +127,7 @@ namespace Wacs.ComponentModel.Types
                         // version-pinning behavior: exact semver under
                         // 0.x, major-compat under ≥1.x.
                         iref.Target = LookupWithSemverCompat(
-                            iref.Package, iref.InterfaceName, ifaceIndex);
+                            pkg, iref.InterfaceName, ifaceIndex);
                     }
                 }
             }
