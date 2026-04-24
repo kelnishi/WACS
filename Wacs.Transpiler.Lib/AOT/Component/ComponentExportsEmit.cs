@@ -86,7 +86,9 @@ namespace Wacs.Transpiler.AOT.Component
             // return / param types. Cache by WIT type name.
             var emittedTypes = new Dictionary<string, Type>();
             if (decodedWit != null)
-                EmitNamedTypes(module, @namespace, decodedWit, emittedTypes);
+                EmitNamedTypes(module, @namespace, decodedWit,
+                               coreIExports, coreModuleClass,
+                               emittedTypes);
 
             foreach (var slot in emittable)
             {
@@ -106,7 +108,8 @@ namespace Wacs.Transpiler.AOT.Component
         /// methods can use them as return / param types.</summary>
         private static void EmitNamedTypes(
             ModuleBuilder module, string @namespace,
-            CtPackage pkg, Dictionary<string, Type> emittedTypes)
+            CtPackage pkg, Type coreIExports, Type coreModuleClass,
+            Dictionary<string, Type> emittedTypes)
         {
             // Worlds + interfaces both contribute named types.
             // Phase 1b focuses on worlds; cross-interface types
@@ -114,15 +117,18 @@ namespace Wacs.Transpiler.AOT.Component
             // world) land when interface emission catches up.
             foreach (var world in pkg.Worlds)
                 foreach (var named in world.Types)
-                    EmitNamedType(module, @namespace, named, emittedTypes);
+                    EmitNamedType(module, @namespace, named,
+                                  coreIExports, coreModuleClass, emittedTypes);
             foreach (var iface in pkg.Interfaces)
                 foreach (var named in iface.Types)
-                    EmitNamedType(module, @namespace, named, emittedTypes);
+                    EmitNamedType(module, @namespace, named,
+                                  coreIExports, coreModuleClass, emittedTypes);
         }
 
         private static void EmitNamedType(
             ModuleBuilder module, string @namespace,
-            CtNamedType named, Dictionary<string, Type> emittedTypes)
+            CtNamedType named, Type coreIExports, Type coreModuleClass,
+            Dictionary<string, Type> emittedTypes)
         {
             if (emittedTypes.ContainsKey(named.Name)) return;
             switch (named.Type)
@@ -147,7 +153,8 @@ namespace Wacs.Transpiler.AOT.Component
                     return;
                 case CtResourceType res:
                     emittedTypes[named.Name] =
-                        EmitResourceType(module, @namespace, named.Name, res);
+                        EmitResourceType(module, @namespace, named.Name, res,
+                                         coreIExports, coreModuleClass);
                     return;
             }
         }
@@ -197,18 +204,46 @@ namespace Wacs.Transpiler.AOT.Component
         /// </summary>
         private static Type EmitResourceType(
             ModuleBuilder module, string @namespace,
-            string witName, CtResourceType res)
+            string witName, CtResourceType res,
+            Type coreIExports, Type coreModuleClass)
         {
             var typeName = @namespace + "." + PascalCase(witName);
+            // Wire IDisposable when the core module exports the
+            // matching `[resource-drop]<Type>` function. Without
+            // it the wrapper is non-disposable — the handle
+            // leaks until the component instance is replaced.
+            var dropMethod = FindResourceDropMethod(coreIExports, witName);
+            var interfaces = dropMethod != null
+                ? new[] { typeof(System.IDisposable) }
+                : Type.EmptyTypes;
             var classBuilder = module.DefineType(typeName,
                 TypeAttributes.Public | TypeAttributes.Sealed
                     | TypeAttributes.Class | TypeAttributes.AutoClass
                     | TypeAttributes.AnsiClass | TypeAttributes.BeforeFieldInit,
-                typeof(object));
+                typeof(object), interfaces);
 
             var handleField = classBuilder.DefineField(
                 "Handle", typeof(int),
                 FieldAttributes.Public | FieldAttributes.InitOnly);
+
+            FieldBuilder? instanceField = null;
+            ConstructorBuilder? cctor = null;
+            if (dropMethod != null)
+            {
+                instanceField = classBuilder.DefineField(
+                    "_instance", coreModuleClass,
+                    FieldAttributes.Private | FieldAttributes.Static
+                        | FieldAttributes.InitOnly);
+                cctor = classBuilder.DefineTypeInitializer();
+                var cctorIl = cctor.GetILGenerator();
+                var coreCtor = coreModuleClass.GetConstructor(Type.EmptyTypes);
+                if (coreCtor != null)
+                {
+                    cctorIl.Emit(OpCodes.Newobj, coreCtor);
+                    cctorIl.Emit(OpCodes.Stsfld, instanceField);
+                }
+                cctorIl.Emit(OpCodes.Ret);
+            }
 
             var ctor = classBuilder.DefineConstructor(
                 MethodAttributes.Public | MethodAttributes.SpecialName
@@ -224,8 +259,54 @@ namespace Wacs.Transpiler.AOT.Component
             ctorIl.Emit(OpCodes.Stfld, handleField);
             ctorIl.Emit(OpCodes.Ret);
 
-            _ = res;   // dtor wiring is a follow-up
+            if (dropMethod != null && instanceField != null)
+            {
+                // public void Dispose() {
+                //     _instance.[resource-drop]<Type>(this.Handle);
+                // }
+                var dispose = classBuilder.DefineMethod(
+                    "Dispose",
+                    MethodAttributes.Public | MethodAttributes.Virtual
+                        | MethodAttributes.HideBySig | MethodAttributes.NewSlot
+                        | MethodAttributes.Final,
+                    typeof(void), Type.EmptyTypes);
+                var dIl = dispose.GetILGenerator();
+                dIl.Emit(OpCodes.Ldsfld, instanceField);
+                dIl.Emit(OpCodes.Ldarg_0);
+                dIl.Emit(OpCodes.Ldfld, handleField);
+                dIl.EmitCall(OpCodes.Callvirt, dropMethod, null);
+                dIl.Emit(OpCodes.Ret);
+                classBuilder.DefineMethodOverride(dispose,
+                    typeof(System.IDisposable).GetMethod("Dispose")!);
+            }
+
+            _ = res;   // explicit-dtor field is followup
             return classBuilder.CreateType()!;
+        }
+
+        /// <summary>Find the core IExports method matching the
+        /// canonical-ABI <c>[resource-drop]<i>witName</i></c>
+        /// export the binding tools emit. Sanitizer turns
+        /// <c>[</c> / <c>]</c> / <c>-</c> into <c>_</c>, so
+        /// <c>[resource-drop]counter</c> ends up as
+        /// <c>_resource_drop_counter</c> on the IExports
+        /// interface.</summary>
+        private static MethodInfo? FindResourceDropMethod(
+            Type iExports, string witName)
+        {
+            var sanitized = SanitizeExportName("[resource-drop]" + witName);
+            var pascal = PascalCase("[resource-drop]" + witName);
+            foreach (var m in iExports.GetMethods())
+            {
+                if (string.Equals(m.Name, sanitized, StringComparison.OrdinalIgnoreCase))
+                    return m;
+                if (m.Name.IndexOf("resource_drop", StringComparison.OrdinalIgnoreCase) >= 0
+                    && m.Name.IndexOf(witName, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return m;
+                if (string.Equals(m.Name, pascal, StringComparison.Ordinal))
+                    return m;
+            }
+            return null;
         }
 
         /// <summary>Emit a public C# class for a WIT variant
