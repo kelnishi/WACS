@@ -1059,6 +1059,43 @@ world w { export def; }";
             Assert.Equal(expected, content);
         }
 
+        // ---- Resource methods with list<u8> params + returns ------------
+
+        private static string FindResourceListU8FixtureDir()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            if (dir == null) return string.Empty;
+            return Path.Combine(dir.FullName, "Spec.Test", "components",
+                                "fixtures", "resource-list-u8");
+        }
+
+        /// <summary>
+        /// Resource methods with <c>list&lt;u8&gt;</c> param (append)
+        /// and <c>list&lt;u8&gt;</c> return (take). Exercises the
+        /// shared marshaling helpers — the same stackalloc prelude
+        /// and return-area lift used by free functions — invoked
+        /// from the resource-method emission path with a leading
+        /// <c>handle</c> stub arg. Byte-for-byte match against
+        /// wit-bindgen 0.30.0.
+        /// </summary>
+        [Fact]
+        public void EmitImportInterfaceFile_resource_with_list_u8_methods_matches_reference()
+        {
+            var fixtureDir = FindResourceListU8FixtureDir();
+            var src = File.ReadAllText(Path.Combine(fixtureDir, "wit", "rl.wit"));
+            var pkgs = WitToTypes.Convert(WitParser.Parse(src));
+            var iface = pkgs.Single().Interfaces.Single(i => i.Name == "env");
+
+            var emitted = CSharpEmitter.EmitImportInterfaceFile(iface, "rl-world");
+
+            var expected = File.ReadAllText(Path.Combine(
+                fixtureDir, "reference",
+                "RlWorldWorld.wit.imports.local.rl.IEnv.cs"));
+            Assert.Equal(expected, emitted.Content);
+        }
+
         // ---- Interop: record<small-prim fields> in function bodies -------
 
         private static string FindInteropRecordFixtureDir()

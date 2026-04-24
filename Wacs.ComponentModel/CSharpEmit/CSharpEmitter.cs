@@ -519,7 +519,15 @@ using System.Diagnostics.CodeAnalysis;
                     {
                         if (m.Function.NamedResults != null) return false;
                         foreach (var p in m.Function.Params)
-                            if (!(p.Type is CtPrimType)) return false;
+                        {
+                            // Resource method params: primitives plus
+                            // list<prim> (byte[]/uint[]/… — lowered
+                            // to pinned-buffer ptr+len via the shared
+                            // Interop prelude helpers).
+                            if (p.Type is CtPrimType) continue;
+                            if (InteropEmit.IsListOfPrim(p.Type)) continue;
+                            return false;
+                        }
                         // Result is allowed when:
                         //   * null (void)
                         //   * a primitive (including string via

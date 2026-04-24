@@ -536,7 +536,7 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// opening <c>{</c> — wit-bindgen emits one iff the body
         /// has a prelude.
         /// </summary>
-        private static bool HasPrelude(CtFunctionType sig)
+        internal static bool HasPrelude(CtFunctionType sig)
         {
             foreach (var p in sig.Params)
             {
@@ -549,8 +549,8 @@ namespace Wacs.ComponentModel.CSharpEmit
             return false;
         }
 
-        private static void EmitWrapperPrelude(StringBuilder sb,
-                                               CtFunctionType sig)
+        internal static void EmitWrapperPrelude(StringBuilder sb,
+                                                CtFunctionType sig)
         {
             // Index across list<u8> params — wit-bindgen names them
             // `buffer`, `buffer1`, `buffer2`, … regardless of the
@@ -676,7 +676,7 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// and <c>list&lt;u8&gt;</c> lower to two stub params:
         /// <c>nint ptr, int len</c>. Other aggregates are follow-ups.
         /// </summary>
-        private static string[] StubTypesFor(CtValType t)
+        internal static string[] StubTypesFor(CtValType t)
         {
             if (t is CtPrimType p)
             {
@@ -994,7 +994,7 @@ namespace Wacs.ComponentModel.CSharpEmit
             }
         }
 
-        private static void EmitLoweredArgs(StringBuilder sb, CtFunctionType sig)
+        internal static void EmitLoweredArgs(StringBuilder sb, CtFunctionType sig)
         {
             bool first = true;
             int listIdx = 0;
