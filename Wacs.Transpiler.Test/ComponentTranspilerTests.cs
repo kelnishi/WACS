@@ -6,6 +6,9 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Reflection.Emit;
 using Wacs.Core.Runtime;
 using Wacs.Transpiler.AOT;
 using Wacs.Transpiler.AOT.Component;
@@ -68,6 +71,65 @@ namespace Wacs.Transpiler.Test
 
             Assert.NotNull(transpileResult);
             Assert.NotNull(transpileResult.FunctionsType);
+        }
+
+        [Fact]
+        public void TranspileSingleModule_produces_valid_transpilation_result()
+        {
+            // Full path: parse component → instantiate embedded
+            // core module → ModuleTranspiler → bake metadata.
+            // Verifies no errors along the pipeline for the
+            // trivial tiny-component.
+            using var fs = File.OpenRead(FindTinyComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, assemblyNamespace: "Wacs.Transpiled.Tiny");
+
+            Assert.NotNull(result);
+            Assert.NotNull(result.FunctionsType);
+            Assert.NotEmpty(result.Methods);
+        }
+
+        [Fact]
+        public void EmitComponentMetadataClass_writes_wit_bytes_to_assembly()
+        {
+            // Exercise the metadata emitter directly with
+            // synthetic bytes. The transpiled assembly should
+            // carry a ComponentMetadata static class whose
+            // EmbeddedWitBytes field exposes the same bytes.
+            var assemblyName = new AssemblyName("Wacs.Test.MetadataEmit");
+            var ab = AssemblyBuilder.DefineDynamicAssembly(
+                assemblyName, AssemblyBuilderAccess.Run);
+            var mb = ab.DefineDynamicModule(assemblyName.Name!);
+
+            byte[] witBytes = { 0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03 };
+            ComponentAssemblyEmit.EmitComponentMetadataClass(
+                mb, "Wacs.Transpiled.Foo", witBytes);
+
+            var meta = ab.GetType("Wacs.Transpiled.Foo.ComponentMetadata");
+            Assert.NotNull(meta);
+            var field = meta!.GetField("EmbeddedWitBytes",
+                BindingFlags.Public | BindingFlags.Static);
+            Assert.NotNull(field);
+            var value = (byte[])field!.GetValue(null)!;
+            Assert.Equal(witBytes, value);
+        }
+
+        [Fact]
+        public void EmitComponentMetadataClass_is_noop_when_wit_null()
+        {
+            // No component-type:* section → no ComponentMetadata
+            // class. Keeps the transpiled assembly lean when the
+            // component doesn't carry metadata.
+            var assemblyName = new AssemblyName("Wacs.Test.NoMetadata");
+            var ab = AssemblyBuilder.DefineDynamicAssembly(
+                assemblyName, AssemblyBuilderAccess.Run);
+            var mb = ab.DefineDynamicModule(assemblyName.Name!);
+
+            ComponentAssemblyEmit.EmitComponentMetadataClass(
+                mb, "Wacs.Transpiled.Empty", witBytes: null);
+
+            var meta = ab.GetType("Wacs.Transpiled.Empty.ComponentMetadata");
+            Assert.Null(meta);
         }
 
         [Fact]
