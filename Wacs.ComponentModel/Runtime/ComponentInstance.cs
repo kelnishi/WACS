@@ -250,16 +250,33 @@ namespace Wacs.ComponentModel.Runtime
             if (TryLiftListOfPrim(r, coreResult.Data.Int32,
                     out var listResult))
                 return listResult;
+            if (TryLiftListOfString(r, coreResult.Data.Int32,
+                    out var listStringResult))
+                return listStringResult;
             if (TryLiftOptionOfPrim(r, coreResult.Data.Int32,
                     out var optionResult))
                 return optionResult;
+            if (TryLiftOptionOfString(r, coreResult.Data.Int32,
+                    out var optionStringResult))
+                return optionStringResult;
+            if (TryLiftTupleOfPrims(r, coreResult.Data.Int32,
+                    out var tupleResult))
+                return tupleResult;
+            if (TryLiftResult(r, coreResult.Data.Int32,
+                    out var resultValue))
+                return resultValue;
+            if (TryLiftEnum(r, coreResult.Data.Int32,
+                    out var enumResult))
+                return enumResult;
+            if (TryLiftFlags(r, coreResult.Data.Int32,
+                    out var flagsResult))
+                return flagsResult;
 
             throw new NotSupportedException(
                 "Lift of this aggregate return shape via the "
-                + "interpreter is a follow-up. The transpiler "
-                + "path covers all Phase 1b fixtures end-to-end; "
-                + "the interpreter v0 covers primitives + string + "
-                + "list<prim> + option<prim> only.");
+                + "interpreter is a follow-up. Record / variant / "
+                + "resource lifts need named-type emission like the "
+                + "transpiler path; not yet wired here.");
         }
 
         /// <summary>Attempt <c>list&lt;primitive&gt;</c> lift —
@@ -344,6 +361,276 @@ namespace Wacs.ComponentModel.Runtime
             };
             result = Activator.CreateInstance(nullableT, payload);
             return true;
+        }
+
+        /// <summary>Lift <c>list&lt;string&gt;</c> via the
+        /// dedicated <see cref="ListMarshal.LiftStringList"/>
+        /// helper — keeps the UTF-8 chokepoint discipline.</summary>
+        private bool TryLiftListOfString(
+            ComponentValType t, int retAreaPtr, out object? result)
+        {
+            result = null;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= _component.Types.Count) return false;
+            if (!(_component.Types[(int)t.TypeIdx] is ComponentListType list))
+                return false;
+            if (!list.Element.IsPrimitive) return false;
+            if (list.Element.Prim != ComponentPrim.String) return false;
+            if (_memory == null) return false;
+
+            var header = ReadMemoryBytes(retAreaPtr, 8);
+            var listPtr = BitConverter.ToInt32(header, 0);
+            var count = BitConverter.ToInt32(header, 4);
+            result = ListMarshal.LiftStringList(_memory.Data, listPtr, count);
+            return true;
+        }
+
+        /// <summary>Lift <c>option&lt;string&gt;</c>: disc byte
+        /// at offset 0, on Some the (strPtr, strLen) at offset
+        /// 4/8 → <see cref="StringMarshal.LiftUtf8"/>; on None
+        /// the C# surface is <c>null</c>.</summary>
+        private bool TryLiftOptionOfString(
+            ComponentValType t, int retAreaPtr, out object? result)
+        {
+            result = null;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= _component.Types.Count) return false;
+            if (!(_component.Types[(int)t.TypeIdx] is ComponentOptionType opt))
+                return false;
+            if (!opt.Inner.IsPrimitive
+                || opt.Inner.Prim != ComponentPrim.String) return false;
+            if (_memory == null) return false;
+
+            var disc = _memory.Data[retAreaPtr];
+            if (disc == 0) { result = null; return true; }
+            if (disc != 1)
+                throw new FormatException(
+                    $"Invalid option discriminant 0x{disc:X2}; expected 0 or 1.");
+            var strPtr = BitConverter.ToInt32(
+                ReadMemoryBytes(retAreaPtr + 4, 4), 0);
+            var strLen = BitConverter.ToInt32(
+                ReadMemoryBytes(retAreaPtr + 8, 4), 0);
+            result = StringMarshal.LiftUtf8(_memory.Data, strPtr, strLen);
+            return true;
+        }
+
+        /// <summary>Lift a <c>tuple&lt;prim, prim, …&gt;</c> as
+        /// a <c>ValueTuple&lt;…&gt;</c>. v0 supports 1–7 element
+        /// tuples; 8+ element variants need the nested TRest
+        /// shape the transpiler also defers.</summary>
+        private bool TryLiftTupleOfPrims(
+            ComponentValType t, int retAreaPtr, out object? result)
+        {
+            result = null;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= _component.Types.Count) return false;
+            if (!(_component.Types[(int)t.TypeIdx] is ComponentTupleType tup))
+                return false;
+            var prims = new ComponentPrim[tup.Elements.Count];
+            for (int i = 0; i < prims.Length; i++)
+            {
+                if (!tup.Elements[i].IsPrimitive) return false;
+                prims[i] = tup.Elements[i].Prim;
+            }
+            if (_memory == null) return false;
+
+            // For all-32-bit tuples the stride is 4 bytes — same
+            // assumption the transpiler's EmitTupleReturnBody
+            // makes. Wide prims (s64/u64/f64) + mixed-width
+            // alignment land as the transpiler's coverage grows.
+            var values = new object[prims.Length];
+            for (int i = 0; i < prims.Length; i++)
+                values[i] = ReadPrimAtOffset(retAreaPtr + i * 4, prims[i]);
+
+            var csTypes = new Type[prims.Length];
+            for (int i = 0; i < prims.Length; i++)
+                csTypes[i] = PrimToCs(prims[i]);
+            var tupleType = MakeValueTuple(csTypes);
+            result = Activator.CreateInstance(tupleType, values);
+            return true;
+        }
+
+        /// <summary>Lift <c>result&lt;Ok, Err&gt;</c> as
+        /// <c>ValueTuple&lt;bool, Ok, Err&gt;</c> — same shape
+        /// the transpiler's `ResultSide` projection produces.
+        /// Disc=0 → (true, ok, default(Err)); Disc=1 → (false,
+        /// default(Ok), err). Each side may be Absent (object),
+        /// Primitive, or String.</summary>
+        private bool TryLiftResult(
+            ComponentValType t, int retAreaPtr, out object? result)
+        {
+            result = null;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= _component.Types.Count) return false;
+            if (!(_component.Types[(int)t.TypeIdx] is ComponentResultType res))
+                return false;
+            if (!TryClassifySide(res.Ok, out var okKind, out var okPrim))
+                return false;
+            if (!TryClassifySide(res.Err, out var errKind, out var errPrim))
+                return false;
+            if (_memory == null) return false;
+
+            var disc = _memory.Data[retAreaPtr];
+            if (disc > 1)
+                throw new FormatException(
+                    $"Invalid result discriminant 0x{disc:X2}.");
+
+            var okType = SideToCsType(okKind, okPrim);
+            var errType = SideToCsType(errKind, errPrim);
+            var tupleType = typeof(ValueTuple<,,>)
+                .MakeGenericType(typeof(bool), okType, errType);
+            object okValue = SideDefault(okType);
+            object errValue = SideDefault(errType);
+            if (disc == 0 && okKind != SideKind.Absent)
+                okValue = LiftSidePayload(okKind, okPrim, retAreaPtr + 4);
+            else if (disc == 1 && errKind != SideKind.Absent)
+                errValue = LiftSidePayload(errKind, errPrim, retAreaPtr + 4);
+            result = Activator.CreateInstance(tupleType,
+                new object[] { disc == 0, okValue, errValue });
+            return true;
+        }
+
+        private enum SideKind { Absent, Primitive, String }
+
+        private static bool TryClassifySide(
+            ComponentValType? raw, out SideKind kind,
+            out ComponentPrim prim)
+        {
+            kind = SideKind.Absent;
+            prim = default;
+            if (raw == null) return true;
+            if (!raw.Value.IsPrimitive) return false;
+            if (raw.Value.Prim == ComponentPrim.String)
+            { kind = SideKind.String; return true; }
+            kind = SideKind.Primitive;
+            prim = raw.Value.Prim;
+            return true;
+        }
+
+        private static Type SideToCsType(SideKind kind, ComponentPrim prim) =>
+            kind switch
+            {
+                SideKind.Absent => typeof(object),
+                SideKind.String => typeof(string),
+                SideKind.Primitive => PrimToCs(prim),
+                _ => throw new InvalidOperationException(),
+            };
+
+        private static object SideDefault(Type t)
+        {
+            if (t.IsValueType) return Activator.CreateInstance(t)!;
+            return null!;
+        }
+
+        private object LiftSidePayload(SideKind kind,
+            ComponentPrim prim, int payloadOffset)
+        {
+            switch (kind)
+            {
+                case SideKind.Primitive:
+                    return ReadPrimAtOffset(payloadOffset, prim);
+                case SideKind.String:
+                    var strPtr = BitConverter.ToInt32(
+                        ReadMemoryBytes(payloadOffset, 4), 0);
+                    var strLen = BitConverter.ToInt32(
+                        ReadMemoryBytes(payloadOffset + 4, 4), 0);
+                    return StringMarshal.LiftUtf8(
+                        _memory!.Data, strPtr, strLen);
+                default:
+                    throw new InvalidOperationException(
+                        "Absent side has no payload to lift.");
+            }
+        }
+
+        /// <summary>Read a primitive value at a given memory
+        /// offset — handles 32-bit prims (and bool / narrow
+        /// ints which fit in i32 wire form). Wide prims
+        /// (s64/u64/f64) are a follow-up that mirrors the
+        /// transpiler's same gap.</summary>
+        private object ReadPrimAtOffset(int offset, ComponentPrim prim)
+        {
+            var bytes = ReadMemoryBytes(offset, 4);
+            return prim switch
+            {
+                ComponentPrim.Bool => bytes[0] != 0,
+                ComponentPrim.S8   => (object)(sbyte)bytes[0],
+                ComponentPrim.U8   => (object)bytes[0],
+                ComponentPrim.S16  => (object)BitConverter.ToInt16(bytes, 0),
+                ComponentPrim.U16  => (object)BitConverter.ToUInt16(bytes, 0),
+                ComponentPrim.S32  => (object)BitConverter.ToInt32(bytes, 0),
+                ComponentPrim.U32  => (object)BitConverter.ToUInt32(bytes, 0),
+                ComponentPrim.F32  => (object)BitConverter.ToSingle(bytes, 0),
+                ComponentPrim.Char => (object)BitConverter.ToUInt32(bytes, 0),
+                _ => throw new NotSupportedException(
+                    "ReadPrimAtOffset for " + prim
+                    + " (wide prim) is a follow-up."),
+            };
+        }
+
+        /// <summary>Lift a structural enum. Unlike the
+        /// retArea-pointer aggregates, enum results return the
+        /// discriminant directly on the wasm stack — narrow the
+        /// i32 to the case-count-derived width per the
+        /// canonical-ABI rule.</summary>
+        private bool TryLiftEnum(
+            ComponentValType t, int rawValue, out object? result)
+        {
+            result = null;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= _component.Types.Count) return false;
+            if (!(_component.Types[(int)t.TypeIdx] is ComponentEnumType en))
+                return false;
+
+            // Without a decoded WIT name to bind to a generated
+            // enum type, return the raw discriminant integer —
+            // the transpiler does the same fallback in
+            // `ResolveEnumReturnType` when no WIT name is bound.
+            var caseCount = en.Cases.Count;
+            if (caseCount <= 256) result = (byte)rawValue;
+            else if (caseCount <= 65536) result = (ushort)rawValue;
+            else result = (uint)rawValue;
+            return true;
+        }
+
+        /// <summary>Lift structural flags — same wire shape as
+        /// enum (the bitmask comes back directly on the wasm
+        /// stack) with a flag-count-derived width: ≤8 → byte,
+        /// ≤16 → ushort, ≤32 → uint.</summary>
+        private bool TryLiftFlags(
+            ComponentValType t, int rawValue, out object? result)
+        {
+            result = null;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= _component.Types.Count) return false;
+            if (!(_component.Types[(int)t.TypeIdx] is ComponentFlagsType fl))
+                return false;
+
+            var n = fl.Flags.Count;
+            if (n <= 8) result = (byte)rawValue;
+            else if (n <= 16) result = (ushort)rawValue;
+            else result = (uint)rawValue;
+            return true;
+        }
+
+        /// <summary>Build a closed <c>ValueTuple&lt;…&gt;</c>
+        /// type — copy of the transpiler's <c>MakeValueTuple</c>.</summary>
+        private static Type MakeValueTuple(Type[] elements)
+        {
+            if (elements.Length == 0)
+                throw new ArgumentException("Empty tuple not supported.");
+            var openGeneric = elements.Length switch
+            {
+                1 => typeof(ValueTuple<>),
+                2 => typeof(ValueTuple<,>),
+                3 => typeof(ValueTuple<,,>),
+                4 => typeof(ValueTuple<,,,>),
+                5 => typeof(ValueTuple<,,,,>),
+                6 => typeof(ValueTuple<,,,,,>),
+                7 => typeof(ValueTuple<,,,,,,>),
+                _ => throw new NotImplementedException(
+                    "8+-element tuples (nested TRest) are a follow-up."),
+            };
+            return openGeneric.MakeGenericType(elements);
         }
 
         /// <summary>C# type for a component primitive — parallel

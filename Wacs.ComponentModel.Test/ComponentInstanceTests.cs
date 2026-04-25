@@ -133,6 +133,106 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Invoke_lifts_list_of_string()
+        {
+            // list-string-component: words() -> list<string>
+            // Each element is a (strPtr, strLen) pair routed
+            // through ListMarshal.LiftStringList → 3-element
+            // string array.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "list-string-component", "ls.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal(new[] { "alpha", "beta", "gamma" },
+                (string[])ci.Invoke("words")!);
+        }
+
+        [Fact]
+        public void Invoke_lifts_option_string_some_branch()
+        {
+            // option-string-component: greeting() -> option<string>
+            // (Some branch — fixture's static data has
+            // disc=1, payload=(ptr,len) for "greetings").
+            // That's the FIRST export ("maybe-some" — the
+            // option-string-component is multi-export).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "option-string-component", "os.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal("greetings", ci.Invoke("maybe-some"));
+            Assert.Null(ci.Invoke("maybe-none"));
+        }
+
+        [Fact]
+        public void Invoke_lifts_tuple_of_prims()
+        {
+            // tuple-return-component: pair() -> tuple<u32, u32>
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "tuple-return-component", "t.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            var pair = ((uint, uint))ci.Invoke("pair")!;
+            Assert.Equal(7u, pair.Item1);
+            Assert.Equal(35u, pair.Item2);
+        }
+
+        [Fact]
+        public void Invoke_lifts_result_prim_prim_ok_branch()
+        {
+            // result-return-component: divide() -> result<u32, u32>
+            // Fixture takes the Ok branch with payload = 5.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "result-return-component", "r.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            var ok = ((bool, uint, uint))ci.Invoke("divide")!;
+            Assert.True(ok.Item1);
+            Assert.Equal(42u, ok.Item2);
+            Assert.Equal(0u, ok.Item3);
+        }
+
+        [Fact]
+        public void Invoke_lifts_result_string_u32_both_branches()
+        {
+            // result-string-component:
+            //   greet() → Ok("fine")
+            //   fail()  → Err(404)
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "result-string-component", "rs.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+
+            var greetTuple = ((bool, string, uint))ci.Invoke("greet")!;
+            Assert.True(greetTuple.Item1);
+            Assert.Equal("fine", greetTuple.Item2);
+            Assert.Equal(0u, greetTuple.Item3);
+
+            var failTuple = ((bool, string, uint))ci.Invoke("fail")!;
+            Assert.False(failTuple.Item1);
+            Assert.Null(failTuple.Item2);
+            Assert.Equal(404u, failTuple.Item3);
+        }
+
+        [Fact]
+        public void Invoke_lifts_enum_as_underlying_integer()
+        {
+            // enum-component: current() -> direction
+            // Without a decoded WIT name on Invoke's side the
+            // lift returns the raw discriminant byte (the
+            // transpiler's same fallback).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "enum-component", "en.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal((byte)2, ci.Invoke("current"));
+        }
+
+        [Fact]
+        public void Invoke_lifts_flags_as_underlying_bitmask()
+        {
+            // flags-component: default-perms() -> permissions
+            // 3 flags → byte; payload = 5 = read | execute.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "flags-component", "fl.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal((byte)5, ci.Invoke("default-perms"));
+        }
+
+        [Fact]
         public void Invoke_dual_engine_equivalence_with_transpiler()
         {
             // The cheapest cross-check: run the same fixture
