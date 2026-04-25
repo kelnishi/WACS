@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>WACS Component Model Bindgen Library</Title>
+        <PackageId>WACS.ComponentModel.Bindgen.Lib</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>Programmatic API for the WACS Component Model bindgen pipeline. WIT → C# (forward) and transpiled .dll → WIT + C# (reverse). Wraps the Wacs.ComponentModel.CSharpEmit utility. For the CLI tool, see WACS.ComponentModel.Bindgen.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.ComponentModel.Bindgen.Lib</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+        <IsAotCompatible>true</IsAotCompatible>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <InternalsVisibleTo Include="Wacs.ComponentModel.Bindgen.Test" />
+    </ItemGroup>
+
+</Project>
