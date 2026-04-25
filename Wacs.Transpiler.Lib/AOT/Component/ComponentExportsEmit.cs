@@ -797,13 +797,21 @@ namespace Wacs.Transpiler.AOT.Component
             /// EmitCoreCall when it needs to extract <c>.Handle</c>
             /// from resource-class params.</summary>
             public Type[]? CsParamTypes;
+            /// <summary>String encoding picked from the canon-lift
+            /// options (<c>string-encoding=utf8|utf16|latin1+utf16</c>).
+            /// UTF-8 is the default when no option is present.
+            /// Drives every <c>StringMarshal.LiftXxx</c> dispatch
+            /// site so each export uses its declared encoding.</summary>
+            public CanonOption.Kind StringEncoding;
 
             public EmittableExport(string name, ComponentFuncType sig,
-                                   uint coreFuncIdx)
+                                   uint coreFuncIdx,
+                                   CanonOption.Kind stringEncoding)
             {
                 Name = name;
                 Signature = sig;
                 CoreFuncIdx = coreFuncIdx;
+                StringEncoding = stringEncoding;
             }
         }
 
@@ -827,10 +835,53 @@ namespace Wacs.Transpiler.AOT.Component
                 if (!(types[(int)lift.TypeIdx] is ComponentFuncType fn))
                     continue;
                 if (!IsEmittable(fn, types)) continue;
+                var encoding = ResolveStringEncoding(lift.Options);
                 list.Add(new EmittableExport(export.Name, fn,
-                                             lift.CoreFuncIdx));
+                                             lift.CoreFuncIdx,
+                                             encoding));
             }
             return list;
+        }
+
+        /// <summary>Pick the export's string encoding from its
+        /// canon-lift options. Defaults to UTF-8 when no
+        /// string-encoding option is explicitly set — matches
+        /// CanonicalABI.md's "if no option, utf8" rule.
+        /// Latin1+UTF-16 is detected here but currently treated
+        /// as plain UTF-16 in lift; the dynamic-encoding case is
+        /// a follow-up.</summary>
+        private static CanonOption.Kind ResolveStringEncoding(
+            IReadOnlyList<CanonOption> options)
+        {
+            foreach (var opt in options)
+            {
+                switch (opt.OptionKind)
+                {
+                    case CanonOption.Kind.StringUtf8:
+                    case CanonOption.Kind.StringUtf16:
+                    case CanonOption.Kind.StringLatin1OrUtf16:
+                        return opt.OptionKind;
+                }
+            }
+            return CanonOption.Kind.StringUtf8;
+        }
+
+        /// <summary>Resolve the <see cref="StringMarshal"/> lift
+        /// method matching <paramref name="encoding"/>. Both
+        /// methods take <c>(byte[] source, int ptr, int len)</c>
+        /// — for UTF-8 <c>len</c> is bytes, for UTF-16 <c>len</c>
+        /// is u16 code units (canonical-ABI rule). The wire is
+        /// always (ptr, len) at the same offsets; only the
+        /// decoder differs.</summary>
+        private static MethodInfo ResolveLiftMethod(
+            CanonOption.Kind encoding)
+        {
+            var name = encoding == CanonOption.Kind.StringUtf16
+                ? nameof(StringMarshal.LiftUtf16)
+                : nameof(StringMarshal.LiftUtf8);
+            return typeof(StringMarshal).GetMethod(
+                name,
+                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
         }
 
         /// <summary>Gate for whether the emitter can handle this
@@ -1967,14 +2018,15 @@ namespace Wacs.Transpiler.AOT.Component
             il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
-            // StringMarshal.LiftUtf8(memory, strPtr, strLen)
+            // StringMarshal.LiftXxx(memory, strPtr, strLen)
             //   where strPtr = BitConverter.ToInt32(memory, P)
             //         strLen = BitConverter.ToInt32(memory, P+4)
+            // The chosen lift dispatches on canon-lift's
+            // string-encoding option (utf8 default, utf16 for
+            // export.StringEncoding == StringUtf16).
             var bitCToInt32 = typeof(BitConverter).GetMethod(
                 "ToInt32", new[] { typeof(byte[]), typeof(int) });
-            var liftMethod = typeof(StringMarshal).GetMethod(
-                nameof(StringMarshal.LiftUtf8),
-                new[] { typeof(byte[]), typeof(int), typeof(int) });
+            var liftMethod = ResolveLiftMethod(export.StringEncoding);
 
             il.Emit(OpCodes.Ldloc, memoryLocal);            // source
             il.Emit(OpCodes.Ldloc, memoryLocal);            // strPtr arg: memory
@@ -1985,7 +2037,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldc_I4_4);
             il.Emit(OpCodes.Add);                           //             P+4
             il.EmitCall(OpCodes.Call, bitCToInt32!, null);  // → strLen
-            il.EmitCall(OpCodes.Call, liftMethod!, null);   // → string
+            il.EmitCall(OpCodes.Call, liftMethod, null);   // → string
             il.Emit(OpCodes.Ret);
         }
 
@@ -2078,8 +2130,13 @@ namespace Wacs.Transpiler.AOT.Component
 
             var bitCToInt32 = typeof(BitConverter).GetMethod(
                 "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+            // UTF-8 vs UTF-16 picked from canon-lift's
+            // string-encoding option; both helpers have the same
+            // (memory, listPtr, count) signature.
             var liftStringList = typeof(ListMarshal).GetMethod(
-                nameof(ListMarshal.LiftStringList),
+                export.StringEncoding == CanonOption.Kind.StringUtf16
+                    ? nameof(ListMarshal.LiftStringListUtf16)
+                    : nameof(ListMarshal.LiftStringList),
                 new[] { typeof(byte[]), typeof(int), typeof(int) })!;
 
             // ListMarshal.LiftStringList(memory, listPtr, count)
@@ -2226,16 +2283,16 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldelem_U1);
             il.Emit(OpCodes.Brfalse, noneLabel);
 
-            // Some: StringMarshal.LiftUtf8(memory,
+            // Some: StringMarshal.LiftXxx(memory,
             //    BitConverter.ToInt32(memory, retArea + 4),
             //    BitConverter.ToInt32(memory, retArea + 8))
+            // Lift method dispatches on the export's canon-lift
+            // string-encoding option.
             var bitCToInt32 = typeof(BitConverter).GetMethod(
                 "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
-            var liftMethod = typeof(StringMarshal).GetMethod(
-                nameof(StringMarshal.LiftUtf8),
-                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+            var liftMethod = ResolveLiftMethod(export.StringEncoding);
 
-            il.Emit(OpCodes.Ldloc, memoryLocal);      // LiftUtf8 arg 1
+            il.Emit(OpCodes.Ldloc, memoryLocal);      // lift arg 1
             il.Emit(OpCodes.Ldloc, memoryLocal);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             il.Emit(OpCodes.Ldc_I4_4);
@@ -2316,7 +2373,8 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 il.Emit(OpCodes.Ldloca, resultLocal);
                 EmitLoadResultPayload(il, memoryLocal, retAreaLocal,
-                                      /*offset*/ 4, okSide);
+                                      /*offset*/ 4, okSide,
+                                      export.StringEncoding);
                 il.Emit(OpCodes.Stfld, tupleFields[1]);    // Item2 = ok payload
             }
             il.Emit(OpCodes.Br, endLabel);
@@ -2329,7 +2387,8 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 il.Emit(OpCodes.Ldloca, resultLocal);
                 EmitLoadResultPayload(il, memoryLocal, retAreaLocal,
-                                      /*offset*/ 4, errSide);
+                                      /*offset*/ 4, errSide,
+                                      export.StringEncoding);
                 il.Emit(OpCodes.Stfld, tupleFields[2]);    // Item3 = err payload
             }
 
@@ -2343,10 +2402,12 @@ namespace Wacs.Transpiler.AOT.Component
         /// <paramref name="side"/>. Primitive payloads use
         /// <see cref="EmitReadPayloadAtOffset"/>; string payloads
         /// read (strPtr, strLen) at the offset and route through
-        /// the StringMarshal UTF-8 chokepoint.</summary>
+        /// the StringMarshal lift method matching the export's
+        /// <paramref name="encoding"/>.</summary>
         private static void EmitLoadResultPayload(
             ILGenerator il, LocalBuilder memoryLocal,
-            LocalBuilder retAreaLocal, int offset, ResultSide side)
+            LocalBuilder retAreaLocal, int offset, ResultSide side,
+            CanonOption.Kind encoding)
         {
             switch (side.Kind)
             {
@@ -2358,10 +2419,8 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     var bitCToInt32 = typeof(BitConverter).GetMethod(
                         "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
-                    var liftMethod = typeof(StringMarshal).GetMethod(
-                        nameof(StringMarshal.LiftUtf8),
-                        new[] { typeof(byte[]), typeof(int), typeof(int) })!;
-                    // StringMarshal.LiftUtf8(memory,
+                    var liftMethod = ResolveLiftMethod(encoding);
+                    // LiftXxx(memory,
                     //   BitConverter.ToInt32(memory, retArea + off),
                     //   BitConverter.ToInt32(memory, retArea + off + 4))
                     il.Emit(OpCodes.Ldloc, memoryLocal);
@@ -2642,7 +2701,8 @@ namespace Wacs.Transpiler.AOT.Component
                     case VariantPayload.Prim pp:
                         if (pp.P == ComponentPrim.String)
                             EmitReadStringPayloadAtOffset(il, memoryLocal,
-                                retAreaLocal, payloadOffset);
+                                retAreaLocal, payloadOffset,
+                                export.StringEncoding);
                         else
                             EmitReadPayloadAtOffset(il, memoryLocal,
                                 retAreaLocal, payloadOffset, pp.P);
@@ -2774,23 +2834,22 @@ namespace Wacs.Transpiler.AOT.Component
             il.EmitCall(OpCodes.Call, liftClosed, null);
         }
 
-        /// <summary>Push a string payload onto the stack via
-        /// <see cref="StringMarshal.LiftUtf8(byte[], int, int)"/>
-        /// — reads (ptr, len) at <c>retArea + offset</c> and
-        /// <c>retArea + offset + 4</c>, decodes the UTF-8 bytes
-        /// to a managed string. Used for variant cases carrying
-        /// a string payload.</summary>
+        /// <summary>Push a string payload onto the stack —
+        /// reads (ptr, len) at <c>retArea + offset</c> and
+        /// <c>retArea + offset + 4</c>, decodes per the
+        /// <paramref name="encoding"/> via
+        /// <see cref="ResolveLiftMethod"/>. Used for variant
+        /// cases carrying a string payload.</summary>
         private static void EmitReadStringPayloadAtOffset(
             ILGenerator il, LocalBuilder memoryLocal,
-            LocalBuilder retAreaLocal, int offset)
+            LocalBuilder retAreaLocal, int offset,
+            CanonOption.Kind encoding)
         {
             var bitCToInt32 = typeof(BitConverter).GetMethod(
                 "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
-            var liftMethod = typeof(StringMarshal).GetMethod(
-                nameof(StringMarshal.LiftUtf8),
-                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+            var liftMethod = ResolveLiftMethod(encoding);
 
-            il.Emit(OpCodes.Ldloc, memoryLocal);    // for LiftUtf8
+            il.Emit(OpCodes.Ldloc, memoryLocal);    // for LiftXxx
             il.Emit(OpCodes.Ldloc, memoryLocal);    // for BitConv 1 (ptr)
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             il.Emit(OpCodes.Ldc_I4, offset);

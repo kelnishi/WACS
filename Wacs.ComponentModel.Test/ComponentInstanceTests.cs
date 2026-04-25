@@ -334,6 +334,21 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Invoke_lifts_utf16_string_via_canon_option()
+        {
+            // utf16-string-component: greet() -> string with the
+            // canon-lift's string-encoding=utf16 option set.
+            // Component fixture stores "Hi" as UTF-16LE
+            // (4 bytes / 2 code units). The interpreter reads the
+            // option from the canon entry on Invoke and dispatches
+            // the lift through StringMarshal.LiftUtf16.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "utf16-string-component", "u16.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal("Hi", ci.Invoke("greet"));
+        }
+
+        [Fact]
         public void Invoke_lifts_own_resource_as_raw_handle()
         {
             // resource-component: make() -> own<counter>
