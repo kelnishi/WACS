@@ -752,7 +752,9 @@ namespace Wacs.Transpiler.AOT.Component
         /// declaration. Each flag gets a literal value of
         /// <c>1 &lt;&lt; i</c>. Underlying width tracks the
         /// canonical-ABI flag wire encoding: ≤8 → byte, ≤16 →
-        /// ushort, ≤32 → uint.</summary>
+        /// ushort, ≤32 → uint. The component-model spec capped
+        /// flags at 32 in 2024 (issue #370) — wasm-tools rejects
+        /// any more, so we don't emit a wider underlying.</summary>
         private static Type EmitFlagsType(
             ModuleBuilder module, string @namespace, CtFlagsType fl)
         {
