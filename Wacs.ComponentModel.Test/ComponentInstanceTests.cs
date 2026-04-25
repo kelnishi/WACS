@@ -5,6 +5,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using System.Collections.Generic;
 using System.IO;
 using Wacs.ComponentModel.Runtime;
 using Xunit;
@@ -256,6 +257,59 @@ namespace Wacs.ComponentModel.Test
             var ci = ComponentInstance.Instantiate(bytes);
             Assert.Equal(15u,
                 ci.Invoke("sum", new uint[] { 1, 2, 3, 4, 5 }));
+        }
+
+        [Fact]
+        public void Invoke_lifts_record_as_field_dictionary()
+        {
+            // record-component: origin() -> point { x: u32, y: u32 }
+            // Surfaces as IReadOnlyDictionary<string, object>.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "record-component", "rc.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            var fields = (IReadOnlyDictionary<string, object>)
+                ci.Invoke("origin")!;
+            Assert.Equal(7u, fields["x"]);
+            Assert.Equal(11u, fields["y"]);
+        }
+
+        [Fact]
+        public void Invoke_lifts_variant_as_tag_payload_tuple()
+        {
+            // variant-component: lookup() -> lookup-result
+            // Returns the Found(42) case (tag=2, payload=42).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "variant-component", "vt.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            var (tag, payload) = ((byte, object?))ci.Invoke("lookup")!;
+            Assert.Equal((byte)2, tag);
+            Assert.Equal(42u, payload);
+        }
+
+        [Fact]
+        public void Invoke_lifts_own_resource_as_raw_handle()
+        {
+            // resource-component: make() -> own<counter>
+            // Without dynamic-type emission, the interpreter
+            // surfaces the i32 handle directly. The fixture
+            // returns 1.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "resource-component", "rsrc.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal(1, ci.Invoke("make"));
+        }
+
+        [Fact]
+        public void Invoke_lowers_borrow_resource_param_as_raw_handle()
+        {
+            // resource-component: inspect(c: borrow<counter>) -> u32
+            // Caller passes the raw i32 handle directly; core
+            // returns 42 regardless of which handle came in.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "resource-component", "rsrc.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            var handle = (int)ci.Invoke("make")!;
+            Assert.Equal(42u, ci.Invoke("inspect", handle));
         }
 
         [Fact]
