@@ -233,6 +233,32 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Invoke_lowers_string_param_via_cabi_realloc()
+        {
+            // string-param-component: echo(s: string) -> string
+            // Round-trip exercises both lower (UTF-8 encode +
+            // cabi_realloc + memcpy) and lift (StringMarshal).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "string-param-component", "sp.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal("roundtrip", ci.Invoke("echo", "roundtrip"));
+        }
+
+        [Fact]
+        public void Invoke_lowers_list_u32_param_via_cabi_realloc()
+        {
+            // list-param-component: sum(xs: list<u32>) -> u32
+            // Marshals the input array's bytes into guest memory
+            // via cabi_realloc + ListMarshal.CopyArrayToGuest,
+            // pushes (ptr, count), core sums on its side.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "list-param-component", "lp.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal(15u,
+                ci.Invoke("sum", new uint[] { 1, 2, 3, 4, 5 }));
+        }
+
+        [Fact]
         public void Invoke_dual_engine_equivalence_with_transpiler()
         {
             // The cheapest cross-check: run the same fixture
