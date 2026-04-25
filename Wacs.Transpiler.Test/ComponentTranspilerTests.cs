@@ -936,6 +936,65 @@ namespace Wacs.Transpiler.Test
             Assert.Equal("denied", deniedField.GetValue(instance));
         }
 
+        private static string FindVariantListComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-list-component", "wasm",
+                                "vl.component.wasm");
+        }
+
+        private static string FindVariantListComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-list-component",
+                                "vl.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_variant_with_list_payload_via_decoded_wit()
+        {
+            // variant-list-component: `variant scan { empty,
+            // found(list<u32>) }` exported as `discover`. The
+            // fixture picks the `found` case with three u32
+            // elements [10, 20, 30]. Variant payload offset
+            // aligns to 4 (list pointer alignment); reading the
+            // (dataPtr, count) pair at offset 4/8 dispatches
+            // ListMarshal.LiftPrim<uint>.
+            using var fs = File.OpenRead(FindVariantListComponentPath());
+            var witBytes = File.ReadAllBytes(
+                FindVariantListComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var scan = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Scan");
+            Assert.NotNull(scan);
+
+            var tagField = scan!.GetField("Tag");
+            var foundField = scan.GetField("Found");
+            Assert.NotNull(tagField);
+            Assert.NotNull(foundField);
+            Assert.Equal(typeof(byte), tagField!.FieldType);
+            Assert.Equal(typeof(uint[]), foundField!.FieldType);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var discover = componentExports!.GetMethod("Discover");
+            Assert.NotNull(discover);
+            Assert.Equal(scan, discover!.ReturnType);
+
+            var instance = discover.Invoke(null, null)!;
+            Assert.Equal((byte)1, tagField.GetValue(instance));
+            Assert.Equal(new uint[] { 10, 20, 30 },
+                (uint[])foundField.GetValue(instance)!);
+        }
+
         private static string FindOptionStringNoneComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
