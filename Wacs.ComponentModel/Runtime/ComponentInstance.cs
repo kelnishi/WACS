@@ -782,11 +782,13 @@ namespace Wacs.ComponentModel.Runtime
 
         /// <summary>Lift a variant return. Surfaces as a
         /// <c>(byte Tag, object? Payload)</c> tuple — Tag is the
-        /// 0-indexed case ordinal, Payload is the lifted
-        /// primitive value (or null when the case has no
-        /// payload). Without dynamic-type emission this is the
-        /// closest the interpreter gets to the transpiler's
-        /// generated tagged-union class.</summary>
+        /// 0-indexed case ordinal, Payload is the lifted value:
+        /// primitive, string, T[] for list-of-prim, or
+        /// <c>IReadOnlyDictionary&lt;string, object&gt;</c> for
+        /// record-of-prim. <c>null</c> for cases with no payload.
+        /// Without dynamic-type emission this is the closest the
+        /// interpreter gets to the transpiler's generated
+        /// tagged-union class.</summary>
         private bool TryLiftVariant(
             ComponentValType t, int retAreaPtr, out object? result)
         {
@@ -795,30 +797,152 @@ namespace Wacs.ComponentModel.Runtime
             if (t.TypeIdx >= _component.Types.Count) return false;
             if (!(_component.Types[(int)t.TypeIdx] is ComponentVariantType vr))
                 return false;
-            // v0: primitive payloads or absent. Aggregate
-            // payloads (string, list, nested) are Phase 2.
+            // Phase 2: every payload-bearing case must be
+            // primitive, list<prim>, or record-of-prim. Other
+            // aggregates (nested variant, list<aggregate>) bail.
             foreach (var c in vr.Cases)
-                if (c.Payload != null && !c.Payload.Value.IsPrimitive)
+            {
+                if (c.Payload == null) continue;
+                if (c.Payload.Value.IsPrimitive) continue;
+                if (c.Payload.Value.TypeIdx >= _component.Types.Count)
                     return false;
+                var inner = _component.Types[(int)c.Payload.Value.TypeIdx];
+                if (inner is ComponentListType lt
+                    && lt.Element.IsPrimitive
+                    && lt.Element.Prim != ComponentPrim.String) continue;
+                if (inner is ComponentRecordType rt
+                    && AllPrimRecord(rt)) continue;
+                return false;
+            }
             if (_memory == null) return false;
 
-            var disc = _memory.Data[retAreaPtr];
-            if (disc >= vr.Cases.Count)
+            // Discriminant width tracks case count.
+            var caseCount = vr.Cases.Count;
+            var discWidth = caseCount <= 256 ? 1
+                : caseCount <= 65536 ? 2 : 4;
+            // Payload alignment: max alignment over all payload-
+            // bearing cases. Mirrors the transpiler's
+            // EmitVariantReturnBody computation.
+            int payloadAlign = 1;
+            foreach (var c in vr.Cases)
+            {
+                if (c.Payload == null) continue;
+                int a;
+                if (c.Payload.Value.IsPrimitive)
+                {
+                    a = c.Payload.Value.Prim == ComponentPrim.String
+                        ? 4 : PrimByteSize(c.Payload.Value.Prim);
+                }
+                else
+                {
+                    var inner = _component.Types[(int)c.Payload.Value.TypeIdx];
+                    a = inner is ComponentRecordType rec
+                        ? RecordMaxFieldAlign(rec)
+                        : 4;   // list<prim>: pointer alignment
+                }
+                if (a > payloadAlign) payloadAlign = a;
+            }
+            var payloadOffset = AlignUp(discWidth, payloadAlign);
+
+            uint disc;
+            if (discWidth == 1) disc = _memory.Data[retAreaPtr];
+            else if (discWidth == 2) disc = BitConverter.ToUInt16(
+                _memory.Data, retAreaPtr);
+            else disc = BitConverter.ToUInt32(_memory.Data, retAreaPtr);
+            if (disc >= caseCount)
                 throw new FormatException(
                     $"Variant discriminant {disc} out of range "
-                    + $"(case count = {vr.Cases.Count}).");
-            var c0 = vr.Cases[disc];
+                    + $"(case count = {caseCount}).");
+
+            var c0 = vr.Cases[(int)disc];
             object? payload = null;
-            if (c0.Payload.HasValue && c0.Payload.Value.IsPrimitive)
+            if (c0.Payload.HasValue)
             {
-                // Variant payload at offset = discWidth padded up
-                // to max payload alignment. v0 pads to 4 (matches
-                // the transpiler's all-≤4-byte-prim assumption).
-                payload = ReadPrimAtOffset(retAreaPtr + 4,
-                                            c0.Payload.Value.Prim);
+                var p = c0.Payload.Value;
+                if (p.IsPrimitive)
+                {
+                    if (p.Prim == ComponentPrim.String)
+                        payload = LiftStringRetArea(retAreaPtr + payloadOffset);
+                    else
+                        payload = ReadPrimAtOffset(
+                            retAreaPtr + payloadOffset, p.Prim);
+                }
+                else
+                {
+                    var inner = _component.Types[(int)p.TypeIdx];
+                    if (inner is ComponentListType lt)
+                        payload = LiftListPayload(
+                            retAreaPtr + payloadOffset, lt.Element.Prim);
+                    else if (inner is ComponentRecordType rec)
+                        payload = LiftRecordPayload(
+                            retAreaPtr + payloadOffset, rec);
+                }
             }
             result = ((byte)disc, payload);
             return true;
+        }
+
+        /// <summary>True iff every record field is primitive.
+        /// Companion to <see cref="TryLiftVariant"/>'s record-
+        /// payload classifier.</summary>
+        private static bool AllPrimRecord(ComponentRecordType rec)
+        {
+            foreach (var f in rec.Fields)
+                if (!f.Type.IsPrimitive) return false;
+            return true;
+        }
+
+        /// <summary>Max field alignment in a record — drives the
+        /// canonical-ABI record alignment. Mirrors the
+        /// transpiler's <c>RecordAlign</c>.</summary>
+        private static int RecordMaxFieldAlign(ComponentRecordType rec)
+        {
+            int a = 1;
+            foreach (var f in rec.Fields)
+            {
+                if (!f.Type.IsPrimitive) continue;
+                var fa = PrimByteSize(f.Type.Prim);
+                if (fa > a) a = fa;
+            }
+            return a;
+        }
+
+        /// <summary>Lift a list-of-primitive payload at a given
+        /// offset. Reads (dataPtr, count) and dispatches
+        /// <see cref="ListMarshal.LiftPrim{T}"/> via reflection
+        /// over the element CLR type.</summary>
+        private object LiftListPayload(int offset, ComponentPrim elemPrim)
+        {
+            var header = ReadMemoryBytes(offset, 8);
+            var dataPtr = BitConverter.ToInt32(header, 0);
+            var count = BitConverter.ToInt32(header, 4);
+            var elemCs = PrimToCs(elemPrim);
+            var liftOpen = typeof(ListMarshal).GetMethod(
+                nameof(ListMarshal.LiftPrim),
+                1,
+                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+            var liftClosed = liftOpen.MakeGenericMethod(elemCs);
+            return liftClosed.Invoke(null,
+                new object[] { _memory!.Data, dataPtr, count })!;
+        }
+
+        /// <summary>Lift a record-of-primitive payload at a given
+        /// offset. Mirrors <see cref="TryLiftRecord"/>'s field-by-
+        /// field reader; surfaces as
+        /// <c>IReadOnlyDictionary&lt;string, object&gt;</c>.</summary>
+        private object LiftRecordPayload(int baseOffset, ComponentRecordType rec)
+        {
+            var dict = new Dictionary<string, object>(rec.Fields.Count);
+            int rel = 0;
+            foreach (var f in rec.Fields)
+            {
+                var align = PrimByteSize(f.Type.Prim);
+                rel = AlignUp(rel, align);
+                dict[f.Name] = ReadPrimAtOffset(
+                    baseOffset + rel, f.Type.Prim);
+                rel += align;
+            }
+            return dict;
         }
 
         /// <summary>Lift an <c>own&lt;R&gt;</c> return as the raw
