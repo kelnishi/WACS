@@ -206,12 +206,26 @@ namespace Wacs.ComponentModel.Runtime
                     lowered.Add(ptr);
                     lowered.Add(count);
                 }
+                else if (!pt.IsPrimitive
+                    && pt.TypeIdx < _component.Types.Count
+                    && (_component.Types[(int)pt.TypeIdx]
+                            is ComponentOwnType
+                        || _component.Types[(int)pt.TypeIdx]
+                            is ComponentBorrowType))
+                {
+                    // own<R> / borrow<R> param — accept the raw
+                    // i32 handle from the user. Without dynamic-
+                    // type emission for the resource class, this
+                    // is the simplest binding shape.
+                    lowered.Add(Convert.ToInt32(userArgs[i]));
+                }
                 else
                 {
                     throw new NotSupportedException(
                         "Lower-side marshaling for this aggregate "
                         + "param shape is a follow-up. v0 covers "
-                        + "primitive + string + list<prim> params.");
+                        + "primitive + string + list<prim> + "
+                        + "own/borrow<R> (as int handles) params.");
                 }
             }
             return lowered.ToArray();
@@ -383,12 +397,19 @@ namespace Wacs.ComponentModel.Runtime
             if (TryLiftFlags(r, coreResult.Data.Int32,
                     out var flagsResult))
                 return flagsResult;
+            if (TryLiftRecord(r, coreResult.Data.Int32,
+                    out var recordResult))
+                return recordResult;
+            if (TryLiftVariant(r, coreResult.Data.Int32,
+                    out var variantResult))
+                return variantResult;
+            if (TryLiftOwn(r, coreResult.Data.Int32,
+                    out var ownResult))
+                return ownResult;
 
             throw new NotSupportedException(
                 "Lift of this aggregate return shape via the "
-                + "interpreter is a follow-up. Record / variant / "
-                + "resource lifts need named-type emission like the "
-                + "transpiler path; not yet wired here.");
+                + "interpreter is a follow-up.");
         }
 
         /// <summary>Attempt <c>list&lt;primitive&gt;</c> lift —
@@ -722,6 +743,108 @@ namespace Wacs.ComponentModel.Runtime
             else if (n <= 16) result = (ushort)rawValue;
             else result = (uint)rawValue;
             return true;
+        }
+
+        /// <summary>Lift a record return. Without per-instance
+        /// dynamic-type emission (the transpiler's
+        /// EmitRecordType path) the interpreter surfaces records
+        /// as <c>IReadOnlyDictionary&lt;string, object&gt;</c>
+        /// keyed by WIT field name. Callers that need a typed
+        /// shape should go through the transpiler.</summary>
+        private bool TryLiftRecord(
+            ComponentValType t, int retAreaPtr, out object? result)
+        {
+            result = null;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= _component.Types.Count) return false;
+            if (!(_component.Types[(int)t.TypeIdx] is ComponentRecordType rec))
+                return false;
+            // v0 supports primitive fields only — same restriction
+            // the transpiler enforces. Aggregate fields each add
+            // their own marshaling shape.
+            foreach (var f in rec.Fields)
+                if (!f.Type.IsPrimitive) return false;
+            if (_memory == null) return false;
+
+            var dict = new Dictionary<string, object>(rec.Fields.Count);
+            int offset = 0;
+            foreach (var f in rec.Fields)
+            {
+                var align = PrimByteSize(f.Type.Prim);
+                offset = AlignUp(offset, align);
+                dict[f.Name] = ReadPrimAtOffset(retAreaPtr + offset,
+                                                 f.Type.Prim);
+                offset += align;
+            }
+            result = dict;
+            return true;
+        }
+
+        /// <summary>Lift a variant return. Surfaces as a
+        /// <c>(byte Tag, object? Payload)</c> tuple — Tag is the
+        /// 0-indexed case ordinal, Payload is the lifted
+        /// primitive value (or null when the case has no
+        /// payload). Without dynamic-type emission this is the
+        /// closest the interpreter gets to the transpiler's
+        /// generated tagged-union class.</summary>
+        private bool TryLiftVariant(
+            ComponentValType t, int retAreaPtr, out object? result)
+        {
+            result = null;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= _component.Types.Count) return false;
+            if (!(_component.Types[(int)t.TypeIdx] is ComponentVariantType vr))
+                return false;
+            // v0: primitive payloads or absent. Aggregate
+            // payloads (string, list, nested) are Phase 2.
+            foreach (var c in vr.Cases)
+                if (c.Payload != null && !c.Payload.Value.IsPrimitive)
+                    return false;
+            if (_memory == null) return false;
+
+            var disc = _memory.Data[retAreaPtr];
+            if (disc >= vr.Cases.Count)
+                throw new FormatException(
+                    $"Variant discriminant {disc} out of range "
+                    + $"(case count = {vr.Cases.Count}).");
+            var c0 = vr.Cases[disc];
+            object? payload = null;
+            if (c0.Payload.HasValue && c0.Payload.Value.IsPrimitive)
+            {
+                // Variant payload at offset = discWidth padded up
+                // to max payload alignment. v0 pads to 4 (matches
+                // the transpiler's all-≤4-byte-prim assumption).
+                payload = ReadPrimAtOffset(retAreaPtr + 4,
+                                            c0.Payload.Value.Prim);
+            }
+            result = ((byte)disc, payload);
+            return true;
+        }
+
+        /// <summary>Lift an <c>own&lt;R&gt;</c> return as the raw
+        /// i32 handle. Users wrap it in their own resource type
+        /// — the interpreter doesn't dynamically emit a sealed
+        /// class the way the transpiler's EmitResourceType
+        /// does. Callers that need the typed wrapper should
+        /// transpile the component instead.</summary>
+        private bool TryLiftOwn(
+            ComponentValType t, int rawValue, out object? result)
+        {
+            result = null;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= _component.Types.Count) return false;
+            if (!(_component.Types[(int)t.TypeIdx] is ComponentOwnType _))
+                return false;
+            // own<R> returns the i32 handle directly on the wasm
+            // stack — no retArea indirection.
+            result = rawValue;
+            return true;
+        }
+
+        private static int AlignUp(int offset, int alignment)
+        {
+            var rem = offset % alignment;
+            return rem == 0 ? offset : offset + (alignment - rem);
         }
 
         /// <summary>Build a closed <c>ValueTuple&lt;…&gt;</c>
