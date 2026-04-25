@@ -52,6 +52,7 @@ namespace Wacs.ComponentModel.Runtime
         private readonly WasmRuntime _runtime;
         private readonly ModuleInstance _coreInstance;
         private MemoryInstance? _memory;
+        private Wacs.Core.Runtime.Delegates.GenericFuncs? _cabiRealloc;
 
         private ComponentInstance(
             ComponentModule component,
@@ -166,31 +167,142 @@ namespace Wacs.ComponentModel.Runtime
 
         private object[] LowerArgs(ComponentFuncType fn, object?[] userArgs)
         {
-            // Primitive params pass through unchanged. Aggregate
-            // params (string, list<prim>) need cabi_realloc on the
-            // guest side — implementing that via the interpreter
-            // requires calling the guest's realloc through the
-            // same WasmRuntime, then writing bytes into the
-            // exported memory. Deferred to a follow-up; v0 errors
-            // on aggregate params instead of half-implementing.
             if (fn.Params.Count != userArgs.Length)
                 throw new ArgumentException(
                     $"Expected {fn.Params.Count} args, got "
                     + $"{userArgs.Length}.");
 
-            var lowered = new object[fn.Params.Count];
+            // Primitive params pass through; string + list<prim>
+            // params route through cabi_realloc + a memcpy into
+            // exported memory, then push (ptr, count) — same
+            // shape the transpiler's EmitPrecomputeBufferParam
+            // helpers emit IL for.
+            var lowered = new List<object>(fn.Params.Count);
             for (int i = 0; i < fn.Params.Count; i++)
             {
                 var pt = fn.Params[i].Type;
-                if (!pt.IsPrimitive)
+                if (pt.IsPrimitive)
+                {
+                    if (pt.Prim == ComponentPrim.String)
+                    {
+                        var (ptr, len) = LowerStringParam((string)userArgs[i]!);
+                        lowered.Add(ptr);
+                        lowered.Add(len);
+                    }
+                    else
+                    {
+                        lowered.Add(LowerPrimitive(pt.Prim, userArgs[i])!);
+                    }
+                }
+                else if (!pt.IsPrimitive
+                    && pt.TypeIdx < _component.Types.Count
+                    && _component.Types[(int)pt.TypeIdx]
+                        is ComponentListType list
+                    && list.Element.IsPrimitive
+                    && list.Element.Prim != ComponentPrim.String)
+                {
+                    var (ptr, count) = LowerListOfPrimParam(
+                        userArgs[i], list.Element.Prim);
+                    lowered.Add(ptr);
+                    lowered.Add(count);
+                }
+                else
+                {
                     throw new NotSupportedException(
-                        "ComponentInstance.Invoke v0 only handles "
-                        + "primitive params. Lowering aggregate args "
-                        + "via cabi_realloc is a follow-up.");
-                lowered[i] = LowerPrimitive(pt.Prim, userArgs[i])!;
+                        "Lower-side marshaling for this aggregate "
+                        + "param shape is a follow-up. v0 covers "
+                        + "primitive + string + list<prim> params.");
+                }
             }
-            return lowered;
+            return lowered.ToArray();
         }
+
+        private (int ptr, int len) LowerStringParam(string value)
+        {
+            if (_memory == null)
+                throw new InvalidOperationException(
+                    "String param lowering requires Module.Memory.");
+            var bytes = StringMarshal.EncodeUtf8(value);
+            var ptr = CabiRealloc(0, 0, 1, bytes.Length);
+            StringMarshal.CopyToGuest(bytes, _memory.Data, ptr);
+            return (ptr, bytes.Length);
+        }
+
+        private (int ptr, int count) LowerListOfPrimParam(
+            object? userArg, ComponentPrim elemPrim)
+        {
+            if (_memory == null)
+                throw new InvalidOperationException(
+                    "List param lowering requires Module.Memory.");
+            if (userArg is not Array arr)
+                throw new ArgumentException(
+                    "list<" + elemPrim + "> param requires a "
+                    + "compatible array argument.");
+            var elemSize = PrimByteSize(elemPrim);
+            var count = arr.Length;
+            var byteLen = count * elemSize;
+            var ptr = CabiRealloc(0, 0, elemSize, byteLen);
+
+            // Closed-generic dispatch over ListMarshal.CopyArrayToGuest
+            // — same MakeGenericMethod pattern the transpiler IL
+            // uses, but at runtime via reflection.
+            var elemCs = PrimToCs(elemPrim);
+            var copyOpen = typeof(ListMarshal).GetMethod(
+                nameof(ListMarshal.CopyArrayToGuest))!;
+            var copyClosed = copyOpen.MakeGenericMethod(elemCs);
+            // Coerce the raw array to the closed element type if
+            // the user passed e.g. uint[] for a u32 list — the
+            // helper's `T : unmanaged` constraint requires a
+            // matching CLR array. For mismatches the user gets
+            // a clear conversion error here rather than a
+            // confusing reflection failure later.
+            if (arr.GetType().GetElementType() != elemCs)
+            {
+                var typed = Array.CreateInstance(elemCs, count);
+                Array.Copy(arr, typed, count);
+                arr = typed;
+            }
+            copyClosed.Invoke(null, new object[] { arr, _memory.Data, ptr });
+            return (ptr, count);
+        }
+
+        /// <summary>Call the guest's <c>cabi_realloc</c> export
+        /// to allocate (or grow / move) a buffer in the
+        /// component's exported memory. Cached on first call —
+        /// every aggregate-param lowering routes through here.</summary>
+        private int CabiRealloc(int oldPtr, int oldLen, int align, int newLen)
+        {
+            if (_cabiRealloc == null)
+            {
+                if (!_runtime.TryGetExportedFunction(
+                        "cabi_realloc", out var addr))
+                    throw new InvalidOperationException(
+                        "Component does not export cabi_realloc; "
+                        + "aggregate params require it.");
+                _cabiRealloc = _runtime.CreateInvoker(
+                    addr, new InvokerOptions());
+            }
+            var results = _cabiRealloc(oldPtr, oldLen, align, newLen);
+            return results[0].Data.Int32;
+        }
+
+        private static int PrimByteSize(ComponentPrim p) => p switch
+        {
+            ComponentPrim.Bool => 1,
+            ComponentPrim.S8   => 1,
+            ComponentPrim.U8   => 1,
+            ComponentPrim.S16  => 2,
+            ComponentPrim.U16  => 2,
+            ComponentPrim.S32  => 4,
+            ComponentPrim.U32  => 4,
+            ComponentPrim.F32  => 4,
+            ComponentPrim.Char => 4,
+            ComponentPrim.S64  => 8,
+            ComponentPrim.U64  => 8,
+            ComponentPrim.F64  => 8,
+            _ => throw new NotSupportedException(
+                "PrimByteSize for " + p + " is a follow-up."),
+        };
 
         private static object LowerPrimitive(ComponentPrim prim, object? value) =>
             prim switch
