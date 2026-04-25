@@ -31,6 +31,12 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel", "Wacs
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Test", "Wacs.ComponentModel.Test\Wacs.ComponentModel.Test.csproj", "{3A1F1B47-654C-436C-BE0E-158A923AACF3}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Bindgen.Lib", "Wacs.ComponentModel.Bindgen.Lib\Wacs.ComponentModel.Bindgen.Lib.csproj", "{4E155331-7FAC-4011-BFA6-F11704476918}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Bindgen", "Wacs.ComponentModel.Bindgen\Wacs.ComponentModel.Bindgen.csproj", "{BA6958DF-70CC-4EEC-8672-96C481A31CA1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Bindgen.Test", "Wacs.ComponentModel.Bindgen.Test\Wacs.ComponentModel.Bindgen.Test.csproj", "{913854F9-ABD3-4E64-9029-802FCFE652C2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -97,5 +103,17 @@ Global
 		{3A1F1B47-654C-436C-BE0E-158A923AACF3}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3A1F1B47-654C-436C-BE0E-158A923AACF3}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3A1F1B47-654C-436C-BE0E-158A923AACF3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4E155331-7FAC-4011-BFA6-F11704476918}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4E155331-7FAC-4011-BFA6-F11704476918}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4E155331-7FAC-4011-BFA6-F11704476918}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4E155331-7FAC-4011-BFA6-F11704476918}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BA6958DF-70CC-4EEC-8672-96C481A31CA1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BA6958DF-70CC-4EEC-8672-96C481A31CA1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BA6958DF-70CC-4EEC-8672-96C481A31CA1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BA6958DF-70CC-4EEC-8672-96C481A31CA1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{913854F9-ABD3-4E64-9029-802FCFE652C2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{913854F9-ABD3-4E64-9029-802FCFE652C2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{913854F9-ABD3-4E64-9029-802FCFE652C2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{913854F9-ABD3-4E64-9029-802FCFE652C2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>9</LangVersion>
+        <TargetFramework>net8.0</TargetFramework>
+        <RootNamespace>Wacs.ComponentModel.Bindgen.Cli</RootNamespace>
+        <AssemblyName>Wacs.ComponentModel.Bindgen</AssemblyName>
+        <StartupObject>Wacs.ComponentModel.Bindgen.Cli.Program</StartupObject>
+
+        <!-- Package identity -->
+        <PackageId>WACS.ComponentModel.Bindgen</PackageId>
+        <Title>WACS Component Model Bindgen</Title>
+        <Version>0.1.0</Version>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <Description>WIT → C# binding generator for WACS components. Installs the `wit-bindgen-wacs` CLI tool. Forward direction: WIT text → C# bindings (offline pre-generation for AOT targets that can't use the runtime transpiler). Reverse direction: transpiled .dll → WIT + C# bindings (regenerate from a shipped assembly with no original .wit). For programmatic use, reference WACS.ComponentModel.Bindgen.Lib.</Description>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageTags>wasm;webassembly;component-model;wit;bindgen;wacs;dotnet-tool</PackageTags>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+        <!-- dotnet tool -->
+        <PackAsTool>true</PackAsTool>
+        <ToolCommandName>wit-bindgen-wacs</ToolCommandName>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Wacs.ComponentModel.Bindgen.Lib\Wacs.ComponentModel.Bindgen.Lib.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="CommandLineParser" Version="2.9.1" />
+    </ItemGroup>
+
+</Project>
