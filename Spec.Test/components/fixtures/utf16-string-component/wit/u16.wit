@@ -1,0 +1,4 @@
+package local:utf16;
+world utf16 {
+    export greet: func() -> string;
+}

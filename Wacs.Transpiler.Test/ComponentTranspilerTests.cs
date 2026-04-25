@@ -1070,6 +1070,42 @@ namespace Wacs.Transpiler.Test
             Assert.Equal((uint)11, yField!.GetValue(dotValue));
         }
 
+        private static string FindUtf16StringComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "utf16-string-component", "wasm",
+                                "u16.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_utf16_string_via_canon_option()
+        {
+            // utf16-string-component: greet() -> string built with
+            // `componentize-... --encoding utf16`. The canon-lift
+            // section on the .component.wasm carries
+            // string-encoding=utf16; the transpiler reads that
+            // option from the canon entry and dispatches the lift
+            // through StringMarshal.LiftUtf16 instead of LiftUtf8.
+            // Fixture stores "Hi" as UTF-16LE: H=0x48 i=0x69 →
+            // 4 bytes, 2 code units. (strPtr, codeUnitCount)
+            // at retArea = (100, 2).
+            using var fs = File.OpenRead(FindUtf16StringComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var greet = componentExports!.GetMethod("Greet");
+            Assert.NotNull(greet);
+            Assert.Equal(typeof(string), greet!.ReturnType);
+
+            Assert.Equal("Hi", (string)greet.Invoke(null, null)!);
+        }
+
         private static string FindOptionStringNoneComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());

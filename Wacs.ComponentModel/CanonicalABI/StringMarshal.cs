@@ -119,5 +119,25 @@ namespace Wacs.ComponentModel.CanonicalABI
                     "UTF-8 copy span out of range of guest memory buffer.");
             Array.Copy(bytes, 0, memory, dstPtr, bytes.Length);
         }
+
+        /// <summary>
+        /// Lift a UTF-16LE byte run at <paramref name="source"/>
+        /// offset <paramref name="ptr"/>, length
+        /// <paramref name="codeUnitCount"/> (in u16 code units,
+        /// not bytes — per CanonicalABI.md "for utf16, len is in
+        /// units of u16's, not bytes"). Used when the canon-lift
+        /// option specifies <c>string-encoding=utf16</c>; the
+        /// guest's string buffer is laid out as 2 bytes per code
+        /// unit, little-endian on every component-supporting
+        /// platform we care about.
+        /// </summary>
+        public static string LiftUtf16(byte[] source, int ptr, int codeUnitCount)
+        {
+            if (ptr < 0 || codeUnitCount < 0
+                || ptr + 2L * codeUnitCount > source.Length)
+                throw new ArgumentOutOfRangeException(nameof(ptr),
+                    "UTF-16 string span out of range of provided memory buffer.");
+            return Encoding.Unicode.GetString(source, ptr, codeUnitCount * 2);
+        }
     }
 }

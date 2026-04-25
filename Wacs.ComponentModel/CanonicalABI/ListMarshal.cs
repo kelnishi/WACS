@@ -145,5 +145,30 @@ namespace Wacs.ComponentModel.CanonicalABI
             }
             return result;
         }
+
+        /// <summary>
+        /// UTF-16 sibling of <see cref="LiftStringList"/>. Each
+        /// element's <c>strLen</c> is in u16 code units (canonical-
+        /// ABI rule for utf16 strings), so the per-element decode
+        /// routes to <see cref="StringMarshal.LiftUtf16(byte[], int, int)"/>.
+        /// </summary>
+        public static string[] LiftStringListUtf16(byte[] memory, int listPtr, int count)
+        {
+            if (count < 0)
+                throw new ArgumentOutOfRangeException(nameof(count),
+                    "list<string> count must be non-negative.");
+            if (count > 0 && (listPtr < 0 || (long)listPtr + count * 8 > memory.Length))
+                throw new ArgumentOutOfRangeException(nameof(listPtr),
+                    "list<string> element span out of range of guest memory.");
+            var result = new string[count];
+            for (int i = 0; i < count; i++)
+            {
+                var offset = listPtr + i * 8;
+                var strPtr = BitConverter.ToInt32(memory, offset);
+                var codeUnits = BitConverter.ToInt32(memory, offset + 4);
+                result[i] = StringMarshal.LiftUtf16(memory, strPtr, codeUnits);
+            }
+            return result;
+        }
     }
 }

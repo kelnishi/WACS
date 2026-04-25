@@ -50,6 +50,14 @@ namespace Wacs.ComponentModel.Runtime
     {
         private readonly ComponentModule _component;
         private readonly WasmRuntime _runtime;
+        /// <summary>Per-Invoke string encoding (set from the
+        /// matching canon-lift's options). Threaded as field
+        /// rather than method parameter because string lifts fan
+        /// out across many helpers (return, list-of-string,
+        /// option-string, result-string, variant-string-payload).
+        /// Reset on each Invoke entry.</summary>
+        private CanonOption.Kind _stringEncoding =
+            CanonOption.Kind.StringUtf8;
         private readonly ModuleInstance _coreInstance;
         private MemoryInstance? _memory;
         private Wacs.Core.Runtime.Delegates.GenericFuncs? _cabiRealloc;
@@ -160,7 +168,28 @@ namespace Wacs.ComponentModel.Runtime
             var coreArgs = LowerArgs(fn, args);
             var coreResults = invoker(coreArgs);
 
+            _stringEncoding = ResolveStringEncoding(lift.Options);
             return LiftResult(fn, coreFuncType, coreResults);
+        }
+
+        /// <summary>Pick the export's string encoding from its
+        /// canon-lift options. Mirror of the transpiler's
+        /// ResolveStringEncoding — defaults to UTF-8 when no
+        /// option present.</summary>
+        private static CanonOption.Kind ResolveStringEncoding(
+            IReadOnlyList<CanonOption> options)
+        {
+            foreach (var opt in options)
+            {
+                switch (opt.OptionKind)
+                {
+                    case CanonOption.Kind.StringUtf8:
+                    case CanonOption.Kind.StringUtf16:
+                    case CanonOption.Kind.StringLatin1OrUtf16:
+                        return opt.OptionKind;
+                }
+            }
+            return CanonOption.Kind.StringUtf8;
         }
 
         // ---- Lower (managed → core wire) -----------------------------
@@ -514,7 +543,9 @@ namespace Wacs.ComponentModel.Runtime
             var header = ReadMemoryBytes(retAreaPtr, 8);
             var listPtr = BitConverter.ToInt32(header, 0);
             var count = BitConverter.ToInt32(header, 4);
-            result = ListMarshal.LiftStringList(_memory.Data, listPtr, count);
+            result = _stringEncoding == CanonOption.Kind.StringUtf16
+                ? ListMarshal.LiftStringListUtf16(_memory.Data, listPtr, count)
+                : ListMarshal.LiftStringList(_memory.Data, listPtr, count);
             return true;
         }
 
@@ -543,7 +574,7 @@ namespace Wacs.ComponentModel.Runtime
                 ReadMemoryBytes(retAreaPtr + 4, 4), 0);
             var strLen = BitConverter.ToInt32(
                 ReadMemoryBytes(retAreaPtr + 8, 4), 0);
-            result = StringMarshal.LiftUtf8(_memory.Data, strPtr, strLen);
+            result = LiftStringAt(strPtr, strLen);
             return true;
         }
 
@@ -667,8 +698,7 @@ namespace Wacs.ComponentModel.Runtime
                         ReadMemoryBytes(payloadOffset, 4), 0);
                     var strLen = BitConverter.ToInt32(
                         ReadMemoryBytes(payloadOffset + 4, 4), 0);
-                    return StringMarshal.LiftUtf8(
-                        _memory!.Data, strPtr, strLen);
+                    return LiftStringAt(strPtr, strLen);
                 default:
                     throw new InvalidOperationException(
                         "Absent side has no payload to lift.");
@@ -1047,8 +1077,20 @@ namespace Wacs.ComponentModel.Runtime
             var memBytes = ReadMemoryBytes(retAreaPtr, 8);
             var strPtr = BitConverter.ToInt32(memBytes, 0);
             var strLen = BitConverter.ToInt32(memBytes, 4);
+            return LiftStringAt(strPtr, strLen);
+        }
+
+        /// <summary>Decode a string at <paramref name="strPtr"/>
+        /// per the per-invoke <see cref="_stringEncoding"/>.
+        /// <paramref name="strLen"/> is bytes for UTF-8 and u16
+        /// code units for UTF-16 (canonical-ABI rule).</summary>
+        private string LiftStringAt(int strPtr, int strLen)
+        {
+            if (_stringEncoding == CanonOption.Kind.StringUtf16)
+                return StringMarshal.LiftUtf16(
+                    _memory!.Data, strPtr, strLen);
             return StringMarshal.LiftUtf8(
-                ReadMemoryBytes(strPtr, strLen), 0, strLen);
+                _memory!.Data, strPtr, strLen);
         }
 
         /// <summary>Snapshot a slice of the core module's
