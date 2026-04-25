@@ -1,0 +1,9 @@
+package local:vs;
+world vs {
+    variant status {
+        idle,
+        denied(string),
+        ok,
+    }
+    export describe: func() -> status;
+}

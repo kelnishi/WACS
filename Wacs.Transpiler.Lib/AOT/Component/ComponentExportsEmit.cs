@@ -530,8 +530,11 @@ namespace Wacs.Transpiler.AOT.Component
             ModuleBuilder module, string @namespace,
             string witName, CtVariantType vr)
         {
-            // Bail on aggregate payloads — same constraint as
-            // record fields. Caller skips the export.
+            // Bail on non-primitive aggregate payloads (lists,
+            // records, nested variants) — those need their own
+            // marshaling shape and ride incrementally as Phase 2
+            // grows. Strings are first-class via the
+            // StringMarshal chokepoint.
             foreach (var c in vr.Cases)
                 if (c.Payload != null && !(c.Payload is CtPrimType))
                     return null;
@@ -555,13 +558,16 @@ namespace Wacs.Transpiler.AOT.Component
 
             // Per-payload-case fields (only the cases with
             // payloads). Each named after the case in PascalCase.
+            // String payloads get `string` field type;
+            // primitives map per CtPrimToCs.
             var payloadFieldByIdx = new Dictionary<int, FieldBuilder>();
             for (int i = 0; i < caseCount; i++)
             {
                 if (!(vr.Cases[i].Payload is CtPrimType prim)) continue;
+                var fldType = CtPrimToCs(prim.Kind);
                 var fld = classBuilder.DefineField(
                     PascalCase(vr.Cases[i].Name),
-                    CtPrimToCs(prim.Kind),
+                    fldType,
                     FieldAttributes.Public | FieldAttributes.InitOnly);
                 payloadFieldByIdx[i] = fld;
             }
@@ -805,7 +811,7 @@ namespace Wacs.Transpiler.AOT.Component
             if (TryResolveFlagsReturn(r, types, out _)) return true;
             if (TryResolveRecordOfPrims(r, types, out _, out _)) return true;
             if (TryResolveVariantReturn(r, types, out var vrShape)
-                && !vrShape.HasAggregatePayload) return true;
+                && !vrShape.HasUnsupportedAggregate) return true;
             if (TryResolveOwnReturn(r, types, out _)) return true;
             return false;
         }
@@ -896,30 +902,45 @@ namespace Wacs.Transpiler.AOT.Component
         }
 
         /// <summary>Description of a structural variant viewed
-        /// from the binary type section: case names paired with
-        /// optional primitive payloads. Aggregate-payload variants
-        /// (Phase 2) signal as <see cref="HasAggregatePayload"/>;
-        /// the IL emitter rejects them.</summary>
+        /// from the binary type section. Each case's payload
+        /// kind is captured as <c>null</c> (no payload), a
+        /// <see cref="ComponentPrim"/> (primitive — including
+        /// <see cref="ComponentPrim.String"/>), or signaled as
+        /// unsupported via <see cref="HasUnsupportedAggregate"/>
+        /// (lists, records, nested variants — those are Phase 2+
+        /// follow-ups beyond the v1 string slice).</summary>
         private sealed class VariantShape
         {
             public IReadOnlyList<string> CaseNames { get; }
             public IReadOnlyList<ComponentPrim?> CasePayloadPrims { get; }
-            public bool HasAggregatePayload { get; }
+            public bool HasUnsupportedAggregate { get; }
             public VariantShape(IReadOnlyList<string> names,
                                 IReadOnlyList<ComponentPrim?> payloads,
-                                bool hasAggregate)
+                                bool hasUnsupported)
             {
                 CaseNames = names;
                 CasePayloadPrims = payloads;
-                HasAggregatePayload = hasAggregate;
+                HasUnsupportedAggregate = hasUnsupported;
+            }
+
+            public bool AnyStringPayload
+            {
+                get
+                {
+                    foreach (var p in CasePayloadPrims)
+                        if (p == ComponentPrim.String) return true;
+                    return false;
+                }
             }
         }
 
         /// <summary>True iff <paramref name="t"/> is a type-ref
         /// to a structural variant where every payload-bearing
-        /// case carries a primitive (or no payload at all).
-        /// Aggregate-payload variants are Phase 2 — rejected via
-        /// <see cref="VariantShape.HasAggregatePayload"/>.</summary>
+        /// case carries a primitive (including string) or no
+        /// payload at all. Non-string aggregate payloads (lists,
+        /// records, nested variants) flag as
+        /// <see cref="VariantShape.HasUnsupportedAggregate"/> for
+        /// the caller to skip.</summary>
         private static bool TryResolveVariantReturn(
             ComponentValType t, IReadOnlyList<DefTypeEntry> types,
             out VariantShape shape)
@@ -930,7 +951,7 @@ namespace Wacs.Transpiler.AOT.Component
             if (!(types[(int)t.TypeIdx] is ComponentVariantType vr)) return false;
             var names = new string[vr.Cases.Count];
             var payloads = new ComponentPrim?[vr.Cases.Count];
-            bool aggregate = false;
+            bool unsupported = false;
             for (int i = 0; i < vr.Cases.Count; i++)
             {
                 names[i] = vr.Cases[i].Name;
@@ -940,15 +961,18 @@ namespace Wacs.Transpiler.AOT.Component
                 }
                 else if (vr.Cases[i].Payload!.Value.IsPrimitive)
                 {
+                    // Primitives (incl. string) are first-class
+                    // — string lift goes through StringMarshal
+                    // at the variant payload offset.
                     payloads[i] = vr.Cases[i].Payload!.Value.Prim;
                 }
                 else
                 {
-                    aggregate = true;
+                    unsupported = true;
                     payloads[i] = null;
                 }
             }
-            shape = new VariantShape(names, payloads, aggregate);
+            shape = new VariantShape(names, payloads, unsupported);
             return true;
         }
 
@@ -1304,7 +1328,7 @@ namespace Wacs.Transpiler.AOT.Component
             }
             else if (TryResolveVariantReturn(
                 export.Signature.Results[0], types, out variantShape)
-                && !variantShape.HasAggregatePayload)
+                && !variantShape.HasUnsupportedAggregate)
             {
                 isVariantReturn = true;
                 // Variants need a generated class — reject
@@ -2391,12 +2415,14 @@ namespace Wacs.Transpiler.AOT.Component
             var discWidth = caseCount <= 256 ? 1
                 : caseCount <= 65536 ? 2 : 4;
             // Payload alignment: max alignment over all
-            // payload-bearing cases; 1 if none.
+            // payload-bearing cases; 1 if none. Strings align to
+            // 4 (pointer alignment); other primitives align to
+            // their byte size.
             int payloadAlign = 1;
             foreach (var p in shape.CasePayloadPrims)
                 if (p.HasValue)
                     payloadAlign = System.Math.Max(payloadAlign,
-                        PrimByteSize(p.Value));
+                        PrimVariantAlign(p.Value));
             var payloadOffset = AlignUp(discWidth, payloadAlign);
 
             // Push tag (read disc byte, narrow as needed).
@@ -2417,12 +2443,20 @@ namespace Wacs.Transpiler.AOT.Component
             // For each payload-bearing case, read its payload
             // value at the shared payload offset. Order matches
             // the variant's case-order in the binary which the
-            // ctor expects.
+            // ctor expects. String payloads route through
+            // StringMarshal.LiftUtf8 reading (ptr, len) at the
+            // payload offset; other primitives go through
+            // EmitReadPayloadAtOffset.
             for (int i = 0; i < caseCount; i++)
             {
                 if (!shape.CasePayloadPrims[i].HasValue) continue;
-                EmitReadPayloadAtOffset(il, memoryLocal, retAreaLocal,
-                    payloadOffset, shape.CasePayloadPrims[i]!.Value);
+                var prim = shape.CasePayloadPrims[i]!.Value;
+                if (prim == ComponentPrim.String)
+                    EmitReadStringPayloadAtOffset(il, memoryLocal,
+                        retAreaLocal, payloadOffset);
+                else
+                    EmitReadPayloadAtOffset(il, memoryLocal, retAreaLocal,
+                        payloadOffset, prim);
             }
 
             // new VariantClass(tag, payload0, payload1, …)
@@ -2441,6 +2475,45 @@ namespace Wacs.Transpiler.AOT.Component
                     + "align with EmitVariantType's ctor signature.");
             il.Emit(OpCodes.Newobj, ctor);
             il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>Variant payload alignment — same as
+        /// <see cref="PrimByteSize"/> for primitives that fit in
+        /// one slot, but special-cases <see cref="ComponentPrim.String"/>
+        /// to 4 (pointer alignment of the leading <c>ptr</c>) so
+        /// string payloads share the slot with same-aligned
+        /// primitives.</summary>
+        private static int PrimVariantAlign(ComponentPrim p) =>
+            p == ComponentPrim.String ? 4 : PrimByteSize(p);
+
+        /// <summary>Push a string payload onto the stack via
+        /// <see cref="StringMarshal.LiftUtf8(byte[], int, int)"/>
+        /// — reads (ptr, len) at <c>retArea + offset</c> and
+        /// <c>retArea + offset + 4</c>, decodes the UTF-8 bytes
+        /// to a managed string. Used for variant cases carrying
+        /// a string payload.</summary>
+        private static void EmitReadStringPayloadAtOffset(
+            ILGenerator il, LocalBuilder memoryLocal,
+            LocalBuilder retAreaLocal, int offset)
+        {
+            var bitCToInt32 = typeof(BitConverter).GetMethod(
+                "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+            var liftMethod = typeof(StringMarshal).GetMethod(
+                nameof(StringMarshal.LiftUtf8),
+                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+
+            il.Emit(OpCodes.Ldloc, memoryLocal);    // for LiftUtf8
+            il.Emit(OpCodes.Ldloc, memoryLocal);    // for BitConv 1 (ptr)
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldc_I4, offset);
+            il.Emit(OpCodes.Add);
+            il.EmitCall(OpCodes.Call, bitCToInt32, null);
+            il.Emit(OpCodes.Ldloc, memoryLocal);    // for BitConv 2 (len)
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldc_I4, offset + 4);
+            il.Emit(OpCodes.Add);
+            il.EmitCall(OpCodes.Call, bitCToInt32, null);
+            il.EmitCall(OpCodes.Call, liftMethod, null);
         }
 
         /// <summary>
