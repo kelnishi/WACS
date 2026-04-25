@@ -287,6 +287,53 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Invoke_lifts_variant_with_string_payload()
+        {
+            // variant-string-component: describe() -> status
+            // where `variant status { idle, denied(string), ok }`.
+            // The fixture returns denied("denied") (tag=1).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "variant-string-component", "vs.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            var (tag, payload) = ((byte, object?))ci.Invoke("describe")!;
+            Assert.Equal((byte)1, tag);
+            Assert.Equal("denied", payload);
+        }
+
+        [Fact]
+        public void Invoke_lifts_variant_with_list_payload()
+        {
+            // variant-list-component: discover() -> scan
+            // where `variant scan { empty, found(list<u32>) }`.
+            // Fixture returns found([10,20,30]) (tag=1).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "variant-list-component", "vl.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            var (tag, payload) = ((byte, object?))ci.Invoke("discover")!;
+            Assert.Equal((byte)1, tag);
+            Assert.Equal(new uint[] { 10, 20, 30 }, (uint[])payload!);
+        }
+
+        [Fact]
+        public void Invoke_lifts_variant_with_record_payload()
+        {
+            // variant-record-component: locate() -> shape
+            // where `variant shape { empty, dot(point) }` and
+            // `record point { x: u32, y: u32 }`. Fixture returns
+            // dot({x:7, y:11}) (tag=1). Without dynamic-type
+            // emission the record surfaces as a string→object
+            // dictionary inside the variant payload slot.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "variant-record-component", "vr.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            var (tag, payload) = ((byte, object?))ci.Invoke("locate")!;
+            Assert.Equal((byte)1, tag);
+            var dict = (IReadOnlyDictionary<string, object>)payload!;
+            Assert.Equal(7u, dict["x"]);
+            Assert.Equal(11u, dict["y"]);
+        }
+
+        [Fact]
         public void Invoke_lifts_own_resource_as_raw_handle()
         {
             // resource-component: make() -> own<counter>
