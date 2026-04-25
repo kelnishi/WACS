@@ -876,6 +876,66 @@ namespace Wacs.Transpiler.Test
             Assert.Equal(105, (int)addMethod.Invoke(fresh, new object[] { 5 })!);
         }
 
+        private static string FindVariantStringComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-string-component", "wasm",
+                                "vs.component.wasm");
+        }
+
+        private static string FindVariantStringComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-string-component",
+                                "vs.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_variant_with_string_payload_via_decoded_wit()
+        {
+            // variant-string-component declares
+            //   `variant status { idle, denied(string), ok }`
+            //   `export describe: func() -> status`
+            // The fixture's retArea picks the `denied` case
+            // (disc=1) with the string payload "denied". The
+            // emitted Status class has Tag (byte) plus Denied
+            // (string) readonly fields; string lift goes through
+            // StringMarshal.LiftUtf8 at the variant payload
+            // offset.
+            using var fs = File.OpenRead(FindVariantStringComponentPath());
+            var witBytes = File.ReadAllBytes(
+                FindVariantStringComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var status = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Status");
+            Assert.NotNull(status);
+
+            var tagField = status!.GetField("Tag");
+            var deniedField = status.GetField("Denied");
+            Assert.NotNull(tagField);
+            Assert.NotNull(deniedField);
+            Assert.Equal(typeof(byte), tagField!.FieldType);
+            Assert.Equal(typeof(string), deniedField!.FieldType);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var describe = componentExports!.GetMethod("Describe");
+            Assert.NotNull(describe);
+            Assert.Equal(status, describe!.ReturnType);
+
+            var instance = describe.Invoke(null, null)!;
+            Assert.Equal((byte)1, tagField.GetValue(instance));
+            Assert.Equal("denied", deniedField.GetValue(instance));
+        }
+
         private static string FindOptionStringNoneComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
