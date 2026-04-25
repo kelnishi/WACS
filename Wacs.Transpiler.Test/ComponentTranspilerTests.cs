@@ -995,6 +995,81 @@ namespace Wacs.Transpiler.Test
                 (uint[])foundField.GetValue(instance)!);
         }
 
+        private static string FindVariantRecordComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-record-component", "wasm",
+                                "vr.component.wasm");
+        }
+
+        private static string FindVariantRecordComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-record-component",
+                                "vr.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_variant_with_record_payload_via_decoded_wit()
+        {
+            // variant-record-component:
+            //   `record point { x: u32, y: u32 }`
+            //   `variant shape { empty, dot(point) }`
+            //   `export locate: func() -> shape`.
+            // The fixture picks the `dot` case (disc=1) carrying
+            // `point { x:7, y:11 }`. Variant payload offset aligns
+            // to 4 (max field align of point); reading x at +4
+            // and y at +8 then `newobj Point` constructs the
+            // record. The variant ctor expects the Point CLR class
+            // as the Dot field type; emittedTypes resolves it via
+            // the case payload's CtTypeRef "point".
+            using var fs = File.OpenRead(FindVariantRecordComponentPath());
+            var witBytes = File.ReadAllBytes(
+                FindVariantRecordComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var point = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Point");
+            var shape = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Shape");
+            Assert.NotNull(point);
+            Assert.NotNull(shape);
+
+            var tagField = shape!.GetField("Tag");
+            var dotField = shape.GetField("Dot");
+            Assert.NotNull(tagField);
+            Assert.NotNull(dotField);
+            Assert.Equal(typeof(byte), tagField!.FieldType);
+            Assert.Equal(point, dotField!.FieldType);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var locate = componentExports!.GetMethod("Locate");
+            Assert.NotNull(locate);
+            Assert.Equal(shape, locate!.ReturnType);
+
+            var instance = locate.Invoke(null, null)!;
+            Assert.Equal((byte)1, tagField.GetValue(instance));
+            var dotValue = dotField.GetValue(instance);
+            Assert.NotNull(dotValue);
+            Assert.IsType(point, dotValue);
+
+            var xField = point!.GetField("X");
+            var yField = point.GetField("Y");
+            Assert.NotNull(xField);
+            Assert.NotNull(yField);
+            Assert.Equal(typeof(uint), xField!.FieldType);
+            Assert.Equal((uint)7, xField.GetValue(dotValue));
+            Assert.Equal((uint)11, yField!.GetValue(dotValue));
+        }
+
         private static string FindOptionStringNoneComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());

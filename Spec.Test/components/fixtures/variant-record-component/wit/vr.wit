@@ -1,0 +1,9 @@
+package local:vr;
+world vr {
+    record point { x: u32, y: u32 }
+    variant shape {
+        empty,
+        dot(point),
+    }
+    export locate: func() -> shape;
+}

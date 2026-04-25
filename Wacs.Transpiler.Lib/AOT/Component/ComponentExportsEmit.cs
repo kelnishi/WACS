@@ -105,24 +105,50 @@ namespace Wacs.Transpiler.AOT.Component
         /// in the world. Each lands in the assembly under
         /// <paramref name="namespace"/>; the cache maps WIT-level
         /// names to the emitted <see cref="Type"/> so export
-        /// methods can use them as return / param types.</summary>
+        /// methods can use them as return / param types.
+        ///
+        /// <para>Two-pass: non-variant types first, then variants.
+        /// Variants may carry record-typed payloads — the record's
+        /// CLR class must already exist in <paramref name="emittedTypes"/>
+        /// when the variant emitter runs so its constructor can
+        /// declare the record class as the case's payload field
+        /// type. Records never reference variants in payloads
+        /// (Phase 2 keeps record-field aggregates as a follow-up),
+        /// so two passes resolve every supported v1 shape.</para>
+        /// </summary>
         private static void EmitNamedTypes(
             ModuleBuilder module, string @namespace,
             CtPackage pkg, Type coreIExports, Type coreModuleClass,
             Dictionary<string, Type> emittedTypes)
         {
-            // Worlds + interfaces both contribute named types.
-            // Phase 1b focuses on worlds; cross-interface types
-            // (declared in `interface foo { … }` and used by a
-            // world) land when interface emission catches up.
+            // Pass 1: non-variant named types.
             foreach (var world in pkg.Worlds)
                 foreach (var named in world.Types)
-                    EmitNamedType(module, @namespace, named,
-                                  coreIExports, coreModuleClass, emittedTypes);
+                    if (!(named.Type is CtVariantType))
+                        EmitNamedType(module, @namespace, named,
+                                      coreIExports, coreModuleClass,
+                                      emittedTypes);
             foreach (var iface in pkg.Interfaces)
                 foreach (var named in iface.Types)
-                    EmitNamedType(module, @namespace, named,
-                                  coreIExports, coreModuleClass, emittedTypes);
+                    if (!(named.Type is CtVariantType))
+                        EmitNamedType(module, @namespace, named,
+                                      coreIExports, coreModuleClass,
+                                      emittedTypes);
+
+            // Pass 2: variants — emittedTypes now has every record
+            // a variant case might reference.
+            foreach (var world in pkg.Worlds)
+                foreach (var named in world.Types)
+                    if (named.Type is CtVariantType)
+                        EmitNamedType(module, @namespace, named,
+                                      coreIExports, coreModuleClass,
+                                      emittedTypes);
+            foreach (var iface in pkg.Interfaces)
+                foreach (var named in iface.Types)
+                    if (named.Type is CtVariantType)
+                        EmitNamedType(module, @namespace, named,
+                                      coreIExports, coreModuleClass,
+                                      emittedTypes);
         }
 
         private static void EmitNamedType(
@@ -147,7 +173,8 @@ namespace Wacs.Transpiler.AOT.Component
                     return;
                 case CtVariantType vr:
                     var emitted = EmitVariantType(module, @namespace,
-                                                   named.Name, vr);
+                                                   named.Name, vr,
+                                                   emittedTypes);
                     if (emitted != null)
                         emittedTypes[named.Name] = emitted;
                     return;
@@ -528,11 +555,13 @@ namespace Wacs.Transpiler.AOT.Component
         /// </summary>
         private static Type? EmitVariantType(
             ModuleBuilder module, string @namespace,
-            string witName, CtVariantType vr)
+            string witName, CtVariantType vr,
+            Dictionary<string, Type> emittedTypes)
         {
             // Allowed payload shapes: none, primitive
-            // (incl. string), list<primitive>. Other aggregates
-            // (records, nested variants, list<aggregate>) bail —
+            // (incl. string), list<primitive>, named
+            // record-of-primitives. Other aggregates (nested
+            // variants, anonymous records, list<aggregate>) bail —
             // each adds its own marshaling shape and rides
             // incrementally as Phase 2 grows.
             foreach (var c in vr.Cases)
@@ -542,6 +571,10 @@ namespace Wacs.Transpiler.AOT.Component
                 if (c.Payload is CtListType l
                     && l.Element is CtPrimType lp
                     && lp.Kind != CtPrim.String)
+                    continue;
+                if (c.Payload is CtTypeRef tr
+                    && emittedTypes.TryGetValue(tr.Name, out var named)
+                    && named.IsClass && !named.IsArray)
                     continue;
                 return null;
             }
@@ -566,7 +599,9 @@ namespace Wacs.Transpiler.AOT.Component
             // Per-payload-case fields (only the cases with
             // payloads). Each named after the case in PascalCase.
             // String payloads get `string` field type; primitives
-            // map per CtPrimToCs; list<prim> payloads get T[].
+            // map per CtPrimToCs; list<prim> payloads get T[];
+            // record-typed payloads get the previously-emitted
+            // record CLR class.
             var payloadFieldByIdx = new Dictionary<int, FieldBuilder>();
             for (int i = 0; i < caseCount; i++)
             {
@@ -576,6 +611,9 @@ namespace Wacs.Transpiler.AOT.Component
                     CtListType list when list.Element is CtPrimType lp
                                           && lp.Kind != CtPrim.String
                         => CtPrimToCs(lp.Kind).MakeArrayType(),
+                    CtTypeRef tr when emittedTypes.TryGetValue(
+                                          tr.Name, out var bound)
+                        => bound,
                     _ => null,
                 };
                 if (fldType == null) continue;
@@ -824,8 +862,7 @@ namespace Wacs.Transpiler.AOT.Component
             if (TryResolveEnumReturn(r, types, out _)) return true;
             if (TryResolveFlagsReturn(r, types, out _)) return true;
             if (TryResolveRecordOfPrims(r, types, out _, out _)) return true;
-            if (TryResolveVariantReturn(r, types, out var vrShape)
-                && !vrShape.HasUnsupportedAggregate) return true;
+            if (IsStructurallyEmittableVariant(r, types)) return true;
             if (TryResolveOwnReturn(r, types, out _)) return true;
             return false;
         }
@@ -918,10 +955,13 @@ namespace Wacs.Transpiler.AOT.Component
         /// <summary>Per-case payload classification for variant
         /// emission. <c>None</c> for no-payload cases;
         /// <c>Prim</c> wraps a primitive (or string) payload;
-        /// <c>ListOfPrim</c> wraps a list-of-primitive payload.
-        /// Other aggregate shapes (record, nested variant) flag
-        /// the variant as unsupported and the emitter skips the
-        /// export.</summary>
+        /// <c>ListOfPrim</c> wraps a list-of-primitive payload;
+        /// <c>RecordOfPrim</c> wraps a record-of-primitives
+        /// payload (the record's CLR class is resolved via
+        /// decoded-WIT name lookup).
+        /// Other aggregate shapes (nested variant, anonymous
+        /// records) flag the variant as unsupported and the
+        /// emitter skips the export.</summary>
         private abstract class VariantPayload
         {
             public sealed class None : VariantPayload { }
@@ -934,6 +974,20 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 public ComponentPrim ElemP { get; }
                 public ListOfPrim(ComponentPrim elem) { ElemP = elem; }
+            }
+            /// <summary>Record-of-primitives payload. The
+            /// structural <see cref="FieldPrims"/> drive the
+            /// per-field byte-level read; <see cref="RecordClrType"/>
+            /// is the CLR class the variant ctor expects (resolved
+            /// from emittedTypes via the decoded-WIT case payload's
+            /// <c>CtTypeRef</c>). Both must agree on field count
+            /// and order.</summary>
+            public sealed class RecordOfPrim : VariantPayload
+            {
+                public ComponentPrim[] FieldPrims { get; }
+                public Type RecordClrType { get; }
+                public RecordOfPrim(ComponentPrim[] fp, Type clr)
+                { FieldPrims = fp; RecordClrType = clr; }
             }
 
             public static readonly VariantPayload Absent = new None();
@@ -960,19 +1014,70 @@ namespace Wacs.Transpiler.AOT.Component
             }
         }
 
+        /// <summary>Structural-only "is this emittable as a
+        /// variant return" check for <see cref="IsEmittable"/>.
+        /// Mirrors <see cref="TryResolveVariantReturn"/> minus the
+        /// WIT-side record-class lookup — IsEmittable runs before
+        /// the WIT decoder is in scope, so we approve any variant
+        /// whose payload-bearing cases land on a recognized
+        /// structural shape (primitive, list-of-primitive,
+        /// record-of-primitives). EmitForExport re-runs the full
+        /// resolver and silently skips records whose CLR class
+        /// can't be bound.</summary>
+        private static bool IsStructurallyEmittableVariant(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types)
+        {
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentVariantType vr)) return false;
+            for (int i = 0; i < vr.Cases.Count; i++)
+            {
+                var p = vr.Cases[i].Payload;
+                if (p == null) continue;
+                if (p.Value.IsPrimitive) continue;
+                if (p.Value.TypeIdx < types.Count
+                    && types[(int)p.Value.TypeIdx] is ComponentListType l
+                    && l.Element.IsPrimitive
+                    && l.Element.Prim != ComponentPrim.String) continue;
+                if (TryResolveRecordOfPrims(p.Value, types, out _, out _)) continue;
+                return false;
+            }
+            return true;
+        }
+
         /// <summary>True iff <paramref name="t"/> is a type-ref
         /// to a structural variant where every payload-bearing
-        /// case carries a primitive (incl. string) or a
-        /// list&lt;primitive&gt;. Other aggregates (record,
-        /// nested variant) flag for the caller to skip.</summary>
+        /// case carries a primitive (incl. string), a
+        /// list&lt;primitive&gt;, or a named record-of-primitives.
+        /// Anonymous records and nested variants flag for the
+        /// caller to skip via <see cref="VariantShape.HasUnsupportedAggregate"/>.
+        ///
+        /// <para>Record-payload classification needs both the
+        /// structural binary (drives byte-level reads) and the
+        /// decoded WIT (drives the CLR class lookup). When
+        /// <paramref name="decodedWit"/> + <paramref name="exportName"/>
+        /// resolve to a WIT-side variant case payload that's a
+        /// <c>CtTypeRef</c> to a previously-emitted record class,
+        /// classify as <see cref="VariantPayload.RecordOfPrim"/>.
+        /// </para></summary>
         private static bool TryResolveVariantReturn(
             ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            CtPackage? decodedWit,
+            Dictionary<string, Type> emittedTypes,
+            string exportName,
             out VariantShape shape)
         {
             shape = null!;
             if (t.IsPrimitive) return false;
             if (t.TypeIdx >= types.Count) return false;
             if (!(types[(int)t.TypeIdx] is ComponentVariantType vr)) return false;
+
+            // Optional WIT-side variant for resolving record-payload
+            // case CLR types. Bound by name when the export's result
+            // points at a CtTypeRef.
+            var witVariant = TryFindWitVariantForExport(
+                decodedWit, exportName);
+
             var names = new string[vr.Cases.Count];
             var payloads = new VariantPayload[vr.Cases.Count];
             bool unsupported = false;
@@ -995,6 +1100,16 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     payloads[i] = new VariantPayload.ListOfPrim(list.Element.Prim);
                 }
+                else if (TryResolveRecordOfPrims(
+                    p.Value, types, out var fieldPrims, out _)
+                    && witVariant != null
+                    && i < witVariant.Cases.Count
+                    && witVariant.Cases[i].Payload is CtTypeRef witRef
+                    && emittedTypes.TryGetValue(witRef.Name, out var clr))
+                {
+                    payloads[i] = new VariantPayload.RecordOfPrim(
+                        fieldPrims, clr);
+                }
                 else
                 {
                     unsupported = true;
@@ -1003,6 +1118,39 @@ namespace Wacs.Transpiler.AOT.Component
             }
             shape = new VariantShape(names, payloads, unsupported);
             return true;
+        }
+
+        /// <summary>Locate the WIT-decoded <see cref="CtVariantType"/>
+        /// behind an export's result type. Walks the decoded
+        /// package, finds the export whose <see cref="CtFunction.Result"/>
+        /// is a <c>CtTypeRef</c>, then looks the named type up in
+        /// the world/interface scope for its underlying variant.
+        /// Returns <c>null</c> when the WIT decoder isn't in play
+        /// or the result is anonymous — variant emission falls back
+        /// to "no record-payload support" in that case.</summary>
+        private static CtVariantType? TryFindWitVariantForExport(
+            CtPackage? decodedWit, string exportName)
+        {
+            if (decodedWit == null) return null;
+            foreach (var world in decodedWit.Worlds)
+            {
+                foreach (var ex in world.Exports)
+                {
+                    if (ex.Name != exportName) continue;
+                    if (!(ex.Spec is CtExternFunc fn)) continue;
+                    if (!(fn.Function.Result is CtTypeRef tr)) continue;
+                    foreach (var named in world.Types)
+                        if (named.Name == tr.Name
+                            && named.Type is CtVariantType v)
+                            return v;
+                    foreach (var iface in decodedWit.Interfaces)
+                        foreach (var named in iface.Types)
+                            if (named.Name == tr.Name
+                                && named.Type is CtVariantType v2)
+                                return v2;
+                }
+            }
+            return null;
         }
 
         /// <summary>True iff <paramref name="t"/> is a type-ref
@@ -1356,7 +1504,9 @@ namespace Wacs.Transpiler.AOT.Component
                 returnType = named;
             }
             else if (TryResolveVariantReturn(
-                export.Signature.Results[0], types, out variantShape)
+                export.Signature.Results[0], types,
+                decodedWit, emittedTypes, export.Name,
+                out variantShape)
                 && !variantShape.HasUnsupportedAggregate)
             {
                 isVariantReturn = true;
@@ -2446,7 +2596,8 @@ namespace Wacs.Transpiler.AOT.Component
             // Payload alignment: max alignment over all
             // payload-bearing cases; 1 if none. Strings + lists
             // align to 4 (pointer alignment); other primitives
-            // align to their byte size.
+            // align to their byte size; records align to their
+            // max field alignment.
             int payloadAlign = 1;
             foreach (var p in shape.CasePayloads)
             {
@@ -2454,6 +2605,7 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     VariantPayload.Prim pp => PrimVariantAlign(pp.P),
                     VariantPayload.ListOfPrim _ => 4,
+                    VariantPayload.RecordOfPrim rr => RecordAlign(rr.FieldPrims),
                     _ => 1,
                 };
                 if (a > payloadAlign) payloadAlign = a;
@@ -2497,6 +2649,10 @@ namespace Wacs.Transpiler.AOT.Component
                         EmitReadListPayloadAtOffset(il, memoryLocal,
                             retAreaLocal, payloadOffset, ll.ElemP);
                         break;
+                    case VariantPayload.RecordOfPrim rr:
+                        EmitReadRecordPayloadAtOffset(il, memoryLocal,
+                            retAreaLocal, payloadOffset, rr);
+                        break;
                 }
             }
 
@@ -2514,6 +2670,9 @@ namespace Wacs.Transpiler.AOT.Component
                         break;
                     case VariantPayload.ListOfPrim ll:
                         ctorParamTypes.Add(PrimToCs(ll.ElemP).MakeArrayType());
+                        break;
+                    case VariantPayload.RecordOfPrim rr:
+                        ctorParamTypes.Add(rr.RecordClrType);
                         break;
                 }
             }
@@ -2535,6 +2694,52 @@ namespace Wacs.Transpiler.AOT.Component
         /// primitives.</summary>
         private static int PrimVariantAlign(ComponentPrim p) =>
             p == ComponentPrim.String ? 4 : PrimByteSize(p);
+
+        /// <summary>Record alignment per canonical-ABI: max
+        /// alignment over fields. Used by variant emission to
+        /// fold record-payload cases into the variant's payload
+        /// alignment computation.</summary>
+        private static int RecordAlign(ComponentPrim[] fieldPrims)
+        {
+            int a = 1;
+            foreach (var f in fieldPrims)
+            {
+                var fa = PrimByteSize(f);
+                if (fa > a) a = fa;
+            }
+            return a;
+        }
+
+        /// <summary>Push a record-of-primitives payload onto the
+        /// stack — reads each field at the canonical-ABI per-field
+        /// offset (running offset, aligned to each field's
+        /// alignment) and constructs the record class via its
+        /// all-prim constructor. Used for variant cases carrying a
+        /// record payload.</summary>
+        private static void EmitReadRecordPayloadAtOffset(
+            ILGenerator il, LocalBuilder memoryLocal,
+            LocalBuilder retAreaLocal, int baseOffset,
+            VariantPayload.RecordOfPrim rr)
+        {
+            int rel = 0;
+            for (int i = 0; i < rr.FieldPrims.Length; i++)
+            {
+                rel = AlignUp(rel, PrimByteSize(rr.FieldPrims[i]));
+                EmitReadPayloadAtOffset(il, memoryLocal, retAreaLocal,
+                    baseOffset + rel, rr.FieldPrims[i]);
+                rel += PrimByteSize(rr.FieldPrims[i]);
+            }
+            var ctorParams = new Type[rr.FieldPrims.Length];
+            for (int i = 0; i < rr.FieldPrims.Length; i++)
+                ctorParams[i] = PrimToCs(rr.FieldPrims[i]);
+            var ctor = rr.RecordClrType.GetConstructor(ctorParams);
+            if (ctor == null)
+                throw new InvalidOperationException(
+                    "Record class missing matching constructor for "
+                    + "variant record-payload — emitter expects an "
+                    + "all-prim ctor in field order.");
+            il.Emit(OpCodes.Newobj, ctor);
+        }
 
         /// <summary>Push a list&lt;primitive&gt; payload onto
         /// the stack — reads (dataPtr, count) at
