@@ -1,0 +1,8 @@
+package local:po;
+world demo {
+    import wasi:filesystem/preopens@0.2.3;
+    import wasi:filesystem/types@0.2.3;
+    /// Calls get-directories, drops all returned descriptors,
+    /// returns count.
+    export count: func() -> u32;
+}
