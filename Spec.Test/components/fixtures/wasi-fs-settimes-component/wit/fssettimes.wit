@@ -1,0 +1,7 @@
+package local:fssettimes;
+world demo {
+    import wasi:filesystem/types@0.2.3;
+    /// Calls set-times(NoChange, Timestamp(2000s, 0)). Returns
+    /// the outer disc (always-Ok = 0).
+    export ask-set-times: func(handle: u32) -> u32;
+}

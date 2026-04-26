@@ -1838,9 +1838,11 @@ namespace Wacs.WASI.Preview2.HostBinding
             // Each param: primitive / enum (1 wire slot),
             // string (2 wire slots: ptr + len),
             // borrow<resource> (1 wire slot: handle resolved
-            // via ResourceContext), or IpSocketAddress (12
+            // via ResourceContext), IpSocketAddress (12
             // wire slots — variant flat-lowering: 1 disc +
-            // 11 joined-case payload slots, all i32).
+            // 11 joined-case payload slots, all i32), or
+            // NewTimestamp (3 wire slots: variant disc +
+            // datetime seconds(i64) + nanoseconds(i32)).
             // Aggregates (records, lists) stay deferred.
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)
@@ -1849,7 +1851,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                     && p.ParameterType.GetCustomAttribute<
                         WasiResourceAttribute>() == null
                     && p.ParameterType != typeof(
-                        Wacs.WASI.Preview2.Sockets.IpSocketAddress))
+                        Wacs.WASI.Preview2.Sockets.IpSocketAddress)
+                    && p.ParameterType != typeof(
+                        Wacs.WASI.Preview2.Filesystem.NewTimestamp))
                     throw new InvalidOperationException(
                         "[WasiErrorResult] void-return resource "
                         + "method '" + m.Name + "' takes "
@@ -1864,6 +1868,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                 else if (p.ParameterType == typeof(
                     Wacs.WASI.Preview2.Sockets.IpSocketAddress))
                     paramSlotCount += 12;
+                else if (p.ParameterType == typeof(
+                    Wacs.WASI.Preview2.Filesystem.NewTimestamp))
+                    paramSlotCount += 3;
                 else
                     paramSlotCount += 1;
             }
@@ -1890,6 +1897,15 @@ namespace Wacs.WASI.Preview2.HostBinding
                     // payload slots, all i32.
                     for (int k = 0; k < 12; k++)
                         wireParamTypes[wi++] = typeof(int);
+                }
+                else if (p.ParameterType == typeof(
+                    Wacs.WASI.Preview2.Filesystem.NewTimestamp))
+                {
+                    // Variant flat-lowering: 1 disc + 2 joined
+                    // payload slots (i64 seconds, i32 nanos).
+                    wireParamTypes[wi++] = typeof(int);   // disc
+                    wireParamTypes[wi++] = typeof(long);  // seconds
+                    wireParamTypes[wi++] = typeof(int);   // nanoseconds
                 }
                 else
                 {
@@ -1933,6 +1949,16 @@ namespace Wacs.WASI.Preview2.HostBinding
                         lambdaParams[wi++] = Expression.Parameter(
                             typeof(int),
                             paramInfos[i].Name + "_s" + k);
+                }
+                else if (paramInfos[i].ParameterType == typeof(
+                    Wacs.WASI.Preview2.Filesystem.NewTimestamp))
+                {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_tsDisc");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(long), paramInfos[i].Name + "_tsSec");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_tsNanos");
                 }
                 else
                 {
@@ -2016,6 +2042,20 @@ namespace Wacs.WASI.Preview2.HostBinding
                         slotArgs[k] = lambdaParams[wi++];
                     argExprs[i] = Expression.Convert(
                         Expression.Call(decodeIpSocketAddrMethod, slotArgs),
+                        typeof(object));
+                }
+                else if (paramInfos[i].ParameterType == typeof(
+                    Wacs.WASI.Preview2.Filesystem.NewTimestamp))
+                {
+                    var decodeTsMethod = typeof(WasiInterfaceBinder)
+                        .GetMethod(nameof(DecodeNewTimestamp),
+                            BindingFlags.Static | BindingFlags.NonPublic)!;
+                    var discParam = lambdaParams[wi++];
+                    var secParam = lambdaParams[wi++];
+                    var nanosParam = lambdaParams[wi++];
+                    argExprs[i] = Expression.Convert(
+                        Expression.Call(decodeTsMethod,
+                            discParam, secParam, nanosParam),
                         typeof(object));
                 }
                 else
@@ -3060,6 +3100,29 @@ namespace Wacs.WASI.Preview2.HostBinding
                     .OutgoingDatagram(data, addr);
             }
             return result;
+        }
+
+        /// <summary>Decode a flat-lowered
+        /// <c>variant new-timestamp</c> from its 3 wire slots:
+        /// disc(i32) + seconds(i64) + nanoseconds(i32). Disc 0
+        /// = no-change, disc 1 = now, disc 2 = timestamp.
+        /// </summary>
+        private static Wacs.WASI.Preview2.Filesystem.NewTimestamp
+            DecodeNewTimestamp(int disc, long seconds, int nanoseconds)
+        {
+            if (disc == 0)
+                return new Wacs.WASI.Preview2.Filesystem
+                    .NewTimestampNoChange();
+            if (disc == 1)
+                return new Wacs.WASI.Preview2.Filesystem
+                    .NewTimestampNow();
+            return new Wacs.WASI.Preview2.Filesystem
+                .NewTimestampTimestamp(
+                    new Wacs.WASI.Preview2.Clocks.Datetime
+                    {
+                        Seconds = (ulong)seconds,
+                        Nanoseconds = (uint)nanoseconds,
+                    });
         }
 
         /// <summary>Decode a flat-lowered
