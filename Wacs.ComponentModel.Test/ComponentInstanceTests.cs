@@ -357,6 +357,23 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Invoke_resolves_through_two_level_nested_components()
+        {
+            // 2-level composer chain: outer → middle → innermost.
+            // Innermost has the real core module + canon lift;
+            // middle and outer are composer-mode wrappers that
+            // alias-re-export through. Recursive Instantiate
+            // turns each composer into a ComponentInstance whose
+            // Invoke delegates to the next level down. Verifies
+            // composer-of-composer falls out cleanly from the
+            // existing recursion.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "nested-component-2level", "multi.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal("Hi!", ci.Invoke("greet"));
+        }
+
+        [Fact]
         public void Invoke_resolves_through_nested_component_alias()
         {
             // nested-component fixture: outer composes one inner
