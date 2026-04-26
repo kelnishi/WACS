@@ -529,6 +529,23 @@ namespace Wacs.WASI.Preview2.HostBinding
                 return;
             }
 
+            // [WasiErrorResult]-tagged + ulong / byte[] return →
+            // result<{u64|list<u8>}, error-code>. Wire layout
+            // matches result<X, stream-error> at the Ok side
+            // (both have payload alignment driven by the Ok
+            // type), so we reuse BindStreamResultResourceMethod
+            // which writes disc=0 + Ok payload at the right
+            // offset. The Err side encoding differs but always-
+            // Ok semantics in v0 means we never write it.
+            if (m.GetCustomAttribute<WasiErrorResultAttribute>() != null
+                && (m.ReturnType == typeof(ulong)
+                    || m.ReturnType == typeof(byte[])))
+            {
+                BindStreamResultResourceMethod(runtime, namespaceName,
+                    importName, table, resourceType, m);
+                return;
+            }
+
             // Method returns a resource → alloc handle.
             if (m.ReturnType.GetCustomAttribute<WasiResourceAttribute>() != null)
             {
@@ -799,18 +816,37 @@ namespace Wacs.WASI.Preview2.HostBinding
             //      (dataPtr, len).
             //   3. Any number of primitive params — each takes
             //      one wire slot (i32 or i64 per ToWireType).
-            bool hasBytesParam = paramInfos.Length == 1
-                && paramInfos[0].ParameterType == typeof(byte[]);
-            if (!hasBytesParam)
-                foreach (var p in paramInfos)
-                    if (!IsPrimitive(p.ParameterType))
-                        return;   // unsupported param shape
+            //   4. byte[] as the FIRST param + N primitive params
+            //      (e.g. descriptor.write(buffer, offset)).
+            bool hasBytesParam = false;
+            int bytesParamIndex = -1;
+            for (int i = 0; i < paramInfos.Length; i++)
+            {
+                if (paramInfos[i].ParameterType == typeof(byte[]))
+                {
+                    if (hasBytesParam)
+                        return;   // multiple byte[] params unsupported
+                    hasBytesParam = true;
+                    bytesParamIndex = i;
+                }
+                else if (!IsPrimitive(paramInfos[i].ParameterType))
+                {
+                    return;   // unsupported (string / record / etc.)
+                }
+            }
+            if (hasBytesParam && bytesParamIndex != 0)
+                return;   // byte[] must be first for v0
 
             // Wire signature: ExecContext, handle, [params...],
-            // retAreaPtr → void. byte[] expands to 2 i32s;
-            // primitives go through ToWireType.
+            // retAreaPtr → void. byte[] expands to 2 i32s
+            // (dataPtr, len); primitives go through ToWireType.
+            // Mixed shape (byte[] first + primitives after)
+            // produces the byte[] expansion followed by each
+            // primitive wire slot.
+            int primParamCount = paramInfos.Length - (hasBytesParam ? 1 : 0);
             int wireParamCount = 1 /*handle*/
-                + (hasBytesParam ? 2 : paramInfos.Length)
+                + (hasBytesParam ? 2 : 0)
+                + primParamCount
                 + 1 /*retArea*/;
             var wireParamTypes = new Type[wireParamCount + 1];
             wireParamTypes[0] = typeof(ExecContext);
@@ -820,6 +856,10 @@ namespace Wacs.WASI.Preview2.HostBinding
             {
                 wireParamTypes[ti++] = typeof(int);   // dataPtr
                 wireParamTypes[ti++] = typeof(int);   // len
+                // Following primitive params (after the byte[]
+                // at index 0).
+                for (int i = 1; i < paramInfos.Length; i++)
+                    wireParamTypes[ti++] = ToWireType(paramInfos[i].ParameterType);
             }
             else
             {
@@ -888,72 +928,90 @@ namespace Wacs.WASI.Preview2.HostBinding
                 }
             }
 
-            // Body for byte[] param case: (ctx, handle, dataPtr,
-            // len, retArea).
-            void BodyBytes(ExecContext ctx, int handle, int dataPtr,
-                int len, int retAreaPtr)
+            // Unified body: (ctx, handle, dataPtr, len,
+            // hostArgs[primitives only], retArea). dataPtr/len
+            // are 0/0 when no byte[] param is present;
+            // hostArgs holds the converted primitive params in
+            // host-type form (the expression tree below builds
+            // it from the wire-typed lambda params).
+            void Body(ExecContext ctx, int handle, int dataPtr, int len,
+                object?[] primArgs, int retAreaPtr)
             {
                 var inst = table.Get(handle);
                 var memory = ctx.DefaultMemory.Data;
-                var bytes = new byte[len];
-                if (len > 0) Array.Copy(memory, dataPtr, bytes, 0, len);
-                var ret = m.Invoke(inst, new object[] { bytes });
-                WriteOk(memory, retAreaPtr, ret);
-            }
-
-            // Body for primitive-params case: (ctx, handle,
-            // hostArgs[], retArea). hostArgs are pre-converted
-            // wire→host types by the expression tree before
-            // calling here.
-            void BodyPrim(ExecContext ctx, int handle, object?[] hostArgs,
-                int retAreaPtr)
-            {
-                var inst = table.Get(handle);
+                object?[] hostArgs;
+                if (hasBytesParam)
+                {
+                    var bytes = new byte[len];
+                    if (len > 0) Array.Copy(memory, dataPtr, bytes, 0, len);
+                    hostArgs = new object?[primArgs.Length + 1];
+                    hostArgs[0] = bytes;
+                    for (int i = 0; i < primArgs.Length; i++)
+                        hostArgs[i + 1] = primArgs[i];
+                }
+                else
+                {
+                    hostArgs = primArgs;
+                }
                 var ret = m.Invoke(inst, hostArgs);
-                var memory = ctx.DefaultMemory.Data;
                 WriteOk(memory, retAreaPtr, ret);
             }
 
             var lambdaParams = new ParameterExpression[wireParamTypes.Length];
             lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
             lambdaParams[1] = Expression.Parameter(typeof(int), "self");
-            for (int i = 2; i < wireParamTypes.Length; i++)
-            {
-                var pname = i == wireParamTypes.Length - 1 ? "retAreaPtr"
-                    : hasBytesParam
-                        ? (i == 2 ? "dataPtr" : "len")
-                        : paramInfos[i - 2].Name;
-                lambdaParams[i] = Expression.Parameter(wireParamTypes[i], pname);
-            }
-            var retAreaParam = lambdaParams[wireParamTypes.Length - 1];
-
-            Expression call;
+            // Compute lambda param names — handle, [dataPtr,
+            // len], [primitive names], retAreaPtr.
+            int idx = 2;
+            ParameterExpression dataPtrParam = Expression.Parameter(typeof(int), "dataPtr");
+            ParameterExpression lenParam = Expression.Parameter(typeof(int), "len");
             if (hasBytesParam)
             {
-                var bodyTarget = Expression.Constant(
-                    (Action<ExecContext, int, int, int, int>)BodyBytes);
-                call = Expression.Invoke(bodyTarget,
-                    lambdaParams[0], lambdaParams[1],
-                    lambdaParams[2], lambdaParams[3], retAreaParam);
+                lambdaParams[idx++] = dataPtrParam;
+                lambdaParams[idx++] = lenParam;
             }
-            else
+            // Following primitive params: skip the byte[] index
+            // when computing names.
+            int firstPrimIdx = hasBytesParam ? 1 : 0;
+            for (int p = firstPrimIdx; p < paramInfos.Length; p++)
+                lambdaParams[idx++] = Expression.Parameter(
+                    wireParamTypes[idx - 1], paramInfos[p].Name);
+            var retAreaParam = Expression.Parameter(typeof(int), "retAreaPtr");
+            lambdaParams[wireParamTypes.Length - 1] = retAreaParam;
+
+            // Build primitive-param array — converts each wire-
+            // typed lambda param back to its host param type.
+            int primStart = hasBytesParam ? 4 : 2;   // ctx+handle+(dataPtr+len)
+            int primCount = paramInfos.Length - (hasBytesParam ? 1 : 0);
+            var primExprs = new Expression[primCount];
+            for (int i = 0; i < primCount; i++)
             {
-                // Build object?[] of host args from wire-typed
-                // lambda params (positions 2..wire-2; last is
-                // retArea).
-                var argArr = Expression.NewArrayInit(typeof(object),
-                    paramInfos.Select((p, i) =>
-                    {
-                        Expression e = lambdaParams[i + 2];
-                        if (p.ParameterType != e.Type)
-                            e = Expression.Convert(e, p.ParameterType);
-                        return (Expression)Expression.Convert(e, typeof(object));
-                    }).ToArray());
-                var bodyTarget = Expression.Constant(
-                    (Action<ExecContext, int, object?[], int>)BodyPrim);
-                call = Expression.Invoke(bodyTarget,
-                    lambdaParams[0], lambdaParams[1], argArr, retAreaParam);
+                var p = paramInfos[i + (hasBytesParam ? 1 : 0)];
+                Expression e = lambdaParams[primStart + i];
+                if (p.ParameterType != e.Type)
+                {
+                    if (p.ParameterType == typeof(bool))
+                        e = Expression.NotEqual(e, Expression.Constant(0, e.Type));
+                    else
+                        e = Expression.Convert(e, p.ParameterType);
+                }
+                primExprs[i] = Expression.Convert(e, typeof(object));
             }
+            var primArr = primCount == 0
+                ? Expression.NewArrayBounds(typeof(object),
+                    Expression.Constant(0))
+                : (Expression)Expression.NewArrayInit(typeof(object), primExprs);
+
+            var bodyTarget = Expression.Constant(
+                (Action<ExecContext, int, int, int, object?[], int>)Body);
+            var call = Expression.Invoke(bodyTarget,
+                lambdaParams[0], lambdaParams[1],
+                hasBytesParam ? (Expression)dataPtrParam
+                              : Expression.Constant(0),
+                hasBytesParam ? (Expression)lenParam
+                              : Expression.Constant(0),
+                primArr,
+                retAreaParam);
             var lambda = Expression.Lambda(delegateType, call, lambdaParams);
             var compiled = lambda.Compile();
 
