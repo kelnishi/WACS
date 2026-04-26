@@ -201,6 +201,50 @@ namespace Wacs.WASI.Preview2.Test
                 (uint)ci.Invoke("ask-type", (uint)handle)!);
         }
 
+        private sealed class MutatingDescriptor : Descriptor
+        {
+            public System.Collections.Generic.List<string> Created
+                = new System.Collections.Generic.List<string>();
+            public System.Collections.Generic.List<string> Removed
+                = new System.Collections.Generic.List<string>();
+            public System.Collections.Generic.List<string> Unlinked
+                = new System.Collections.Generic.List<string>();
+            public MutatingDescriptor() : base("/synthetic") { }
+            public override void CreateDirectoryAt(string path)
+                => Created.Add(path);
+            public override void RemoveDirectoryAt(string path)
+                => Removed.Add(path);
+            public override void UnlinkFileAt(string path)
+                => Unlinked.Add(path);
+        }
+
+        [Fact]
+        public void MutatingPath_ops_thread_string_through_void_result_wrapper()
+        {
+            // Component imports descriptor.{create,remove,unlink}-*
+            // and sums the outer disc bytes from each retArea.
+            // Always-Ok = 0; expected return: 0. Stub records
+            // each path so we can also assert the string round-
+            // tripped correctly.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-mutate-component", "fsmutate.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new MutatingDescriptor();
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke("ask-mutate", (uint)handle)!);
+            Assert.Equal(new[] { "child" }, desc.Created);
+            Assert.Equal(new[] { "child" }, desc.Removed);
+            Assert.Equal(new[] { "child" }, desc.Unlinked);
+        }
+
         private sealed class OpenAtDescriptor : Descriptor
         {
             public string LastPath = "";
