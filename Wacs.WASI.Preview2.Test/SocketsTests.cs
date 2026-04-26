@@ -98,6 +98,48 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(1, resources.TableFor(typeof(TcpSocket)).Count);
         }
 
+        private sealed class OptionsTcpSocket : TcpSocket
+        {
+            public OptionsTcpSocket() : base(IpAddressFamily.Ipv4)
+            {
+                _listening = true;
+            }
+        }
+
+        [Fact]
+        public void TcpSocket_options_round_trip_through_result_primitive_returns()
+        {
+            // Fixture: ask-options(handle) walks
+            //   is-listening() -> bool   (bare, no result)
+            //   set-hop-limit(42)        (u8 param + result<_,_>)
+            //   hop-limit()              (result<u8, _>)
+            //   set-keep-alive-enabled(true) (bool param + result<_,_>)
+            //   keep-alive-enabled()     (result<bool, _>)
+            // and packs (kae<<16) | (hop<<8) | listening into a u32.
+            // Stub starts in listening state → expect:
+            //   listening=1, hop=42, kae=1 → 0x012a01.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-tcp-options-component", "tcpoptions.component.wasm"));
+            var resources = new ResourceContext();
+            var sock = new OptionsTcpSocket();
+            int handle = resources.TableFor(typeof(TcpSocket))
+                .Allocate(sock);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<TcpSocket>(
+                    "wasi:sockets/tcp@0.2.3", resources);
+            });
+
+            uint result = (uint)ci.Invoke("ask-options", (uint)handle)!;
+            Assert.Equal(1u, result & 0xff);
+            Assert.Equal(42u, (result >> 8) & 0xff);
+            Assert.Equal(1u, (result >> 16) & 0xff);
+            // Stub state should now reflect the setter calls.
+            Assert.Equal((byte)42, sock.HopLimit());
+            Assert.True(sock.KeepAliveEnabled());
+        }
+
         private sealed class ListeningTcpSocket : TcpSocket
         {
             public int FinishBindCalls;

@@ -539,6 +539,10 @@ namespace Wacs.WASI.Preview2.HostBinding
             // Ok semantics in v0 means we never write it.
             if (m.GetCustomAttribute<WasiErrorResultAttribute>() != null
                 && (m.ReturnType == typeof(ulong)
+                    || m.ReturnType == typeof(uint)
+                    || m.ReturnType == typeof(ushort)
+                    || m.ReturnType == typeof(byte)
+                    || m.ReturnType == typeof(bool)
                     || m.ReturnType == typeof(byte[])))
             {
                 BindStreamResultResourceMethod(runtime, namespaceName,
@@ -912,16 +916,23 @@ namespace Wacs.WASI.Preview2.HostBinding
             var delegateType = OpenActionType(wireParamTypes.Length)
                 .MakeGenericType(wireParamTypes);
 
-            // Recognized return shapes: void, ulong, byte[].
-            var retShape = m.ReturnType == typeof(void) ? 0
-                : m.ReturnType == typeof(ulong) ? 1
-                : m.ReturnType == typeof(byte[]) ? 2
+            // Recognized return shapes (Ok payload): void, bool/u8,
+            // u16, u32, u64, byte[]. Each encodes as disc + Ok
+            // payload at the natural alignment (max(1, sizeof Ok)).
+            var rt = m.ReturnType;
+            var retShape = rt == typeof(void) ? 0
+                : rt == typeof(ulong) ? 1
+                : rt == typeof(byte[]) ? 2
+                : rt == typeof(bool) ? 3
+                : rt == typeof(byte) ? 4
+                : rt == typeof(uint) ? 5
+                : rt == typeof(ushort) ? 6
                 : -1;
             if (retShape < 0)
                 throw new InvalidOperationException(
                     "[WasiStreamResult] on method with unsupported "
-                    + "return type " + m.ReturnType + " (expected "
-                    + "void / ulong / byte[]).");
+                    + "return type " + rt + " (expected void / "
+                    + "bool / u8 / u16 / u32 / u64 / byte[]).");
 
             Wacs.Core.Runtime.Delegates.GenericFuncs? cabiRealloc = null;
             int Allocate(int align, int size)
@@ -941,31 +952,48 @@ namespace Wacs.WASI.Preview2.HostBinding
                 return cabiRealloc(0, 0, align, size)[0].Data.Int32;
             }
 
-            // Common payload writer — disc=0 + Ok payload bytes.
+            // Common payload writer — disc=0 + Ok payload bytes
+            // at natural alignment.
             void WriteOk(byte[] memOut, int retAreaPtr, object? ret)
             {
                 memOut[retAreaPtr] = 0;
                 memOut[retAreaPtr + 1] = 0;
                 memOut[retAreaPtr + 2] = 0;
                 memOut[retAreaPtr + 3] = 0;
-                if (retShape == 1)   // ulong at offset 8
+                switch (retShape)
                 {
-                    memOut[retAreaPtr + 4] = 0;
-                    memOut[retAreaPtr + 5] = 0;
-                    memOut[retAreaPtr + 6] = 0;
-                    memOut[retAreaPtr + 7] = 0;
-                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
-                        memOut.AsSpan(retAreaPtr + 8, 8), (ulong)ret!);
-                }
-                else if (retShape == 2)   // byte[] at offset 4
-                {
-                    var bs = (byte[])ret!;
-                    int dPtr = bs.Length == 0 ? 0
-                        : Allocate(1, bs.Length);
-                    if (bs.Length > 0)
-                        Array.Copy(bs, 0, memOut, dPtr, bs.Length);
-                    WriteI32LE(memOut, retAreaPtr + 4, dPtr);
-                    WriteI32LE(memOut, retAreaPtr + 8, bs.Length);
+                    case 1:   // ulong at offset 8
+                        memOut[retAreaPtr + 4] = 0;
+                        memOut[retAreaPtr + 5] = 0;
+                        memOut[retAreaPtr + 6] = 0;
+                        memOut[retAreaPtr + 7] = 0;
+                        System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                            memOut.AsSpan(retAreaPtr + 8, 8), (ulong)ret!);
+                        break;
+                    case 2:   // byte[] (ptr, len) at offset 4
+                        var bs = (byte[])ret!;
+                        int dPtr = bs.Length == 0 ? 0
+                            : Allocate(1, bs.Length);
+                        if (bs.Length > 0)
+                            Array.Copy(bs, 0, memOut, dPtr, bs.Length);
+                        WriteI32LE(memOut, retAreaPtr + 4, dPtr);
+                        WriteI32LE(memOut, retAreaPtr + 8, bs.Length);
+                        break;
+                    case 3:   // bool at offset 1
+                        memOut[retAreaPtr + 1] = (bool)ret! ? (byte)1 : (byte)0;
+                        break;
+                    case 4:   // u8 at offset 1
+                        memOut[retAreaPtr + 1] = (byte)ret!;
+                        break;
+                    case 5:   // u32 at offset 4
+                        WriteI32LE(memOut, retAreaPtr + 4,
+                            (int)(uint)ret!);
+                        break;
+                    case 6:   // u16 at offset 2
+                        ushort v = (ushort)ret!;
+                        memOut[retAreaPtr + 2] = (byte)(v & 0xff);
+                        memOut[retAreaPtr + 3] = (byte)((v >> 8) & 0xff);
+                        break;
                 }
             }
 
@@ -1229,7 +1257,14 @@ namespace Wacs.WASI.Preview2.HostBinding
                 {
                     Expression e = lambdaParams[wi++];
                     if (paramInfos[i].ParameterType != e.Type)
-                        e = Expression.Convert(e, paramInfos[i].ParameterType);
+                    {
+                        if (paramInfos[i].ParameterType == typeof(bool))
+                            e = Expression.NotEqual(e,
+                                Expression.Constant(0, e.Type));
+                        else
+                            e = Expression.Convert(e,
+                                paramInfos[i].ParameterType);
+                    }
                     argExprs[i] = Expression.Convert(e, typeof(object));
                 }
             }
@@ -1406,7 +1441,14 @@ namespace Wacs.WASI.Preview2.HostBinding
                 {
                     Expression e = lambdaParams[wi++];
                     if (paramInfos[i].ParameterType != e.Type)
-                        e = Expression.Convert(e, paramInfos[i].ParameterType);
+                    {
+                        if (paramInfos[i].ParameterType == typeof(bool))
+                            e = Expression.NotEqual(e,
+                                Expression.Constant(0, e.Type));
+                        else
+                            e = Expression.Convert(e,
+                                paramInfos[i].ParameterType);
+                    }
                     argExprs[i] = Expression.Convert(e, typeof(object));
                 }
             }
