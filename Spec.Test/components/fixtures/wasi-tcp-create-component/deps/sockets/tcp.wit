@@ -1,0 +1,5 @@
+package wasi:sockets@0.2.3;
+interface tcp {
+    resource tcp-socket;
+    enum error-code { unknown, access-denied, not-permitted }
+}

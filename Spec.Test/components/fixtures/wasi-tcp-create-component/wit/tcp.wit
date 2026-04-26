@@ -1,0 +1,8 @@
+package local:tcp;
+world demo {
+    import wasi:sockets/tcp-create-socket@0.2.3;
+    import wasi:sockets/tcp@0.2.3;
+    /// Creates a tcp socket with the given family, drops it,
+    /// returns the result disc (0 = Ok, 1 = Err).
+    export try-create: func(family: u32) -> u32;
+}
