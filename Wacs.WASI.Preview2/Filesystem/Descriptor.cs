@@ -185,6 +185,34 @@ namespace Wacs.WASI.Preview2.Filesystem
             return (ulong)buffer.Length;
         }
 
+        /// <summary>Create a directory at <paramref name="path"/>
+        /// relative to this descriptor (treated as a directory).
+        /// </summary>
+        [WasiErrorResult]
+        [WasiMethodName("create-directory-at")]
+        public virtual void CreateDirectoryAt(string path)
+        {
+            Directory.CreateDirectory(System.IO.Path.Combine(Path, path));
+        }
+
+        /// <summary>Remove the empty directory at
+        /// <paramref name="path"/>.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("remove-directory-at")]
+        public virtual void RemoveDirectoryAt(string path)
+        {
+            Directory.Delete(System.IO.Path.Combine(Path, path));
+        }
+
+        /// <summary>Unlink (delete) the file at
+        /// <paramref name="path"/>.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("unlink-file-at")]
+        public virtual void UnlinkFileAt(string path)
+        {
+            File.Delete(System.IO.Path.Combine(Path, path));
+        }
+
         /// <summary>Open or create a file/directory relative to
         /// this descriptor (treated as a directory) at
         /// <paramref name="path"/>. Returns a fresh
