@@ -108,6 +108,12 @@ namespace Wacs.WASI.Preview2.HostBinding
                         runtime, namespaceName, impl, m);
                     continue;
                 }
+                if (IsResourceStringPairArrayReturnPrimitiveParams(m))
+                {
+                    BindResourceStringPairArrayReturnMethod(
+                        runtime, namespaceName, impl, m, resources);
+                    continue;
+                }
                 if (IsRecordOfPrimitivesReturnPrimitiveParams(m))
                 {
                     BindRecordReturnMethod(
@@ -885,6 +891,28 @@ namespace Wacs.WASI.Preview2.HostBinding
                 (namespaceName, importName), body);
         }
 
+        /// <summary>True iff the method returns
+        /// <c>(TResource, string)[]</c> where TResource is a
+        /// [WasiResource]-marked class. Used by
+        /// wasi:filesystem/preopens.get-directories — list of
+        /// (descriptor handle, host-path-string) pairs.</summary>
+        private static bool IsResourceStringPairArrayReturnPrimitiveParams(MethodInfo m)
+        {
+            if (!m.ReturnType.IsArray) return false;
+            var elem = m.ReturnType.GetElementType()!;
+            if (!elem.IsValueType) return false;
+            if (!elem.IsGenericType) return false;
+            if (elem.GetGenericTypeDefinition() != typeof(System.ValueTuple<,>))
+                return false;
+            var args = elem.GetGenericArguments();
+            if (args[0].GetCustomAttribute<WasiResourceAttribute>() == null)
+                return false;
+            if (args[1] != typeof(string)) return false;
+            foreach (var p in m.GetParameters())
+                if (!IsPrimitive(p.ParameterType)) return false;
+            return true;
+        }
+
         private static bool IsStringPairArrayReturnPrimitiveParams(MethodInfo m)
         {
             // (string, string)[] — i.e. ValueTuple<string, string>[]
@@ -1259,6 +1287,52 @@ namespace Wacs.WASI.Preview2.HostBinding
                         WriteI32LE(memory, arrayPtr + i * 16 + 4, kBytes.Length);
                         WriteI32LE(memory, arrayPtr + i * 16 + 8, vPtr);
                         WriteI32LE(memory, arrayPtr + i * 16 + 12, vBytes.Length);
+                    }
+                    WriteI32LE(memory, retAreaPtr, arrayPtr);
+                    WriteI32LE(memory, retAreaPtr + 4, count);
+                });
+        }
+
+        /// <summary>Canon-lower wrapper for host methods
+        /// returning <c>(TResource, string)[]</c> — list of
+        /// pairs where the first element is a resource handle
+        /// (allocated in the matching resource table on each
+        /// call) and the second is a string. Used by
+        /// wasi:filesystem/preopens.get-directories. Each
+        /// element is 12 bytes (handle: i32 + strPtr: i32 +
+        /// strLen: i32) with align=4.</summary>
+        private static void BindResourceStringPairArrayReturnMethod(
+            WasmRuntime runtime, string namespaceName,
+            object impl, MethodInfo m, ResourceContext resources)
+        {
+            var elem = m.ReturnType.GetElementType()!;
+            var item1Field = elem.GetField("Item1")!;
+            var item2Field = elem.GetField("Item2")!;
+            var resourceType = item1Field.FieldType;
+            var table = resources.TableFor(resourceType);
+
+            BindAggregateReturnMethod(runtime, namespaceName, impl, m,
+                (memory, retAreaPtr, ret, allocate) =>
+                {
+                    var arr = (System.Collections.IList)ret!;
+                    int count = arr.Count;
+                    int arrayPtr = count == 0 ? 0
+                        : allocate(4, count * 12);
+                    for (int i = 0; i < count; i++)
+                    {
+                        var pair = arr[i]!;
+                        var resInst = item1Field.GetValue(pair)!;
+                        var s = (string)item2Field.GetValue(pair)!;
+                        int handle = table.Allocate(resInst);
+                        var sBytes = System.Text.Encoding.UTF8.GetBytes(s);
+                        int sPtr = sBytes.Length == 0 ? 0
+                            : allocate(1, sBytes.Length);
+                        if (sBytes.Length > 0)
+                            System.Array.Copy(sBytes, 0, memory,
+                                sPtr, sBytes.Length);
+                        WriteI32LE(memory, arrayPtr + i * 12, handle);
+                        WriteI32LE(memory, arrayPtr + i * 12 + 4, sPtr);
+                        WriteI32LE(memory, arrayPtr + i * 12 + 8, sBytes.Length);
                     }
                     WriteI32LE(memory, retAreaPtr, arrayPtr);
                     WriteI32LE(memory, retAreaPtr + 4, count);
