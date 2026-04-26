@@ -1,0 +1,15 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    enum error-code { unknown }
+    flags descriptor-flags {
+        read,
+        write,
+        file-integrity-sync,
+        data-integrity-sync,
+        requested-write-sync,
+        mutate-directory,
+    }
+    resource descriptor {
+        get-flags: func() -> result<descriptor-flags, error-code>;
+    }
+}

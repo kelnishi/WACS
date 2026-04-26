@@ -170,6 +170,39 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal("src", desc.LastPath);
         }
 
+        private sealed class FlagsDescriptor : Descriptor
+        {
+            private readonly DescriptorFlags _flags;
+            public FlagsDescriptor(DescriptorFlags flags)
+                : base("/synthetic") { _flags = flags; }
+            public override DescriptorFlags GetFlags() => _flags;
+        }
+
+        [Fact]
+        public void GetFlags_writes_flags_enum_as_u8_when_flag_count_le_8()
+        {
+            // Fixture: ask-flags(handle) calls get-flags and
+            // reads the byte at retArea+1. Wire form for 6
+            // declared flags is u8, align 1 — total retArea
+            // 2 bytes. Stub returns Read | Write = 0b11 = 3.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-getflags-component", "fsgetflags.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new FlagsDescriptor(
+                DescriptorFlags.Read | DescriptorFlags.Write);
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal(3u, (uint)ci.Invoke(
+                "ask-flags", (uint)handle)!);
+        }
+
         private sealed class AccessAtDescriptor : Descriptor
         {
             public AccessType? LastType;
