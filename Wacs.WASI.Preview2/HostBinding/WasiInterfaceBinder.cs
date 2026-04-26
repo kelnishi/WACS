@@ -57,6 +57,15 @@ namespace Wacs.WASI.Preview2.HostBinding
                 if (m.IsSpecialName) continue;   // skip property accessors
                 if (!IsPrimitiveSignature(m)) continue;
                 BindMethod(runtime, namespaceName, impl, m);
+                // Aggregate-signatured methods (byte[] returns,
+                // string params, records, resources) are
+                // skipped silently — they need real canon-lower
+                // wiring through wit-component's synthesized
+                // adapter modules, which currently produces 3+
+                // core modules per component and breaks the
+                // "exactly one core module" invariant in
+                // ComponentInstance.Instantiate. Multi-core-
+                // module support is the prerequisite slice.
             }
         }
 
