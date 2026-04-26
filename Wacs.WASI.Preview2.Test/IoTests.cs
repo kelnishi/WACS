@@ -60,6 +60,36 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [Fact]
+        public void Poll_resolves_borrow_pollable_array_and_returns_u32_indices()
+        {
+            // Fixture: ask-poll(a, b) builds list<borrow<pollable>>
+            // = [a, b] in linear memory, calls poll, returns the
+            // output list-len. Default Pollable is always-ready,
+            // so both inputs report ready → count == 2.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-io-poll-component", "iopoll.component.wasm"));
+            var resources = new ResourceContext();
+            var poll = new PollSource();
+            var p1 = new Pollable();
+            var p2 = new Pollable();
+            int hA = resources.TableFor(typeof(Pollable))
+                .Allocate(p1);
+            int hB = resources.TableFor(typeof(Pollable))
+                .Allocate(p2);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiInstance(
+                    "wasi:io/poll@0.2.3", poll, resources);
+                runtime.BindWasiResource<Pollable>(
+                    "wasi:io/poll@0.2.3", resources);
+            });
+
+            Assert.Equal(2u, (uint)ci.Invoke(
+                "ask-poll", (uint)hA, (uint)hB)!);
+        }
+
+        [Fact]
         public void Error_to_debug_string_lifts_string_through_resource_method()
         {
             // Fixture: ask-debug(handle) calls
