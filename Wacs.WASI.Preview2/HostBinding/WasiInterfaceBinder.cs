@@ -63,6 +63,12 @@ namespace Wacs.WASI.Preview2.HostBinding
                         runtime, namespaceName, impl, m, resources);
                     continue;
                 }
+                if (IsOptionResourceReturnPrimitiveParams(m))
+                {
+                    BindOptionResourceReturnMethod(
+                        runtime, namespaceName, impl, m, resources);
+                    continue;
+                }
                 if (IsPrimitiveSignature(m))
                 {
                     BindMethod(runtime, namespaceName, impl, m);
@@ -139,6 +145,26 @@ namespace Wacs.WASI.Preview2.HostBinding
         {
             if (m.ReturnType.GetCustomAttribute<WasiResourceAttribute>() == null)
                 return false;
+            // Plain own<T> path — no [WasiOptionalReturn].
+            if (m.GetCustomAttribute<WasiOptionalReturnAttribute>() != null)
+                return false;
+            foreach (var p in m.GetParameters())
+                if (!IsPrimitive(p.ParameterType)) return false;
+            return true;
+        }
+
+        /// <summary>True iff the method returns a
+        /// [WasiResource]-marked class tagged
+        /// [WasiOptionalReturn] — option&lt;own&lt;T&gt;&gt;.
+        /// C# can't distinguish nullable from non-nullable
+        /// reference types at reflection level, so the host
+        /// opts in via the attribute.</summary>
+        private static bool IsOptionResourceReturnPrimitiveParams(MethodInfo m)
+        {
+            if (m.ReturnType.GetCustomAttribute<WasiResourceAttribute>() == null)
+                return false;
+            if (m.GetCustomAttribute<WasiOptionalReturnAttribute>() == null)
+                return false;
             foreach (var p in m.GetParameters())
                 if (!IsPrimitive(p.ParameterType)) return false;
             return true;
@@ -198,6 +224,90 @@ namespace Wacs.WASI.Preview2.HostBinding
                 (Func<ExecContext, object?[], int>)Body);
             var call = Expression.Invoke(bodyTarget,
                 lambdaParams[0], argArr);
+            var lambda = Expression.Lambda(delegateType, call, lambdaParams);
+            var compiled = lambda.Compile();
+
+            var bindOpen = typeof(WasmRuntime).GetMethods()
+                .First(mi => mi.Name == nameof(WasmRuntime.BindHostFunction)
+                    && mi.IsGenericMethod
+                    && mi.GetParameters().Length == 2);
+            var bindClosed = bindOpen.MakeGenericMethod(delegateType);
+            bindClosed.Invoke(runtime,
+                new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Build a canon-lower wrapper for a host
+        /// method returning <c>option&lt;own&lt;T&gt;&gt;</c>.
+        /// Wire form: void return, retAreaPtr trailing param.
+        /// retArea layout: 1 byte disc + 3 bytes padding + 4
+        /// byte handle (when Some). Total 8 bytes.
+        /// <list type="bullet">
+        /// <item>Host returns null → write disc=0 (rest don't-
+        /// care; we zero-fill defensively).</item>
+        /// <item>Host returns instance → allocate handle,
+        /// write disc=1 + handle at offset 4.</item>
+        /// </list></summary>
+        private static void BindOptionResourceReturnMethod(
+            WasmRuntime runtime, string namespaceName,
+            object impl, MethodInfo m, ResourceContext resources)
+        {
+            var importName = ToKebabCase(m.Name);
+            var paramInfos = m.GetParameters();
+
+            // Wrapper signature: ExecContext, [host params...],
+            // retAreaPtr → void.
+            var paramTypes = new Type[paramInfos.Length + 2];
+            paramTypes[0] = typeof(ExecContext);
+            for (int i = 0; i < paramInfos.Length; i++)
+                paramTypes[i + 1] = ToWireType(paramInfos[i].ParameterType);
+            paramTypes[paramInfos.Length + 1] = typeof(int);
+
+            var delegateType = OpenActionType(paramTypes.Length)
+                .MakeGenericType(paramTypes);
+
+            var table = resources.TableFor(m.ReturnType);
+
+            void Body(ExecContext ctx, object?[] hostArgs, int retAreaPtr)
+            {
+                var inst = m.Invoke(impl, hostArgs);
+                var memory = ctx.DefaultMemory.Data;
+                if (inst == null)
+                {
+                    memory[retAreaPtr] = 0;
+                    memory[retAreaPtr + 1] = 0;
+                    memory[retAreaPtr + 2] = 0;
+                    memory[retAreaPtr + 3] = 0;
+                    return;
+                }
+                var handle = table.Allocate(inst);
+                memory[retAreaPtr] = 1;
+                memory[retAreaPtr + 1] = 0;
+                memory[retAreaPtr + 2] = 0;
+                memory[retAreaPtr + 3] = 0;
+                WriteI32LE(memory, retAreaPtr + 4, handle);
+            }
+
+            var lambdaParams = new ParameterExpression[paramTypes.Length];
+            lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
+            for (int i = 0; i < paramInfos.Length; i++)
+                lambdaParams[i + 1] = Expression.Parameter(
+                    paramTypes[i + 1], paramInfos[i].Name);
+            lambdaParams[paramInfos.Length + 1] =
+                Expression.Parameter(typeof(int), "retAreaPtr");
+
+            var argArr = Expression.NewArrayInit(typeof(object),
+                paramInfos.Select((p, i) =>
+                {
+                    Expression e = lambdaParams[i + 1];
+                    if (p.ParameterType != e.Type)
+                        e = Expression.Convert(e, p.ParameterType);
+                    return (Expression)Expression.Convert(e, typeof(object));
+                }).ToArray());
+            var bodyTarget = Expression.Constant(
+                (Action<ExecContext, object?[], int>)Body);
+            var call = Expression.Invoke(bodyTarget,
+                lambdaParams[0], argArr,
+                lambdaParams[paramInfos.Length + 1]);
             var lambda = Expression.Lambda(delegateType, call, lambdaParams);
             var compiled = lambda.Compile();
 
