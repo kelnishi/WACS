@@ -1,0 +1,7 @@
+package local:fsopen;
+world demo {
+    import wasi:filesystem/types@0.2.3;
+    /// open-at(handle, "child", flags) — uses Create open-flag,
+    /// returns the new descriptor handle.
+    export ask-open: func(handle: u32) -> u32;
+}

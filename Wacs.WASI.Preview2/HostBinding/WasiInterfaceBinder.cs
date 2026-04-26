@@ -1039,31 +1039,51 @@ namespace Wacs.WASI.Preview2.HostBinding
             Type resourceType, MethodInfo m, ResourceContext resources)
         {
             var paramInfos = m.GetParameters();
-            // Aggregate-param resource methods stay deferred —
-            // descriptor.read-via-stream has only u64 (filesize)
-            // beyond self, which is primitive.
+            // Param shape: each param is either primitive /
+            // enum (1 wire slot — flags-typed C# enums map to
+            // their underlying integer through ToWireType) or
+            // string (2 wire slots: ptr + len). Other aggregates
+            // (records, lists) stay deferred.
             foreach (var p in paramInfos)
-                if (!IsPrimitive(p.ParameterType))
+                if (!IsPrimitive(p.ParameterType)
+                    && !p.ParameterType.IsEnum
+                    && p.ParameterType != typeof(string))
                     throw new InvalidOperationException(
                         "[WasiErrorResult] resource method '" + m.Name
-                        + "' takes a non-primitive param "
-                        + p.ParameterType + " — aggregate-param "
-                        + "resource methods are a follow-up.");
+                        + "' takes unsupported param type "
+                        + p.ParameterType + ".");
 
-            // Wire signature: ExecContext, handle (i32),
-            // [host params...], retAreaPtr → void.
-            var wireParamTypes = new Type[paramInfos.Length + 3];
+            // Compute wire-slot count: 1 (handle) + per-param
+            // (1 for primitive, 2 for string) + 1 (retArea).
+            int paramSlotCount = 0;
+            foreach (var p in paramInfos)
+                paramSlotCount += p.ParameterType == typeof(string) ? 2 : 1;
+            var wireParamTypes = new Type[3 + paramSlotCount];
             wireParamTypes[0] = typeof(ExecContext);
-            wireParamTypes[1] = typeof(int);
-            for (int i = 0; i < paramInfos.Length; i++)
-                wireParamTypes[i + 2] = ToWireType(paramInfos[i].ParameterType);
-            wireParamTypes[paramInfos.Length + 2] = typeof(int);
+            wireParamTypes[1] = typeof(int);   // handle
+            int wi = 2;
+            foreach (var p in paramInfos)
+            {
+                if (p.ParameterType == typeof(string))
+                {
+                    wireParamTypes[wi++] = typeof(int);   // ptr
+                    wireParamTypes[wi++] = typeof(int);   // len
+                }
+                else
+                {
+                    wireParamTypes[wi++] = ToWireType(p.ParameterType);
+                }
+            }
+            wireParamTypes[wi] = typeof(int);   // retArea
 
             var delegateType = OpenActionType(wireParamTypes.Length)
                 .MakeGenericType(wireParamTypes);
 
             var returnTable = resources.TableFor(m.ReturnType);
 
+            // Body takes pre-built hostArgs[] from the lambda;
+            // string params are decoded from (ptr, len) before
+            // the call.
             void Body(ExecContext ctx, int handle, object?[] hostArgs,
                 int retAreaPtr)
             {
@@ -1086,25 +1106,71 @@ namespace Wacs.WASI.Preview2.HostBinding
             var lambdaParams = new ParameterExpression[wireParamTypes.Length];
             lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
             lambdaParams[1] = Expression.Parameter(typeof(int), "self");
+            wi = 2;
             for (int i = 0; i < paramInfos.Length; i++)
-                lambdaParams[i + 2] = Expression.Parameter(
-                    wireParamTypes[i + 2], paramInfos[i].Name);
-            lambdaParams[paramInfos.Length + 2] =
-                Expression.Parameter(typeof(int), "retAreaPtr");
-
-            var argArr = Expression.NewArrayInit(typeof(object),
-                paramInfos.Select((p, i) =>
+            {
+                if (paramInfos[i].ParameterType == typeof(string))
                 {
-                    Expression e = lambdaParams[i + 2];
-                    if (p.ParameterType != e.Type)
-                        e = Expression.Convert(e, p.ParameterType);
-                    return (Expression)Expression.Convert(e, typeof(object));
-                }).ToArray());
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_ptr");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_len");
+                }
+                else
+                {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        wireParamTypes[wi - 1], paramInfos[i].Name);
+                }
+            }
+            var retAreaParam = Expression.Parameter(typeof(int), "retAreaPtr");
+            lambdaParams[wireParamTypes.Length - 1] = retAreaParam;
+
+            // Build object?[] of host args. String params:
+            // call helper to decode (ptr, len). Primitive
+            // params: convert wire→host.
+            var ctxParam = lambdaParams[0];
+            var memoryProp = typeof(ExecContext).GetProperty(
+                nameof(ExecContext.DefaultMemory))!;
+            var memDataField = typeof(Wacs.Core.Runtime.Types.MemoryInstance)
+                .GetField("Data")!;
+            var memoryAccess = Expression.Field(
+                Expression.Property(ctxParam, memoryProp),
+                memDataField);
+            var encodingUtf8 = Expression.Property(null,
+                typeof(System.Text.Encoding).GetProperty(
+                    nameof(System.Text.Encoding.UTF8))!);
+            var getStringMethod = typeof(System.Text.Encoding).GetMethod(
+                nameof(System.Text.Encoding.GetString),
+                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+
+            wi = 2;
+            var argExprs = new Expression[paramInfos.Length];
+            for (int i = 0; i < paramInfos.Length; i++)
+            {
+                if (paramInfos[i].ParameterType == typeof(string))
+                {
+                    var ptrParam = lambdaParams[wi++];
+                    var lenParam = lambdaParams[wi++];
+                    // Encoding.UTF8.GetString(memory, ptr, len)
+                    argExprs[i] = Expression.Convert(
+                        Expression.Call(encodingUtf8, getStringMethod,
+                            memoryAccess, ptrParam, lenParam),
+                        typeof(object));
+                }
+                else
+                {
+                    Expression e = lambdaParams[wi++];
+                    if (paramInfos[i].ParameterType != e.Type)
+                        e = Expression.Convert(e, paramInfos[i].ParameterType);
+                    argExprs[i] = Expression.Convert(e, typeof(object));
+                }
+            }
+
+            var argArr = Expression.NewArrayInit(typeof(object), argExprs);
             var bodyTarget = Expression.Constant(
                 (Action<ExecContext, int, object?[], int>)Body);
             var call = Expression.Invoke(bodyTarget,
-                lambdaParams[0], lambdaParams[1], argArr,
-                lambdaParams[paramInfos.Length + 2]);
+                lambdaParams[0], lambdaParams[1], argArr, retAreaParam);
             var lambda = Expression.Lambda(delegateType, call, lambdaParams);
             var compiled = lambda.Compile();
 
