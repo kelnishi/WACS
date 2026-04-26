@@ -245,6 +245,42 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(new[] { "child" }, desc.Unlinked);
         }
 
+        private sealed class PathDescriptor : Descriptor
+        {
+            public PathDescriptor(string path) : base(path) { }
+        }
+
+        [Fact]
+        public void IsSameObject_resolves_borrow_descriptor_param()
+        {
+            // Fixture: ask-same(self, other) →
+            // descriptor.is-same-object(self, other) returning
+            // bool as u32. Stub uses the path-equality default;
+            // descriptors with the same path → 1, different →
+            // 0.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-same-component", "fssame.component.wasm"));
+            var resources = new ResourceContext();
+            var a = new PathDescriptor("/data/x");
+            var b = new PathDescriptor("/data/x");
+            var c = new PathDescriptor("/data/y");
+            var table = resources.TableFor(typeof(Descriptor));
+            int hA = table.Allocate(a);
+            int hB = table.Allocate(b);
+            int hC = table.Allocate(c);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-same", (uint)hA, (uint)hB)!);
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-same", (uint)hA, (uint)hC)!);
+        }
+
         private sealed class SymlinkDescriptor : Descriptor
         {
             public string LastOldPath = "";

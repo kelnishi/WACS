@@ -245,6 +245,18 @@ namespace Wacs.WASI.Preview2.Filesystem
             return new Descriptor(fullPath);
         }
 
+        /// <summary>True iff <paramref name="other"/> refers to
+        /// the same underlying filesystem object. Default
+        /// compares the host-side <see cref="Path"/>; subclasses
+        /// override for VFS shims that don't keep textual
+        /// paths.</summary>
+        [WasiMethodName("is-same-object")]
+        public virtual bool IsSameObject(Descriptor other)
+        {
+            if (other == null) return false;
+            return string.Equals(Path, other.Path, StringComparison.Ordinal);
+        }
+
         public virtual void Dispose() { }
     }
 

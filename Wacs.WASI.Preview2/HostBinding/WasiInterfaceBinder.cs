@@ -556,8 +556,13 @@ namespace Wacs.WASI.Preview2.HostBinding
 
             // Aggregate-param resource methods are a follow-up
             // (write etc. are handled via [WasiStreamResult]).
+            // Resource-typed params (borrow<T>) are admitted —
+            // wire form is i32 handle; the wrapper resolves it
+            // via ResourceContext.TableFor(T).Get(handle).
             foreach (var p in paramInfos)
-                if (!IsPrimitive(p.ParameterType)) return;
+                if (!IsPrimitive(p.ParameterType)
+                    && p.ParameterType.GetCustomAttribute<
+                        WasiResourceAttribute>() == null) return;
 
             // Dispatch on return shape. String returns go
             // through the retArea wrapper; primitive / void
@@ -582,11 +587,18 @@ namespace Wacs.WASI.Preview2.HostBinding
 
             // Wrapper signature: ExecContext, handle (i32),
             // [host params...] → wire return type (or void).
+            // Resource params lower to i32 (handle).
             var wireParamTypes = new Type[paramInfos.Length + 2];
             wireParamTypes[0] = typeof(ExecContext);
             wireParamTypes[1] = typeof(int);
             for (int i = 0; i < paramInfos.Length; i++)
-                wireParamTypes[i + 2] = ToWireType(paramInfos[i].ParameterType);
+            {
+                wireParamTypes[i + 2] =
+                    paramInfos[i].ParameterType.GetCustomAttribute<
+                        WasiResourceAttribute>() != null
+                    ? typeof(int)
+                    : ToWireType(paramInfos[i].ParameterType);
+            }
 
             Type delegateType;
             if (m.ReturnType == typeof(void))
@@ -617,11 +629,28 @@ namespace Wacs.WASI.Preview2.HostBinding
                 Expression.Call(tableConst, getMethod, lambdaParams[1]),
                 resourceType);
 
+            // For resource-typed params we need the matching
+            // ResourceContext to resolve the handle. The expr
+            // tree uses TableFor(type).Get(h) per param.
+            var contextConst = Expression.Constant(resources);
+            var tableForMethod = typeof(ResourceContext).GetMethod(
+                nameof(ResourceContext.TableFor))!;
             var argExprs = new Expression[paramInfos.Length];
             for (int i = 0; i < paramInfos.Length; i++)
             {
                 Expression e = lambdaParams[i + 2];
-                if (paramInfos[i].ParameterType != e.Type)
+                if (paramInfos[i].ParameterType.GetCustomAttribute<
+                        WasiResourceAttribute>() != null)
+                {
+                    // Resolve borrow handle via ResourceContext.
+                    var paramTable = Expression.Call(contextConst,
+                        tableForMethod,
+                        Expression.Constant(paramInfos[i].ParameterType));
+                    e = Expression.Convert(
+                        Expression.Call(paramTable, getMethod, e),
+                        paramInfos[i].ParameterType);
+                }
+                else if (paramInfos[i].ParameterType != e.Type)
                 {
                     if (paramInfos[i].ParameterType == typeof(bool))
                         e = Expression.NotEqual(e,
