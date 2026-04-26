@@ -392,6 +392,20 @@ namespace Wacs.WASI.Preview2.Sockets
         public virtual IpSocketAddress RemoteAddress()
             => new Ipv4SocketAddress(0, new byte[] { 0, 0, 0, 0 });
 
+        /// <summary>Yield the
+        /// (incoming-datagram-stream, outgoing-datagram-stream)
+        /// pair for this socket. <paramref name="remoteAddress"/>
+        /// optionally pins the streams to a single peer (when
+        /// non-null); when null the socket is unconnected and
+        /// any peer can send to it. Default returns stub
+        /// streams.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("stream")]
+        public virtual (IncomingDatagramStream, OutgoingDatagramStream)
+            UdpStream([WasiOptionalParam] IpSocketAddress? remoteAddress)
+            => (new IncomingDatagramStream(),
+                new OutgoingDatagramStream());
+
         protected byte _hopLimit = 64;
         protected ulong _receiveBufferSize = 65_536;
         protected ulong _sendBufferSize = 65_536;

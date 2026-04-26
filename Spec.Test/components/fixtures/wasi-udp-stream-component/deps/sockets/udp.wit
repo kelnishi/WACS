@@ -1,0 +1,11 @@
+package wasi:sockets@0.2.3;
+interface udp {
+    use network.{ip-socket-address, error-code};
+    resource incoming-datagram-stream;
+    resource outgoing-datagram-stream;
+    resource udp-socket {
+        %stream: func(remote-address: option<ip-socket-address>)
+            -> result<tuple<own<incoming-datagram-stream>,
+                            own<outgoing-datagram-stream>>, error-code>;
+    }
+}

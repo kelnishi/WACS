@@ -22,4 +22,18 @@ namespace Wacs.WASI.Preview2.HostBinding
     public sealed class WasiOptionalReturnAttribute : Attribute
     {
     }
+
+    /// <summary>
+    /// Marks a host method parameter as receiving an
+    /// <c>option&lt;…&gt;</c> rather than the equivalent
+    /// non-nullable WIT type. Used for
+    /// <c>option&lt;ip-socket-address&gt;</c> on
+    /// <c>udp-socket.%stream</c>; binder reads the option
+    /// disc + payload slots, dispatches null vs constructed.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false,
+        Inherited = false)]
+    public sealed class WasiOptionalParamAttribute : Attribute
+    {
+    }
 }
