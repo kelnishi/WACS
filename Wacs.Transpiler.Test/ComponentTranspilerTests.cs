@@ -1070,6 +1070,42 @@ namespace Wacs.Transpiler.Test
             Assert.Equal((uint)11, yField!.GetValue(dotValue));
         }
 
+        private static string FindNestedComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "nested-component", "wasm",
+                                "nested.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_resolves_through_nested_component_alias()
+        {
+            // nested-component fixture: outer composes one inner
+            // component, alias-re-exporting its `inner-greet`
+            // export as `greet`. The transpiler detects no core
+            // modules + nested components, takes the composer
+            // path: recursively transpiles each nested component
+            // into its own assembly under a sub-namespace, then
+            // emits an outer ComponentExports class whose methods
+            // delegate to the matching inner ComponentExports
+            // method via cross-assembly call. Inner returns "Hi!".
+            using var fs = File.OpenRead(FindNestedComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var greet = componentExports!.GetMethod("Greet");
+            Assert.NotNull(greet);
+            Assert.Equal(typeof(string), greet!.ReturnType);
+
+            Assert.Equal("Hi!", (string)greet.Invoke(null, null)!);
+        }
+
         private static string FindUtf16ParamComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
