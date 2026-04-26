@@ -142,11 +142,20 @@ namespace Wacs.WASI.Preview2.Http
 
     /// <summary>WIT <c>wasi:http/types.outgoing-request</c>
     /// — a request being constructed for outbound dispatch.
-    /// v0 is a marker resource; methods land incrementally.
+    /// v0 covers the headers/scheme/authority surface that
+    /// rides existing binder paths; method/path-with-query
+    /// (variant + option<string>) ride incrementally.
     /// </summary>
     [WasiResource("outgoing-request")]
     public class OutgoingRequest : IDisposable
     {
+        protected Fields _headers = new Fields();
+
+        /// <summary>Per WIT semantics, returns ownership of
+        /// the headers Fields to the guest. Default returns
+        /// the configured _headers.</summary>
+        public virtual Fields Headers() => _headers;
+
         public virtual void Dispose() { }
     }
 
@@ -156,6 +165,8 @@ namespace Wacs.WASI.Preview2.Http
     [WasiResource("incoming-request")]
     public class IncomingRequest : IDisposable
     {
+        public virtual Fields Headers() => new Fields();
+
         public virtual void Dispose() { }
     }
 
