@@ -1,0 +1,7 @@
+package local:fserrcode;
+world demo {
+    import wasi:filesystem/types@0.2.3;
+    /// Calls filesystem-error-code(err); returns
+    /// (option-disc | (payload << 8)) as u32.
+    export ask-errcode: func(err: u32) -> u32;
+}
