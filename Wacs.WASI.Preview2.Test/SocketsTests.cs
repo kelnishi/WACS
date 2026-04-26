@@ -10,6 +10,7 @@ using Wacs.ComponentModel.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.Io;
 using Wacs.WASI.Preview2.Sockets;
+using Wacs.WASI.Preview2;
 using Xunit;
 
 namespace Wacs.WASI.Preview2.Test
@@ -266,6 +267,71 @@ namespace Wacs.WASI.Preview2.Test
             // Port: 443
             Assert.Equal(443u, (uint)ci.Invoke(
                 "ask-local-port", (uint)handle)!);
+        }
+
+        [Fact]
+        public void TcpSocket_accept_returns_tuple_of_three_resource_handles()
+        {
+            // Fixture: ask-accept(handle) calls accept(),
+            // reads three i32 handles from retArea+4/+8/+12,
+            // counts non-zero handles, drops all three, returns
+            // the count.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-tcp-accept-component", "tcpaccept.component.wasm"));
+            var resources = new ResourceContext();
+            var sock = new TcpSocket(IpAddressFamily.Ipv4);
+            int handle = resources.TableFor(typeof(TcpSocket))
+                .Allocate(sock);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<TcpSocket>(
+                    "wasi:sockets/tcp@0.2.3", resources);
+                runtime.BindWasiResource<InputStream>(
+                    "wasi:io/streams@0.2.3", resources);
+                runtime.BindWasiResource<OutputStream>(
+                    "wasi:io/streams@0.2.3", resources);
+            });
+
+            // Three non-zero handles allocated by accept.
+            Assert.Equal(3u, (uint)ci.Invoke(
+                "ask-accept", (uint)handle)!);
+            // After drop: only the original tcp-socket handle
+            // remains; the new tcp-socket allocated by accept
+            // is dropped, and the streams tables are clean.
+            Assert.Equal(1, resources.TableFor(typeof(TcpSocket)).Count);
+            Assert.Equal(0, resources.TableFor(typeof(InputStream)).Count);
+            Assert.Equal(0, resources.TableFor(typeof(OutputStream)).Count);
+        }
+
+        [Fact]
+        public void TcpSocket_finish_connect_returns_input_output_pair()
+        {
+            // Fixture: ask-connect(handle) calls finish-connect,
+            // reads (in_handle, out_handle) at retArea+4/+8,
+            // counts non-zero handles, drops both, returns
+            // the count.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-tcp-accept-component", "tcpaccept.component.wasm"));
+            var resources = new ResourceContext();
+            var sock = new TcpSocket(IpAddressFamily.Ipv4);
+            int handle = resources.TableFor(typeof(TcpSocket))
+                .Allocate(sock);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<TcpSocket>(
+                    "wasi:sockets/tcp@0.2.3", resources);
+                runtime.BindWasiResource<InputStream>(
+                    "wasi:io/streams@0.2.3", resources);
+                runtime.BindWasiResource<OutputStream>(
+                    "wasi:io/streams@0.2.3", resources);
+            });
+
+            Assert.Equal(2u, (uint)ci.Invoke(
+                "ask-connect", (uint)handle)!);
+            Assert.Equal(0, resources.TableFor(typeof(InputStream)).Count);
+            Assert.Equal(0, resources.TableFor(typeof(OutputStream)).Count);
         }
 
         [Fact]

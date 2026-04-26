@@ -572,7 +572,8 @@ namespace Wacs.WASI.Preview2.HostBinding
                     || m.ReturnType == typeof(
                         Wacs.WASI.Preview2.Sockets.IpSocketAddress)
                     || m.ReturnType.IsSubclassOf(typeof(
-                        Wacs.WASI.Preview2.Sockets.IpSocketAddress))))
+                        Wacs.WASI.Preview2.Sockets.IpSocketAddress))
+                    || IsResourceTuple(m.ReturnType)))
             {
                 BindStreamResultResourceMethod(runtime, namespaceName,
                     importName, table, resourceType, m, resources);
@@ -963,9 +964,12 @@ namespace Wacs.WASI.Preview2.HostBinding
             // Recognized return shapes (Ok payload): void, bool/u8,
             // u16, u32, u64, byte[], (byte[], bool) ValueTuple
             // (descriptor.read shape), record-of-primitives
-            // (metadata-hash-value etc.), or IpSocketAddress
-            // (sockets local-/remote-address). Each encodes as
-            // disc + Ok payload at the natural alignment.
+            // (metadata-hash-value etc.), IpSocketAddress
+            // (sockets local-/remote-address), or tuple-of-
+            // resources (accept / finish-connect: 2-3 i32
+            // handles, each allocated in its own table). Each
+            // encodes as disc + Ok payload at the natural
+            // alignment.
             var rt = m.ReturnType;
             var retShape = rt == typeof(void) ? 0
                 : rt == typeof(ulong) ? 1
@@ -979,6 +983,7 @@ namespace Wacs.WASI.Preview2.HostBinding
                 : rt == typeof(Wacs.WASI.Preview2.Sockets.IpSocketAddress)
                     || rt.IsSubclassOf(typeof(
                         Wacs.WASI.Preview2.Sockets.IpSocketAddress)) ? 9
+                : IsResourceTuple(rt) ? 10
                 : -1;
             if (retShape < 0)
                 throw new InvalidOperationException(
@@ -986,7 +991,26 @@ namespace Wacs.WASI.Preview2.HostBinding
                     + "return type " + rt + " (expected void / "
                     + "bool / u8 / u16 / u32 / u64 / byte[] / "
                     + "(byte[], bool) / record-of-primitives / "
-                    + "ip-socket-address).");
+                    + "ip-socket-address / tuple-of-resources).");
+
+            // For tuple-of-resources: precompute the per-field
+            // resource tables so the hot path doesn't reflect.
+            FieldInfo[]? tupleFields = null;
+            ResourceTable[]? tupleTables = null;
+            if (retShape == 10)
+            {
+                if (resources == null)
+                    throw new InvalidOperationException(
+                        "[WasiStreamResult] tuple-of-resources "
+                        + "return on '" + m.Name + "' requires "
+                        + "a ResourceContext.");
+                tupleFields = rt.GetFields(
+                    BindingFlags.Public | BindingFlags.Instance);
+                tupleTables = new ResourceTable[tupleFields.Length];
+                for (int i = 0; i < tupleFields.Length; i++)
+                    tupleTables[i] = resources.TableFor(
+                        tupleFields[i].FieldType);
+            }
 
             // For record-of-prims: precompute field offsets +
             // total alignment so the hot path doesn't reflect.
@@ -1102,6 +1126,17 @@ namespace Wacs.WASI.Preview2.HostBinding
                               // 28-byte payload at retArea+8.
                         WriteIpSocketAddressAt(memOut, retAreaPtr + 4,
                             (Wacs.WASI.Preview2.Sockets.IpSocketAddress)ret!);
+                        break;
+                    case 10:  // tuple-of-resources: each Item_i is
+                              // allocated in its table; handles
+                              // written as i32 at retArea+4+i*4.
+                        for (int i = 0; i < tupleFields!.Length; i++)
+                        {
+                            var resInst = tupleFields[i].GetValue(ret);
+                            int handle = tupleTables![i].Allocate(resInst!);
+                            WriteI32LE(memOut, retAreaPtr + 4 + i * 4,
+                                handle);
+                        }
                         break;
                 }
             }
@@ -2615,6 +2650,27 @@ namespace Wacs.WASI.Preview2.HostBinding
                     "Unknown IpSocketAddress subclass: "
                     + addr?.GetType());
             }
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a
+        /// <c>ValueTuple&lt;...&gt;</c> whose every type
+        /// argument is a <see cref="WasiResourceAttribute"/>-
+        /// marked class. Drives the stream-result wrapper's
+        /// "tuple-of-resources" Ok payload — accept (3-tuple)
+        /// and finish-connect (2-tuple) on tcp-socket.
+        /// </summary>
+        private static bool IsResourceTuple(Type t)
+        {
+            if (!t.IsGenericType) return false;
+            if (!t.GetGenericTypeDefinition().Name.StartsWith(
+                    "ValueTuple", StringComparison.Ordinal))
+                return false;
+            var args = t.GetGenericArguments();
+            if (args.Length < 2) return false;
+            foreach (var a in args)
+                if (a.GetCustomAttribute<WasiResourceAttribute>() == null)
+                    return false;
+            return true;
         }
 
         /// <summary>True iff <paramref name="t"/> is a struct
