@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System.Diagnostics;
+using Wacs.WASI.Preview2.Io;
 
 namespace Wacs.WASI.Preview2.Clocks
 {
@@ -46,5 +47,13 @@ namespace Wacs.WASI.Preview2.Clocks
             // Smallest reportable step = 1 tick → ns.
             return (ulong)(1_000_000_000L / Stopwatch.Frequency);
         }
+
+        /// <summary>Default impl returns an always-ready
+        /// Pollable — sufficient for guests that only need
+        /// the wiring; concrete subclasses integrate with
+        /// async timers.</summary>
+        public Pollable SubscribeInstant(ulong when) => new Pollable();
+
+        public Pollable SubscribeDuration(ulong when) => new Pollable();
     }
 }
