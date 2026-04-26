@@ -104,6 +104,67 @@ namespace Wacs.WASI.Preview2.Sockets
         [WasiErrorResult]
         public virtual void Shutdown(ShutdownType how) { }
 
+        /// <summary>True iff this socket has transitioned into
+        /// the listening state. Bare <c>bool</c> return — no
+        /// result wrapping per WIT.</summary>
+        [WasiMethodName("is-listening")]
+        public virtual bool IsListening() => _listening;
+
+        /// <summary>Per-socket setter for the listen backlog.
+        /// v0 just records the value.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("set-listen-backlog-size")]
+        public virtual void SetListenBacklogSize(ulong value)
+            => ListenBacklogSize = value;
+
+        public ulong ListenBacklogSize { get; protected set; } = 128;
+
+        /// <summary>SO_KEEPALIVE getter.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("keep-alive-enabled")]
+        public virtual bool KeepAliveEnabled() => _keepAliveEnabled;
+
+        [WasiErrorResult]
+        [WasiMethodName("set-keep-alive-enabled")]
+        public virtual void SetKeepAliveEnabled(bool value)
+            => _keepAliveEnabled = value;
+
+        /// <summary>IP_TTL / IPV6_UNICAST_HOPS getter.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("hop-limit")]
+        public virtual byte HopLimit() => _hopLimit;
+
+        [WasiErrorResult]
+        [WasiMethodName("set-hop-limit")]
+        public virtual void SetHopLimit(byte value)
+            => _hopLimit = value;
+
+        /// <summary>SO_RCVBUF getter.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("receive-buffer-size")]
+        public virtual ulong ReceiveBufferSize() => _receiveBufferSize;
+
+        [WasiErrorResult]
+        [WasiMethodName("set-receive-buffer-size")]
+        public virtual void SetReceiveBufferSize(ulong value)
+            => _receiveBufferSize = value;
+
+        /// <summary>SO_SNDBUF getter.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("send-buffer-size")]
+        public virtual ulong SendBufferSize() => _sendBufferSize;
+
+        [WasiErrorResult]
+        [WasiMethodName("set-send-buffer-size")]
+        public virtual void SetSendBufferSize(ulong value)
+            => _sendBufferSize = value;
+
+        protected bool _listening;
+        protected bool _keepAliveEnabled;
+        protected byte _hopLimit = 64;
+        protected ulong _receiveBufferSize = 65_536;
+        protected ulong _sendBufferSize = 65_536;
+
         public virtual void Dispose() { }
     }
 
