@@ -50,6 +50,78 @@ namespace Wacs.WASI.Preview2.Filesystem
     }
 
     /// <summary>WIT enum
+    /// <c>wasi:filesystem/types.error-code</c>. The full
+    /// v0.2.3 spec has 37 cases, captured here as a byte
+    /// enum with declaration-order values. Used as the
+    /// Some payload of <c>filesystem-error-code()</c>.
+    /// </summary>
+    public enum FilesystemErrorCode : byte
+    {
+        Access = 0,
+        WouldBlock = 1,
+        Already = 2,
+        BadDescriptor = 3,
+        Busy = 4,
+        Deadlock = 5,
+        Quota = 6,
+        Exist = 7,
+        FileTooLarge = 8,
+        IllegalByteSequence = 9,
+        InProgress = 10,
+        Interrupted = 11,
+        Invalid = 12,
+        Io = 13,
+        IsDirectory = 14,
+        Loop = 15,
+        TooManyLinks = 16,
+        MessageSize = 17,
+        NameTooLong = 18,
+        NoDevice = 19,
+        NoEntry = 20,
+        NoLock = 21,
+        InsufficientMemory = 22,
+        InsufficientSpace = 23,
+        NotDirectory = 24,
+        NotEmpty = 25,
+        NotRecoverable = 26,
+        Unsupported = 27,
+        NoTty = 28,
+        NoSuchDevice = 29,
+        Overflow = 30,
+        NotPermitted = 31,
+        Pipe = 32,
+        ReadOnly = 33,
+        InvalidSeek = 34,
+        TextFileBusy = 35,
+        CrossDevice = 36,
+    }
+
+    /// <summary>Host-side surface for the top-level
+    /// <c>wasi:filesystem/types.filesystem-error-code</c>:
+    /// <code>filesystem-error-code: func(err: borrow&lt;error&gt;)
+    ///     -&gt; option&lt;error-code&gt;;</code>
+    /// Returns null when <paramref name="err"/> is not a
+    /// filesystem error; matching <see cref="FilesystemErrorCode"/>
+    /// otherwise.</summary>
+    public interface IFilesystemErrorCode
+    {
+        FilesystemErrorCode? FilesystemErrorCode(
+            Wacs.WASI.Preview2.Io.Error err);
+    }
+
+    /// <summary>Default <see cref="IFilesystemErrorCode"/>
+    /// — returns null regardless of input. Concrete hosts
+    /// override to classify <see cref="Wacs.WASI.Preview2.Io.Error"/>
+    /// instances as filesystem errors.</summary>
+    public sealed class FilesystemErrorCodeSource : IFilesystemErrorCode
+    {
+        [WasiOptionalReturn]
+        [WasiMethodName("filesystem-error-code")]
+        public FilesystemErrorCode? FilesystemErrorCode(
+            Wacs.WASI.Preview2.Io.Error err) => null;
+    }
+
+    /// <summary>WIT enum
     /// <c>wasi:filesystem/types.advice</c> — hint for
     /// descriptor.advise().</summary>
     public enum Advice : byte

@@ -97,6 +97,12 @@ namespace Wacs.WASI.Preview2.HostBinding
                         runtime, namespaceName, impl, m);
                     continue;
                 }
+                if (IsOptionEnumReturnBorrowParam(m))
+                {
+                    BindOptionEnumReturnBorrowParamMethod(
+                        runtime, namespaceName, impl, m, resources);
+                    continue;
+                }
                 if (IsStringReturnPrimitiveParams(m))
                 {
                     BindStringReturnMethod(
@@ -144,6 +150,65 @@ namespace Wacs.WASI.Preview2.HostBinding
             foreach (var p in m.GetParameters())
                 if (!IsPrimitive(p.ParameterType)) return false;
             return true;
+        }
+
+        /// <summary>True iff the method shape matches
+        /// <c>EnumType? M(TResource)</c> where TResource has
+        /// <see cref="WasiResourceAttribute"/> and the return
+        /// is a nullable enum tagged
+        /// <see cref="WasiOptionalReturnAttribute"/>.
+        /// Drives <c>wasi:filesystem/types.filesystem-error-code</c>
+        /// — borrow<error> in, option<error-code> out.</summary>
+        private static bool IsOptionEnumReturnBorrowParam(MethodInfo m)
+        {
+            if (m.GetCustomAttribute<WasiOptionalReturnAttribute>() == null)
+                return false;
+            var rt = m.ReturnType;
+            if (!rt.IsGenericType
+                || rt.GetGenericTypeDefinition() != typeof(Nullable<>))
+                return false;
+            if (!rt.GetGenericArguments()[0].IsEnum) return false;
+            var ps = m.GetParameters();
+            if (ps.Length != 1) return false;
+            return ps[0].ParameterType.GetCustomAttribute<
+                WasiResourceAttribute>() != null;
+        }
+
+        /// <summary>Canon-lower wrapper for
+        /// <c>option&lt;enum&gt; M(borrow&lt;TResource&gt;)</c> —
+        /// the shape used by
+        /// <c>wasi:filesystem/types.filesystem-error-code</c>.
+        /// Wire form: 2-byte retArea (option disc + 1-byte
+        /// payload), 1 borrow handle param.</summary>
+        private static void BindOptionEnumReturnBorrowParamMethod(
+            WasmRuntime runtime, string namespaceName,
+            object impl, MethodInfo m, ResourceContext resources)
+        {
+            var importName = m.GetCustomAttribute<WasiMethodNameAttribute>()?
+                .WitName ?? ToKebabCase(m.Name);
+            var paramType = m.GetParameters()[0].ParameterType;
+            var paramTable = resources.TableFor(paramType);
+
+            // Wire: ExecContext, handle (i32), retAreaPtr (i32) → void.
+            void Body(ExecContext ctx, int handle, int retArea)
+            {
+                var inst = paramTable.Get(handle);
+                var ret = m.Invoke(impl, new object?[] { inst });
+                var memory = ctx.DefaultMemory.Data;
+                if (ret == null)
+                {
+                    memory[retArea] = 0;       // None
+                    memory[retArea + 1] = 0;
+                }
+                else
+                {
+                    memory[retArea] = 1;       // Some
+                    memory[retArea + 1] = Convert.ToByte(ret);
+                }
+            }
+
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (namespaceName, importName), Body);
         }
 
         /// <summary>True iff the method shape matches

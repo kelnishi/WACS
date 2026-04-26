@@ -178,6 +178,78 @@ namespace Wacs.WASI.Preview2.Test
             public override DescriptorFlags GetFlags() => _flags;
         }
 
+        private sealed class StubFsErrCode : IFilesystemErrorCode
+        {
+            [WasiOptionalReturn]
+            [WasiMethodName("filesystem-error-code")]
+            public FilesystemErrorCode? FilesystemErrorCode(
+                Wacs.WASI.Preview2.Io.Error err)
+            {
+                // Classify any Error whose message starts
+                // with "fs:" as a filesystem error keyed by
+                // the byte value after the colon. Otherwise
+                // null = not a filesystem error.
+                var msg = err.ToDebugString();
+                if (msg.StartsWith("fs:",
+                    System.StringComparison.Ordinal)
+                    && byte.TryParse(msg.Substring(3), out var b))
+                    return (FilesystemErrorCode)b;
+                return null;
+            }
+        }
+
+        [Fact]
+        public void FilesystemErrorCode_returns_some_when_classified()
+        {
+            // Fixture: ask-errcode(err-handle) calls
+            // filesystem-error-code(err); packs (option-disc,
+            // payload-byte) as u32 (disc in bits 0-7, byte
+            // in bits 8-15). Stub recognizes "fs:20" → Some(20).
+            // Expected: (1) | (20 << 8) = 0x1401.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-errcode-component", "fserrcode.component.wasm"));
+            var resources = new ResourceContext();
+            var fec = new StubFsErrCode();
+            var err = new Wacs.WASI.Preview2.Io.Error("fs:20");
+            int handle = resources.TableFor(
+                typeof(Wacs.WASI.Preview2.Io.Error)).Allocate(err);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiInstance(
+                    "wasi:filesystem/types@0.2.3", fec, resources);
+                runtime.BindWasiResource<Wacs.WASI.Preview2.Io.Error>(
+                    "wasi:io/error@0.2.3", resources);
+            });
+
+            Assert.Equal(0x1401u, (uint)ci.Invoke(
+                "ask-errcode", (uint)handle)!);
+        }
+
+        [Fact]
+        public void FilesystemErrorCode_returns_none_when_not_classified()
+        {
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-errcode-component", "fserrcode.component.wasm"));
+            var resources = new ResourceContext();
+            var fec = new StubFsErrCode();
+            var err = new Wacs.WASI.Preview2.Io.Error("network");
+            int handle = resources.TableFor(
+                typeof(Wacs.WASI.Preview2.Io.Error)).Allocate(err);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiInstance(
+                    "wasi:filesystem/types@0.2.3", fec, resources);
+                runtime.BindWasiResource<Wacs.WASI.Preview2.Io.Error>(
+                    "wasi:io/error@0.2.3", resources);
+            });
+
+            // None disc=0 + payload byte stays 0 → 0.
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-errcode", (uint)handle)!);
+        }
+
         [Fact]
         public void GetFlags_writes_flags_enum_as_u8_when_flag_count_le_8()
         {
