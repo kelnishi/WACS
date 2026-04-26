@@ -9,6 +9,7 @@ using System.IO;
 using Wacs.ComponentModel.Runtime;
 using Wacs.WASI.Preview2.Clocks;
 using Wacs.WASI.Preview2.HostBinding;
+using Wacs.WASI.Preview2.Io;
 using Xunit;
 
 namespace Wacs.WASI.Preview2.Test
@@ -71,6 +72,31 @@ namespace Wacs.WASI.Preview2.Test
             Assert.True(elapsed > 0);
             // Resolution() is the smallest tick → positive ns.
             Assert.True(step > 0);
+        }
+
+        [Fact]
+        public void Subscribe_instant_and_duration_yield_pollable_handles()
+        {
+            // Fixture: ask-subscribe() calls
+            // monotonic-clock.subscribe-instant(1000) + .subscribe-duration(2000),
+            // drops both pollables, returns 0.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-clock-subscribe-component",
+                "clocksub.component.wasm"));
+            var resources = new ResourceContext();
+            var clock = new MonotonicClock();
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiInstance(
+                    "wasi:clocks/monotonic-clock@0.2.3", clock, resources);
+                runtime.BindWasiResource<Pollable>(
+                    "wasi:io/poll@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke("ask-subscribe")!);
+            // Both pollables dropped by the guest; table empty.
+            Assert.Equal(0, resources.TableFor(typeof(Pollable)).Count);
         }
     }
 }

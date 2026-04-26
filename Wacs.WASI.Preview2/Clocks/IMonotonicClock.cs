@@ -5,6 +5,8 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using Wacs.WASI.Preview2.Io;
+
 namespace Wacs.WASI.Preview2.Clocks
 {
     /// <summary>
@@ -39,5 +41,15 @@ namespace Wacs.WASI.Preview2.Clocks
         /// <see cref="Now"/> readings under maximum sampling
         /// pressure.</summary>
         ulong Resolution();
+
+        /// <summary>Yield a pollable that fires at absolute
+        /// time <paramref name="when"/> (a future
+        /// <see cref="Now"/> reading).</summary>
+        Pollable SubscribeInstant(ulong when);
+
+        /// <summary>Yield a pollable that fires
+        /// <paramref name="when"/> nanoseconds after the
+        /// subscribe call.</summary>
+        Pollable SubscribeDuration(ulong when);
     }
 }
