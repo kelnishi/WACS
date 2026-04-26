@@ -119,6 +119,93 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(1, resources.TableFor(typeof(Fields)).Count);
         }
 
+        private sealed class TeapotResponse : IncomingResponse
+        {
+            public override ushort Status() => 418;   // I'm a teapot
+        }
+
+        [Fact]
+        public void IncomingResponse_status_returns_u16()
+        {
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-response-component", "httpresponse.component.wasm"));
+            var resources = new ResourceContext();
+            var resp = new TeapotResponse();
+            int handle = resources.TableFor(typeof(IncomingResponse))
+                .Allocate(resp);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<IncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<OutgoingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<Fields>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(418u, (uint)ci.Invoke(
+                "ask-status", (uint)handle)!);
+        }
+
+        [Fact]
+        public void OutgoingResponse_set_status_code_round_trips()
+        {
+            // Fixture: ask-set-status(handle) calls
+            // outgoing-response.set-status-code(handle, 404)
+            // then status-code(handle), returning the new
+            // value. Validates u16 param + result wrap +
+            // u16 return on the same instance.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-response-component", "httpresponse.component.wasm"));
+            var resources = new ResourceContext();
+            var resp = new OutgoingResponse();
+            int handle = resources.TableFor(typeof(OutgoingResponse))
+                .Allocate(resp);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<IncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<OutgoingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<Fields>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(404u, (uint)ci.Invoke(
+                "ask-set-status", (uint)handle)!);
+            Assert.Equal((ushort)404, resp.StatusCode());
+        }
+
+        [Fact]
+        public void IncomingResponse_headers_yields_fields_handle()
+        {
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-response-component", "httpresponse.component.wasm"));
+            var resources = new ResourceContext();
+            var resp = new IncomingResponse();
+            int handle = resources.TableFor(typeof(IncomingResponse))
+                .Allocate(resp);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<IncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<OutgoingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<Fields>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-headers", (uint)handle)!);
+            // Returned Fields handle was dropped by the
+            // guest; only the original IncomingResponse
+            // handle remains.
+            Assert.Equal(0, resources.TableFor(typeof(Fields)).Count);
+        }
+
         [Fact]
         public void Http_resource_markers_are_allocatable()
         {
