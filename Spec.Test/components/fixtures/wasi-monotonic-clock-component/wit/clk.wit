@@ -1,0 +1,6 @@
+package local:clk;
+world clk {
+    import wasi:clocks/monotonic-clock@0.2.3;
+    export elapsed: func() -> u64;
+    export step: func() -> u64;
+}
