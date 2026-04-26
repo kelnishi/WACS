@@ -245,6 +245,51 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(new[] { "child" }, desc.Unlinked);
         }
 
+        private sealed class RenameDescriptor : Descriptor
+        {
+            public string LastOldPath = "";
+            public string LastNewPath = "";
+            public Descriptor? LastNewDescriptor;
+            public RenameDescriptor() : base("/synthetic") { }
+            public override void RenameAt(string oldPath,
+                Descriptor newDescriptor, string newPath)
+            {
+                LastOldPath = oldPath;
+                LastNewPath = newPath;
+                LastNewDescriptor = newDescriptor;
+            }
+        }
+
+        [Fact]
+        public void RenameAt_resolves_borrow_descriptor_with_two_strings()
+        {
+            // Fixture: ask-rename(self, newdesc) →
+            // descriptor.rename-at(self, "src", newdesc, "dst").
+            // Stub records all three params; asserts paths +
+            // identity of the new descriptor.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-rename-component", "fsrename.component.wasm"));
+            var resources = new ResourceContext();
+            var self = new RenameDescriptor();
+            var other = new Descriptor("/other");
+            int hSelf = resources.TableFor(typeof(Descriptor))
+                .Allocate(self);
+            int hOther = resources.TableFor(typeof(Descriptor))
+                .Allocate(other);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-rename", (uint)hSelf, (uint)hOther)!);
+            Assert.Equal("src", self.LastOldPath);
+            Assert.Equal("dst", self.LastNewPath);
+            Assert.Same(other, self.LastNewDescriptor);
+        }
+
         private sealed class PathDescriptor : Descriptor
         {
             public PathDescriptor(string path) : base(path) { }

@@ -213,6 +213,32 @@ namespace Wacs.WASI.Preview2.Filesystem
             File.Delete(System.IO.Path.Combine(Path, path));
         }
 
+        /// <summary>Hard-link <paramref name="oldPath"/> under
+        /// <c>this</c> to <paramref name="newPath"/> under
+        /// <paramref name="newDescriptor"/>. Default impl is a
+        /// no-op since System.IO has no portable hard-link
+        /// API; concrete subclasses override.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("link-at")]
+        public virtual void LinkAt(PathFlags oldPathFlags, string oldPath,
+            Descriptor newDescriptor, string newPath) { }
+
+        /// <summary>Rename <paramref name="oldPath"/> under
+        /// <c>this</c> to <paramref name="newPath"/> under
+        /// <paramref name="newDescriptor"/>.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("rename-at")]
+        public virtual void RenameAt(string oldPath,
+            Descriptor newDescriptor, string newPath)
+        {
+            var oldFull = System.IO.Path.Combine(Path, oldPath);
+            var newFull = System.IO.Path.Combine(newDescriptor.Path, newPath);
+            if (File.Exists(oldFull))
+                File.Move(oldFull, newFull);
+            else if (Directory.Exists(oldFull))
+                Directory.Move(oldFull, newFull);
+        }
+
         /// <summary>Create a symbolic link at
         /// <paramref name="newPath"/> pointing at
         /// <paramref name="oldPath"/>. Default impl is a no-op
