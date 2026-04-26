@@ -82,6 +82,59 @@ namespace Wacs.WASI.Preview2.Test
             public override DescriptorType GetDescriptorType() => _type;
         }
 
+        private sealed class TrackingDescriptor : Descriptor
+        {
+            public int SyncCalls;
+            public ulong LastSetSize;
+            public TrackingDescriptor() : base("/synthetic") { }
+            public override void Sync() => SyncCalls++;
+            public override void SetSize(ulong size) => LastSetSize = size;
+        }
+
+        [Fact]
+        public void Sync_returns_Ok_disc_zero_through_result_void_wrapper()
+        {
+            // Component imports descriptor.sync, exports
+            // ask-sync(handle) → u32 returning the outer disc.
+            // Always-Ok: 0.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-sync-component", "fssync.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new TrackingDescriptor();
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke("ask-sync", (uint)handle)!);
+            Assert.Equal(1, desc.SyncCalls);
+        }
+
+        [Fact]
+        public void SetSize_threads_u64_through_result_void_wrapper()
+        {
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-sync-component", "fssync.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new TrackingDescriptor();
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke("ask-set-size",
+                (uint)handle, 4096UL)!);
+            Assert.Equal(4096UL, desc.LastSetSize);
+        }
+
         [Fact]
         public void GetType_returns_enum_value_through_result_wrapper()
         {

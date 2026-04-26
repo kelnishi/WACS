@@ -114,6 +114,27 @@ namespace Wacs.WASI.Preview2.Filesystem
             return new HostFileOutputStream(stream);
         }
 
+        /// <summary>Force any buffered modifications to be
+        /// flushed to durable storage. Default: no-op (host
+        /// streams flush on close anyway).</summary>
+        [WasiErrorResult]
+        public virtual void Sync() { }
+
+        /// <summary>Like <see cref="Sync"/> but only flushes
+        /// data, not metadata. Default: no-op.</summary>
+        [WasiErrorResult]
+        public virtual void SyncData() { }
+
+        /// <summary>Truncate or extend the file to
+        /// <paramref name="size"/> bytes.</summary>
+        [WasiErrorResult]
+        public virtual void SetSize(ulong size)
+        {
+            using var fs = new FileStream(Path, FileMode.Open,
+                FileAccess.Write);
+            fs.SetLength((long)size);
+        }
+
         public virtual void Dispose() { }
     }
 
