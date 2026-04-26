@@ -66,10 +66,40 @@ namespace Wacs.WASI.Preview2.HostBinding
                         runtime, namespaceName, impl, m);
                     continue;
                 }
+                if (IsRecordOfPrimitivesReturnPrimitiveParams(m))
+                {
+                    BindRecordReturnMethod(
+                        runtime, namespaceName, impl, m);
+                    continue;
+                }
                 // Other aggregate shapes (string returns, list<T>
-                // for non-byte T, records, resources) are
-                // follow-ups — silently skipped here.
+                // for non-byte T, resources) are follow-ups —
+                // silently skipped here.
             }
+        }
+
+        /// <summary>True iff the method returns a struct/class
+        /// whose every public field is a primitive (the C#
+        /// representation of a record-of-primitives) and every
+        /// parameter is a primitive flat slot. The most common
+        /// pattern after byte[] for WASI shapes — datetime,
+        /// stat-like records, etc.</summary>
+        private static bool IsRecordOfPrimitivesReturnPrimitiveParams(MethodInfo m)
+        {
+            var t = m.ReturnType;
+            if (IsPrimitive(t) || t == typeof(byte[]) || t == typeof(void)
+                || t == typeof(string)) return false;
+            if (!t.IsValueType && !t.IsClass) return false;
+            // Record-of-primitives shape: at least one public
+            // field, all primitive-typed.
+            var fields = t.GetFields(
+                BindingFlags.Public | BindingFlags.Instance);
+            if (fields.Length == 0) return false;
+            foreach (var f in fields)
+                if (!IsPrimitive(f.FieldType)) return false;
+            foreach (var p in m.GetParameters())
+                if (!IsPrimitive(p.ParameterType)) return false;
+            return true;
         }
 
         /// <summary>True iff the method returns <c>byte[]</c>
@@ -202,6 +232,165 @@ namespace Wacs.WASI.Preview2.HostBinding
             var bindClosed = bindOpen.MakeGenericMethod(delegateType);
             bindClosed.Invoke(runtime,
                 new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Build a canon-lower wrapper for a host
+        /// method returning a record-of-primitives. Same
+        /// retArea-pointer convention as
+        /// <see cref="BindByteArrayReturnMethod"/> — the wasm
+        /// import takes (host params..., retAreaPtr) and writes
+        /// the record's fields at retAreaPtr per canonical-ABI
+        /// alignment rules. Field offsets are computed by
+        /// walking declared field order with running alignment
+        /// (each field starts at the next multiple of its own
+        /// alignment from the running offset).</summary>
+        private static void BindRecordReturnMethod(
+            WasmRuntime runtime, string namespaceName,
+            object impl, MethodInfo m)
+        {
+            var importName = ToKebabCase(m.Name);
+
+            var paramInfos = m.GetParameters();
+            var paramTypes = new Type[paramInfos.Length + 2];
+            paramTypes[0] = typeof(ExecContext);
+            for (int i = 0; i < paramInfos.Length; i++)
+                paramTypes[i + 1] = ToWireType(paramInfos[i].ParameterType);
+            paramTypes[paramInfos.Length + 1] = typeof(int);
+
+            var delegateType = OpenActionType(paramTypes.Length)
+                .MakeGenericType(paramTypes);
+
+            // Pre-compute per-field byte offsets following
+            // canonical-ABI alignment rules so the wrapper
+            // doesn't recompute on every call.
+            var recordType = m.ReturnType;
+            var fields = recordType.GetFields(
+                BindingFlags.Public | BindingFlags.Instance);
+            var fieldOffsets = new int[fields.Length];
+            int offset = 0;
+            for (int i = 0; i < fields.Length; i++)
+            {
+                var size = PrimitiveByteSize(fields[i].FieldType);
+                offset = AlignUp(offset, size);
+                fieldOffsets[i] = offset;
+                offset += size;
+            }
+
+            void Body(ExecContext ctx, object?[] hostArgs, int retAreaPtr)
+            {
+                var record = m.Invoke(impl, hostArgs)!;
+                var memory = ctx.DefaultMemory.Data;
+                for (int i = 0; i < fields.Length; i++)
+                {
+                    var v = fields[i].GetValue(record);
+                    WritePrimitiveLE(memory, retAreaPtr + fieldOffsets[i],
+                        fields[i].FieldType, v!);
+                }
+            }
+
+            var lambdaParams = new ParameterExpression[paramTypes.Length];
+            lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
+            for (int i = 0; i < paramInfos.Length; i++)
+                lambdaParams[i + 1] = Expression.Parameter(
+                    paramTypes[i + 1], paramInfos[i].Name);
+            lambdaParams[paramInfos.Length + 1] =
+                Expression.Parameter(typeof(int), "retAreaPtr");
+
+            var argArr = Expression.NewArrayInit(typeof(object),
+                paramInfos.Select((p, i) =>
+                {
+                    Expression e = lambdaParams[i + 1];
+                    if (p.ParameterType != e.Type)
+                        e = Expression.Convert(e, p.ParameterType);
+                    return (Expression)Expression.Convert(e, typeof(object));
+                }).ToArray());
+            var bodyTarget = Expression.Constant(
+                (Action<ExecContext, object?[], int>)Body);
+            var call = Expression.Invoke(bodyTarget,
+                lambdaParams[0], argArr,
+                lambdaParams[paramInfos.Length + 1]);
+            var lambda = Expression.Lambda(delegateType, call, lambdaParams);
+            var compiled = lambda.Compile();
+
+            var bindOpen = typeof(WasmRuntime).GetMethods()
+                .First(mi => mi.Name == nameof(WasmRuntime.BindHostFunction)
+                    && mi.IsGenericMethod
+                    && mi.GetParameters().Length == 2);
+            var bindClosed = bindOpen.MakeGenericMethod(delegateType);
+            bindClosed.Invoke(runtime,
+                new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Byte size of a primitive — drives both
+        /// alignment (start at AlignUp(offset, size)) and write
+        /// width (size bytes per field). Mirrors the canonical-
+        /// ABI alignment rule "alignment(P) = sizeof(P)" for
+        /// primitives.</summary>
+        private static int PrimitiveByteSize(Type t)
+        {
+            if (t == typeof(bool) || t == typeof(byte)
+                || t == typeof(sbyte)) return 1;
+            if (t == typeof(short) || t == typeof(ushort)) return 2;
+            if (t == typeof(int) || t == typeof(uint)
+                || t == typeof(float)) return 4;
+            if (t == typeof(long) || t == typeof(ulong)
+                || t == typeof(double)) return 8;
+            throw new NotSupportedException(
+                "PrimitiveByteSize for " + t + " is unsupported.");
+        }
+
+        private static int AlignUp(int o, int a)
+        {
+            var rem = o % a;
+            return rem == 0 ? o : o + (a - rem);
+        }
+
+        /// <summary>Write a primitive value at
+        /// <paramref name="ptr"/> in <paramref name="memory"/>
+        /// in little-endian order — the canonical-ABI default
+        /// (and only) byte ordering for record fields.</summary>
+        private static void WritePrimitiveLE(byte[] memory, int ptr,
+            Type t, object v)
+        {
+            if (t == typeof(bool)) memory[ptr] = (bool)v ? (byte)1 : (byte)0;
+            else if (t == typeof(byte)) memory[ptr] = (byte)v;
+            else if (t == typeof(sbyte)) memory[ptr] = unchecked((byte)(sbyte)v);
+            else if (t == typeof(short))
+                System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(
+                    memory.AsSpan(ptr, 2), (short)v);
+            else if (t == typeof(ushort))
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(
+                    memory.AsSpan(ptr, 2), (ushort)v);
+            else if (t == typeof(int))
+                System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
+                    memory.AsSpan(ptr, 4), (int)v);
+            else if (t == typeof(uint))
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+                    memory.AsSpan(ptr, 4), (uint)v);
+            else if (t == typeof(long))
+                System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(
+                    memory.AsSpan(ptr, 8), (long)v);
+            else if (t == typeof(ulong))
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                    memory.AsSpan(ptr, 8), (ulong)v);
+            else if (t == typeof(float))
+            {
+                // BinaryPrimitives.WriteSingleLittleEndian is
+                // .NET 5+; netstandard2.1 needs the manual
+                // bit-reinterpret via SingleToInt32Bits.
+                System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
+                    memory.AsSpan(ptr, 4),
+                    System.BitConverter.SingleToInt32Bits((float)v));
+            }
+            else if (t == typeof(double))
+            {
+                System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(
+                    memory.AsSpan(ptr, 8),
+                    System.BitConverter.DoubleToInt64Bits((double)v));
+            }
+            else
+                throw new NotSupportedException(
+                    "WritePrimitiveLE for " + t + " is unsupported.");
         }
 
         /// <summary>True iff every parameter + the return type
