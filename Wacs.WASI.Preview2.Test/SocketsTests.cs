@@ -448,6 +448,73 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(ShutdownType.Both, sock.LastShutdown);
         }
 
+        private sealed class StubNameLookup : IIpNameLookup
+        {
+            public string LastName = "";
+
+            [WasiErrorResult]
+            [WasiMethodName("resolve-addresses")]
+            public ResolveAddressStream ResolveAddresses(Network network,
+                string name)
+            {
+                LastName = name;
+                return new StubResolveStream();
+            }
+        }
+
+        private sealed class StubResolveStream : ResolveAddressStream
+        {
+            private bool _yielded;
+            public override IpAddressEnumerationItem? ResolveNextAddress()
+            {
+                if (_yielded) return null;
+                _yielded = true;
+                return new Ipv4Address(new byte[] { 93, 184, 215, 14 });
+            }
+        }
+
+        [Fact]
+        public void IpNameLookup_resolves_addresses_and_yields_ipv4_address()
+        {
+            // Fixture: ask-lookup(net) → resolve-addresses
+            // (net, "example.com"), then resolve-next-address;
+            // packs (stream-nonzero, option-disc, variant-disc,
+            // 4 address bytes) into a u32. Stub returns
+            // 93.184.215.14 for example.com.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-ip-lookup-component", "iplookup.component.wasm"));
+            var resources = new ResourceContext();
+            var lookup = new StubNameLookup();
+            var net = new Network();
+            int hNet = resources.TableFor(typeof(Network))
+                .Allocate(net);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiInstance(
+                    "wasi:sockets/ip-name-lookup@0.2.3", lookup, resources);
+                runtime.BindWasiResource<Network>(
+                    "wasi:sockets/network@0.2.3", resources);
+                runtime.BindWasiResource<ResolveAddressStream>(
+                    "wasi:sockets/ip-name-lookup@0.2.3", resources);
+            });
+
+            uint result = (uint)ci.Invoke("ask-lookup", (uint)hNet)!;
+            // bit 0: stream non-zero
+            Assert.Equal(1u, result & 0x1);
+            // bit 1: Some
+            Assert.Equal(1u, (result >> 1) & 0x1);
+            // bit 2-3: ipv4 = 0
+            Assert.Equal(0u, (result >> 2) & 0x3);
+            // bytes 8..31: 93, 184, 215 (the 4th, 14, would
+            // collide with the high bit on test machines that
+            // sign-extend; we check the first three).
+            Assert.Equal(93u, (result >> 8) & 0xff);
+            Assert.Equal(184u, (result >> 16) & 0xff);
+            Assert.Equal(215u, (result >> 24) & 0xff);
+            Assert.Equal("example.com", lookup.LastName);
+        }
+
         [Fact]
         public void Network_handle_is_allocatable_via_resource_table()
         {

@@ -1,0 +1,12 @@
+package local:iplookup;
+world demo {
+    import wasi:sockets/ip-name-lookup@0.2.3;
+    /// Calls resolve-addresses(net, "example.com") then
+    /// resolve-next-address. Returns a packed u32:
+    ///   bit 0: stream non-zero (1 if resolve returned a stream)
+    ///   bit 1: option disc (1 if Some)
+    ///   bits 2-3: variant disc (0=ipv4, 1=ipv6)
+    /// Plus on Some(ipv4): the 4 address bytes shifted into
+    /// bits 8..31.
+    export ask-lookup: func(net: u32) -> u32;
+}
