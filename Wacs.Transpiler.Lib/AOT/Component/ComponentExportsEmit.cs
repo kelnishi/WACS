@@ -867,18 +867,23 @@ namespace Wacs.Transpiler.AOT.Component
         }
 
         /// <summary>Resolve the <see cref="StringMarshal"/> lift
-        /// method matching <paramref name="encoding"/>. Both
-        /// methods take <c>(byte[] source, int ptr, int len)</c>
-        /// — for UTF-8 <c>len</c> is bytes, for UTF-16 <c>len</c>
-        /// is u16 code units (canonical-ABI rule). The wire is
-        /// always (ptr, len) at the same offsets; only the
-        /// decoder differs.</summary>
+        /// method matching <paramref name="encoding"/>. All
+        /// three methods take <c>(byte[] source, int ptr, int len)</c>
+        /// — for UTF-8 <c>len</c> is bytes; for UTF-16 <c>len</c>
+        /// is u16 code units; for latin1+utf16 the high bit
+        /// distinguishes per-string (set → UTF-16 code units;
+        /// clear → Latin-1 byte count).</summary>
         private static MethodInfo ResolveLiftMethod(
             CanonOption.Kind encoding)
         {
-            var name = encoding == CanonOption.Kind.StringUtf16
-                ? nameof(StringMarshal.LiftUtf16)
-                : nameof(StringMarshal.LiftUtf8);
+            var name = encoding switch
+            {
+                CanonOption.Kind.StringUtf16 =>
+                    nameof(StringMarshal.LiftUtf16),
+                CanonOption.Kind.StringLatin1OrUtf16 =>
+                    nameof(StringMarshal.LiftLatin1OrUtf16),
+                _ => nameof(StringMarshal.LiftUtf8),
+            };
             return typeof(StringMarshal).GetMethod(
                 name,
                 new[] { typeof(byte[]), typeof(int), typeof(int) })!;
@@ -1851,11 +1856,21 @@ namespace Wacs.Transpiler.AOT.Component
             // UTF-8 default; UTF-16 picks Encoding.Unicode +
             // align=2 + length-in-code-units (canonical-ABI rule
             // "for utf16, len is in units of u16's, not bytes").
-            var isUtf16 = encoding == CanonOption.Kind.StringUtf16;
+            // latin1+utf16: we always emit as UTF-16 with the
+            // high-bit tag set (simpler emission, always correct;
+            // Latin-1-when-fits optimization is a follow-up).
+            var isUtf16 = encoding == CanonOption.Kind.StringUtf16
+                || encoding == CanonOption.Kind.StringLatin1OrUtf16;
+            var tagHighBit = encoding == CanonOption.Kind.StringLatin1OrUtf16;
+            string encodeMethod;
+            if (encoding == CanonOption.Kind.StringUtf16)
+                encodeMethod = nameof(StringMarshal.EncodeUtf16);
+            else if (encoding == CanonOption.Kind.StringLatin1OrUtf16)
+                encodeMethod = nameof(StringMarshal.EncodeLatin1OrUtf16);
+            else
+                encodeMethod = nameof(StringMarshal.EncodeUtf8);
             var encode = typeof(StringMarshal).GetMethod(
-                isUtf16 ? nameof(StringMarshal.EncodeUtf16)
-                        : nameof(StringMarshal.EncodeUtf8),
-                new[] { typeof(string) })!;
+                encodeMethod, new[] { typeof(string) })!;
             var copy = typeof(StringMarshal).GetMethod(
                 nameof(StringMarshal.CopyToGuest),
                 new[] { typeof(byte[]), typeof(byte[]), typeof(int) })!;
@@ -1875,13 +1890,20 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Conv_I4);
             il.Emit(OpCodes.Stloc, byteLenLocal);
 
-            // count passed to wasm = byteLen for UTF-8,
-            // byteLen / 2 for UTF-16 (u16 code units).
+            // count passed to wasm:
+            // - UTF-8: byteLen (bytes)
+            // - UTF-16: byteLen / 2 (u16 code units)
+            // - latin1+utf16: byteLen / 2 | UTF16_TAG
             il.Emit(OpCodes.Ldloc, byteLenLocal);
             if (isUtf16)
             {
                 il.Emit(OpCodes.Ldc_I4_2);
                 il.Emit(OpCodes.Div);
+            }
+            if (tagHighBit)
+            {
+                il.Emit(OpCodes.Ldc_I4, unchecked((int)0x8000_0000));
+                il.Emit(OpCodes.Or);
             }
             il.Emit(OpCodes.Stloc, countLocal);
 

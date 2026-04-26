@@ -399,16 +399,28 @@ namespace Wacs.ComponentModel.Runtime
                     "String param lowering requires Module.Memory.");
             // Encoding picked from the per-Invoke
             // _stringEncoding field, set on Invoke entry from the
-            // canon-lift options. UTF-16 uses align=2 and passes
-            // length in u16 code units.
-            var isUtf16 = _stringEncoding == CanonOption.Kind.StringUtf16;
-            var bytes = isUtf16
-                ? StringMarshal.EncodeUtf16(value)
-                : StringMarshal.EncodeUtf8(value);
+            // canon-lift options. UTF-16 uses align=2 + length-
+            // in-code-units. latin1+utf16 emits as UTF-16 with
+            // the high-bit tag set (canonical-ABI permits the
+            // implementation to pick; Latin-1-when-fits is a
+            // follow-up optimization).
+            var enc = _stringEncoding;
+            var isUtf16 = enc == CanonOption.Kind.StringUtf16
+                || enc == CanonOption.Kind.StringLatin1OrUtf16;
+            byte[] bytes;
+            if (enc == CanonOption.Kind.StringUtf16)
+                bytes = StringMarshal.EncodeUtf16(value);
+            else if (enc == CanonOption.Kind.StringLatin1OrUtf16)
+                bytes = StringMarshal.EncodeLatin1OrUtf16(value);
+            else
+                bytes = StringMarshal.EncodeUtf8(value);
             var align = isUtf16 ? 2 : 1;
             var ptr = CabiRealloc(0, 0, align, bytes.Length);
             StringMarshal.CopyToGuest(bytes, _memory.Data, ptr);
-            return (ptr, isUtf16 ? bytes.Length / 2 : bytes.Length);
+            int len = isUtf16 ? bytes.Length / 2 : bytes.Length;
+            if (enc == CanonOption.Kind.StringLatin1OrUtf16)
+                len = (int)((uint)len | StringMarshal.Latin1OrUtf16Tag);
+            return (ptr, len);
         }
 
         private (int ptr, int count) LowerListOfPrimParam(
@@ -1222,12 +1234,18 @@ namespace Wacs.ComponentModel.Runtime
 
         /// <summary>Decode a string at <paramref name="strPtr"/>
         /// per the per-invoke <see cref="_stringEncoding"/>.
-        /// <paramref name="strLen"/> is bytes for UTF-8 and u16
-        /// code units for UTF-16 (canonical-ABI rule).</summary>
+        /// <paramref name="strLen"/> is bytes for UTF-8, u16 code
+        /// units for UTF-16 (canonical-ABI rule). For
+        /// latin1+utf16 the length's high bit distinguishes
+        /// per-string — set → UTF-16 code units; clear → Latin-1
+        /// byte count.</summary>
         private string LiftStringAt(int strPtr, int strLen)
         {
             if (_stringEncoding == CanonOption.Kind.StringUtf16)
                 return StringMarshal.LiftUtf16(
+                    _memory!.Data, strPtr, strLen);
+            if (_stringEncoding == CanonOption.Kind.StringLatin1OrUtf16)
+                return StringMarshal.LiftLatin1OrUtf16(
                     _memory!.Data, strPtr, strLen);
             return StringMarshal.LiftUtf8(
                 _memory!.Data, strPtr, strLen);

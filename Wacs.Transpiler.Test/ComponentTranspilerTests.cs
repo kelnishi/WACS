@@ -1070,6 +1070,54 @@ namespace Wacs.Transpiler.Test
             Assert.Equal((uint)11, yField!.GetValue(dotValue));
         }
 
+        private static string FindCompactUtf16ComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "compact-utf16-component", "wasm",
+                                "clu.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_latin1_branch_of_compact_utf16()
+        {
+            // compact-utf16-component built with --encoding
+            // compact-utf16 → canon-lift's option is
+            // string-encoding=latin1+utf16. The `latin` export
+            // returns a buffer tagged with the high bit CLEAR;
+            // LiftLatin1OrUtf16 routes to the Latin-1 decode path,
+            // taking taggedLen as raw byte count. Fixture has
+            // 2 raw bytes 0x48 0x69 → "Hi".
+            using var fs = File.OpenRead(FindCompactUtf16ComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var latin = componentExports!.GetMethod("Latin");
+            Assert.NotNull(latin);
+            Assert.Equal("Hi", (string)latin!.Invoke(null, null)!);
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_utf16_branch_of_compact_utf16()
+        {
+            // Companion test: the `wide` export returns a buffer
+            // tagged with the high bit SET; LiftLatin1OrUtf16
+            // masks the tag, treats the count as u16 code units,
+            // and decodes the buffer as UTF-16LE. Fixture stores
+            // "Hi" as 4 bytes (2 code units).
+            using var fs = File.OpenRead(FindCompactUtf16ComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var wide = componentExports!.GetMethod("Wide");
+            Assert.NotNull(wide);
+            Assert.Equal("Hi", (string)wide!.Invoke(null, null)!);
+        }
+
         private static string FindNestedComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
