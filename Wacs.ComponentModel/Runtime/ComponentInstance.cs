@@ -79,24 +79,42 @@ namespace Wacs.ComponentModel.Runtime
         /// module composition lands when Phase 1c grows up to
         /// match the transpiler's coverage.
         /// </summary>
-        public static ComponentInstance Instantiate(byte[] componentBytes)
+        public static ComponentInstance Instantiate(byte[] componentBytes,
+            Action<WasmRuntime>? configureImports = null)
         {
             using var ms = new MemoryStream(componentBytes);
-            return Instantiate(ms);
+            return Instantiate(ms, configureImports);
         }
 
-        public static ComponentInstance Instantiate(Stream componentStream)
+        public static ComponentInstance Instantiate(Stream componentStream,
+            Action<WasmRuntime>? configureImports = null)
         {
             var component = ComponentBinaryParser.Parse(componentStream);
-            return Instantiate(component);
+            return Instantiate(component, configureImports);
         }
 
         /// <summary>Instantiate a pre-parsed component. Used both
         /// for the top-level entry and recursively for nested
         /// components when the outer is a "composer" — a wrapper
         /// that bundles + re-exports nested components without
-        /// embedding its own core module.</summary>
-        public static ComponentInstance Instantiate(ComponentModule component)
+        /// embedding its own core module.
+        ///
+        /// <para><paramref name="configureImports"/> is invoked
+        /// after the runtime is created but before the inner core
+        /// module is instantiated. Callers use it to satisfy
+        /// component imports — currently via the same
+        /// <c>BindHostFunction</c> API the WASIp1 host bindings
+        /// use. The (module, name) pair the runtime resolves
+        /// against is the <i>core</i> import that the component's
+        /// canon-lower + core-instance machinery routes the
+        /// component-level import through. For the common case
+        /// (instantiate-with passes the host-provided instance
+        /// straight through to the inner module's import) the
+        /// pair matches the component-level interface name +
+        /// kebab-case function name verbatim — see Phase 3 v0
+        /// fixtures for the convention.</para></summary>
+        public static ComponentInstance Instantiate(ComponentModule component,
+            Action<WasmRuntime>? configureImports = null)
         {
             var coreBinaries = component.CoreModuleBinaries.ToList();
             if (coreBinaries.Count == 1)
@@ -104,6 +122,7 @@ namespace Wacs.ComponentModel.Runtime
                 var runtime = new WasmRuntime();
                 using var coreMs = new MemoryStream(coreBinaries[0]);
                 var coreModule = BinaryModuleParser.ParseWasm(coreMs);
+                configureImports?.Invoke(runtime);
                 var coreInstance = runtime.InstantiateModule(coreModule);
                 return new ComponentInstance(component, runtime, coreInstance);
             }
