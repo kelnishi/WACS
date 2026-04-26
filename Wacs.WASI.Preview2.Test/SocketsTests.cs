@@ -448,6 +448,50 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(ShutdownType.Both, sock.LastShutdown);
         }
 
+        private sealed class CapturingOutStream : OutgoingDatagramStream
+        {
+            public OutgoingDatagram[]? LastSent;
+            public override ulong Send(OutgoingDatagram[] datagrams)
+            {
+                LastSent = datagrams;
+                return (ulong)datagrams.Length;
+            }
+        }
+
+        [Fact]
+        public void OutgoingDatagramStream_send_decodes_list_of_record_param()
+        {
+            // Fixture: ask-send(handle) builds 1 outgoing-datagram
+            // (data="ping", remote=Some(ipv4(127.0.0.1:7))) and
+            // calls send. Stub captures the array; test asserts
+            // every field round-tripped through the wire decode.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-udp-send-component", "udpsend.component.wasm"));
+            var resources = new ResourceContext();
+            var stream = new CapturingOutStream();
+            int handle = resources.TableFor(typeof(OutgoingDatagramStream))
+                .Allocate(stream);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutgoingDatagramStream>(
+                    "wasi:sockets/udp@0.2.3", resources);
+            });
+
+            // send returns count; stub returns input count = 1.
+            Assert.Equal(1UL, (ulong)ci.Invoke(
+                "ask-send", (uint)handle)!);
+            Assert.NotNull(stream.LastSent);
+            Assert.Single(stream.LastSent!);
+            var dg = stream.LastSent![0];
+            Assert.Equal(System.Text.Encoding.UTF8.GetBytes("ping"),
+                dg.Data);
+            Assert.IsType<Ipv4SocketAddress>(dg.RemoteAddress);
+            var v4 = (Ipv4SocketAddress)dg.RemoteAddress!;
+            Assert.Equal(7, v4.Port);
+            Assert.Equal(new byte[] { 127, 0, 0, 1 }, v4.Address);
+        }
+
         private sealed class FixedDatagramStream : IncomingDatagramStream
         {
             public override IncomingDatagram[] Receive(ulong maxResults)

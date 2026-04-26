@@ -60,6 +60,31 @@ namespace Wacs.WASI.Preview2.Sockets
         public virtual void Dispose() { }
     }
 
+    /// <summary>WIT record
+    /// <c>wasi:sockets/udp.outgoing-datagram</c>:
+    /// <code>record outgoing-datagram {
+    ///     data: list&lt;u8&gt;,
+    ///     remote-address: option&lt;ip-socket-address&gt;,
+    /// }</code>
+    /// Wire size 44, align 4: 8 bytes for the data list +
+    /// 36 bytes for the option<ip-socket-address>.</summary>
+    public sealed class OutgoingDatagram
+    {
+        public byte[] Data { get; }
+        /// <summary>null when the parent stream is connected
+        /// to a single peer (pinned at <c>%stream</c> time);
+        /// non-null when the per-datagram peer overrides the
+        /// stream's pin.</summary>
+        public IpSocketAddress? RemoteAddress { get; }
+
+        public OutgoingDatagram(byte[] data,
+            IpSocketAddress? remoteAddress)
+        {
+            Data = data ?? throw new ArgumentNullException(nameof(data));
+            RemoteAddress = remoteAddress;
+        }
+    }
+
     /// <summary>
     /// Host representation of
     /// <c>wasi:sockets/udp@0.2.x</c>'s
@@ -77,6 +102,15 @@ namespace Wacs.WASI.Preview2.Sockets
         [WasiErrorResult]
         [WasiMethodName("check-send")]
         public virtual ulong CheckSend() => 64;
+
+        /// <summary>Send a batch of datagrams. Returns the
+        /// number successfully enqueued — short writes are
+        /// allowed when the kernel buffer fills mid-batch.
+        /// Default returns the input count (assume all sent).
+        /// </summary>
+        [WasiErrorResult]
+        public virtual ulong Send(OutgoingDatagram[] datagrams)
+            => (ulong)datagrams.Length;
 
         /// <summary>Pollable that fires when the next
         /// <c>send</c> won't block.</summary>

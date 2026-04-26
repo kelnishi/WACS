@@ -1019,6 +1019,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                        Wacs.WASI.Preview2.Sockets.IpSocketAddress)
                    && p.GetCustomAttribute<
                        WasiOptionalParamAttribute>() != null;
+            bool IsOutgoingDatagramArrayParam(ParameterInfo p)
+                => p.ParameterType == typeof(
+                    Wacs.WASI.Preview2.Sockets.OutgoingDatagram[]);
             for (int i = 0; i < paramInfos.Length; i++)
             {
                 var pt = paramInfos[i].ParameterType;
@@ -1030,6 +1033,10 @@ namespace Wacs.WASI.Preview2.HostBinding
                     bytesParamIndex = i;
                 }
                 else if (IsOptionalIpAddrParam(paramInfos[i]))
+                {
+                    // OK — handled specially below.
+                }
+                else if (IsOutgoingDatagramArrayParam(paramInfos[i]))
                 {
                     // OK — handled specially below.
                 }
@@ -1047,6 +1054,7 @@ namespace Wacs.WASI.Preview2.HostBinding
             {
                 if (p.ParameterType == typeof(byte[])) return 2;
                 if (IsOptionalIpAddrParam(p)) return 13;
+                if (IsOutgoingDatagramArrayParam(p)) return 2;   // ptr + len
                 return 1;
             }
             int paramSlotsTotal = 0;
@@ -1073,6 +1081,11 @@ namespace Wacs.WASI.Preview2.HostBinding
                 {
                     for (int k = 0; k < 13; k++)
                         wireParamTypes[ti++] = typeof(int);
+                }
+                else if (IsOutgoingDatagramArrayParam(p))
+                {
+                    wireParamTypes[ti++] = typeof(int);   // listPtr
+                    wireParamTypes[ti++] = typeof(int);   // listLen
                 }
                 else
                 {
@@ -1401,6 +1414,13 @@ namespace Wacs.WASI.Preview2.HostBinding
                         lambdaParams[idx++] = Expression.Parameter(
                             typeof(int), p.Name + "_s" + k);
                 }
+                else if (IsOutgoingDatagramArrayParam(p))
+                {
+                    lambdaParams[idx++] = Expression.Parameter(
+                        typeof(int), p.Name + "_listPtr");
+                    lambdaParams[idx++] = Expression.Parameter(
+                        typeof(int), p.Name + "_listLen");
+                }
                 else
                 {
                     lambdaParams[idx++] = Expression.Parameter(
@@ -1435,6 +1455,16 @@ namespace Wacs.WASI.Preview2.HostBinding
             var decodeOptIpAddrMethod = typeof(WasiInterfaceBinder)
                 .GetMethod(nameof(DecodeOptionalIpSocketAddressFromFlatWire),
                     BindingFlags.Static | BindingFlags.NonPublic)!;
+            var decodeOutDgArrayMethod = typeof(WasiInterfaceBinder)
+                .GetMethod(nameof(DecodeOutgoingDatagramArray),
+                    BindingFlags.Static | BindingFlags.NonPublic)!;
+            var memoryPropForBody = typeof(ExecContext).GetProperty(
+                nameof(ExecContext.DefaultMemory))!;
+            var memDataFieldForBody = typeof(Wacs.Core.Runtime.Types
+                .MemoryInstance).GetField("Data")!;
+            var memoryAccessForBody = Expression.Field(
+                Expression.Property(lambdaParams[0], memoryPropForBody),
+                memDataFieldForBody);
 
             // Walk lambda params per host-param slot count to
             // build per-host-param expressions. byte[] params
@@ -1460,6 +1490,18 @@ namespace Wacs.WASI.Preview2.HostBinding
                         Expression.Call(decodeOptIpAddrMethod, slotArgs),
                         typeof(object));
                     slotIdx += 13;
+                    continue;
+                }
+                if (IsOutgoingDatagramArrayParam(p))
+                {
+                    var listPtrParam = lambdaParams[slotIdx];
+                    var listLenParam = lambdaParams[slotIdx + 1];
+                    primExprs[hostIdx++] = Expression.Convert(
+                        Expression.Call(decodeOutDgArrayMethod,
+                            memoryAccessForBody,
+                            listPtrParam, listLenParam),
+                        typeof(object));
+                    slotIdx += 2;
                     continue;
                 }
                 Expression e = lambdaParams[slotIdx++];
@@ -2811,6 +2853,78 @@ namespace Wacs.WASI.Preview2.HostBinding
         /// width (size bytes per field). Mirrors the canonical-
         /// ABI alignment rule "alignment(P) = sizeof(P)" for
         /// primitives.</summary>
+        /// <summary>Decode a list&lt;outgoing-datagram&gt;
+        /// from linear memory at <paramref name="listPtr"/>
+        /// for <paramref name="listLen"/> elements. Each
+        /// element is 44 bytes: data list (8) + option<ip-
+        /// socket-address> (36). Returns the decoded array
+        /// in host-side form for passing to the host
+        /// method.</summary>
+        private static Wacs.WASI.Preview2.Sockets.OutgoingDatagram[]
+            DecodeOutgoingDatagramArray(byte[] memory, int listPtr,
+                int listLen)
+        {
+            var result = new Wacs.WASI.Preview2.Sockets
+                .OutgoingDatagram[listLen];
+            for (int i = 0; i < listLen; i++)
+            {
+                int eb = listPtr + i * 44;
+                // data: list<u8> at eb+0/+4
+                int dataPtr = (int)System.Buffers.Binary
+                    .BinaryPrimitives.ReadInt32LittleEndian(
+                        memory.AsSpan(eb, 4));
+                int dataLen = (int)System.Buffers.Binary
+                    .BinaryPrimitives.ReadInt32LittleEndian(
+                        memory.AsSpan(eb + 4, 4));
+                var data = new byte[dataLen];
+                if (dataLen > 0)
+                    Array.Copy(memory, dataPtr, data, 0, dataLen);
+                // remote-address: option<ip-socket-address> at eb+8.
+                //   eb+8: option disc (u8), eb+9..+11 padding
+                //   eb+12: variant disc (u8), eb+13..+15 pad
+                //   eb+16..: variant payload
+                Wacs.WASI.Preview2.Sockets.IpSocketAddress? addr = null;
+                if (memory[eb + 8] != 0)
+                {
+                    byte variantDisc = memory[eb + 12];
+                    if (variantDisc == 0)
+                    {
+                        // ipv4 case: port at +16, address at +18..+21
+                        ushort port = (ushort)(memory[eb + 16]
+                            | (memory[eb + 17] << 8));
+                        addr = new Wacs.WASI.Preview2.Sockets
+                            .Ipv4SocketAddress(port,
+                            new byte[] {
+                                memory[eb + 18], memory[eb + 19],
+                                memory[eb + 20], memory[eb + 21],
+                            });
+                    }
+                    else
+                    {
+                        // ipv6 case: port at +16, flow-info at +20,
+                        // address at +24..+39, scope-id at +40
+                        ushort port = (ushort)(memory[eb + 16]
+                            | (memory[eb + 17] << 8));
+                        uint flow = (uint)System.Buffers.Binary
+                            .BinaryPrimitives.ReadInt32LittleEndian(
+                                memory.AsSpan(eb + 20, 4));
+                        var addr6 = new ushort[8];
+                        for (int k = 0; k < 8; k++)
+                            addr6[k] = (ushort)(memory[eb + 24 + k * 2]
+                                | (memory[eb + 25 + k * 2] << 8));
+                        uint scope = (uint)System.Buffers.Binary
+                            .BinaryPrimitives.ReadInt32LittleEndian(
+                                memory.AsSpan(eb + 40, 4));
+                        addr = new Wacs.WASI.Preview2.Sockets
+                            .Ipv6SocketAddress(port, flow, addr6, scope);
+                    }
+                }
+                result[i] = new Wacs.WASI.Preview2.Sockets
+                    .OutgoingDatagram(data, addr);
+            }
+            return result;
+        }
+
         /// <summary>Decode a flat-lowered
         /// <c>option&lt;ip-socket-address&gt;</c> from its 13
         /// wire slots: 1 option disc + 12 inner ip-socket-
