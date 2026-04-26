@@ -217,7 +217,17 @@ namespace Wacs.ComponentModel.Runtime
                     {
                         var entries = CanonSectionReader.Decode(s.Payload);
                         foreach (var e in entries)
+                        {
+                            // Both canon lower AND
+                            // canon resource.* (new / drop /
+                            // rep) add to the core-func index
+                            // space. Counting only CanonLower
+                            // would mis-align subsequent core-
+                            // alias indices when wit-component
+                            // emits resource handles.
                             if (e is CanonLower) coreFuncIdx++;
+                            else if (e is CanonResourceOp) coreFuncIdx++;
+                        }
                         break;
                     }
                 }

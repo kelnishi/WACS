@@ -1,0 +1,5 @@
+package local:sw;
+world demo {
+    import wasi:io/streams@0.2.3;
+    export try-write: func(handle: u32) -> u32;
+}
