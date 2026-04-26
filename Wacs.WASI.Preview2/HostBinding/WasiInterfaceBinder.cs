@@ -679,7 +679,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                     || m.ReturnType == typeof(
                         Wacs.WASI.Preview2.Sockets.IpAddressEnumerationItem)
                     || m.ReturnType.IsSubclassOf(typeof(
-                        Wacs.WASI.Preview2.Sockets.IpAddressEnumerationItem))))
+                        Wacs.WASI.Preview2.Sockets.IpAddressEnumerationItem))
+                    || m.ReturnType == typeof(
+                        Wacs.WASI.Preview2.Sockets.IncomingDatagram[])))
             {
                 BindStreamResultResourceMethod(runtime, namespaceName,
                     importName, table, resourceType, m, resources);
@@ -1108,6 +1110,7 @@ namespace Wacs.WASI.Preview2.HostBinding
                 : rt == typeof(Wacs.WASI.Preview2.Sockets.IpAddressEnumerationItem)
                     || rt.IsSubclassOf(typeof(
                         Wacs.WASI.Preview2.Sockets.IpAddressEnumerationItem)) ? 11
+                : rt == typeof(Wacs.WASI.Preview2.Sockets.IncomingDatagram[]) ? 12
                 : -1;
             if (retShape < 0)
                 throw new InvalidOperationException(
@@ -1261,6 +1264,35 @@ namespace Wacs.WASI.Preview2.HostBinding
                             WriteI32LE(memOut, retAreaPtr + 4 + i * 4,
                                 handle);
                         }
+                        break;
+                    case 12:  // list<incoming-datagram>: each elem
+                              // is 40 bytes (data list + variant);
+                              // (list-ptr, list-len) at retArea+4/+8.
+                        var dgs = (Wacs.WASI.Preview2.Sockets
+                            .IncomingDatagram[])ret!;
+                        int dgsCount = dgs.Length;
+                        int dgsArrayPtr = dgsCount == 0 ? 0
+                            : Allocate(4, dgsCount * 40);
+                        for (int i = 0; i < dgsCount; i++)
+                        {
+                            var dg = dgs[i];
+                            int elemBase = dgsArrayPtr + i * 40;
+                            // data: list<u8> at elemBase+0,+4
+                            int dataPtr = dg.Data.Length == 0 ? 0
+                                : Allocate(1, dg.Data.Length);
+                            if (dg.Data.Length > 0)
+                                Array.Copy(dg.Data, 0, memOut,
+                                    dataPtr, dg.Data.Length);
+                            WriteI32LE(memOut, elemBase, dataPtr);
+                            WriteI32LE(memOut, elemBase + 4,
+                                dg.Data.Length);
+                            // remote-address: ip-socket-address
+                            // (32 bytes) at elemBase+8.
+                            WriteIpSocketAddressAt(memOut,
+                                elemBase + 8, dg.RemoteAddress);
+                        }
+                        WriteI32LE(memOut, retAreaPtr + 4, dgsArrayPtr);
+                        WriteI32LE(memOut, retAreaPtr + 8, dgsCount);
                         break;
                     case 11:  // option<ip-address>: 22-byte total.
                               // Layout:

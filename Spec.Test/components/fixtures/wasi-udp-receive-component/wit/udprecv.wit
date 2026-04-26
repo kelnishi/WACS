@@ -1,0 +1,15 @@
+package local:udprecv;
+world demo {
+    import wasi:sockets/udp@0.2.3;
+    /// Calls receive(handle, 4); reads list-len at retArea+8.
+    /// Returns the list-len as u32.
+    export ask-recv-count: func(handle: u32) -> u32;
+    /// Reads first elem's data-len. (data-ptr at +0, data-len
+    /// at +4 within the elem at array_ptr+0.)
+    export ask-recv-first-data-len: func(handle: u32) -> u32;
+    /// Reads first byte of first elem's data.
+    export ask-recv-first-data-byte: func(handle: u32) -> u32;
+    /// Reads first elem's port (u16) — at elem_base + 12
+    /// (data 8 bytes + variant disc 1 + 3 padding + port).
+    export ask-recv-first-port: func(handle: u32) -> u32;
+}
