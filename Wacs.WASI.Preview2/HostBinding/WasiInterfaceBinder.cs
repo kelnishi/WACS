@@ -1409,16 +1409,20 @@ namespace Wacs.WASI.Preview2.HostBinding
         {
             var paramInfos = m.GetParameters();
             // Each param: primitive / enum (1 wire slot),
-            // string (2 wire slots: ptr + len), or
+            // string (2 wire slots: ptr + len),
             // borrow<resource> (1 wire slot: handle resolved
-            // via ResourceContext). Aggregates (records, lists)
-            // stay deferred.
+            // via ResourceContext), or IpSocketAddress (12
+            // wire slots — variant flat-lowering: 1 disc +
+            // 11 joined-case payload slots, all i32).
+            // Aggregates (records, lists) stay deferred.
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)
                     && !p.ParameterType.IsEnum
                     && p.ParameterType != typeof(string)
                     && p.ParameterType.GetCustomAttribute<
-                        WasiResourceAttribute>() == null)
+                        WasiResourceAttribute>() == null
+                    && p.ParameterType != typeof(
+                        Wacs.WASI.Preview2.Sockets.IpSocketAddress))
                     throw new InvalidOperationException(
                         "[WasiErrorResult] void-return resource "
                         + "method '" + m.Name + "' takes "
@@ -1427,7 +1431,15 @@ namespace Wacs.WASI.Preview2.HostBinding
 
             int paramSlotCount = 0;
             foreach (var p in paramInfos)
-                paramSlotCount += p.ParameterType == typeof(string) ? 2 : 1;
+            {
+                if (p.ParameterType == typeof(string))
+                    paramSlotCount += 2;
+                else if (p.ParameterType == typeof(
+                    Wacs.WASI.Preview2.Sockets.IpSocketAddress))
+                    paramSlotCount += 12;
+                else
+                    paramSlotCount += 1;
+            }
             var wireParamTypes = new Type[3 + paramSlotCount];
             wireParamTypes[0] = typeof(ExecContext);
             wireParamTypes[1] = typeof(int);
@@ -1443,6 +1455,14 @@ namespace Wacs.WASI.Preview2.HostBinding
                     WasiResourceAttribute>() != null)
                 {
                     wireParamTypes[wi++] = typeof(int);   // borrow handle
+                }
+                else if (p.ParameterType == typeof(
+                    Wacs.WASI.Preview2.Sockets.IpSocketAddress))
+                {
+                    // Variant flat-lowering: 1 disc + 11 joined
+                    // payload slots, all i32.
+                    for (int k = 0; k < 12; k++)
+                        wireParamTypes[wi++] = typeof(int);
                 }
                 else
                 {
@@ -1476,6 +1496,16 @@ namespace Wacs.WASI.Preview2.HostBinding
                         typeof(int), paramInfos[i].Name + "_ptr");
                     lambdaParams[wi++] = Expression.Parameter(
                         typeof(int), paramInfos[i].Name + "_len");
+                }
+                else if (paramInfos[i].ParameterType == typeof(
+                    Wacs.WASI.Preview2.Sockets.IpSocketAddress))
+                {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_disc");
+                    for (int k = 1; k <= 11; k++)
+                        lambdaParams[wi++] = Expression.Parameter(
+                            typeof(int),
+                            paramInfos[i].Name + "_s" + k);
                 }
                 else
                 {
@@ -1521,6 +1551,11 @@ namespace Wacs.WASI.Preview2.HostBinding
             var getResourceMethod = typeof(ResourceTable).GetMethod(
                 nameof(ResourceTable.Get))!;
 
+            // Static helper for IpSocketAddress flat-wire decode.
+            var decodeIpSocketAddrMethod = typeof(WasiInterfaceBinder)
+                .GetMethod(nameof(DecodeIpSocketAddressFromFlatWire),
+                    BindingFlags.Static | BindingFlags.NonPublic)!;
+
             wi = 2;
             var argExprs = new Expression[paramInfos.Length];
             for (int i = 0; i < paramInfos.Length; i++)
@@ -1544,6 +1579,16 @@ namespace Wacs.WASI.Preview2.HostBinding
                     argExprs[i] = Expression.Convert(
                         Expression.Call(paramTable, getResourceMethod,
                             handleParam),
+                        typeof(object));
+                }
+                else if (paramInfos[i].ParameterType == typeof(
+                    Wacs.WASI.Preview2.Sockets.IpSocketAddress))
+                {
+                    var slotArgs = new Expression[12];
+                    for (int k = 0; k < 12; k++)
+                        slotArgs[k] = lambdaParams[wi++];
+                    argExprs[i] = Expression.Convert(
+                        Expression.Call(decodeIpSocketAddrMethod, slotArgs),
                         typeof(object));
                 }
                 else
@@ -2486,6 +2531,37 @@ namespace Wacs.WASI.Preview2.HostBinding
         /// width (size bytes per field). Mirrors the canonical-
         /// ABI alignment rule "alignment(P) = sizeof(P)" for
         /// primitives.</summary>
+        /// <summary>Decode a flat-lowered
+        /// <c>ip-socket-address</c> param from its 12 wire
+        /// slots: 1 disc + 11 joined-payload slots (all i32).
+        /// Disc 0 → ipv4 (slots s1..s5 used: port + 4 bytes
+        /// address); disc 1 → ipv6 (s1..s11 used: port +
+        /// flow-info + 8 u16 address + scope-id). Padding
+        /// slots in the ipv4 case (s6..s11) are ignored.
+        /// </summary>
+        private static Wacs.WASI.Preview2.Sockets.IpSocketAddress
+            DecodeIpSocketAddressFromFlatWire(int disc, int s1, int s2,
+                int s3, int s4, int s5, int s6, int s7, int s8, int s9,
+                int s10, int s11)
+        {
+            if (disc == 0)
+            {
+                return new Wacs.WASI.Preview2.Sockets.Ipv4SocketAddress(
+                    (ushort)s1,
+                    new byte[] { (byte)s2, (byte)s3, (byte)s4, (byte)s5 });
+            }
+            else
+            {
+                return new Wacs.WASI.Preview2.Sockets.Ipv6SocketAddress(
+                    (ushort)s1, (uint)s2,
+                    new ushort[] {
+                        (ushort)s3, (ushort)s4, (ushort)s5, (ushort)s6,
+                        (ushort)s7, (ushort)s8, (ushort)s9, (ushort)s10,
+                    },
+                    (uint)s11);
+            }
+        }
+
         /// <summary>Write a WIT
         /// <c>variant ip-socket-address</c> at
         /// <paramref name="ptr"/>. Layout: 1-byte case disc
@@ -2932,8 +3008,13 @@ namespace Wacs.WASI.Preview2.HostBinding
             10 => typeof(Func<,,,,,,,,,>),
             11 => typeof(Func<,,,,,,,,,,>),
             12 => typeof(Func<,,,,,,,,,,,>),
+            13 => typeof(Func<,,,,,,,,,,,,>),
+            14 => typeof(Func<,,,,,,,,,,,,,>),
+            15 => typeof(Func<,,,,,,,,,,,,,,>),
+            16 => typeof(Func<,,,,,,,,,,,,,,,>),
+            17 => typeof(Func<,,,,,,,,,,,,,,,,>),
             _ => throw new NotSupportedException(
-                "Func arities above 12 are a follow-up."),
+                "Func arities above 17 are a follow-up."),
         };
 
         private static Type OpenActionType(int count) => count switch
@@ -2950,8 +3031,12 @@ namespace Wacs.WASI.Preview2.HostBinding
             10 => typeof(Action<,,,,,,,,,>),
             11 => typeof(Action<,,,,,,,,,,>),
             12 => typeof(Action<,,,,,,,,,,,>),
+            13 => typeof(Action<,,,,,,,,,,,,>),
+            14 => typeof(Action<,,,,,,,,,,,,,>),
+            15 => typeof(Action<,,,,,,,,,,,,,,>),
+            16 => typeof(Action<,,,,,,,,,,,,,,,>),
             _ => throw new NotSupportedException(
-                "Action arities above 12 are a follow-up."),
+                "Action arities above 16 are a follow-up."),
         };
     }
 }

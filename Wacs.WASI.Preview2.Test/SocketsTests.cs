@@ -98,6 +98,92 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(1, resources.TableFor(typeof(TcpSocket)).Count);
         }
 
+        private sealed class CapturingTcpSocket : TcpSocket
+        {
+            public CapturingTcpSocket() : base(IpAddressFamily.Ipv4) { }
+            public Network? CapturedNetwork;
+            public IpSocketAddress? CapturedAddress;
+            public override void StartBind(Network network,
+                IpSocketAddress localAddress)
+            {
+                CapturedNetwork = network;
+                CapturedAddress = localAddress;
+            }
+        }
+
+        [Fact]
+        public void TcpSocket_start_bind_decodes_ipv4_variant_param()
+        {
+            // Fixture: ask-bind(handle, net) calls
+            //   start-bind(network, ipv4(127.0.0.1:9000))
+            // by passing 12 i32 wire slots for the variant param
+            // (1 disc=0 + 11 payload slots; only s1..s5 are used
+            // for the ipv4 case). Stub captures the resolved
+            // IpSocketAddress; test asserts the round-tripped
+            // ipv4 fields.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-tcp-startbind-component", "tcpstartbind.component.wasm"));
+            var resources = new ResourceContext();
+            var sock = new CapturingTcpSocket();
+            var net = new Network();
+            int hSock = resources.TableFor(typeof(TcpSocket))
+                .Allocate(sock);
+            int hNet = resources.TableFor(typeof(Network))
+                .Allocate(net);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<TcpSocket>(
+                    "wasi:sockets/tcp@0.2.3", resources);
+                runtime.BindWasiResource<Network>(
+                    "wasi:sockets/network@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-bind", (uint)hSock, (uint)hNet)!);
+            Assert.Same(net, sock.CapturedNetwork);
+            Assert.IsType<Ipv4SocketAddress>(sock.CapturedAddress);
+            var v4 = (Ipv4SocketAddress)sock.CapturedAddress!;
+            Assert.Equal(9000, v4.Port);
+            Assert.Equal(new byte[] { 127, 0, 0, 1 }, v4.Address);
+        }
+
+        [Fact]
+        public void TcpSocket_start_bind_decodes_ipv6_variant_param()
+        {
+            // Same fixture, ipv6 export. Wire passes disc=1 +
+            // 11 payload slots (port, flow, 8× u16 address,
+            // scope). Stub captures the IpSocketAddress; assert
+            // it's an Ipv6SocketAddress with port=443, [::1].
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-tcp-startbind-component", "tcpstartbind.component.wasm"));
+            var resources = new ResourceContext();
+            var sock = new CapturingTcpSocket();
+            var net = new Network();
+            int hSock = resources.TableFor(typeof(TcpSocket))
+                .Allocate(sock);
+            int hNet = resources.TableFor(typeof(Network))
+                .Allocate(net);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<TcpSocket>(
+                    "wasi:sockets/tcp@0.2.3", resources);
+                runtime.BindWasiResource<Network>(
+                    "wasi:sockets/network@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-bind-v6", (uint)hSock, (uint)hNet)!);
+            Assert.IsType<Ipv6SocketAddress>(sock.CapturedAddress);
+            var v6 = (Ipv6SocketAddress)sock.CapturedAddress!;
+            Assert.Equal(443, v6.Port);
+            Assert.Equal(0u, v6.FlowInfo);
+            Assert.Equal(new ushort[] { 0, 0, 0, 0, 0, 0, 0, 1 },
+                v6.Address);
+            Assert.Equal(0u, v6.ScopeId);
+        }
+
         private sealed class FixedAddrTcpSocket : TcpSocket
         {
             public FixedAddrTcpSocket() : base(IpAddressFamily.Ipv4) { }

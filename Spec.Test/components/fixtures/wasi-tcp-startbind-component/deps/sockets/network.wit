@@ -1,0 +1,22 @@
+package wasi:sockets@0.2.3;
+interface network {
+    enum error-code { unknown }
+    enum ip-address-family { ipv4, ipv6 }
+    type ipv4-address = tuple<u8, u8, u8, u8>;
+    type ipv6-address = tuple<u16, u16, u16, u16, u16, u16, u16, u16>;
+    record ipv4-socket-address {
+        port: u16,
+        address: ipv4-address,
+    }
+    record ipv6-socket-address {
+        port: u16,
+        flow-info: u32,
+        address: ipv6-address,
+        scope-id: u32,
+    }
+    variant ip-socket-address {
+        ipv4(ipv4-socket-address),
+        ipv6(ipv6-socket-address),
+    }
+    resource network;
+}

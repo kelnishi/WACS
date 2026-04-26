@@ -148,6 +148,29 @@ namespace Wacs.WASI.Preview2.Sockets
         /// subclass for real I/O readiness.</summary>
         public virtual Pollable Subscribe() => new Pollable();
 
+        /// <summary>Begin binding to <paramref name="localAddress"/>.
+        /// Pairs with <see cref="FinishBind"/>. Default
+        /// captures the address; concrete impls invoke real
+        /// socket APIs.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("start-bind")]
+        public virtual void StartBind(Network network,
+            IpSocketAddress localAddress)
+            => _pendingLocal = localAddress;
+
+        /// <summary>Begin connecting to
+        /// <paramref name="remoteAddress"/>.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("start-connect")]
+        public virtual void StartConnect(Network network,
+            IpSocketAddress remoteAddress)
+            => _pendingRemote = remoteAddress;
+
+        public IpSocketAddress? PendingLocal => _pendingLocal;
+        public IpSocketAddress? PendingRemote => _pendingRemote;
+        protected IpSocketAddress? _pendingLocal;
+        protected IpSocketAddress? _pendingRemote;
+
         /// <summary>Complete a previously-issued <c>start-bind</c>
         /// call. Default impl is a no-op since v0 doesn't yet
         /// model the start/finish split.</summary>
@@ -299,6 +322,16 @@ namespace Wacs.WASI.Preview2.Sockets
         [WasiErrorResult]
         [WasiMethodName("finish-bind")]
         public virtual void FinishBind() { }
+
+        /// <summary>Begin binding to a local address.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("start-bind")]
+        public virtual void StartBind(Network network,
+            IpSocketAddress localAddress)
+            => _pendingLocal = localAddress;
+
+        public IpSocketAddress? PendingLocal => _pendingLocal;
+        protected IpSocketAddress? _pendingLocal;
 
         /// <summary>IP_TTL / IPV6_UNICAST_HOPS getter — UDP
         /// equivalent of TCP's <c>hop-limit</c>.</summary>
