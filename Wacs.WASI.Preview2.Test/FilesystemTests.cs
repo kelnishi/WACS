@@ -170,6 +170,54 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal("src", desc.LastPath);
         }
 
+        private sealed class FixedDirDescriptor : Descriptor
+        {
+            public FixedDirDescriptor() : base("/synthetic") { }
+            public override DirectoryEntryStream ReadDirectory()
+                => new DirectoryEntryStream(new[] {
+                    new DirectoryEntry(DescriptorType.RegularFile,
+                        "first.txt"),
+                    new DirectoryEntry(DescriptorType.Directory,
+                        "subdir"),
+                });
+        }
+
+        [Fact]
+        public void ReadDirectory_yields_entry_stream_with_first_record()
+        {
+            // Fixture: ask-readdir(handle) → read-directory →
+            // read-directory-entry once. Packs (option-disc,
+            // type, name-len, first-name-byte) into a u32.
+            // Stub directory has 2 entries; first is a
+            // regular-file named "first.txt".
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-readdir-component", "fsreaddir.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new FixedDirDescriptor();
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+                runtime.BindWasiResource<DirectoryEntryStream>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            uint result = (uint)ci.Invoke(
+                "ask-readdir", (uint)handle)!;
+            // option disc: 1 (Some)
+            Assert.Equal(1u, result & 0xff);
+            // type: 6 (RegularFile)
+            Assert.Equal((uint)DescriptorType.RegularFile,
+                (result >> 8) & 0xff);
+            // name-len: 9 ("first.txt")
+            Assert.Equal(9u, (result >> 16) & 0xff);
+            // first byte: 'f' = 0x66
+            Assert.Equal(0x66u, (result >> 24) & 0xff);
+        }
+
         private sealed class FixedHashDescriptor : Descriptor
         {
             public FixedHashDescriptor() : base("/synthetic") { }

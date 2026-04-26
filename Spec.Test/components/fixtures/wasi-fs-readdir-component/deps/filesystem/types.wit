@@ -1,0 +1,20 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    enum error-code { unknown }
+    enum descriptor-type {
+        unknown, block-device, character-device, directory,
+        fifo, symbolic-link, regular-file, socket,
+    }
+    record directory-entry {
+        %type: descriptor-type,
+        name: string,
+    }
+    resource directory-entry-stream {
+        read-directory-entry: func()
+            -> result<option<directory-entry>, error-code>;
+    }
+    resource descriptor {
+        read-directory: func()
+            -> result<own<directory-entry-stream>, error-code>;
+    }
+}
