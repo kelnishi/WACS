@@ -79,6 +79,32 @@ namespace Wacs.WASI.Preview2.Io
         [WasiMethodName("blocking-write-zeroes-and-flush")]
         public virtual void BlockingWriteZeroesAndFlush(ulong len) { }
 
+        /// <summary>Move up to <paramref name="len"/> bytes from
+        /// <paramref name="src"/> straight into this output —
+        /// guests use this to chain a read-stream to a write-
+        /// stream without bouncing through their own buffer.
+        /// Default impl reads from <paramref name="src"/> and
+        /// writes to <c>this</c>, returning the count actually
+        /// moved.</summary>
+        [WasiStreamResult]
+        public virtual ulong Splice(InputStream src, ulong len)
+        {
+            var bytes = src.Read(len);
+            Write(bytes);
+            return (ulong)bytes.Length;
+        }
+
+        /// <summary>Like <see cref="Splice"/> but blocks until
+        /// at least one byte moves.</summary>
+        [WasiStreamResult]
+        [WasiMethodName("blocking-splice")]
+        public virtual ulong BlockingSplice(InputStream src, ulong len)
+        {
+            var bytes = src.BlockingRead(len);
+            Write(bytes);
+            return (ulong)bytes.Length;
+        }
+
         /// <summary>Subscribe to a pollable signaling when the
         /// next write won't block. Default: always-ready
         /// pollable.</summary>

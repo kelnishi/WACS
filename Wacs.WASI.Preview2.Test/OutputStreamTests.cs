@@ -84,6 +84,67 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(0, resources.TableFor(typeof(OutputStream)).Count);
         }
 
+        public sealed class FixedSourceStream : InputStream
+        {
+            private readonly byte[] _bytes;
+            private int _pos;
+            public FixedSourceStream(byte[] bytes) { _bytes = bytes; }
+            public override byte[] Read(ulong len)
+            {
+                int avail = _bytes.Length - _pos;
+                int n = (int)System.Math.Min(
+                    System.Math.Min(len, (ulong)int.MaxValue),
+                    (ulong)avail);
+                var slice = new byte[n];
+                System.Array.Copy(_bytes, _pos, slice, 0, n);
+                _pos += n;
+                return slice;
+            }
+            public override byte[] BlockingRead(ulong len) => Read(len);
+        }
+
+        public sealed class SinkStream : OutputStream
+        {
+            public System.Collections.Generic.List<byte> Captured =
+                new System.Collections.Generic.List<byte>();
+            public override void Write(byte[] contents)
+                => Captured.AddRange(contents);
+        }
+
+        [Fact]
+        public void Splice_resolves_borrow_input_stream_and_returns_u64_count()
+        {
+            // Fixture: ask-splice(out, in) calls splice(out, in,
+            // 32). Stub source has 12 bytes; splice copies all
+            // 12 (length 32 caps to source remainder), returns
+            // 12 in the Ok u64 payload. Test asserts the count
+            // and that the sink received the source bytes.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-io-splice-component", "iosplice.component.wasm"));
+            var resources = new ResourceContext();
+            var source = new FixedSourceStream(
+                System.Text.Encoding.UTF8.GetBytes("hello, splice"));
+            var sink = new SinkStream();
+            int hOut = resources.TableFor(typeof(OutputStream))
+                .Allocate(sink);
+            int hIn = resources.TableFor(typeof(InputStream))
+                .Allocate(source);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutputStream>(
+                    "wasi:io/streams@0.2.3", resources);
+                runtime.BindWasiResource<InputStream>(
+                    "wasi:io/streams@0.2.3", resources);
+            });
+
+            // "hello, splice" = 13 bytes, len=32 caps at 13.
+            Assert.Equal(13UL, (ulong)ci.Invoke(
+                "ask-splice", (uint)hOut, (uint)hIn)!);
+            Assert.Equal(System.Text.Encoding.UTF8.GetBytes(
+                "hello, splice"), sink.Captured.ToArray());
+        }
+
         public sealed class TrackingStream : OutputStream
         {
             public ulong LastWriteZeroes;
