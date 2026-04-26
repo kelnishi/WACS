@@ -3,10 +3,13 @@
     (func $del (param i32 i32 i32 i32)))
   (import "wasi:http/types@0.2.3" "[method]fields.clone"
     (func $clone (param i32) (result i32)))
+  (import "wasi:http/types@0.2.3" "[method]fields.has"
+    (func $has (param i32 i32 i32) (result i32)))
   (import "wasi:http/types@0.2.3" "[resource-drop]fields"
     (func $drop (param i32)))
   (memory (export "memory") 1)
   (data (i32.const 100) "X-Custom")
+  (data (i32.const 200) "X-Present")
   (global $next (mut i32) (i32.const 1024))
   (func $realloc (param i32 i32 i32 i32) (result i32)
     (local $r i32) (local $align i32)
@@ -29,4 +32,6 @@
     (local $h i32)
     (local.set $h (call $clone (local.get 0)))
     (call $drop (local.get $h))
-    (i32.ne (local.get $h) (i32.const 0))))
+    (i32.ne (local.get $h) (i32.const 0)))
+  (func (export "ask-has") (param i32) (result i32)
+    (call $has (local.get 0) (i32.const 200) (i32.const 9))))

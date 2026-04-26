@@ -788,13 +788,16 @@ namespace Wacs.WASI.Preview2.HostBinding
 
             // Aggregate-param resource methods are a follow-up
             // (write etc. are handled via [WasiStreamResult]).
-            // Resource-typed params (borrow<T>) are admitted —
-            // wire form is i32 handle; the wrapper resolves it
-            // via ResourceContext.TableFor(T).Get(handle).
+            // Admitted: primitive (1 wire slot), borrow<resource>
+            // (1 slot, resolved via ResourceContext), string
+            // (2 slots — ptr + len, decoded via UTF-8). Other
+            // aggregates (records, lists, options) stay
+            // deferred.
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)
                     && p.ParameterType.GetCustomAttribute<
-                        WasiResourceAttribute>() == null) return;
+                        WasiResourceAttribute>() == null
+                    && p.ParameterType != typeof(string)) return;
 
             // Dispatch on return shape. String returns go
             // through the retArea wrapper; primitive / void
@@ -819,17 +822,33 @@ namespace Wacs.WASI.Preview2.HostBinding
 
             // Wrapper signature: ExecContext, handle (i32),
             // [host params...] → wire return type (or void).
-            // Resource params lower to i32 (handle).
-            var wireParamTypes = new Type[paramInfos.Length + 2];
+            // Resource params lower to i32 (handle); string
+            // params lower to (i32 ptr, i32 len).
+            int slotsPerParam(ParameterInfo p)
+                => p.ParameterType == typeof(string) ? 2 : 1;
+            int paramSlotsTotal = 0;
+            foreach (var p in paramInfos)
+                paramSlotsTotal += slotsPerParam(p);
+            var wireParamTypes = new Type[paramSlotsTotal + 2];
             wireParamTypes[0] = typeof(ExecContext);
             wireParamTypes[1] = typeof(int);
-            for (int i = 0; i < paramInfos.Length; i++)
+            int wti = 2;
+            foreach (var p in paramInfos)
             {
-                wireParamTypes[i + 2] =
-                    paramInfos[i].ParameterType.GetCustomAttribute<
-                        WasiResourceAttribute>() != null
-                    ? typeof(int)
-                    : ToWireType(paramInfos[i].ParameterType);
+                if (p.ParameterType == typeof(string))
+                {
+                    wireParamTypes[wti++] = typeof(int);
+                    wireParamTypes[wti++] = typeof(int);
+                }
+                else if (p.ParameterType.GetCustomAttribute<
+                    WasiResourceAttribute>() != null)
+                {
+                    wireParamTypes[wti++] = typeof(int);
+                }
+                else
+                {
+                    wireParamTypes[wti++] = ToWireType(p.ParameterType);
+                }
             }
 
             Type delegateType;
@@ -849,9 +868,22 @@ namespace Wacs.WASI.Preview2.HostBinding
             var lambdaParams = new ParameterExpression[wireParamTypes.Length];
             lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
             lambdaParams[1] = Expression.Parameter(typeof(int), "self");
-            for (int i = 0; i < paramInfos.Length; i++)
-                lambdaParams[i + 2] = Expression.Parameter(
-                    wireParamTypes[i + 2], paramInfos[i].Name);
+            int lpi = 2;
+            foreach (var p in paramInfos)
+            {
+                if (p.ParameterType == typeof(string))
+                {
+                    lambdaParams[lpi++] = Expression.Parameter(
+                        typeof(int), p.Name + "_ptr");
+                    lambdaParams[lpi++] = Expression.Parameter(
+                        typeof(int), p.Name + "_len");
+                }
+                else
+                {
+                    lambdaParams[lpi++] = Expression.Parameter(
+                        wireParamTypes[lpi - 1], p.Name);
+                }
+            }
 
             // instance = (T)table.Get(self)
             var tableConst = Expression.Constant(table);
@@ -867,10 +899,34 @@ namespace Wacs.WASI.Preview2.HostBinding
             var contextConst = Expression.Constant(resources);
             var tableForMethod = typeof(ResourceContext).GetMethod(
                 nameof(ResourceContext.TableFor))!;
+            // For string params: load memory once and reuse.
+            var memoryProp = typeof(ExecContext).GetProperty(
+                nameof(ExecContext.DefaultMemory))!;
+            var memDataField = typeof(Wacs.Core.Runtime.Types.MemoryInstance)
+                .GetField("Data")!;
+            var memoryAccess = Expression.Field(
+                Expression.Property(lambdaParams[0], memoryProp),
+                memDataField);
+            var encodingUtf8 = Expression.Property(null,
+                typeof(System.Text.Encoding).GetProperty(
+                    nameof(System.Text.Encoding.UTF8))!);
+            var getStringMethod = typeof(System.Text.Encoding).GetMethod(
+                nameof(System.Text.Encoding.GetString),
+                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+
             var argExprs = new Expression[paramInfos.Length];
+            int slotIdx = 2;
             for (int i = 0; i < paramInfos.Length; i++)
             {
-                Expression e = lambdaParams[i + 2];
+                if (paramInfos[i].ParameterType == typeof(string))
+                {
+                    var ptrParam = lambdaParams[slotIdx++];
+                    var lenParam = lambdaParams[slotIdx++];
+                    argExprs[i] = Expression.Call(encodingUtf8,
+                        getStringMethod, memoryAccess, ptrParam, lenParam);
+                    continue;
+                }
+                Expression e = lambdaParams[slotIdx++];
                 if (paramInfos[i].ParameterType.GetCustomAttribute<
                         WasiResourceAttribute>() != null)
                 {
