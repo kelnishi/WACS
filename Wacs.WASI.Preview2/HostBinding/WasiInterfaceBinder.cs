@@ -286,14 +286,49 @@ namespace Wacs.WASI.Preview2.HostBinding
             WasmRuntime runtime, string namespaceName,
             object impl, MethodInfo m, ResourceContext resources)
         {
-            var importName = ToKebabCase(m.Name);
+            var importName = m.GetCustomAttribute<WasiMethodNameAttribute>()?
+                .WitName ?? ToKebabCase(m.Name);
             var paramInfos = m.GetParameters();
 
-            var paramTypes = new Type[paramInfos.Length + 2];
+            // Param shapes: primitive / enum (1 wire slot),
+            // string (2 wire slots), borrow<resource> (1 wire
+            // slot, resolved via ResourceContext).
+            foreach (var p in paramInfos)
+                if (!IsPrimitive(p.ParameterType)
+                    && !p.ParameterType.IsEnum
+                    && p.ParameterType != typeof(string)
+                    && p.ParameterType.GetCustomAttribute<
+                        WasiResourceAttribute>() == null)
+                    throw new InvalidOperationException(
+                        "[WasiErrorResult] resource-return host "
+                        + "method '" + m.Name + "' takes "
+                        + "unsupported param type "
+                        + p.ParameterType + ".");
+
+            int paramSlotCount = 0;
+            foreach (var p in paramInfos)
+                paramSlotCount += p.ParameterType == typeof(string) ? 2 : 1;
+            var paramTypes = new Type[2 + paramSlotCount];
             paramTypes[0] = typeof(ExecContext);
-            for (int i = 0; i < paramInfos.Length; i++)
-                paramTypes[i + 1] = ToWireType(paramInfos[i].ParameterType);
-            paramTypes[paramInfos.Length + 1] = typeof(int);
+            int wi = 1;
+            foreach (var p in paramInfos)
+            {
+                if (p.ParameterType == typeof(string))
+                {
+                    paramTypes[wi++] = typeof(int);
+                    paramTypes[wi++] = typeof(int);
+                }
+                else if (p.ParameterType.GetCustomAttribute<
+                    WasiResourceAttribute>() != null)
+                {
+                    paramTypes[wi++] = typeof(int);
+                }
+                else
+                {
+                    paramTypes[wi++] = ToWireType(p.ParameterType);
+                }
+            }
+            paramTypes[wi] = typeof(int);   // retArea
 
             var delegateType = OpenActionType(paramTypes.Length)
                 .MakeGenericType(paramTypes);
@@ -320,25 +355,92 @@ namespace Wacs.WASI.Preview2.HostBinding
 
             var lambdaParams = new ParameterExpression[paramTypes.Length];
             lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
+            wi = 1;
             for (int i = 0; i < paramInfos.Length; i++)
-                lambdaParams[i + 1] = Expression.Parameter(
-                    paramTypes[i + 1], paramInfos[i].Name);
-            lambdaParams[paramInfos.Length + 1] =
-                Expression.Parameter(typeof(int), "retAreaPtr");
-
-            var argArr = Expression.NewArrayInit(typeof(object),
-                paramInfos.Select((p, i) =>
+            {
+                if (paramInfos[i].ParameterType == typeof(string))
                 {
-                    Expression e = lambdaParams[i + 1];
-                    if (p.ParameterType != e.Type)
-                        e = Expression.Convert(e, p.ParameterType);
-                    return (Expression)Expression.Convert(e, typeof(object));
-                }).ToArray());
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_ptr");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_len");
+                }
+                else
+                {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        paramTypes[wi - 1], paramInfos[i].Name);
+                }
+            }
+            var retAreaParam = Expression.Parameter(typeof(int), "retAreaPtr");
+            lambdaParams[paramTypes.Length - 1] = retAreaParam;
+
+            var ctxParam = lambdaParams[0];
+            var memoryProp = typeof(ExecContext).GetProperty(
+                nameof(ExecContext.DefaultMemory))!;
+            var memDataField = typeof(Wacs.Core.Runtime.Types.MemoryInstance)
+                .GetField("Data")!;
+            var memoryAccess = Expression.Field(
+                Expression.Property(ctxParam, memoryProp),
+                memDataField);
+            var encodingUtf8 = Expression.Property(null,
+                typeof(System.Text.Encoding).GetProperty(
+                    nameof(System.Text.Encoding.UTF8))!);
+            var getStringMethod = typeof(System.Text.Encoding).GetMethod(
+                nameof(System.Text.Encoding.GetString),
+                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+
+            var contextConst = Expression.Constant(resources);
+            var tableForMethod = typeof(ResourceContext).GetMethod(
+                nameof(ResourceContext.TableFor))!;
+            var getResourceMethod = typeof(ResourceTable).GetMethod(
+                nameof(ResourceTable.Get))!;
+
+            wi = 1;
+            var argExprs = new Expression[paramInfos.Length];
+            for (int i = 0; i < paramInfos.Length; i++)
+            {
+                if (paramInfos[i].ParameterType == typeof(string))
+                {
+                    var ptrParam = lambdaParams[wi++];
+                    var lenParam = lambdaParams[wi++];
+                    argExprs[i] = Expression.Convert(
+                        Expression.Call(encodingUtf8, getStringMethod,
+                            memoryAccess, ptrParam, lenParam),
+                        typeof(object));
+                }
+                else if (paramInfos[i].ParameterType.GetCustomAttribute<
+                    WasiResourceAttribute>() != null)
+                {
+                    var handleParam = lambdaParams[wi++];
+                    var paramTable = Expression.Call(contextConst,
+                        tableForMethod,
+                        Expression.Constant(paramInfos[i].ParameterType));
+                    argExprs[i] = Expression.Convert(
+                        Expression.Call(paramTable, getResourceMethod,
+                            handleParam),
+                        typeof(object));
+                }
+                else
+                {
+                    Expression e = lambdaParams[wi++];
+                    if (paramInfos[i].ParameterType != e.Type)
+                    {
+                        if (paramInfos[i].ParameterType == typeof(bool))
+                            e = Expression.NotEqual(e,
+                                Expression.Constant(0, e.Type));
+                        else
+                            e = Expression.Convert(e,
+                                paramInfos[i].ParameterType);
+                    }
+                    argExprs[i] = Expression.Convert(e, typeof(object));
+                }
+            }
+
+            var argArr = Expression.NewArrayInit(typeof(object), argExprs);
             var bodyTarget = Expression.Constant(
                 (Action<ExecContext, object?[], int>)Body);
             var call = Expression.Invoke(bodyTarget,
-                lambdaParams[0], argArr,
-                lambdaParams[paramInfos.Length + 1]);
+                lambdaParams[0], argArr, retAreaParam);
             var lambda = Expression.Lambda(delegateType, call, lambdaParams);
             var compiled = lambda.Compile();
 
@@ -573,7 +675,11 @@ namespace Wacs.WASI.Preview2.HostBinding
                         Wacs.WASI.Preview2.Sockets.IpSocketAddress)
                     || m.ReturnType.IsSubclassOf(typeof(
                         Wacs.WASI.Preview2.Sockets.IpSocketAddress))
-                    || IsResourceTuple(m.ReturnType)))
+                    || IsResourceTuple(m.ReturnType)
+                    || m.ReturnType == typeof(
+                        Wacs.WASI.Preview2.Sockets.IpAddressEnumerationItem)
+                    || m.ReturnType.IsSubclassOf(typeof(
+                        Wacs.WASI.Preview2.Sockets.IpAddressEnumerationItem))))
             {
                 BindStreamResultResourceMethod(runtime, namespaceName,
                     importName, table, resourceType, m, resources);
@@ -984,6 +1090,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                     || rt.IsSubclassOf(typeof(
                         Wacs.WASI.Preview2.Sockets.IpSocketAddress)) ? 9
                 : IsResourceTuple(rt) ? 10
+                : rt == typeof(Wacs.WASI.Preview2.Sockets.IpAddressEnumerationItem)
+                    || rt.IsSubclassOf(typeof(
+                        Wacs.WASI.Preview2.Sockets.IpAddressEnumerationItem)) ? 11
                 : -1;
             if (retShape < 0)
                 throw new InvalidOperationException(
@@ -1136,6 +1245,55 @@ namespace Wacs.WASI.Preview2.HostBinding
                             int handle = tupleTables![i].Allocate(resInst!);
                             WriteI32LE(memOut, retAreaPtr + 4 + i * 4,
                                 handle);
+                        }
+                        break;
+                    case 11:  // option<ip-address>: 22-byte total.
+                              // Layout:
+                              //   +0: outer disc (0=Ok)
+                              //   +1: padding
+                              //   +2: option disc (0=None, 1=Some)
+                              //   +3: padding
+                              //   +4: variant disc (0=ipv4, 1=ipv6)
+                              //   +5: padding
+                              //   +6..+21: variant payload
+                        // outer disc=0 already written above.
+                        var ipa = (Wacs.WASI.Preview2.Sockets
+                            .IpAddressEnumerationItem?)ret;
+                        if (ipa == null)
+                        {
+                            memOut[retAreaPtr + 2] = 0;   // option None
+                        }
+                        else
+                        {
+                            memOut[retAreaPtr + 2] = 1;   // option Some
+                            memOut[retAreaPtr + 3] = 0;
+                            if (ipa is Wacs.WASI.Preview2.Sockets.Ipv4Address v4)
+                            {
+                                memOut[retAreaPtr + 4] = 0;
+                                memOut[retAreaPtr + 5] = 0;
+                                memOut[retAreaPtr + 6] = v4.Address[0];
+                                memOut[retAreaPtr + 7] = v4.Address[1];
+                                memOut[retAreaPtr + 8] = v4.Address[2];
+                                memOut[retAreaPtr + 9] = v4.Address[3];
+                            }
+                            else if (ipa is Wacs.WASI.Preview2.Sockets.Ipv6Address v6)
+                            {
+                                memOut[retAreaPtr + 4] = 1;
+                                memOut[retAreaPtr + 5] = 0;
+                                for (int i = 0; i < 8; i++)
+                                {
+                                    memOut[retAreaPtr + 6 + i * 2]
+                                        = (byte)(v6.Address[i] & 0xff);
+                                    memOut[retAreaPtr + 7 + i * 2]
+                                        = (byte)((v6.Address[i] >> 8) & 0xff);
+                                }
+                            }
+                            else
+                            {
+                                throw new ArgumentException(
+                                    "Unknown IpAddressEnumerationItem "
+                                    + "subclass: " + ipa.GetType());
+                            }
                         }
                         break;
                 }
