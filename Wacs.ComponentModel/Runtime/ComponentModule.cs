@@ -72,6 +72,57 @@ namespace Wacs.ComponentModel.Runtime
             }
         }
 
+        /// <summary>Count of nested component sections — each
+        /// holds another full <c>.component.wasm</c> binary. A
+        /// non-zero count means this component composes other
+        /// components via the instance + alias sections; the
+        /// transpiler / interpreter need to recursively parse
+        /// each before instantiating the outer.</summary>
+        public int NestedComponentCount =>
+            SectionsOf(ComponentSectionId.Component).Count();
+
+        /// <summary>Raw bytes of each nested component section
+        /// in file order. Companion to
+        /// <see cref="CoreModuleBinaries"/> for the
+        /// component-of-components case. Each payload is a
+        /// complete component binary (preamble +
+        /// version/layer=0x000d + sections) that can be
+        /// recursively fed back through
+        /// <see cref="Parser.ComponentBinaryParser.Parse"/>.
+        /// </summary>
+        public IEnumerable<byte[]> NestedComponentBinaries
+        {
+            get
+            {
+                foreach (var s in RawSections)
+                    if (s.Id == ComponentSectionId.Component)
+                        yield return s.Payload;
+            }
+        }
+
+        /// <summary>Decode each nested component eagerly. Useful
+        /// when downstream consumers need to walk the full
+        /// composition tree (e.g. for resolving aliases that
+        /// target sub-component exports). Each entry is itself a
+        /// fully-functional <see cref="ComponentModule"/>.
+        /// </summary>
+        public IReadOnlyList<ComponentModule> NestedComponents
+        {
+            get
+            {
+                if (_nestedComponents != null) return _nestedComponents;
+                var list = new List<ComponentModule>();
+                foreach (var bytes in NestedComponentBinaries)
+                {
+                    using var ms = new System.IO.MemoryStream(bytes);
+                    list.Add(Parser.ComponentBinaryParser.Parse(ms));
+                }
+                _nestedComponents = list;
+                return list;
+            }
+        }
+        private IReadOnlyList<ComponentModule>? _nestedComponents;
+
         /// <summary>
         /// Decoded custom sections, parsed on demand. Useful for
         /// inspecting <c>component-type:*</c> (the embedded WIT

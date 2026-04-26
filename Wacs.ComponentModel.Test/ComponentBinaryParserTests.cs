@@ -178,6 +178,44 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(0u, export.Index);
         }
 
+        private static string FindNestedComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "nested-component", "wasm",
+                                "nested.component.wasm");
+        }
+
+        [Fact]
+        public void Parse_recognises_nested_component_section()
+        {
+            // nested-component fixture: outer component embeds
+            // one inner component (section id=4) that defines
+            // `inner-greet`, then uses instance + alias sections
+            // to re-export it as `greet` at the outer level. The
+            // parser surfaces nested components via NestedComponents
+            // / NestedComponentBinaries; recursive parsing turns
+            // each into a fully-functional ComponentModule.
+            var path = FindNestedComponentPath();
+            using var stream = File.OpenRead(path);
+            var component = ComponentBinaryParser.Parse(stream);
+
+            Assert.Equal(1, component.NestedComponentCount);
+            var inner = Assert.Single(component.NestedComponents);
+
+            // The outer has zero embedded core modules — the core
+            // wasm lives entirely inside the nested component.
+            Assert.Equal(0, component.CoreModuleCount);
+            Assert.Equal(1, inner.CoreModuleCount);
+
+            // The inner exposes its own canon-lifted export,
+            // which the outer aliases up + re-exports as `greet`.
+            Assert.Contains(inner.Exports, e => e.Name == "inner-greet");
+            Assert.Contains(component.Exports, e => e.Name == "greet");
+        }
+
         [Fact]
         public void Parse_rejects_truncated_header()
         {
