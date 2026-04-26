@@ -213,6 +213,16 @@ namespace Wacs.WASI.Preview2.Filesystem
             File.Delete(System.IO.Path.Combine(Path, path));
         }
 
+        /// <summary>Create a symbolic link at
+        /// <paramref name="newPath"/> pointing at
+        /// <paramref name="oldPath"/>. Default impl is a no-op
+        /// since System.IO has no portable symlink API on
+        /// netstandard2.1 — concrete subclasses override.
+        /// </summary>
+        [WasiErrorResult]
+        [WasiMethodName("symlink-at")]
+        public virtual void SymlinkAt(string oldPath, string newPath) { }
+
         /// <summary>Open or create a file/directory relative to
         /// this descriptor (treated as a directory) at
         /// <paramref name="path"/>. Returns a fresh

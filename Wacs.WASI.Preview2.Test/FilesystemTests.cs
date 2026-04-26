@@ -245,6 +245,40 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(new[] { "child" }, desc.Unlinked);
         }
 
+        private sealed class SymlinkDescriptor : Descriptor
+        {
+            public string LastOldPath = "";
+            public string LastNewPath = "";
+            public SymlinkDescriptor() : base("/synthetic") { }
+            public override void SymlinkAt(string oldPath, string newPath)
+            {
+                LastOldPath = oldPath;
+                LastNewPath = newPath;
+            }
+        }
+
+        [Fact]
+        public void SymlinkAt_threads_two_strings_through_void_result_wrapper()
+        {
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-symlink-component", "fssymlink.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new SymlinkDescriptor();
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-symlink", (uint)handle)!);
+            Assert.Equal("src", desc.LastOldPath);
+            Assert.Equal("dst", desc.LastNewPath);
+        }
+
         private sealed class OpenAtDescriptor : Descriptor
         {
             public string LastPath = "";
