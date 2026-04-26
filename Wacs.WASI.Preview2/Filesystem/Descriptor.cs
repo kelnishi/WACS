@@ -417,6 +417,20 @@ namespace Wacs.WASI.Preview2.Filesystem
                 atime, mtime, ctime);
         }
 
+        /// <summary>Inspect file metadata at a path relative
+        /// to this descriptor (treated as a directory). Same
+        /// shape as <see cref="Stat"/> but takes a relative
+        /// path; useful for guests walking trees without
+        /// opening every entry.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("stat-at")]
+        public virtual DescriptorStat StatAt(PathFlags pathFlags,
+            string path)
+        {
+            var fullPath = System.IO.Path.Combine(Path, path);
+            return new Descriptor(fullPath).Stat();
+        }
+
         private static Datetime ToDatetime(DateTime dt)
         {
             // .NET DateTime → Unix epoch seconds + remainder

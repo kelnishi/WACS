@@ -1044,10 +1044,15 @@ namespace Wacs.WASI.Preview2.HostBinding
                 {
                     // OK — handled specially below.
                 }
+                else if (pt == typeof(string))
+                {
+                    // OK — 2 wire slots (ptr + len), decoded via
+                    // Encoding.UTF8.GetString.
+                }
                 else if (!IsPrimitive(pt)
                     && pt.GetCustomAttribute<WasiResourceAttribute>() == null)
                 {
-                    return;   // unsupported (string / record / etc.)
+                    return;   // unsupported (record etc.)
                 }
             }
             if (hasBytesParam && bytesParamIndex != 0)
@@ -1057,6 +1062,7 @@ namespace Wacs.WASI.Preview2.HostBinding
             int SlotsFor(ParameterInfo p)
             {
                 if (p.ParameterType == typeof(byte[])) return 2;
+                if (p.ParameterType == typeof(string)) return 2;
                 if (IsOptionalIpAddrParam(p)) return 13;
                 if (IsOutgoingDatagramArrayParam(p)) return 2;   // ptr + len
                 return 1;
@@ -1080,6 +1086,11 @@ namespace Wacs.WASI.Preview2.HostBinding
                 {
                     wireParamTypes[ti++] = typeof(int);   // dataPtr
                     wireParamTypes[ti++] = typeof(int);   // len
+                }
+                else if (p.ParameterType == typeof(string))
+                {
+                    wireParamTypes[ti++] = typeof(int);   // strPtr
+                    wireParamTypes[ti++] = typeof(int);   // strLen
                 }
                 else if (IsOptionalIpAddrParam(p))
                 {
@@ -1474,6 +1485,13 @@ namespace Wacs.WASI.Preview2.HostBinding
                     lambdaParams[idx++] = dataPtrParam;
                     lambdaParams[idx++] = lenParam;
                 }
+                else if (p.ParameterType == typeof(string))
+                {
+                    lambdaParams[idx++] = Expression.Parameter(
+                        typeof(int), p.Name + "_strPtr");
+                    lambdaParams[idx++] = Expression.Parameter(
+                        typeof(int), p.Name + "_strLen");
+                }
                 else if (IsOptionalIpAddrParam(p))
                 {
                     lambdaParams[idx++] = Expression.Parameter(
@@ -1570,6 +1588,23 @@ namespace Wacs.WASI.Preview2.HostBinding
                         Expression.Call(decodeOutDgArrayMethod,
                             memoryAccessForBody,
                             listPtrParam, listLenParam),
+                        typeof(object));
+                    slotIdx += 2;
+                    continue;
+                }
+                if (p.ParameterType == typeof(string))
+                {
+                    var ptrParam = lambdaParams[slotIdx];
+                    var lenParam2 = lambdaParams[slotIdx + 1];
+                    var encUtf8 = Expression.Property(null,
+                        typeof(System.Text.Encoding).GetProperty(
+                            nameof(System.Text.Encoding.UTF8))!);
+                    var getStr = typeof(System.Text.Encoding).GetMethod(
+                        nameof(System.Text.Encoding.GetString),
+                        new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+                    primExprs[hostIdx++] = Expression.Convert(
+                        Expression.Call(encUtf8, getStr,
+                            memoryAccessForBody, ptrParam, lenParam2),
                         typeof(object));
                     slotIdx += 2;
                     continue;
