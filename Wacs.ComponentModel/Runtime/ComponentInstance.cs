@@ -88,20 +88,132 @@ namespace Wacs.ComponentModel.Runtime
         public static ComponentInstance Instantiate(Stream componentStream)
         {
             var component = ComponentBinaryParser.Parse(componentStream);
-            var coreBinaries = component.CoreModuleBinaries.ToList();
-            if (coreBinaries.Count != 1)
-                throw new InvalidOperationException(
-                    "ComponentInstance.Instantiate requires exactly one "
-                    + "embedded core module; got "
-                    + coreBinaries.Count + ".");
-
-            var runtime = new WasmRuntime();
-            using var coreMs = new MemoryStream(coreBinaries[0]);
-            var coreModule = BinaryModuleParser.ParseWasm(coreMs);
-            var coreInstance = runtime.InstantiateModule(coreModule);
-
-            return new ComponentInstance(component, runtime, coreInstance);
+            return Instantiate(component);
         }
+
+        /// <summary>Instantiate a pre-parsed component. Used both
+        /// for the top-level entry and recursively for nested
+        /// components when the outer is a "composer" — a wrapper
+        /// that bundles + re-exports nested components without
+        /// embedding its own core module.</summary>
+        public static ComponentInstance Instantiate(ComponentModule component)
+        {
+            var coreBinaries = component.CoreModuleBinaries.ToList();
+            if (coreBinaries.Count == 1)
+            {
+                var runtime = new WasmRuntime();
+                using var coreMs = new MemoryStream(coreBinaries[0]);
+                var coreModule = BinaryModuleParser.ParseWasm(coreMs);
+                var coreInstance = runtime.InstantiateModule(coreModule);
+                return new ComponentInstance(component, runtime, coreInstance);
+            }
+
+            // Composer mode: no core modules of our own — every
+            // export funnels through alias chains into nested
+            // components. v1 supports the simplest shape:
+            // (instantiate component-idx) + alias re-exports,
+            // no args. Multi-arg + nested-of-nested instantiation
+            // are follow-ups.
+            if (coreBinaries.Count == 0
+                && component.NestedComponentCount > 0)
+            {
+                return InstantiateComposer(component);
+            }
+
+            throw new InvalidOperationException(
+                "ComponentInstance.Instantiate requires exactly one "
+                + "embedded core module OR (zero core modules + at "
+                + "least one nested component); got "
+                + coreBinaries.Count + " core modules and "
+                + component.NestedComponentCount + " nested components.");
+        }
+
+        /// <summary>Build a composer-mode instance: recursively
+        /// instantiate each nested component, then resolve the
+        /// outer's instance + alias sections to map outer
+        /// component-func indices through to inner functions.
+        /// Invoke routes through the alias chain.</summary>
+        private static ComponentInstance InstantiateComposer(
+            ComponentModule component)
+        {
+            // Instantiate each nested component into a child
+            // ComponentInstance.
+            var nested = new List<ComponentInstance>();
+            foreach (var sub in component.NestedComponents)
+                nested.Add(Instantiate(sub));
+
+            // Walk Instances + Aliases in file order to populate
+            // the component-instance and component-func index
+            // spaces. v1 only handles the shape this fixture
+            // exercises: InstantiateComponent (no args) +
+            // alias-export-of-instance for funcs.
+            var instances = new List<ComponentInstance>();
+            var componentFuncResolver =
+                new Dictionary<uint, (ComponentInstance Inner, string ExportName)>();
+            uint funcIdx = 0;
+            foreach (var i in component.Instances)
+            {
+                if (i is InstantiateComponent ic)
+                {
+                    if (ic.Args.Count != 0)
+                        throw new NotSupportedException(
+                            "InstantiateComponent with args is a "
+                            + "follow-up — current composer support "
+                            + "only handles arg-less instantiation.");
+                    if (ic.ComponentIdx >= nested.Count)
+                        throw new InvalidOperationException(
+                            "Instantiate references nested component "
+                            + ic.ComponentIdx + " but only "
+                            + nested.Count + " parsed.");
+                    instances.Add(nested[(int)ic.ComponentIdx]);
+                }
+                else
+                {
+                    throw new NotSupportedException(
+                        "InstantiateInline is a follow-up.");
+                }
+            }
+            foreach (var a in component.Aliases)
+            {
+                if (a.IsComponentFunc)
+                {
+                    if (a.TargetKind !=
+                            AliasTargetKind.ComponentInstanceExport)
+                        throw new NotSupportedException(
+                            "Non-instance-export alias targets are a "
+                            + "follow-up — only ComponentInstanceExport "
+                            + "is supported in composer mode v1.");
+                    if (!a.InstanceIdx.HasValue
+                        || a.InstanceIdx.Value >= instances.Count)
+                        throw new InvalidOperationException(
+                            "Alias references instance "
+                            + a.InstanceIdx + " but only "
+                            + instances.Count + " in scope.");
+                    componentFuncResolver[funcIdx] = (
+                        instances[(int)a.InstanceIdx.Value],
+                        a.ExportName!);
+                    funcIdx++;
+                }
+            }
+            return new ComponentInstance(component, componentFuncResolver);
+        }
+
+        // Composer-mode constructor: no own runtime + core
+        // instance; routes Invoke through nested instances via
+        // _composerFuncResolver.
+        private ComponentInstance(
+            ComponentModule component,
+            Dictionary<uint, (ComponentInstance Inner, string ExportName)>
+                composerFuncResolver)
+        {
+            _component = component;
+            _runtime = null!;        // composer mode has no runtime
+            _coreInstance = null!;   // nor a core instance
+            _composerFuncResolver = composerFuncResolver;
+        }
+
+        private readonly Dictionary<uint, (ComponentInstance Inner, string ExportName)>?
+            _composerFuncResolver;
 
         /// <summary>The parsed component this instance backs —
         /// useful for callers that want to inspect declared
@@ -133,6 +245,22 @@ namespace Wacs.ComponentModel.Runtime
                 ?? throw new ArgumentException(
                     $"No component-level Func export named '{exportName}'.",
                     nameof(exportName));
+
+            // Composer mode: outer has no canon lifts of its own;
+            // every component-func resolves through an alias into
+            // a nested instance. Resolve the chain and delegate.
+            if (_composerFuncResolver != null)
+            {
+                if (!_composerFuncResolver.TryGetValue(
+                        componentExport.Index, out var target))
+                    throw new InvalidOperationException(
+                        "Composer-mode component-func "
+                        + componentExport.Index + " (export '"
+                        + exportName + "') has no resolved alias "
+                        + "target; only ComponentInstanceExport "
+                        + "aliases are wired in v1.");
+                return target.Inner.Invoke(target.ExportName, args);
+            }
 
             if (!_component.ComponentFuncToCanon.TryGetValue(
                     componentExport.Index, out var lift))
