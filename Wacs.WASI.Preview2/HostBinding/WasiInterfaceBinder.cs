@@ -1840,9 +1840,10 @@ namespace Wacs.WASI.Preview2.HostBinding
             // borrow<resource> (1 wire slot: handle resolved
             // via ResourceContext), IpSocketAddress (12
             // wire slots — variant flat-lowering: 1 disc +
-            // 11 joined-case payload slots, all i32), or
+            // 11 joined-case payload slots, all i32),
             // NewTimestamp (3 wire slots: variant disc +
-            // datetime seconds(i64) + nanoseconds(i32)).
+            // datetime seconds(i64) + nanoseconds(i32)), or
+            // AccessType (2 wire slots: variant disc + modes).
             // Aggregates (records, lists) stay deferred.
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)
@@ -1853,7 +1854,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                     && p.ParameterType != typeof(
                         Wacs.WASI.Preview2.Sockets.IpSocketAddress)
                     && p.ParameterType != typeof(
-                        Wacs.WASI.Preview2.Filesystem.NewTimestamp))
+                        Wacs.WASI.Preview2.Filesystem.NewTimestamp)
+                    && p.ParameterType != typeof(
+                        Wacs.WASI.Preview2.Filesystem.AccessType))
                     throw new InvalidOperationException(
                         "[WasiErrorResult] void-return resource "
                         + "method '" + m.Name + "' takes "
@@ -1871,6 +1874,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                 else if (p.ParameterType == typeof(
                     Wacs.WASI.Preview2.Filesystem.NewTimestamp))
                     paramSlotCount += 3;
+                else if (p.ParameterType == typeof(
+                    Wacs.WASI.Preview2.Filesystem.AccessType))
+                    paramSlotCount += 2;
                 else
                     paramSlotCount += 1;
             }
@@ -1906,6 +1912,14 @@ namespace Wacs.WASI.Preview2.HostBinding
                     wireParamTypes[wi++] = typeof(int);   // disc
                     wireParamTypes[wi++] = typeof(long);  // seconds
                     wireParamTypes[wi++] = typeof(int);   // nanoseconds
+                }
+                else if (p.ParameterType == typeof(
+                    Wacs.WASI.Preview2.Filesystem.AccessType))
+                {
+                    // Variant flat-lowering: 1 disc + 1 modes
+                    // payload slot (i32, ignored when exists).
+                    wireParamTypes[wi++] = typeof(int);   // disc
+                    wireParamTypes[wi++] = typeof(int);   // modes
                 }
                 else
                 {
@@ -1959,6 +1973,14 @@ namespace Wacs.WASI.Preview2.HostBinding
                         typeof(long), paramInfos[i].Name + "_tsSec");
                     lambdaParams[wi++] = Expression.Parameter(
                         typeof(int), paramInfos[i].Name + "_tsNanos");
+                }
+                else if (paramInfos[i].ParameterType == typeof(
+                    Wacs.WASI.Preview2.Filesystem.AccessType))
+                {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_atDisc");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_atModes");
                 }
                 else
                 {
@@ -2056,6 +2078,19 @@ namespace Wacs.WASI.Preview2.HostBinding
                     argExprs[i] = Expression.Convert(
                         Expression.Call(decodeTsMethod,
                             discParam, secParam, nanosParam),
+                        typeof(object));
+                }
+                else if (paramInfos[i].ParameterType == typeof(
+                    Wacs.WASI.Preview2.Filesystem.AccessType))
+                {
+                    var decodeAtMethod = typeof(WasiInterfaceBinder)
+                        .GetMethod(nameof(DecodeAccessType),
+                            BindingFlags.Static | BindingFlags.NonPublic)!;
+                    var discParam = lambdaParams[wi++];
+                    var modesParam = lambdaParams[wi++];
+                    argExprs[i] = Expression.Convert(
+                        Expression.Call(decodeAtMethod,
+                            discParam, modesParam),
                         typeof(object));
                 }
                 else
@@ -3100,6 +3135,19 @@ namespace Wacs.WASI.Preview2.HostBinding
                     .OutgoingDatagram(data, addr);
             }
             return result;
+        }
+
+        /// <summary>Decode a flat-lowered
+        /// <c>variant access-type</c> from its 2 wire slots:
+        /// disc(i32) + modes(i32). Disc 0 = access(modes),
+        /// disc 1 = exists.</summary>
+        private static Wacs.WASI.Preview2.Filesystem.AccessType
+            DecodeAccessType(int disc, int modes)
+        {
+            if (disc == 0)
+                return new Wacs.WASI.Preview2.Filesystem.AccessTypeAccess(
+                    (Wacs.WASI.Preview2.Filesystem.AccessModes)modes);
+            return new Wacs.WASI.Preview2.Filesystem.AccessTypeExists();
         }
 
         /// <summary>Decode a flat-lowered

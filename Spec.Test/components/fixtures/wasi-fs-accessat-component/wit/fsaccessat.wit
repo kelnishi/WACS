@@ -1,0 +1,9 @@
+package local:fsaccessat;
+world demo {
+    import wasi:filesystem/types@0.2.3;
+    /// Calls access-at(0, "f", access(readable | writable)).
+    /// Returns outer disc.
+    export ask-access-readable: func(handle: u32) -> u32;
+    /// Calls access-at(0, "f", exists). Returns outer disc.
+    export ask-access-exists: func(handle: u32) -> u32;
+}
