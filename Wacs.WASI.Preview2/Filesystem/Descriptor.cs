@@ -49,6 +49,31 @@ namespace Wacs.WASI.Preview2.Filesystem
         MutateDirectory = 1 << 5,
     }
 
+    /// <summary>WIT variant
+    /// <c>wasi:filesystem/types.new-timestamp</c>:
+    /// <code>variant new-timestamp {
+    ///   no-change, now, timestamp(datetime),
+    /// }</code>
+    /// Used as a param to <see cref="Descriptor.SetTimes"/>.
+    /// Wire form: variant disc (u8) + datetime payload at
+    /// align-8 offset; flat-lowered as 3 wire slots
+    /// (disc + i64 seconds + i32 nanoseconds).</summary>
+    public abstract class NewTimestamp { }
+
+    /// <summary>"Don't change this timestamp."</summary>
+    public sealed class NewTimestampNoChange : NewTimestamp { }
+
+    /// <summary>"Set this timestamp to now."</summary>
+    public sealed class NewTimestampNow : NewTimestamp { }
+
+    /// <summary>"Set this timestamp to the given
+    /// <see cref="Wacs.WASI.Preview2.Clocks.Datetime"/>."</summary>
+    public sealed class NewTimestampTimestamp : NewTimestamp
+    {
+        public Datetime Value { get; }
+        public NewTimestampTimestamp(Datetime value) { Value = value; }
+    }
+
     /// <summary>WIT record
     /// <c>wasi:filesystem/types.metadata-hash-value</c>:
     /// <code>record metadata-hash-value { lower: u64, upper: u64 }</code>
@@ -477,6 +502,37 @@ namespace Wacs.WASI.Preview2.Filesystem
             // hosts override with stat()-derived inode/device
             // pairs.
             ulong lower = (ulong)Path.GetHashCode();
+            ulong upper = lower * 0x9E3779B97F4A7C15UL;
+            return new MetadataHashValue(lower, upper);
+        }
+
+        /// <summary>Update access + modification timestamps.
+        /// Each arg picks one of three cases (no-change, now,
+        /// or a specific datetime) — the host applies the
+        /// corresponding utime semantics.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("set-times")]
+        public virtual void SetTimes(NewTimestamp dataAccessTimestamp,
+            NewTimestamp dataModificationTimestamp) { }
+
+        /// <summary>Update timestamps at a relative
+        /// path.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("set-times-at")]
+        public virtual void SetTimesAt(PathFlags pathFlags, string path,
+            NewTimestamp dataAccessTimestamp,
+            NewTimestamp dataModificationTimestamp) { }
+
+        /// <summary>Hash the file at a relative path. Pairs
+        /// with <see cref="MetadataHash"/>; default impl
+        /// hashes the full combined path string.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("metadata-hash-at")]
+        public virtual MetadataHashValue MetadataHashAt(
+            PathFlags pathFlags, string path)
+        {
+            var fullPath = System.IO.Path.Combine(Path, path);
+            ulong lower = (ulong)fullPath.GetHashCode();
             ulong upper = lower * 0x9E3779B97F4A7C15UL;
             return new MetadataHashValue(lower, upper);
         }

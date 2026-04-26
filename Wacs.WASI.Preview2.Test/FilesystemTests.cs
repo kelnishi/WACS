@@ -170,6 +170,50 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal("src", desc.LastPath);
         }
 
+        private sealed class SetTimesDescriptor : Descriptor
+        {
+            public NewTimestamp? LastAtime;
+            public NewTimestamp? LastMtime;
+            public SetTimesDescriptor() : base("/synthetic") { }
+            public override void SetTimes(NewTimestamp atime,
+                NewTimestamp mtime)
+            {
+                LastAtime = atime;
+                LastMtime = mtime;
+            }
+        }
+
+        [Fact]
+        public void SetTimes_decodes_new_timestamp_variant_params()
+        {
+            // Fixture: ask-set-times(handle) calls
+            //   set-times(NoChange, Timestamp(2000s, 0))
+            // by passing 6 wire slots for the two variants
+            // (3 each: disc + i64 sec + i32 nanos). Stub
+            // captures both args; test asserts the case
+            // dispatch + datetime payload.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-settimes-component", "fssettimes.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new SetTimesDescriptor();
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-times", (uint)handle)!);
+            Assert.IsType<NewTimestampNoChange>(desc.LastAtime);
+            Assert.IsType<NewTimestampTimestamp>(desc.LastMtime);
+            var ts = (NewTimestampTimestamp)desc.LastMtime!;
+            Assert.Equal(2000UL, ts.Value.Seconds);
+            Assert.Equal(0u, ts.Value.Nanoseconds);
+        }
+
         private sealed class StatDescriptor : Descriptor
         {
             public StatDescriptor() : base("/synthetic") { }
