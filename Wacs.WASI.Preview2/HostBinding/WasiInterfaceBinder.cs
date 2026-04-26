@@ -472,8 +472,13 @@ namespace Wacs.WASI.Preview2.HostBinding
             Type resourceType, MethodInfo m,
             ResourceContext resources)
         {
-            var importName = "[method]" + witResourceName + "."
-                + ToKebabCase(m.Name);
+            // Honor [WasiMethodName] override when the C#
+            // method name can't kebab-case back to the WIT
+            // name (e.g. WIT "get-type" can't come from
+            // GetType which clashes with Object.GetType).
+            var nameAttr = m.GetCustomAttribute<WasiMethodNameAttribute>();
+            var rawName = nameAttr?.WitName ?? ToKebabCase(m.Name);
+            var importName = "[method]" + witResourceName + "." + rawName;
             var paramInfos = m.GetParameters();
 
             // [WasiStreamResult]-tagged methods canon-lower to
@@ -497,6 +502,18 @@ namespace Wacs.WASI.Preview2.HostBinding
                 BindErrorResultResourceMethodReturningResource(
                     runtime, namespaceName, importName, table,
                     resourceType, m, resources);
+                return;
+            }
+
+            // [WasiErrorResult]-tagged + enum return →
+            // result<enum, error-code> on a resource method.
+            // Used by descriptor.get-type / similar.
+            if (m.GetCustomAttribute<WasiErrorResultAttribute>() != null
+                && m.ReturnType.IsEnum)
+            {
+                BindErrorResultEnumReturnResourceMethod(
+                    runtime, namespaceName, importName, table,
+                    resourceType, m);
                 return;
             }
 
@@ -1028,6 +1045,41 @@ namespace Wacs.WASI.Preview2.HostBinding
             var bindClosed = bindOpen.MakeGenericMethod(delegateType);
             bindClosed.Invoke(runtime,
                 new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Resource method tagged
+        /// [WasiErrorResult] returning an enum —
+        /// result&lt;enum, error-code&gt;. Both sides are
+        /// no-payload variants; wire form is 1-byte outer disc
+        /// + 1-byte inner enum disc at retArea+1 (no padding
+        /// since both align to 1).</summary>
+        private static void BindErrorResultEnumReturnResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable selfTable,
+            Type resourceType, MethodInfo m)
+        {
+            if (m.GetParameters().Length != 0)
+                throw new InvalidOperationException(
+                    "[WasiErrorResult] enum-return resource "
+                    + "method '" + m.Name + "' takes params — "
+                    + "v0 only handles zero-arg get-* methods.");
+
+            // Wire signature: ExecContext, handle, retAreaPtr.
+            var delegateType = typeof(Action<ExecContext, int, int>);
+
+            void Body(ExecContext ctx, int handle, int retAreaPtr)
+            {
+                var inst = selfTable.Get(handle);
+                var ret = m.Invoke(inst, Array.Empty<object?>())!;
+                // Convert enum to its underlying byte.
+                byte v = System.Convert.ToByte(ret);
+                var memory = ctx.DefaultMemory.Data;
+                memory[retAreaPtr] = 0;       // Ok disc
+                memory[retAreaPtr + 1] = v;   // enum value
+            }
+
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (namespaceName, importName), Body);
         }
 
         /// <summary>Resource method returning another resource
