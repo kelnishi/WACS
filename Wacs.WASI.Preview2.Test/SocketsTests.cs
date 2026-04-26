@@ -98,6 +98,34 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(1, resources.TableFor(typeof(TcpSocket)).Count);
         }
 
+        [Fact]
+        public void TcpSocket_keep_alive_idle_time_and_count_round_trip()
+        {
+            // Fixture: ask-keepalive(handle) walks
+            //   set-keep-alive-idle-time(1000)  (u64 param)
+            //   set-keep-alive-count(5)          (u32 param)
+            //   keep-alive-count()               (result<u32, _>)
+            // and returns the count u32 from retArea+4.
+            // Verifies u32 result-wrapped getter wire shape.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-tcp-keepalive-component", "tcpkeepalive.component.wasm"));
+            var resources = new ResourceContext();
+            var sock = new TcpSocket(IpAddressFamily.Ipv4);
+            int handle = resources.TableFor(typeof(TcpSocket))
+                .Allocate(sock);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<TcpSocket>(
+                    "wasi:sockets/tcp@0.2.3", resources);
+            });
+
+            Assert.Equal(5u, (uint)ci.Invoke(
+                "ask-keepalive", (uint)handle)!);
+            Assert.Equal(1000UL, sock.KeepAliveIdleTime());
+            Assert.Equal(5u, sock.KeepAliveCount());
+        }
+
         private sealed class OptionsTcpSocket : TcpSocket
         {
             public OptionsTcpSocket() : base(IpAddressFamily.Ipv4)

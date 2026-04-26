@@ -129,6 +129,35 @@ namespace Wacs.WASI.Preview2.Sockets
         public virtual void SetKeepAliveEnabled(bool value)
             => _keepAliveEnabled = value;
 
+        /// <summary>SO_KEEPALIVE idle-time getter (nanoseconds
+        /// before the first keep-alive probe).</summary>
+        [WasiErrorResult]
+        [WasiMethodName("keep-alive-idle-time")]
+        public virtual ulong KeepAliveIdleTime() => _keepAliveIdleTime;
+
+        [WasiErrorResult]
+        [WasiMethodName("set-keep-alive-idle-time")]
+        public virtual void SetKeepAliveIdleTime(ulong value)
+            => _keepAliveIdleTime = value;
+
+        [WasiErrorResult]
+        [WasiMethodName("keep-alive-interval")]
+        public virtual ulong KeepAliveInterval() => _keepAliveInterval;
+
+        [WasiErrorResult]
+        [WasiMethodName("set-keep-alive-interval")]
+        public virtual void SetKeepAliveInterval(ulong value)
+            => _keepAliveInterval = value;
+
+        [WasiErrorResult]
+        [WasiMethodName("keep-alive-count")]
+        public virtual uint KeepAliveCount() => _keepAliveCount;
+
+        [WasiErrorResult]
+        [WasiMethodName("set-keep-alive-count")]
+        public virtual void SetKeepAliveCount(uint value)
+            => _keepAliveCount = value;
+
         /// <summary>IP_TTL / IPV6_UNICAST_HOPS getter.</summary>
         [WasiErrorResult]
         [WasiMethodName("hop-limit")]
@@ -164,6 +193,9 @@ namespace Wacs.WASI.Preview2.Sockets
         protected byte _hopLimit = 64;
         protected ulong _receiveBufferSize = 65_536;
         protected ulong _sendBufferSize = 65_536;
+        protected ulong _keepAliveIdleTime = 7_200UL * 1_000_000_000UL;
+        protected ulong _keepAliveInterval = 75UL * 1_000_000_000UL;
+        protected uint _keepAliveCount = 9;
 
         public virtual void Dispose() { }
     }
