@@ -44,12 +44,24 @@ namespace Wacs.ComponentModel.Runtime.Parser
         Type = 6,
     }
 
+    /// <summary>Aliastarget kinds. <c>InstanceExport</c> covers
+    /// both component-instance (0x00) and core-instance (0x01)
+    /// exports — they differ only in which index space they
+    /// reference. <c>Outer</c> reaches up the lexical component
+    /// chain.</summary>
+    public enum AliasTargetKind : byte
+    {
+        ComponentInstanceExport = 0x00,
+        CoreInstanceExport = 0x01,
+        Outer = 0x02,
+    }
+
     /// <summary>
-    /// A single alias entry's sort + target-kind descriptor.
-    /// The aliastarget payload (instance idx + name, or outer
-    /// component offset) is consumed during decode but not
-    /// surfaced here — the parser's current use is counting
-    /// which aliases contribute to which index space.
+    /// A single alias entry's sort + target descriptor. Surfaces
+    /// the aliastarget payload so downstream consumers can
+    /// resolve aliases through the composition tree (sub-component
+    /// instantiation needs <see cref="InstanceIdx"/> +
+    /// <see cref="ExportName"/> to bind).
     /// </summary>
     public sealed class ComponentAliasEntry
     {
@@ -58,11 +70,33 @@ namespace Wacs.ComponentModel.Runtime.Parser
         /// <see cref="AliasSort.CoreSort"/>; selects which core
         /// space the alias populates.</summary>
         public CoreAliasKind? CoreKind { get; }
+        public AliasTargetKind TargetKind { get; }
+        /// <summary>For instance-export targets: which instance
+        /// is the alias drawn from. <c>null</c> for outer
+        /// aliases.</summary>
+        public uint? InstanceIdx { get; }
+        /// <summary>For instance-export targets: which named
+        /// export of that instance the alias resolves to.
+        /// <c>null</c> for outer aliases.</summary>
+        public string? ExportName { get; }
+        /// <summary>For outer aliases: how many components to
+        /// climb. <c>null</c> for instance-export targets.</summary>
+        public uint? OuterCount { get; }
+        /// <summary>For outer aliases: index in the outer
+        /// space. <c>null</c> for instance-export targets.</summary>
+        public uint? OuterIdx { get; }
 
-        public ComponentAliasEntry(AliasSort sort, CoreAliasKind? coreKind)
+        public ComponentAliasEntry(AliasSort sort, CoreAliasKind? coreKind,
+            AliasTargetKind targetKind, uint? instanceIdx,
+            string? exportName, uint? outerCount, uint? outerIdx)
         {
             Sort = sort;
             CoreKind = coreKind;
+            TargetKind = targetKind;
+            InstanceIdx = instanceIdx;
+            ExportName = exportName;
+            OuterCount = outerCount;
+            OuterIdx = outerIdx;
         }
 
         /// <summary>True iff this alias adds to the COMPONENT
@@ -110,28 +144,38 @@ namespace Wacs.ComponentModel.Runtime.Parser
                 sort = (AliasSort)sortByte;
             }
 
-            // Consume the aliastarget body. Its content doesn't
-            // matter for our counting — we just need to advance
-            // past it so the next entry parses from the right
-            // offset.
             var targetTag = r.ReadByte();
             switch (targetTag)
             {
                 case 0x00:    // component-instance export
+                {
+                    var instIdx = r.ReadVarU32();
+                    var name = r.ReadName();
+                    return new ComponentAliasEntry(sort, coreKind,
+                        AliasTargetKind.ComponentInstanceExport,
+                        instIdx, name, null, null);
+                }
                 case 0x01:    // core-instance export
-                    r.ReadVarU32();    // instance idx
-                    r.ReadName();      // name
-                    break;
+                {
+                    var instIdx = r.ReadVarU32();
+                    var name = r.ReadName();
+                    return new ComponentAliasEntry(sort, coreKind,
+                        AliasTargetKind.CoreInstanceExport,
+                        instIdx, name, null, null);
+                }
                 case 0x02:    // outer alias
-                    r.ReadVarU32();    // outer-component count
-                    r.ReadVarU32();    // index in outer space
-                    break;
+                {
+                    var outerCount = r.ReadVarU32();
+                    var outerIdx = r.ReadVarU32();
+                    return new ComponentAliasEntry(sort, coreKind,
+                        AliasTargetKind.Outer,
+                        null, null, outerCount, outerIdx);
+                }
                 default:
                     throw new FormatException(
                         $"Unknown aliastarget tag 0x{targetTag:X2}. "
                         + "Expected 0x00/0x01/0x02.");
             }
-            return new ComponentAliasEntry(sort, coreKind);
         }
     }
 }

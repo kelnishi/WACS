@@ -183,6 +183,51 @@ namespace Wacs.ComponentModel.Runtime
         private IReadOnlyList<Parser.CanonEntry>? _canons;
 
         /// <summary>
+        /// Decoded component-instance entries — each describes
+        /// one instantiation (of a nested component or as an
+        /// inline-export bundle). Allocates a fresh slot in the
+        /// component-instance index space; aliases reach into
+        /// these instances' export tables to populate the outer
+        /// component's other index spaces.
+        /// </summary>
+        public IReadOnlyList<Parser.ComponentInstanceEntry> Instances
+        {
+            get
+            {
+                if (_instances != null) return _instances;
+                var list = new List<Parser.ComponentInstanceEntry>();
+                foreach (var s in RawSections)
+                    if (s.Id == Parser.ComponentSectionId.Instance)
+                        list.AddRange(Parser.InstanceSectionReader.Decode(s.Payload));
+                _instances = list;
+                return list;
+            }
+        }
+        private IReadOnlyList<Parser.ComponentInstanceEntry>? _instances;
+
+        /// <summary>
+        /// Decoded alias entries in file order. Aliases populate
+        /// index spaces by reaching into nested instances'
+        /// exports or up the lexical-component chain. The
+        /// component-func resolver uses these to map outer
+        /// exports through to inner functions.
+        /// </summary>
+        public IReadOnlyList<Parser.ComponentAliasEntry> Aliases
+        {
+            get
+            {
+                if (_aliases != null) return _aliases;
+                var list = new List<Parser.ComponentAliasEntry>();
+                foreach (var s in RawSections)
+                    if (s.Id == Parser.ComponentSectionId.Alias)
+                        list.AddRange(Parser.AliasSectionReader.Decode(s.Payload));
+                _aliases = list;
+                return list;
+            }
+        }
+        private IReadOnlyList<Parser.ComponentAliasEntry>? _aliases;
+
+        /// <summary>
         /// Decoded deftype table — the component's type space.
         /// <see cref="Parser.CanonLift.TypeIdx"/> /
         /// <see cref="Parser.ComponentExportEntry.TypeAscription"/>
