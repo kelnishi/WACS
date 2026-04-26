@@ -1002,27 +1002,37 @@ namespace Wacs.WASI.Preview2.HostBinding
             // Recognized param shapes:
             //   1. Zero params.
             //   2. One byte[] (list<u8>) — expands to 2 wire i32s
-            //      (dataPtr, len).
+            //      (dataPtr, len). MUST be first when present.
             //   3. Any number of primitive params — each takes
             //      one wire slot (i32 or i64 per ToWireType).
-            //   4. byte[] as the FIRST param + N primitive params
-            //      (e.g. descriptor.write(buffer, offset)).
-            //   5. Borrow<resource> params — 1 wire slot (handle
+            //   4. Borrow<resource> params — 1 wire slot (handle
             //      resolved via ResourceContext at the boundary).
+            //   5. option<ip-socket-address> param tagged
+            //      [WasiOptionalParam] — 13 wire slots (option
+            //      disc + 12 ip-socket-address flat slots).
             bool hasBytesParam = false;
             int bytesParamIndex = -1;
+            bool IsOptionalIpAddrParam(ParameterInfo p)
+                => p.ParameterType == typeof(
+                       Wacs.WASI.Preview2.Sockets.IpSocketAddress)
+                   && p.GetCustomAttribute<
+                       WasiOptionalParamAttribute>() != null;
             for (int i = 0; i < paramInfos.Length; i++)
             {
-                if (paramInfos[i].ParameterType == typeof(byte[]))
+                var pt = paramInfos[i].ParameterType;
+                if (pt == typeof(byte[]))
                 {
                     if (hasBytesParam)
                         return;   // multiple byte[] params unsupported
                     hasBytesParam = true;
                     bytesParamIndex = i;
                 }
-                else if (!IsPrimitive(paramInfos[i].ParameterType)
-                    && paramInfos[i].ParameterType.GetCustomAttribute<
-                        WasiResourceAttribute>() == null)
+                else if (IsOptionalIpAddrParam(paramInfos[i]))
+                {
+                    // OK — handled specially below.
+                }
+                else if (!IsPrimitive(pt)
+                    && pt.GetCustomAttribute<WasiResourceAttribute>() == null)
                 {
                     return;   // unsupported (string / record / etc.)
                 }
@@ -1030,16 +1040,18 @@ namespace Wacs.WASI.Preview2.HostBinding
             if (hasBytesParam && bytesParamIndex != 0)
                 return;   // byte[] must be first for v0
 
-            // Wire signature: ExecContext, handle, [params...],
-            // retAreaPtr → void. byte[] expands to 2 i32s
-            // (dataPtr, len); primitives go through ToWireType.
-            // Mixed shape (byte[] first + primitives after)
-            // produces the byte[] expansion followed by each
-            // primitive wire slot.
-            int primParamCount = paramInfos.Length - (hasBytesParam ? 1 : 0);
+            // Per-param wire-slot count.
+            int SlotsFor(ParameterInfo p)
+            {
+                if (p.ParameterType == typeof(byte[])) return 2;
+                if (IsOptionalIpAddrParam(p)) return 13;
+                return 1;
+            }
+            int paramSlotsTotal = 0;
+            foreach (var p in paramInfos)
+                paramSlotsTotal += SlotsFor(p);
             int wireParamCount = 1 /*handle*/
-                + (hasBytesParam ? 2 : 0)
-                + primParamCount
+                + paramSlotsTotal
                 + 1 /*retArea*/;
             var wireParamTypes = new Type[wireParamCount + 1];
             wireParamTypes[0] = typeof(ExecContext);
@@ -1048,19 +1060,22 @@ namespace Wacs.WASI.Preview2.HostBinding
             Type WireOf(Type pt)
                 => pt.GetCustomAttribute<WasiResourceAttribute>() != null
                     ? typeof(int) : ToWireType(pt);
-            if (hasBytesParam)
+            foreach (var p in paramInfos)
             {
-                wireParamTypes[ti++] = typeof(int);   // dataPtr
-                wireParamTypes[ti++] = typeof(int);   // len
-                // Following primitive/borrow params (after the
-                // byte[] at index 0).
-                for (int i = 1; i < paramInfos.Length; i++)
-                    wireParamTypes[ti++] = WireOf(paramInfos[i].ParameterType);
-            }
-            else
-            {
-                foreach (var p in paramInfos)
+                if (p.ParameterType == typeof(byte[]))
+                {
+                    wireParamTypes[ti++] = typeof(int);   // dataPtr
+                    wireParamTypes[ti++] = typeof(int);   // len
+                }
+                else if (IsOptionalIpAddrParam(p))
+                {
+                    for (int k = 0; k < 13; k++)
+                        wireParamTypes[ti++] = typeof(int);
+                }
+                else
+                {
                     wireParamTypes[ti++] = WireOf(p.ParameterType);
+                }
             }
             wireParamTypes[ti] = typeof(int);   // retArea
 
@@ -1331,51 +1346,91 @@ namespace Wacs.WASI.Preview2.HostBinding
             var lambdaParams = new ParameterExpression[wireParamTypes.Length];
             lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
             lambdaParams[1] = Expression.Parameter(typeof(int), "self");
-            // Compute lambda param names — handle, [dataPtr,
-            // len], [primitive names], retAreaPtr.
+            // Compute lambda param names per host param — byte[]
+            // expands to (ptr, len), option<ip-socket-address>
+            // expands to 13 slots, others to 1 slot.
             int idx = 2;
             ParameterExpression dataPtrParam = Expression.Parameter(typeof(int), "dataPtr");
             ParameterExpression lenParam = Expression.Parameter(typeof(int), "len");
-            if (hasBytesParam)
+            foreach (var p in paramInfos)
             {
-                lambdaParams[idx++] = dataPtrParam;
-                lambdaParams[idx++] = lenParam;
+                if (p.ParameterType == typeof(byte[]))
+                {
+                    lambdaParams[idx++] = dataPtrParam;
+                    lambdaParams[idx++] = lenParam;
+                }
+                else if (IsOptionalIpAddrParam(p))
+                {
+                    lambdaParams[idx++] = Expression.Parameter(
+                        typeof(int), p.Name + "_optDisc");
+                    lambdaParams[idx++] = Expression.Parameter(
+                        typeof(int), p.Name + "_disc");
+                    for (int k = 1; k <= 11; k++)
+                        lambdaParams[idx++] = Expression.Parameter(
+                            typeof(int), p.Name + "_s" + k);
+                }
+                else
+                {
+                    lambdaParams[idx++] = Expression.Parameter(
+                        wireParamTypes[idx - 1], p.Name);
+                }
             }
-            // Following primitive params: skip the byte[] index
-            // when computing names.
-            int firstPrimIdx = hasBytesParam ? 1 : 0;
-            for (int p = firstPrimIdx; p < paramInfos.Length; p++)
-                lambdaParams[idx++] = Expression.Parameter(
-                    wireParamTypes[idx - 1], paramInfos[p].Name);
             var retAreaParam = Expression.Parameter(typeof(int), "retAreaPtr");
             lambdaParams[wireParamTypes.Length - 1] = retAreaParam;
 
-            // Build primitive/borrow-param array — converts each
-            // wire-typed lambda param back to its host type.
-            // Borrow<resource> params look up the handle via
-            // ResourceContext.
-            int primStart = hasBytesParam ? 4 : 2;   // ctx+handle+(dataPtr+len)
-            int primCount = paramInfos.Length - (hasBytesParam ? 1 : 0);
+            // Build host-arg array — converts each wire param
+            // group back to its host type. Borrow<resource>
+            // looks up via ResourceContext; option<ip-socket-
+            // address> calls DecodeOptionalIpSocketAddress;
+            // byte[] is handled outside this array (passed via
+            // dataPtr/len directly to Body).
             var hasBorrowParam = paramInfos.Any(p =>
                 p.ParameterType.GetCustomAttribute<
                     WasiResourceAttribute>() != null);
-            if (hasBorrowParam && resources == null)
+            var hasOptionalIpAddr = paramInfos.Any(IsOptionalIpAddrParam);
+            if ((hasBorrowParam || hasOptionalIpAddr) && resources == null)
                 throw new InvalidOperationException(
                     "[WasiStreamResult] method '" + m.Name
-                    + "' takes a borrow<resource> param but no "
+                    + "' takes a resource-typed param but no "
                     + "ResourceContext was supplied.");
-            var contextConst = hasBorrowParam
+            var contextConst = (hasBorrowParam || hasOptionalIpAddr)
                 ? (Expression)Expression.Constant(resources!)
                 : Expression.Constant(null, typeof(ResourceContext));
             var tableForMethod = typeof(ResourceContext).GetMethod(
                 nameof(ResourceContext.TableFor))!;
             var getResourceMethod = typeof(ResourceTable).GetMethod(
                 nameof(ResourceTable.Get))!;
-            var primExprs = new Expression[primCount];
-            for (int i = 0; i < primCount; i++)
+            var decodeOptIpAddrMethod = typeof(WasiInterfaceBinder)
+                .GetMethod(nameof(DecodeOptionalIpSocketAddressFromFlatWire),
+                    BindingFlags.Static | BindingFlags.NonPublic)!;
+
+            // Walk lambda params per host-param slot count to
+            // build per-host-param expressions. byte[] params
+            // skip the host-arg array (Body uses dataPtr/len).
+            int slotIdx = 2;   // after ctx + self
+            int hostArgCount = paramInfos.Count(p =>
+                p.ParameterType != typeof(byte[]));
+            var primExprs = new Expression[hostArgCount];
+            int hostIdx = 0;
+            foreach (var p in paramInfos)
             {
-                var p = paramInfos[i + (hasBytesParam ? 1 : 0)];
-                Expression e = lambdaParams[primStart + i];
+                if (p.ParameterType == typeof(byte[]))
+                {
+                    slotIdx += 2;
+                    continue;
+                }
+                if (IsOptionalIpAddrParam(p))
+                {
+                    var slotArgs = new Expression[13];
+                    for (int k = 0; k < 13; k++)
+                        slotArgs[k] = lambdaParams[slotIdx + k];
+                    primExprs[hostIdx++] = Expression.Convert(
+                        Expression.Call(decodeOptIpAddrMethod, slotArgs),
+                        typeof(object));
+                    slotIdx += 13;
+                    continue;
+                }
+                Expression e = lambdaParams[slotIdx++];
                 if (p.ParameterType.GetCustomAttribute<
                     WasiResourceAttribute>() != null)
                 {
@@ -1393,9 +1448,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                     else
                         e = Expression.Convert(e, p.ParameterType);
                 }
-                primExprs[i] = Expression.Convert(e, typeof(object));
+                primExprs[hostIdx++] = Expression.Convert(e, typeof(object));
             }
-            var primArr = primCount == 0
+            var primArr = hostArgCount == 0
                 ? Expression.NewArrayBounds(typeof(object),
                     Expression.Constant(0))
                 : (Expression)Expression.NewArrayInit(typeof(object), primExprs);
@@ -2724,6 +2779,21 @@ namespace Wacs.WASI.Preview2.HostBinding
         /// width (size bytes per field). Mirrors the canonical-
         /// ABI alignment rule "alignment(P) = sizeof(P)" for
         /// primitives.</summary>
+        /// <summary>Decode a flat-lowered
+        /// <c>option&lt;ip-socket-address&gt;</c> from its 13
+        /// wire slots: 1 option disc + 12 inner ip-socket-
+        /// address slots. Returns null when option disc is 0.
+        /// </summary>
+        private static Wacs.WASI.Preview2.Sockets.IpSocketAddress?
+            DecodeOptionalIpSocketAddressFromFlatWire(int optionDisc,
+                int variantDisc, int s1, int s2, int s3, int s4, int s5,
+                int s6, int s7, int s8, int s9, int s10, int s11)
+        {
+            if (optionDisc == 0) return null;
+            return DecodeIpSocketAddressFromFlatWire(variantDisc,
+                s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11);
+        }
+
         /// <summary>Decode a flat-lowered
         /// <c>ip-socket-address</c> param from its 12 wire
         /// slots: 1 disc + 11 joined-payload slots (all i32).

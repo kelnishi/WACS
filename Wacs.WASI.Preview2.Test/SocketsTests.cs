@@ -448,6 +448,84 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(ShutdownType.Both, sock.LastShutdown);
         }
 
+        private sealed class CapturingUdpSocket : UdpSocket
+        {
+            public IpSocketAddress? CapturedRemote;
+            public bool RemoteWasNull;
+            public CapturingUdpSocket() : base(IpAddressFamily.Ipv4) { }
+            public override (IncomingDatagramStream, OutgoingDatagramStream)
+                UdpStream(IpSocketAddress? remoteAddress)
+            {
+                CapturedRemote = remoteAddress;
+                RemoteWasNull = remoteAddress == null;
+                return (new IncomingDatagramStream(),
+                    new OutgoingDatagramStream());
+            }
+        }
+
+        [Fact]
+        public void UdpSocket_stream_with_none_remote_address()
+        {
+            // Fixture: ask-stream-none(handle) calls
+            // %stream(None) — passes option-disc=0 + 12 zero
+            // payload slots. Returns count of non-zero handles
+            // (2). Stub asserts the option decoded to null.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-udp-stream-component", "udpstream.component.wasm"));
+            var resources = new ResourceContext();
+            var sock = new CapturingUdpSocket();
+            int handle = resources.TableFor(typeof(UdpSocket))
+                .Allocate(sock);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<UdpSocket>(
+                    "wasi:sockets/udp@0.2.3", resources);
+                runtime.BindWasiResource<IncomingDatagramStream>(
+                    "wasi:sockets/udp@0.2.3", resources);
+                runtime.BindWasiResource<OutgoingDatagramStream>(
+                    "wasi:sockets/udp@0.2.3", resources);
+            });
+
+            Assert.Equal(2u, (uint)ci.Invoke(
+                "ask-stream-none", (uint)handle)!);
+            Assert.True(sock.RemoteWasNull);
+            Assert.Null(sock.CapturedRemote);
+        }
+
+        [Fact]
+        public void UdpSocket_stream_with_some_ipv4_remote_address()
+        {
+            // Same fixture, ask-stream-some passes
+            // option<ip-socket-address> = Some(ipv4(127.0.0.1:5000)).
+            // Wire: option-disc=1, variant-disc=0, port=5000,
+            // 4 address bytes, then 7 don't-care padding slots.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-udp-stream-component", "udpstream.component.wasm"));
+            var resources = new ResourceContext();
+            var sock = new CapturingUdpSocket();
+            int handle = resources.TableFor(typeof(UdpSocket))
+                .Allocate(sock);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<UdpSocket>(
+                    "wasi:sockets/udp@0.2.3", resources);
+                runtime.BindWasiResource<IncomingDatagramStream>(
+                    "wasi:sockets/udp@0.2.3", resources);
+                runtime.BindWasiResource<OutgoingDatagramStream>(
+                    "wasi:sockets/udp@0.2.3", resources);
+            });
+
+            Assert.Equal(2u, (uint)ci.Invoke(
+                "ask-stream-some", (uint)handle)!);
+            Assert.False(sock.RemoteWasNull);
+            Assert.IsType<Ipv4SocketAddress>(sock.CapturedRemote);
+            var v4 = (Ipv4SocketAddress)sock.CapturedRemote!;
+            Assert.Equal(5000, v4.Port);
+            Assert.Equal(new byte[] { 127, 0, 0, 1 }, v4.Address);
+        }
+
         private sealed class StubNameLookup : IIpNameLookup
         {
             public string LastName = "";
