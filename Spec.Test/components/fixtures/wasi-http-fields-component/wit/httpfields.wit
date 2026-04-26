@@ -1,0 +1,10 @@
+package local:httpfields;
+world demo {
+    import wasi:http/types@0.2.3;
+    /// Calls fields.delete(handle, "X-Custom"); returns
+    /// the outer disc byte (always-Ok = 0).
+    export ask-delete: func(handle: u32) -> u32;
+    /// Calls fields.clone(handle); drops the returned
+    /// handle. Returns 1 if a non-zero handle came back.
+    export ask-clone: func(handle: u32) -> u32;
+}

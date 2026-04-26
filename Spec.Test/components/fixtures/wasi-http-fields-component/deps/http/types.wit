@@ -1,0 +1,13 @@
+package wasi:http@0.2.3;
+interface types {
+    variant header-error {
+        invalid-syntax,
+        forbidden,
+        immutable,
+    }
+    type field-key = string;
+    resource fields {
+        delete: func(name: field-key) -> result<_, header-error>;
+        clone: func() -> fields;
+    }
+}
