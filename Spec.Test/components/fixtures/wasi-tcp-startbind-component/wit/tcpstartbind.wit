@@ -1,0 +1,9 @@
+package local:tcpstartbind;
+world demo {
+    import wasi:sockets/tcp@0.2.3;
+    /// Calls start-bind(network, ipv4(127.0.0.1:9000)).
+    /// Returns the outer disc (always-Ok = 0).
+    export ask-bind: func(handle: u32, net: u32) -> u32;
+    /// Same shape but ipv6([::1]:443).
+    export ask-bind-v6: func(handle: u32, net: u32) -> u32;
+}
