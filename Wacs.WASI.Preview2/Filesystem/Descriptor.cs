@@ -12,6 +12,42 @@ using Wacs.WASI.Preview2.Io;
 
 namespace Wacs.WASI.Preview2.Filesystem
 {
+    /// <summary>WIT flags
+    /// <c>wasi:filesystem/types.path-flags</c>. Wire form is
+    /// i32 with one bit per flag.</summary>
+    [System.Flags]
+    public enum PathFlags : uint
+    {
+        None = 0,
+        SymlinkFollow = 1 << 0,
+    }
+
+    /// <summary>WIT flags
+    /// <c>wasi:filesystem/types.open-flags</c>.</summary>
+    [System.Flags]
+    public enum OpenFlags : uint
+    {
+        None = 0,
+        Create = 1 << 0,
+        Directory = 1 << 1,
+        Exclusive = 1 << 2,
+        Truncate = 1 << 3,
+    }
+
+    /// <summary>WIT flags
+    /// <c>wasi:filesystem/types.descriptor-flags</c>.</summary>
+    [System.Flags]
+    public enum DescriptorFlags : uint
+    {
+        None = 0,
+        Read = 1 << 0,
+        Write = 1 << 1,
+        FileIntegritySync = 1 << 2,
+        DataIntegritySync = 1 << 3,
+        RequestedWriteSync = 1 << 4,
+        MutateDirectory = 1 << 5,
+    }
+
     /// <summary>WIT enum
     /// <c>wasi:filesystem/types.descriptor-type</c>. The wire
     /// representation is a 1-byte discriminator; the host
@@ -147,6 +183,28 @@ namespace Wacs.WASI.Preview2.Filesystem
                 fs.Seek((long)offset, SeekOrigin.Begin);
             fs.Write(buffer, 0, buffer.Length);
             return (ulong)buffer.Length;
+        }
+
+        /// <summary>Open or create a file/directory relative to
+        /// this descriptor (treated as a directory) at
+        /// <paramref name="path"/>. Returns a fresh
+        /// <see cref="Descriptor"/> for the opened entry.
+        /// Default impl honors <see cref="OpenFlags.Create"/> by
+        /// touching the target file; the resulting descriptor's
+        /// behavior comes from the base class.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("open-at")]
+        public virtual Descriptor OpenAt(PathFlags pathFlags, string path,
+            OpenFlags openFlags, DescriptorFlags flags)
+        {
+            var fullPath = System.IO.Path.Combine(Path, path);
+            if ((openFlags & OpenFlags.Create) != 0
+                && !File.Exists(fullPath)
+                && !Directory.Exists(fullPath))
+            {
+                File.WriteAllBytes(fullPath, System.Array.Empty<byte>());
+            }
+            return new Descriptor(fullPath);
         }
 
         public virtual void Dispose() { }

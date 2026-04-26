@@ -201,6 +201,61 @@ namespace Wacs.WASI.Preview2.Test
                 (uint)ci.Invoke("ask-type", (uint)handle)!);
         }
 
+        private sealed class OpenAtDescriptor : Descriptor
+        {
+            public string LastPath = "";
+            public PathFlags LastPathFlags;
+            public OpenFlags LastOpenFlags;
+            public DescriptorFlags LastDescriptorFlags;
+            public OpenAtDescriptor() : base("/synthetic") { }
+            public override Descriptor OpenAt(PathFlags pathFlags,
+                string path, OpenFlags openFlags,
+                DescriptorFlags descriptorFlags)
+            {
+                LastPath = path;
+                LastPathFlags = pathFlags;
+                LastOpenFlags = openFlags;
+                LastDescriptorFlags = descriptorFlags;
+                return new Descriptor("/synthetic/" + path);
+            }
+        }
+
+        [Fact]
+        public void OpenAt_threads_string_param_and_returns_resource_handle()
+        {
+            // Component: ask-open(handle) calls
+            // descriptor.open-at(handle, 0, "child", Create=1, 0)
+            // and returns the i32 handle from retArea+4 (Ok
+            // payload of result<own<descriptor>, error-code>).
+            // Drops the returned handle so resource-table count
+            // is clean. Test asserts: returned handle is non-
+            // zero, host received the right path + flags, and
+            // the returned descriptor's table is empty after
+            // drop.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-open-component", "fsopen.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new OpenAtDescriptor();
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            uint returned = (uint)ci.Invoke(
+                "ask-open", (uint)handle)!;
+            Assert.NotEqual(0u, returned);
+            Assert.Equal("child", desc.LastPath);
+            Assert.Equal(OpenFlags.Create, desc.LastOpenFlags);
+            Assert.Equal(PathFlags.None, desc.LastPathFlags);
+            Assert.Equal(DescriptorFlags.None, desc.LastDescriptorFlags);
+            // After drop only the original descriptor remains.
+            Assert.Equal(1, resources.TableFor(typeof(Descriptor)).Count);
+        }
+
         [Fact]
         public void ReadViaStream_yields_input_stream_then_read_returns_bytes()
         {
