@@ -6,7 +6,9 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using System.IO;
 using Wacs.WASI.Preview2.HostBinding;
+using Wacs.WASI.Preview2.Io;
 
 namespace Wacs.WASI.Preview2.Filesystem
 {
@@ -15,13 +17,12 @@ namespace Wacs.WASI.Preview2.Filesystem
     /// <c>descriptor</c> resource. Stands in for an opened file
     /// or directory.
     ///
-    /// <para>v0 ships the resource as a marker — no methods.
-    /// Guests can receive descriptor handles from
-    /// <c>wasi:filesystem/preopens.get-directories</c> but
-    /// can't yet operate on them. The full method surface
-    /// (read-via-stream, write-via-stream, stat, etc.) is a
-    /// follow-up; this commit lands the type so preopens has
-    /// something to return.</para>
+    /// <para>v0 ships the bridge methods (read-via-stream,
+    /// write-via-stream, append-via-stream) that turn a
+    /// descriptor into an input/output-stream. The remaining
+    /// ~25 descriptor methods (open-at, stat, get-type,
+    /// readlink-at, etc.) ride incrementally as their wire
+    /// shapes become tractable.</para>
     /// </summary>
     [WasiResource("descriptor")]
     public class Descriptor : IDisposable
@@ -37,6 +38,93 @@ namespace Wacs.WASI.Preview2.Filesystem
             Path = path ?? throw new ArgumentNullException(nameof(path));
         }
 
+        /// <summary>Open the file for reading from
+        /// <paramref name="offset"/>. Returns an
+        /// <see cref="InputStream"/> wrapping the underlying
+        /// host file. Default impl uses
+        /// <see cref="System.IO.File.OpenRead"/>; subclasses
+        /// override for virtual file systems.</summary>
+        [WasiErrorResult]
+        public virtual InputStream ReadViaStream(ulong offset)
+        {
+            var stream = File.OpenRead(Path);
+            if (offset > 0)
+                stream.Seek((long)offset, SeekOrigin.Begin);
+            return new HostFileInputStream(stream);
+        }
+
+        /// <summary>Open the file for writing at
+        /// <paramref name="offset"/>. Returns an
+        /// <see cref="OutputStream"/> wrapping the underlying
+        /// host file.</summary>
+        [WasiErrorResult]
+        public virtual OutputStream WriteViaStream(ulong offset)
+        {
+            var stream = File.OpenWrite(Path);
+            if (offset > 0)
+                stream.Seek((long)offset, SeekOrigin.Begin);
+            return new HostFileOutputStream(stream);
+        }
+
+        /// <summary>Open the file for appending. Returns an
+        /// <see cref="OutputStream"/> positioned at EOF.</summary>
+        [WasiErrorResult]
+        public virtual OutputStream AppendViaStream()
+        {
+            var stream = new FileStream(Path, FileMode.Append,
+                FileAccess.Write);
+            return new HostFileOutputStream(stream);
+        }
+
         public virtual void Dispose() { }
+    }
+
+    /// <summary>InputStream that wraps a host
+    /// <see cref="Stream"/> and disposes it on
+    /// <see cref="Dispose"/>. Used by Descriptor's
+    /// read-via-stream so closing the guest stream actually
+    /// releases the file.</summary>
+    public sealed class HostFileInputStream : InputStream
+    {
+        private readonly Stream _stream;
+        public HostFileInputStream(Stream stream) { _stream = stream; }
+
+        public override byte[] Read(ulong len)
+        {
+            int n = (int)System.Math.Min(len, (ulong)int.MaxValue);
+            var buf = new byte[n];
+            int read = _stream.Read(buf, 0, n);
+            if (read == n) return buf;
+            var slice = new byte[read];
+            System.Array.Copy(buf, 0, slice, 0, read);
+            return slice;
+        }
+
+        public override byte[] BlockingRead(ulong len) => Read(len);
+        public override void Dispose() { _stream.Dispose(); }
+    }
+
+    /// <summary>OutputStream that wraps a host
+    /// <see cref="Stream"/> and disposes it on
+    /// <see cref="Dispose"/>.</summary>
+    public sealed class HostFileOutputStream : OutputStream
+    {
+        private readonly Stream _stream;
+        public HostFileOutputStream(Stream stream) { _stream = stream; }
+
+        public override void Write(byte[] contents)
+        {
+            _stream.Write(contents, 0, contents.Length);
+        }
+
+        public override void BlockingWriteAndFlush(byte[] contents)
+        {
+            _stream.Write(contents, 0, contents.Length);
+            _stream.Flush();
+        }
+
+        public override void Flush() { _stream.Flush(); }
+        public override void BlockingFlush() { _stream.Flush(); }
+        public override void Dispose() { _stream.Dispose(); }
     }
 }

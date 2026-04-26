@@ -487,6 +487,19 @@ namespace Wacs.WASI.Preview2.HostBinding
                 return;
             }
 
+            // [WasiErrorResult]-tagged + resource return →
+            // result<own<TReturn>, error-code> on a resource
+            // method. Used by wasi:filesystem/types descriptor's
+            // bridge methods (read-via-stream, write-via-stream).
+            if (m.GetCustomAttribute<WasiErrorResultAttribute>() != null
+                && m.ReturnType.GetCustomAttribute<WasiResourceAttribute>() != null)
+            {
+                BindErrorResultResourceMethodReturningResource(
+                    runtime, namespaceName, importName, table,
+                    resourceType, m, resources);
+                return;
+            }
+
             // Method returns a resource → alloc handle.
             if (m.ReturnType.GetCustomAttribute<WasiResourceAttribute>() != null)
             {
@@ -912,6 +925,99 @@ namespace Wacs.WASI.Preview2.HostBinding
                 call = Expression.Invoke(bodyTarget,
                     lambdaParams[0], lambdaParams[1], argArr, retAreaParam);
             }
+            var lambda = Expression.Lambda(delegateType, call, lambdaParams);
+            var compiled = lambda.Compile();
+
+            var bindOpen = typeof(WasmRuntime).GetMethods()
+                .First(mi => mi.Name == nameof(WasmRuntime.BindHostFunction)
+                    && mi.IsGenericMethod
+                    && mi.GetParameters().Length == 2);
+            var bindClosed = bindOpen.MakeGenericMethod(delegateType);
+            bindClosed.Invoke(runtime,
+                new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Resource method tagged
+        /// [WasiErrorResult] returning another resource —
+        /// result&lt;own&lt;TReturn&gt;, error-code&gt;. The
+        /// canonical use is filesystem bridge methods like
+        /// descriptor.read-via-stream returning
+        /// own&lt;input-stream&gt;. Wire shape: (handle, ...primitive
+        /// params, retAreaPtr) → void; retArea: 1-byte outer
+        /// disc + 3-byte padding + 4-byte handle (when Ok).
+        /// Always-Ok semantics in v0.</summary>
+        private static void BindErrorResultResourceMethodReturningResource(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable selfTable,
+            Type resourceType, MethodInfo m, ResourceContext resources)
+        {
+            var paramInfos = m.GetParameters();
+            // Aggregate-param resource methods stay deferred —
+            // descriptor.read-via-stream has only u64 (filesize)
+            // beyond self, which is primitive.
+            foreach (var p in paramInfos)
+                if (!IsPrimitive(p.ParameterType))
+                    throw new InvalidOperationException(
+                        "[WasiErrorResult] resource method '" + m.Name
+                        + "' takes a non-primitive param "
+                        + p.ParameterType + " — aggregate-param "
+                        + "resource methods are a follow-up.");
+
+            // Wire signature: ExecContext, handle (i32),
+            // [host params...], retAreaPtr → void.
+            var wireParamTypes = new Type[paramInfos.Length + 3];
+            wireParamTypes[0] = typeof(ExecContext);
+            wireParamTypes[1] = typeof(int);
+            for (int i = 0; i < paramInfos.Length; i++)
+                wireParamTypes[i + 2] = ToWireType(paramInfos[i].ParameterType);
+            wireParamTypes[paramInfos.Length + 2] = typeof(int);
+
+            var delegateType = OpenActionType(wireParamTypes.Length)
+                .MakeGenericType(wireParamTypes);
+
+            var returnTable = resources.TableFor(m.ReturnType);
+
+            void Body(ExecContext ctx, int handle, object?[] hostArgs,
+                int retAreaPtr)
+            {
+                var inst = selfTable.Get(handle);
+                var ret = m.Invoke(inst, hostArgs);
+                if (ret == null)
+                    throw new InvalidOperationException(
+                        "[WasiErrorResult] resource method '" + m.Name
+                        + "' returned null — Ok payload must "
+                        + "be non-null.");
+                var memory = ctx.DefaultMemory.Data;
+                var retHandle = returnTable.Allocate(ret);
+                memory[retAreaPtr] = 0;
+                memory[retAreaPtr + 1] = 0;
+                memory[retAreaPtr + 2] = 0;
+                memory[retAreaPtr + 3] = 0;
+                WriteI32LE(memory, retAreaPtr + 4, retHandle);
+            }
+
+            var lambdaParams = new ParameterExpression[wireParamTypes.Length];
+            lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
+            lambdaParams[1] = Expression.Parameter(typeof(int), "self");
+            for (int i = 0; i < paramInfos.Length; i++)
+                lambdaParams[i + 2] = Expression.Parameter(
+                    wireParamTypes[i + 2], paramInfos[i].Name);
+            lambdaParams[paramInfos.Length + 2] =
+                Expression.Parameter(typeof(int), "retAreaPtr");
+
+            var argArr = Expression.NewArrayInit(typeof(object),
+                paramInfos.Select((p, i) =>
+                {
+                    Expression e = lambdaParams[i + 2];
+                    if (p.ParameterType != e.Type)
+                        e = Expression.Convert(e, p.ParameterType);
+                    return (Expression)Expression.Convert(e, typeof(object));
+                }).ToArray());
+            var bodyTarget = Expression.Constant(
+                (Action<ExecContext, int, object?[], int>)Body);
+            var call = Expression.Invoke(bodyTarget,
+                lambdaParams[0], lambdaParams[1], argArr,
+                lambdaParams[paramInfos.Length + 2]);
             var lambda = Expression.Lambda(delegateType, call, lambdaParams);
             var compiled = lambda.Compile();
 
