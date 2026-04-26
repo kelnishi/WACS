@@ -1,0 +1,7 @@
+package local:tcpkeepalive;
+world demo {
+    import wasi:sockets/tcp@0.2.3;
+    /// Sets idle-time and count, then reads them back. Returns
+    /// the count Ok value at retArea+4 as u32.
+    export ask-keepalive: func(handle: u32) -> u32;
+}
