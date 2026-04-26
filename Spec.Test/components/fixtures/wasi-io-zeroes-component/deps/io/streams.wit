@@ -1,0 +1,8 @@
+package wasi:io@0.2.3;
+interface streams {
+    variant stream-error { last-operation-failed, closed }
+    resource output-stream {
+        write-zeroes: func(len: u64) -> result<_, stream-error>;
+        blocking-write-zeroes-and-flush: func(len: u64) -> result<_, stream-error>;
+    }
+}

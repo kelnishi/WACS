@@ -83,5 +83,41 @@ namespace Wacs.WASI.Preview2.Test
             // After drop the table should be empty.
             Assert.Equal(0, resources.TableFor(typeof(OutputStream)).Count);
         }
+
+        public sealed class TrackingStream : OutputStream
+        {
+            public ulong LastWriteZeroes;
+            public ulong LastBlockingWriteZeroes;
+            public override void WriteZeroes(ulong len)
+                => LastWriteZeroes = len;
+            public override void BlockingWriteZeroesAndFlush(ulong len)
+                => LastBlockingWriteZeroes = len;
+        }
+
+        [Fact]
+        public void WriteZeroes_threads_u64_param_through_void_result_wrapper()
+        {
+            // Fixture: ask-zeroes(handle) calls
+            // write-zeroes(8) then blocking-write-zeroes-and-flush(16).
+            // Stub captures both lengths; test asserts both
+            // and that the outer-disc bytes summed to 0.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-io-zeroes-component", "iozeroes.component.wasm"));
+            var resources = new ResourceContext();
+            var stream = new TrackingStream();
+            int handle = resources.TableFor(typeof(OutputStream))
+                .Allocate(stream);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutputStream>(
+                    "wasi:io/streams@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-zeroes", (uint)handle)!);
+            Assert.Equal(8UL, stream.LastWriteZeroes);
+            Assert.Equal(16UL, stream.LastBlockingWriteZeroes);
+        }
     }
 }

@@ -67,6 +67,18 @@ namespace Wacs.WASI.Preview2.Io
         [WasiStreamResult]
         public virtual void BlockingFlush() { }
 
+        /// <summary>Write <paramref name="len"/> zero bytes to
+        /// the sink. Default: discard.</summary>
+        [WasiStreamResult]
+        [WasiMethodName("write-zeroes")]
+        public virtual void WriteZeroes(ulong len) { }
+
+        /// <summary>Block until <paramref name="len"/> zero
+        /// bytes are written and flushed.</summary>
+        [WasiStreamResult]
+        [WasiMethodName("blocking-write-zeroes-and-flush")]
+        public virtual void BlockingWriteZeroesAndFlush(ulong len) { }
+
         /// <summary>Subscribe to a pollable signaling when the
         /// next write won't block. Default: always-ready
         /// pollable.</summary>
