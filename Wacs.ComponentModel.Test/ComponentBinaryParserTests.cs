@@ -217,6 +217,37 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Parse_surfaces_nested_instance_and_alias_targets()
+        {
+            // nested-component fixture wires the outer's `greet`
+            // export through (instantiate component 0) +
+            // (alias export 0 "inner-greet" (func)). Verifies the
+            // newly-surfaced Instances + Aliases lists carry the
+            // exact info downstream consumers need to resolve
+            // outer exports through the composition tree.
+            var path = FindNestedComponentPath();
+            using var stream = File.OpenRead(path);
+            var component = ComponentBinaryParser.Parse(stream);
+
+            // (instance (instantiate 0)) — one InstantiateComponent
+            // entry pointing at component-idx 0 with no args.
+            var instance = Assert.Single(component.Instances);
+            var inst = Assert.IsType<InstantiateComponent>(instance);
+            Assert.Equal(0u, inst.ComponentIdx);
+            Assert.Empty(inst.Args);
+
+            // (alias export 0 "inner-greet" (func)) — one alias
+            // entry of sort=Func targeting instance 0's
+            // "inner-greet" export.
+            var alias = Assert.Single(component.Aliases);
+            Assert.Equal(AliasSort.Func, alias.Sort);
+            Assert.Equal(AliasTargetKind.ComponentInstanceExport,
+                alias.TargetKind);
+            Assert.Equal(0u, alias.InstanceIdx);
+            Assert.Equal("inner-greet", alias.ExportName);
+        }
+
+        [Fact]
         public void Parse_rejects_truncated_header()
         {
             // Valid magic + version but layer=0 → core module,
