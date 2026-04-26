@@ -127,6 +127,12 @@ namespace Wacs.WASI.Preview2.HostBinding
                         runtime, namespaceName, impl, m);
                     continue;
                 }
+                if (IsResourceArrayParamU32ArrayReturn(m))
+                {
+                    BindResourceArrayParamU32ArrayReturnMethod(
+                        runtime, namespaceName, impl, m, resources);
+                    continue;
+                }
                 // Other aggregate shapes (list<tuple<string,string>>,
                 // resources) are follow-ups — silently skipped here.
             }
@@ -138,6 +144,23 @@ namespace Wacs.WASI.Preview2.HostBinding
             foreach (var p in m.GetParameters())
                 if (!IsPrimitive(p.ParameterType)) return false;
             return true;
+        }
+
+        /// <summary>True iff the method shape matches
+        /// <c>uint[] M(TResource[])</c> where TResource is a
+        /// <see cref="WasiResourceAttribute"/>-marked type.
+        /// Drives the canon-lower wrapper for
+        /// <c>wasi:io/poll.poll</c> — list&lt;borrow&lt;pollable&gt;&gt;
+        /// in, list&lt;u32&gt; out.</summary>
+        private static bool IsResourceArrayParamU32ArrayReturn(MethodInfo m)
+        {
+            if (m.ReturnType != typeof(uint[])) return false;
+            var ps = m.GetParameters();
+            if (ps.Length != 1) return false;
+            if (!ps[0].ParameterType.IsArray) return false;
+            var elem = ps[0].ParameterType.GetElementType();
+            if (elem == null) return false;
+            return elem.GetCustomAttribute<WasiResourceAttribute>() != null;
         }
 
         private static bool IsStringArrayReturnPrimitiveParams(MethodInfo m)
@@ -2060,6 +2083,68 @@ namespace Wacs.WASI.Preview2.HostBinding
                     WriteI32LE(memory, retAreaPtr, arrayPtr);
                     WriteI32LE(memory, retAreaPtr + 4, count);
                 });
+        }
+
+        /// <summary>Canon-lower wrapper for
+        /// <c>poll(in: list&lt;borrow&lt;TResource&gt;&gt;)
+        /// -&gt; list&lt;u32&gt;</c>. The single param decodes from
+        /// (in_ptr, in_len) into a TResource[] (handles
+        /// resolved via the per-component ResourceContext);
+        /// the u32[] return allocates via cabi_realloc and
+        /// writes (out_ptr, out_len) at retArea.</summary>
+        private static void BindResourceArrayParamU32ArrayReturnMethod(
+            WasmRuntime runtime, string namespaceName,
+            object impl, MethodInfo m, ResourceContext resources)
+        {
+            var importName = ToKebabCase(m.Name);
+            var elemType = m.GetParameters()[0].ParameterType
+                .GetElementType()!;
+            var resTable = resources.TableFor(elemType);
+
+            // Wire: ExecContext, in_ptr, in_len, retArea → void.
+            var delegateType = typeof(Action<ExecContext, int, int, int>);
+
+            Wacs.Core.Runtime.Delegates.GenericFuncs? cabiRealloc = null;
+            int Allocate(int align, int size)
+            {
+                if (cabiRealloc == null)
+                {
+                    if (!runtime.TryGetExportedFunction(
+                            "cabi_realloc", out var addr))
+                        throw new InvalidOperationException(
+                            "Component does not export cabi_realloc.");
+                    cabiRealloc = runtime.CreateInvoker(
+                        addr, new InvokerOptions());
+                }
+                return cabiRealloc(0, 0, align, size)[0].Data.Int32;
+            }
+
+            void Body(ExecContext ctx, int inPtr, int inLen, int retArea)
+            {
+                var memory = ctx.DefaultMemory.Data;
+                // Decode list<borrow<TResource>> from the input
+                // pointer/length pair. Each handle is i32.
+                var resArr = System.Array.CreateInstance(elemType, inLen);
+                for (int i = 0; i < inLen; i++)
+                {
+                    int h = (int)System.Buffers.Binary.BinaryPrimitives
+                        .ReadInt32LittleEndian(
+                            memory.AsSpan(inPtr + i * 4, 4));
+                    resArr.SetValue(resTable.Get(h), i);
+                }
+
+                var ret = (uint[])m.Invoke(impl, new object[] { resArr })!;
+
+                int outPtr = ret.Length == 0 ? 0
+                    : Allocate(4, ret.Length * 4);
+                for (int i = 0; i < ret.Length; i++)
+                    WriteI32LE(memory, outPtr + i * 4, (int)ret[i]);
+                WriteI32LE(memory, retArea, outPtr);
+                WriteI32LE(memory, retArea + 4, ret.Length);
+            }
+
+            runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
+                (namespaceName, importName), Body);
         }
 
         /// <summary>Canon-lower wrapper for host methods
