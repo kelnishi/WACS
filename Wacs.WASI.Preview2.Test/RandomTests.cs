@@ -53,6 +53,52 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [Fact]
+        public void BindWasiInstance_wires_random_bytes_through_canon_lower()
+        {
+            // wasi-random-bytes-component imports
+            // get-random-bytes(len: u64) -> list<u8>. Multi-core-
+            // module path: wit-component generates 3 modules
+            // (adapter + post-return shim + user); the
+            // ComponentInstance Phase 3 v0 trace finds the user
+            // module via canon-lift's CoreFuncIdx → alias →
+            // core-instance → core-module chain, instantiates
+            // just that one, and binds the canon-lower wrapper
+            // under the user module's import name. The wrapper
+            // takes (len, retAreaPtr) on the wasm stack, calls
+            // Random.GetRandomBytes(len), allocates guest memory
+            // via cabi_realloc, copies bytes, writes (dataPtr,
+            // count) at retAreaPtr.
+            //
+            // Stub the host with a deterministic generator so
+            // we can assert specific byte values.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-random-bytes-component", "rb.component.wasm"));
+            var stub = new DeterministicRandom();
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+                runtime.BindWasiInstance(
+                    "wasi:random/random@0.2.3", stub));
+
+            var result = (byte[])ci.Invoke("fetch", 5UL)!;
+            // Stub generates byte i = (byte)i for i in [0..len),
+            // so 5 bytes = {0, 1, 2, 3, 4}.
+            Assert.Equal(new byte[] { 0, 1, 2, 3, 4 }, result);
+        }
+
+        /// <summary>Predictable byte stream for asserting on
+        /// canon-lower mechanics — produces (byte)i at index i
+        /// instead of CSPRNG output.</summary>
+        private sealed class DeterministicRandom : IRandom
+        {
+            public byte[] GetRandomBytes(ulong len)
+            {
+                var buf = new byte[(int)len];
+                for (int i = 0; i < buf.Length; i++) buf[i] = (byte)i;
+                return buf;
+            }
+            public ulong GetRandomU64() => 0;
+        }
+
+        [Fact]
         public void BindWasiInstance_wires_random_u64_through_runtime()
         {
             // Auto-binder walks the Random impl, picks

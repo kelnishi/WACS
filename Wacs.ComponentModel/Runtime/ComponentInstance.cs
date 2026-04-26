@@ -139,12 +139,131 @@ namespace Wacs.ComponentModel.Runtime
                 return InstantiateComposer(component);
             }
 
+            // Multi-core-module mode: wit-component's typical
+            // output for an aggregate-typed host import — 3+
+            // core modules wired via core-instance + with-clause
+            // directives. v1 takes the pragmatic shortcut: trace
+            // canon-lift entries back to identify the "user"
+            // core module (the one whose exports are component-
+            // visible), instantiate just that one, and bind the
+            // host implementation directly to its imports under
+            // the (module, name) pair its core import declares.
+            // Skips wit-component's call_indirect adapter +
+            // post-return shim — they're scaffolding around the
+            // canon-lower wrapper, which we do directly in the
+            // binder. Matches what most components need without
+            // implementing the full multi-instance composition
+            // engine.
+            if (coreBinaries.Count > 1)
+            {
+                var primaryIdx = FindPrimaryCoreModuleIdx(component);
+                if (primaryIdx.HasValue)
+                    return InstantiateMultiCore(component,
+                        coreBinaries, primaryIdx.Value,
+                        configureImports);
+            }
+
             throw new InvalidOperationException(
                 "ComponentInstance.Instantiate requires exactly one "
                 + "embedded core module OR (zero core modules + at "
-                + "least one nested component); got "
+                + "least one nested component) OR a multi-module "
+                + "wit-component output where canon-lift traces to "
+                + "a primary user module; got "
                 + coreBinaries.Count + " core modules and "
                 + component.NestedComponentCount + " nested components.");
+        }
+
+        /// <summary>Trace canon-lift entries through the alias +
+        /// core-instance chain to find which core-module hosts
+        /// the component's "user" exports. wit-component's
+        /// adapter + post-return shims sit elsewhere in the
+        /// module list; the canon-lifts always reference the
+        /// user module's exported funcs. Returns the
+        /// 0-based core-module index, or null if the trace
+        /// fails (caller surfaces an InvalidOperationException
+        /// since no other heuristic fits).</summary>
+        private static int? FindPrimaryCoreModuleIdx(ComponentModule component)
+        {
+            // Build core-func-idx → core-instance-idx map from
+            // alias entries (the core-export form). Walk
+            // RawSections in file order to track index growth
+            // across canon-lower entries (which also bump the
+            // core-func space).
+            var coreFuncToInstance = new Dictionary<uint, uint>();
+            uint coreFuncIdx = 0;
+            foreach (var s in component.RawSections)
+            {
+                switch (s.Id)
+                {
+                    case ComponentSectionId.Alias:
+                    {
+                        var entries = AliasSectionReader.Decode(s.Payload);
+                        foreach (var a in entries)
+                        {
+                            if (a.Sort == AliasSort.CoreSort
+                                && a.CoreKind == CoreAliasKind.Func)
+                            {
+                                if (a.TargetKind ==
+                                        AliasTargetKind.CoreInstanceExport
+                                    && a.InstanceIdx.HasValue)
+                                    coreFuncToInstance[coreFuncIdx] =
+                                        a.InstanceIdx.Value;
+                                coreFuncIdx++;
+                            }
+                        }
+                        break;
+                    }
+                    case ComponentSectionId.Canon:
+                    {
+                        var entries = CanonSectionReader.Decode(s.Payload);
+                        foreach (var e in entries)
+                            if (e is CanonLower) coreFuncIdx++;
+                        break;
+                    }
+                }
+            }
+
+            // First canon-lift: that's the export-side anchor.
+            // Its CoreFuncIdx resolves through the map above to
+            // a core-instance, and that instance's
+            // InstantiateCoreModule entry tells us the module.
+            CanonLift? firstLift = null;
+            foreach (var c in component.Canons)
+                if (c is CanonLift cl) { firstLift = cl; break; }
+            if (firstLift == null) return null;
+
+            if (!coreFuncToInstance.TryGetValue(
+                    firstLift.CoreFuncIdx, out var instIdx))
+                return null;
+            var coreInsts = component.CoreInstances;
+            if (instIdx >= coreInsts.Count) return null;
+            if (coreInsts[(int)instIdx] is InstantiateCoreModule ic)
+                return (int)ic.ModuleIdx;
+            return null;
+        }
+
+        /// <summary>Instantiate a multi-core-module component
+        /// by picking the primary module, satisfying its
+        /// imports via host bindings, and skipping the
+        /// adapter / post-return scaffolding wit-component
+        /// emits around aggregate-typed canon-lowers. The
+        /// configureImports callback is the single point where
+        /// callers register the host delegates that satisfy
+        /// the primary module's imports — the binder writes
+        /// canon-lower wrappers under those (module, name)
+        /// pairs.</summary>
+        private static ComponentInstance InstantiateMultiCore(
+            ComponentModule component,
+            List<byte[]> coreBinaries,
+            int primaryIdx,
+            Action<WasmRuntime>? configureImports)
+        {
+            var runtime = new WasmRuntime();
+            using var coreMs = new MemoryStream(coreBinaries[primaryIdx]);
+            var coreModule = BinaryModuleParser.ParseWasm(coreMs);
+            configureImports?.Invoke(runtime);
+            var coreInstance = runtime.InstantiateModule(coreModule);
+            return new ComponentInstance(component, runtime, coreInstance);
         }
 
         /// <summary>Build a composer-mode instance: recursively
