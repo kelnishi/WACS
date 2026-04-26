@@ -1,0 +1,20 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    use wasi:clocks/wall-clock@0.2.3.{datetime};
+    enum error-code { unknown }
+    enum descriptor-type {
+        unknown, block-device, character-device, directory,
+        fifo, symbolic-link, regular-file, socket,
+    }
+    record descriptor-stat {
+        %type: descriptor-type,
+        link-count: u64,
+        size: u64,
+        data-access-timestamp: option<datetime>,
+        data-modification-timestamp: option<datetime>,
+        status-change-timestamp: option<datetime>,
+    }
+    resource descriptor {
+        stat: func() -> result<descriptor-stat, error-code>;
+    }
+}

@@ -683,7 +683,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                     || m.ReturnType == typeof(
                         Wacs.WASI.Preview2.Sockets.IncomingDatagram[])
                     || m.ReturnType == typeof(
-                        Wacs.WASI.Preview2.Filesystem.DirectoryEntry)))
+                        Wacs.WASI.Preview2.Filesystem.DirectoryEntry)
+                    || m.ReturnType == typeof(
+                        Wacs.WASI.Preview2.Filesystem.DescriptorStat)))
             {
                 BindStreamResultResourceMethod(runtime, namespaceName,
                     importName, table, resourceType, m, resources);
@@ -1127,6 +1129,7 @@ namespace Wacs.WASI.Preview2.HostBinding
                         Wacs.WASI.Preview2.Sockets.IpAddressEnumerationItem)) ? 11
                 : rt == typeof(Wacs.WASI.Preview2.Sockets.IncomingDatagram[]) ? 12
                 : rt == typeof(Wacs.WASI.Preview2.Filesystem.DirectoryEntry) ? 13
+                : rt == typeof(Wacs.WASI.Preview2.Filesystem.DescriptorStat) ? 14
                 : -1;
             if (retShape < 0)
                 throw new InvalidOperationException(
@@ -1280,6 +1283,38 @@ namespace Wacs.WASI.Preview2.HostBinding
                             WriteI32LE(memOut, retAreaPtr + 4 + i * 4,
                                 handle);
                         }
+                        break;
+                    case 14:  // descriptor-stat: 96-byte record.
+                              // Layout (relative to retArea):
+                              //   +0: outer disc (Ok)
+                              //   +1..+7: padding (align 8)
+                              //   +8: type (u8)
+                              //   +16: link-count (u64)
+                              //   +24: size (u64)
+                              //   +32: data-access-timestamp (24)
+                              //   +56: data-mod-timestamp (24)
+                              //   +80: status-change-timestamp (24)
+                              // option<datetime> (24 bytes, align 8):
+                              //   +0: option disc
+                              //   +8: seconds (u64)
+                              //   +16: nanoseconds (u32)
+                        var st = (Wacs.WASI.Preview2.Filesystem
+                            .DescriptorStat)ret!;
+                        memOut[retAreaPtr + 8] = (byte)st.Type;
+                        System.Buffers.Binary.BinaryPrimitives
+                            .WriteUInt64LittleEndian(
+                                memOut.AsSpan(retAreaPtr + 16, 8),
+                                st.LinkCount);
+                        System.Buffers.Binary.BinaryPrimitives
+                            .WriteUInt64LittleEndian(
+                                memOut.AsSpan(retAreaPtr + 24, 8),
+                                st.Size);
+                        WriteOptionalDatetime(memOut, retAreaPtr + 32,
+                            st.DataAccessTimestamp);
+                        WriteOptionalDatetime(memOut, retAreaPtr + 56,
+                            st.DataModificationTimestamp);
+                        WriteOptionalDatetime(memOut, retAreaPtr + 80,
+                            st.StatusChangeTimestamp);
                         break;
                     case 13:  // option<directory-entry>: 20-byte total.
                               // Layout:
@@ -2888,6 +2923,38 @@ namespace Wacs.WASI.Preview2.HostBinding
         /// width (size bytes per field). Mirrors the canonical-
         /// ABI alignment rule "alignment(P) = sizeof(P)" for
         /// primitives.</summary>
+        /// <summary>Write an
+        /// <c>option&lt;datetime&gt;</c> at <paramref name="ptr"/>.
+        /// 24 bytes, align 8: option disc(1) + 7 pad +
+        /// seconds(u64) + nanoseconds(u32) + 4 pad. When
+        /// null, only the disc byte is meaningful.</summary>
+        private static void WriteOptionalDatetime(byte[] memory, int ptr,
+            Wacs.WASI.Preview2.Clocks.Datetime? dt)
+        {
+            if (dt == null)
+            {
+                memory[ptr] = 0;   // None
+                return;
+            }
+            memory[ptr] = 1;       // Some
+            // bytes ptr+1..+7 stay zero (preamble already
+            // cleared retArea on outer disc write; for nested
+            // option<datetime> in stat the outer write only
+            // touches +0..+3, so we zero the option padding).
+            for (int i = 1; i < 8; i++) memory[ptr + i] = 0;
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt64LittleEndian(
+                    memory.AsSpan(ptr + 8, 8), dt.Value.Seconds);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt32LittleEndian(
+                    memory.AsSpan(ptr + 16, 4), dt.Value.Nanoseconds);
+            // bytes ptr+20..+23 are tail padding (align 8).
+            memory[ptr + 20] = 0;
+            memory[ptr + 21] = 0;
+            memory[ptr + 22] = 0;
+            memory[ptr + 23] = 0;
+        }
+
         /// <summary>Decode a list&lt;outgoing-datagram&gt;
         /// from linear memory at <paramref name="listPtr"/>
         /// for <paramref name="listLen"/> elements. Each

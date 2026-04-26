@@ -7,6 +7,7 @@
 
 using System;
 using System.IO;
+using Wacs.WASI.Preview2.Clocks;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.Io;
 
@@ -80,6 +81,48 @@ namespace Wacs.WASI.Preview2.Filesystem
         {
             Type = type;
             Name = name ?? throw new ArgumentNullException(nameof(name));
+        }
+    }
+
+    /// <summary>WIT record
+    /// <c>wasi:filesystem/types.descriptor-stat</c> — the
+    /// "stat" payload returned by descriptor.stat. Three
+    /// option<datetime> fields cover access / modification /
+    /// status-change timestamps; null on any of them means
+    /// the host doesn't track that timestamp.
+    /// <code>
+    /// record descriptor-stat {
+    ///   type: descriptor-type,
+    ///   link-count: u64,
+    ///   size: u64,
+    ///   data-access-timestamp: option<datetime>,
+    ///   data-modification-timestamp: option<datetime>,
+    ///   status-change-timestamp: option<datetime>,
+    /// }
+    /// </code>
+    /// Wire size 96, align 8. The result wrapper bumps total
+    /// retArea to 104 bytes.</summary>
+    public sealed class DescriptorStat
+    {
+        public DescriptorType Type { get; }
+        public ulong LinkCount { get; }
+        public ulong Size { get; }
+        public Datetime? DataAccessTimestamp { get; }
+        public Datetime? DataModificationTimestamp { get; }
+        public Datetime? StatusChangeTimestamp { get; }
+
+        public DescriptorStat(DescriptorType type, ulong linkCount,
+            ulong size,
+            Datetime? dataAccessTimestamp,
+            Datetime? dataModificationTimestamp,
+            Datetime? statusChangeTimestamp)
+        {
+            Type = type;
+            LinkCount = linkCount;
+            Size = size;
+            DataAccessTimestamp = dataAccessTimestamp;
+            DataModificationTimestamp = dataModificationTimestamp;
+            StatusChangeTimestamp = statusChangeTimestamp;
         }
     }
 
@@ -338,6 +381,54 @@ namespace Wacs.WASI.Preview2.Filesystem
         [WasiErrorResult]
         [WasiMethodName("readlink-at")]
         public virtual string ReadlinkAt(string path) => "";
+
+        /// <summary>Inspect file metadata. Returns a
+        /// <see cref="DescriptorStat"/> with type / link-count
+        /// / size + the three timestamps. Default impl reads
+        /// from System.IO.File / Directory; concrete VFS
+        /// shims override.</summary>
+        [WasiErrorResult]
+        public virtual DescriptorStat Stat()
+        {
+            DescriptorType type = GetDescriptorType();
+            ulong linkCount = 1;   // POSIX hardlink count; host-
+                                   // only implementations rarely
+                                   // know this exactly.
+            ulong size = 0;
+            Datetime? mtime = null;
+            Datetime? atime = null;
+            Datetime? ctime = null;
+            if (type == DescriptorType.RegularFile)
+            {
+                var fi = new FileInfo(Path);
+                size = (ulong)fi.Length;
+                atime = ToDatetime(fi.LastAccessTimeUtc);
+                mtime = ToDatetime(fi.LastWriteTimeUtc);
+                ctime = ToDatetime(fi.CreationTimeUtc);
+            }
+            else if (type == DescriptorType.Directory)
+            {
+                var di = new DirectoryInfo(Path);
+                atime = ToDatetime(di.LastAccessTimeUtc);
+                mtime = ToDatetime(di.LastWriteTimeUtc);
+                ctime = ToDatetime(di.CreationTimeUtc);
+            }
+            return new DescriptorStat(type, linkCount, size,
+                atime, mtime, ctime);
+        }
+
+        private static Datetime ToDatetime(DateTime dt)
+        {
+            // .NET DateTime → Unix epoch seconds + remainder
+            // nanoseconds. WIT datetime expects "wall-clock
+            // seconds since the Unix epoch".
+            var diff = dt - new DateTime(1970, 1, 1,
+                0, 0, 0, DateTimeKind.Utc);
+            long ticks = diff.Ticks;
+            ulong seconds = (ulong)(ticks / TimeSpan.TicksPerSecond);
+            uint nanos = (uint)((ticks % TimeSpan.TicksPerSecond) * 100);
+            return new Datetime { Seconds = seconds, Nanoseconds = nanos };
+        }
 
         /// <summary>Open the directory for reading entries.
         /// Returns a <see cref="DirectoryEntryStream"/> the

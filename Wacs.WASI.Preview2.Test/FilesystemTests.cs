@@ -170,6 +170,52 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal("src", desc.LastPath);
         }
 
+        private sealed class StatDescriptor : Descriptor
+        {
+            public StatDescriptor() : base("/synthetic") { }
+            public override DescriptorStat Stat()
+                => new DescriptorStat(
+                    DescriptorType.RegularFile,
+                    linkCount: 1,
+                    size: 4096,
+                    dataAccessTimestamp: new Wacs.WASI.Preview2.Clocks
+                        .Datetime { Seconds = 1700000000, Nanoseconds = 0 },
+                    dataModificationTimestamp: new Wacs.WASI.Preview2.Clocks
+                        .Datetime { Seconds = 1700100000, Nanoseconds = 500 },
+                    statusChangeTimestamp: null);
+        }
+
+        [Fact]
+        public void Stat_writes_descriptor_stat_record_with_option_datetime_fields()
+        {
+            // Fixture: ask-stat-{type, size, mtime-disc,
+            // mtime} each call descriptor.stat and read
+            // different fields out of the 96-byte record.
+            // Stub returns RegularFile, size=4096,
+            // mtime=Some(1700100000s), ctime=None.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-stat-component", "fsstat.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new StatDescriptor();
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal((uint)DescriptorType.RegularFile,
+                (uint)ci.Invoke("ask-stat-type", (uint)handle)!);
+            Assert.Equal(4096UL,
+                (ulong)ci.Invoke("ask-stat-size", (uint)handle)!);
+            Assert.Equal(1u,
+                (uint)ci.Invoke("ask-stat-mtime-disc", (uint)handle)!);
+            Assert.Equal(1700100000UL,
+                (ulong)ci.Invoke("ask-stat-mtime", (uint)handle)!);
+        }
+
         private sealed class FixedDirDescriptor : Descriptor
         {
             public FixedDirDescriptor() : base("/synthetic") { }
