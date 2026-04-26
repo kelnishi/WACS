@@ -1,0 +1,6 @@
+package wasi:sockets@0.2.3;
+interface tcp-create-socket {
+    use network.{ip-address-family};
+    use tcp.{tcp-socket, error-code};
+    create-tcp-socket: func(address-family: ip-address-family) -> result<tcp-socket, error-code>;
+}
