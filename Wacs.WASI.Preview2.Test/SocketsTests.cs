@@ -448,6 +448,57 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(ShutdownType.Both, sock.LastShutdown);
         }
 
+        private sealed class FixedDatagramStream : IncomingDatagramStream
+        {
+            public override IncomingDatagram[] Receive(ulong maxResults)
+                => new[] {
+                    new IncomingDatagram(
+                        new byte[] { 0x68, 0x69, 0x21 },   // "hi!"
+                        new Ipv4SocketAddress(53,
+                            new byte[] { 8, 8, 8, 8 })),
+                    new IncomingDatagram(
+                        new byte[] { 0x6f, 0x6b },         // "ok"
+                        new Ipv4SocketAddress(80,
+                            new byte[] { 1, 1, 1, 1 })),
+                };
+        }
+
+        [Fact]
+        public void IncomingDatagramStream_receive_writes_list_of_record()
+        {
+            // Fixture: ask-recv-count / ask-recv-first-data-len /
+            // ask-recv-first-data-byte / ask-recv-first-port each
+            // call receive(4) and read different fields from
+            // the returned list. Stub yields 2 datagrams:
+            //   #0: "hi!" from 8.8.8.8:53
+            //   #1: "ok" from 1.1.1.1:80
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-udp-receive-component", "udprecv.component.wasm"));
+            var resources = new ResourceContext();
+            var stream = new FixedDatagramStream();
+            int handle = resources.TableFor(typeof(IncomingDatagramStream))
+                .Allocate(stream);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<IncomingDatagramStream>(
+                    "wasi:sockets/udp@0.2.3", resources);
+            });
+
+            // Count: 2 datagrams
+            Assert.Equal(2u, (uint)ci.Invoke(
+                "ask-recv-count", (uint)handle)!);
+            // First data-len: 3 ("hi!")
+            Assert.Equal(3u, (uint)ci.Invoke(
+                "ask-recv-first-data-len", (uint)handle)!);
+            // First data byte: 'h' = 0x68
+            Assert.Equal(0x68u, (uint)ci.Invoke(
+                "ask-recv-first-data-byte", (uint)handle)!);
+            // First port: 53
+            Assert.Equal(53u, (uint)ci.Invoke(
+                "ask-recv-first-port", (uint)handle)!);
+        }
+
         private sealed class CapturingUdpSocket : UdpSocket
         {
             public IpSocketAddress? CapturedRemote;
