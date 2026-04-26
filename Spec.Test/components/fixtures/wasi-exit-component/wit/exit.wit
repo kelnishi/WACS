@@ -1,0 +1,6 @@
+package local:ex;
+world ex {
+    import wasi:cli/exit@0.2.3;
+    export call-exit-ok: func();
+    export call-exit-err: func();
+}

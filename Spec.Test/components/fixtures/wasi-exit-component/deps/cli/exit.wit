@@ -1,0 +1,4 @@
+package wasi:cli@0.2.3;
+interface exit {
+    exit: func(status: result);
+}
