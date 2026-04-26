@@ -681,7 +681,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                     || m.ReturnType.IsSubclassOf(typeof(
                         Wacs.WASI.Preview2.Sockets.IpAddressEnumerationItem))
                     || m.ReturnType == typeof(
-                        Wacs.WASI.Preview2.Sockets.IncomingDatagram[])))
+                        Wacs.WASI.Preview2.Sockets.IncomingDatagram[])
+                    || m.ReturnType == typeof(
+                        Wacs.WASI.Preview2.Filesystem.DirectoryEntry)))
             {
                 BindStreamResultResourceMethod(runtime, namespaceName,
                     importName, table, resourceType, m, resources);
@@ -1124,6 +1126,7 @@ namespace Wacs.WASI.Preview2.HostBinding
                     || rt.IsSubclassOf(typeof(
                         Wacs.WASI.Preview2.Sockets.IpAddressEnumerationItem)) ? 11
                 : rt == typeof(Wacs.WASI.Preview2.Sockets.IncomingDatagram[]) ? 12
+                : rt == typeof(Wacs.WASI.Preview2.Filesystem.DirectoryEntry) ? 13
                 : -1;
             if (retShape < 0)
                 throw new InvalidOperationException(
@@ -1276,6 +1279,38 @@ namespace Wacs.WASI.Preview2.HostBinding
                             int handle = tupleTables![i].Allocate(resInst!);
                             WriteI32LE(memOut, retAreaPtr + 4 + i * 4,
                                 handle);
+                        }
+                        break;
+                    case 13:  // option<directory-entry>: 20-byte total.
+                              // Layout:
+                              //   +0: outer disc (0=Ok)
+                              //   +1..+3: padding
+                              //   +4: option disc (0=None, 1=Some)
+                              //   +5..+7: padding
+                              //   +8: type (u8)
+                              //   +9..+11: padding (string aligns 4)
+                              //   +12: name ptr (i32)
+                              //   +16: name len (i32)
+                        var de = (Wacs.WASI.Preview2.Filesystem
+                            .DirectoryEntry?)ret;
+                        if (de == null)
+                        {
+                            memOut[retAreaPtr + 4] = 0;   // None
+                        }
+                        else
+                        {
+                            memOut[retAreaPtr + 4] = 1;   // Some
+                            memOut[retAreaPtr + 8] = (byte)de.Type;
+                            var nameBytes = System.Text.Encoding.UTF8
+                                .GetBytes(de.Name);
+                            int namePtr = nameBytes.Length == 0 ? 0
+                                : Allocate(1, nameBytes.Length);
+                            if (nameBytes.Length > 0)
+                                Array.Copy(nameBytes, 0, memOut,
+                                    namePtr, nameBytes.Length);
+                            WriteI32LE(memOut, retAreaPtr + 12, namePtr);
+                            WriteI32LE(memOut, retAreaPtr + 16,
+                                nameBytes.Length);
                         }
                         break;
                     case 12:  // list<incoming-datagram>: each elem

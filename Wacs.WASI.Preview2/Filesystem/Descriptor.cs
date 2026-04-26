@@ -64,6 +64,25 @@ namespace Wacs.WASI.Preview2.Filesystem
         }
     }
 
+    /// <summary>WIT record
+    /// <c>wasi:filesystem/types.directory-entry</c>:
+    /// <code>record directory-entry {
+    ///     type: descriptor-type,
+    ///     name: string,
+    /// }</code>
+    /// </summary>
+    public sealed class DirectoryEntry
+    {
+        public DescriptorType Type { get; }
+        public string Name { get; }
+
+        public DirectoryEntry(DescriptorType type, string name)
+        {
+            Type = type;
+            Name = name ?? throw new ArgumentNullException(nameof(name));
+        }
+    }
+
     /// <summary>WIT enum
     /// <c>wasi:filesystem/types.descriptor-type</c>. The wire
     /// representation is a 1-byte discriminator; the host
@@ -320,6 +339,26 @@ namespace Wacs.WASI.Preview2.Filesystem
         [WasiMethodName("readlink-at")]
         public virtual string ReadlinkAt(string path) => "";
 
+        /// <summary>Open the directory for reading entries.
+        /// Returns a <see cref="DirectoryEntryStream"/> the
+        /// guest pulls entries from one at a time.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("read-directory")]
+        public virtual DirectoryEntryStream ReadDirectory()
+        {
+            if (!Directory.Exists(Path))
+                return new DirectoryEntryStream(
+                    System.Array.Empty<DirectoryEntry>());
+            var entries = new System.Collections.Generic.List<DirectoryEntry>();
+            foreach (var d in Directory.EnumerateDirectories(Path))
+                entries.Add(new DirectoryEntry(DescriptorType.Directory,
+                    System.IO.Path.GetFileName(d) ?? ""));
+            foreach (var f in Directory.EnumerateFiles(Path))
+                entries.Add(new DirectoryEntry(DescriptorType.RegularFile,
+                    System.IO.Path.GetFileName(f) ?? ""));
+            return new DirectoryEntryStream(entries.ToArray());
+        }
+
         /// <summary>Stable hash of the file's identity (inode +
         /// device on POSIX). Two descriptors referring to the
         /// same underlying file return equal values across
@@ -348,6 +387,34 @@ namespace Wacs.WASI.Preview2.Filesystem
             if (other == null) return false;
             return string.Equals(Path, other.Path, StringComparison.Ordinal);
         }
+
+        public virtual void Dispose() { }
+    }
+
+    /// <summary>Host representation of
+    /// <c>wasi:filesystem/types.directory-entry-stream</c>.
+    /// Pull-stream of <see cref="DirectoryEntry"/> items. The
+    /// base impl is array-backed — concrete hosts override
+    /// <see cref="ReadDirectoryEntry"/> for stream sources
+    /// that can't fully materialize ahead of time.</summary>
+    [WasiResource("directory-entry-stream")]
+    public class DirectoryEntryStream : IDisposable
+    {
+        private readonly DirectoryEntry[] _entries;
+        private int _pos;
+
+        public DirectoryEntryStream(DirectoryEntry[] entries)
+        {
+            _entries = entries
+                ?? throw new ArgumentNullException(nameof(entries));
+        }
+
+        /// <summary>Pull the next directory entry, or null
+        /// when exhausted.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("read-directory-entry")]
+        public virtual DirectoryEntry? ReadDirectoryEntry()
+            => _pos < _entries.Length ? _entries[_pos++] : null;
 
         public virtual void Dispose() { }
     }
