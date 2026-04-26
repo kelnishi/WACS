@@ -525,7 +525,7 @@ namespace Wacs.WASI.Preview2.HostBinding
             {
                 BindErrorResultVoidReturnResourceMethod(
                     runtime, namespaceName, importName, table,
-                    resourceType, m);
+                    resourceType, m, resources);
                 return;
             }
 
@@ -1225,16 +1225,21 @@ namespace Wacs.WASI.Preview2.HostBinding
         private static void BindErrorResultVoidReturnResourceMethod(
             WasmRuntime runtime, string namespaceName,
             string importName, ResourceTable selfTable,
-            Type resourceType, MethodInfo m)
+            Type resourceType, MethodInfo m,
+            ResourceContext? resources = null)
         {
             var paramInfos = m.GetParameters();
-            // Each param: primitive / enum (1 wire slot) or
-            // string (2 wire slots: ptr + len). Aggregates
-            // (records, lists) stay deferred.
+            // Each param: primitive / enum (1 wire slot),
+            // string (2 wire slots: ptr + len), or
+            // borrow<resource> (1 wire slot: handle resolved
+            // via ResourceContext). Aggregates (records, lists)
+            // stay deferred.
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)
                     && !p.ParameterType.IsEnum
-                    && p.ParameterType != typeof(string))
+                    && p.ParameterType != typeof(string)
+                    && p.ParameterType.GetCustomAttribute<
+                        WasiResourceAttribute>() == null)
                     throw new InvalidOperationException(
                         "[WasiErrorResult] void-return resource "
                         + "method '" + m.Name + "' takes "
@@ -1254,6 +1259,11 @@ namespace Wacs.WASI.Preview2.HostBinding
                 {
                     wireParamTypes[wi++] = typeof(int);
                     wireParamTypes[wi++] = typeof(int);
+                }
+                else if (p.ParameterType.GetCustomAttribute<
+                    WasiResourceAttribute>() != null)
+                {
+                    wireParamTypes[wi++] = typeof(int);   // borrow handle
                 }
                 else
                 {
@@ -1312,6 +1322,26 @@ namespace Wacs.WASI.Preview2.HostBinding
                 nameof(System.Text.Encoding.GetString),
                 new[] { typeof(byte[]), typeof(int), typeof(int) })!;
 
+            // Resource params resolve via the per-component
+            // ResourceContext (closure-captured). Without one
+            // we can't decode borrow handles, so demand it
+            // upfront.
+            var hasResourceParam = paramInfos.Any(p =>
+                p.ParameterType.GetCustomAttribute<
+                    WasiResourceAttribute>() != null);
+            if (hasResourceParam && resources == null)
+                throw new InvalidOperationException(
+                    "Resource method '" + m.Name + "' takes a "
+                    + "borrow<resource> param but no "
+                    + "ResourceContext was supplied.");
+            var contextConst = hasResourceParam
+                ? (Expression)Expression.Constant(resources!)
+                : Expression.Constant(null, typeof(ResourceContext));
+            var tableForMethod = typeof(ResourceContext).GetMethod(
+                nameof(ResourceContext.TableFor))!;
+            var getResourceMethod = typeof(ResourceTable).GetMethod(
+                nameof(ResourceTable.Get))!;
+
             wi = 2;
             var argExprs = new Expression[paramInfos.Length];
             for (int i = 0; i < paramInfos.Length; i++)
@@ -1323,6 +1353,18 @@ namespace Wacs.WASI.Preview2.HostBinding
                     argExprs[i] = Expression.Convert(
                         Expression.Call(encodingUtf8, getStringMethod,
                             memoryAccess, ptrParam, lenParam),
+                        typeof(object));
+                }
+                else if (paramInfos[i].ParameterType.GetCustomAttribute<
+                    WasiResourceAttribute>() != null)
+                {
+                    var handleParam = lambdaParams[wi++];
+                    var paramTable = Expression.Call(contextConst,
+                        tableForMethod,
+                        Expression.Constant(paramInfos[i].ParameterType));
+                    argExprs[i] = Expression.Convert(
+                        Expression.Call(paramTable, getResourceMethod,
+                            handleParam),
                         typeof(object));
                 }
                 else
@@ -2390,9 +2432,12 @@ namespace Wacs.WASI.Preview2.HostBinding
             6 => typeof(Func<,,,,,>),
             7 => typeof(Func<,,,,,,>),
             8 => typeof(Func<,,,,,,,>),
+            9 => typeof(Func<,,,,,,,,>),
+            10 => typeof(Func<,,,,,,,,,>),
+            11 => typeof(Func<,,,,,,,,,,>),
+            12 => typeof(Func<,,,,,,,,,,,>),
             _ => throw new NotSupportedException(
-                "Func arities above 8 are a follow-up — none of "
-                + "the v0.2.3 WASI interfaces hit this."),
+                "Func arities above 12 are a follow-up."),
         };
 
         private static Type OpenActionType(int count) => count switch
@@ -2405,8 +2450,12 @@ namespace Wacs.WASI.Preview2.HostBinding
             6 => typeof(Action<,,,,,>),
             7 => typeof(Action<,,,,,,>),
             8 => typeof(Action<,,,,,,,>),
+            9 => typeof(Action<,,,,,,,,>),
+            10 => typeof(Action<,,,,,,,,,>),
+            11 => typeof(Action<,,,,,,,,,,>),
+            12 => typeof(Action<,,,,,,,,,,,>),
             _ => throw new NotSupportedException(
-                "Action arities above 8 are a follow-up."),
+                "Action arities above 12 are a follow-up."),
         };
     }
 }
