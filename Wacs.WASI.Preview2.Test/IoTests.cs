@@ -5,6 +5,9 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using System.IO;
+using Wacs.ComponentModel.Runtime;
+using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.Io;
 using Xunit;
 
@@ -45,6 +48,42 @@ namespace Wacs.WASI.Preview2.Test
             // call to-debug-string. Norm to empty string.
             var e = new Error(null!);
             Assert.Equal("", e.ToDebugString());
+        }
+
+        private static string FindFixturePath(string fixtureDir, string fileName)
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", fixtureDir, "wasm", fileName);
+        }
+
+        [Fact]
+        public void Error_to_debug_string_lifts_string_through_resource_method()
+        {
+            // Fixture: ask-debug(handle) calls
+            // error.to-debug-string(handle) into a callee-
+            // allocated retArea, returns that retArea pointer.
+            // Outer canon-lift on the export reads (ptr, len)
+            // from retArea / retArea+4 and lifts the string.
+            // Stub Error has Message="disk full"; expect that
+            // string back from the canon-lifted return.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-io-error-component", "ioerror.component.wasm"));
+            var resources = new ResourceContext();
+            var err = new Error("disk full");
+            int handle = resources.TableFor(typeof(Error))
+                .Allocate(err);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Error>(
+                    "wasi:io/error@0.2.3", resources);
+            });
+
+            var result = ci.Invoke("ask-debug", (uint)handle);
+            Assert.Equal("disk full", result);
         }
     }
 }
