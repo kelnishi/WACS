@@ -311,6 +311,15 @@ namespace Wacs.WASI.Preview2.Filesystem
             return new Descriptor(fullPath);
         }
 
+        /// <summary>Read the target of the symbolic link at
+        /// <paramref name="path"/>. Default impl returns
+        /// the empty string — concrete subclasses override
+        /// (System.IO has no portable readlink in
+        /// netstandard2.1).</summary>
+        [WasiErrorResult]
+        [WasiMethodName("readlink-at")]
+        public virtual string ReadlinkAt(string path) => "";
+
         /// <summary>Stable hash of the file's identity (inode +
         /// device on POSIX). Two descriptors referring to the
         /// same underlying file return equal values across

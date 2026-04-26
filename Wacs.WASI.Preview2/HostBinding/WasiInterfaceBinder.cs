@@ -575,6 +575,21 @@ namespace Wacs.WASI.Preview2.HostBinding
                 return;
             }
 
+            // [WasiErrorResult]-tagged + string return →
+            // result<string, error-code>. Wire layout: outer
+            // disc + 3-byte align padding + (string-ptr,
+            // string-len) at retArea+4/+8. String params
+            // accepted (decoded via Encoding.UTF8.GetString).
+            // Used by descriptor.readlink-at, etc.
+            if (m.GetCustomAttribute<WasiErrorResultAttribute>() != null
+                && m.ReturnType == typeof(string))
+            {
+                BindErrorResultStringReturnResourceMethod(
+                    runtime, namespaceName, importName, table,
+                    resourceType, m);
+                return;
+            }
+
             // Method returns a resource → alloc handle.
             if (m.ReturnType.GetCustomAttribute<WasiResourceAttribute>() != null)
             {
@@ -1514,6 +1529,173 @@ namespace Wacs.WASI.Preview2.HostBinding
                     argExprs[i] = Expression.Convert(
                         Expression.Call(paramTable, getResourceMethod,
                             handleParam),
+                        typeof(object));
+                }
+                else
+                {
+                    Expression e = lambdaParams[wi++];
+                    if (paramInfos[i].ParameterType != e.Type)
+                    {
+                        if (paramInfos[i].ParameterType == typeof(bool))
+                            e = Expression.NotEqual(e,
+                                Expression.Constant(0, e.Type));
+                        else
+                            e = Expression.Convert(e,
+                                paramInfos[i].ParameterType);
+                    }
+                    argExprs[i] = Expression.Convert(e, typeof(object));
+                }
+            }
+
+            var argArr = Expression.NewArrayInit(typeof(object), argExprs);
+            var bodyTarget = Expression.Constant(
+                (Action<ExecContext, int, object?[], int>)Body);
+            var call = Expression.Invoke(bodyTarget,
+                lambdaParams[0], lambdaParams[1], argArr, retAreaParam);
+            var lambda = Expression.Lambda(delegateType, call, lambdaParams);
+            var compiled = lambda.Compile();
+
+            var bindOpen = typeof(WasmRuntime).GetMethods()
+                .First(mi => mi.Name == nameof(WasmRuntime.BindHostFunction)
+                    && mi.IsGenericMethod
+                    && mi.GetParameters().Length == 2);
+            var bindClosed = bindOpen.MakeGenericMethod(delegateType);
+            bindClosed.Invoke(runtime,
+                new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Resource method tagged
+        /// [WasiErrorResult] returning <c>string</c> —
+        /// result&lt;string, error-code&gt;. Wire form: outer
+        /// disc + 3-byte padding + (string-ptr, string-len)
+        /// at retArea+4/+8 (12 bytes total). Each string
+        /// param decodes via Encoding.UTF8.GetString from
+        /// (ptr, len) wire slots; primitives ride through
+        /// ToWireType. Used by descriptor.readlink-at,
+        /// terminal-* readlinks, etc.</summary>
+        private static void BindErrorResultStringReturnResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable selfTable,
+            Type resourceType, MethodInfo m)
+        {
+            var paramInfos = m.GetParameters();
+            foreach (var p in paramInfos)
+                if (!IsPrimitive(p.ParameterType)
+                    && !p.ParameterType.IsEnum
+                    && p.ParameterType != typeof(string))
+                    throw new InvalidOperationException(
+                        "[WasiErrorResult] string-return resource "
+                        + "method '" + m.Name + "' takes "
+                        + "unsupported param type "
+                        + p.ParameterType + ".");
+
+            int paramSlotCount = 0;
+            foreach (var p in paramInfos)
+                paramSlotCount += p.ParameterType == typeof(string) ? 2 : 1;
+            var wireParamTypes = new Type[3 + paramSlotCount];
+            wireParamTypes[0] = typeof(ExecContext);
+            wireParamTypes[1] = typeof(int);
+            int wi = 2;
+            foreach (var p in paramInfos)
+            {
+                if (p.ParameterType == typeof(string))
+                {
+                    wireParamTypes[wi++] = typeof(int);
+                    wireParamTypes[wi++] = typeof(int);
+                }
+                else
+                {
+                    wireParamTypes[wi++] = ToWireType(p.ParameterType);
+                }
+            }
+            wireParamTypes[wi] = typeof(int);
+
+            var delegateType = OpenActionType(wireParamTypes.Length)
+                .MakeGenericType(wireParamTypes);
+
+            Wacs.Core.Runtime.Delegates.GenericFuncs? cabiRealloc = null;
+            int Allocate(int align, int size)
+            {
+                if (cabiRealloc == null)
+                {
+                    if (!runtime.TryGetExportedFunction(
+                            "cabi_realloc", out var addr))
+                        throw new InvalidOperationException(
+                            "Component does not export "
+                            + "cabi_realloc — required for "
+                            + "string-result resource methods.");
+                    cabiRealloc = runtime.CreateInvoker(
+                        addr, new InvokerOptions());
+                }
+                return cabiRealloc(0, 0, align, size)[0].Data.Int32;
+            }
+
+            void Body(ExecContext ctx, int handle, object?[] hostArgs,
+                int retAreaPtr)
+            {
+                var inst = selfTable.Get(handle);
+                var ret = (string)(m.Invoke(inst, hostArgs) ?? "");
+                var memory = ctx.DefaultMemory.Data;
+                var bs = System.Text.Encoding.UTF8.GetBytes(ret);
+                int dPtr = bs.Length == 0 ? 0 : Allocate(1, bs.Length);
+                if (bs.Length > 0)
+                    Array.Copy(bs, 0, memory, dPtr, bs.Length);
+                memory[retAreaPtr] = 0;       // Ok disc
+                memory[retAreaPtr + 1] = 0;
+                memory[retAreaPtr + 2] = 0;
+                memory[retAreaPtr + 3] = 0;
+                WriteI32LE(memory, retAreaPtr + 4, dPtr);
+                WriteI32LE(memory, retAreaPtr + 8, bs.Length);
+            }
+
+            var lambdaParams = new ParameterExpression[wireParamTypes.Length];
+            lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
+            lambdaParams[1] = Expression.Parameter(typeof(int), "self");
+            wi = 2;
+            for (int i = 0; i < paramInfos.Length; i++)
+            {
+                if (paramInfos[i].ParameterType == typeof(string))
+                {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_ptr");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_len");
+                }
+                else
+                {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        wireParamTypes[wi - 1], paramInfos[i].Name);
+                }
+            }
+            var retAreaParam = Expression.Parameter(typeof(int), "retAreaPtr");
+            lambdaParams[wireParamTypes.Length - 1] = retAreaParam;
+
+            var ctxParam = lambdaParams[0];
+            var memoryProp = typeof(ExecContext).GetProperty(
+                nameof(ExecContext.DefaultMemory))!;
+            var memDataField = typeof(Wacs.Core.Runtime.Types.MemoryInstance)
+                .GetField("Data")!;
+            var memoryAccess = Expression.Field(
+                Expression.Property(ctxParam, memoryProp),
+                memDataField);
+            var encodingUtf8 = Expression.Property(null,
+                typeof(System.Text.Encoding).GetProperty(
+                    nameof(System.Text.Encoding.UTF8))!);
+            var getStringMethod = typeof(System.Text.Encoding).GetMethod(
+                nameof(System.Text.Encoding.GetString),
+                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+
+            wi = 2;
+            var argExprs = new Expression[paramInfos.Length];
+            for (int i = 0; i < paramInfos.Length; i++)
+            {
+                if (paramInfos[i].ParameterType == typeof(string))
+                {
+                    var ptrParam = lambdaParams[wi++];
+                    var lenParam = lambdaParams[wi++];
+                    argExprs[i] = Expression.Convert(
+                        Expression.Call(encodingUtf8, getStringMethod,
+                            memoryAccess, ptrParam, lenParam),
                         typeof(object));
                 }
                 else

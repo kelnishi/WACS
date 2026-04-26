@@ -1,0 +1,7 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    enum error-code { unknown }
+    resource descriptor {
+        readlink-at: func(path: string) -> result<string, error-code>;
+    }
+}
