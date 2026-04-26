@@ -544,7 +544,8 @@ namespace Wacs.WASI.Preview2.HostBinding
                     || m.ReturnType == typeof(byte)
                     || m.ReturnType == typeof(bool)
                     || m.ReturnType == typeof(byte[])
-                    || m.ReturnType == typeof(ValueTuple<byte[], bool>)))
+                    || m.ReturnType == typeof(ValueTuple<byte[], bool>)
+                    || IsPrimitiveRecord(m.ReturnType)))
             {
                 BindStreamResultResourceMethod(runtime, namespaceName,
                     importName, table, resourceType, m, resources);
@@ -919,8 +920,9 @@ namespace Wacs.WASI.Preview2.HostBinding
 
             // Recognized return shapes (Ok payload): void, bool/u8,
             // u16, u32, u64, byte[], (byte[], bool) ValueTuple
-            // (descriptor.read shape). Each encodes as disc + Ok
-            // payload at the natural alignment (max(1, sizeof Ok)).
+            // (descriptor.read shape), or a record-of-primitives
+            // (metadata-hash-value etc.). Each encodes as disc +
+            // Ok payload at the natural alignment.
             var rt = m.ReturnType;
             var retShape = rt == typeof(void) ? 0
                 : rt == typeof(ulong) ? 1
@@ -930,13 +932,41 @@ namespace Wacs.WASI.Preview2.HostBinding
                 : rt == typeof(uint) ? 5
                 : rt == typeof(ushort) ? 6
                 : rt == typeof(ValueTuple<byte[], bool>) ? 7
+                : IsPrimitiveRecord(rt) ? 8
                 : -1;
             if (retShape < 0)
                 throw new InvalidOperationException(
                     "[WasiStreamResult] on method with unsupported "
                     + "return type " + rt + " (expected void / "
                     + "bool / u8 / u16 / u32 / u64 / byte[] / "
-                    + "(byte[], bool)).");
+                    + "(byte[], bool) / record-of-primitives).");
+
+            // For record-of-prims: precompute field offsets +
+            // total alignment so the hot path doesn't reflect.
+            FieldInfo[]? recordFields = null;
+            int[]? recordOffsets = null;
+            int recordAlign = 1;
+            int recordPayloadOffset = 0;
+            if (retShape == 8)
+            {
+                recordFields = rt.GetFields(
+                    BindingFlags.Public | BindingFlags.Instance);
+                recordOffsets = new int[recordFields.Length];
+                int off = 0;
+                foreach (var f in recordFields)
+                {
+                    var sz = PrimitiveByteSize(f.FieldType);
+                    if (sz > recordAlign) recordAlign = sz;
+                }
+                for (int i = 0; i < recordFields.Length; i++)
+                {
+                    var sz = PrimitiveByteSize(recordFields[i].FieldType);
+                    off = AlignUp(off, sz);
+                    recordOffsets[i] = off;
+                    off += sz;
+                }
+                recordPayloadOffset = AlignUp(1, recordAlign);
+            }
 
             Wacs.Core.Runtime.Delegates.GenericFuncs? cabiRealloc = null;
             int Allocate(int align, int size)
@@ -1008,6 +1038,17 @@ namespace Wacs.WASI.Preview2.HostBinding
                         WriteI32LE(memOut, retAreaPtr + 4, dPtr2);
                         WriteI32LE(memOut, retAreaPtr + 8, bs2.Length);
                         memOut[retAreaPtr + 12] = tup.Item2 ? (byte)1 : (byte)0;
+                        break;
+                    case 8:   // record-of-primitives: fields at
+                              // retArea + recordPayloadOffset + recordOffsets[i]
+                        for (int i = 0; i < recordFields!.Length; i++)
+                        {
+                            var fv = recordFields[i].GetValue(ret)!;
+                            WritePrimitiveLE(memOut,
+                                retAreaPtr + recordPayloadOffset
+                                    + recordOffsets![i],
+                                recordFields[i].FieldType, fv);
+                        }
                         break;
                 }
             }
@@ -2163,6 +2204,32 @@ namespace Wacs.WASI.Preview2.HostBinding
         /// width (size bytes per field). Mirrors the canonical-
         /// ABI alignment rule "alignment(P) = sizeof(P)" for
         /// primitives.</summary>
+        /// <summary>True iff <paramref name="t"/> is a struct
+        /// or class whose public instance fields are all
+        /// primitives (and there is at least one). Used to
+        /// detect record-of-primitives return types for the
+        /// stream-result wrapper (metadata-hash-value etc.).
+        /// </summary>
+        private static bool IsPrimitiveRecord(Type t)
+        {
+            if (t == typeof(void)) return false;
+            if (t.IsPrimitive || t.IsEnum) return false;
+            if (t == typeof(string) || t == typeof(byte[])) return false;
+            if (t.IsArray) return false;
+            // Filter ValueTuple — it's structurally a record but
+            // we treat it as a dedicated shape.
+            if (t.IsGenericType
+                && t.GetGenericTypeDefinition().Name.StartsWith(
+                    "ValueTuple", StringComparison.Ordinal))
+                return false;
+            var fields = t.GetFields(
+                BindingFlags.Public | BindingFlags.Instance);
+            if (fields.Length == 0) return false;
+            foreach (var f in fields)
+                if (!IsPrimitive(f.FieldType)) return false;
+            return true;
+        }
+
         private static int PrimitiveByteSize(Type t)
         {
             if (t == typeof(bool) || t == typeof(byte)

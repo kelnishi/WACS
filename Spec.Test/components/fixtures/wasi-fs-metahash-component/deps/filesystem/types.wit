@@ -1,0 +1,11 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    enum error-code { unknown }
+    record metadata-hash-value {
+        lower: u64,
+        upper: u64,
+    }
+    resource descriptor {
+        metadata-hash: func() -> result<metadata-hash-value, error-code>;
+    }
+}

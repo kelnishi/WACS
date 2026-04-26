@@ -48,6 +48,22 @@ namespace Wacs.WASI.Preview2.Filesystem
         MutateDirectory = 1 << 5,
     }
 
+    /// <summary>WIT record
+    /// <c>wasi:filesystem/types.metadata-hash-value</c>:
+    /// <code>record metadata-hash-value { lower: u64, upper: u64 }</code>
+    /// </summary>
+    public struct MetadataHashValue
+    {
+        public ulong Lower;
+        public ulong Upper;
+
+        public MetadataHashValue(ulong lower, ulong upper)
+        {
+            Lower = lower;
+            Upper = upper;
+        }
+    }
+
     /// <summary>WIT enum
     /// <c>wasi:filesystem/types.descriptor-type</c>. The wire
     /// representation is a 1-byte discriminator; the host
@@ -293,6 +309,23 @@ namespace Wacs.WASI.Preview2.Filesystem
                 File.WriteAllBytes(fullPath, System.Array.Empty<byte>());
             }
             return new Descriptor(fullPath);
+        }
+
+        /// <summary>Stable hash of the file's identity (inode +
+        /// device on POSIX). Two descriptors referring to the
+        /// same underlying file return equal values across
+        /// <c>get-type</c> changes; default impl hashes
+        /// <see cref="Path"/>.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("metadata-hash")]
+        public virtual MetadataHashValue MetadataHash()
+        {
+            // Cheap deterministic hash from the path; concrete
+            // hosts override with stat()-derived inode/device
+            // pairs.
+            ulong lower = (ulong)Path.GetHashCode();
+            ulong upper = lower * 0x9E3779B97F4A7C15UL;
+            return new MetadataHashValue(lower, upper);
         }
 
         /// <summary>True iff <paramref name="other"/> refers to

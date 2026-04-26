@@ -135,6 +135,42 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(4096UL, desc.LastSetSize);
         }
 
+        private sealed class FixedHashDescriptor : Descriptor
+        {
+            public FixedHashDescriptor() : base("/synthetic") { }
+            public override MetadataHashValue MetadataHash()
+                => new MetadataHashValue(0x1122334455667788UL,
+                                         0x99AABBCCDDEEFF00UL);
+        }
+
+        [Fact]
+        public void MetadataHash_writes_record_of_two_u64_at_aligned_offset()
+        {
+            // Fixture: ask-meta-lower(handle) +
+            // ask-meta-upper(handle) call descriptor.metadata-hash
+            // and read the two u64 fields at retArea+8 (lower)
+            // and retArea+16 (upper). Stub returns fixed
+            // 0x1122..7788 / 0x99AA..FF00; assert both lift back
+            // through canon-lift unchanged.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-metahash-component", "fsmetahash.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new FixedHashDescriptor();
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0x1122334455667788UL,
+                (ulong)ci.Invoke("ask-meta-lower", (uint)handle)!);
+            Assert.Equal(0x99AABBCCDDEEFF00UL,
+                (ulong)ci.Invoke("ask-meta-upper", (uint)handle)!);
+        }
+
         private sealed class FixedReadDescriptor : Descriptor
         {
             private readonly byte[] _content;
