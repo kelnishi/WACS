@@ -334,6 +334,29 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Invoke_lifts_compact_utf16_latin1_branch()
+        {
+            // compact-utf16-component (string-encoding=latin1+utf16):
+            // `latin` returns a buffer with the high-bit CLEAR
+            // → Latin-1 decode, len = byte count.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "compact-utf16-component", "clu.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal("Hi", ci.Invoke("latin"));
+        }
+
+        [Fact]
+        public void Invoke_lifts_compact_utf16_utf16_branch()
+        {
+            // Companion: `wide` returns a buffer with the high-
+            // bit SET → UTF-16 decode, len & ~tag = u16 code units.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "compact-utf16-component", "clu.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal("Hi", ci.Invoke("wide"));
+        }
+
+        [Fact]
         public void Invoke_resolves_through_nested_component_alias()
         {
             // nested-component fixture: outer composes one inner

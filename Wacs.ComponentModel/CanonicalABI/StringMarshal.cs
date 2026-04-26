@@ -155,5 +155,66 @@ namespace Wacs.ComponentModel.CanonicalABI
         {
             return Encoding.Unicode.GetBytes(value);
         }
+
+        /// <summary>The high bit of <c>tagged_code_units</c>
+        /// distinguishes UTF-16 (set) from Latin-1 (clear) when
+        /// <c>string-encoding=latin1+utf16</c>. Mask off to read
+        /// the actual count.</summary>
+        public const uint Latin1OrUtf16Tag = 1u << 31;
+
+        /// <summary>
+        /// Lift a string under <c>string-encoding=latin1+utf16</c>
+        /// (wasm-tools spelling: <c>compact-utf16</c>). The
+        /// per-string encoding is dynamic: if the high bit of
+        /// <paramref name="taggedCodeUnits"/> is set, treat as
+        /// UTF-16LE with <c>byte_length = 2 * (tagged &amp; ~tag)</c>;
+        /// otherwise treat as Latin-1 with <c>byte_length = tagged</c>
+        /// (each byte one code point in U+0000..U+00FF).
+        /// </summary>
+        public static string LiftLatin1OrUtf16(byte[] source, int ptr, int taggedCodeUnits)
+        {
+            // Cast to uint to inspect the high bit safely — the
+            // wire value is treated as unsigned per CanonicalABI.
+            var tagged = (uint)taggedCodeUnits;
+            if ((tagged & Latin1OrUtf16Tag) != 0)
+            {
+                var codeUnits = (int)(tagged & ~Latin1OrUtf16Tag);
+                return LiftUtf16(source, ptr, codeUnits);
+            }
+            // Latin-1: each byte at source[ptr+i] is the code
+            // point. ISO-8859-1 is the single-byte decoder; spelled
+            // by codepage rather than the .NET 5+ Encoding.Latin1
+            // shorthand to keep netstandard2.1 happy.
+            var byteLen = (int)tagged;
+            if (ptr < 0 || byteLen < 0 || ptr + byteLen > source.Length)
+                throw new ArgumentOutOfRangeException(nameof(ptr),
+                    "Latin-1 string span out of range of provided memory buffer.");
+            return Latin1.GetString(source, ptr, byteLen);
+        }
+
+        /// <summary>Cached ISO-8859-1 decoder. Equivalent to
+        /// .NET 5+'s <c>Encoding.Latin1</c> — separate constant
+        /// keeps the netstandard2.1 build clean.</summary>
+        private static readonly Encoding Latin1 =
+            Encoding.GetEncoding("ISO-8859-1");
+
+        /// <summary>Lower-path helper for
+        /// <c>string-encoding=latin1+utf16</c>. The choice between
+        /// Latin-1 and UTF-16 is implementation-defined — we
+        /// always emit UTF-16 with the high-bit tag set: simpler
+        /// emission code, always correct, never silently truncates
+        /// on non-Latin-1 chars. The Latin-1-when-all-bytes-fit
+        /// optimization is a follow-up.
+        ///
+        /// <para>Returns the same shape as <see cref="EncodeUtf16"/>;
+        /// the caller stamps the high bit of the code-unit count
+        /// when pushing the (ptr, taggedLen) pair on the wasm
+        /// stack. Provided here as a marker for the chosen
+        /// strategy so downstream emitters can find it
+        /// uniformly.</para></summary>
+        public static byte[] EncodeLatin1OrUtf16(string value)
+        {
+            return Encoding.Unicode.GetBytes(value);
+        }
     }
 }

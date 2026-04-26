@@ -1,0 +1,8 @@
+package local:clu;
+world clu {
+    // Two exports to exercise both branches of the latin1+utf16
+    // dynamic decode: `latin` returns a Latin-1-tagged buffer,
+    // `wide` returns a UTF-16-tagged buffer.
+    export latin: func() -> string;
+    export wide: func() -> string;
+}
