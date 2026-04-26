@@ -247,6 +247,72 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal("inner-greet", alias.ExportName);
         }
 
+        private static string FindWasiRandomBytesComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "wasi-random-bytes-component", "wasm",
+                                "rb.component.wasm");
+        }
+
+        [Fact]
+        public void Parse_decodes_multi_core_module_composition()
+        {
+            // wit-component generates 3 core modules + a chain
+            // of core-instance entries (instantiate + inline-
+            // export bundles) for any component that imports an
+            // aggregate-typed function. Verifies the new
+            // CoreInstanceSectionReader handles both forms — the
+            // 0x00 (instantiate moduleidx + with-clause args)
+            // and 0x01 (inline-export bundle) — without
+            // crashing on real wit-component output.
+            var path = FindWasiRandomBytesComponentPath();
+            using var stream = File.OpenRead(path);
+            var component = ComponentBinaryParser.Parse(stream);
+
+            // Spec.Test/components/fixtures/wasi-random-bytes-component:
+            // 3 core modules (wit-component adapter + post-
+            // return + user's core wasm).
+            Assert.True(component.CoreModuleCount >= 3,
+                $"Expected ≥3 core modules, got {component.CoreModuleCount}");
+
+            // Multiple core-instance entries — wit-component's
+            // typical instantiate/inline-export interleaving.
+            Assert.True(component.CoreInstances.Count >= 3,
+                $"Expected ≥3 core-instance entries, got "
+                + component.CoreInstances.Count);
+
+            // Both forms appear in real output: at least one
+            // InstantiateCoreModule + at least one
+            // InstantiateCoreInline.
+            bool hasInstantiate = false, hasInline = false;
+            foreach (var e in component.CoreInstances)
+            {
+                if (e is InstantiateCoreModule) hasInstantiate = true;
+                if (e is InstantiateCoreInline) hasInline = true;
+            }
+            Assert.True(hasInstantiate,
+                "Expected at least one InstantiateCoreModule entry");
+            Assert.True(hasInline,
+                "Expected at least one InstantiateCoreInline entry");
+
+            // The instantiate entries' with-clauses target the
+            // host-imported namespace; one of them should name
+            // the wasi:random/random@0.2.3 instance.
+            bool foundWasiArg = false;
+            foreach (var e in component.CoreInstances)
+            {
+                if (e is InstantiateCoreModule ic)
+                    foreach (var arg in ic.Args)
+                        if (arg.Name.Contains("wasi:random/random"))
+                        { foundWasiArg = true; break; }
+            }
+            Assert.True(foundWasiArg,
+                "Expected an instantiate-arg targeting wasi:random/random");
+        }
+
         [Fact]
         public void Parse_rejects_truncated_header()
         {

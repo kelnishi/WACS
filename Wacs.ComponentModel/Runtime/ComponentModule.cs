@@ -183,6 +183,32 @@ namespace Wacs.ComponentModel.Runtime
         private IReadOnlyList<Parser.CanonEntry>? _canons;
 
         /// <summary>
+        /// Decoded core-instance entries — each describes one
+        /// step in the core-wasm composition: either an
+        /// <c>(instantiate core-moduleidx arg*)</c> with a
+        /// with-clause supplying named import bundles, or an
+        /// inline-export bundle that lifts items from the
+        /// surrounding core spaces under fresh names.
+        /// Pairs with the canon section + core-alias entries to
+        /// drive multi-core-module wiring (wit-component's
+        /// adapter modules + post-return shims).
+        /// </summary>
+        public IReadOnlyList<Parser.CoreInstanceEntry> CoreInstances
+        {
+            get
+            {
+                if (_coreInstances != null) return _coreInstances;
+                var list = new List<Parser.CoreInstanceEntry>();
+                foreach (var s in RawSections)
+                    if (s.Id == Parser.ComponentSectionId.CoreInstance)
+                        list.AddRange(Parser.CoreInstanceSectionReader.Decode(s.Payload));
+                _coreInstances = list;
+                return list;
+            }
+        }
+        private IReadOnlyList<Parser.CoreInstanceEntry>? _coreInstances;
+
+        /// <summary>
         /// Decoded component-instance entries — each describes
         /// one instantiation (of a nested component or as an
         /// inline-export bundle). Allocates a fresh slot in the
