@@ -7,4 +7,7 @@ world demo {
     /// Calls fields.clone(handle); drops the returned
     /// handle. Returns 1 if a non-zero handle came back.
     export ask-clone: func(handle: u32) -> u32;
+    /// Calls fields.has(handle, "X-Present"); returns the
+    /// bool as u32.
+    export ask-has: func(handle: u32) -> u32;
 }

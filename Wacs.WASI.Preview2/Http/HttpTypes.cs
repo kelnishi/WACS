@@ -91,6 +91,19 @@ namespace Wacs.WASI.Preview2.Http
             = new System.Collections.Generic.List<
                 (string Key, byte[] Value)>();
 
+        /// <summary>True iff there is at least one entry
+        /// with key matching <paramref name="name"/> (case-
+        /// insensitive). WIT
+        /// <c>has: func(name: field-key) -&gt; bool</c>.</summary>
+        public virtual bool Has(string name)
+        {
+            foreach (var (k, _) in _entries)
+                if (string.Equals(k, name,
+                    System.StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
+        }
+
         /// <summary>Append a (key, value) entry. Host-side
         /// helper not bound to WIT yet (the WIT
         /// <c>append(field-key, field-value)</c> will route

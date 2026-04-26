@@ -68,6 +68,31 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [Fact]
+        public void Fields_has_decodes_string_param_on_primitive_resource_method()
+        {
+            // Fixture: ask-has(handle) calls fields.has(handle,
+            // "X-Present"). Stub fields starts with one entry
+            // ("X-Present", "v") via AppendEntry; expect
+            // has() == 1.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-fields-component", "httpfields.component.wasm"));
+            var resources = new ResourceContext();
+            var fields = new Fields();
+            fields.AppendEntry("X-Present", new byte[] { (byte)'v' });
+            int handle = resources.TableFor(typeof(Fields))
+                .Allocate(fields);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Fields>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-has", (uint)handle)!);
+        }
+
+        [Fact]
         public void Fields_clone_returns_fresh_resource_handle()
         {
             // Fixture: ask-clone(handle) calls fields.clone,
