@@ -1,0 +1,11 @@
+package local:tcpaccept;
+world demo {
+    import wasi:sockets/tcp@0.2.3;
+    /// Calls accept; drops the three returned handles. Returns
+    /// the count of distinct non-zero handles received (3 on
+    /// happy path).
+    export ask-accept: func(handle: u32) -> u32;
+    /// Calls finish-connect; drops the two returned handles.
+    /// Returns the count of distinct non-zero handles (2).
+    export ask-connect: func(handle: u32) -> u32;
+}

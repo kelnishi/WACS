@@ -189,6 +189,26 @@ namespace Wacs.WASI.Preview2.Sockets
         [WasiMethodName("finish-listen")]
         public virtual void FinishListen() { }
 
+        /// <summary>Complete a previously-issued
+        /// <c>start-connect</c> call. Returns the
+        /// (input-stream, output-stream) pair for the freshly
+        /// established connection — guests use these to read
+        /// and write the TCP byte stream. Default returns a
+        /// pair of stub streams.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("finish-connect")]
+        public virtual (InputStream, OutputStream) FinishConnect()
+            => (new InputStream(), new OutputStream());
+
+        /// <summary>Accept a pending incoming connection.
+        /// Returns the new <c>tcp-socket</c> + its
+        /// (input-stream, output-stream) pair. Default returns
+        /// stub instances.</summary>
+        [WasiErrorResult]
+        public virtual (TcpSocket, InputStream, OutputStream) Accept()
+            => (new TcpSocket(Family),
+                new InputStream(), new OutputStream());
+
         /// <summary>Initiate a connection-shutdown of the
         /// requested direction. The base impl is a no-op
         /// stub.</summary>

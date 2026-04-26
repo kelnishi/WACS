@@ -1,0 +1,9 @@
+package wasi:sockets@0.2.3;
+interface tcp {
+    use network.{error-code};
+    use wasi:io/streams@0.2.3.{input-stream, output-stream};
+    resource tcp-socket {
+        accept: func() -> result<tuple<own<tcp-socket>, own<input-stream>, own<output-stream>>, error-code>;
+        finish-connect: func() -> result<tuple<own<input-stream>, own<output-stream>>, error-code>;
+    }
+}
