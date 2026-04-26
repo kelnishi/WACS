@@ -98,6 +98,90 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(1, resources.TableFor(typeof(TcpSocket)).Count);
         }
 
+        private sealed class FixedAddrTcpSocket : TcpSocket
+        {
+            public FixedAddrTcpSocket() : base(IpAddressFamily.Ipv4) { }
+            public override IpSocketAddress LocalAddress()
+                => new Ipv4SocketAddress(8080,
+                    new byte[] { 192, 168, 1, 42 });
+        }
+
+        private sealed class Ipv6TcpSocket : TcpSocket
+        {
+            public Ipv6TcpSocket() : base(IpAddressFamily.Ipv6) { }
+            public override IpSocketAddress LocalAddress()
+                => new Ipv6SocketAddress(443, 0,
+                    new ushort[] {
+                        0x2001, 0x0DB8, 0, 0,
+                        0, 0, 0, 0x0001 },
+                    0);
+        }
+
+        [Fact]
+        public void TcpSocket_local_address_writes_ipv4_variant_payload()
+        {
+            // Fixture: ask-local-disc / ask-local-port /
+            // ask-local-ipv4 each call local-address, read
+            // different fields out of the variant wire form:
+            //   retArea+0: outer disc
+            //   retArea+4: variant disc (0=ipv4)
+            //   retArea+8: port (u16)
+            //   retArea+10..+13: ipv4 4-byte address
+            // Stub returns 192.168.1.42:8080 (ipv4).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-tcp-localaddr-component", "tcplocaladdr.component.wasm"));
+            var resources = new ResourceContext();
+            var sock = new FixedAddrTcpSocket();
+            int handle = resources.TableFor(typeof(TcpSocket))
+                .Allocate(sock);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<TcpSocket>(
+                    "wasi:sockets/tcp@0.2.3", resources);
+            });
+
+            // Variant disc: ipv4 = 0
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-local-disc", (uint)handle)!);
+            // Port: 8080
+            Assert.Equal(8080u, (uint)ci.Invoke(
+                "ask-local-port", (uint)handle)!);
+            // IPv4 packed: 192.168.1.42 = 0xC0A8012A
+            Assert.Equal(0xC0A8012Au, (uint)ci.Invoke(
+                "ask-local-ipv4", (uint)handle)!);
+        }
+
+        [Fact]
+        public void TcpSocket_local_address_writes_ipv6_variant_disc()
+        {
+            // Same fixture as the ipv4 test but with an ipv6
+            // socket — only the variant disc is reachable
+            // through the ipv4-shape WAT, so we just verify
+            // that the binder routes to the ipv6 case (disc=1).
+            // The full ipv6 fixture would need a separate WAT
+            // reading the wider payload offsets.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-tcp-localaddr-component", "tcplocaladdr.component.wasm"));
+            var resources = new ResourceContext();
+            var sock = new Ipv6TcpSocket();
+            int handle = resources.TableFor(typeof(TcpSocket))
+                .Allocate(sock);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<TcpSocket>(
+                    "wasi:sockets/tcp@0.2.3", resources);
+            });
+
+            // Variant disc: ipv6 = 1
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-local-disc", (uint)handle)!);
+            // Port: 443
+            Assert.Equal(443u, (uint)ci.Invoke(
+                "ask-local-port", (uint)handle)!);
+        }
+
         [Fact]
         public void TcpSocket_keep_alive_idle_time_and_count_round_trip()
         {
