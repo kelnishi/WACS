@@ -1548,15 +1548,36 @@ namespace Wacs.WASI.Preview2.HostBinding
                     "WritePrimitiveLE for " + t + " is unsupported.");
         }
 
-        /// <summary>True iff every parameter + the return type
-        /// is a primitive that maps cleanly to a wasm flat slot
-        /// (i32 / i64 / f32 / f64). Aggregates land in a
-        /// follow-up.</summary>
+        /// <summary>True iff the return type is primitive /
+        /// void and every param is either a primitive flat slot
+        /// or a record-of-primitives (which canon-lowers to its
+        /// fields flattened across wire slots).</summary>
         private static bool IsPrimitiveSignature(MethodInfo m)
         {
             if (!IsPrimitiveOrVoid(m.ReturnType)) return false;
             foreach (var p in m.GetParameters())
-                if (!IsPrimitive(p.ParameterType)) return false;
+                if (!IsPrimitiveOrRecordOfPrimitives(p.ParameterType))
+                    return false;
+            return true;
+        }
+
+        /// <summary>True iff <paramref name="t"/> is a primitive
+        /// OR a struct/class with at least one public field, all
+        /// primitive-typed (the host C# representation of a WIT
+        /// record-of-primitives param).</summary>
+        private static bool IsPrimitiveOrRecordOfPrimitives(Type t)
+        {
+            if (IsPrimitive(t)) return true;
+            if (!t.IsValueType && !t.IsClass) return false;
+            // Exclude reference-type aggregates like string /
+            // byte[] / arrays / collections — those need their
+            // own wrapper paths.
+            if (t == typeof(string) || t.IsArray) return false;
+            var fields = t.GetFields(
+                BindingFlags.Public | BindingFlags.Instance);
+            if (fields.Length == 0) return false;
+            foreach (var f in fields)
+                if (!IsPrimitive(f.FieldType)) return false;
             return true;
         }
 
@@ -1609,12 +1630,39 @@ namespace Wacs.WASI.Preview2.HostBinding
             // byte / sbyte / short / ushort etc. don't round-
             // trip through its ResultType validator, so we map
             // each to int / long and convert inside the body
-            // before invoking the impl method.
+            // before invoking the impl method. Record-of-
+            // primitives params canon-lower to their fields
+            // flattened across wire slots.
             var paramInfos = m.GetParameters();
-            var paramTypes = new Type[paramInfos.Length + 1];
-            paramTypes[0] = typeof(ExecContext);
+            // Pre-compute wire-slot expansion: for each host
+            // param, either a single wire type (primitive) or
+            // one wire type per public field (record).
+            var wireSlots = new System.Collections.Generic.List<Type>();
+            wireSlots.Add(typeof(ExecContext));
+            // Per-host-param: number of wire slots it occupies,
+            // and (for records) the list of fields.
+            var paramSlotCounts = new int[paramInfos.Length];
+            var paramRecordFields = new FieldInfo[paramInfos.Length][];
             for (int i = 0; i < paramInfos.Length; i++)
-                paramTypes[i + 1] = ToWireType(paramInfos[i].ParameterType);
+            {
+                var pt = paramInfos[i].ParameterType;
+                if (IsPrimitive(pt))
+                {
+                    wireSlots.Add(ToWireType(pt));
+                    paramSlotCounts[i] = 1;
+                }
+                else
+                {
+                    // Record-of-primitives: expand to fields.
+                    var fields = pt.GetFields(
+                        BindingFlags.Public | BindingFlags.Instance);
+                    foreach (var f in fields)
+                        wireSlots.Add(ToWireType(f.FieldType));
+                    paramSlotCounts[i] = fields.Length;
+                    paramRecordFields[i] = fields;
+                }
+            }
+            var paramTypes = wireSlots.ToArray();
 
             // Build the open-generic delegate type for
             // Func<ExecContext, …, TRet> / Action<ExecContext, …>.
@@ -1631,35 +1679,98 @@ namespace Wacs.WASI.Preview2.HostBinding
                     .MakeGenericType(allTypes);
             }
 
-            // Expression tree: (ctx, p1, p2, …) =>
-            //   (TRet)impl.Method((TParam)p1, (TParam)p2, …)
-            // The casts handle wire-type ↔ host-type mismatches
-            // (e.g. wire int → host bool / byte). The
-            // ExecContext parameter is accepted but ignored —
-            // primitive WASI methods don't read host state.
+            // Expression tree: (ctx, w1, w2, …) =>
+            //   (TRet)impl.Method(TParam1, TParam2, …)
+            // Where each TParamI either reads a single wire
+            // slot (primitive) or constructs a record from
+            // multiple consecutive wire slots.
             var lambdaParams = new ParameterExpression[paramTypes.Length];
             lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
+            int wireIdx = 1;
             for (int i = 0; i < paramInfos.Length; i++)
-                lambdaParams[i + 1] = Expression.Parameter(
-                    paramTypes[i + 1], paramInfos[i].Name);
+            {
+                if (paramSlotCounts[i] == 1 && paramRecordFields[i] == null)
+                {
+                    lambdaParams[wireIdx] = Expression.Parameter(
+                        paramTypes[wireIdx], paramInfos[i].Name);
+                    wireIdx++;
+                }
+                else
+                {
+                    var fields = paramRecordFields[i];
+                    for (int f = 0; f < fields.Length; f++)
+                    {
+                        lambdaParams[wireIdx] = Expression.Parameter(
+                            paramTypes[wireIdx],
+                            paramInfos[i].Name + "_" + fields[f].Name);
+                        wireIdx++;
+                    }
+                }
+            }
 
             var implExpr = Expression.Constant(impl);
             var argExprs = new Expression[paramInfos.Length];
+            wireIdx = 1;
             for (int i = 0; i < paramInfos.Length; i++)
             {
-                Expression e = lambdaParams[i + 1];
-                if (paramInfos[i].ParameterType != e.Type)
+                if (paramSlotCounts[i] == 1 && paramRecordFields[i] == null)
                 {
-                    // bool isn't directly castable from int —
-                    // express as `wireVal != 0`.
-                    if (paramInfos[i].ParameterType == typeof(bool))
-                        e = Expression.NotEqual(e,
-                            Expression.Constant(0, e.Type));
-                    else
-                        e = Expression.Convert(e,
-                            paramInfos[i].ParameterType);
+                    Expression e = lambdaParams[wireIdx];
+                    if (paramInfos[i].ParameterType != e.Type)
+                    {
+                        if (paramInfos[i].ParameterType == typeof(bool))
+                            e = Expression.NotEqual(e,
+                                Expression.Constant(0, e.Type));
+                        else
+                            e = Expression.Convert(e,
+                                paramInfos[i].ParameterType);
+                    }
+                    argExprs[i] = e;
+                    wireIdx++;
                 }
-                argExprs[i] = e;
+                else
+                {
+                    // Build `new TRecord { Field0 = ...,
+                    // Field1 = ..., }` with each field cast
+                    // from its wire type to the field type.
+                    // Structs don't have explicit parameterless
+                    // ctors but Expression.New(Type) for value
+                    // types creates a default value.
+                    var fields = paramRecordFields[i];
+                    var pt = paramInfos[i].ParameterType;
+                    NewExpression newExpr;
+                    if (pt.IsValueType)
+                    {
+                        newExpr = Expression.New(pt);
+                    }
+                    else
+                    {
+                        var ctor = pt.GetConstructor(Type.EmptyTypes);
+                        if (ctor == null)
+                            throw new InvalidOperationException(
+                                "Record param type " + pt + " requires "
+                                + "a parameterless constructor for the "
+                                + "auto-binder's flattened-args path.");
+                        newExpr = Expression.New(ctor);
+                    }
+                    var bindings = new MemberBinding[fields.Length];
+                    for (int f = 0; f < fields.Length; f++)
+                    {
+                        Expression e = lambdaParams[wireIdx + f];
+                        if (fields[f].FieldType != e.Type)
+                        {
+                            if (fields[f].FieldType == typeof(bool))
+                                e = Expression.NotEqual(e,
+                                    Expression.Constant(0, e.Type));
+                            else
+                                e = Expression.Convert(e,
+                                    fields[f].FieldType);
+                        }
+                        bindings[f] = Expression.Bind(fields[f], e);
+                    }
+                    argExprs[i] = Expression.MemberInit(newExpr, bindings);
+                    wireIdx += fields.Length;
+                }
             }
             Expression call = Expression.Call(implExpr, m, argExprs);
             // Cast return value back to wire type if the impl's
