@@ -574,7 +574,11 @@ namespace Wacs.WASI.Preview2.HostBinding
                     importName, table, resourceType, m);
                 return;
             }
-            if (!IsPrimitiveOrVoid(m.ReturnType)) return;
+            // Bare enum returns (no result wrapping) ride the
+            // primitive path through ToWireType — wire form is
+            // the underlying integer.
+            if (!IsPrimitiveOrVoid(m.ReturnType)
+                && !m.ReturnType.IsEnum) return;
 
             // Wrapper signature: ExecContext, handle (i32),
             // [host params...] → wire return type (or void).

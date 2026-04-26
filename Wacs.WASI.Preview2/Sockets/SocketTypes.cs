@@ -7,6 +7,7 @@
 
 using System;
 using Wacs.WASI.Preview2.HostBinding;
+using Wacs.WASI.Preview2.Io;
 
 namespace Wacs.WASI.Preview2.Sockets
 {
@@ -55,6 +56,19 @@ namespace Wacs.WASI.Preview2.Sockets
     {
         public IpAddressFamily Family { get; }
         public TcpSocket(IpAddressFamily family) { Family = family; }
+
+        /// <summary>Return the socket's address family. WIT's
+        /// <c>address-family() -&gt; ip-address-family</c> —
+        /// no result wrapping; bare enum return.</summary>
+        [WasiMethodName("address-family")]
+        public virtual IpAddressFamily AddressFamily() => Family;
+
+        /// <summary>Yield a pollable that fires when this
+        /// socket has work to do. v0 default returns an
+        /// always-ready Pollable; concrete implementations
+        /// subclass for real I/O readiness.</summary>
+        public virtual Pollable Subscribe() => new Pollable();
+
         public virtual void Dispose() { }
     }
 
@@ -65,6 +79,12 @@ namespace Wacs.WASI.Preview2.Sockets
     {
         public IpAddressFamily Family { get; }
         public UdpSocket(IpAddressFamily family) { Family = family; }
+
+        [WasiMethodName("address-family")]
+        public virtual IpAddressFamily AddressFamily() => Family;
+
+        public virtual Pollable Subscribe() => new Pollable();
+
         public virtual void Dispose() { }
     }
 }
