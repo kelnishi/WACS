@@ -888,13 +888,21 @@ namespace Wacs.ComponentModel.Runtime
             }
             if (_memory == null) return false;
 
-            // For all-32-bit tuples the stride is 4 bytes — same
-            // assumption the transpiler's EmitTupleReturnBody
-            // makes. Wide prims (s64/u64/f64) + mixed-width
-            // alignment land as the transpiler's coverage grows.
+            // Per-element offset follows canonical-ABI alignment
+            // — running offset rounded up to each element's
+            // alignment, then incremented by its byte size.
+            // Mixed-width tuples (e.g. tuple<u64, u32> at 0/8)
+            // are common in WASI shapes like wall-clock's
+            // datetime tuple.
             var values = new object[prims.Length];
+            int off = 0;
             for (int i = 0; i < prims.Length; i++)
-                values[i] = ReadPrimAtOffset(retAreaPtr + i * 4, prims[i]);
+            {
+                var size = PrimByteSize(prims[i]);
+                off = AlignUp(off, size);
+                values[i] = ReadPrimAtOffset(retAreaPtr + off, prims[i]);
+                off += size;
+            }
 
             var csTypes = new Type[prims.Length];
             for (int i = 0; i < prims.Length; i++)
@@ -998,10 +1006,22 @@ namespace Wacs.ComponentModel.Runtime
         /// <summary>Read a primitive value at a given memory
         /// offset — handles 32-bit prims (and bool / narrow
         /// ints which fit in i32 wire form). Wide prims
-        /// (s64/u64/f64) are a follow-up that mirrors the
-        /// transpiler's same gap.</summary>
+        /// (s64/u64/f64) read 8 bytes; the wider read width is
+        /// the only delta from the small-prim path.</summary>
         private object ReadPrimAtOffset(int offset, ComponentPrim prim)
         {
+            switch (prim)
+            {
+                case ComponentPrim.S64:
+                    return BitConverter.ToInt64(
+                        ReadMemoryBytes(offset, 8), 0);
+                case ComponentPrim.U64:
+                    return BitConverter.ToUInt64(
+                        ReadMemoryBytes(offset, 8), 0);
+                case ComponentPrim.F64:
+                    return BitConverter.ToDouble(
+                        ReadMemoryBytes(offset, 8), 0);
+            }
             var bytes = ReadMemoryBytes(offset, 4);
             return prim switch
             {
@@ -1016,7 +1036,7 @@ namespace Wacs.ComponentModel.Runtime
                 ComponentPrim.Char => (object)BitConverter.ToUInt32(bytes, 0),
                 _ => throw new NotSupportedException(
                     "ReadPrimAtOffset for " + prim
-                    + " (wide prim) is a follow-up."),
+                    + " is unsupported."),
             };
         }
 
