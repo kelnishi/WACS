@@ -698,6 +698,9 @@ namespace Wacs.ComponentModel.Runtime
             if (TryLiftListOfString(r, coreResult.Data.Int32,
                     out var listStringResult))
                 return listStringResult;
+            if (TryLiftListOfStringPair(r, coreResult.Data.Int32,
+                    out var listPairResult))
+                return listPairResult;
             if (TryLiftOptionOfPrim(r, coreResult.Data.Int32,
                     out var optionResult))
                 return optionResult;
@@ -836,6 +839,52 @@ namespace Wacs.ComponentModel.Runtime
             result = _stringEncoding == CanonOption.Kind.StringUtf16
                 ? ListMarshal.LiftStringListUtf16(_memory.Data, listPtr, count)
                 : ListMarshal.LiftStringList(_memory.Data, listPtr, count);
+            return true;
+        }
+
+        /// <summary>Lift <c>list&lt;tuple&lt;string, string&gt;&gt;</c>
+        /// — the wire shape WASI uses for environment-var pairs.
+        /// Header is (arrayPtr, count); each element is 16 bytes
+        /// (k_ptr, k_len, v_ptr, v_len). Decoded as a
+        /// <c>(string, string)[]</c> on the C# side.</summary>
+        private bool TryLiftListOfStringPair(
+            ComponentValType t, int retAreaPtr, out object? result)
+        {
+            result = null;
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= _component.Types.Count) return false;
+            if (!(_component.Types[(int)t.TypeIdx] is ComponentListType list))
+                return false;
+            // The element must itself be a tuple<string, string>
+            // — a type-ref to a structural ComponentTupleType
+            // with exactly two string elements.
+            if (list.Element.IsPrimitive) return false;
+            if (list.Element.TypeIdx >= _component.Types.Count) return false;
+            if (!(_component.Types[(int)list.Element.TypeIdx]
+                    is ComponentTupleType tup)) return false;
+            if (tup.Elements.Count != 2) return false;
+            foreach (var e in tup.Elements)
+                if (!e.IsPrimitive || e.Prim != ComponentPrim.String)
+                    return false;
+            if (_memory == null) return false;
+
+            var header = ReadMemoryBytes(retAreaPtr, 8);
+            var arrayPtr = BitConverter.ToInt32(header, 0);
+            var count = BitConverter.ToInt32(header, 4);
+            var pairs = new (string, string)[count];
+            for (int i = 0; i < count; i++)
+            {
+                int basePtr = arrayPtr + i * 16;
+                var slot = ReadMemoryBytes(basePtr, 16);
+                int kPtr = BitConverter.ToInt32(slot, 0);
+                int kLen = BitConverter.ToInt32(slot, 4);
+                int vPtr = BitConverter.ToInt32(slot, 8);
+                int vLen = BitConverter.ToInt32(slot, 12);
+                pairs[i] = (
+                    LiftStringAt(kPtr, kLen),
+                    LiftStringAt(vPtr, vLen));
+            }
+            result = pairs;
             return true;
         }
 

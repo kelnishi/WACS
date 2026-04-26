@@ -1,0 +1,6 @@
+package wasi:cli@0.2.3;
+interface environment {
+    get-environment: func() -> list<tuple<string, string>>;
+    get-arguments: func() -> list<string>;
+    initial-cwd: func() -> option<string>;
+}
