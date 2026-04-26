@@ -1070,6 +1070,48 @@ namespace Wacs.Transpiler.Test
             Assert.Equal((uint)11, yField!.GetValue(dotValue));
         }
 
+        private static string FindUtf16ParamComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "utf16-string-param-component", "wasm",
+                                "u16p.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_round_trips_utf16_string_param()
+        {
+            // utf16-string-param-component: echo(s: string) -> string
+            // built with --encoding utf16. Tests the lower path:
+            // caller passes a C# string → emitted IL encodes via
+            // EncodeUtf16, calls cabi_realloc(align=2, byteLen),
+            // copies the UTF-16LE bytes into guest memory, then
+            // pushes (ptr, codeUnits) — codeUnits = byteLen / 2,
+            // not byteLen. The guest's echo returns the same
+            // (ptr, codeUnits) at retArea so the lift round-trips
+            // back to the same string.
+            using var fs = File.OpenRead(FindUtf16ParamComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var echo = componentExports!.GetMethod("Echo");
+            Assert.NotNull(echo);
+            Assert.Equal(typeof(string), echo!.ReturnType);
+            Assert.Equal(typeof(string), echo.GetParameters()[0].ParameterType);
+
+            // ASCII round-trip — UTF-16 widens each char to 2 bytes
+            // but the lift narrows back to the same string.
+            Assert.Equal("Hello", (string)echo.Invoke(null, new object[] { "Hello" })!);
+
+            // Non-ASCII round-trip — UTF-16 native; UTF-8 would
+            // need 2 bytes per char so this exercises that we're
+            // really using UTF-16 not UTF-8.
+            Assert.Equal("café", (string)echo.Invoke(null, new object[] { "café" })!);
+        }
+
         private static string FindUtf16StringComponentPath()
         {
             var dir = new DirectoryInfo(Directory.GetCurrentDirectory());

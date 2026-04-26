@@ -164,11 +164,15 @@ namespace Wacs.ComponentModel.Runtime
             // about correctness, not throughput. (The transpiler
             // path stays the fast lane; the interpreter is the
             // checking lane.)
+            // Set encoding BEFORE lowering so string-param
+            // encoding tracks the canon-lift's option (UTF-8
+            // default; UTF-16 picks align=2 + u16-code-unit
+            // length).
+            _stringEncoding = ResolveStringEncoding(lift.Options);
             var invoker = _runtime.CreateInvoker(coreAddr, new InvokerOptions());
             var coreArgs = LowerArgs(fn, args);
             var coreResults = invoker(coreArgs);
 
-            _stringEncoding = ResolveStringEncoding(lift.Options);
             return LiftResult(fn, coreFuncType, coreResults);
         }
 
@@ -265,10 +269,18 @@ namespace Wacs.ComponentModel.Runtime
             if (_memory == null)
                 throw new InvalidOperationException(
                     "String param lowering requires Module.Memory.");
-            var bytes = StringMarshal.EncodeUtf8(value);
-            var ptr = CabiRealloc(0, 0, 1, bytes.Length);
+            // Encoding picked from the per-Invoke
+            // _stringEncoding field, set on Invoke entry from the
+            // canon-lift options. UTF-16 uses align=2 and passes
+            // length in u16 code units.
+            var isUtf16 = _stringEncoding == CanonOption.Kind.StringUtf16;
+            var bytes = isUtf16
+                ? StringMarshal.EncodeUtf16(value)
+                : StringMarshal.EncodeUtf8(value);
+            var align = isUtf16 ? 2 : 1;
+            var ptr = CabiRealloc(0, 0, align, bytes.Length);
             StringMarshal.CopyToGuest(bytes, _memory.Data, ptr);
-            return (ptr, bytes.Length);
+            return (ptr, isUtf16 ? bytes.Length / 2 : bytes.Length);
         }
 
         private (int ptr, int count) LowerListOfPrimParam(

@@ -334,6 +334,22 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Invoke_round_trips_utf16_string_param()
+        {
+            // utf16-string-param-component: echo(s) -> string
+            // with string-encoding=utf16. Tests the lower path:
+            // C# string → EncodeUtf16 → cabi_realloc(align=2) →
+            // (ptr, codeUnits) on the wasm stack. Guest echoes
+            // back the same (ptr, codeUnits) at retArea; the
+            // lift decodes via LiftUtf16 to round-trip.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "utf16-string-param-component", "u16p.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal("Hello", ci.Invoke("echo", "Hello"));
+            Assert.Equal("café", ci.Invoke("echo", "café"));
+        }
+
+        [Fact]
         public void Invoke_lifts_utf16_string_via_canon_option()
         {
             // utf16-string-component: greet() -> string with the

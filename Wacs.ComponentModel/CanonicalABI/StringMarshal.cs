@@ -139,5 +139,21 @@ namespace Wacs.ComponentModel.CanonicalABI
                     "UTF-16 string span out of range of provided memory buffer.");
             return Encoding.Unicode.GetString(source, ptr, codeUnitCount * 2);
         }
+
+        /// <summary>
+        /// UTF-16LE encode step — companion to
+        /// <see cref="EncodeUtf8"/> for the lower path when the
+        /// canon-lower option specifies
+        /// <c>string-encoding=utf16</c>. Returns the raw little-
+        /// endian bytes; the IL splits them across cabi_realloc
+        /// (align=2, byteLen=bytes.Length) and CopyToGuest, then
+        /// pushes (ptr, codeUnitCount) on the stack — note the
+        /// length passed to the guest is u16 code units, not
+        /// bytes (canonical-ABI rule).
+        /// </summary>
+        public static byte[] EncodeUtf16(string value)
+        {
+            return Encoding.Unicode.GetBytes(value);
+        }
     }
 }
