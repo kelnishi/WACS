@@ -240,11 +240,14 @@ namespace Wacs.WASI.Preview2.HostBinding
             var table = resources.TableFor(resourceType);
 
             // Resource methods bind as [method]Name.method-name.
+            // Skip Dispose — it's bound as [resource-drop]Name
+            // separately rather than as an instance method.
             foreach (var m in resourceType.GetMethods(
                 BindingFlags.Public | BindingFlags.Instance))
             {
                 if (m.DeclaringType == typeof(object)) continue;
                 if (m.IsSpecialName) continue;
+                if (m.Name == "Dispose") continue;
                 BindResourceMethod(runtime, namespaceName,
                     witName, table, resourceType, m);
             }
@@ -257,8 +260,10 @@ namespace Wacs.WASI.Preview2.HostBinding
         /// <summary>Bind one method on a resource class. Wire
         /// form: first i32 is the handle (self via
         /// borrow&lt;T&gt;), then host params follow. Method
-        /// return is dispatched the same way as a regular host
-        /// method — primitive / aggregate / etc.</summary>
+        /// return is dispatched on shape — primitive / void
+        /// inline; string returns through a retArea wrapper
+        /// (same pattern as BindStringReturnMethod but with a
+        /// leading handle param).</summary>
         private static void BindResourceMethod(
             WasmRuntime runtime, string namespaceName,
             string witResourceName, ResourceTable table,
@@ -268,12 +273,26 @@ namespace Wacs.WASI.Preview2.HostBinding
                 + ToKebabCase(m.Name);
             var paramInfos = m.GetParameters();
 
-            // Only primitive-shaped methods for v0; aggregate
-            // returns / params are follow-ups (they'd reuse the
-            // existing wrappers but with a leading handle slot).
-            if (!IsPrimitiveOrVoid(m.ReturnType)) return;
+            // Aggregate-param resource methods are a follow-up.
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)) return;
+
+            // Dispatch on return shape. String returns go
+            // through the retArea wrapper; primitive / void
+            // continue inline.
+            if (m.ReturnType == typeof(string))
+            {
+                BindStringReturnResourceMethod(runtime, namespaceName,
+                    importName, table, resourceType, m);
+                return;
+            }
+            if (m.ReturnType == typeof(byte[]))
+            {
+                BindByteArrayReturnResourceMethod(runtime, namespaceName,
+                    importName, table, resourceType, m);
+                return;
+            }
+            if (!IsPrimitiveOrVoid(m.ReturnType)) return;
 
             // Wrapper signature: ExecContext, handle (i32),
             // [host params...] → wire return type (or void).
@@ -339,6 +358,138 @@ namespace Wacs.WASI.Preview2.HostBinding
                     call = Expression.Convert(call,
                         ToWireType(m.ReturnType));
             }
+            var lambda = Expression.Lambda(delegateType, call, lambdaParams);
+            var compiled = lambda.Compile();
+
+            var bindOpen = typeof(WasmRuntime).GetMethods()
+                .First(mi => mi.Name == nameof(WasmRuntime.BindHostFunction)
+                    && mi.IsGenericMethod
+                    && mi.GetParameters().Length == 2);
+            var bindClosed = bindOpen.MakeGenericMethod(delegateType);
+            bindClosed.Invoke(runtime,
+                new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Resource method returning string — same
+        /// retArea-write template as the regular string path
+        /// but with a leading handle param that resolves to the
+        /// host instance via the resource table.</summary>
+        private static void BindStringReturnResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable table,
+            Type resourceType, MethodInfo m)
+        {
+            BindAggregateResourceMethod(runtime, namespaceName,
+                importName, table, resourceType, m,
+                (memory, retAreaPtr, ret, allocate) =>
+                {
+                    var bytes = System.Text.Encoding.UTF8.GetBytes((string)ret!);
+                    var dataPtr = bytes.Length == 0 ? 0
+                        : allocate(1, bytes.Length);
+                    if (bytes.Length > 0)
+                        System.Array.Copy(bytes, 0, memory,
+                            dataPtr, bytes.Length);
+                    WriteI32LE(memory, retAreaPtr, dataPtr);
+                    WriteI32LE(memory, retAreaPtr + 4, bytes.Length);
+                });
+        }
+
+        /// <summary>Resource method returning byte[]. Same wire
+        /// form as string return; differs only in the encoding
+        /// step (here: identity).</summary>
+        private static void BindByteArrayReturnResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable table,
+            Type resourceType, MethodInfo m)
+        {
+            BindAggregateResourceMethod(runtime, namespaceName,
+                importName, table, resourceType, m,
+                (memory, retAreaPtr, ret, allocate) =>
+                {
+                    var bytes = (byte[])ret!;
+                    var dataPtr = bytes.Length == 0 ? 0
+                        : allocate(1, bytes.Length);
+                    if (bytes.Length > 0)
+                        System.Array.Copy(bytes, 0, memory,
+                            dataPtr, bytes.Length);
+                    WriteI32LE(memory, retAreaPtr, dataPtr);
+                    WriteI32LE(memory, retAreaPtr + 4, bytes.Length);
+                });
+        }
+
+        /// <summary>Shared template for aggregate-returning
+        /// resource methods. Handles handle lookup, expression-
+        /// tree compilation, and BindHostFunction registration.
+        /// The shape-specific bit lives in the writePayload
+        /// callback.</summary>
+        private static void BindAggregateResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable table,
+            Type resourceType, MethodInfo m,
+            Action<byte[], int, object?, Func<int, int, int>> writePayload)
+        {
+            var paramInfos = m.GetParameters();
+
+            // Wrapper signature: ExecContext, handle (i32),
+            // [host params...], retAreaPtr (i32) → void.
+            var wireParamTypes = new Type[paramInfos.Length + 3];
+            wireParamTypes[0] = typeof(ExecContext);
+            wireParamTypes[1] = typeof(int);   // self handle
+            for (int i = 0; i < paramInfos.Length; i++)
+                wireParamTypes[i + 2] = ToWireType(paramInfos[i].ParameterType);
+            wireParamTypes[paramInfos.Length + 2] = typeof(int);   // retAreaPtr
+
+            var delegateType = OpenActionType(wireParamTypes.Length)
+                .MakeGenericType(wireParamTypes);
+
+            Wacs.Core.Runtime.Delegates.GenericFuncs? cabiRealloc = null;
+            int Allocate(int align, int size)
+            {
+                if (cabiRealloc == null)
+                {
+                    if (!runtime.TryGetExportedFunction(
+                            "cabi_realloc", out var addr))
+                        throw new InvalidOperationException(
+                            "Component does not export "
+                            + "cabi_realloc — required for "
+                            + "aggregate-returning resource methods.");
+                    cabiRealloc = runtime.CreateInvoker(
+                        addr, new InvokerOptions());
+                }
+                return cabiRealloc(0, 0, align, size)[0].Data.Int32;
+            }
+
+            void Body(ExecContext ctx, int handle, object?[] hostArgs,
+                int retAreaPtr)
+            {
+                var inst = table.Get(handle);
+                var ret = m.Invoke(inst, hostArgs);
+                var memory = ctx.DefaultMemory.Data;
+                writePayload(memory, retAreaPtr, ret, Allocate);
+            }
+
+            var lambdaParams = new ParameterExpression[wireParamTypes.Length];
+            lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
+            lambdaParams[1] = Expression.Parameter(typeof(int), "self");
+            for (int i = 0; i < paramInfos.Length; i++)
+                lambdaParams[i + 2] = Expression.Parameter(
+                    wireParamTypes[i + 2], paramInfos[i].Name);
+            lambdaParams[paramInfos.Length + 2] =
+                Expression.Parameter(typeof(int), "retAreaPtr");
+
+            var argArr = Expression.NewArrayInit(typeof(object),
+                paramInfos.Select((p, i) =>
+                {
+                    Expression e = lambdaParams[i + 2];
+                    if (p.ParameterType != e.Type)
+                        e = Expression.Convert(e, p.ParameterType);
+                    return (Expression)Expression.Convert(e, typeof(object));
+                }).ToArray());
+            var bodyTarget = Expression.Constant(
+                (Action<ExecContext, int, object?[], int>)Body);
+            var call = Expression.Invoke(bodyTarget,
+                lambdaParams[0], lambdaParams[1], argArr,
+                lambdaParams[paramInfos.Length + 2]);
             var lambda = Expression.Lambda(delegateType, call, lambdaParams);
             var compiled = lambda.Compile();
 
