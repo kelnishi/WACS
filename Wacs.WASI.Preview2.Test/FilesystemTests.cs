@@ -135,6 +135,48 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(4096UL, desc.LastSetSize);
         }
 
+        private sealed class CapturingDescriptor : Descriptor
+        {
+            public byte[] LastWritten = System.Array.Empty<byte>();
+            public ulong LastOffset;
+            public CapturingDescriptor() : base("/synthetic") { }
+            public override ulong Write(byte[] buffer, ulong offset)
+            {
+                LastWritten = buffer;
+                LastOffset = offset;
+                return (ulong)buffer.Length;
+            }
+        }
+
+        [Fact]
+        public void Write_threads_byte_array_param_and_u64_return()
+        {
+            // Component: ask-write(handle) calls
+            // descriptor.write(handle, "hello", 0) and reads
+            // back the u64 count from retArea+8 (the Ok payload
+            // of result<u64, error-code>). Stub captures the
+            // bytes; test asserts both the count returned and
+            // the captured bytes.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-write-component", "fswrite.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new CapturingDescriptor();
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal(5UL, (ulong)ci.Invoke(
+                "ask-write", (uint)handle)!);
+            Assert.Equal(new byte[] { (byte)'h', (byte)'e', (byte)'l',
+                (byte)'l', (byte)'o' }, desc.LastWritten);
+            Assert.Equal(0UL, desc.LastOffset);
+        }
+
         [Fact]
         public void GetType_returns_enum_value_through_result_wrapper()
         {

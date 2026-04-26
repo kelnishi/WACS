@@ -135,6 +135,20 @@ namespace Wacs.WASI.Preview2.Filesystem
             fs.SetLength((long)size);
         }
 
+        /// <summary>Write <paramref name="buffer"/> at
+        /// <paramref name="offset"/>. Returns count actually
+        /// written.</summary>
+        [WasiErrorResult]
+        public virtual ulong Write(byte[] buffer, ulong offset)
+        {
+            using var fs = new FileStream(Path, FileMode.OpenOrCreate,
+                FileAccess.Write);
+            if (offset > 0)
+                fs.Seek((long)offset, SeekOrigin.Begin);
+            fs.Write(buffer, 0, buffer.Length);
+            return (ulong)buffer.Length;
+        }
+
         public virtual void Dispose() { }
     }
 
