@@ -46,15 +46,23 @@ namespace Wacs.WASI.Preview2.HostBinding
         /// directly.</para>
         /// </summary>
         public static void BindWasiInstance(this WasmRuntime runtime,
-            string namespaceName, object impl)
+            string namespaceName, object impl,
+            ResourceContext? resources = null)
         {
             if (impl == null) throw new ArgumentNullException(nameof(impl));
+            resources ??= new ResourceContext();
             var implType = impl.GetType();
             foreach (var m in implType.GetMethods(
                 BindingFlags.Public | BindingFlags.Instance))
             {
                 if (m.DeclaringType == typeof(object)) continue;
                 if (m.IsSpecialName) continue;   // skip property accessors
+                if (IsResourceReturnPrimitiveParams(m))
+                {
+                    BindResourceReturnMethod(
+                        runtime, namespaceName, impl, m, resources);
+                    continue;
+                }
                 if (IsPrimitiveSignature(m))
                 {
                     BindMethod(runtime, namespaceName, impl, m);
@@ -119,6 +127,246 @@ namespace Wacs.WASI.Preview2.HostBinding
             foreach (var p in m.GetParameters())
                 if (!IsPrimitive(p.ParameterType)) return false;
             return true;
+        }
+
+        /// <summary>True iff the method returns a class tagged
+        /// <see cref="WasiResourceAttribute"/> and every param
+        /// is primitive. Drives the alloc-on-return canon-lower
+        /// wrapper for <c>own&lt;T&gt;</c> results — the host
+        /// hands back a fresh i32 handle that indexes into the
+        /// component's resource table.</summary>
+        private static bool IsResourceReturnPrimitiveParams(MethodInfo m)
+        {
+            if (m.ReturnType.GetCustomAttribute<WasiResourceAttribute>() == null)
+                return false;
+            foreach (var p in m.GetParameters())
+                if (!IsPrimitive(p.ParameterType)) return false;
+            return true;
+        }
+
+        /// <summary>Build a canon-lower wrapper for a host
+        /// method returning <c>own&lt;T&gt;</c>. Wire form is a
+        /// single i32 result (the handle) — no retArea
+        /// indirection needed since it fits in a flat slot. The
+        /// wrapper invokes the impl, allocates a fresh handle
+        /// in the resource table, and returns the handle.</summary>
+        private static void BindResourceReturnMethod(
+            WasmRuntime runtime, string namespaceName,
+            object impl, MethodInfo m, ResourceContext resources)
+        {
+            var importName = ToKebabCase(m.Name);
+            var paramInfos = m.GetParameters();
+
+            // Wrapper signature: ExecContext, [host params...] → int
+            var paramTypes = new Type[paramInfos.Length + 1];
+            paramTypes[0] = typeof(ExecContext);
+            for (int i = 0; i < paramInfos.Length; i++)
+                paramTypes[i + 1] = ToWireType(paramInfos[i].ParameterType);
+            var allTypes = new Type[paramTypes.Length + 1];
+            Array.Copy(paramTypes, allTypes, paramTypes.Length);
+            allTypes[paramTypes.Length] = typeof(int);
+            var delegateType = OpenFuncType(allTypes.Length)
+                .MakeGenericType(allTypes);
+
+            var table = resources.TableFor(m.ReturnType);
+
+            int Body(ExecContext _, object?[] hostArgs)
+            {
+                var inst = m.Invoke(impl, hostArgs);
+                if (inst == null)
+                    throw new InvalidOperationException(
+                        "Resource-returning host method '" + m.Name
+                        + "' returned null — own<T> cannot be null.");
+                return table.Allocate(inst);
+            }
+
+            var lambdaParams = new ParameterExpression[paramTypes.Length];
+            lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
+            for (int i = 0; i < paramInfos.Length; i++)
+                lambdaParams[i + 1] = Expression.Parameter(
+                    paramTypes[i + 1], paramInfos[i].Name);
+
+            var argArr = Expression.NewArrayInit(typeof(object),
+                paramInfos.Select((p, i) =>
+                {
+                    Expression e = lambdaParams[i + 1];
+                    if (p.ParameterType != e.Type)
+                        e = Expression.Convert(e, p.ParameterType);
+                    return (Expression)Expression.Convert(e, typeof(object));
+                }).ToArray());
+            var bodyTarget = Expression.Constant(
+                (Func<ExecContext, object?[], int>)Body);
+            var call = Expression.Invoke(bodyTarget,
+                lambdaParams[0], argArr);
+            var lambda = Expression.Lambda(delegateType, call, lambdaParams);
+            var compiled = lambda.Compile();
+
+            var bindOpen = typeof(WasmRuntime).GetMethods()
+                .First(mi => mi.Name == nameof(WasmRuntime.BindHostFunction)
+                    && mi.IsGenericMethod
+                    && mi.GetParameters().Length == 2);
+            var bindClosed = bindOpen.MakeGenericMethod(delegateType);
+            bindClosed.Invoke(runtime,
+                new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Bind a resource type's methods + drop
+        /// callback under a WIT namespace. Walks public
+        /// instance methods on <typeparamref name="T"/>,
+        /// kebab-cases each name, and registers under
+        /// <c>[method]ResourceName.method-name</c>. Also
+        /// registers a <c>[resource-drop]ResourceName</c>
+        /// handler that calls <see cref="ResourceTable.Drop"/>
+        /// (which Disposes IDisposable instances).
+        /// </summary>
+        public static void BindWasiResource<T>(
+            this WasmRuntime runtime, string namespaceName,
+            ResourceContext resources) where T : class
+        {
+            BindWasiResource(runtime, namespaceName, typeof(T), resources);
+        }
+
+        public static void BindWasiResource(
+            this WasmRuntime runtime, string namespaceName,
+            Type resourceType, ResourceContext resources)
+        {
+            var attr = resourceType.GetCustomAttribute<WasiResourceAttribute>();
+            if (attr == null)
+                throw new ArgumentException(
+                    "Resource type " + resourceType + " must be "
+                    + "marked [WasiResource].",
+                    nameof(resourceType));
+            var witName = attr.WitName ?? ToKebabCase(resourceType.Name);
+            var table = resources.TableFor(resourceType);
+
+            // Resource methods bind as [method]Name.method-name.
+            foreach (var m in resourceType.GetMethods(
+                BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (m.DeclaringType == typeof(object)) continue;
+                if (m.IsSpecialName) continue;
+                BindResourceMethod(runtime, namespaceName,
+                    witName, table, resourceType, m);
+            }
+
+            // [resource-drop]Name — wasm passes i32 handle,
+            // we drop the table entry (and Dispose).
+            BindResourceDrop(runtime, namespaceName, witName, table);
+        }
+
+        /// <summary>Bind one method on a resource class. Wire
+        /// form: first i32 is the handle (self via
+        /// borrow&lt;T&gt;), then host params follow. Method
+        /// return is dispatched the same way as a regular host
+        /// method — primitive / aggregate / etc.</summary>
+        private static void BindResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string witResourceName, ResourceTable table,
+            Type resourceType, MethodInfo m)
+        {
+            var importName = "[method]" + witResourceName + "."
+                + ToKebabCase(m.Name);
+            var paramInfos = m.GetParameters();
+
+            // Only primitive-shaped methods for v0; aggregate
+            // returns / params are follow-ups (they'd reuse the
+            // existing wrappers but with a leading handle slot).
+            if (!IsPrimitiveOrVoid(m.ReturnType)) return;
+            foreach (var p in paramInfos)
+                if (!IsPrimitive(p.ParameterType)) return;
+
+            // Wrapper signature: ExecContext, handle (i32),
+            // [host params...] → wire return type (or void).
+            var wireParamTypes = new Type[paramInfos.Length + 2];
+            wireParamTypes[0] = typeof(ExecContext);
+            wireParamTypes[1] = typeof(int);
+            for (int i = 0; i < paramInfos.Length; i++)
+                wireParamTypes[i + 2] = ToWireType(paramInfos[i].ParameterType);
+
+            Type delegateType;
+            if (m.ReturnType == typeof(void))
+                delegateType = OpenActionType(wireParamTypes.Length)
+                    .MakeGenericType(wireParamTypes);
+            else
+            {
+                var allTypes = new Type[wireParamTypes.Length + 1];
+                Array.Copy(wireParamTypes, allTypes, wireParamTypes.Length);
+                allTypes[wireParamTypes.Length] = ToWireType(m.ReturnType);
+                delegateType = OpenFuncType(allTypes.Length)
+                    .MakeGenericType(allTypes);
+            }
+
+            // Body: look up instance from handle, call method.
+            var lambdaParams = new ParameterExpression[wireParamTypes.Length];
+            lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
+            lambdaParams[1] = Expression.Parameter(typeof(int), "self");
+            for (int i = 0; i < paramInfos.Length; i++)
+                lambdaParams[i + 2] = Expression.Parameter(
+                    wireParamTypes[i + 2], paramInfos[i].Name);
+
+            // instance = (T)table.Get(self)
+            var tableConst = Expression.Constant(table);
+            var getMethod = typeof(ResourceTable).GetMethod(
+                nameof(ResourceTable.Get))!;
+            var instanceExpr = Expression.Convert(
+                Expression.Call(tableConst, getMethod, lambdaParams[1]),
+                resourceType);
+
+            var argExprs = new Expression[paramInfos.Length];
+            for (int i = 0; i < paramInfos.Length; i++)
+            {
+                Expression e = lambdaParams[i + 2];
+                if (paramInfos[i].ParameterType != e.Type)
+                {
+                    if (paramInfos[i].ParameterType == typeof(bool))
+                        e = Expression.NotEqual(e,
+                            Expression.Constant(0, e.Type));
+                    else
+                        e = Expression.Convert(e,
+                            paramInfos[i].ParameterType);
+                }
+                argExprs[i] = e;
+            }
+            Expression call = Expression.Call(instanceExpr, m, argExprs);
+            if (m.ReturnType != typeof(void)
+                && m.ReturnType != ToWireType(m.ReturnType))
+            {
+                if (m.ReturnType == typeof(bool))
+                    call = Expression.Condition(call,
+                        Expression.Constant(1),
+                        Expression.Constant(0));
+                else
+                    call = Expression.Convert(call,
+                        ToWireType(m.ReturnType));
+            }
+            var lambda = Expression.Lambda(delegateType, call, lambdaParams);
+            var compiled = lambda.Compile();
+
+            var bindOpen = typeof(WasmRuntime).GetMethods()
+                .First(mi => mi.Name == nameof(WasmRuntime.BindHostFunction)
+                    && mi.IsGenericMethod
+                    && mi.GetParameters().Length == 2);
+            var bindClosed = bindOpen.MakeGenericMethod(delegateType);
+            bindClosed.Invoke(runtime,
+                new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Register the <c>[resource-drop]T</c> handler
+        /// — wasm passes the i32 handle; we drop it from the
+        /// table (Disposing IDisposable instances). Drop on an
+        /// already-dropped handle returns silently per the
+        /// canonical-ABI spec.</summary>
+        private static void BindResourceDrop(
+            WasmRuntime runtime, string namespaceName,
+            string witResourceName, ResourceTable table)
+        {
+            var importName = "[resource-drop]" + witResourceName;
+            Action<ExecContext, int> body = (_, handle) =>
+            {
+                table.Drop(handle);
+            };
+            runtime.BindHostFunction<Action<ExecContext, int>>(
+                (namespaceName, importName), body);
         }
 
         private static bool IsStringPairArrayReturnPrimitiveParams(MethodInfo m)

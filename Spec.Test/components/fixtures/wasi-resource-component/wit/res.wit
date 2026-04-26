@@ -1,0 +1,11 @@
+package local:res;
+interface things {
+    resource thing {
+        get-value: func() -> u32;
+    }
+    make: func() -> own<thing>;
+}
+world demo {
+    import things;
+    export trip: func() -> u32;
+}

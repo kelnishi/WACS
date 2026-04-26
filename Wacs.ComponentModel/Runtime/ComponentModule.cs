@@ -296,6 +296,10 @@ namespace Wacs.ComponentModel.Runtime
                             foreach (var e in Parser.ExportSectionReader.Decode(s.Payload))
                                 if (e.Sort == Parser.ComponentSort.Type) allocs++;
                             break;
+                        case Parser.ComponentSectionId.Alias:
+                            foreach (var a in Parser.AliasSectionReader.Decode(s.Payload))
+                                if (a.Sort == Parser.AliasSort.Type) allocs++;
+                            break;
                     }
                 }
                 if ((int)allocs > len) len = (int)allocs;
@@ -392,6 +396,35 @@ namespace Wacs.ComponentModel.Runtime
                                 if (e.Sort != Parser.ComponentSort.Type) continue;
                                 aliases[typeIdx] = e.Index;
                                 typeIdx++;
+                            }
+                            break;
+                        }
+                        case Parser.ComponentSectionId.Alias:
+                        {
+                            // Type-sort aliases bump the type
+                            // index space — same as Type-kind
+                            // imports/exports. wit-component
+                            // emits these for resource-method
+                            // wrappers (e.g.
+                            // `(alias export 0 "thing" (type 1))`
+                            // surfaces the imported instance's
+                            // resource as a top-level type slot
+                            // so canon resource.drop can name it).
+                            // The body is opaque from the
+                            // alias-section reader's POV; leave
+                            // the slot as the SubResource sentinel
+                            // for now — sufficient for canon-lift
+                            // type lookups that don't introspect
+                            // the resource beyond knowing it's a
+                            // type.
+                            var entries = Parser.AliasSectionReader.Decode(s.Payload);
+                            foreach (var a in entries)
+                            {
+                                if (a.Sort == Parser.AliasSort.Type)
+                                {
+                                    map[typeIdx] = new Parser.ComponentResourceType(null);
+                                    typeIdx++;
+                                }
                             }
                             break;
                         }
