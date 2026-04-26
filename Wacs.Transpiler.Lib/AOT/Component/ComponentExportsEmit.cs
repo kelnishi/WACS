@@ -1821,7 +1821,8 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     EmitLowerStringParamToLocals(
                         il, instanceField, reallocMethod, memoryProp,
-                        i, out ptrLocals[i], out countLocals[i]);
+                        i, export.StringEncoding,
+                        out ptrLocals[i], out countLocals[i]);
                 }
                 else if (!pt.IsPrimitive
                          && TryResolveListOfPrim(pt, types, out var elemPrim))
@@ -1843,17 +1844,24 @@ namespace Wacs.Transpiler.AOT.Component
         private static void EmitLowerStringParamToLocals(
             ILGenerator il, FieldBuilder instanceField,
             MethodInfo reallocMethod, PropertyInfo memoryProp,
-            int argIdx, out LocalBuilder ptrLocal,
+            int argIdx, CanonOption.Kind encoding,
+            out LocalBuilder ptrLocal,
             out LocalBuilder countLocal)
         {
+            // UTF-8 default; UTF-16 picks Encoding.Unicode +
+            // align=2 + length-in-code-units (canonical-ABI rule
+            // "for utf16, len is in units of u16's, not bytes").
+            var isUtf16 = encoding == CanonOption.Kind.StringUtf16;
             var encode = typeof(StringMarshal).GetMethod(
-                nameof(StringMarshal.EncodeUtf8),
+                isUtf16 ? nameof(StringMarshal.EncodeUtf16)
+                        : nameof(StringMarshal.EncodeUtf8),
                 new[] { typeof(string) })!;
             var copy = typeof(StringMarshal).GetMethod(
                 nameof(StringMarshal.CopyToGuest),
                 new[] { typeof(byte[]), typeof(byte[]), typeof(int) })!;
 
             var bytesLocal = il.DeclareLocal(typeof(byte[]));
+            var byteLenLocal = il.DeclareLocal(typeof(int));
             countLocal = il.DeclareLocal(typeof(int));
             ptrLocal = il.DeclareLocal(typeof(int));
 
@@ -1861,16 +1869,27 @@ namespace Wacs.Transpiler.AOT.Component
             il.EmitCall(OpCodes.Call, encode, null);
             il.Emit(OpCodes.Stloc, bytesLocal);
 
+            // byteLen = bytes.Length (used for both alloc + copy).
             il.Emit(OpCodes.Ldloc, bytesLocal);
             il.Emit(OpCodes.Ldlen);
             il.Emit(OpCodes.Conv_I4);
+            il.Emit(OpCodes.Stloc, byteLenLocal);
+
+            // count passed to wasm = byteLen for UTF-8,
+            // byteLen / 2 for UTF-16 (u16 code units).
+            il.Emit(OpCodes.Ldloc, byteLenLocal);
+            if (isUtf16)
+            {
+                il.Emit(OpCodes.Ldc_I4_2);
+                il.Emit(OpCodes.Div);
+            }
             il.Emit(OpCodes.Stloc, countLocal);
 
             il.Emit(OpCodes.Ldsfld, instanceField);
             il.Emit(OpCodes.Ldc_I4_0);     // oldPtr
             il.Emit(OpCodes.Ldc_I4_0);     // oldLen
-            il.Emit(OpCodes.Ldc_I4_1);     // align = 1 (byte-aligned UTF-8)
-            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Ldc_I4, isUtf16 ? 2 : 1);   // align
+            il.Emit(OpCodes.Ldloc, byteLenLocal);
             il.EmitCall(OpCodes.Callvirt, reallocMethod, null);
             il.Emit(OpCodes.Stloc, ptrLocal);
 
