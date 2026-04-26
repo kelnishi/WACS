@@ -98,6 +98,50 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(1, resources.TableFor(typeof(TcpSocket)).Count);
         }
 
+        private sealed class ListeningTcpSocket : TcpSocket
+        {
+            public int FinishBindCalls;
+            public int StartListenCalls;
+            public int FinishListenCalls;
+            public ShutdownType LastShutdown;
+            public ListeningTcpSocket() : base(IpAddressFamily.Ipv4) { }
+            public override void FinishBind() => FinishBindCalls++;
+            public override void StartListen() => StartListenCalls++;
+            public override void FinishListen() => FinishListenCalls++;
+            public override void Shutdown(ShutdownType how)
+                => LastShutdown = how;
+        }
+
+        [Fact]
+        public void TcpSocket_listen_lifecycle_threads_void_results_with_enum_param()
+        {
+            // Fixture: ask-listen(handle) walks finish-bind →
+            // start-listen → finish-listen → shutdown(both),
+            // summing the outer-disc bytes from each retArea.
+            // Always-Ok = 0; expected return: 0. Stub records
+            // each call so we verify the wire dispatch hit each
+            // method and threaded the shutdown-type enum
+            // correctly.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-tcp-listen-component", "tcplisten.component.wasm"));
+            var resources = new ResourceContext();
+            var sock = new ListeningTcpSocket();
+            int handle = resources.TableFor(typeof(TcpSocket))
+                .Allocate(sock);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<TcpSocket>(
+                    "wasi:sockets/tcp@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke("ask-listen", (uint)handle)!);
+            Assert.Equal(1, sock.FinishBindCalls);
+            Assert.Equal(1, sock.StartListenCalls);
+            Assert.Equal(1, sock.FinishListenCalls);
+            Assert.Equal(ShutdownType.Both, sock.LastShutdown);
+        }
+
         [Fact]
         public void Network_handle_is_allocatable_via_resource_table()
         {

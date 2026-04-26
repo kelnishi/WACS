@@ -47,6 +47,17 @@ namespace Wacs.WASI.Preview2.Sockets
         WouldBlock = 12,
     }
 
+    /// <summary>WIT enum
+    /// <c>wasi:sockets/tcp.shutdown-type</c>:
+    /// <code>enum shutdown-type { receive, send, both }</code>
+    /// </summary>
+    public enum ShutdownType : byte
+    {
+        Receive = 0,
+        Send = 1,
+        Both = 2,
+    }
+
     /// <summary>Host representation of <c>tcp-socket</c>.
     /// Marker in v0 — bind / connect / send / recv methods
     /// are deferred. Each instance is tagged with the
@@ -69,6 +80,30 @@ namespace Wacs.WASI.Preview2.Sockets
         /// subclass for real I/O readiness.</summary>
         public virtual Pollable Subscribe() => new Pollable();
 
+        /// <summary>Complete a previously-issued <c>start-bind</c>
+        /// call. Default impl is a no-op since v0 doesn't yet
+        /// model the start/finish split.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("finish-bind")]
+        public virtual void FinishBind() { }
+
+        /// <summary>Begin transitioning to the listening state.
+        /// Pairs with <see cref="FinishListen"/>.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("start-listen")]
+        public virtual void StartListen() { }
+
+        /// <summary>Complete the listen transition.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("finish-listen")]
+        public virtual void FinishListen() { }
+
+        /// <summary>Initiate a connection-shutdown of the
+        /// requested direction. The base impl is a no-op
+        /// stub.</summary>
+        [WasiErrorResult]
+        public virtual void Shutdown(ShutdownType how) { }
+
         public virtual void Dispose() { }
     }
 
@@ -84,6 +119,10 @@ namespace Wacs.WASI.Preview2.Sockets
         public virtual IpAddressFamily AddressFamily() => Family;
 
         public virtual Pollable Subscribe() => new Pollable();
+
+        [WasiErrorResult]
+        [WasiMethodName("finish-bind")]
+        public virtual void FinishBind() { }
 
         public virtual void Dispose() { }
     }
