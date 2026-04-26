@@ -74,6 +74,38 @@ namespace Wacs.WASI.Preview2.Test
             public override byte[] BlockingRead(ulong len) => Read(len);
         }
 
+        private sealed class TypedDescriptor : Descriptor
+        {
+            private readonly DescriptorType _type;
+            public TypedDescriptor(DescriptorType type)
+                : base("/synthetic") { _type = type; }
+            public override DescriptorType GetDescriptorType() => _type;
+        }
+
+        [Fact]
+        public void GetType_returns_enum_value_through_result_wrapper()
+        {
+            // Component imports descriptor.get-type, exports
+            // ask-type(handle) → u32 reading the inner enum
+            // disc from retArea+1. Stub returns Directory (3);
+            // expected: 3.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-type-component", "fstype.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new TypedDescriptor(DescriptorType.Directory);
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal((uint)DescriptorType.Directory,
+                (uint)ci.Invoke("ask-type", (uint)handle)!);
+        }
+
         [Fact]
         public void ReadViaStream_yields_input_stream_then_read_returns_bytes()
         {

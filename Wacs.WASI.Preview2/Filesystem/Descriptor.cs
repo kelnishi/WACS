@@ -12,6 +12,23 @@ using Wacs.WASI.Preview2.Io;
 
 namespace Wacs.WASI.Preview2.Filesystem
 {
+    /// <summary>WIT enum
+    /// <c>wasi:filesystem/types.descriptor-type</c>. The wire
+    /// representation is a 1-byte discriminator; the host
+    /// returns the C# enum and the binder reads its
+    /// underlying byte.</summary>
+    public enum DescriptorType : byte
+    {
+        Unknown = 0,
+        BlockDevice = 1,
+        CharacterDevice = 2,
+        Directory = 3,
+        Fifo = 4,
+        SymbolicLink = 5,
+        RegularFile = 6,
+        Socket = 7,
+    }
+
     /// <summary>
     /// Host representation of <c>wasi:filesystem/types@0.2.x</c>'s
     /// <c>descriptor</c> resource. Stands in for an opened file
@@ -36,6 +53,27 @@ namespace Wacs.WASI.Preview2.Filesystem
         public Descriptor(string path)
         {
             Path = path ?? throw new ArgumentNullException(nameof(path));
+        }
+
+        /// <summary>Report the descriptor's WIT type. Default
+        /// inspects the host filesystem: directories yield
+        /// <see cref="DescriptorType.Directory"/>, files
+        /// <see cref="DescriptorType.RegularFile"/>, otherwise
+        /// <see cref="DescriptorType.Unknown"/>. Subclasses
+        /// override for virtual paths.
+        ///
+        /// <para>Method is named <c>GetDescriptorType</c> rather
+        /// than <c>GetType</c> to avoid the
+        /// <see cref="object.GetType"/> clash; the
+        /// <see cref="WasiMethodNameAttribute"/> override
+        /// restores the WIT name <c>get-type</c>.</para></summary>
+        [WasiErrorResult]
+        [WasiMethodName("get-type")]
+        public virtual DescriptorType GetDescriptorType()
+        {
+            if (Directory.Exists(Path)) return DescriptorType.Directory;
+            if (File.Exists(Path)) return DescriptorType.RegularFile;
+            return DescriptorType.Unknown;
         }
 
         /// <summary>Open the file for reading from
