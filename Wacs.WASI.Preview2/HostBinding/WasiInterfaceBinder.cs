@@ -449,11 +449,17 @@ namespace Wacs.WASI.Preview2.HostBinding
         {
             var importName = ToKebabCase(m.Name);
 
+            // Wire types are what WacsCore's BindHostFunction
+            // accepts on its delegate parameter list — bool /
+            // byte / sbyte / short / ushort etc. don't round-
+            // trip through its ResultType validator, so we map
+            // each to int / long and convert inside the body
+            // before invoking the impl method.
             var paramInfos = m.GetParameters();
             var paramTypes = new Type[paramInfos.Length + 1];
             paramTypes[0] = typeof(ExecContext);
             for (int i = 0; i < paramInfos.Length; i++)
-                paramTypes[i + 1] = paramInfos[i].ParameterType;
+                paramTypes[i + 1] = ToWireType(paramInfos[i].ParameterType);
 
             // Build the open-generic delegate type for
             // Func<ExecContext, …, TRet> / Action<ExecContext, …>.
@@ -465,25 +471,55 @@ namespace Wacs.WASI.Preview2.HostBinding
             {
                 var allTypes = new Type[paramTypes.Length + 1];
                 Array.Copy(paramTypes, allTypes, paramTypes.Length);
-                allTypes[paramTypes.Length] = m.ReturnType;
+                allTypes[paramTypes.Length] = ToWireType(m.ReturnType);
                 delegateType = OpenFuncType(allTypes.Length)
                     .MakeGenericType(allTypes);
             }
 
-            // Expression tree: (ctx, p1, p2, …) => impl.Method(p1, p2, …)
-            // The ExecContext parameter is accepted but ignored —
+            // Expression tree: (ctx, p1, p2, …) =>
+            //   (TRet)impl.Method((TParam)p1, (TParam)p2, …)
+            // The casts handle wire-type ↔ host-type mismatches
+            // (e.g. wire int → host bool / byte). The
+            // ExecContext parameter is accepted but ignored —
             // primitive WASI methods don't read host state.
             var lambdaParams = new ParameterExpression[paramTypes.Length];
             lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
             for (int i = 0; i < paramInfos.Length; i++)
                 lambdaParams[i + 1] = Expression.Parameter(
-                    paramInfos[i].ParameterType, paramInfos[i].Name);
+                    paramTypes[i + 1], paramInfos[i].Name);
 
             var implExpr = Expression.Constant(impl);
             var argExprs = new Expression[paramInfos.Length];
             for (int i = 0; i < paramInfos.Length; i++)
-                argExprs[i] = lambdaParams[i + 1];
-            var call = Expression.Call(implExpr, m, argExprs);
+            {
+                Expression e = lambdaParams[i + 1];
+                if (paramInfos[i].ParameterType != e.Type)
+                {
+                    // bool isn't directly castable from int —
+                    // express as `wireVal != 0`.
+                    if (paramInfos[i].ParameterType == typeof(bool))
+                        e = Expression.NotEqual(e,
+                            Expression.Constant(0, e.Type));
+                    else
+                        e = Expression.Convert(e,
+                            paramInfos[i].ParameterType);
+                }
+                argExprs[i] = e;
+            }
+            Expression call = Expression.Call(implExpr, m, argExprs);
+            // Cast return value back to wire type if the impl's
+            // return type is narrower (e.g. ushort → int).
+            if (m.ReturnType != typeof(void)
+                && m.ReturnType != ToWireType(m.ReturnType))
+            {
+                if (m.ReturnType == typeof(bool))
+                    call = Expression.Condition(call,
+                        Expression.Constant(1),
+                        Expression.Constant(0));
+                else
+                    call = Expression.Convert(call,
+                        ToWireType(m.ReturnType));
+            }
             var lambda = Expression.Lambda(delegateType, call, lambdaParams);
             var compiled = lambda.Compile();
 
