@@ -135,6 +135,50 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(4096UL, desc.LastSetSize);
         }
 
+        private sealed class FixedReadDescriptor : Descriptor
+        {
+            private readonly byte[] _content;
+            public FixedReadDescriptor(byte[] content)
+                : base("/synthetic") { _content = content; }
+            public override (byte[], bool) Read(ulong length, ulong offset)
+            {
+                int o = (int)System.Math.Min(offset, (ulong)_content.Length);
+                int n = (int)System.Math.Min(
+                    System.Math.Min(length, (ulong)int.MaxValue),
+                    (ulong)(_content.Length - o));
+                var slice = new byte[n];
+                System.Array.Copy(_content, o, slice, 0, n);
+                bool eof = (o + n) >= _content.Length;
+                return (slice, eof);
+            }
+        }
+
+        [Fact]
+        public void Read_direct_returns_tuple_list_u8_bool_through_result_wrapper()
+        {
+            // Fixture: ask-read(handle) calls
+            // descriptor.read(handle, 8, 0) and reads the
+            // (list-len, eof) at retArea+8/+12 — packs them
+            // as (len << 1) | eof.
+            // Stub content is "ABCDE" (5 bytes); read(8, 0)
+            // yields all 5 + EOF=1 → (5 << 1) | 1 = 11.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-readdirect-component", "fsreaddirect.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new FixedReadDescriptor(
+                System.Text.Encoding.UTF8.GetBytes("ABCDE"));
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal(11u, (uint)ci.Invoke("ask-read", (uint)handle)!);
+        }
+
         private sealed class CapturingDescriptor : Descriptor
         {
             public byte[] LastWritten = System.Array.Empty<byte>();

@@ -185,6 +185,39 @@ namespace Wacs.WASI.Preview2.Sockets
         [WasiMethodName("finish-bind")]
         public virtual void FinishBind() { }
 
+        /// <summary>IP_TTL / IPV6_UNICAST_HOPS getter — UDP
+        /// equivalent of TCP's <c>hop-limit</c>.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("unicast-hop-limit")]
+        public virtual byte UnicastHopLimit() => _hopLimit;
+
+        [WasiErrorResult]
+        [WasiMethodName("set-unicast-hop-limit")]
+        public virtual void SetUnicastHopLimit(byte value)
+            => _hopLimit = value;
+
+        [WasiErrorResult]
+        [WasiMethodName("receive-buffer-size")]
+        public virtual ulong ReceiveBufferSize() => _receiveBufferSize;
+
+        [WasiErrorResult]
+        [WasiMethodName("set-receive-buffer-size")]
+        public virtual void SetReceiveBufferSize(ulong value)
+            => _receiveBufferSize = value;
+
+        [WasiErrorResult]
+        [WasiMethodName("send-buffer-size")]
+        public virtual ulong SendBufferSize() => _sendBufferSize;
+
+        [WasiErrorResult]
+        [WasiMethodName("set-send-buffer-size")]
+        public virtual void SetSendBufferSize(ulong value)
+            => _sendBufferSize = value;
+
+        protected byte _hopLimit = 64;
+        protected ulong _receiveBufferSize = 65_536;
+        protected ulong _sendBufferSize = 65_536;
+
         public virtual void Dispose() { }
     }
 }
