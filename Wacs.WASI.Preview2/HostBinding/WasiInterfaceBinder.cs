@@ -488,7 +488,7 @@ namespace Wacs.WASI.Preview2.HostBinding
             if (m.GetCustomAttribute<WasiStreamResultAttribute>() != null)
             {
                 BindStreamResultResourceMethod(runtime, namespaceName,
-                    importName, table, resourceType, m);
+                    importName, table, resourceType, m, resources);
                 return;
             }
 
@@ -542,7 +542,7 @@ namespace Wacs.WASI.Preview2.HostBinding
                     || m.ReturnType == typeof(byte[])))
             {
                 BindStreamResultResourceMethod(runtime, namespaceName,
-                    importName, table, resourceType, m);
+                    importName, table, resourceType, m, resources);
                 return;
             }
 
@@ -840,7 +840,8 @@ namespace Wacs.WASI.Preview2.HostBinding
         private static void BindStreamResultResourceMethod(
             WasmRuntime runtime, string namespaceName,
             string importName, ResourceTable table,
-            Type resourceType, MethodInfo m)
+            Type resourceType, MethodInfo m,
+            ResourceContext? resources = null)
         {
             var paramInfos = m.GetParameters();
             // Recognized param shapes:
@@ -851,6 +852,8 @@ namespace Wacs.WASI.Preview2.HostBinding
             //      one wire slot (i32 or i64 per ToWireType).
             //   4. byte[] as the FIRST param + N primitive params
             //      (e.g. descriptor.write(buffer, offset)).
+            //   5. Borrow<resource> params — 1 wire slot (handle
+            //      resolved via ResourceContext at the boundary).
             bool hasBytesParam = false;
             int bytesParamIndex = -1;
             for (int i = 0; i < paramInfos.Length; i++)
@@ -862,7 +865,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                     hasBytesParam = true;
                     bytesParamIndex = i;
                 }
-                else if (!IsPrimitive(paramInfos[i].ParameterType))
+                else if (!IsPrimitive(paramInfos[i].ParameterType)
+                    && paramInfos[i].ParameterType.GetCustomAttribute<
+                        WasiResourceAttribute>() == null)
                 {
                     return;   // unsupported (string / record / etc.)
                 }
@@ -885,19 +890,22 @@ namespace Wacs.WASI.Preview2.HostBinding
             wireParamTypes[0] = typeof(ExecContext);
             wireParamTypes[1] = typeof(int);   // self handle
             int ti = 2;
+            Type WireOf(Type pt)
+                => pt.GetCustomAttribute<WasiResourceAttribute>() != null
+                    ? typeof(int) : ToWireType(pt);
             if (hasBytesParam)
             {
                 wireParamTypes[ti++] = typeof(int);   // dataPtr
                 wireParamTypes[ti++] = typeof(int);   // len
-                // Following primitive params (after the byte[]
-                // at index 0).
+                // Following primitive/borrow params (after the
+                // byte[] at index 0).
                 for (int i = 1; i < paramInfos.Length; i++)
-                    wireParamTypes[ti++] = ToWireType(paramInfos[i].ParameterType);
+                    wireParamTypes[ti++] = WireOf(paramInfos[i].ParameterType);
             }
             else
             {
                 foreach (var p in paramInfos)
-                    wireParamTypes[ti++] = ToWireType(p.ParameterType);
+                    wireParamTypes[ti++] = WireOf(p.ParameterType);
             }
             wireParamTypes[ti] = typeof(int);   // retArea
 
@@ -1012,16 +1020,43 @@ namespace Wacs.WASI.Preview2.HostBinding
             var retAreaParam = Expression.Parameter(typeof(int), "retAreaPtr");
             lambdaParams[wireParamTypes.Length - 1] = retAreaParam;
 
-            // Build primitive-param array — converts each wire-
-            // typed lambda param back to its host param type.
+            // Build primitive/borrow-param array — converts each
+            // wire-typed lambda param back to its host type.
+            // Borrow<resource> params look up the handle via
+            // ResourceContext.
             int primStart = hasBytesParam ? 4 : 2;   // ctx+handle+(dataPtr+len)
             int primCount = paramInfos.Length - (hasBytesParam ? 1 : 0);
+            var hasBorrowParam = paramInfos.Any(p =>
+                p.ParameterType.GetCustomAttribute<
+                    WasiResourceAttribute>() != null);
+            if (hasBorrowParam && resources == null)
+                throw new InvalidOperationException(
+                    "[WasiStreamResult] method '" + m.Name
+                    + "' takes a borrow<resource> param but no "
+                    + "ResourceContext was supplied.");
+            var contextConst = hasBorrowParam
+                ? (Expression)Expression.Constant(resources!)
+                : Expression.Constant(null, typeof(ResourceContext));
+            var tableForMethod = typeof(ResourceContext).GetMethod(
+                nameof(ResourceContext.TableFor))!;
+            var getResourceMethod = typeof(ResourceTable).GetMethod(
+                nameof(ResourceTable.Get))!;
             var primExprs = new Expression[primCount];
             for (int i = 0; i < primCount; i++)
             {
                 var p = paramInfos[i + (hasBytesParam ? 1 : 0)];
                 Expression e = lambdaParams[primStart + i];
-                if (p.ParameterType != e.Type)
+                if (p.ParameterType.GetCustomAttribute<
+                    WasiResourceAttribute>() != null)
+                {
+                    var paramTable = Expression.Call(contextConst,
+                        tableForMethod,
+                        Expression.Constant(p.ParameterType));
+                    e = Expression.Convert(
+                        Expression.Call(paramTable, getResourceMethod, e),
+                        p.ParameterType);
+                }
+                else if (p.ParameterType != e.Type)
                 {
                     if (p.ParameterType == typeof(bool))
                         e = Expression.NotEqual(e, Expression.Constant(0, e.Type));
