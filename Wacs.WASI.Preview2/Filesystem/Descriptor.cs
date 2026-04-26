@@ -49,6 +49,51 @@ namespace Wacs.WASI.Preview2.Filesystem
         MutateDirectory = 1 << 5,
     }
 
+    /// <summary>WIT enum
+    /// <c>wasi:filesystem/types.advice</c> — hint for
+    /// descriptor.advise().</summary>
+    public enum Advice : byte
+    {
+        Normal = 0,
+        Sequential = 1,
+        Random = 2,
+        WillNeed = 3,
+        DontNeed = 4,
+        NoReuse = 5,
+    }
+
+    /// <summary>WIT flags
+    /// <c>wasi:filesystem/types.modes</c> — accessibility
+    /// modes used by access-type's access(modes) case.</summary>
+    [System.Flags]
+    public enum AccessModes : uint
+    {
+        None = 0,
+        Readable = 1 << 0,
+        Writable = 1 << 1,
+        Executable = 1 << 2,
+    }
+
+    /// <summary>WIT variant
+    /// <c>wasi:filesystem/types.access-type</c>:
+    /// <code>variant access-type {
+    ///   access(modes),       // bit-mask of which modes to test
+    ///   exists,              // existence-only check
+    /// }</code>
+    /// Wire form: 2 flat slots (variant disc + modes-or-pad).
+    /// </summary>
+    public abstract class AccessType { }
+
+    /// <summary>access-type case "access(modes)".</summary>
+    public sealed class AccessTypeAccess : AccessType
+    {
+        public AccessModes Modes { get; }
+        public AccessTypeAccess(AccessModes modes) { Modes = modes; }
+    }
+
+    /// <summary>access-type case "exists" (no payload).</summary>
+    public sealed class AccessTypeExists : AccessType { }
+
     /// <summary>WIT variant
     /// <c>wasi:filesystem/types.new-timestamp</c>:
     /// <code>variant new-timestamp {
@@ -505,6 +550,21 @@ namespace Wacs.WASI.Preview2.Filesystem
             ulong upper = lower * 0x9E3779B97F4A7C15UL;
             return new MetadataHashValue(lower, upper);
         }
+
+        /// <summary>Hint at access pattern for the descriptor's
+        /// underlying file. Default impl is a no-op — concrete
+        /// hosts wire to posix_fadvise on POSIX.</summary>
+        [WasiErrorResult]
+        public virtual void Advise(ulong offset, ulong length,
+            Advice advice) { }
+
+        /// <summary>Test existence / accessibility at a path.
+        /// Default impl is a no-op stub; concrete hosts
+        /// override.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("access-at")]
+        public virtual void AccessAt(PathFlags pathFlags, string path,
+            AccessType type) { }
 
         /// <summary>Update access + modification timestamps.
         /// Each arg picks one of three cases (no-change, now,

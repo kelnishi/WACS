@@ -1,0 +1,17 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    enum error-code { unknown }
+    flags path-flags { symlink-follow }
+    flags modes { readable, writable, executable }
+    variant access-type {
+        access(modes),
+        exists,
+    }
+    resource descriptor {
+        access-at: func(
+            path-flags: path-flags,
+            path: string,
+            %type: access-type,
+        ) -> result<_, error-code>;
+    }
+}
