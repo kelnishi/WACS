@@ -1,0 +1,4 @@
+package wasi:random@0.2.3;
+interface random {
+    get-random-u64: func() -> u64;
+}

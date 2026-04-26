@@ -334,6 +334,34 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Invoke_calls_through_host_provided_wasi_random_u64_import()
+        {
+            // Phase 3 v0: smallest possible WASI Preview 2
+            // host-import slice. The fixture imports
+            // wasi:random/random.get-random-u64 and exposes a
+            // `pick` export that just calls through. The host
+            // hands a stub via configureImports — the runtime
+            // resolves the inner core wasm's import by exact
+            // (module, name) match (wit-component's
+            // instantiate-with passes the host-provided instance
+            // straight through under the same namespace name).
+            // Primitive-only signature (no aggregates) means the
+            // canon-lower section is effectively pass-through;
+            // aggregates (string, list) are a follow-up that
+            // needs real lowering wiring.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-random-u64-component", "rand.component.wasm"));
+            const ulong expected = 0xDEADBEEF_CAFEF00DUL;
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindHostFunction<System.Func<Wacs.Core.Runtime.ExecContext, ulong>>(
+                    ("wasi:random/random@0.2.3", "get-random-u64"),
+                    _ => expected);
+            });
+            Assert.Equal(expected, ci.Invoke("pick"));
+        }
+
+        [Fact]
         public void Invoke_lifts_compact_utf16_latin1_branch()
         {
             // compact-utf16-component (string-encoding=latin1+utf16):
