@@ -66,16 +66,95 @@ namespace Wacs.WASI.Preview2.HostBinding
                         runtime, namespaceName, impl, m);
                     continue;
                 }
+                // option-string check FIRST since the predicate
+                // requires an explicit attribute; without it the
+                // plain string-return path would catch the same
+                // method first.
+                if (IsOptionStringReturnPrimitiveParams(m))
+                {
+                    BindOptionStringReturnMethod(
+                        runtime, namespaceName, impl, m);
+                    continue;
+                }
+                if (IsStringReturnPrimitiveParams(m))
+                {
+                    BindStringReturnMethod(
+                        runtime, namespaceName, impl, m);
+                    continue;
+                }
+                if (IsStringArrayReturnPrimitiveParams(m))
+                {
+                    BindStringArrayReturnMethod(
+                        runtime, namespaceName, impl, m);
+                    continue;
+                }
+                if (IsStringPairArrayReturnPrimitiveParams(m))
+                {
+                    BindStringPairArrayReturnMethod(
+                        runtime, namespaceName, impl, m);
+                    continue;
+                }
                 if (IsRecordOfPrimitivesReturnPrimitiveParams(m))
                 {
                     BindRecordReturnMethod(
                         runtime, namespaceName, impl, m);
                     continue;
                 }
-                // Other aggregate shapes (string returns, list<T>
-                // for non-byte T, resources) are follow-ups —
-                // silently skipped here.
+                // Other aggregate shapes (list<tuple<string,string>>,
+                // resources) are follow-ups — silently skipped here.
             }
+        }
+
+        private static bool IsStringReturnPrimitiveParams(MethodInfo m)
+        {
+            if (m.ReturnType != typeof(string)) return false;
+            foreach (var p in m.GetParameters())
+                if (!IsPrimitive(p.ParameterType)) return false;
+            return true;
+        }
+
+        private static bool IsStringArrayReturnPrimitiveParams(MethodInfo m)
+        {
+            if (m.ReturnType != typeof(string[])) return false;
+            foreach (var p in m.GetParameters())
+                if (!IsPrimitive(p.ParameterType)) return false;
+            return true;
+        }
+
+        private static bool IsStringPairArrayReturnPrimitiveParams(MethodInfo m)
+        {
+            // (string, string)[] — i.e. ValueTuple<string, string>[]
+            // matches list<tuple<string, string>>. Used by
+            // wasi:cli/environment.get-environment.
+            if (!m.ReturnType.IsArray) return false;
+            var elem = m.ReturnType.GetElementType()!;
+            if (!elem.IsValueType) return false;
+            if (!elem.IsGenericType) return false;
+            if (elem.GetGenericTypeDefinition() != typeof(System.ValueTuple<,>))
+                return false;
+            var args = elem.GetGenericArguments();
+            if (args[0] != typeof(string) || args[1] != typeof(string))
+                return false;
+            foreach (var p in m.GetParameters())
+                if (!IsPrimitive(p.ParameterType)) return false;
+            return true;
+        }
+
+        private static bool IsOptionStringReturnPrimitiveParams(MethodInfo m)
+        {
+            // Treat string? (a Nullable-ish reference type) as
+            // option<string>. C# can't actually distinguish
+            // string from string? at the reflection level (both
+            // are typeof(string)), so we use a marker attribute
+            // — or here, accept any string-returning method
+            // tagged [WasiOptional]. For v0 this binder only
+            // fires when the host opts in via the attribute.
+            if (m.ReturnType != typeof(string)) return false;
+            if (m.GetCustomAttribute<WasiOptionalReturnAttribute>() == null)
+                return false;
+            foreach (var p in m.GetParameters())
+                if (!IsPrimitive(p.ParameterType)) return false;
+            return true;
         }
 
         /// <summary>True iff the method returns a struct/class
@@ -319,6 +398,244 @@ namespace Wacs.WASI.Preview2.HostBinding
             var bindClosed = bindOpen.MakeGenericMethod(delegateType);
             bindClosed.Invoke(runtime,
                 new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Canon-lower wrapper for host methods
+        /// returning <c>string</c> — same wire form as byte[]
+        /// (UTF-8 bytes + (ptr, len) at retAreaPtr); the only
+        /// difference is the encoding step.</summary>
+        private static void BindStringReturnMethod(
+            WasmRuntime runtime, string namespaceName,
+            object impl, MethodInfo m)
+        {
+            BindAggregateReturnMethod(runtime, namespaceName, impl, m,
+                (memory, retAreaPtr, ret, allocate) =>
+                {
+                    var bytes = System.Text.Encoding.UTF8.GetBytes((string)ret!);
+                    var dataPtr = allocate(1, bytes.Length);
+                    if (bytes.Length > 0)
+                        System.Array.Copy(bytes, 0, memory,
+                            dataPtr, bytes.Length);
+                    WriteI32LE(memory, retAreaPtr, dataPtr);
+                    WriteI32LE(memory, retAreaPtr + 4, bytes.Length);
+                });
+        }
+
+        /// <summary>Canon-lower wrapper for host methods
+        /// returning <c>string[]</c> — list of strings. Each
+        /// string is encoded + allocated separately, then a
+        /// pointer-array of (ptr, len) pairs is allocated and
+        /// written, then (arrayPtr, count) goes to retAreaPtr.
+        /// </summary>
+        private static void BindStringArrayReturnMethod(
+            WasmRuntime runtime, string namespaceName,
+            object impl, MethodInfo m)
+        {
+            BindAggregateReturnMethod(runtime, namespaceName, impl, m,
+                (memory, retAreaPtr, ret, allocate) =>
+                {
+                    var arr = (string[])ret!;
+                    int count = arr.Length;
+                    int arrayPtr = count == 0 ? 0
+                        : allocate(4, count * 8);
+                    for (int i = 0; i < count; i++)
+                    {
+                        var bytes = System.Text.Encoding.UTF8.GetBytes(arr[i]);
+                        int strPtr = bytes.Length == 0 ? 0
+                            : allocate(1, bytes.Length);
+                        if (bytes.Length > 0)
+                            System.Array.Copy(bytes, 0, memory,
+                                strPtr, bytes.Length);
+                        WriteI32LE(memory, arrayPtr + i * 8, strPtr);
+                        WriteI32LE(memory, arrayPtr + i * 8 + 4, bytes.Length);
+                    }
+                    WriteI32LE(memory, retAreaPtr, arrayPtr);
+                    WriteI32LE(memory, retAreaPtr + 4, count);
+                });
+        }
+
+        /// <summary>Canon-lower wrapper for host methods
+        /// returning <c>(string, string)[]</c> — list of string
+        /// pairs (e.g. environment vars). Each element is 4 i32s
+        /// (k_ptr, k_len, v_ptr, v_len = 16 bytes); the array
+        /// itself is allocated as count*16 bytes; (arrayPtr,
+        /// count) goes to retAreaPtr.</summary>
+        private static void BindStringPairArrayReturnMethod(
+            WasmRuntime runtime, string namespaceName,
+            object impl, MethodInfo m)
+        {
+            BindAggregateReturnMethod(runtime, namespaceName, impl, m,
+                (memory, retAreaPtr, ret, allocate) =>
+                {
+                    var arr = (System.Collections.IList)ret!;
+                    int count = arr.Count;
+                    int arrayPtr = count == 0 ? 0
+                        : allocate(4, count * 16);
+                    var elemType = ret.GetType().GetElementType()!;
+                    var item1Field = elemType.GetField("Item1")!;
+                    var item2Field = elemType.GetField("Item2")!;
+                    for (int i = 0; i < count; i++)
+                    {
+                        var pair = arr[i]!;
+                        var k = (string)item1Field.GetValue(pair)!;
+                        var v = (string)item2Field.GetValue(pair)!;
+                        var kBytes = System.Text.Encoding.UTF8.GetBytes(k);
+                        var vBytes = System.Text.Encoding.UTF8.GetBytes(v);
+                        int kPtr = kBytes.Length == 0 ? 0
+                            : allocate(1, kBytes.Length);
+                        if (kBytes.Length > 0)
+                            System.Array.Copy(kBytes, 0, memory,
+                                kPtr, kBytes.Length);
+                        int vPtr = vBytes.Length == 0 ? 0
+                            : allocate(1, vBytes.Length);
+                        if (vBytes.Length > 0)
+                            System.Array.Copy(vBytes, 0, memory,
+                                vPtr, vBytes.Length);
+                        WriteI32LE(memory, arrayPtr + i * 16, kPtr);
+                        WriteI32LE(memory, arrayPtr + i * 16 + 4, kBytes.Length);
+                        WriteI32LE(memory, arrayPtr + i * 16 + 8, vPtr);
+                        WriteI32LE(memory, arrayPtr + i * 16 + 12, vBytes.Length);
+                    }
+                    WriteI32LE(memory, retAreaPtr, arrayPtr);
+                    WriteI32LE(memory, retAreaPtr + 4, count);
+                });
+        }
+
+        /// <summary>Canon-lower wrapper for host methods
+        /// returning <c>option&lt;string&gt;</c> — null on the
+        /// host side maps to disc=0; non-null maps to disc=1
+        /// + (ptr, len) at offsets 4/8. Per WASI's option-string
+        /// shape, retArea is 12 bytes (1-byte disc, padding to
+        /// 4-align, 4-byte ptr, 4-byte len). Methods opt into
+        /// this path via
+        /// <see cref="WasiOptionalReturnAttribute"/>.</summary>
+        private static void BindOptionStringReturnMethod(
+            WasmRuntime runtime, string namespaceName,
+            object impl, MethodInfo m)
+        {
+            BindAggregateReturnMethod(runtime, namespaceName, impl, m,
+                (memory, retAreaPtr, ret, allocate) =>
+                {
+                    if (ret == null)
+                    {
+                        // None — disc=0; canonical ABI doesn't
+                        // require us to zero the rest, but doing
+                        // so is cheap and avoids leaking stale
+                        // bytes if cabi_realloc didn't.
+                        memory[retAreaPtr] = 0;
+                        memory[retAreaPtr + 1] = 0;
+                        memory[retAreaPtr + 2] = 0;
+                        memory[retAreaPtr + 3] = 0;
+                        return;
+                    }
+                    var bytes = System.Text.Encoding.UTF8.GetBytes((string)ret);
+                    int strPtr = bytes.Length == 0 ? 0
+                        : allocate(1, bytes.Length);
+                    if (bytes.Length > 0)
+                        System.Array.Copy(bytes, 0, memory,
+                            strPtr, bytes.Length);
+                    memory[retAreaPtr] = 1;
+                    memory[retAreaPtr + 1] = 0;
+                    memory[retAreaPtr + 2] = 0;
+                    memory[retAreaPtr + 3] = 0;
+                    WriteI32LE(memory, retAreaPtr + 4, strPtr);
+                    WriteI32LE(memory, retAreaPtr + 8, bytes.Length);
+                });
+        }
+
+        /// <summary>Shared template for aggregate-return canon-
+        /// lower wrappers. Builds the (ExecContext, host-params...,
+        /// retAreaPtr) → void delegate signature, drives
+        /// expression-tree compilation, and registers via
+        /// BindHostFunction. The supplied
+        /// <paramref name="writePayload"/> callback is the
+        /// shape-specific bit: it gets memory + retAreaPtr +
+        /// the host method's return value + an allocate(align,
+        /// size) closure routing to lazy-resolved
+        /// cabi_realloc.</summary>
+        private static void BindAggregateReturnMethod(
+            WasmRuntime runtime, string namespaceName,
+            object impl, MethodInfo m,
+            Action<byte[], int, object?, Func<int, int, int>> writePayload)
+        {
+            var importName = ToKebabCase(m.Name);
+
+            var paramInfos = m.GetParameters();
+            var paramTypes = new Type[paramInfos.Length + 2];
+            paramTypes[0] = typeof(ExecContext);
+            for (int i = 0; i < paramInfos.Length; i++)
+                paramTypes[i + 1] = ToWireType(paramInfos[i].ParameterType);
+            paramTypes[paramInfos.Length + 1] = typeof(int);
+
+            var delegateType = OpenActionType(paramTypes.Length)
+                .MakeGenericType(paramTypes);
+
+            Wacs.Core.Runtime.Delegates.GenericFuncs? cabiRealloc = null;
+            int Allocate(int align, int size)
+            {
+                if (cabiRealloc == null)
+                {
+                    if (!runtime.TryGetExportedFunction(
+                            "cabi_realloc", out var addr))
+                        throw new InvalidOperationException(
+                            "Component does not export "
+                            + "cabi_realloc — required for "
+                            + "aggregate-returning host imports.");
+                    cabiRealloc = runtime.CreateInvoker(
+                        addr, new InvokerOptions());
+                }
+                return cabiRealloc(0, 0, align, size)[0].Data.Int32;
+            }
+
+            void Body(ExecContext ctx, object?[] hostArgs, int retAreaPtr)
+            {
+                var ret = m.Invoke(impl, hostArgs);
+                var memory = ctx.DefaultMemory.Data;
+                writePayload(memory, retAreaPtr, ret, Allocate);
+            }
+
+            var lambdaParams = new ParameterExpression[paramTypes.Length];
+            lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
+            for (int i = 0; i < paramInfos.Length; i++)
+                lambdaParams[i + 1] = Expression.Parameter(
+                    paramTypes[i + 1], paramInfos[i].Name);
+            lambdaParams[paramInfos.Length + 1] =
+                Expression.Parameter(typeof(int), "retAreaPtr");
+
+            var argArr = Expression.NewArrayInit(typeof(object),
+                paramInfos.Select((p, i) =>
+                {
+                    Expression e = lambdaParams[i + 1];
+                    if (p.ParameterType != e.Type)
+                        e = Expression.Convert(e, p.ParameterType);
+                    return (Expression)Expression.Convert(e, typeof(object));
+                }).ToArray());
+            var bodyTarget = Expression.Constant(
+                (Action<ExecContext, object?[], int>)Body);
+            var call = Expression.Invoke(bodyTarget,
+                lambdaParams[0], argArr,
+                lambdaParams[paramInfos.Length + 1]);
+            var lambda = Expression.Lambda(delegateType, call, lambdaParams);
+            var compiled = lambda.Compile();
+
+            var bindOpen = typeof(WasmRuntime).GetMethods()
+                .First(mi => mi.Name == nameof(WasmRuntime.BindHostFunction)
+                    && mi.IsGenericMethod
+                    && mi.GetParameters().Length == 2);
+            var bindClosed = bindOpen.MakeGenericMethod(delegateType);
+            bindClosed.Invoke(runtime,
+                new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Write an i32 to memory in little-endian.
+        /// Used by aggregate-return wrappers to lay down ptr/
+        /// len pairs in retArea or in inner arrays.</summary>
+        private static void WriteI32LE(byte[] memory, int ptr, int value)
+        {
+            memory[ptr]     = (byte)(value & 0xFF);
+            memory[ptr + 1] = (byte)((value >> 8) & 0xFF);
+            memory[ptr + 2] = (byte)((value >> 16) & 0xFF);
+            memory[ptr + 3] = (byte)((value >> 24) & 0xFF);
         }
 
         /// <summary>Byte size of a primitive — drives both

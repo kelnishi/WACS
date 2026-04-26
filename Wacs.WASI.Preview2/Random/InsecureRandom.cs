@@ -19,7 +19,11 @@ namespace Wacs.WASI.Preview2.Random
     /// </summary>
     public sealed class InsecureRandom : IInsecureRandom
     {
-        private readonly SysRandom _rng = SysRandom.Shared;
+        // Random.Shared is .NET 6+; netstandard2.1 needs a
+        // per-instance RNG. Marked as readonly to make the
+        // intent explicit even though System.Random isn't
+        // thread-safe — guests typically call this serially.
+        private readonly SysRandom _rng = new SysRandom();
 
         public byte[] GetInsecureRandomBytes(ulong len)
         {
