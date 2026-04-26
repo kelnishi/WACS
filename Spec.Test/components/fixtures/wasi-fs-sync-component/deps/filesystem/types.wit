@@ -1,0 +1,9 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    enum error-code { unknown }
+    type filesize = u64;
+    resource descriptor {
+        sync: func() -> result<_, error-code>;
+        set-size: func(size: filesize) -> result<_, error-code>;
+    }
+}

@@ -517,6 +517,18 @@ namespace Wacs.WASI.Preview2.HostBinding
                 return;
             }
 
+            // [WasiErrorResult]-tagged + void return →
+            // result<_, error-code> on a resource method.
+            // Used by descriptor.sync / set-size / etc.
+            if (m.GetCustomAttribute<WasiErrorResultAttribute>() != null
+                && m.ReturnType == typeof(void))
+            {
+                BindErrorResultVoidReturnResourceMethod(
+                    runtime, namespaceName, importName, table,
+                    resourceType, m);
+                return;
+            }
+
             // Method returns a resource → alloc handle.
             if (m.ReturnType.GetCustomAttribute<WasiResourceAttribute>() != null)
             {
@@ -1011,6 +1023,82 @@ namespace Wacs.WASI.Preview2.HostBinding
                 memory[retAreaPtr + 2] = 0;
                 memory[retAreaPtr + 3] = 0;
                 WriteI32LE(memory, retAreaPtr + 4, retHandle);
+            }
+
+            var lambdaParams = new ParameterExpression[wireParamTypes.Length];
+            lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
+            lambdaParams[1] = Expression.Parameter(typeof(int), "self");
+            for (int i = 0; i < paramInfos.Length; i++)
+                lambdaParams[i + 2] = Expression.Parameter(
+                    wireParamTypes[i + 2], paramInfos[i].Name);
+            lambdaParams[paramInfos.Length + 2] =
+                Expression.Parameter(typeof(int), "retAreaPtr");
+
+            var argArr = Expression.NewArrayInit(typeof(object),
+                paramInfos.Select((p, i) =>
+                {
+                    Expression e = lambdaParams[i + 2];
+                    if (p.ParameterType != e.Type)
+                        e = Expression.Convert(e, p.ParameterType);
+                    return (Expression)Expression.Convert(e, typeof(object));
+                }).ToArray());
+            var bodyTarget = Expression.Constant(
+                (Action<ExecContext, int, object?[], int>)Body);
+            var call = Expression.Invoke(bodyTarget,
+                lambdaParams[0], lambdaParams[1], argArr,
+                lambdaParams[paramInfos.Length + 2]);
+            var lambda = Expression.Lambda(delegateType, call, lambdaParams);
+            var compiled = lambda.Compile();
+
+            var bindOpen = typeof(WasmRuntime).GetMethods()
+                .First(mi => mi.Name == nameof(WasmRuntime.BindHostFunction)
+                    && mi.IsGenericMethod
+                    && mi.GetParameters().Length == 2);
+            var bindClosed = bindOpen.MakeGenericMethod(delegateType);
+            bindClosed.Invoke(runtime,
+                new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Resource method tagged
+        /// [WasiErrorResult] returning void —
+        /// result&lt;_, error-code&gt;. Wire shape: (handle,
+        /// ...primitive params, retAreaPtr) → void; retArea
+        /// is 2 bytes (1-byte outer disc + 1-byte inner
+        /// error-code disc when Err). Always-Ok in v0.</summary>
+        private static void BindErrorResultVoidReturnResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable selfTable,
+            Type resourceType, MethodInfo m)
+        {
+            var paramInfos = m.GetParameters();
+            foreach (var p in paramInfos)
+                if (!IsPrimitive(p.ParameterType))
+                    throw new InvalidOperationException(
+                        "[WasiErrorResult] void-return resource "
+                        + "method '" + m.Name + "' takes a non-"
+                        + "primitive param — aggregate-param "
+                        + "support is a follow-up.");
+
+            // Wire: ExecContext, handle, [primitive params...],
+            // retAreaPtr → void.
+            var wireParamTypes = new Type[paramInfos.Length + 3];
+            wireParamTypes[0] = typeof(ExecContext);
+            wireParamTypes[1] = typeof(int);
+            for (int i = 0; i < paramInfos.Length; i++)
+                wireParamTypes[i + 2] = ToWireType(paramInfos[i].ParameterType);
+            wireParamTypes[paramInfos.Length + 2] = typeof(int);
+
+            var delegateType = OpenActionType(wireParamTypes.Length)
+                .MakeGenericType(wireParamTypes);
+
+            void Body(ExecContext ctx, int handle, object?[] hostArgs,
+                int retAreaPtr)
+            {
+                var inst = selfTable.Get(handle);
+                m.Invoke(inst, hostArgs);
+                var memory = ctx.DefaultMemory.Data;
+                memory[retAreaPtr] = 0;       // Ok
+                memory[retAreaPtr + 1] = 0;   // padding
             }
 
             var lambdaParams = new ParameterExpression[wireParamTypes.Length];

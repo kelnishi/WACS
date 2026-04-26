@@ -1,0 +1,8 @@
+package local:fssync;
+world demo {
+    import wasi:filesystem/types@0.2.3;
+    /// sync(handle) returns the result disc (0=Ok, 1=Err).
+    export ask-sync: func(handle: u32) -> u32;
+    /// set-size(handle, n) returns the result disc.
+    export ask-set-size: func(handle: u32, size: u64) -> u32;
+}
