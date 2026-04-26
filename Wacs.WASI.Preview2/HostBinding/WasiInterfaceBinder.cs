@@ -249,7 +249,7 @@ namespace Wacs.WASI.Preview2.HostBinding
                 if (m.IsSpecialName) continue;
                 if (m.Name == "Dispose") continue;
                 BindResourceMethod(runtime, namespaceName,
-                    witName, table, resourceType, m);
+                    witName, table, resourceType, m, resources);
             }
 
             // [resource-drop]Name — wasm passes i32 handle,
@@ -267,13 +267,34 @@ namespace Wacs.WASI.Preview2.HostBinding
         private static void BindResourceMethod(
             WasmRuntime runtime, string namespaceName,
             string witResourceName, ResourceTable table,
-            Type resourceType, MethodInfo m)
+            Type resourceType, MethodInfo m,
+            ResourceContext resources)
         {
             var importName = "[method]" + witResourceName + "."
                 + ToKebabCase(m.Name);
             var paramInfos = m.GetParameters();
 
-            // Aggregate-param resource methods are a follow-up.
+            // [WasiStreamResult]-tagged methods canon-lower to
+            // result<T, stream-error> where T is the host
+            // method's return type. This covers most of
+            // wasi:io/streams' surface.
+            if (m.GetCustomAttribute<WasiStreamResultAttribute>() != null)
+            {
+                BindStreamResultResourceMethod(runtime, namespaceName,
+                    importName, table, resourceType, m);
+                return;
+            }
+
+            // Method returns a resource → alloc handle.
+            if (m.ReturnType.GetCustomAttribute<WasiResourceAttribute>() != null)
+            {
+                BindResourceReturnResourceMethod(runtime, namespaceName,
+                    importName, table, resourceType, m, resources);
+                return;
+            }
+
+            // Aggregate-param resource methods are a follow-up
+            // (write etc. are handled via [WasiStreamResult]).
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)) return;
 
@@ -500,6 +521,205 @@ namespace Wacs.WASI.Preview2.HostBinding
             var bindClosed = bindOpen.MakeGenericMethod(delegateType);
             bindClosed.Invoke(runtime,
                 new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Resource method tagged
+        /// <see cref="WasiStreamResultAttribute"/>. Canon-lowers
+        /// to <c>result&lt;T, stream-error&gt;</c> where T is
+        /// the host method's return type. v0 always-Ok
+        /// semantics — host throwing propagates as wasm trap
+        /// rather than mapping to last-operation-failed /
+        /// closed; the Err encoding is a follow-up.
+        ///
+        /// <para>Wire shape varies by Ok payload:
+        /// <list type="bullet">
+        /// <item>void → 1-byte disc only (12-byte retArea
+        /// reserved for the variant-payload Err side, but Ok
+        /// only writes byte 0 = 0).</item>
+        /// <item>u64 → disc + u64 at align-8 offset.</item>
+        /// <item>list&lt;u8&gt; → disc + (ptr, len) at
+        /// align-4 offset.</item>
+        /// </list>
+        /// Param shape: optional list&lt;u8&gt; (lifted from
+        /// (dataPtr, len) on the wasm stack).</para>
+        /// </summary>
+        private static void BindStreamResultResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable table,
+            Type resourceType, MethodInfo m)
+        {
+            var paramInfos = m.GetParameters();
+            // Recognized param shapes: zero params, or one
+            // byte[] (list<u8>).
+            bool hasBytesParam = false;
+            if (paramInfos.Length == 1
+                && paramInfos[0].ParameterType == typeof(byte[]))
+                hasBytesParam = true;
+            else if (paramInfos.Length != 0)
+                return;   // unsupported param shape
+
+            // Wire signature: ExecContext, handle, [dataPtr,
+            // len], retAreaPtr → void.
+            int wireParamCount = 1 /*handle*/
+                + (hasBytesParam ? 2 : 0) /*dataPtr+len*/
+                + 1 /*retArea*/;
+            var wireParamTypes = new Type[wireParamCount + 1];
+            wireParamTypes[0] = typeof(ExecContext);
+            for (int i = 1; i < wireParamTypes.Length; i++)
+                wireParamTypes[i] = typeof(int);
+
+            var delegateType = OpenActionType(wireParamTypes.Length)
+                .MakeGenericType(wireParamTypes);
+
+            // Recognized return shapes: void, ulong, byte[].
+            var retShape = m.ReturnType == typeof(void) ? 0
+                : m.ReturnType == typeof(ulong) ? 1
+                : m.ReturnType == typeof(byte[]) ? 2
+                : -1;
+            if (retShape < 0)
+                throw new InvalidOperationException(
+                    "[WasiStreamResult] on method with unsupported "
+                    + "return type " + m.ReturnType + " (expected "
+                    + "void / ulong / byte[]).");
+
+            Wacs.Core.Runtime.Delegates.GenericFuncs? cabiRealloc = null;
+            int Allocate(int align, int size)
+            {
+                if (cabiRealloc == null)
+                {
+                    if (!runtime.TryGetExportedFunction(
+                            "cabi_realloc", out var addr))
+                        throw new InvalidOperationException(
+                            "Component does not export "
+                            + "cabi_realloc — required for "
+                            + "stream-result methods with "
+                            + "list payload.");
+                    cabiRealloc = runtime.CreateInvoker(
+                        addr, new InvokerOptions());
+                }
+                return cabiRealloc(0, 0, align, size)[0].Data.Int32;
+            }
+
+            void Body(ExecContext ctx, int handle, int dataPtr, int len,
+                int retAreaPtr)
+            {
+                var inst = table.Get(handle);
+                object?[] hostArgs;
+                if (hasBytesParam)
+                {
+                    var memory = ctx.DefaultMemory.Data;
+                    var bytes = new byte[len];
+                    if (len > 0)
+                        Array.Copy(memory, dataPtr, bytes, 0, len);
+                    hostArgs = new object[] { bytes };
+                }
+                else
+                {
+                    hostArgs = Array.Empty<object?>();
+                }
+                var ret = m.Invoke(inst, hostArgs);
+                var memOut = ctx.DefaultMemory.Data;
+                // Always-Ok: write disc=0 (offset 0). Then Ok
+                // payload at the appropriate offset.
+                memOut[retAreaPtr] = 0;
+                memOut[retAreaPtr + 1] = 0;
+                memOut[retAreaPtr + 2] = 0;
+                memOut[retAreaPtr + 3] = 0;
+                if (retShape == 1)   // ulong: write at offset 8
+                {
+                    var v = (ulong)ret!;
+                    memOut[retAreaPtr + 4] = 0;
+                    memOut[retAreaPtr + 5] = 0;
+                    memOut[retAreaPtr + 6] = 0;
+                    memOut[retAreaPtr + 7] = 0;
+                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(
+                        memOut.AsSpan(retAreaPtr + 8, 8), v);
+                }
+                else if (retShape == 2)   // byte[]: write (ptr, len) at offset 4
+                {
+                    var bytes = (byte[])ret!;
+                    int dPtr = bytes.Length == 0 ? 0
+                        : Allocate(1, bytes.Length);
+                    if (bytes.Length > 0)
+                        Array.Copy(bytes, 0, memOut, dPtr, bytes.Length);
+                    WriteI32LE(memOut, retAreaPtr + 4, dPtr);
+                    WriteI32LE(memOut, retAreaPtr + 8, bytes.Length);
+                }
+            }
+
+            // Build closed delegate via expression tree. We
+            // dispatch on hasBytesParam to construct the right
+            // call shape.
+            var lambdaParams = new ParameterExpression[wireParamTypes.Length];
+            lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
+            lambdaParams[1] = Expression.Parameter(typeof(int), "self");
+            int idx = 2;
+            ParameterExpression dataPtrParam = Expression.Parameter(typeof(int), "dataPtr");
+            ParameterExpression lenParam = Expression.Parameter(typeof(int), "len");
+            if (hasBytesParam)
+            {
+                lambdaParams[idx++] = dataPtrParam;
+                lambdaParams[idx++] = lenParam;
+            }
+            ParameterExpression retAreaParam = Expression.Parameter(typeof(int), "retAreaPtr");
+            lambdaParams[idx] = retAreaParam;
+
+            var bodyTarget = Expression.Constant(
+                (Action<ExecContext, int, int, int, int>)Body);
+            // Body always takes 5 args; pad missing dataPtr/len
+            // with zeros when hasBytesParam=false.
+            var call = Expression.Invoke(bodyTarget,
+                lambdaParams[0], lambdaParams[1],
+                hasBytesParam ? (Expression)dataPtrParam
+                              : Expression.Constant(0),
+                hasBytesParam ? (Expression)lenParam
+                              : Expression.Constant(0),
+                retAreaParam);
+            var lambda = Expression.Lambda(delegateType, call, lambdaParams);
+            var compiled = lambda.Compile();
+
+            var bindOpen = typeof(WasmRuntime).GetMethods()
+                .First(mi => mi.Name == nameof(WasmRuntime.BindHostFunction)
+                    && mi.IsGenericMethod
+                    && mi.GetParameters().Length == 2);
+            var bindClosed = bindOpen.MakeGenericMethod(delegateType);
+            bindClosed.Invoke(runtime,
+                new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Resource method returning another resource
+        /// type (e.g. <c>output-stream.subscribe() -&gt;
+        /// own&lt;pollable&gt;</c>). Wire form: handle in,
+        /// handle out — both i32 flat slots. Wrapper looks up
+        /// self, invokes host method, allocates a fresh handle
+        /// for the returned resource via the matching table.
+        /// </summary>
+        private static void BindResourceReturnResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable selfTable,
+            Type resourceType, MethodInfo m,
+            ResourceContext resources)
+        {
+            if (m.GetParameters().Length != 0)
+                throw new InvalidOperationException(
+                    "Resource method returning a resource with "
+                    + "parameters is a follow-up — only zero-arg "
+                    + "factory methods (subscribe-style) ship in v0.");
+            var returnTable = resources.TableFor(m.ReturnType);
+
+            int Body(ExecContext _, int handle)
+            {
+                var inst = selfTable.Get(handle);
+                var ret = m.Invoke(inst, Array.Empty<object?>());
+                if (ret == null)
+                    throw new InvalidOperationException(
+                        "Resource-returning method '" + m.Name
+                        + "' returned null — own<T> cannot be null.");
+                return returnTable.Allocate(ret);
+            }
+
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                (namespaceName, importName), Body);
         }
 
         /// <summary>Register the <c>[resource-drop]T</c> handler
