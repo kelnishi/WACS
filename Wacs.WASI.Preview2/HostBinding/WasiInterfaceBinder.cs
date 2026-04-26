@@ -543,7 +543,8 @@ namespace Wacs.WASI.Preview2.HostBinding
                     || m.ReturnType == typeof(ushort)
                     || m.ReturnType == typeof(byte)
                     || m.ReturnType == typeof(bool)
-                    || m.ReturnType == typeof(byte[])))
+                    || m.ReturnType == typeof(byte[])
+                    || m.ReturnType == typeof(ValueTuple<byte[], bool>)))
             {
                 BindStreamResultResourceMethod(runtime, namespaceName,
                     importName, table, resourceType, m, resources);
@@ -917,7 +918,8 @@ namespace Wacs.WASI.Preview2.HostBinding
                 .MakeGenericType(wireParamTypes);
 
             // Recognized return shapes (Ok payload): void, bool/u8,
-            // u16, u32, u64, byte[]. Each encodes as disc + Ok
+            // u16, u32, u64, byte[], (byte[], bool) ValueTuple
+            // (descriptor.read shape). Each encodes as disc + Ok
             // payload at the natural alignment (max(1, sizeof Ok)).
             var rt = m.ReturnType;
             var retShape = rt == typeof(void) ? 0
@@ -927,12 +929,14 @@ namespace Wacs.WASI.Preview2.HostBinding
                 : rt == typeof(byte) ? 4
                 : rt == typeof(uint) ? 5
                 : rt == typeof(ushort) ? 6
+                : rt == typeof(ValueTuple<byte[], bool>) ? 7
                 : -1;
             if (retShape < 0)
                 throw new InvalidOperationException(
                     "[WasiStreamResult] on method with unsupported "
                     + "return type " + rt + " (expected void / "
-                    + "bool / u8 / u16 / u32 / u64 / byte[]).");
+                    + "bool / u8 / u16 / u32 / u64 / byte[] / "
+                    + "(byte[], bool)).");
 
             Wacs.Core.Runtime.Delegates.GenericFuncs? cabiRealloc = null;
             int Allocate(int align, int size)
@@ -993,6 +997,17 @@ namespace Wacs.WASI.Preview2.HostBinding
                         ushort v = (ushort)ret!;
                         memOut[retAreaPtr + 2] = (byte)(v & 0xff);
                         memOut[retAreaPtr + 3] = (byte)((v >> 8) & 0xff);
+                        break;
+                    case 7:   // (byte[], bool): list at +4, eof at +12
+                        var tup = (ValueTuple<byte[], bool>)ret!;
+                        var bs2 = tup.Item1;
+                        int dPtr2 = bs2.Length == 0 ? 0
+                            : Allocate(1, bs2.Length);
+                        if (bs2.Length > 0)
+                            Array.Copy(bs2, 0, memOut, dPtr2, bs2.Length);
+                        WriteI32LE(memOut, retAreaPtr + 4, dPtr2);
+                        WriteI32LE(memOut, retAreaPtr + 8, bs2.Length);
+                        memOut[retAreaPtr + 12] = tup.Item2 ? (byte)1 : (byte)0;
                         break;
                 }
             }

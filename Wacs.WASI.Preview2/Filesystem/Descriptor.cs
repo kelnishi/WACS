@@ -171,6 +171,30 @@ namespace Wacs.WASI.Preview2.Filesystem
             fs.SetLength((long)size);
         }
 
+        /// <summary>Direct read from the file at
+        /// <paramref name="offset"/> for up to
+        /// <paramref name="length"/> bytes. Returns the bytes
+        /// actually read paired with an EOF flag (true iff
+        /// the read hit end-of-file before consuming all
+        /// requested bytes). The streams interface goes through
+        /// <see cref="ReadViaStream"/>; this is the direct path
+        /// for guests that don't want a stream's buffering.</summary>
+        [WasiErrorResult]
+        public virtual (byte[], bool) Read(ulong length, ulong offset)
+        {
+            using var fs = File.OpenRead(Path);
+            if (offset > 0)
+                fs.Seek((long)offset, SeekOrigin.Begin);
+            int n = (int)System.Math.Min(length, (ulong)int.MaxValue);
+            var buf = new byte[n];
+            int read = fs.Read(buf, 0, n);
+            bool atEof = fs.Position >= fs.Length;
+            if (read == n) return (buf, atEof);
+            var slice = new byte[read];
+            System.Array.Copy(buf, 0, slice, 0, read);
+            return (slice, atEof);
+        }
+
         /// <summary>Write <paramref name="buffer"/> at
         /// <paramref name="offset"/>. Returns count actually
         /// written.</summary>
