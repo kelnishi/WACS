@@ -1,0 +1,7 @@
+package wasi:sockets@0.2.3;
+interface tcp {
+    use network.{ip-socket-address, error-code};
+    resource tcp-socket {
+        local-address: func() -> result<ip-socket-address, error-code>;
+    }
+}

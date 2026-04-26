@@ -568,7 +568,11 @@ namespace Wacs.WASI.Preview2.HostBinding
                     || m.ReturnType == typeof(bool)
                     || m.ReturnType == typeof(byte[])
                     || m.ReturnType == typeof(ValueTuple<byte[], bool>)
-                    || IsPrimitiveRecord(m.ReturnType)))
+                    || IsPrimitiveRecord(m.ReturnType)
+                    || m.ReturnType == typeof(
+                        Wacs.WASI.Preview2.Sockets.IpSocketAddress)
+                    || m.ReturnType.IsSubclassOf(typeof(
+                        Wacs.WASI.Preview2.Sockets.IpSocketAddress))))
             {
                 BindStreamResultResourceMethod(runtime, namespaceName,
                     importName, table, resourceType, m, resources);
@@ -958,9 +962,10 @@ namespace Wacs.WASI.Preview2.HostBinding
 
             // Recognized return shapes (Ok payload): void, bool/u8,
             // u16, u32, u64, byte[], (byte[], bool) ValueTuple
-            // (descriptor.read shape), or a record-of-primitives
-            // (metadata-hash-value etc.). Each encodes as disc +
-            // Ok payload at the natural alignment.
+            // (descriptor.read shape), record-of-primitives
+            // (metadata-hash-value etc.), or IpSocketAddress
+            // (sockets local-/remote-address). Each encodes as
+            // disc + Ok payload at the natural alignment.
             var rt = m.ReturnType;
             var retShape = rt == typeof(void) ? 0
                 : rt == typeof(ulong) ? 1
@@ -971,13 +976,17 @@ namespace Wacs.WASI.Preview2.HostBinding
                 : rt == typeof(ushort) ? 6
                 : rt == typeof(ValueTuple<byte[], bool>) ? 7
                 : IsPrimitiveRecord(rt) ? 8
+                : rt == typeof(Wacs.WASI.Preview2.Sockets.IpSocketAddress)
+                    || rt.IsSubclassOf(typeof(
+                        Wacs.WASI.Preview2.Sockets.IpSocketAddress)) ? 9
                 : -1;
             if (retShape < 0)
                 throw new InvalidOperationException(
                     "[WasiStreamResult] on method with unsupported "
                     + "return type " + rt + " (expected void / "
                     + "bool / u8 / u16 / u32 / u64 / byte[] / "
-                    + "(byte[], bool) / record-of-primitives).");
+                    + "(byte[], bool) / record-of-primitives / "
+                    + "ip-socket-address).");
 
             // For record-of-prims: precompute field offsets +
             // total alignment so the hot path doesn't reflect.
@@ -1087,6 +1096,12 @@ namespace Wacs.WASI.Preview2.HostBinding
                                     + recordOffsets![i],
                                 recordFields[i].FieldType, fv);
                         }
+                        break;
+                    case 9:   // IpSocketAddress: variant at retArea+4
+                              // Layout: variant disc(1) + 3 pad +
+                              // 28-byte payload at retArea+8.
+                        WriteIpSocketAddressAt(memOut, retAreaPtr + 4,
+                            (Wacs.WASI.Preview2.Sockets.IpSocketAddress)ret!);
                         break;
                 }
             }
@@ -2471,6 +2486,61 @@ namespace Wacs.WASI.Preview2.HostBinding
         /// width (size bytes per field). Mirrors the canonical-
         /// ABI alignment rule "alignment(P) = sizeof(P)" for
         /// primitives.</summary>
+        /// <summary>Write a WIT
+        /// <c>variant ip-socket-address</c> at
+        /// <paramref name="ptr"/>. Layout: 1-byte case disc
+        /// (0=ipv4, 1=ipv6) + 3 padding + 28-byte payload (max
+        /// of the two cases — ipv4 fills only 6 bytes, ipv6
+        /// fills the full 28). Total 32 bytes.</summary>
+        private static void WriteIpSocketAddressAt(byte[] memory, int ptr,
+            Wacs.WASI.Preview2.Sockets.IpSocketAddress addr)
+        {
+            if (addr is Wacs.WASI.Preview2.Sockets.Ipv4SocketAddress v4)
+            {
+                memory[ptr] = 0;     // variant disc = ipv4
+                memory[ptr + 1] = 0;
+                memory[ptr + 2] = 0;
+                memory[ptr + 3] = 0;
+                // ipv4-socket-address payload at ptr+4:
+                //   port(u16) + 4×u8 = 6 bytes total
+                memory[ptr + 4] = (byte)(v4.Port & 0xff);
+                memory[ptr + 5] = (byte)((v4.Port >> 8) & 0xff);
+                memory[ptr + 6] = v4.Address[0];
+                memory[ptr + 7] = v4.Address[1];
+                memory[ptr + 8] = v4.Address[2];
+                memory[ptr + 9] = v4.Address[3];
+            }
+            else if (addr is Wacs.WASI.Preview2.Sockets.Ipv6SocketAddress v6)
+            {
+                memory[ptr] = 1;     // variant disc = ipv6
+                memory[ptr + 1] = 0;
+                memory[ptr + 2] = 0;
+                memory[ptr + 3] = 0;
+                // ipv6-socket-address payload at ptr+4:
+                //   port(u16) + 2 pad + flow-info(u32) +
+                //   8×u16(16) + scope-id(u32) = 28 bytes
+                memory[ptr + 4] = (byte)(v6.Port & 0xff);
+                memory[ptr + 5] = (byte)((v6.Port >> 8) & 0xff);
+                memory[ptr + 6] = 0;   // padding
+                memory[ptr + 7] = 0;
+                WriteI32LE(memory, ptr + 8, (int)v6.FlowInfo);
+                for (int i = 0; i < 8; i++)
+                {
+                    memory[ptr + 12 + i * 2]
+                        = (byte)(v6.Address[i] & 0xff);
+                    memory[ptr + 13 + i * 2]
+                        = (byte)((v6.Address[i] >> 8) & 0xff);
+                }
+                WriteI32LE(memory, ptr + 28, (int)v6.ScopeId);
+            }
+            else
+            {
+                throw new ArgumentException(
+                    "Unknown IpSocketAddress subclass: "
+                    + addr?.GetType());
+            }
+        }
+
         /// <summary>True iff <paramref name="t"/> is a struct
         /// or class whose public instance fields are all
         /// primitives (and there is at least one). Used to

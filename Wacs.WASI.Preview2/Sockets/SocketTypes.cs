@@ -58,6 +58,74 @@ namespace Wacs.WASI.Preview2.Sockets
         Both = 2,
     }
 
+    /// <summary>WIT variant
+    /// <c>wasi:sockets/network.ip-socket-address</c>. Wire
+    /// form: 1-byte variant disc + 3-byte align padding +
+    /// 28-byte payload (max of the two case sizes). Total
+    /// 32 bytes, align 4. Two case classes mirror the WIT
+    /// shape; the binder dispatches on runtime type at
+    /// canon-lower time.</summary>
+    public abstract class IpSocketAddress
+    {
+        public IpAddressFamily Family { get; }
+        public ushort Port { get; }
+        protected IpSocketAddress(IpAddressFamily family, ushort port)
+        {
+            Family = family;
+            Port = port;
+        }
+    }
+
+    /// <summary>IPv4 case of <see cref="IpSocketAddress"/>:
+    /// <code>record ipv4-socket-address { port: u16, address: tuple&lt;u8, u8, u8, u8&gt; }</code>
+    /// Wire size 6 (port:2 + address:4), align 2.</summary>
+    public sealed class Ipv4SocketAddress : IpSocketAddress
+    {
+        /// <summary>4-octet IPv4 address in network order
+        /// (a.b.c.d → bytes[0..3]).</summary>
+        public byte[] Address { get; }
+
+        public Ipv4SocketAddress(ushort port, byte[] address)
+            : base(IpAddressFamily.Ipv4, port)
+        {
+            if (address == null || address.Length != 4)
+                throw new ArgumentException(
+                    "IPv4 address must be exactly 4 bytes.",
+                    nameof(address));
+            Address = address;
+        }
+    }
+
+    /// <summary>IPv6 case of <see cref="IpSocketAddress"/>:
+    /// <code>record ipv6-socket-address {
+    ///     port: u16, flow-info: u32,
+    ///     address: tuple&lt;u16, u16, u16, u16, u16, u16, u16, u16&gt;,
+    ///     scope-id: u32,
+    /// }</code>
+    /// Wire size 28 (port:2 + pad:2 + flow:4 + addr:16 +
+    /// scope:4), align 4.</summary>
+    public sealed class Ipv6SocketAddress : IpSocketAddress
+    {
+        public uint FlowInfo { get; }
+        /// <summary>8-group IPv6 address (each u16 in network
+        /// order).</summary>
+        public ushort[] Address { get; }
+        public uint ScopeId { get; }
+
+        public Ipv6SocketAddress(ushort port, uint flowInfo,
+            ushort[] address, uint scopeId)
+            : base(IpAddressFamily.Ipv6, port)
+        {
+            if (address == null || address.Length != 8)
+                throw new ArgumentException(
+                    "IPv6 address must be exactly 8 u16 groups.",
+                    nameof(address));
+            FlowInfo = flowInfo;
+            Address = address;
+            ScopeId = scopeId;
+        }
+    }
+
     /// <summary>Host representation of <c>tcp-socket</c>.
     /// Marker in v0 — bind / connect / send / recv methods
     /// are deferred. Each instance is tagged with the
@@ -103,6 +171,21 @@ namespace Wacs.WASI.Preview2.Sockets
         /// stub.</summary>
         [WasiErrorResult]
         public virtual void Shutdown(ShutdownType how) { }
+
+        /// <summary>Local address the socket is bound to.
+        /// Default returns 0.0.0.0:0 — concrete subclasses
+        /// override after a real bind.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("local-address")]
+        public virtual IpSocketAddress LocalAddress()
+            => new Ipv4SocketAddress(0, new byte[] { 0, 0, 0, 0 });
+
+        /// <summary>Remote (peer) address the socket is
+        /// connected to.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("remote-address")]
+        public virtual IpSocketAddress RemoteAddress()
+            => new Ipv4SocketAddress(0, new byte[] { 0, 0, 0, 0 });
 
         /// <summary>True iff this socket has transitioned into
         /// the listening state. Bare <c>bool</c> return — no
@@ -245,6 +328,16 @@ namespace Wacs.WASI.Preview2.Sockets
         [WasiMethodName("set-send-buffer-size")]
         public virtual void SetSendBufferSize(ulong value)
             => _sendBufferSize = value;
+
+        [WasiErrorResult]
+        [WasiMethodName("local-address")]
+        public virtual IpSocketAddress LocalAddress()
+            => new Ipv4SocketAddress(0, new byte[] { 0, 0, 0, 0 });
+
+        [WasiErrorResult]
+        [WasiMethodName("remote-address")]
+        public virtual IpSocketAddress RemoteAddress()
+            => new Ipv4SocketAddress(0, new byte[] { 0, 0, 0, 0 });
 
         protected byte _hopLimit = 64;
         protected ulong _receiveBufferSize = 65_536;
