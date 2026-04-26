@@ -160,18 +160,41 @@ namespace Wacs.WASI.Preview2.Http
     }
 
     /// <summary>WIT <c>wasi:http/types.incoming-response</c>.
-    /// </summary>
+    /// Holds status + headers + body of a server-sent
+    /// response.</summary>
     [WasiResource("incoming-response")]
     public class IncomingResponse : IDisposable
     {
+        /// <summary>HTTP status code (200, 404, etc.).
+        /// WIT <c>status() -&gt; status-code</c> where
+        /// status-code is u16.</summary>
+        public virtual ushort Status() => 200;
+
+        /// <summary>Headers attached to this response. The
+        /// returned <see cref="Fields"/> handle is owned by
+        /// the guest per WIT semantics. Default returns an
+        /// empty Fields.</summary>
+        public virtual Fields Headers() => new Fields();
+
         public virtual void Dispose() { }
     }
 
     /// <summary>WIT <c>wasi:http/types.outgoing-response</c>.
-    /// </summary>
+    /// Server-side response under construction.</summary>
     [WasiResource("outgoing-response")]
     public class OutgoingResponse : IDisposable
     {
+        protected ushort _statusCode = 200;
+
+        public virtual ushort StatusCode() => _statusCode;
+
+        [WasiErrorResult]
+        [WasiMethodName("set-status-code")]
+        public virtual void SetStatusCode(ushort statusCode)
+            => _statusCode = statusCode;
+
+        public virtual Fields Headers() => new Fields();
+
         public virtual void Dispose() { }
     }
 

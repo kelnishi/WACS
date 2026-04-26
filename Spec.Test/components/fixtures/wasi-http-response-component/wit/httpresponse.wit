@@ -1,0 +1,12 @@
+package local:httpresponse;
+world demo {
+    import wasi:http/types@0.2.3;
+    /// Calls incoming-response.status(handle); returns u32.
+    export ask-status: func(handle: u32) -> u32;
+    /// Calls outgoing-response.set-status-code(handle, 404)
+    /// then status-code(handle); returns the new status u32.
+    export ask-set-status: func(handle: u32) -> u32;
+    /// Calls incoming-response.headers(handle); drops the
+    /// returned fields handle. Returns 1 if non-zero.
+    export ask-headers: func(handle: u32) -> u32;
+}
