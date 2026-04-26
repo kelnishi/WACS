@@ -551,6 +551,15 @@ namespace Wacs.WASI.Preview2.Filesystem
             return new MetadataHashValue(lower, upper);
         }
 
+        /// <summary>Read the descriptor's open / mutability
+        /// flag set. Default returns Read | Write. Concrete
+        /// hosts override based on how the descriptor was
+        /// obtained.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("get-flags")]
+        public virtual DescriptorFlags GetFlags()
+            => DescriptorFlags.Read | DescriptorFlags.Write;
+
         /// <summary>Hint at access pattern for the descriptor's
         /// underlying file. Default impl is a no-op — concrete
         /// hosts wire to posix_fadvise on POSIX.</summary>

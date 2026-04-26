@@ -630,11 +630,15 @@ namespace Wacs.WASI.Preview2.HostBinding
                 return;
             }
 
-            // [WasiErrorResult]-tagged + enum return →
-            // result<enum, error-code> on a resource method.
-            // Used by descriptor.get-type / similar.
+            // [WasiErrorResult]-tagged + plain enum return
+            // (no [Flags]) → result<enum, error-code>. Plain
+            // enums are no-payload variants; wire is u8 disc.
+            // [Flags] enums are handled below — they widen
+            // to u8 / u16 / u32 based on declared flag count.
             if (m.GetCustomAttribute<WasiErrorResultAttribute>() != null
-                && m.ReturnType.IsEnum)
+                && m.ReturnType.IsEnum
+                && m.ReturnType.GetCustomAttribute<
+                    System.FlagsAttribute>() == null)
             {
                 BindErrorResultEnumReturnResourceMethod(
                     runtime, namespaceName, importName, table,
@@ -685,7 +689,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                     || m.ReturnType == typeof(
                         Wacs.WASI.Preview2.Filesystem.DirectoryEntry)
                     || m.ReturnType == typeof(
-                        Wacs.WASI.Preview2.Filesystem.DescriptorStat)))
+                        Wacs.WASI.Preview2.Filesystem.DescriptorStat)
+                    || (m.ReturnType.IsEnum && m.ReturnType
+                        .GetCustomAttribute<System.FlagsAttribute>() != null)))
             {
                 BindStreamResultResourceMethod(runtime, namespaceName,
                     importName, table, resourceType, m, resources);
@@ -1141,6 +1147,8 @@ namespace Wacs.WASI.Preview2.HostBinding
                 : rt == typeof(Wacs.WASI.Preview2.Sockets.IncomingDatagram[]) ? 12
                 : rt == typeof(Wacs.WASI.Preview2.Filesystem.DirectoryEntry) ? 13
                 : rt == typeof(Wacs.WASI.Preview2.Filesystem.DescriptorStat) ? 14
+                : (rt.IsEnum
+                    && rt.GetCustomAttribute<System.FlagsAttribute>() != null) ? 15
                 : -1;
             if (retShape < 0)
                 throw new InvalidOperationException(
@@ -1149,6 +1157,21 @@ namespace Wacs.WASI.Preview2.HostBinding
                     + "bool / u8 / u16 / u32 / u64 / byte[] / "
                     + "(byte[], bool) / record-of-primitives / "
                     + "ip-socket-address / tuple-of-resources).");
+
+            // For [Flags] enum returns: precompute the wire
+            // byte width based on declared flag count (1-8 →
+            // 1 byte, 9-16 → 2, 17-32 → 4). Per WIT spec
+            // "alignment(flags) = sizeof(flags)".
+            int flagsByteWidth = 0;
+            if (retShape == 15)
+            {
+                int flagCount = 0;
+                foreach (var v in Enum.GetValues(rt))
+                    if (Convert.ToUInt64(v) != 0)
+                        flagCount++;
+                flagsByteWidth = flagCount <= 8 ? 1
+                    : flagCount <= 16 ? 2 : 4;
+            }
 
             // For tuple-of-resources: precompute the per-field
             // resource tables so the hot path doesn't reflect.
@@ -1293,6 +1316,27 @@ namespace Wacs.WASI.Preview2.HostBinding
                             int handle = tupleTables![i].Allocate(resInst!);
                             WriteI32LE(memOut, retAreaPtr + 4 + i * 4,
                                 handle);
+                        }
+                        break;
+                    case 15:  // [Flags] enum: 1, 2, or 4 bytes
+                              // wire — payload at offset =
+                              // flagsByteWidth (= max(1, width)).
+                              // result wrapper align = width.
+                        ulong flagsVal = Convert.ToUInt64(ret);
+                        if (flagsByteWidth == 1)
+                        {
+                            memOut[retAreaPtr + 1] = (byte)flagsVal;
+                        }
+                        else if (flagsByteWidth == 2)
+                        {
+                            ushort fv16 = (ushort)flagsVal;
+                            memOut[retAreaPtr + 2] = (byte)(fv16 & 0xff);
+                            memOut[retAreaPtr + 3] = (byte)((fv16 >> 8) & 0xff);
+                        }
+                        else
+                        {
+                            WriteI32LE(memOut, retAreaPtr + 4,
+                                (int)(uint)flagsVal);
                         }
                         break;
                     case 14:  // descriptor-stat: 96-byte record.

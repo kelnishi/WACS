@@ -1,0 +1,6 @@
+package local:fsgetflags;
+world demo {
+    import wasi:filesystem/types@0.2.3;
+    /// Calls get-flags; returns the flags byte as u32.
+    export ask-flags: func(handle: u32) -> u32;
+}
