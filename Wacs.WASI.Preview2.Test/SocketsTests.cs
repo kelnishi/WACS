@@ -8,6 +8,7 @@
 using System.IO;
 using Wacs.ComponentModel.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
+using Wacs.WASI.Preview2.Io;
 using Wacs.WASI.Preview2.Sockets;
 using Xunit;
 
@@ -64,6 +65,37 @@ namespace Wacs.WASI.Preview2.Test
                 dir = dir.Parent;
             return Path.Combine(dir!.FullName, "Spec.Test", "components",
                                 "fixtures", fixtureDir, "wasm", fileName);
+        }
+
+        [Fact]
+        public void TcpSocket_subscribe_yields_pollable_handle_address_family_returns_enum()
+        {
+            // Fixture: ask-family(handle) calls
+            // tcp-socket.address-family(handle) → ip-address-family
+            // and tcp-socket.subscribe(handle) → pollable;
+            // drops the pollable; returns the family disc as u32.
+            // Stub creates an Ipv6 socket → expected 1.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-tcp-method-component", "tcpmethod.component.wasm"));
+            var resources = new ResourceContext();
+            var sock = new TcpSocket(IpAddressFamily.Ipv6);
+            int handle = resources.TableFor(typeof(TcpSocket))
+                .Allocate(sock);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<TcpSocket>(
+                    "wasi:sockets/tcp@0.2.3", resources);
+                runtime.BindWasiResource<Pollable>(
+                    "wasi:io/poll@0.2.3", resources);
+            });
+
+            Assert.Equal((uint)IpAddressFamily.Ipv6,
+                (uint)ci.Invoke("ask-family", (uint)handle)!);
+            // Pollable allocated by subscribe was dropped by the
+            // guest; only the original tcp-socket remains.
+            Assert.Equal(0, resources.TableFor(typeof(Pollable)).Count);
+            Assert.Equal(1, resources.TableFor(typeof(TcpSocket)).Count);
         }
 
         [Fact]

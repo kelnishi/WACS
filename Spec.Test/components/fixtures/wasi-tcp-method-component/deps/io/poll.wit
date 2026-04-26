@@ -1,0 +1,4 @@
+package wasi:io@0.2.3;
+interface poll {
+    resource pollable;
+}
