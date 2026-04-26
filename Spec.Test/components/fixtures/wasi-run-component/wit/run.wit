@@ -1,0 +1,5 @@
+package local:cmd;
+world demo {
+    /// Exports run() returning result<_, _> — the cli/run shape.
+    export run: func() -> result;
+}
