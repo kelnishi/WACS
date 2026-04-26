@@ -135,6 +135,41 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(4096UL, desc.LastSetSize);
         }
 
+        private sealed class ReadlinkDescriptor : Descriptor
+        {
+            public string LastPath = "";
+            public ReadlinkDescriptor() : base("/synthetic") { }
+            public override string ReadlinkAt(string path)
+            {
+                LastPath = path;
+                return "/links/target/" + path;
+            }
+        }
+
+        [Fact]
+        public void ReadlinkAt_returns_string_through_result_wrapper()
+        {
+            // Fixture: ask-readlink(handle) → string. WAT calls
+            // readlink-at(handle, "src") and returns the Ok
+            // payload string. Stub returns "/links/target/src".
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-fs-readlink-component", "fsreadlink.component.wasm"));
+            var resources = new ResourceContext();
+            var desc = new ReadlinkDescriptor();
+            int handle = resources.TableFor(typeof(Descriptor))
+                .Allocate(desc);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Descriptor>(
+                    "wasi:filesystem/types@0.2.3", resources);
+            });
+
+            Assert.Equal("/links/target/src",
+                ci.Invoke("ask-readlink", (uint)handle));
+            Assert.Equal("src", desc.LastPath);
+        }
+
         private sealed class FixedHashDescriptor : Descriptor
         {
             public FixedHashDescriptor() : base("/synthetic") { }
