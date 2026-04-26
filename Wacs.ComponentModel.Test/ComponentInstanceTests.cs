@@ -334,6 +334,25 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
+        public void Invoke_resolves_through_nested_component_alias()
+        {
+            // nested-component fixture: outer composes one inner
+            // component, alias-re-exporting its `inner-greet`
+            // export as `greet`. The interpreter detects no core
+            // modules + nested components, takes the composer
+            // path: recursively instantiates each nested
+            // component, walks Instances + Aliases to map outer
+            // component-func indices through to (inner instance,
+            // export name) pairs. Invoke routes through the chain.
+            // The inner's `inner-greet` returns "Hi!" via its
+            // canon-lifted UTF-8 string return.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "nested-component", "nested.component.wasm"));
+            var ci = ComponentInstance.Instantiate(bytes);
+            Assert.Equal("Hi!", ci.Invoke("greet"));
+        }
+
+        [Fact]
         public void Invoke_round_trips_utf16_string_param()
         {
             // utf16-string-param-component: echo(s) -> string
