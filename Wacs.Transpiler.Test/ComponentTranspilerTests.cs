@@ -1128,6 +1128,37 @@ namespace Wacs.Transpiler.Test
                                 "nested.component.wasm");
         }
 
+        private static string FindNestedComponent2LevelPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "nested-component-2level", "wasm",
+                                "multi.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_resolves_through_two_level_nested_components()
+        {
+            // Composer-of-composer fixture: outer wraps middle
+            // wraps innermost. Each level is composer mode (zero
+            // core modules + one nested component) except the
+            // innermost which has the real core wasm. Recursive
+            // TranspileSingleModule sees each level as composer
+            // and emits a delegating ComponentExports — the
+            // outer's `Greet` calls middle's `MidGreet` calls
+            // innermost's `InnerGreet` which canon-lifts "Hi!".
+            using var fs = File.OpenRead(FindNestedComponent2LevelPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var greet = componentExports!.GetMethod("Greet");
+            Assert.NotNull(greet);
+            Assert.Equal("Hi!", (string)greet!.Invoke(null, null)!);
+        }
+
         [Fact]
         public void TranspileSingleModule_resolves_through_nested_component_alias()
         {
