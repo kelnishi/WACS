@@ -1112,6 +1112,80 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal("ftp", other.Name);
         }
 
+        private sealed class SchemedOutgoingRequest : OutgoingRequest
+        {
+            public SchemedOutgoingRequest(HttpScheme? scheme)
+            {
+                _scheme = scheme;
+            }
+        }
+
+        [Fact]
+        public void OutgoingRequest_scheme_getter_writes_option_variant_retArea()
+        {
+            // Three calls cover: None (option disc=0), HTTPS
+            // (option=1, variant=1, no payload), Other("ftp")
+            // (option=1, variant=2, ptr+len at offsets 8/12).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-getscheme-component",
+                "getscheme.component.wasm"));
+
+            // Subtest 1: None
+            {
+                var resources = new ResourceContext();
+                var req = new SchemedOutgoingRequest(null);
+                int hReq = resources.TableFor(typeof(OutgoingRequest))
+                    .Allocate(req);
+                var ci = ComponentInstance.Instantiate(bytes, runtime =>
+                {
+                    runtime.BindWasiResource<OutgoingRequest>(
+                        "wasi:http/types@0.2.3", resources);
+                });
+                Assert.Equal(0u, (uint)ci.Invoke(
+                    "ask-scheme-disc", (uint)hReq)!);
+            }
+
+            // Subtest 2: Some(HTTPS)
+            {
+                var resources = new ResourceContext();
+                var req = new SchemedOutgoingRequest(new HttpSchemeHttps());
+                int hReq = resources.TableFor(typeof(OutgoingRequest))
+                    .Allocate(req);
+                var ci = ComponentInstance.Instantiate(bytes, runtime =>
+                {
+                    runtime.BindWasiResource<OutgoingRequest>(
+                        "wasi:http/types@0.2.3", resources);
+                });
+                Assert.Equal(1u, (uint)ci.Invoke(
+                    "ask-scheme-disc", (uint)hReq)!);
+                Assert.Equal(1u, (uint)ci.Invoke(
+                    "ask-scheme-variant", (uint)hReq)!);
+                Assert.Equal(0u, (uint)ci.Invoke(
+                    "ask-scheme-other-len", (uint)hReq)!);
+            }
+
+            // Subtest 3: Some(Other("ftp"))
+            {
+                var resources = new ResourceContext();
+                var req = new SchemedOutgoingRequest(
+                    new HttpSchemeOther("ftp"));
+                int hReq = resources.TableFor(typeof(OutgoingRequest))
+                    .Allocate(req);
+                var ci = ComponentInstance.Instantiate(bytes, runtime =>
+                {
+                    runtime.BindWasiResource<OutgoingRequest>(
+                        "wasi:http/types@0.2.3", resources);
+                });
+                Assert.Equal(1u, (uint)ci.Invoke(
+                    "ask-scheme-disc", (uint)hReq)!);
+                Assert.Equal(2u, (uint)ci.Invoke(
+                    "ask-scheme-variant", (uint)hReq)!);
+                // "ftp" UTF-8 = 3 bytes
+                Assert.Equal(3u, (uint)ci.Invoke(
+                    "ask-scheme-other-len", (uint)hReq)!);
+            }
+        }
+
         [Fact]
         public void Http_resource_markers_are_allocatable()
         {

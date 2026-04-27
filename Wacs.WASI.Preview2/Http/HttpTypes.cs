@@ -238,6 +238,13 @@ namespace Wacs.WASI.Preview2.Http
         /// </summary>
         protected HttpScheme? _scheme;
 
+        /// <summary>WIT <c>scheme: func()
+        ///   -&gt; option&lt;scheme&gt;</c>. Reads back the
+        /// scheme set by SetScheme — null is None on the wire.
+        /// </summary>
+        [WasiOptionalReturn]
+        public virtual HttpScheme? Scheme() => _scheme;
+
         /// <summary>WIT <c>set-scheme: func(
         ///   scheme: option&lt;scheme&gt;) -&gt; result</c>.
         /// option<variant> param: 4 wire slots
@@ -303,10 +310,16 @@ namespace Wacs.WASI.Preview2.Http
     public class IncomingRequest : IDisposable
     {
         protected HttpMethod _method = new HttpMethodGet();
+        protected HttpScheme? _scheme;
 
         /// <summary>HTTP request method on the server side.
         /// WIT <c>method() -&gt; method</c>.</summary>
         public virtual HttpMethod Method() => _method;
+
+        /// <summary>HTTP scheme. WIT <c>scheme: func()
+        ///   -&gt; option&lt;scheme&gt;</c>.</summary>
+        [WasiOptionalReturn]
+        public virtual HttpScheme? Scheme() => _scheme;
 
         public virtual Fields Headers() => new Fields();
 
