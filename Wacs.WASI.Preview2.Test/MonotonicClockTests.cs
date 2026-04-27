@@ -58,9 +58,10 @@ namespace Wacs.WASI.Preview2.Test
             var bytes = File.ReadAllBytes(FindFixturePath(
                 "wasi-monotonic-clock-component", "clk.component.wasm"));
             var clock = new MonotonicClock();
+            var resources = new ResourceContext();
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-                runtime.BindWasiInstance(
-                    "wasi:clocks/monotonic-clock@0.2.3", clock));
+                new ClockBindings(resources, monotonic: clock)
+                    .BindToRuntime(runtime));
 
             // Both calls return u64s drawn from the host clock.
             var elapsed = (ulong)ci.Invoke("elapsed")!;
@@ -88,8 +89,8 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiInstance(
-                    "wasi:clocks/monotonic-clock@0.2.3", clock, resources);
+                new ClockBindings(resources, monotonic: clock)
+                    .BindToRuntime(runtime);
                 runtime.BindWasiResource<Pollable>(
                     "wasi:io/poll@0.2.3", resources);
             });

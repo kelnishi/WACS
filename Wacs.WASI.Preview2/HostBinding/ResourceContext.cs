@@ -45,6 +45,16 @@ namespace Wacs.WASI.Preview2.HostBinding
             return t;
         }
 
+        /// <summary>Generic shorthand for
+        /// <see cref="TableFor(Type)"/>. Lets binding code write
+        /// <c>resources.Table&lt;Pollable&gt;()</c> without the
+        /// typeof noise. Named <c>Table</c> rather than
+        /// <c>TableFor</c> to avoid an
+        /// <see cref="System.Reflection.AmbiguousMatchException"/>
+        /// when the legacy binder reflects on
+        /// <c>nameof(ResourceContext.TableFor)</c>.</summary>
+        public ResourceTable Table<T>() => TableFor(typeof(T));
+
         /// <summary>Number of distinct resource types tracked.
         /// Diagnostic hook for tests that want to inspect the
         /// composition of a component's host-side state.</summary>
