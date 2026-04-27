@@ -31,12 +31,12 @@ namespace Wacs.WASI.Preview2.Test
             private readonly byte[] _data;
             public CannedInputStream(byte[] data) { _data = data; }
 
-            public override byte[] Read(ulong len)
+            public override Result<byte[], StreamError> Read(ulong len)
             {
                 int n = (int)System.Math.Min(len, (ulong)_data.Length);
                 var slice = new byte[n];
                 System.Array.Copy(_data, 0, slice, 0, n);
-                return slice;
+                return Result<byte[], StreamError>.FromOk(slice);
             }
         }
 

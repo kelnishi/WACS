@@ -59,7 +59,7 @@ namespace Wacs.WASI.Preview2.Test
             private int _pos;
             public InMemoryInputStream(byte[] bytes) { _bytes = bytes; }
 
-            public override byte[] Read(ulong len)
+            public override Result<byte[], StreamError> Read(ulong len)
             {
                 int avail = _bytes.Length - _pos;
                 int n = (int)System.Math.Min(
@@ -68,10 +68,11 @@ namespace Wacs.WASI.Preview2.Test
                 var slice = new byte[n];
                 System.Array.Copy(_bytes, _pos, slice, 0, n);
                 _pos += n;
-                return slice;
+                return Result<byte[], StreamError>.FromOk(slice);
             }
 
-            public override byte[] BlockingRead(ulong len) => Read(len);
+            public override Result<byte[], StreamError> BlockingRead(ulong len)
+                => Read(len);
         }
 
         private sealed class TypedDescriptor : Descriptor

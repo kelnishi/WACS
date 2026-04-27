@@ -28,12 +28,13 @@ namespace Wacs.WASI.Preview2.Io
         //     blocking-splice: ... same ...
         //     subscribe: func() -> own<pollable>;
         //   }
-        private static void BindOutputStream(WasmRuntime runtime,
+        private void BindOutputStream(WasmRuntime runtime,
             ResourceContext resources, Realloc alloc)
         {
             var streams = resources.Table<OutputStream>();
             var inputs = resources.Table<InputStream>();
             var pollables = resources.Table<Pollable>();
+            var errors = resources.Table<Error>();
 
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (Ns, "[resource-drop]output-stream"),
@@ -42,7 +43,7 @@ namespace Wacs.WASI.Preview2.Io
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]output-stream.check-write"),
                 (ctx, handle, retArea) =>
-                    WriteOkU64(ctx, retArea,
+                    WriteResultU64(ctx, errors, retArea,
                         ((OutputStream)streams.Get(handle)).CheckWrite()));
 
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int>>(
@@ -50,8 +51,8 @@ namespace Wacs.WASI.Preview2.Io
                 (ctx, handle, ptr, len, retArea) =>
                 {
                     var bytes = ctx.ReadByteArray(ptr, len);
-                    ((OutputStream)streams.Get(handle)).Write(bytes);
-                    WriteOkUnit(ctx, retArea);
+                    var r = ((OutputStream)streams.Get(handle)).Write(bytes);
+                    WriteResultUnit(ctx, errors, retArea, r);
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int>>(
@@ -59,53 +60,45 @@ namespace Wacs.WASI.Preview2.Io
                 (ctx, handle, ptr, len, retArea) =>
                 {
                     var bytes = ctx.ReadByteArray(ptr, len);
-                    ((OutputStream)streams.Get(handle))
+                    var r = ((OutputStream)streams.Get(handle))
                         .BlockingWriteAndFlush(bytes);
-                    WriteOkUnit(ctx, retArea);
+                    WriteResultUnit(ctx, errors, retArea, r);
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]output-stream.flush"),
                 (ctx, handle, retArea) =>
-                {
-                    ((OutputStream)streams.Get(handle)).Flush();
-                    WriteOkUnit(ctx, retArea);
-                });
+                    WriteResultUnit(ctx, errors, retArea,
+                        ((OutputStream)streams.Get(handle)).Flush()));
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]output-stream.blocking-flush"),
                 (ctx, handle, retArea) =>
-                {
-                    ((OutputStream)streams.Get(handle)).BlockingFlush();
-                    WriteOkUnit(ctx, retArea);
-                });
+                    WriteResultUnit(ctx, errors, retArea,
+                        ((OutputStream)streams.Get(handle)).BlockingFlush()));
 
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (Ns, "[method]output-stream.write-zeroes"),
                 (ctx, handle, len, retArea) =>
-                {
-                    ((OutputStream)streams.Get(handle))
-                        .WriteZeroes((ulong)len);
-                    WriteOkUnit(ctx, retArea);
-                });
+                    WriteResultUnit(ctx, errors, retArea,
+                        ((OutputStream)streams.Get(handle))
+                            .WriteZeroes((ulong)len)));
 
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (Ns, "[method]output-stream.blocking-write-zeroes-and-flush"),
                 (ctx, handle, len, retArea) =>
-                {
-                    ((OutputStream)streams.Get(handle))
-                        .BlockingWriteZeroesAndFlush((ulong)len);
-                    WriteOkUnit(ctx, retArea);
-                });
+                    WriteResultUnit(ctx, errors, retArea,
+                        ((OutputStream)streams.Get(handle))
+                            .BlockingWriteZeroesAndFlush((ulong)len)));
 
             runtime.BindHostFunction<Action<ExecContext, int, int, long, int>>(
                 (Ns, "[method]output-stream.splice"),
                 (ctx, handle, srcHandle, len, retArea) =>
                 {
                     var src = (InputStream)inputs.Get(srcHandle);
-                    var moved = ((OutputStream)streams.Get(handle))
+                    var r = ((OutputStream)streams.Get(handle))
                         .Splice(src, (ulong)len);
-                    WriteOkU64(ctx, retArea, moved);
+                    WriteResultU64(ctx, errors, retArea, r);
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int, long, int>>(
@@ -113,15 +106,19 @@ namespace Wacs.WASI.Preview2.Io
                 (ctx, handle, srcHandle, len, retArea) =>
                 {
                     var src = (InputStream)inputs.Get(srcHandle);
-                    var moved = ((OutputStream)streams.Get(handle))
+                    var r = ((OutputStream)streams.Get(handle))
                         .BlockingSplice(src, (ulong)len);
-                    WriteOkU64(ctx, retArea, moved);
+                    WriteResultU64(ctx, errors, retArea, r);
                 });
 
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[method]output-stream.subscribe"),
-                (_, handle) => pollables.Allocate(
-                    ((OutputStream)streams.Get(handle)).Subscribe()));
+                (_, handle) =>
+                {
+                    var p = ((OutputStream)streams.Get(handle))
+                        .Subscribe();
+                    return pollables.Allocate((Pollable)p);
+                });
         }
     }
 }

@@ -47,10 +47,17 @@ namespace Wacs.WASI.Preview2.Test
             {
                 private readonly CapturingStdout _owner;
                 public Capture(CapturingStdout owner) { _owner = owner; }
-                public override void Write(byte[] contents) =>
+                public override Result<Unit, StreamError> Write(byte[] contents)
+                {
                     _owner.All.AddRange(contents);
-                public override void BlockingWriteAndFlush(byte[] contents) =>
+                    return Result<Unit, StreamError>.FromOk(Unit.Value);
+                }
+                public override Result<Unit, StreamError>
+                    BlockingWriteAndFlush(byte[] contents)
+                {
                     _owner.All.AddRange(contents);
+                    return Result<Unit, StreamError>.FromOk(Unit.Value);
+                }
             }
         }
 
