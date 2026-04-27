@@ -2496,6 +2496,12 @@ namespace Wacs.WASI.Preview2.HostBinding
                        == typeof(Nullable<>)
                    && IsPrimitive(p.ParameterType
                        .GetGenericArguments()[0]);
+            // option<string> param — string with
+            // [WasiOptionalParam]. Wire: 3 slots (disc i32 +
+            // string ptr i32 + string len i32).
+            bool IsOptString(ParameterInfo p)
+                => p.GetCustomAttribute<WasiOptionalParamAttribute>() != null
+                   && p.ParameterType == typeof(string);
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)
                     && !p.ParameterType.IsEnum
@@ -2506,6 +2512,7 @@ namespace Wacs.WASI.Preview2.HostBinding
                         WasiResourceAttribute>() == null
                     && !IsOptResource(p)
                     && !IsOptPrimitive(p)
+                    && !IsOptString(p)
                     && p.ParameterType != typeof(
                         Wacs.WASI.Preview2.Sockets.IpSocketAddress)
                     && p.ParameterType != typeof(
@@ -2521,7 +2528,9 @@ namespace Wacs.WASI.Preview2.HostBinding
             int paramSlotCount = 0;
             foreach (var p in paramInfos)
             {
-                if (p.ParameterType == typeof(string)
+                if (IsOptString(p))
+                    paramSlotCount += 3;
+                else if (p.ParameterType == typeof(string)
                     || p.ParameterType == typeof(byte[])
                     || p.ParameterType == typeof(byte[][])
                     || IsOptResource(p)
@@ -2545,7 +2554,13 @@ namespace Wacs.WASI.Preview2.HostBinding
             int wi = 2;
             foreach (var p in paramInfos)
             {
-                if (p.ParameterType == typeof(string)
+                if (IsOptString(p))
+                {
+                    wireParamTypes[wi++] = typeof(int);   // disc
+                    wireParamTypes[wi++] = typeof(int);   // ptr
+                    wireParamTypes[wi++] = typeof(int);   // len
+                }
+                else if (p.ParameterType == typeof(string)
                     || p.ParameterType == typeof(byte[])
                     || p.ParameterType == typeof(byte[][]))
                 {
@@ -2621,7 +2636,16 @@ namespace Wacs.WASI.Preview2.HostBinding
             wi = 2;
             for (int i = 0; i < paramInfos.Length; i++)
             {
-                if (paramInfos[i].ParameterType == typeof(string)
+                if (IsOptString(paramInfos[i]))
+                {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_optDisc");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_ptr");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_len");
+                }
+                else if (paramInfos[i].ParameterType == typeof(string)
                     || paramInfos[i].ParameterType == typeof(byte[])
                     || paramInfos[i].ParameterType == typeof(byte[][]))
                 {
@@ -2733,7 +2757,30 @@ namespace Wacs.WASI.Preview2.HostBinding
                     BindingFlags.Static | BindingFlags.NonPublic)!;
             for (int i = 0; i < paramInfos.Length; i++)
             {
-                if (paramInfos[i].ParameterType == typeof(string))
+                if (IsOptString(paramInfos[i]))
+                {
+                    // option<string>: 3 wire slots (disc i32 +
+                    // ptr i32 + len i32). disc==0 → null;
+                    // disc==1 → UTF-8 decode (ptr, len). The
+                    // string-decode happens unconditionally to
+                    // simplify the expression; the conditional
+                    // chooses null vs decoded.
+                    var optDiscParam = lambdaParams[wi++];
+                    var ptrParam = lambdaParams[wi++];
+                    var lenParam = lambdaParams[wi++];
+                    var decoded = Expression.Call(
+                        encodingUtf8, getStringMethod,
+                        memoryAccess, ptrParam, lenParam);
+                    argExprs[i] = Expression.Convert(
+                        Expression.Condition(
+                            Expression.Equal(optDiscParam,
+                                Expression.Constant(0)),
+                            Expression.Constant(null,
+                                typeof(string)),
+                            decoded),
+                        typeof(object));
+                }
+                else if (paramInfos[i].ParameterType == typeof(string))
                 {
                     var ptrParam = lambdaParams[wi++];
                     var lenParam = lambdaParams[wi++];

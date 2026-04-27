@@ -981,6 +981,44 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [Fact]
+        public void OutgoingRequest_set_path_and_authority_with_option_string()
+        {
+            // Fixture exercises option<string> param shape:
+            // 3 wire slots (disc i32 + ptr i32 + len i32).
+            // Three calls: set-path-with-query(None) clears
+            // path; set-path-with-query(Some(s)) sets it;
+            // set-authority(Some(s)) sets the authority.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-req-setters-component",
+                "httpreqset.component.wasm"));
+            var resources = new ResourceContext();
+            var req = new OutgoingRequest();
+            int hReq = resources.TableFor(typeof(OutgoingRequest))
+                .Allocate(req);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            // None — leaves _pathWithQuery null.
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-path-none", (uint)hReq)!);
+            Assert.Null(req.PathWithQuery());
+
+            // Some("/foo/bar?x=1")
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-path-some", (uint)hReq)!);
+            Assert.Equal("/foo/bar?x=1", req.PathWithQuery());
+
+            // Some("example.com:443") via set-authority
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-authority-some", (uint)hReq)!);
+            Assert.Equal("example.com:443", req.Authority());
+        }
+
+        [Fact]
         public void Http_resource_markers_are_allocatable()
         {
             // Smoke test: every wasi:http resource type can
