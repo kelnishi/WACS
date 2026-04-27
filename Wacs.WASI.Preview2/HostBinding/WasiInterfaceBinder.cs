@@ -811,6 +811,18 @@ namespace Wacs.WASI.Preview2.HostBinding
                 return;
             }
 
+            // [WasiFutureTrailersResult] →
+            // option<result<option<own<trailers>>, error-code>>.
+            // Specialized binder writes the 48-byte retArea
+            // for the always-Ok subset of states.
+            if (m.GetCustomAttribute<
+                WasiFutureTrailersResultAttribute>() != null)
+            {
+                BindFutureTrailersGetMethod(runtime, namespaceName,
+                    importName, table, resourceType, m, resources);
+                return;
+            }
+
             // [WasiUnitResult] + void return →
             // result<_, _> on a resource method. Wire is
             // flat-return i32 (just the disc) instead of the
@@ -1445,6 +1457,93 @@ namespace Wacs.WASI.Preview2.HostBinding
                         WriteI32LE(memory, retAreaPtr + 12, 0);
                     }
                 });
+        }
+
+        /// <summary>Resource method canon-lowering to WIT
+        /// <c>option&lt;result&lt;option&lt;own&lt;trailers&gt;&gt;,
+        /// error-code&gt;&gt;</c> — the future-trailers.get
+        /// shape. Host method returns
+        /// <c>(bool ready, Fields? trailers)</c>.
+        ///
+        /// <para>retArea is 48 bytes (align 8 since error-code
+        /// includes <c>option&lt;u64&gt;</c> payloads):
+        /// <list type="bullet">
+        /// <item>0:  outer option disc (1B)</item>
+        /// <item>1-7: padding to 8-align result</item>
+        /// <item>8:  result disc (1B)</item>
+        /// <item>9-15: padding (result-payload starts at +16)</item>
+        /// <item>16: inner option disc (1B) when Ok</item>
+        /// <item>17-19: padding</item>
+        /// <item>20: handle (4B) when Some</item>
+        /// <item>24-47: error-code payload area (zeroed for
+        /// always-Ok)</item>
+        /// </list>
+        /// State encoding:
+        /// <list type="bullet">
+        /// <item>(false, _) → outer disc=0; rest doesn't matter</item>
+        /// <item>(true, null) → outer=1, result=0, inner=0</item>
+        /// <item>(true, fields) → outer=1, result=0, inner=1,
+        /// handle at +20</item>
+        /// </list>
+        /// v0 always-Ok — Err-side encoding (Some(Err(error-
+        /// code))) is a follow-up that needs the full error-code
+        /// variant payload writer.</para></summary>
+        private static void BindFutureTrailersGetMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable selfTable,
+            Type resourceType, MethodInfo m,
+            ResourceContext resources)
+        {
+            // The trailers handle target table is for Fields
+            // (since trailers = fields type alias in WIT).
+            var trailersType = typeof(Wacs.WASI.Preview2.Http.Fields);
+            var trailersTable = resources.TableFor(trailersType);
+
+            void Body(ExecContext ctx, int handle, int retAreaPtr)
+            {
+                var inst = selfTable.Get(handle);
+                var ret = m.Invoke(inst, Array.Empty<object?>());
+                if (ret == null)
+                    throw new InvalidOperationException(
+                        "[WasiFutureTrailersResult] method '"
+                        + m.Name + "' returned null — expected "
+                        + "(bool ready, Fields? trailers).");
+                var tup = (System.ValueTuple<bool,
+                    Wacs.WASI.Preview2.Http.Fields?>)ret;
+                var memory = ctx.DefaultMemory.Data;
+                if (!tup.Item1)
+                {
+                    // Outer None — guest interprets as "not
+                    // ready yet".
+                    memory[retAreaPtr] = 0;
+                    return;
+                }
+                // Outer Some + Ok.
+                memory[retAreaPtr] = 1;        // outer Some
+                for (int p = 1; p <= 7; p++)
+                    memory[retAreaPtr + p] = 0;
+                memory[retAreaPtr + 8] = 0;    // Ok
+                for (int p = 9; p <= 15; p++)
+                    memory[retAreaPtr + p] = 0;
+                if (tup.Item2 == null)
+                {
+                    // inner None — ready, no trailers.
+                    memory[retAreaPtr + 16] = 0;
+                    for (int p = 17; p <= 19; p++)
+                        memory[retAreaPtr + p] = 0;
+                    WriteI32LE(memory, retAreaPtr + 20, 0);
+                    return;
+                }
+                // inner Some(handle).
+                memory[retAreaPtr + 16] = 1;
+                for (int p = 17; p <= 19; p++)
+                    memory[retAreaPtr + p] = 0;
+                int trailerHandle = trailersTable.Allocate(tup.Item2);
+                WriteI32LE(memory, retAreaPtr + 20, trailerHandle);
+            }
+
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (namespaceName, importName), Body);
         }
 
         /// <summary>Resource method returning
