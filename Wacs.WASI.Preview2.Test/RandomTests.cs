@@ -75,8 +75,7 @@ namespace Wacs.WASI.Preview2.Test
                 "wasi-random-bytes-component", "rb.component.wasm"));
             var stub = new DeterministicRandom();
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-                runtime.BindWasiInstance(
-                    "wasi:random/random@0.2.3", stub));
+                new RandomBindings(stub).BindToRuntime(runtime));
 
             var result = (byte[])ci.Invoke("fetch", 5UL)!;
             // Stub generates byte i = (byte)i for i in [0..len),
@@ -111,8 +110,7 @@ namespace Wacs.WASI.Preview2.Test
                 "wasi-random-u64-component", "rand.component.wasm"));
             var random = new Random.Random();
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-                runtime.BindWasiInstance(
-                    "wasi:random/random@0.2.3", random));
+                new RandomBindings(random).BindToRuntime(runtime));
             // Two calls; both non-zero is overwhelmingly likely.
             // Just check the call chain works — the value is
             // CSPRNG-driven so we can't assert specifics.
