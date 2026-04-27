@@ -356,8 +356,15 @@ namespace Wacs.WASI.Preview2.HostBinding
             var paramInfos = m.GetParameters();
 
             // Param shapes: primitive / enum (1 wire slot),
-            // string (2 wire slots), borrow<resource> (1 wire
-            // slot, resolved via ResourceContext).
+            // string (2 wire slots), borrow<resource> or
+            // own<resource> (1 wire slot, resolved via
+            // ResourceContext), option<own<resource>>
+            // (2 wire slots: option disc + handle, tagged
+            // [WasiOptionalParam]).
+            bool IsOptResource(ParameterInfo p)
+                => p.GetCustomAttribute<WasiOptionalParamAttribute>() != null
+                   && p.ParameterType.GetCustomAttribute<
+                       WasiResourceAttribute>() != null;
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)
                     && !p.ParameterType.IsEnum
@@ -372,7 +379,13 @@ namespace Wacs.WASI.Preview2.HostBinding
 
             int paramSlotCount = 0;
             foreach (var p in paramInfos)
-                paramSlotCount += p.ParameterType == typeof(string) ? 2 : 1;
+            {
+                if (p.ParameterType == typeof(string)
+                    || IsOptResource(p))
+                    paramSlotCount += 2;
+                else
+                    paramSlotCount += 1;
+            }
             var paramTypes = new Type[2 + paramSlotCount];
             paramTypes[0] = typeof(ExecContext);
             int wi = 1;
@@ -382,6 +395,11 @@ namespace Wacs.WASI.Preview2.HostBinding
                 {
                     paramTypes[wi++] = typeof(int);
                     paramTypes[wi++] = typeof(int);
+                }
+                else if (IsOptResource(p))
+                {
+                    paramTypes[wi++] = typeof(int);   // option disc
+                    paramTypes[wi++] = typeof(int);   // handle
                 }
                 else if (p.ParameterType.GetCustomAttribute<
                     WasiResourceAttribute>() != null)
@@ -430,6 +448,13 @@ namespace Wacs.WASI.Preview2.HostBinding
                     lambdaParams[wi++] = Expression.Parameter(
                         typeof(int), paramInfos[i].Name + "_len");
                 }
+                else if (IsOptResource(paramInfos[i]))
+                {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_optDisc");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_handle");
+                }
                 else
                 {
                     lambdaParams[wi++] = Expression.Parameter(
@@ -471,6 +496,29 @@ namespace Wacs.WASI.Preview2.HostBinding
                     argExprs[i] = Expression.Convert(
                         Expression.Call(encodingUtf8, getStringMethod,
                             memoryAccess, ptrParam, lenParam),
+                        typeof(object));
+                }
+                else if (IsOptResource(paramInfos[i]))
+                {
+                    // option<own<resource>> param: 2 slots
+                    // (option disc + handle). Resolve via
+                    // table when disc==1, else null.
+                    var optDiscParam = lambdaParams[wi++];
+                    var handleParam = lambdaParams[wi++];
+                    var paramTable = Expression.Call(contextConst,
+                        tableForMethod,
+                        Expression.Constant(paramInfos[i].ParameterType));
+                    var resolved = Expression.Convert(
+                        Expression.Call(paramTable, getResourceMethod,
+                            handleParam),
+                        paramInfos[i].ParameterType);
+                    argExprs[i] = Expression.Convert(
+                        Expression.Condition(
+                            Expression.Equal(optDiscParam,
+                                Expression.Constant(0)),
+                            Expression.Constant(null,
+                                paramInfos[i].ParameterType),
+                            resolved),
                         typeof(object));
                 }
                 else if (paramInfos[i].ParameterType.GetCustomAttribute<
