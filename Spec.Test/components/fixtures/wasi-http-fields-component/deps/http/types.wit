@@ -9,6 +9,7 @@ interface types {
     type field-value = list<u8>;
     resource fields {
         has: func(name: field-key) -> bool;
+        get: func(name: field-key) -> list<field-value>;
         append: func(name: field-key, value: field-value)
             -> result<_, header-error>;
         delete: func(name: field-key) -> result<_, header-error>;

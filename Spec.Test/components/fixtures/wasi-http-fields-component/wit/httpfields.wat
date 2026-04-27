@@ -9,6 +9,8 @@
     (func $app (param i32 i32 i32 i32 i32 i32)))
   (import "wasi:http/types@0.2.3" "[method]fields.entries"
     (func $ent (param i32 i32)))
+  (import "wasi:http/types@0.2.3" "[method]fields.get"
+    (func $get (param i32 i32 i32 i32)))
   (import "wasi:http/types@0.2.3" "[resource-drop]fields"
     (func $drop (param i32)))
   (memory (export "memory") 1)
@@ -16,6 +18,7 @@
   (data (i32.const 200) "X-Present")
   (data (i32.const 300) "X-New")
   (data (i32.const 400) "value")
+  (data (i32.const 500) "X-Foo")
   (global $next (mut i32) (i32.const 1024))
   (func $realloc (param i32 i32 i32 i32) (result i32)
     (local $r i32) (local $align i32)
@@ -71,4 +74,18 @@
     (local.set $arr (i32.load (local.get $r)))
     ;; First elem's val-ptr at arr+8.
     (local.set $valPtr (i32.load offset=8 (local.get $arr)))
-    (i32.load8_u (local.get $valPtr))))
+    (i32.load8_u (local.get $valPtr)))
+  ;; list<list<u8>>: 8-byte retArea (ptr, len);
+  ;; each elem 8 bytes (bytes-ptr, bytes-len).
+  (func (export "ask-get-len") (param i32) (result i32)
+    (local $r i32)
+    (local.set $r (call $realloc (i32.const 0) (i32.const 0) (i32.const 4) (i32.const 8)))
+    (call $get (local.get 0) (i32.const 500) (i32.const 5) (local.get $r))
+    (i32.load offset=4 (local.get $r)))
+  (func (export "ask-get-first-byte") (param i32) (result i32)
+    (local $r i32) (local $arr i32) (local $bytesPtr i32)
+    (local.set $r (call $realloc (i32.const 0) (i32.const 0) (i32.const 4) (i32.const 8)))
+    (call $get (local.get 0) (i32.const 500) (i32.const 5) (local.get $r))
+    (local.set $arr (i32.load (local.get $r)))
+    (local.set $bytesPtr (i32.load (local.get $arr)))
+    (i32.load8_u (local.get $bytesPtr))))
