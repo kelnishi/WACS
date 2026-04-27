@@ -109,5 +109,61 @@ namespace Wacs.ComponentModel.Bindgen
             foreach (var s in sources)
                 File.WriteAllText(Path.Combine(outDir, s.FileName), s.Content);
         }
+
+        // -----------------------------------------------------
+        //                     Host-mode emission
+        // -----------------------------------------------------
+
+        /// <summary>
+        /// Host-side emission: WIT directory → set of
+        /// <c>public interface IXxx</c> source files for
+        /// implementation by a runtime binding. Each generated
+        /// symbol carries a
+        /// <see cref="Wacs.ComponentModel.Runtime.WitSourceAttribute"/>
+        /// for runtime validation.
+        ///
+        /// <para>Returns one <see cref="EmittedSource"/> per WIT
+        /// interface; consumers iterate to write or pipe into a
+        /// Roslyn <c>SourceProductionContext</c>.</para>
+        /// </summary>
+        public static IReadOnlyList<EmittedSource> EmitHostInterfacesFromDirectory(
+            string directory, EmitOptions? options = null)
+        {
+            if (directory == null) throw new ArgumentNullException(nameof(directory));
+            var packages = WitLoader.LoadDirectoryTree(directory);
+            return EmitHostInterfacesFromPackages(packages, options);
+        }
+
+        /// <summary>Same as
+        /// <see cref="EmitHostInterfacesFromDirectory"/> but
+        /// takes an explicit list of WIT file paths. Useful when
+        /// the consuming project has WIT files registered as
+        /// MSBuild <c>&lt;AdditionalFiles&gt;</c> and the source-gen
+        /// has already resolved them to absolute paths.</summary>
+        public static IReadOnlyList<EmittedSource> EmitHostInterfacesFromFiles(
+            IEnumerable<string> witPaths, EmitOptions? options = null)
+        {
+            if (witPaths == null) throw new ArgumentNullException(nameof(witPaths));
+            var packages = WitLoader.LoadFiles(witPaths);
+            return EmitHostInterfacesFromPackages(packages, options);
+        }
+
+        /// <summary>Same as
+        /// <see cref="EmitHostInterfacesFromDirectory"/> but takes
+        /// pre-parsed packages — Roslyn source generators that
+        /// hold the AST in-memory call this directly to avoid
+        /// re-reading.</summary>
+        public static IReadOnlyList<EmittedSource> EmitHostInterfacesFromPackages(
+            IReadOnlyList<CtPackage> packages, EmitOptions? options = null)
+        {
+            if (packages == null) throw new ArgumentNullException(nameof(packages));
+            var opts = options ?? new EmitOptions { HostInterfaceMode = true };
+            opts.HostInterfaceMode = true;
+            var result = new List<EmittedSource>();
+            foreach (var pkg in packages)
+                result.AddRange(HostInterfaceEmit.EmitPackage(
+                    pkg, packages, opts));
+            return result;
+        }
     }
 }

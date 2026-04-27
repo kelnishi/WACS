@@ -63,6 +63,44 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// metadata and don't object to their presence.</para>
         /// </summary>
         public bool IncludeWitMetadata { get; set; } = false;
+
+        /// <summary>
+        /// When true, the emitter produces <b>host-side</b>
+        /// interfaces — <c>public interface IXxx { ... }</c>
+        /// declarations a runtime binding implements — instead of
+        /// the consumer-side instantiation classes (DllImport
+        /// stubs, handle wrappers) the default mode emits.
+        ///
+        /// <para>Host-mode output:
+        /// <list type="bullet">
+        /// <item>Resources become <c>interface IResource</c> with
+        /// method signatures only (no Handle, no Dispose, no
+        /// DllImport).</item>
+        /// <item>Free functions on a WIT interface become methods
+        /// of an <c>IInterfaceName</c> interface.</item>
+        /// <item>Types (<c>record</c> / <c>variant</c> /
+        /// <c>enum</c> / <c>flags</c>) emit as plain DTOs in the
+        /// containing namespace.</item>
+        /// <item>Each generated interface and method carries a
+        /// <see cref="Wacs.ComponentModel.Runtime.WitSourceAttribute"/>
+        /// with the verbatim WIT-text fragment that produced it,
+        /// for runtime validation against expected
+        /// contracts.</item>
+        /// </list></para>
+        ///
+        /// <para>Mutually exclusive with the consumer-side
+        /// emission shape: a single emitter pass picks one mode.
+        /// Use <see cref="Wacs.ComponentModel.Bindgen.WitForward"/>
+        /// twice if both shapes are needed.</para>
+        /// </summary>
+        public bool HostInterfaceMode { get; set; } = false;
+
+        /// <summary>
+        /// Root namespace for generated host interfaces. Default
+        /// derives from the WIT package name. Only consulted when
+        /// <see cref="HostInterfaceMode"/> is true.
+        /// </summary>
+        public string? HostNamespaceOverride { get; set; }
     }
 
     public enum CSharpRuntime
