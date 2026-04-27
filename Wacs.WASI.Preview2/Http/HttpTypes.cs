@@ -392,6 +392,11 @@ namespace Wacs.WASI.Preview2.Http
     [WasiResource("future-incoming-response")]
     public class FutureIncomingResponse : IDisposable
     {
+        /// <summary>Pollable that fires when the response
+        /// is ready to be retrieved via get(). Default
+        /// returns an always-ready pollable.</summary>
+        public virtual Pollable Subscribe() => new Pollable();
+
         public virtual void Dispose() { }
     }
 
@@ -428,6 +433,11 @@ namespace Wacs.WASI.Preview2.Http
     [WasiResource("future-trailers")]
     public class FutureTrailers : IDisposable
     {
+        /// <summary>Pollable that fires when the trailers
+        /// are ready (or the body has confirmed there are
+        /// none).</summary>
+        public virtual Pollable Subscribe() => new Pollable();
+
         public virtual void Dispose() { }
     }
 
