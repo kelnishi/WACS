@@ -107,7 +107,7 @@ namespace Wacs.WASI.Preview2.Cli
                 (ns, "initial-cwd"),
                 (ctx, retArea) =>
                     MemoryWriter.WriteOptionString(
-                        ctx.Memory(), retArea, impl.InitialCwd(), alloc));
+                        ctx.Memory, retArea, impl.InitialCwd(), alloc));
         }
 
         // wasi:cli/exit@0.2.3
@@ -221,22 +221,25 @@ namespace Wacs.WASI.Preview2.Cli
         // list<string> retArea encoder. retArea = 8 bytes:
         // (list-ptr i32, list-len i32). Each element occupies 8
         // bytes: (str-ptr i32, str-len i32). Empty list → ptr=0.
+        // Re-fetches memory after each alloc since cabi_realloc
+        // can grow the underlying byte[].
         private static void WriteStringList(ExecContext ctx,
             Realloc alloc, int retArea, string[] values)
         {
-            var mem = ctx.Memory();
             int count = values.Length;
             int arrayPtr = count == 0 ? 0
                 : alloc.Allocate(4, count * 8);
             for (int i = 0; i < count; i++)
             {
                 var (ptr, len) = MemoryWriter.WriteUtf8StringAllocated(
-                    mem, values[i], alloc);
+                    ctx.Memory, values[i], alloc);
+                var mem = ctx.Memory();
                 MemoryWriter.WriteI32LE(mem, arrayPtr + i * 8, ptr);
                 MemoryWriter.WriteI32LE(mem, arrayPtr + i * 8 + 4, len);
             }
-            MemoryWriter.WriteI32LE(mem, retArea, arrayPtr);
-            MemoryWriter.WriteI32LE(mem, retArea + 4, count);
+            var memEnd = ctx.Memory();
+            MemoryWriter.WriteI32LE(memEnd, retArea, arrayPtr);
+            MemoryWriter.WriteI32LE(memEnd, retArea + 4, count);
         }
 
         // list<tuple<string, string>> retArea encoder. retArea = 8
@@ -245,23 +248,24 @@ namespace Wacs.WASI.Preview2.Cli
         private static void WriteStringPairList(ExecContext ctx,
             Realloc alloc, int retArea, (string, string)[] pairs)
         {
-            var mem = ctx.Memory();
             int count = pairs.Length;
             int arrayPtr = count == 0 ? 0
                 : alloc.Allocate(4, count * 16);
             for (int i = 0; i < count; i++)
             {
                 var (kPtr, kLen) = MemoryWriter
-                    .WriteUtf8StringAllocated(mem, pairs[i].Item1, alloc);
+                    .WriteUtf8StringAllocated(ctx.Memory, pairs[i].Item1, alloc);
                 var (vPtr, vLen) = MemoryWriter
-                    .WriteUtf8StringAllocated(mem, pairs[i].Item2, alloc);
+                    .WriteUtf8StringAllocated(ctx.Memory, pairs[i].Item2, alloc);
+                var mem = ctx.Memory();
                 MemoryWriter.WriteI32LE(mem, arrayPtr + i * 16, kPtr);
                 MemoryWriter.WriteI32LE(mem, arrayPtr + i * 16 + 4, kLen);
                 MemoryWriter.WriteI32LE(mem, arrayPtr + i * 16 + 8, vPtr);
                 MemoryWriter.WriteI32LE(mem, arrayPtr + i * 16 + 12, vLen);
             }
-            MemoryWriter.WriteI32LE(mem, retArea, arrayPtr);
-            MemoryWriter.WriteI32LE(mem, retArea + 4, count);
+            var memEnd = ctx.Memory();
+            MemoryWriter.WriteI32LE(memEnd, retArea, arrayPtr);
+            MemoryWriter.WriteI32LE(memEnd, retArea + 4, count);
         }
     }
 }
