@@ -36,7 +36,7 @@ namespace Wacs.WASI.Preview2.Io
     /// real implementations subclass + override.</para>
     /// </summary>
     [WasiResource("pollable")]
-    public class Pollable : IDisposable
+    public class Pollable : IPollable, IDisposable
     {
         /// <summary>True iff the underlying condition has
         /// already been triggered. Default: always ready.

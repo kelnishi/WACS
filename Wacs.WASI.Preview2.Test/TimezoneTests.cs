@@ -39,6 +39,17 @@ namespace Wacs.WASI.Preview2.Test
             // Just echo a configured offset — tests don't care
             // about the datetime content.
             public int UtcOffset(Datetime when) => _offsetSeconds;
+
+            // Display is part of the WIT spec but not exercised
+            // by the v0 binding tests; a stub satisfies the
+            // contract so the test project compiles.
+            public TimezoneDisplay Display(Datetime when)
+                => new TimezoneDisplay
+                {
+                    UtcOffset = _offsetSeconds,
+                    Name = "UTC",
+                    InDaylightSavingTime = false,
+                };
         }
 
         [Fact]

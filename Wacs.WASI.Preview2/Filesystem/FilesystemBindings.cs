@@ -203,8 +203,8 @@ namespace Wacs.WASI.Preview2.Filesystem
             }
             mem[offset] = 1;
             for (int i = 1; i < 8; i++) mem[offset + i] = 0;
-            MemoryWriter.WriteU64LE(mem, offset + 8, value.Value.Seconds);
-            MemoryWriter.WriteU32LE(mem, offset + 16, value.Value.Nanoseconds);
+            MemoryWriter.WriteU64LE(mem, offset + 8, value.Seconds);
+            MemoryWriter.WriteU32LE(mem, offset + 16, value.Nanoseconds);
             for (int i = 20; i < 24; i++) mem[offset + i] = 0;
         }
 

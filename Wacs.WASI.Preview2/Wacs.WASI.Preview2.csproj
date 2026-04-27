@@ -46,15 +46,24 @@
          emitted for them (the hand-written interfaces still
          own those subsystems' API surface). -->
     <ItemGroup>
-        <!-- Phase B1: wasi:random is migrated. Generator emits
-             host interfaces for it. -->
+        <!-- Phase B1+: migrated subsystems flagged WitForHost=
+             true drive interface emission. Other packages stay
+             visible to the WIT resolver (so cross-package `use`
+             chains resolve) but their hand-written interfaces
+             remain authoritative until migrated.
+             Clocks needs poll+error emitted too — its WIT
+             returns pollable from monotonic-clock.subscribe-*. -->
         <AdditionalFiles Include="wit\deps\random\**\*.wit"
                          WitForHost="true" />
+        <AdditionalFiles Include="wit\deps\clocks\**\*.wit"
+                         WitForHost="true" />
+        <AdditionalFiles Include="wit\deps\io\poll.wit"
+                         WitForHost="true" />
+        <AdditionalFiles Include="wit\deps\io\error.wit"
+                         WitForHost="true" />
 
-        <!-- Other packages are visible to the WIT resolver
-             (so cross-package `use` works) but not generated. -->
         <AdditionalFiles Include="wit\**\*.wit"
-                         Exclude="wit\deps\random\**\*.wit"
+                         Exclude="wit\deps\random\**\*.wit;wit\deps\clocks\**\*.wit;wit\deps\io\poll.wit;wit\deps\io\error.wit"
                          WitForHost="false" />
 
         <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="WitForHost" />
