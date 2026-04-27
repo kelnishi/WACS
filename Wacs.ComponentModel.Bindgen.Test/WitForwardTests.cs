@@ -118,7 +118,7 @@ namespace Wacs.ComponentModel.Bindgen.Test
             Assert.NotEmpty(sources);
             // One C# file per WIT interface; this fixture has one.
             Assert.Single(sources);
-            Assert.Equal("Env.g.cs", sources[0].FileName);
+            Assert.Equal("Wasi_Demo_V0_2_3_Env.g.cs", sources[0].FileName);
         }
 
         [Fact]
@@ -184,9 +184,10 @@ namespace Wacs.ComponentModel.Bindgen.Test
             var sources = WitForward
                 .EmitHostInterfacesFromDirectory(witDir);
             // Random emits 3 interfaces: random, insecure,
-            // insecure-seed.
+            // insecure-seed. Filename includes the
+            // namespace-qualified prefix.
             var randomFile = sources.FirstOrDefault(s =>
-                s.FileName == "Random.g.cs");
+                s.FileName.EndsWith("_Random.g.cs"));
             Assert.NotNull(randomFile);
             // get-random-bytes(len: u64) -> list<u8>
             Assert.Contains("byte[]", randomFile!.Content);
