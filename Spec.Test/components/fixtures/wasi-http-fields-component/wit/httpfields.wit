@@ -25,4 +25,7 @@ world demo {
     export ask-get-len: func(handle: u32) -> u32;
     /// Returns first byte of the first value's data.
     export ask-get-first-byte: func(handle: u32) -> u32;
+    /// Calls fields.set(handle, "X-Set", ["one", "two"]);
+    /// returns the outer disc byte (0 = Ok).
+    export ask-set: func(handle: u32) -> u32;
 }

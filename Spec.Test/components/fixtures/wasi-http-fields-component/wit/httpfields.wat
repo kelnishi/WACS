@@ -11,6 +11,8 @@
     (func $ent (param i32 i32)))
   (import "wasi:http/types@0.2.3" "[method]fields.get"
     (func $get (param i32 i32 i32 i32)))
+  (import "wasi:http/types@0.2.3" "[method]fields.set"
+    (func $set (param i32 i32 i32 i32 i32 i32)))
   (import "wasi:http/types@0.2.3" "[resource-drop]fields"
     (func $drop (param i32)))
   (memory (export "memory") 1)
@@ -19,6 +21,9 @@
   (data (i32.const 300) "X-New")
   (data (i32.const 400) "value")
   (data (i32.const 500) "X-Foo")
+  (data (i32.const 600) "X-Set")
+  (data (i32.const 700) "one")
+  (data (i32.const 800) "two")
   (global $next (mut i32) (i32.const 1024))
   (func $realloc (param i32 i32 i32 i32) (result i32)
     (local $r i32) (local $align i32)
@@ -88,4 +93,22 @@
     (call $get (local.get 0) (i32.const 500) (i32.const 5) (local.get $r))
     (local.set $arr (i32.load (local.get $r)))
     (local.set $bytesPtr (i32.load (local.get $arr)))
-    (i32.load8_u (local.get $bytesPtr))))
+    (i32.load8_u (local.get $bytesPtr)))
+  (func (export "ask-set") (param i32) (result i32)
+    (local $list i32) (local $r i32)
+    ;; Build list<list<u8>> with 2 elements (each 8 bytes:
+    ;; bytes-ptr + bytes-len). Elem 0 = "one"@700/3, elem
+    ;; 1 = "two"@800/3.
+    (local.set $list (call $realloc (i32.const 0) (i32.const 0) (i32.const 4) (i32.const 16)))
+    (i32.store          (local.get $list) (i32.const 700))
+    (i32.store offset=4 (local.get $list) (i32.const 3))
+    (i32.store offset=8 (local.get $list) (i32.const 800))
+    (i32.store offset=12 (local.get $list) (i32.const 3))
+    ;; result<_, header-error>: 2 bytes
+    (local.set $r (call $realloc (i32.const 0) (i32.const 0) (i32.const 1) (i32.const 2)))
+    ;; set(handle, "X-Set"@600/5, list-ptr, 2, retArea)
+    (call $set (local.get 0)
+               (i32.const 600) (i32.const 5)
+               (local.get $list) (i32.const 2)
+               (local.get $r))
+    (i32.load8_u (local.get $r))))

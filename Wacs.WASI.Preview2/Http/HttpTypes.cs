@@ -125,6 +125,21 @@ namespace Wacs.WASI.Preview2.Http
         public virtual void Append(string name, byte[] value)
             => _entries.Add((name, value));
 
+        /// <summary>Replace all entries matching
+        /// <paramref name="name"/> with the supplied list
+        /// of values. WIT
+        /// <c>set: func(name: field-key,
+        ///              value: list&lt;field-value&gt;)
+        ///   -&gt; result&lt;_, header-error&gt;</c>.</summary>
+        [WasiErrorResult]
+        public virtual void Set(string name, byte[][] value)
+        {
+            _entries.RemoveAll(e => string.Equals(e.Key, name,
+                System.StringComparison.OrdinalIgnoreCase));
+            foreach (var v in value)
+                _entries.Add((name, v));
+        }
+
         /// <summary>Host-side alias for
         /// <see cref="Append(string, byte[])"/> kept for
         /// fixture setup paths that pre-seed the entry list

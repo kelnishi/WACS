@@ -10,6 +10,8 @@ interface types {
     resource fields {
         has: func(name: field-key) -> bool;
         get: func(name: field-key) -> list<field-value>;
+        set: func(name: field-key, value: list<field-value>)
+            -> result<_, header-error>;
         append: func(name: field-key, value: field-value)
             -> result<_, header-error>;
         delete: func(name: field-key) -> result<_, header-error>;
