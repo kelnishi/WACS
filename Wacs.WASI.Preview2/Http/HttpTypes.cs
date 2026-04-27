@@ -619,6 +619,42 @@ namespace Wacs.WASI.Preview2.Http
             => new FutureIncomingResponse();
     }
 
+    /// <summary>Stub for the WIT
+    /// <c>wasi:http/types.error-code</c> variant. v0 only
+    /// surfaces this type as the None side of
+    /// <c>option&lt;error-code&gt;</c> returns — the full 39-
+    /// case variant hierarchy + payload encoder is v1 work.
+    /// Cannot be instantiated.</summary>
+    public abstract class ErrorCode
+    {
+        private protected ErrorCode() { }
+    }
+
+    /// <summary>WIT top-level
+    /// <c>wasi:http/types.http-error-code: func(
+    ///   err: borrow&lt;io-error&gt;) -&gt; option&lt;error-code&gt;</c>.
+    /// Translates an opaque io-error resource handle into an
+    /// HTTP-shaped error-code if applicable. v0 always
+    /// returns None — no WACS-side mapping yet.</summary>
+    public interface IHttpErrorCodeMapper
+    {
+        [WasiOptionalReturn]
+        [WasiMethodName("http-error-code")]
+        ErrorCode? HttpErrorCode(Wacs.WASI.Preview2.Io.Error err);
+    }
+
+    /// <summary>Default <see cref="IHttpErrorCodeMapper"/> impl
+    /// — always returns None. Concrete hosts override to
+    /// surface specific error-code mappings when their stream
+    /// implementation produces a known error class.</summary>
+    public sealed class HttpErrorCodeMapperSource : IHttpErrorCodeMapper
+    {
+        [WasiOptionalReturn]
+        [WasiMethodName("http-error-code")]
+        public ErrorCode? HttpErrorCode(Wacs.WASI.Preview2.Io.Error err)
+            => null;
+    }
+
     /// <summary>WIT
     /// <c>wasi:http/types.future-trailers</c>.</summary>
     [WasiResource("future-trailers")]

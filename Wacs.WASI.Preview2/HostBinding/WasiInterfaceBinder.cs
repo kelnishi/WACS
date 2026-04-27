@@ -139,9 +139,67 @@ namespace Wacs.WASI.Preview2.HostBinding
                         runtime, namespaceName, impl, m, resources);
                     continue;
                 }
+                // [WasiOptionalReturn] returning the
+                // Wacs.WASI.Preview2.Http.ErrorCode stub class
+                // with a single borrow<resource> param. v0
+                // always-None — used by wasi:http/types
+                // .http-error-code.
+                if (m.GetCustomAttribute<
+                        WasiOptionalReturnAttribute>() != null
+                    && m.ReturnType ==
+                        typeof(Wacs.WASI.Preview2.Http.ErrorCode)
+                    && m.GetParameters().Length == 1
+                    && m.GetParameters()[0].ParameterType
+                        .GetCustomAttribute<
+                            WasiResourceAttribute>() != null)
+                {
+                    BindHttpErrorCodeMethod(runtime, namespaceName,
+                        impl, m, resources);
+                    continue;
+                }
                 // Other aggregate shapes (list<tuple<string,string>>,
                 // resources) are follow-ups — silently skipped here.
             }
+        }
+
+        /// <summary>Bind <c>wasi:http/types.http-error-code</c>
+        /// — top-level function returning option<error-code>.
+        /// v0 always-None semantics: writes 0 to the outer
+        /// option disc byte at the start of the retArea and
+        /// leaves the rest zeroed (the guest's cabi_realloc'd
+        /// buffer arrives zeroed, so the error-code payload
+        /// area is naturally zero). The host method's return
+        /// value is invoked but not encoded — actual error-
+        /// code payload encoding is v1 work.</summary>
+        private static void BindHttpErrorCodeMethod(
+            WasmRuntime runtime, string namespaceName,
+            object impl, MethodInfo m, ResourceContext resources)
+        {
+            var importName = m.GetCustomAttribute<
+                WasiMethodNameAttribute>()?.WitName
+                ?? ToKebabCase(m.Name);
+            var paramType = m.GetParameters()[0].ParameterType;
+            var paramTable = resources.TableFor(paramType);
+
+            void Body(ExecContext ctx, int handle, int retAreaPtr)
+            {
+                var arg = paramTable.Get(handle);
+                var ret = m.Invoke(impl, new object?[] { arg });
+                var memory = ctx.DefaultMemory.Data;
+                if (ret == null)
+                {
+                    memory[retAreaPtr] = 0;   // None
+                    return;
+                }
+                throw new InvalidOperationException(
+                    "[WasiOptionalReturn] http-error-code "
+                    + "returned a non-null ErrorCode — v0 "
+                    + "always-None; the full error-code "
+                    + "variant payload encoder is v1 work.");
+            }
+
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (namespaceName, importName), Body);
         }
 
         private static bool IsStringReturnPrimitiveParams(MethodInfo m)

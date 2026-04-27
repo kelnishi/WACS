@@ -1380,6 +1380,38 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [Fact]
+        public void HttpErrorCode_top_level_returns_option_none_disc()
+        {
+            // wasi:http/types.http-error-code maps an io-error
+            // borrow → option<error-code>. v0 always returns
+            // None — host method returns null, binder writes
+            // disc=0 to the retArea.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-error-code-component",
+                "httperrcode.component.wasm"));
+            var resources = new ResourceContext();
+            var ioError = new Wacs.WASI.Preview2.Io.Error(
+                "stub: not a real error");
+            int hErr = resources.TableFor(typeof(
+                Wacs.WASI.Preview2.Io.Error))
+                .Allocate(ioError);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiInstance(
+                    "wasi:http/types@0.2.3",
+                    new HttpErrorCodeMapperSource(),
+                    resources);
+                runtime.BindWasiResource<
+                    Wacs.WASI.Preview2.Io.Error>(
+                    "wasi:io/error@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-http-error-code", (uint)hErr)!);
+        }
+
+        [Fact]
         public void Http_resource_markers_are_allocatable()
         {
             // Smoke test: every wasi:http resource type can
