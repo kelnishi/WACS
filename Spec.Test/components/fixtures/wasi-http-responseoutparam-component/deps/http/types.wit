@@ -1,0 +1,10 @@
+package wasi:http@0.2.3;
+interface types {
+    variant error-code { internal-error }
+    resource outgoing-response;
+    resource response-outparam {
+        set: static func(param: own<response-outparam>,
+                         response: result<own<outgoing-response>,
+                                          error-code>);
+    }
+}

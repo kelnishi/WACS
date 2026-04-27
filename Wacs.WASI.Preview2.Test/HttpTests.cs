@@ -791,6 +791,80 @@ namespace Wacs.WASI.Preview2.Test
                     .Get((int)hTrailers));
         }
 
+        private sealed class CapturingResponseOutparam : ResponseOutparam
+        {
+            public bool SetCalled;
+            public OutgoingResponse? CapturedResponse;
+
+            public override void Set(OutgoingResponse? response)
+            {
+                SetCalled = true;
+                CapturedResponse = response;
+            }
+        }
+
+        [Fact]
+        public void ResponseOutparam_set_with_ok_resolves_response()
+        {
+            // Fixture: ask-set-ok(param, response) calls
+            // [static]response-outparam.set(param,
+            // Ok(response)) — wire 3 slots: param handle,
+            // outer disc=0, payload handle. Stub records the
+            // resolved response.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-responseoutparam-component",
+                "httpresponseoutparam.component.wasm"));
+            var resources = new ResourceContext();
+            var outparam = new CapturingResponseOutparam();
+            var response = new OutgoingResponse();
+            int hParam = resources.TableFor(typeof(ResponseOutparam))
+                .Allocate(outparam);
+            int hResponse = resources.TableFor(typeof(OutgoingResponse))
+                .Allocate(response);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<ResponseOutparam>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<OutgoingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-ok", (uint)hParam, (uint)hResponse)!);
+            Assert.True(outparam.SetCalled);
+            Assert.Same(response, outparam.CapturedResponse);
+        }
+
+        [Fact]
+        public void ResponseOutparam_set_with_err_passes_null()
+        {
+            // Same fixture, ask-set-err(param) calls
+            // set(param, Err(internal-error)) — outer disc=1,
+            // payload slot ignored. Stub gets null since v0
+            // doesn't surface the error payload.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-responseoutparam-component",
+                "httpresponseoutparam.component.wasm"));
+            var resources = new ResourceContext();
+            var outparam = new CapturingResponseOutparam();
+            int hParam = resources.TableFor(typeof(ResponseOutparam))
+                .Allocate(outparam);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<ResponseOutparam>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<OutgoingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-err", (uint)hParam)!);
+            Assert.True(outparam.SetCalled);
+            Assert.Null(outparam.CapturedResponse);
+        }
+
         [Fact]
         public void Http_resource_markers_are_allocatable()
         {
