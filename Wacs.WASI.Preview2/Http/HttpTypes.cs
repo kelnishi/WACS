@@ -335,6 +335,9 @@ namespace Wacs.WASI.Preview2.Http
     {
         protected HttpMethod _method = new HttpMethodGet();
         protected HttpScheme? _scheme;
+        protected Fields _headers = new Fields();
+        protected string? _pathWithQuery;
+        protected string? _authority;
 
         /// <summary>HTTP request method on the server side.
         /// WIT <c>method() -&gt; method</c>.</summary>
@@ -345,14 +348,14 @@ namespace Wacs.WASI.Preview2.Http
         [WasiOptionalReturn]
         public virtual HttpScheme? Scheme() => _scheme;
 
-        public virtual Fields Headers() => new Fields();
+        public virtual Fields Headers() => _headers;
 
         [WasiOptionalReturn]
         [WasiMethodName("path-with-query")]
-        public virtual string? PathWithQuery() => null;
+        public virtual string? PathWithQuery() => _pathWithQuery;
 
         [WasiOptionalReturn]
-        public virtual string? Authority() => null;
+        public virtual string? Authority() => _authority;
 
         /// <summary>Take ownership of the request body for
         /// reading.</summary>
@@ -371,16 +374,18 @@ namespace Wacs.WASI.Preview2.Http
     [WasiResource("incoming-response")]
     public class IncomingResponse : IDisposable
     {
+        protected ushort _status = 200;
+        protected Fields _headers = new Fields();
+
         /// <summary>HTTP status code (200, 404, etc.).
         /// WIT <c>status() -&gt; status-code</c> where
         /// status-code is u16.</summary>
-        public virtual ushort Status() => 200;
+        public virtual ushort Status() => _status;
 
         /// <summary>Headers attached to this response. The
         /// returned <see cref="Fields"/> handle is owned by
-        /// the guest per WIT semantics. Default returns an
-        /// empty Fields.</summary>
-        public virtual Fields Headers() => new Fields();
+        /// the guest per WIT semantics.</summary>
+        public virtual Fields Headers() => _headers;
 
         /// <summary>Take ownership of the response body for
         /// reading.</summary>
