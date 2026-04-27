@@ -30,7 +30,7 @@ namespace Wacs.WASI.Preview2.Io
     /// taxonomy a host concern.</para>
     /// </summary>
     [WasiResource("error")]
-    public class Error : IDisposable
+    public class Error : IError, IDisposable
     {
         /// <summary>The debug string the guest sees. Set at
         /// construction; subclasses can override

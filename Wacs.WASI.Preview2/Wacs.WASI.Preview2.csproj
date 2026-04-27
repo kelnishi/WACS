@@ -57,13 +57,11 @@
                          WitForHost="true" />
         <AdditionalFiles Include="wit\deps\clocks\**\*.wit"
                          WitForHost="true" />
-        <AdditionalFiles Include="wit\deps\io\poll.wit"
-                         WitForHost="true" />
-        <AdditionalFiles Include="wit\deps\io\error.wit"
+        <AdditionalFiles Include="wit\deps\io\**\*.wit"
                          WitForHost="true" />
 
         <AdditionalFiles Include="wit\**\*.wit"
-                         Exclude="wit\deps\random\**\*.wit;wit\deps\clocks\**\*.wit;wit\deps\io\poll.wit;wit\deps\io\error.wit"
+                         Exclude="wit\deps\random\**\*.wit;wit\deps\clocks\**\*.wit;wit\deps\io\**\*.wit"
                          WitForHost="false" />
 
         <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="WitForHost" />
