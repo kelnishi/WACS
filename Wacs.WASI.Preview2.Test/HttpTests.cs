@@ -1689,6 +1689,98 @@ namespace Wacs.WASI.Preview2.Test
                 .GetString(bytesOut));
         }
 
+        // FutureTrailers stub that throws to surface Err.
+        private sealed class ErringTrailers : FutureTrailers
+        {
+            public ErrorCode Error =
+                new ErrorCodeConnectionTimeout();
+            public override (bool ready, Fields? trailers) Get()
+                => throw new WasiErrorCodeException(Error);
+        }
+
+        [Fact]
+        public void FutureTrailers_get_inner_err_path()
+        {
+            // Throwing WasiErrorCodeException routes the
+            // future-trailers.get retArea to the inner Err
+            // shape: outer=1, result=1 (Err), encoder writes
+            // error-code at retArea+16 (32 bytes).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-future-trailers-get-component",
+                "futuretrailers.component.wasm"));
+            var resources = new ResourceContext();
+            var ft = new ErringTrailers {
+                Error = new ErrorCodeConnectionTimeout() };
+            int hFt = resources.TableFor(typeof(FutureTrailers))
+                .Allocate(ft);
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<FutureTrailers>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<Fields>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            // outer=1 (Some), result=1 (Err) at fixture's
+            // ask-result-disc which reads retArea+8
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-outer-disc", (uint)hFt)!);
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-result-disc", (uint)hFt)!);
+            // ask-inner-disc reads retArea+16 — for the Err
+            // path that's the error-code variant disc, which
+            // is 8 (connection-timeout).
+            Assert.Equal(8u, (uint)ci.Invoke(
+                "ask-inner-disc", (uint)hFt)!);
+        }
+
+        // FutureIncomingResponse stub that throws Err.
+        private sealed class ErringFutureResponse : FutureIncomingResponse
+        {
+            public ErrorCode Error =
+                new ErrorCodeHttpResponseTimeout();
+            public override (bool ready, IncomingResponse? response) Get()
+                => throw new WasiErrorCodeException(Error);
+        }
+
+        [Fact]
+        public void FutureIncomingResponse_get_inner_err_path()
+        {
+            // Throwing surfaces the inner Err side: outer=1,
+            // outer-result=0 (Ok of outer), inner-result=1
+            // (Err of inner), encoder writes error-code at
+            // retArea+24.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-future-response-get-component",
+                "futureresp.component.wasm"));
+            var resources = new ResourceContext();
+            var fr = new ErringFutureResponse {
+                Error = new ErrorCodeHttpResponseTimeout() };
+            int hFr = resources.TableFor(typeof(FutureIncomingResponse))
+                .Allocate(fr);
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<FutureIncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<IncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-outer-disc", (uint)hFr)!);
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-outer-result-disc", (uint)hFr)!);
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-inner-result-disc", (uint)hFr)!);
+            // ask-response-handle reads retArea+24 — for Err
+            // that's the error-code variant disc byte. We
+            // can't extract just 1 byte through this i32-load
+            // export, so verify only the low byte.
+            uint raw = (uint)ci.Invoke(
+                "ask-response-handle", (uint)hFr)!;
+            Assert.Equal(33u, raw & 0xFFu);  // disc 33 = HTTP-response-timeout
+        }
+
         [Fact]
         public void Http_resource_markers_are_allocatable()
         {
