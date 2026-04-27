@@ -5,8 +5,10 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using System;
 using System.IO;
 using Wacs.ComponentModel.Runtime;
+using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Xunit;
 
@@ -14,8 +16,8 @@ namespace Wacs.WASI.Preview2.Test
 {
     /// <summary>
     /// End-to-end resource handle tests — covers
-    /// own&lt;T&gt; allocation, [method]T binding,
-    /// [resource-drop]T disposal.
+    /// own&lt;T&gt; allocation, [method]T binding, and
+    /// [resource-drop]T disposal via an explicit IBindable.
     /// </summary>
     public class ResourceTests
     {
@@ -29,7 +31,7 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [WasiResource("thing")]
-        public sealed class Thing : System.IDisposable
+        public sealed class Thing : IDisposable
         {
             public uint Value { get; }
             public bool Disposed { get; private set; }
@@ -38,9 +40,27 @@ namespace Wacs.WASI.Preview2.Test
             public void Dispose() { Disposed = true; }
         }
 
-        public sealed class StubThings
+        // Explicit IBindable for the local:res/things test
+        // surface — mirrors the new per-subsystem pattern.
+        private sealed class ThingsBindings : IBindable
         {
-            public Thing Make() => new Thing(42u);
+            private const string Ns = "local:res/things";
+            private readonly ResourceContext _resources;
+            public ThingsBindings(ResourceContext resources)
+                => _resources = resources;
+
+            public void BindToRuntime(WasmRuntime runtime)
+            {
+                var things = _resources.Table<Thing>();
+                runtime.BindHostFunction<Func<ExecContext, int>>(
+                    (Ns, "make"), _ => things.Allocate(new Thing(42u)));
+                runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                    (Ns, "[method]thing.get-value"),
+                    (_, h) => (int)((Thing)things.Get(h)).GetValue());
+                runtime.BindHostFunction<Action<ExecContext, int>>(
+                    (Ns, "[resource-drop]thing"),
+                    (_, h) => things.Drop(h));
+            }
         }
 
         [Fact]
@@ -55,12 +75,8 @@ namespace Wacs.WASI.Preview2.Test
             var bytes = File.ReadAllBytes(FindFixturePath(
                 "wasi-resource-component", "res.component.wasm"));
             var resources = new ResourceContext();
-            var things = new StubThings();
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiInstance("local:res/things", things, resources);
-                runtime.BindWasiResource<Thing>("local:res/things", resources);
-            });
+                new ThingsBindings(resources).BindToRuntime(runtime));
 
             var v = (uint)ci.Invoke("trip")!;
             Assert.Equal(42u, v);

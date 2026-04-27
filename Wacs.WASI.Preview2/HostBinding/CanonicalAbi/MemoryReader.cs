@@ -22,7 +22,7 @@ namespace Wacs.WASI.Preview2.HostBinding.CanonicalAbi
     /// memory — that's <c>cabi_realloc</c>'s job (see
     /// <see cref="Realloc"/>).</para>
     /// </summary>
-    internal static class MemoryReader
+    public static class MemoryReader
     {
         /// <summary>UTF-8 decode a string from
         /// <paramref name="ptr"/> for <paramref name="len"/>

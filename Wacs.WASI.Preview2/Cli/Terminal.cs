@@ -40,19 +40,16 @@ namespace Wacs.WASI.Preview2.Cli
     /// Returns null when stdin isn't a terminal.</summary>
     public interface ITerminalStdin
     {
-        [WasiOptionalReturn]
         TerminalInput? GetTerminalStdin();
     }
 
     public interface ITerminalStdout
     {
-        [WasiOptionalReturn]
         TerminalOutput? GetTerminalStdout();
     }
 
     public interface ITerminalStderr
     {
-        [WasiOptionalReturn]
         TerminalOutput? GetTerminalStderr();
     }
 
@@ -62,21 +59,18 @@ namespace Wacs.WASI.Preview2.Cli
     /// (option None) when redirected.</summary>
     public sealed class TerminalStdin : ITerminalStdin
     {
-        [WasiOptionalReturn]
         public TerminalInput? GetTerminalStdin() =>
             Console.IsInputRedirected ? null : new TerminalInput();
     }
 
     public sealed class TerminalStdout : ITerminalStdout
     {
-        [WasiOptionalReturn]
         public TerminalOutput? GetTerminalStdout() =>
             Console.IsOutputRedirected ? null : new TerminalOutput();
     }
 
     public sealed class TerminalStderr : ITerminalStderr
     {
-        [WasiOptionalReturn]
         public TerminalOutput? GetTerminalStderr() =>
             Console.IsErrorRedirected ? null : new TerminalOutput();
     }

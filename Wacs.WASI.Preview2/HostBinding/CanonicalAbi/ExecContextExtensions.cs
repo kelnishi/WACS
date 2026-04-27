@@ -19,7 +19,7 @@ namespace Wacs.WASI.Preview2.HostBinding.CanonicalAbi
     /// ptr, len)</c> — keeps the per-syscall code dense and
     /// readable.
     /// </summary>
-    internal static class ExecContextExtensions
+    public static class ExecContextExtensions
     {
         /// <summary>The guest's default linear memory backing
         /// array. Most canonical-ABI helpers take it directly;

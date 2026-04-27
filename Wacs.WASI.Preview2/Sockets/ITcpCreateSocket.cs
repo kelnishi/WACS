@@ -5,8 +5,6 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-using Wacs.WASI.Preview2.HostBinding;
-
 namespace Wacs.WASI.Preview2.Sockets
 {
     /// <summary>
@@ -21,13 +19,11 @@ namespace Wacs.WASI.Preview2.Sockets
     /// </summary>
     public interface ITcpCreateSocket
     {
-        [WasiErrorResult]
         TcpSocket CreateTcpSocket(IpAddressFamily addressFamily);
     }
 
     public interface IUdpCreateSocket
     {
-        [WasiErrorResult]
         UdpSocket CreateUdpSocket(IpAddressFamily addressFamily);
     }
 
@@ -37,14 +33,12 @@ namespace Wacs.WASI.Preview2.Sockets
     /// in a follow-up.</summary>
     public sealed class TcpCreateSocket : ITcpCreateSocket
     {
-        [WasiErrorResult]
         public TcpSocket CreateTcpSocket(IpAddressFamily addressFamily) =>
             new TcpSocket(addressFamily);
     }
 
     public sealed class UdpCreateSocket : IUdpCreateSocket
     {
-        [WasiErrorResult]
         public UdpSocket CreateUdpSocket(IpAddressFamily addressFamily) =>
             new UdpSocket(addressFamily);
     }

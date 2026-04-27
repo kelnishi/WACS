@@ -5,8 +5,6 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-using Wacs.WASI.Preview2.HostBinding;
-
 namespace Wacs.WASI.Preview2.Cli
 {
     /// <summary>
@@ -38,7 +36,6 @@ namespace Wacs.WASI.Preview2.Cli
         /// <summary>Initial working directory, if any.
         /// <c>None</c> if no cwd is exposed (sandbox/embedded
         /// scenarios).</summary>
-        [WasiOptionalReturn]
         string? InitialCwd();
     }
 }

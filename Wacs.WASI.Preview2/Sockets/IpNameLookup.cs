@@ -34,8 +34,6 @@ namespace Wacs.WASI.Preview2.Sockets
         /// <summary>Pull the next resolved address, or null
         /// when the resolution is exhausted. Default returns
         /// null (empty stream).</summary>
-        [WasiErrorResult]
-        [WasiMethodName("resolve-next-address")]
         public virtual IpAddressEnumerationItem? ResolveNextAddress()
             => null;
 
@@ -117,8 +115,6 @@ namespace Wacs.WASI.Preview2.Sockets
     /// etc.).</summary>
     public sealed class IpNameLookup : IIpNameLookup
     {
-        [WasiErrorResult]
-        [WasiMethodName("resolve-addresses")]
         public ResolveAddressStream ResolveAddresses(Network network,
             string name) => new ResolveAddressStream();
     }

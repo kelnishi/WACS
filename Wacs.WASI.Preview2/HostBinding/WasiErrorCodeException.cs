@@ -21,7 +21,7 @@ namespace Wacs.WASI.Preview2.HostBinding
     /// outer disc=1 + variant payload into the retArea.
     ///
     /// <para>Default error-result paths (without
-    /// [WasiSpecErrorCode]) treat throws as host bugs and
+    /// ) treat throws as host bugs and
     /// let them propagate; only methods opted in to spec-
     /// layout encoding catch this exception type.</para>
     /// </summary>

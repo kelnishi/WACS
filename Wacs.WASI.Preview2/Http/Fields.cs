@@ -36,7 +36,6 @@ namespace Wacs.WASI.Preview2.Http
         /// factory under that import name and table-allocates
         /// the returned instance, handing back the i32 handle.
         /// </summary>
-        [WasiConstructor]
         public static Fields New() => new Fields();
 
         /// <summary>WIT <c>from-list: static func(
@@ -51,9 +50,6 @@ namespace Wacs.WASI.Preview2.Http
         /// succeeds — header-error Err side not surfaced
         /// (would carry invalid-syntax(tuple<string,
         /// list<u8>>) / forbidden / immutable).</summary>
-        [WasiStaticMethod]
-        [WasiMethodName("from-list")]
-        [WasiErrorResult]
         public static Fields FromList(
             System.ValueTuple<string, byte[]>[] entries)
         {
@@ -93,7 +89,6 @@ namespace Wacs.WASI.Preview2.Http
         /// <summary>Append a (key, value) entry. WIT
         /// <c>append(field-key, field-value)
         ///   -&gt; result&lt;_, header-error&gt;</c>.</summary>
-        [WasiErrorResult]
         public virtual void Append(string name, byte[] value)
             => _entries.Add((name, value));
 
@@ -103,7 +98,6 @@ namespace Wacs.WASI.Preview2.Http
         /// <c>set: func(name: field-key,
         ///              value: list&lt;field-value&gt;)
         ///   -&gt; result&lt;_, header-error&gt;</c>.</summary>
-        [WasiErrorResult]
         public virtual void Set(string name, byte[][] value)
         {
             _entries.RemoveAll(e => string.Equals(e.Key, name,
@@ -121,7 +115,6 @@ namespace Wacs.WASI.Preview2.Http
 
         /// <summary>Remove every entry matching
         /// <paramref name="name"/> (case-insensitive).</summary>
-        [WasiErrorResult]
         public virtual void Delete(string name)
             => _entries.RemoveAll(e => string.Equals(e.Key, name,
                 System.StringComparison.OrdinalIgnoreCase));
@@ -152,7 +145,6 @@ namespace Wacs.WASI.Preview2.Http
         /// byte[]>[]; the binder writes the canon-lower form
         /// (list-ptr, list-len) at retArea + element pairs
         /// at the allocated array.</summary>
-        [WasiMethodName("entries")]
         public virtual System.ValueTuple<string, byte[]>[] EntriesArray()
         {
             var arr = new System.ValueTuple<string, byte[]>[

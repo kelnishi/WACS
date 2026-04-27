@@ -541,10 +541,9 @@ namespace Wacs.WASI.Preview2.Test
             public OutgoingRequest? CapturedRequest;
             public RequestOptions? CapturedOptions;
 
-            [WasiErrorResult]
             public FutureIncomingResponse Handle(
                 OutgoingRequest request,
-                [WasiOptionalParam] RequestOptions? options)
+                RequestOptions? options)
             {
                 CapturedRequest = request;
                 CapturedOptions = options;
@@ -796,7 +795,7 @@ namespace Wacs.WASI.Preview2.Test
             // Fixture: ask-new() calls [constructor]fields()
             // and returns the new handle. The auto-binder
             // walks Fields' static methods, finds
-            // [WasiConstructor] on Fields.New, and registers
+            // on Fields.New, and registers
             // the import. Each call allocates a new instance
             // and table-allocates its handle.
             var bytes = File.ReadAllBytes(FindFixturePath(
@@ -1278,7 +1277,7 @@ namespace Wacs.WASI.Preview2.Test
         // the http-error-code retArea path with a real wasm
         // call. Reflection-walked attributes don't transfer
         // from the interface to the implementing method, so
-        // the [WasiOptionalReturn] / [WasiMethodName] markers
+        // the / markers
         // are repeated on the impl — same pattern as
         // HttpErrorCodeMapperSource.
         private sealed class StagedHttpErrorCodeMapper
@@ -1286,8 +1285,6 @@ namespace Wacs.WASI.Preview2.Test
         {
             public ErrorCode? Staged;
 
-            [WasiOptionalReturn]
-            [WasiMethodName("http-error-code")]
             public ErrorCode? HttpErrorCode(
                 Wacs.WASI.Preview2.Io.Error err) => Staged;
         }
@@ -1429,7 +1426,7 @@ namespace Wacs.WASI.Preview2.Test
                 "ask-http-error-code", (uint)hErr)!);
         }
 
-        // Handler that uses [WasiSpecErrorCode] — opts in to
+        // Handler that uses — opts in to
         // the full WASI-HTTP error-code variant retArea
         // layout (align 8, 40 bytes). Throws
         // WasiErrorCodeException to drive the Err side
@@ -1440,11 +1437,9 @@ namespace Wacs.WASI.Preview2.Test
             public FutureIncomingResponse Response =
                 new FutureIncomingResponse();
 
-            [WasiErrorResult]
-            [WasiSpecErrorCode]
             public FutureIncomingResponse Handle(
                 OutgoingRequest request,
-                [WasiOptionalParam] RequestOptions? options)
+                RequestOptions? options)
             {
                 if (StagedError != null)
                     throw new WasiErrorCodeException(StagedError);

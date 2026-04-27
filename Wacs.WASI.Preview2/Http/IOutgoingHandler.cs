@@ -5,8 +5,6 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-using Wacs.WASI.Preview2.HostBinding;
-
 namespace Wacs.WASI.Preview2.Http
 {
     /// <summary>Host-side surface for
@@ -31,9 +29,8 @@ namespace Wacs.WASI.Preview2.Http
     /// <c>System.Net.Http.HttpClient</c> or similar.</summary>
     public sealed class OutgoingHandlerSource : IOutgoingHandler
     {
-        [WasiErrorResult]
         public FutureIncomingResponse Handle(OutgoingRequest request,
-            [WasiOptionalParam] RequestOptions? options)
+            RequestOptions? options)
             => new FutureIncomingResponse();
     }
 }

@@ -22,7 +22,7 @@ namespace Wacs.WASI.Preview2.HostBinding.CanonicalAbi
     /// <see cref="Allocate"/> call. Throws if the component
     /// doesn't export <c>cabi_realloc</c>.</para>
     /// </summary>
-    internal sealed class Realloc
+    public sealed class Realloc
     {
         private readonly WasmRuntime _runtime;
         private Wacs.Core.Runtime.Delegates.GenericFuncs? _cabiRealloc;

@@ -20,7 +20,7 @@ namespace Wacs.WASI.Preview2.HostBinding.CanonicalAbi
     /// allocate guest memory take an <see cref="Realloc"/> for
     /// that purpose. Bare primitive writers don't allocate.</para>
     /// </summary>
-    internal static class MemoryWriter
+    public static class MemoryWriter
     {
         /// <summary>Write an i32 in little-endian at
         /// <paramref name="ptr"/>.</summary>

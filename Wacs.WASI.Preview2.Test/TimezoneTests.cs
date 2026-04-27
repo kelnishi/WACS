@@ -54,11 +54,10 @@ namespace Wacs.WASI.Preview2.Test
             var bytes = File.ReadAllBytes(FindFixturePath(
                 "wasi-timezone-component", "tz.component.wasm"));
             var stub = new StubTimezone(offsetSeconds: -28800);   // PST
+            var resources = new ResourceContext();
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiInstance(
-                    "wasi:clocks/timezone@0.2.3", stub);
-            });
+                new ClockBindings(resources, timezone: stub)
+                    .BindToRuntime(runtime));
 
             var got = (int)ci.Invoke("ask-offset",
                 1700000000UL, 0u)!;

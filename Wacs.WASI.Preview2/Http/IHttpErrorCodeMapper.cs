@@ -5,8 +5,6 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-using Wacs.WASI.Preview2.HostBinding;
-
 namespace Wacs.WASI.Preview2.Http
 {
     /// <summary>WIT top-level
@@ -17,8 +15,6 @@ namespace Wacs.WASI.Preview2.Http
     /// returns None — no WACS-side mapping yet.</summary>
     public interface IHttpErrorCodeMapper
     {
-        [WasiOptionalReturn]
-        [WasiMethodName("http-error-code")]
         ErrorCode? HttpErrorCode(Wacs.WASI.Preview2.Io.Error err);
     }
 
@@ -28,8 +24,6 @@ namespace Wacs.WASI.Preview2.Http
     /// implementation produces a known error class.</summary>
     public sealed class HttpErrorCodeMapperSource : IHttpErrorCodeMapper
     {
-        [WasiOptionalReturn]
-        [WasiMethodName("http-error-code")]
         public ErrorCode? HttpErrorCode(Wacs.WASI.Preview2.Io.Error err)
             => null;
     }

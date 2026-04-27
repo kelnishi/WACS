@@ -43,40 +43,31 @@ namespace Wacs.WASI.Preview2.Io
         /// now without blocking. Default: large constant —
         /// most non-network sinks are happy to take any
         /// reasonable buffer.</summary>
-        [WasiStreamResult]
         public virtual ulong CheckWrite() => 65_536UL;
 
         /// <summary>Write <paramref name="contents"/> to the
         /// underlying sink. Default: discard.</summary>
-        [WasiStreamResult]
         public virtual void Write(byte[] contents) { }
 
         /// <summary>Block until <paramref name="contents"/> is
         /// fully written + flushed. Default: same as
         /// <see cref="Write"/> for the no-op impl.</summary>
-        [WasiStreamResult]
         public virtual void BlockingWriteAndFlush(byte[] contents) { }
 
         /// <summary>Trigger flush of any buffered bytes.
         /// Default: no-op.</summary>
-        [WasiStreamResult]
         public virtual void Flush() { }
 
         /// <summary>Block until all buffered bytes are flushed.
         /// Default: no-op.</summary>
-        [WasiStreamResult]
         public virtual void BlockingFlush() { }
 
         /// <summary>Write <paramref name="len"/> zero bytes to
         /// the sink. Default: discard.</summary>
-        [WasiStreamResult]
-        [WasiMethodName("write-zeroes")]
         public virtual void WriteZeroes(ulong len) { }
 
         /// <summary>Block until <paramref name="len"/> zero
         /// bytes are written and flushed.</summary>
-        [WasiStreamResult]
-        [WasiMethodName("blocking-write-zeroes-and-flush")]
         public virtual void BlockingWriteZeroesAndFlush(ulong len) { }
 
         /// <summary>Move up to <paramref name="len"/> bytes from
@@ -86,7 +77,6 @@ namespace Wacs.WASI.Preview2.Io
         /// Default impl reads from <paramref name="src"/> and
         /// writes to <c>this</c>, returning the count actually
         /// moved.</summary>
-        [WasiStreamResult]
         public virtual ulong Splice(InputStream src, ulong len)
         {
             var bytes = src.Read(len);
@@ -96,8 +86,6 @@ namespace Wacs.WASI.Preview2.Io
 
         /// <summary>Like <see cref="Splice"/> but blocks until
         /// at least one byte moves.</summary>
-        [WasiStreamResult]
-        [WasiMethodName("blocking-splice")]
         public virtual ulong BlockingSplice(InputStream src, ulong len)
         {
             var bytes = src.BlockingRead(len);

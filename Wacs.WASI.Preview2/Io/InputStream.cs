@@ -35,20 +35,16 @@ namespace Wacs.WASI.Preview2.Io
         /// <summary>Read up to <paramref name="len"/> bytes
         /// from the stream. Empty array signals EOF (or no
         /// data ready in the non-blocking variant).</summary>
-        [WasiStreamResult]
         public virtual byte[] Read(ulong len) => Array.Empty<byte>();
 
         /// <summary>Block until at least one byte is available,
         /// then read up to <paramref name="len"/>.</summary>
-        [WasiStreamResult]
         public virtual byte[] BlockingRead(ulong len) => Array.Empty<byte>();
 
         /// <summary>Discard up to <paramref name="len"/> bytes
         /// without copying. Returns count actually skipped.</summary>
-        [WasiStreamResult]
         public virtual ulong Skip(ulong len) => 0UL;
 
-        [WasiStreamResult]
         public virtual ulong BlockingSkip(ulong len) => 0UL;
 
         public virtual Pollable Subscribe() => new Pollable();

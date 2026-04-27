@@ -29,21 +29,16 @@ namespace Wacs.WASI.Preview2.Http
 
         /// <summary>HTTP scheme. WIT <c>scheme: func()
         ///   -&gt; option&lt;scheme&gt;</c>.</summary>
-        [WasiOptionalReturn]
         public virtual HttpScheme? Scheme() => _scheme;
 
         public virtual Fields Headers() => _headers;
 
-        [WasiOptionalReturn]
-        [WasiMethodName("path-with-query")]
         public virtual string? PathWithQuery() => _pathWithQuery;
 
-        [WasiOptionalReturn]
         public virtual string? Authority() => _authority;
 
         /// <summary>Take ownership of the request body for
         /// reading.</summary>
-        [WasiErrorResult]
         public virtual IncomingBody Consume()
             => _body ??= new IncomingBody();
 
