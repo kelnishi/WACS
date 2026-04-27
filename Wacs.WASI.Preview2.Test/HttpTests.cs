@@ -569,9 +569,8 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiInstance(
-                    "wasi:http/outgoing-handler@0.2.3",
-                    handler, resources);
+                new OutgoingHandlerBindings(resources, handler)
+                    .BindToRuntime(runtime);
                 new HttpTypes(resources).BindToRuntime(runtime);
             });
 
@@ -601,9 +600,8 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiInstance(
-                    "wasi:http/outgoing-handler@0.2.3",
-                    handler, resources);
+                new OutgoingHandlerBindings(resources, handler)
+                    .BindToRuntime(runtime);
                 new HttpTypes(resources).BindToRuntime(runtime);
             });
 
@@ -1468,9 +1466,8 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiInstance(
-                    "wasi:http/outgoing-handler@0.2.3",
-                    handler, resources);
+                new OutgoingHandlerBindings(resources, handler,
+                    useSpecErrorCode: true).BindToRuntime(runtime);
                 new HttpTypes(resources).BindToRuntime(runtime);
             });
 
@@ -1503,9 +1500,8 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiInstance(
-                    "wasi:http/outgoing-handler@0.2.3",
-                    handler, resources);
+                new OutgoingHandlerBindings(resources, handler,
+                    useSpecErrorCode: true).BindToRuntime(runtime);
                 new HttpTypes(resources).BindToRuntime(runtime);
             });
 
@@ -1537,9 +1533,8 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiInstance(
-                    "wasi:http/outgoing-handler@0.2.3",
-                    handler, resources);
+                new OutgoingHandlerBindings(resources, handler,
+                    useSpecErrorCode: true).BindToRuntime(runtime);
                 new HttpTypes(resources).BindToRuntime(runtime);
             });
 
