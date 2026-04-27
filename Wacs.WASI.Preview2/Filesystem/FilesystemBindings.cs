@@ -130,15 +130,18 @@ namespace Wacs.WASI.Preview2.Filesystem
         // result<(list<u8>, bool), error-code>: 16 bytes.
         // outer disc=0 + 3 pad + (list ptr@+4 + list len@+8 +
         // bool@+12 + 3 tail pad).
-        private static void WriteOkBytesEofTuple(byte[] mem, int retArea,
-            byte[] data, bool eof, Realloc alloc)
+        // Takes a getMemory delegate because alloc.Allocate may
+        // grow the underlying byte[] mid-call.
+        private static void WriteOkBytesEofTuple(Func<byte[]> getMemory,
+            int retArea, byte[] data, bool eof, Realloc alloc)
         {
+            int ptr = data.Length == 0 ? 0
+                : alloc.Allocate(1, data.Length);
+            var mem = getMemory();
             mem[retArea] = 0;
             mem[retArea + 1] = 0;
             mem[retArea + 2] = 0;
             mem[retArea + 3] = 0;
-            int ptr = data.Length == 0 ? 0
-                : alloc.Allocate(1, data.Length);
             if (data.Length > 0)
                 Array.Copy(data, 0, mem, ptr, data.Length);
             MemoryWriter.WriteI32LE(mem, retArea + 4, ptr);
