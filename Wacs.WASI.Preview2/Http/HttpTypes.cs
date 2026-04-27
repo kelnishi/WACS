@@ -104,6 +104,20 @@ namespace Wacs.WASI.Preview2.Http
             return false;
         }
 
+        /// <summary>All values for entries matching
+        /// <paramref name="name"/> (case-insensitive). WIT
+        /// <c>get: func(name: field-key)
+        ///   -&gt; list&lt;field-value&gt;</c>.</summary>
+        public virtual byte[][] Get(string name)
+        {
+            var result = new System.Collections.Generic.List<byte[]>();
+            foreach (var (k, v) in _entries)
+                if (string.Equals(k, name,
+                    System.StringComparison.OrdinalIgnoreCase))
+                    result.Add(v);
+            return result.ToArray();
+        }
+
         /// <summary>Append a (key, value) entry. WIT
         /// <c>append(field-key, field-value)
         ///   -&gt; result&lt;_, header-error&gt;</c>.</summary>

@@ -872,6 +872,16 @@ namespace Wacs.WASI.Preview2.HostBinding
                     table, resourceType, m);
                 return;
             }
+            // list<list<u8>> return — byte[][]. Used by
+            // fields.get() in wasi:http. Each element is
+            // 8 bytes (bytes-ptr, bytes-len) at align 4.
+            if (m.ReturnType == typeof(byte[][]))
+            {
+                BindByteArrayListReturnResourceMethod(
+                    runtime, namespaceName, importName,
+                    table, resourceType, m);
+                return;
+            }
             // Bare enum returns (no result wrapping) ride the
             // primitive path through ToWireType — wire form is
             // the underlying integer.
@@ -1052,6 +1062,41 @@ namespace Wacs.WASI.Preview2.HostBinding
                             dataPtr, bytes.Length);
                     WriteI32LE(memory, retAreaPtr, dataPtr);
                     WriteI32LE(memory, retAreaPtr + 4, bytes.Length);
+                });
+        }
+
+        /// <summary>Resource method returning
+        /// <c>list&lt;list&lt;u8&gt;&gt;</c> (byte[][]). Used
+        /// by fields.get() in wasi:http. retArea: 8 bytes
+        /// (list-ptr, list-len). Each elem 8 bytes
+        /// (bytes-ptr, bytes-len) at align 4.</summary>
+        private static void BindByteArrayListReturnResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable table,
+            Type resourceType, MethodInfo m)
+        {
+            BindAggregateResourceMethod(runtime, namespaceName,
+                importName, table, resourceType, m,
+                (memory, retAreaPtr, ret, allocate) =>
+                {
+                    var arr = (byte[][])ret!;
+                    int count = arr.Length;
+                    int arrayPtr = count == 0 ? 0
+                        : allocate(4, count * 8);
+                    for (int i = 0; i < count; i++)
+                    {
+                        var bs = arr[i];
+                        int dPtr = bs.Length == 0 ? 0
+                            : allocate(1, bs.Length);
+                        if (bs.Length > 0)
+                            Array.Copy(bs, 0, memory,
+                                dPtr, bs.Length);
+                        WriteI32LE(memory, arrayPtr + i * 8, dPtr);
+                        WriteI32LE(memory, arrayPtr + i * 8 + 4,
+                            bs.Length);
+                    }
+                    WriteI32LE(memory, retAreaPtr, arrayPtr);
+                    WriteI32LE(memory, retAreaPtr + 4, count);
                 });
         }
 
@@ -1314,12 +1359,27 @@ namespace Wacs.WASI.Preview2.HostBinding
 
             // Wrapper signature: ExecContext, handle (i32),
             // [host params...], retAreaPtr (i32) → void.
-            var wireParamTypes = new Type[paramInfos.Length + 3];
+            // string params expand to (ptr, len) — 2 wire slots.
+            int paramSlots = 0;
+            foreach (var p in paramInfos)
+                paramSlots += p.ParameterType == typeof(string) ? 2 : 1;
+            var wireParamTypes = new Type[paramSlots + 3];
             wireParamTypes[0] = typeof(ExecContext);
             wireParamTypes[1] = typeof(int);   // self handle
-            for (int i = 0; i < paramInfos.Length; i++)
-                wireParamTypes[i + 2] = ToWireType(paramInfos[i].ParameterType);
-            wireParamTypes[paramInfos.Length + 2] = typeof(int);   // retAreaPtr
+            int wpi = 2;
+            foreach (var p in paramInfos)
+            {
+                if (p.ParameterType == typeof(string))
+                {
+                    wireParamTypes[wpi++] = typeof(int);
+                    wireParamTypes[wpi++] = typeof(int);
+                }
+                else
+                {
+                    wireParamTypes[wpi++] = ToWireType(p.ParameterType);
+                }
+            }
+            wireParamTypes[wpi] = typeof(int);   // retAreaPtr
 
             var delegateType = OpenActionType(wireParamTypes.Length)
                 .MakeGenericType(wireParamTypes);
@@ -1353,25 +1413,65 @@ namespace Wacs.WASI.Preview2.HostBinding
             var lambdaParams = new ParameterExpression[wireParamTypes.Length];
             lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
             lambdaParams[1] = Expression.Parameter(typeof(int), "self");
-            for (int i = 0; i < paramInfos.Length; i++)
-                lambdaParams[i + 2] = Expression.Parameter(
-                    wireParamTypes[i + 2], paramInfos[i].Name);
-            lambdaParams[paramInfos.Length + 2] =
+            int lpi = 2;
+            foreach (var p in paramInfos)
+            {
+                if (p.ParameterType == typeof(string))
+                {
+                    lambdaParams[lpi++] = Expression.Parameter(
+                        typeof(int), p.Name + "_ptr");
+                    lambdaParams[lpi++] = Expression.Parameter(
+                        typeof(int), p.Name + "_len");
+                }
+                else
+                {
+                    lambdaParams[lpi++] = Expression.Parameter(
+                        wireParamTypes[lpi - 1], p.Name);
+                }
+            }
+            lambdaParams[wireParamTypes.Length - 1] =
                 Expression.Parameter(typeof(int), "retAreaPtr");
 
-            var argArr = Expression.NewArrayInit(typeof(object),
-                paramInfos.Select((p, i) =>
+            // For string params: load memory once.
+            var memoryProp = typeof(ExecContext).GetProperty(
+                nameof(ExecContext.DefaultMemory))!;
+            var memDataField = typeof(Wacs.Core.Runtime.Types.MemoryInstance)
+                .GetField("Data")!;
+            var memoryAccess = Expression.Field(
+                Expression.Property(lambdaParams[0], memoryProp),
+                memDataField);
+            var encodingUtf8 = Expression.Property(null,
+                typeof(System.Text.Encoding).GetProperty(
+                    nameof(System.Text.Encoding.UTF8))!);
+            var getStringMethod = typeof(System.Text.Encoding).GetMethod(
+                nameof(System.Text.Encoding.GetString),
+                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+
+            int slotIdx = 2;
+            var argExprs = new Expression[paramInfos.Length];
+            for (int i = 0; i < paramInfos.Length; i++)
+            {
+                if (paramInfos[i].ParameterType == typeof(string))
                 {
-                    Expression e = lambdaParams[i + 2];
-                    if (p.ParameterType != e.Type)
-                        e = Expression.Convert(e, p.ParameterType);
-                    return (Expression)Expression.Convert(e, typeof(object));
-                }).ToArray());
+                    var ptrParam = lambdaParams[slotIdx++];
+                    var lenParam = lambdaParams[slotIdx++];
+                    argExprs[i] = Expression.Convert(
+                        Expression.Call(encodingUtf8, getStringMethod,
+                            memoryAccess, ptrParam, lenParam),
+                        typeof(object));
+                    continue;
+                }
+                Expression e = lambdaParams[slotIdx++];
+                if (paramInfos[i].ParameterType != e.Type)
+                    e = Expression.Convert(e, paramInfos[i].ParameterType);
+                argExprs[i] = Expression.Convert(e, typeof(object));
+            }
+            var argArr = Expression.NewArrayInit(typeof(object), argExprs);
             var bodyTarget = Expression.Constant(
                 (Action<ExecContext, int, object?[], int>)Body);
             var call = Expression.Invoke(bodyTarget,
                 lambdaParams[0], lambdaParams[1], argArr,
-                lambdaParams[paramInfos.Length + 2]);
+                lambdaParams[wireParamTypes.Length - 1]);
             var lambda = Expression.Lambda(delegateType, call, lambdaParams);
             var compiled = lambda.Compile();
 

@@ -20,4 +20,9 @@ world demo {
     export ask-entries-first-key: func(handle: u32) -> u32;
     /// Returns first byte of the first entry's value.
     export ask-entries-first-val: func(handle: u32) -> u32;
+    /// Calls fields.get(handle, "X-Foo"); returns the
+    /// list-len as u32.
+    export ask-get-len: func(handle: u32) -> u32;
+    /// Returns first byte of the first value's data.
+    export ask-get-first-byte: func(handle: u32) -> u32;
 }
