@@ -2388,13 +2388,16 @@ namespace Wacs.WASI.Preview2.HostBinding
             // NewTimestamp (3 wire slots: variant disc +
             // datetime seconds(i64) + nanoseconds(i32)),
             // AccessType (2 wire slots: variant disc + modes),
-            // or byte[] (2 wire slots: ptr + len).
+            // byte[] (2 wire slots: ptr + len), or
+            // byte[][] (2 wire slots: list-ptr + list-len,
+            // per-elem 8 bytes ptr+len decoded in body).
             // Aggregates (records, lists) stay deferred.
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)
                     && !p.ParameterType.IsEnum
                     && p.ParameterType != typeof(string)
                     && p.ParameterType != typeof(byte[])
+                    && p.ParameterType != typeof(byte[][])
                     && p.ParameterType.GetCustomAttribute<
                         WasiResourceAttribute>() == null
                     && p.ParameterType != typeof(
@@ -2413,7 +2416,8 @@ namespace Wacs.WASI.Preview2.HostBinding
             foreach (var p in paramInfos)
             {
                 if (p.ParameterType == typeof(string)
-                    || p.ParameterType == typeof(byte[]))
+                    || p.ParameterType == typeof(byte[])
+                    || p.ParameterType == typeof(byte[][]))
                     paramSlotCount += 2;
                 else if (p.ParameterType == typeof(
                     Wacs.WASI.Preview2.Sockets.IpSocketAddress))
@@ -2434,7 +2438,8 @@ namespace Wacs.WASI.Preview2.HostBinding
             foreach (var p in paramInfos)
             {
                 if (p.ParameterType == typeof(string)
-                    || p.ParameterType == typeof(byte[]))
+                    || p.ParameterType == typeof(byte[])
+                    || p.ParameterType == typeof(byte[][]))
                 {
                     wireParamTypes[wi++] = typeof(int);   // ptr
                     wireParamTypes[wi++] = typeof(int);   // len
@@ -2496,7 +2501,8 @@ namespace Wacs.WASI.Preview2.HostBinding
             for (int i = 0; i < paramInfos.Length; i++)
             {
                 if (paramInfos[i].ParameterType == typeof(string)
-                    || paramInfos[i].ParameterType == typeof(byte[]))
+                    || paramInfos[i].ParameterType == typeof(byte[])
+                    || paramInfos[i].ParameterType == typeof(byte[][]))
                 {
                     lambdaParams[wi++] = Expression.Parameter(
                         typeof(int), paramInfos[i].Name + "_ptr");
@@ -2604,6 +2610,18 @@ namespace Wacs.WASI.Preview2.HostBinding
                     var lenParam = lambdaParams[wi++];
                     argExprs[i] = Expression.Convert(
                         Expression.Call(sliceCopyMethod,
+                            memoryAccess, ptrParam, lenParam),
+                        typeof(object));
+                }
+                else if (paramInfos[i].ParameterType == typeof(byte[][]))
+                {
+                    var decodeListMethod = typeof(WasiInterfaceBinder)
+                        .GetMethod(nameof(DecodeByteArrayList),
+                            BindingFlags.Static | BindingFlags.NonPublic)!;
+                    var ptrParam = lambdaParams[wi++];
+                    var lenParam = lambdaParams[wi++];
+                    argExprs[i] = Expression.Convert(
+                        Expression.Call(decodeListMethod,
                             memoryAccess, ptrParam, lenParam),
                         typeof(object));
                 }
@@ -3725,6 +3743,32 @@ namespace Wacs.WASI.Preview2.HostBinding
             if (len > 0)
                 System.Array.Copy(memory, ptr, slice, 0, len);
             return slice;
+        }
+
+        /// <summary>Decode a list&lt;list&lt;u8&gt;&gt; param
+        /// from linear memory. listPtr points at len entries,
+        /// each 8 bytes (bytes-ptr i32 + bytes-len i32).
+        /// Returns a fresh byte[][] copy — host owns the
+        /// elements and won't alias guest memory.</summary>
+        private static byte[][] DecodeByteArrayList(byte[] memory,
+            int listPtr, int listLen)
+        {
+            var result = new byte[listLen][];
+            for (int i = 0; i < listLen; i++)
+            {
+                int eb = listPtr + i * 8;
+                int dataPtr = (int)System.Buffers.Binary
+                    .BinaryPrimitives.ReadInt32LittleEndian(
+                        memory.AsSpan(eb, 4));
+                int dataLen = (int)System.Buffers.Binary
+                    .BinaryPrimitives.ReadInt32LittleEndian(
+                        memory.AsSpan(eb + 4, 4));
+                var slice = new byte[dataLen];
+                if (dataLen > 0)
+                    Array.Copy(memory, dataPtr, slice, 0, dataLen);
+                result[i] = slice;
+            }
+            return result;
         }
 
         /// <summary>Decode a flat-lowered

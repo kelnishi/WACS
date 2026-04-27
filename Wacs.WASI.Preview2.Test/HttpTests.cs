@@ -188,6 +188,42 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [Fact]
+        public void Fields_set_decodes_string_and_byte_array_list_params()
+        {
+            // Fixture: ask-set(handle) calls fields.set(handle,
+            // "X-Set", ["one", "two"]). Stub starts with one
+            // existing X-Set entry; set replaces it with the
+            // two new values.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-fields-component", "httpfields.component.wasm"));
+            var resources = new ResourceContext();
+            var fields = new Fields();
+            fields.AppendEntry("X-Set",
+                System.Text.Encoding.UTF8.GetBytes("OLD"));
+            int handle = resources.TableFor(typeof(Fields))
+                .Allocate(fields);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Fields>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set", (uint)handle)!);
+            // After set: 2 entries, both keyed "X-Set", with
+            // values "one" and "two". The original "OLD"
+            // entry was wiped.
+            Assert.Equal(2, fields.Entries.Count);
+            Assert.Equal("X-Set", fields.Entries[0].Key);
+            Assert.Equal(System.Text.Encoding.UTF8.GetBytes("one"),
+                fields.Entries[0].Value);
+            Assert.Equal("X-Set", fields.Entries[1].Key);
+            Assert.Equal(System.Text.Encoding.UTF8.GetBytes("two"),
+                fields.Entries[1].Value);
+        }
+
+        [Fact]
         public void Fields_clone_returns_fresh_resource_handle()
         {
             // Fixture: ask-clone(handle) calls fields.clone,
