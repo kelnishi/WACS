@@ -6,8 +6,11 @@ interface types {
         immutable,
     }
     type field-key = string;
+    type field-value = list<u8>;
     resource fields {
         has: func(name: field-key) -> bool;
+        append: func(name: field-key, value: field-value)
+            -> result<_, header-error>;
         delete: func(name: field-key) -> result<_, header-error>;
         clone: func() -> fields;
     }
