@@ -1,0 +1,13 @@
+package local:unitresult;
+world demo {
+    import test:unit/iface@1.0.0;
+    /// Calls thing.do-it(handle) where do-it returns bare
+    /// result. The wat layer reads the i32 wire return and
+    /// forwards it. 0 = Ok, 1 = Err.
+    export ask-do-it: func(thing: u32) -> u32;
+    /// Calls thing.set-name(handle, name) where set-name takes
+    /// option<string> and returns bare result.
+    export ask-set-name-some: func(thing: u32) -> u32;
+    /// Calls thing.set-name(handle, None).
+    export ask-set-name-none: func(thing: u32) -> u32;
+}
