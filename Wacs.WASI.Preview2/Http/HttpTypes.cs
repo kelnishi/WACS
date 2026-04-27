@@ -224,6 +224,15 @@ namespace Wacs.WASI.Preview2.Http
         /// <c>method() -&gt; method</c>.</summary>
         public virtual HttpMethod Method() => _method;
 
+        /// <summary>WIT <c>set-method: func(method: method)
+        ///   -&gt; result</c>. Variant param flat-encoded
+        /// (disc + ptr + len for the joined string payload).
+        /// Always-Ok in v0.</summary>
+        [WasiUnitResult]
+        [WasiMethodName("set-method")]
+        public virtual void SetMethod(HttpMethod method)
+            => _method = method;
+
         /// <summary>Per WIT semantics, returns ownership of
         /// the headers Fields to the guest. Default returns
         /// the configured _headers.</summary>
