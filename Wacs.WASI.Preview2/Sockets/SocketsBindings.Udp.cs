@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
@@ -38,7 +39,7 @@ namespace Wacs.WASI.Preview2.Sockets
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (UdpNs, "[method]udp-socket.subscribe"),
                 (_, h) => pollables.Allocate(
-                    ((UdpSocket)socks.Get(h)).Subscribe()));
+                    (Pollable)((UdpSocket)socks.Get(h)).Subscribe()));
 
             // start-bind(net, addr) -> result<_, error-code>
             // Same 16-arg shape as tcp-socket.start-bind.
@@ -50,44 +51,55 @@ namespace Wacs.WASI.Preview2.Sockets
                 {
                     var addr = DecodeIpSocketAddressFlat(disc,
                         s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11);
-                    ((UdpSocket)socks.Get(h)).StartBind(
+                    var r = ((UdpSocket)socks.Get(h)).StartBind(
                         (Network)nets.Get(hNet), addr);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (UdpNs, "[method]udp-socket.finish-bind"),
                 (ctx, h, retArea) =>
                 {
-                    ((UdpSocket)socks.Get(h)).FinishBind();
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((UdpSocket)socks.Get(h)).FinishBind();
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             // %stream(option<addr>) ->
             //   result<(incoming, outgoing), error-code>.
             // Wire: handle + 13 option-flat slots + retArea = 15
             // ints; Action<ExecContext, int×15> = 16 type params.
-            // retArea = 12 bytes: disc + 3 pad + in@+4 + out@+8.
+            // retArea = 12 bytes: outer disc + 3 pad + in@+4 + out@+8.
+            // Calls the IUdpSocket.Stream overload (Result-returning);
+            // the public-virtual concrete-typed UdpStream is the
+            // host extension point and the explicit-interface shim
+            // wraps its tuple.
             runtime.BindHostFunction<Action<ExecContext, int, int,
                 int, int, int, int, int, int, int, int, int, int, int, int, int>>(
                 (UdpNs, "[method]udp-socket.stream"),
                 (ctx, h, optDisc, vDisc, s1, s2, s3, s4, s5, s6, s7,
                     s8, s9, s10, s11, retArea) =>
                 {
-                    IpSocketAddress? addr = optDisc == 0 ? null
-                        : DecodeIpSocketAddressFlat(vDisc, s1, s2, s3,
-                            s4, s5, s6, s7, s8, s9, s10, s11);
-                    var (inS, outS) = ((UdpSocket)socks.Get(h))
-                        .UdpStream(addr);
+                    Option<IpSocketAddress> opt = optDisc == 0
+                        ? Option<IpSocketAddress>.None
+                        : Option<IpSocketAddress>.Some(
+                            DecodeIpSocketAddressFlat(vDisc, s1, s2, s3,
+                                s4, s5, s6, s7, s8, s9, s10, s11));
+                    var r = ((IUdpSocket)socks.Get(h)).Stream(opt);
                     var mem = ctx.Memory();
-                    mem[retArea] = 0;
-                    mem[retArea + 1] = 0;
-                    mem[retArea + 2] = 0;
-                    mem[retArea + 3] = 0;
-                    MemoryWriter.WriteI32LE(mem, retArea + 4,
-                        ins.Allocate(inS));
-                    MemoryWriter.WriteI32LE(mem, retArea + 8,
-                        outs.Allocate(outS));
+                    if (r.IsOk)
+                    {
+                        var (inS, outS) = r.Ok;
+                        mem[retArea] = 0;
+                        mem[retArea + 1] = 0;
+                        mem[retArea + 2] = 0;
+                        mem[retArea + 3] = 0;
+                        MemoryWriter.WriteI32LE(mem, retArea + 4,
+                            ins.Allocate((IncomingDatagramStream)inS));
+                        MemoryWriter.WriteI32LE(mem, retArea + 8,
+                            outs.Allocate((OutgoingDatagramStream)outS));
+                        return;
+                    }
+                    WriteErrCode(mem, retArea, 12, r.Err);
                 });
 
             // local / remote address (same 36-byte shape as tcp).
@@ -95,71 +107,61 @@ namespace Wacs.WASI.Preview2.Sockets
                 (UdpNs, "[method]udp-socket.local-address"),
                 (ctx, h, retArea) =>
                 {
-                    var addr = ((UdpSocket)socks.Get(h)).LocalAddress();
-                    var mem = ctx.Memory();
-                    mem[retArea] = 0;
-                    mem[retArea + 1] = 0;
-                    mem[retArea + 2] = 0;
-                    mem[retArea + 3] = 0;
-                    WriteIpSocketAddress(mem, retArea + 4, addr);
+                    var r = ((UdpSocket)socks.Get(h)).LocalAddress();
+                    WriteResultIpSocketAddress(ctx.Memory(), retArea, r);
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (UdpNs, "[method]udp-socket.remote-address"),
                 (ctx, h, retArea) =>
                 {
-                    var addr = ((UdpSocket)socks.Get(h)).RemoteAddress();
-                    var mem = ctx.Memory();
-                    mem[retArea] = 0;
-                    mem[retArea + 1] = 0;
-                    mem[retArea + 2] = 0;
-                    mem[retArea + 3] = 0;
-                    WriteIpSocketAddress(mem, retArea + 4, addr);
+                    var r = ((UdpSocket)socks.Get(h)).RemoteAddress();
+                    WriteResultIpSocketAddress(ctx.Memory(), retArea, r);
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (UdpNs, "[method]udp-socket.unicast-hop-limit"),
                 (ctx, h, retArea) =>
-                    WriteOkU8(ctx.Memory(), retArea,
+                    WriteResultU8(ctx.Memory(), retArea,
                         ((UdpSocket)socks.Get(h)).UnicastHopLimit()));
 
             runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
                 (UdpNs, "[method]udp-socket.set-unicast-hop-limit"),
                 (ctx, h, value, retArea) =>
                 {
-                    ((UdpSocket)socks.Get(h)).SetUnicastHopLimit(
-                        (byte)value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((UdpSocket)socks.Get(h))
+                        .SetUnicastHopLimit((byte)value);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (UdpNs, "[method]udp-socket.receive-buffer-size"),
                 (ctx, h, retArea) =>
-                    WriteOkU64(ctx.Memory(), retArea,
+                    WriteResultU64(ctx.Memory(), retArea,
                         ((UdpSocket)socks.Get(h)).ReceiveBufferSize()));
 
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (UdpNs, "[method]udp-socket.set-receive-buffer-size"),
                 (ctx, h, value, retArea) =>
                 {
-                    ((UdpSocket)socks.Get(h)).SetReceiveBufferSize(
-                        (ulong)value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((UdpSocket)socks.Get(h))
+                        .SetReceiveBufferSize((ulong)value);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (UdpNs, "[method]udp-socket.send-buffer-size"),
                 (ctx, h, retArea) =>
-                    WriteOkU64(ctx.Memory(), retArea,
+                    WriteResultU64(ctx.Memory(), retArea,
                         ((UdpSocket)socks.Get(h)).SendBufferSize()));
 
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (UdpNs, "[method]udp-socket.set-send-buffer-size"),
                 (ctx, h, value, retArea) =>
                 {
-                    ((UdpSocket)socks.Get(h)).SetSendBufferSize(
-                        (ulong)value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((UdpSocket)socks.Get(h))
+                        .SetSendBufferSize((ulong)value);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
         }
 
@@ -180,16 +182,25 @@ namespace Wacs.WASI.Preview2.Sockets
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (UdpNs, "[method]incoming-datagram-stream.subscribe"),
                 (_, h) => pollables.Allocate(
-                    ((IncomingDatagramStream)streams.Get(h)).Subscribe()));
+                    (Pollable)((IncomingDatagramStream)streams.Get(h))
+                        .Subscribe()));
 
             // receive(maxResults: u64) -> result<list<incoming-datagram>, _>
-            // retArea = 12 bytes: disc + 3 pad + listPtr@+4 + listLen@+8.
+            // retArea = 12 bytes: outer disc + 3 pad + listPtr@+4 +
+            // listLen@+8.
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (UdpNs, "[method]incoming-datagram-stream.receive"),
                 (ctx, h, maxResults, retArea) =>
                 {
-                    var dgs = ((IncomingDatagramStream)streams.Get(h))
+                    var r = ((IncomingDatagramStream)streams.Get(h))
                         .Receive((ulong)maxResults);
+                    var mem = ctx.Memory();
+                    if (!r.IsOk)
+                    {
+                        WriteErrCode(mem, retArea, 12, r.Err);
+                        return;
+                    }
+                    var dgs = r.Ok;
                     int count = dgs.Length;
                     int arrayPtr = count == 0 ? 0
                         : alloc.Allocate(4, count * 40);
@@ -211,7 +222,7 @@ namespace Wacs.WASI.Preview2.Sockets
                         WriteIpSocketAddress(memBuf, elemBase + 8,
                             dg.RemoteAddress);
                     }
-                    var mem = ctx.Memory();
+                    mem = ctx.Memory();
                     mem[retArea] = 0;
                     mem[retArea + 1] = 0;
                     mem[retArea + 2] = 0;
@@ -237,13 +248,14 @@ namespace Wacs.WASI.Preview2.Sockets
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (UdpNs, "[method]outgoing-datagram-stream.subscribe"),
                 (_, h) => pollables.Allocate(
-                    ((OutgoingDatagramStream)streams.Get(h)).Subscribe()));
+                    (Pollable)((OutgoingDatagramStream)streams.Get(h))
+                        .Subscribe()));
 
             // check-send() -> result<u64, _>.
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (UdpNs, "[method]outgoing-datagram-stream.check-send"),
                 (ctx, h, retArea) =>
-                    WriteOkU64(ctx.Memory(), retArea,
+                    WriteResultU64(ctx.Memory(), retArea,
                         ((OutgoingDatagramStream)streams.Get(h))
                             .CheckSend()));
 
@@ -267,7 +279,8 @@ namespace Wacs.WASI.Preview2.Sockets
                         var data = new byte[dataLen];
                         if (dataLen > 0)
                             Array.Copy(memory, dataPtr, data, 0, dataLen);
-                        IpSocketAddress? addr = null;
+                        Option<IpSocketAddress> remote =
+                            Option<IpSocketAddress>.None;
                         if (memory[elemBase + 8] != 0)
                         {
                             byte vDisc = memory[elemBase + 12];
@@ -275,13 +288,16 @@ namespace Wacs.WASI.Preview2.Sockets
                             {
                                 ushort port = (ushort)(memory[elemBase + 16]
                                     | (memory[elemBase + 17] << 8));
-                                addr = new Ipv4SocketAddress(port,
-                                    new byte[] {
-                                        memory[elemBase + 18],
-                                        memory[elemBase + 19],
-                                        memory[elemBase + 20],
-                                        memory[elemBase + 21],
-                                    });
+                                remote = Option<IpSocketAddress>.Some(
+                                    new IpSocketAddress.IpSocketAddressIpv4(
+                                        new Ipv4SocketAddress {
+                                            Port = port,
+                                            Address = (
+                                                memory[elemBase + 18],
+                                                memory[elemBase + 19],
+                                                memory[elemBase + 20],
+                                                memory[elemBase + 21]),
+                                        }));
                             }
                             else
                             {
@@ -289,21 +305,36 @@ namespace Wacs.WASI.Preview2.Sockets
                                     | (memory[elemBase + 17] << 8));
                                 uint flow = (uint)MemoryReader.ReadI32LE(
                                     memory, elemBase + 20);
-                                var addr6 = new ushort[8];
-                                for (int k = 0; k < 8; k++)
-                                    addr6[k] = (ushort)(memory[elemBase + 24 + k * 2]
-                                        | (memory[elemBase + 25 + k * 2] << 8));
+                                ushort A(int off) => (ushort)(memory[off]
+                                    | (memory[off + 1] << 8));
                                 uint scope = (uint)MemoryReader.ReadI32LE(
                                     memory, elemBase + 40);
-                                addr = new Ipv6SocketAddress(port, flow,
-                                    addr6, scope);
+                                remote = Option<IpSocketAddress>.Some(
+                                    new IpSocketAddress.IpSocketAddressIpv6(
+                                        new Ipv6SocketAddress {
+                                            Port = port,
+                                            FlowInfo = flow,
+                                            Address = (
+                                                A(elemBase + 24),
+                                                A(elemBase + 26),
+                                                A(elemBase + 28),
+                                                A(elemBase + 30),
+                                                A(elemBase + 32),
+                                                A(elemBase + 34),
+                                                A(elemBase + 36),
+                                                A(elemBase + 38)),
+                                            ScopeId = scope,
+                                        }));
                             }
                         }
-                        dgs[i] = new OutgoingDatagram(data, addr);
+                        dgs[i] = new OutgoingDatagram {
+                            Data = data,
+                            RemoteAddress = remote,
+                        };
                     }
-                    ulong sent = ((OutgoingDatagramStream)streams.Get(h))
+                    var sendResult = ((OutgoingDatagramStream)streams.Get(h))
                         .Send(dgs);
-                    WriteOkU64(ctx.Memory(), retArea, sent);
+                    WriteResultU64(ctx.Memory(), retArea, sendResult);
                 });
         }
     }

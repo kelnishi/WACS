@@ -95,13 +95,14 @@ namespace Wacs.WASI.Preview2.Test
         private sealed class CapturingTcpSocket : TcpSocket
         {
             public CapturingTcpSocket() : base(IpAddressFamily.Ipv4) { }
-            public Network? CapturedNetwork;
+            public INetwork? CapturedNetwork;
             public IpSocketAddress? CapturedAddress;
-            public override void StartBind(Network network,
+            public override Result<Unit, ErrorCode> StartBind(INetwork network,
                 IpSocketAddress localAddress)
             {
                 CapturedNetwork = network;
                 CapturedAddress = localAddress;
+                return Result<Unit, ErrorCode>.FromOk(Unit.Value);
             }
         }
 
@@ -131,10 +132,10 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-bind", (uint)hSock, (uint)hNet)!);
             Assert.Same(net, sock.CapturedNetwork);
-            Assert.IsType<Ipv4SocketAddress>(sock.CapturedAddress);
-            var v4 = (Ipv4SocketAddress)sock.CapturedAddress!;
+            Assert.IsType<IpSocketAddress.IpSocketAddressIpv4>(sock.CapturedAddress);
+            var v4 = ((IpSocketAddress.IpSocketAddressIpv4)sock.CapturedAddress!).Value;
             Assert.Equal(9000, v4.Port);
-            Assert.Equal(new byte[] { 127, 0, 0, 1 }, v4.Address);
+            Assert.Equal(((byte)127, (byte)0, (byte)0, (byte)1), v4.Address);
         }
 
         [Fact]
@@ -143,7 +144,7 @@ namespace Wacs.WASI.Preview2.Test
             // Same fixture, ipv6 export. Wire passes disc=1 +
             // 11 payload slots (port, flow, 8× u16 address,
             // scope). Stub captures the IpSocketAddress; assert
-            // it's an Ipv6SocketAddress with port=443, [::1].
+            // it's an Ipv6 case with port=443, [::1].
             var bytes = File.ReadAllBytes(FindFixturePath(
                 "wasi-tcp-startbind-component", "tcpstartbind.component.wasm"));
             var resources = new ResourceContext();
@@ -159,11 +160,12 @@ namespace Wacs.WASI.Preview2.Test
 
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-bind-v6", (uint)hSock, (uint)hNet)!);
-            Assert.IsType<Ipv6SocketAddress>(sock.CapturedAddress);
-            var v6 = (Ipv6SocketAddress)sock.CapturedAddress!;
+            Assert.IsType<IpSocketAddress.IpSocketAddressIpv6>(sock.CapturedAddress);
+            var v6 = ((IpSocketAddress.IpSocketAddressIpv6)sock.CapturedAddress!).Value;
             Assert.Equal(443, v6.Port);
             Assert.Equal(0u, v6.FlowInfo);
-            Assert.Equal(new ushort[] { 0, 0, 0, 0, 0, 0, 0, 1 },
+            Assert.Equal(((ushort)0, (ushort)0, (ushort)0, (ushort)0,
+                          (ushort)0, (ushort)0, (ushort)0, (ushort)1),
                 v6.Address);
             Assert.Equal(0u, v6.ScopeId);
         }
@@ -171,20 +173,29 @@ namespace Wacs.WASI.Preview2.Test
         private sealed class FixedAddrTcpSocket : TcpSocket
         {
             public FixedAddrTcpSocket() : base(IpAddressFamily.Ipv4) { }
-            public override IpSocketAddress LocalAddress()
-                => new Ipv4SocketAddress(8080,
-                    new byte[] { 192, 168, 1, 42 });
+            public override Result<IpSocketAddress, ErrorCode> LocalAddress()
+                => Result<IpSocketAddress, ErrorCode>.FromOk(
+                    new IpSocketAddress.IpSocketAddressIpv4(
+                        new Ipv4SocketAddress {
+                            Port = 8080,
+                            Address = (192, 168, 1, 42),
+                        }));
         }
 
         private sealed class Ipv6TcpSocket : TcpSocket
         {
             public Ipv6TcpSocket() : base(IpAddressFamily.Ipv6) { }
-            public override IpSocketAddress LocalAddress()
-                => new Ipv6SocketAddress(443, 0,
-                    new ushort[] {
-                        0x2001, 0x0DB8, 0, 0,
-                        0, 0, 0, 0x0001 },
-                    0);
+            public override Result<IpSocketAddress, ErrorCode> LocalAddress()
+                => Result<IpSocketAddress, ErrorCode>.FromOk(
+                    new IpSocketAddress.IpSocketAddressIpv6(
+                        new Ipv6SocketAddress {
+                            Port = 443,
+                            FlowInfo = 0,
+                            Address = (
+                                0x2001, 0x0DB8, 0, 0,
+                                0, 0, 0, 0x0001),
+                            ScopeId = 0,
+                        }));
         }
 
         [Fact]
@@ -324,8 +335,8 @@ namespace Wacs.WASI.Preview2.Test
 
             Assert.Equal(5u, (uint)ci.Invoke(
                 "ask-keepalive", (uint)handle)!);
-            Assert.Equal(1000UL, sock.KeepAliveIdleTime());
-            Assert.Equal(5u, sock.KeepAliveCount());
+            Assert.Equal(1000UL, sock.KeepAliveIdleTime().Ok);
+            Assert.Equal(5u, sock.KeepAliveCount().Ok);
         }
 
         private sealed class OptionsTcpSocket : TcpSocket
@@ -363,8 +374,8 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(42u, (result >> 8) & 0xff);
             Assert.Equal(1u, (result >> 16) & 0xff);
             // Stub state should now reflect the setter calls.
-            Assert.Equal((byte)42, sock.HopLimit());
-            Assert.True(sock.KeepAliveEnabled());
+            Assert.Equal((byte)42, sock.HopLimit().Ok);
+            Assert.True(sock.KeepAliveEnabled().Ok);
         }
 
         private sealed class ListeningTcpSocket : TcpSocket
@@ -374,11 +385,26 @@ namespace Wacs.WASI.Preview2.Test
             public int FinishListenCalls;
             public ShutdownType LastShutdown;
             public ListeningTcpSocket() : base(IpAddressFamily.Ipv4) { }
-            public override void FinishBind() => FinishBindCalls++;
-            public override void StartListen() => StartListenCalls++;
-            public override void FinishListen() => FinishListenCalls++;
-            public override void Shutdown(ShutdownType how)
-                => LastShutdown = how;
+            public override Result<Unit, ErrorCode> FinishBind()
+            {
+                FinishBindCalls++;
+                return Result<Unit, ErrorCode>.FromOk(Unit.Value);
+            }
+            public override Result<Unit, ErrorCode> StartListen()
+            {
+                StartListenCalls++;
+                return Result<Unit, ErrorCode>.FromOk(Unit.Value);
+            }
+            public override Result<Unit, ErrorCode> FinishListen()
+            {
+                FinishListenCalls++;
+                return Result<Unit, ErrorCode>.FromOk(Unit.Value);
+            }
+            public override Result<Unit, ErrorCode> Shutdown(ShutdownType how)
+            {
+                LastShutdown = how;
+                return Result<Unit, ErrorCode>.FromOk(Unit.Value);
+            }
         }
 
         [Fact]
@@ -411,10 +437,12 @@ namespace Wacs.WASI.Preview2.Test
         private sealed class CapturingOutStream : OutgoingDatagramStream
         {
             public OutgoingDatagram[]? LastSent;
-            public override ulong Send(OutgoingDatagram[] datagrams)
+            public override Result<ulong, ErrorCode> Send(
+                OutgoingDatagram[] datagrams)
             {
                 LastSent = datagrams;
-                return (ulong)datagrams.Length;
+                return Result<ulong, ErrorCode>.FromOk(
+                    (ulong)datagrams.Length);
             }
         }
 
@@ -443,25 +471,38 @@ namespace Wacs.WASI.Preview2.Test
             var dg = stream.LastSent![0];
             Assert.Equal(System.Text.Encoding.UTF8.GetBytes("ping"),
                 dg.Data);
-            Assert.IsType<Ipv4SocketAddress>(dg.RemoteAddress);
-            var v4 = (Ipv4SocketAddress)dg.RemoteAddress!;
+            Assert.True(dg.RemoteAddress.HasValue);
+            Assert.IsType<IpSocketAddress.IpSocketAddressIpv4>(
+                dg.RemoteAddress.Value);
+            var v4 = ((IpSocketAddress.IpSocketAddressIpv4)dg.RemoteAddress.Value).Value;
             Assert.Equal(7, v4.Port);
-            Assert.Equal(new byte[] { 127, 0, 0, 1 }, v4.Address);
+            Assert.Equal(((byte)127, (byte)0, (byte)0, (byte)1), v4.Address);
         }
 
         private sealed class FixedDatagramStream : IncomingDatagramStream
         {
-            public override IncomingDatagram[] Receive(ulong maxResults)
-                => new[] {
-                    new IncomingDatagram(
-                        new byte[] { 0x68, 0x69, 0x21 },   // "hi!"
-                        new Ipv4SocketAddress(53,
-                            new byte[] { 8, 8, 8, 8 })),
-                    new IncomingDatagram(
-                        new byte[] { 0x6f, 0x6b },         // "ok"
-                        new Ipv4SocketAddress(80,
-                            new byte[] { 1, 1, 1, 1 })),
-                };
+            public override Result<IncomingDatagram[], ErrorCode> Receive(
+                ulong maxResults)
+                => Result<IncomingDatagram[], ErrorCode>.FromOk(new[] {
+                    new IncomingDatagram {
+                        Data = new byte[] { 0x68, 0x69, 0x21 },   // "hi!"
+                        RemoteAddress =
+                            new IpSocketAddress.IpSocketAddressIpv4(
+                                new Ipv4SocketAddress {
+                                    Port = 53,
+                                    Address = (8, 8, 8, 8),
+                                }),
+                    },
+                    new IncomingDatagram {
+                        Data = new byte[] { 0x6f, 0x6b },         // "ok"
+                        RemoteAddress =
+                            new IpSocketAddress.IpSocketAddressIpv4(
+                                new Ipv4SocketAddress {
+                                    Port = 80,
+                                    Address = (1, 1, 1, 1),
+                                }),
+                    },
+                });
         }
 
         [Fact]
@@ -555,32 +596,40 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(2u, (uint)ci.Invoke(
                 "ask-stream-some", (uint)handle)!);
             Assert.False(sock.RemoteWasNull);
-            Assert.IsType<Ipv4SocketAddress>(sock.CapturedRemote);
-            var v4 = (Ipv4SocketAddress)sock.CapturedRemote!;
+            Assert.IsType<IpSocketAddress.IpSocketAddressIpv4>(
+                sock.CapturedRemote);
+            var v4 = ((IpSocketAddress.IpSocketAddressIpv4)sock.CapturedRemote!).Value;
             Assert.Equal(5000, v4.Port);
-            Assert.Equal(new byte[] { 127, 0, 0, 1 }, v4.Address);
+            Assert.Equal(((byte)127, (byte)0, (byte)0, (byte)1), v4.Address);
         }
 
         private sealed class StubNameLookup : IIpNameLookup
         {
             public string LastName = "";
 
-            public ResolveAddressStream ResolveAddresses(Network network,
-                string name)
+            public Result<IResolveAddressStream, ErrorCode> ResolveAddresses(
+                INetwork network, string name)
             {
                 LastName = name;
-                return new StubResolveStream();
+                return Result<IResolveAddressStream, ErrorCode>.FromOk(
+                    new StubResolveStream());
             }
         }
 
         private sealed class StubResolveStream : ResolveAddressStream
         {
             private bool _yielded;
-            public override IpAddressEnumerationItem? ResolveNextAddress()
+            public override Result<Option<IpAddress>, ErrorCode>
+                ResolveNextAddress()
             {
-                if (_yielded) return null;
+                if (_yielded)
+                    return Result<Option<IpAddress>, ErrorCode>.FromOk(
+                        Option<IpAddress>.None);
                 _yielded = true;
-                return new Ipv4Address(new byte[] { 93, 184, 215, 14 });
+                return Result<Option<IpAddress>, ErrorCode>.FromOk(
+                    Option<IpAddress>.Some(
+                        new IpAddress.IpAddressIpv4(
+                            (93, 184, 215, 14))));
             }
         }
 

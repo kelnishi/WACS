@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
@@ -17,9 +18,10 @@ namespace Wacs.WASI.Preview2.Sockets
     {
         // wasi:sockets/tcp@0.2.3 — tcp-socket resource. Bare
         // bool / enum returns skip the result wrapper; everything
-        // else uses result<X, error-code>. start-bind and
-        // start-connect take an ip-socket-address param flat-
-        // lowered to 12 i32 wire slots.
+        // else is result<X, error-code> with the Result-returning
+        // host method dispatched through WriteResult* helpers.
+        // start-bind / start-connect take an ip-socket-address
+        // param flat-lowered to 12 i32 wire slots.
         private static void BindTcpSocket(WasmRuntime runtime,
             ResourceContext resources)
         {
@@ -42,7 +44,7 @@ namespace Wacs.WASI.Preview2.Sockets
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (TcpNs, "[method]tcp-socket.subscribe"),
                 (_, h) => pollables.Allocate(
-                    ((TcpSocket)socks.Get(h)).Subscribe()));
+                    (Pollable)((TcpSocket)socks.Get(h)).Subscribe()));
 
             // is-listening() -> bool — bare bool.
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
@@ -62,9 +64,9 @@ namespace Wacs.WASI.Preview2.Sockets
                 {
                     var addr = DecodeIpSocketAddressFlat(disc,
                         s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11);
-                    ((TcpSocket)socks.Get(h)).StartBind(
+                    var r = ((TcpSocket)socks.Get(h)).StartBind(
                         (Network)nets.Get(hNet), addr);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             // finish-bind() -> result<_, error-code>.
@@ -72,8 +74,8 @@ namespace Wacs.WASI.Preview2.Sockets
                 (TcpNs, "[method]tcp-socket.finish-bind"),
                 (ctx, h, retArea) =>
                 {
-                    ((TcpSocket)socks.Get(h)).FinishBind();
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((TcpSocket)socks.Get(h)).FinishBind();
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             // start-connect(net, addr) -> result<_, error-code>.
@@ -86,28 +88,33 @@ namespace Wacs.WASI.Preview2.Sockets
                 {
                     var addr = DecodeIpSocketAddressFlat(disc,
                         s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11);
-                    ((TcpSocket)socks.Get(h)).StartConnect(
+                    var r = ((TcpSocket)socks.Get(h)).StartConnect(
                         (Network)nets.Get(hNet), addr);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             // finish-connect() -> result<(input, output), _>.
-            // retArea = 12 bytes: disc + 3 pad + in@+4 + out@+8.
+            // retArea = 12 bytes: outer disc + 3 pad + in@+4 + out@+8.
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (TcpNs, "[method]tcp-socket.finish-connect"),
                 (ctx, h, retArea) =>
                 {
-                    var (inS, outS) = ((TcpSocket)socks.Get(h))
-                        .FinishConnect();
+                    var r = ((TcpSocket)socks.Get(h)).FinishConnect();
                     var mem = ctx.Memory();
-                    mem[retArea] = 0;
-                    mem[retArea + 1] = 0;
-                    mem[retArea + 2] = 0;
-                    mem[retArea + 3] = 0;
-                    MemoryWriter.WriteI32LE(mem, retArea + 4,
-                        ins.Allocate(inS));
-                    MemoryWriter.WriteI32LE(mem, retArea + 8,
-                        outs.Allocate(outS));
+                    if (r.IsOk)
+                    {
+                        var (inS, outS) = r.Ok;
+                        mem[retArea] = 0;
+                        mem[retArea + 1] = 0;
+                        mem[retArea + 2] = 0;
+                        mem[retArea + 3] = 0;
+                        MemoryWriter.WriteI32LE(mem, retArea + 4,
+                            ins.Allocate((InputStream)inS));
+                        MemoryWriter.WriteI32LE(mem, retArea + 8,
+                            outs.Allocate((OutputStream)outS));
+                        return;
+                    }
+                    WriteErrCode(mem, retArea, 12, r.Err);
                 });
 
             // start-listen() -> result<_, error-code>.
@@ -115,8 +122,8 @@ namespace Wacs.WASI.Preview2.Sockets
                 (TcpNs, "[method]tcp-socket.start-listen"),
                 (ctx, h, retArea) =>
                 {
-                    ((TcpSocket)socks.Get(h)).StartListen();
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((TcpSocket)socks.Get(h)).StartListen();
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             // finish-listen() -> result<_, error-code>.
@@ -124,28 +131,38 @@ namespace Wacs.WASI.Preview2.Sockets
                 (TcpNs, "[method]tcp-socket.finish-listen"),
                 (ctx, h, retArea) =>
                 {
-                    ((TcpSocket)socks.Get(h)).FinishListen();
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((TcpSocket)socks.Get(h)).FinishListen();
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             // accept() -> result<(tcp-socket, in, out), _>.
-            // retArea = 16 bytes: disc + 3 pad + 3×i32 handles.
+            // retArea = 16 bytes: outer disc + 3 pad + 3×i32 handles.
+            // Calls the ITcpSocket-shaped overload (Result-returning);
+            // the public-virtual concrete-typed Accept() is the
+            // host extension point and the explicit-interface shim
+            // wraps its tuple.
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (TcpNs, "[method]tcp-socket.accept"),
                 (ctx, h, retArea) =>
                 {
-                    var (s, inS, outS) = ((TcpSocket)socks.Get(h)).Accept();
+                    var r = ((ITcpSocket)socks.Get(h)).Accept();
                     var mem = ctx.Memory();
-                    mem[retArea] = 0;
-                    mem[retArea + 1] = 0;
-                    mem[retArea + 2] = 0;
-                    mem[retArea + 3] = 0;
-                    MemoryWriter.WriteI32LE(mem, retArea + 4,
-                        socks.Allocate(s));
-                    MemoryWriter.WriteI32LE(mem, retArea + 8,
-                        ins.Allocate(inS));
-                    MemoryWriter.WriteI32LE(mem, retArea + 12,
-                        outs.Allocate(outS));
+                    if (r.IsOk)
+                    {
+                        var (s, inS, outS) = r.Ok;
+                        mem[retArea] = 0;
+                        mem[retArea + 1] = 0;
+                        mem[retArea + 2] = 0;
+                        mem[retArea + 3] = 0;
+                        MemoryWriter.WriteI32LE(mem, retArea + 4,
+                            socks.Allocate((TcpSocket)s));
+                        MemoryWriter.WriteI32LE(mem, retArea + 8,
+                            ins.Allocate((InputStream)inS));
+                        MemoryWriter.WriteI32LE(mem, retArea + 12,
+                            outs.Allocate((OutputStream)outS));
+                        return;
+                    }
+                    WriteErrCode(mem, retArea, 16, r.Err);
                 });
 
             // shutdown(shutdown-type) -> result<_, error-code>.
@@ -153,8 +170,9 @@ namespace Wacs.WASI.Preview2.Sockets
                 (TcpNs, "[method]tcp-socket.shutdown"),
                 (ctx, h, how, retArea) =>
                 {
-                    ((TcpSocket)socks.Get(h)).Shutdown((ShutdownType)how);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((TcpSocket)socks.Get(h))
+                        .Shutdown((ShutdownType)how);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             // local-address() / remote-address() ->
@@ -166,26 +184,16 @@ namespace Wacs.WASI.Preview2.Sockets
                 (TcpNs, "[method]tcp-socket.local-address"),
                 (ctx, h, retArea) =>
                 {
-                    var addr = ((TcpSocket)socks.Get(h)).LocalAddress();
-                    var mem = ctx.Memory();
-                    mem[retArea] = 0;
-                    mem[retArea + 1] = 0;
-                    mem[retArea + 2] = 0;
-                    mem[retArea + 3] = 0;
-                    WriteIpSocketAddress(mem, retArea + 4, addr);
+                    var r = ((TcpSocket)socks.Get(h)).LocalAddress();
+                    WriteResultIpSocketAddress(ctx.Memory(), retArea, r);
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (TcpNs, "[method]tcp-socket.remote-address"),
                 (ctx, h, retArea) =>
                 {
-                    var addr = ((TcpSocket)socks.Get(h)).RemoteAddress();
-                    var mem = ctx.Memory();
-                    mem[retArea] = 0;
-                    mem[retArea + 1] = 0;
-                    mem[retArea + 2] = 0;
-                    mem[retArea + 3] = 0;
-                    WriteIpSocketAddress(mem, retArea + 4, addr);
+                    var r = ((TcpSocket)socks.Get(h)).RemoteAddress();
+                    WriteResultIpSocketAddress(ctx.Memory(), retArea, r);
                 });
 
             // -----------------------------------------------------
@@ -197,16 +205,16 @@ namespace Wacs.WASI.Preview2.Sockets
                 (TcpNs, "[method]tcp-socket.set-listen-backlog-size"),
                 (ctx, h, value, retArea) =>
                 {
-                    ((TcpSocket)socks.Get(h)).SetListenBacklogSize(
-                        (ulong)value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((TcpSocket)socks.Get(h))
+                        .SetListenBacklogSize((ulong)value);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             // keep-alive-enabled() -> result<bool, _>.
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (TcpNs, "[method]tcp-socket.keep-alive-enabled"),
                 (ctx, h, retArea) =>
-                    WriteOkBool(ctx.Memory(), retArea,
+                    WriteResultBool(ctx.Memory(), retArea,
                         ((TcpSocket)socks.Get(h)).KeepAliveEnabled()));
 
             // set-keep-alive-enabled(bool) -> result<_, _>.
@@ -214,100 +222,101 @@ namespace Wacs.WASI.Preview2.Sockets
                 (TcpNs, "[method]tcp-socket.set-keep-alive-enabled"),
                 (ctx, h, value, retArea) =>
                 {
-                    ((TcpSocket)socks.Get(h)).SetKeepAliveEnabled(
-                        value != 0);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((TcpSocket)socks.Get(h))
+                        .SetKeepAliveEnabled(value != 0);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             // keep-alive-idle-time() -> result<u64, _>.
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (TcpNs, "[method]tcp-socket.keep-alive-idle-time"),
                 (ctx, h, retArea) =>
-                    WriteOkU64(ctx.Memory(), retArea,
+                    WriteResultU64(ctx.Memory(), retArea,
                         ((TcpSocket)socks.Get(h)).KeepAliveIdleTime()));
 
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (TcpNs, "[method]tcp-socket.set-keep-alive-idle-time"),
                 (ctx, h, value, retArea) =>
                 {
-                    ((TcpSocket)socks.Get(h)).SetKeepAliveIdleTime(
-                        (ulong)value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((TcpSocket)socks.Get(h))
+                        .SetKeepAliveIdleTime((ulong)value);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (TcpNs, "[method]tcp-socket.keep-alive-interval"),
                 (ctx, h, retArea) =>
-                    WriteOkU64(ctx.Memory(), retArea,
+                    WriteResultU64(ctx.Memory(), retArea,
                         ((TcpSocket)socks.Get(h)).KeepAliveInterval()));
 
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (TcpNs, "[method]tcp-socket.set-keep-alive-interval"),
                 (ctx, h, value, retArea) =>
                 {
-                    ((TcpSocket)socks.Get(h)).SetKeepAliveInterval(
-                        (ulong)value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((TcpSocket)socks.Get(h))
+                        .SetKeepAliveInterval((ulong)value);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (TcpNs, "[method]tcp-socket.keep-alive-count"),
                 (ctx, h, retArea) =>
-                    WriteOkU32(ctx.Memory(), retArea,
+                    WriteResultU32(ctx.Memory(), retArea,
                         ((TcpSocket)socks.Get(h)).KeepAliveCount()));
 
             runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
                 (TcpNs, "[method]tcp-socket.set-keep-alive-count"),
                 (ctx, h, value, retArea) =>
                 {
-                    ((TcpSocket)socks.Get(h)).SetKeepAliveCount(
-                        (uint)value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((TcpSocket)socks.Get(h))
+                        .SetKeepAliveCount((uint)value);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             // hop-limit / set-hop-limit (u8 wire-widened to i32).
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (TcpNs, "[method]tcp-socket.hop-limit"),
                 (ctx, h, retArea) =>
-                    WriteOkU8(ctx.Memory(), retArea,
+                    WriteResultU8(ctx.Memory(), retArea,
                         ((TcpSocket)socks.Get(h)).HopLimit()));
 
             runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
                 (TcpNs, "[method]tcp-socket.set-hop-limit"),
                 (ctx, h, value, retArea) =>
                 {
-                    ((TcpSocket)socks.Get(h)).SetHopLimit((byte)value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((TcpSocket)socks.Get(h))
+                        .SetHopLimit((byte)value);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (TcpNs, "[method]tcp-socket.receive-buffer-size"),
                 (ctx, h, retArea) =>
-                    WriteOkU64(ctx.Memory(), retArea,
+                    WriteResultU64(ctx.Memory(), retArea,
                         ((TcpSocket)socks.Get(h)).ReceiveBufferSize()));
 
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (TcpNs, "[method]tcp-socket.set-receive-buffer-size"),
                 (ctx, h, value, retArea) =>
                 {
-                    ((TcpSocket)socks.Get(h)).SetReceiveBufferSize(
-                        (ulong)value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((TcpSocket)socks.Get(h))
+                        .SetReceiveBufferSize((ulong)value);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (TcpNs, "[method]tcp-socket.send-buffer-size"),
                 (ctx, h, retArea) =>
-                    WriteOkU64(ctx.Memory(), retArea,
+                    WriteResultU64(ctx.Memory(), retArea,
                         ((TcpSocket)socks.Get(h)).SendBufferSize()));
 
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (TcpNs, "[method]tcp-socket.set-send-buffer-size"),
                 (ctx, h, value, retArea) =>
                 {
-                    ((TcpSocket)socks.Get(h)).SetSendBufferSize(
-                        (ulong)value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((TcpSocket)socks.Get(h))
+                        .SetSendBufferSize((ulong)value);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
         }
     }
