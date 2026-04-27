@@ -22,18 +22,12 @@ namespace Wacs.WASI.Preview2.Io
         //     blocking-skip: func(len: u64) -> result<u64, stream-error>;
         //     subscribe: func() -> own<pollable>;
         //   }
-        //
-        // Wire forms:
-        //   read / blocking-read: (handle i32, len i64, retArea i32) → void
-        //                          retArea = 12 bytes, list<u8> Ok side
-        //   skip / blocking-skip: (handle i32, len i64, retArea i32) → void
-        //                          retArea = 16 bytes, u64 Ok side
-        //   subscribe:            (handle i32) → i32 (pollable handle)
-        private static void BindInputStream(WasmRuntime runtime,
+        private void BindInputStream(WasmRuntime runtime,
             ResourceContext resources, Realloc alloc)
         {
             var streams = resources.Table<InputStream>();
             var pollables = resources.Table<Pollable>();
+            var errors = resources.Table<Error>();
 
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (Ns, "[resource-drop]input-stream"),
@@ -42,35 +36,39 @@ namespace Wacs.WASI.Preview2.Io
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (Ns, "[method]input-stream.read"),
                 (ctx, handle, len, retArea) =>
-                    WriteOkByteList(ctx, alloc, retArea,
+                    WriteResultByteList(ctx, errors, alloc, retArea,
                         ((InputStream)streams.Get(handle))
                             .Read((ulong)len)));
 
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (Ns, "[method]input-stream.blocking-read"),
                 (ctx, handle, len, retArea) =>
-                    WriteOkByteList(ctx, alloc, retArea,
+                    WriteResultByteList(ctx, errors, alloc, retArea,
                         ((InputStream)streams.Get(handle))
                             .BlockingRead((ulong)len)));
 
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (Ns, "[method]input-stream.skip"),
                 (ctx, handle, len, retArea) =>
-                    WriteOkU64(ctx, retArea,
+                    WriteResultU64(ctx, errors, retArea,
                         ((InputStream)streams.Get(handle))
                             .Skip((ulong)len)));
 
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (Ns, "[method]input-stream.blocking-skip"),
                 (ctx, handle, len, retArea) =>
-                    WriteOkU64(ctx, retArea,
+                    WriteResultU64(ctx, errors, retArea,
                         ((InputStream)streams.Get(handle))
                             .BlockingSkip((ulong)len)));
 
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[method]input-stream.subscribe"),
-                (_, handle) => pollables.Allocate(
-                    ((InputStream)streams.Get(handle)).Subscribe()));
+                (_, handle) =>
+                {
+                    var p = ((InputStream)streams.Get(handle))
+                        .Subscribe();
+                    return pollables.Allocate((Pollable)p);
+                });
         }
     }
 }

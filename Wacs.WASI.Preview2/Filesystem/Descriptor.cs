@@ -7,6 +7,7 @@
 
 using System;
 using System.IO;
+using Wacs.ComponentModel.Runtime;
 using Wacs.WASI.Preview2.Clocks;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.Io;
@@ -682,18 +683,30 @@ namespace Wacs.WASI.Preview2.Filesystem
         private readonly Stream _stream;
         public HostFileInputStream(Stream stream) { _stream = stream; }
 
-        public override byte[] Read(ulong len)
+        public override Result<byte[], StreamError> Read(ulong len)
         {
             int n = (int)System.Math.Min(len, (ulong)int.MaxValue);
             var buf = new byte[n];
-            int read = _stream.Read(buf, 0, n);
-            if (read == n) return buf;
+            int read;
+            try { read = _stream.Read(buf, 0, n); }
+            catch (System.Exception e)
+            {
+                return Result<byte[], StreamError>.FromErr(
+                    new StreamError.StreamErrorLastOperationFailed(
+                        new Wacs.WASI.Preview2.Io.Error(e.Message)));
+            }
+            if (read == 0)
+                return Result<byte[], StreamError>.FromErr(
+                    new StreamError.StreamErrorClosed());
+            if (read == n)
+                return Result<byte[], StreamError>.FromOk(buf);
             var slice = new byte[read];
             System.Array.Copy(buf, 0, slice, 0, read);
-            return slice;
+            return Result<byte[], StreamError>.FromOk(slice);
         }
 
-        public override byte[] BlockingRead(ulong len) => Read(len);
+        public override Result<byte[], StreamError> BlockingRead(ulong len)
+            => Read(len);
         public override void Dispose() { _stream.Dispose(); }
     }
 
@@ -705,19 +718,49 @@ namespace Wacs.WASI.Preview2.Filesystem
         private readonly Stream _stream;
         public HostFileOutputStream(Stream stream) { _stream = stream; }
 
-        public override void Write(byte[] contents)
+        public override Result<Unit, StreamError> Write(byte[] contents)
         {
-            _stream.Write(contents, 0, contents.Length);
+            try { _stream.Write(contents, 0, contents.Length); }
+            catch (System.Exception e)
+            {
+                return Result<Unit, StreamError>.FromErr(
+                    new StreamError.StreamErrorLastOperationFailed(
+                        new Wacs.WASI.Preview2.Io.Error(e.Message)));
+            }
+            return Result<Unit, StreamError>.FromOk(Unit.Value);
         }
 
-        public override void BlockingWriteAndFlush(byte[] contents)
+        public override Result<Unit, StreamError> BlockingWriteAndFlush(
+            byte[] contents)
         {
-            _stream.Write(contents, 0, contents.Length);
-            _stream.Flush();
+            try
+            {
+                _stream.Write(contents, 0, contents.Length);
+                _stream.Flush();
+            }
+            catch (System.Exception e)
+            {
+                return Result<Unit, StreamError>.FromErr(
+                    new StreamError.StreamErrorLastOperationFailed(
+                        new Wacs.WASI.Preview2.Io.Error(e.Message)));
+            }
+            return Result<Unit, StreamError>.FromOk(Unit.Value);
         }
 
-        public override void Flush() { _stream.Flush(); }
-        public override void BlockingFlush() { _stream.Flush(); }
+        public override Result<Unit, StreamError> Flush()
+        {
+            try { _stream.Flush(); }
+            catch (System.Exception e)
+            {
+                return Result<Unit, StreamError>.FromErr(
+                    new StreamError.StreamErrorLastOperationFailed(
+                        new Wacs.WASI.Preview2.Io.Error(e.Message)));
+            }
+            return Result<Unit, StreamError>.FromOk(Unit.Value);
+        }
+
+        public override Result<Unit, StreamError> BlockingFlush()
+            => Flush();
         public override void Dispose() { _stream.Dispose(); }
     }
 }

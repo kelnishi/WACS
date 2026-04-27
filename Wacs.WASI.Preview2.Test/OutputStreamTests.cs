@@ -38,9 +38,10 @@ namespace Wacs.WASI.Preview2.Test
             public System.Collections.Generic.List<byte> Captured =
                 new System.Collections.Generic.List<byte>();
 
-            public override void Write(byte[] contents)
+            public override Result<Unit, StreamError> Write(byte[] contents)
             {
                 Captured.AddRange(contents);
+                return Result<Unit, StreamError>.FromOk(Unit.Value);
             }
         }
 
@@ -86,7 +87,7 @@ namespace Wacs.WASI.Preview2.Test
             private readonly byte[] _bytes;
             private int _pos;
             public FixedSourceStream(byte[] bytes) { _bytes = bytes; }
-            public override byte[] Read(ulong len)
+            public override Result<byte[], StreamError> Read(ulong len)
             {
                 int avail = _bytes.Length - _pos;
                 int n = (int)System.Math.Min(
@@ -95,17 +96,21 @@ namespace Wacs.WASI.Preview2.Test
                 var slice = new byte[n];
                 System.Array.Copy(_bytes, _pos, slice, 0, n);
                 _pos += n;
-                return slice;
+                return Result<byte[], StreamError>.FromOk(slice);
             }
-            public override byte[] BlockingRead(ulong len) => Read(len);
+            public override Result<byte[], StreamError> BlockingRead(ulong len)
+                => Read(len);
         }
 
         public sealed class SinkStream : OutputStream
         {
             public System.Collections.Generic.List<byte> Captured =
                 new System.Collections.Generic.List<byte>();
-            public override void Write(byte[] contents)
-                => Captured.AddRange(contents);
+            public override Result<Unit, StreamError> Write(byte[] contents)
+            {
+                Captured.AddRange(contents);
+                return Result<Unit, StreamError>.FromOk(Unit.Value);
+            }
         }
 
         [Fact]
@@ -141,10 +146,17 @@ namespace Wacs.WASI.Preview2.Test
         {
             public ulong LastWriteZeroes;
             public ulong LastBlockingWriteZeroes;
-            public override void WriteZeroes(ulong len)
-                => LastWriteZeroes = len;
-            public override void BlockingWriteZeroesAndFlush(ulong len)
-                => LastBlockingWriteZeroes = len;
+            public override Result<Unit, StreamError> WriteZeroes(ulong len)
+            {
+                LastWriteZeroes = len;
+                return Result<Unit, StreamError>.FromOk(Unit.Value);
+            }
+            public override Result<Unit, StreamError>
+                BlockingWriteZeroesAndFlush(ulong len)
+            {
+                LastBlockingWriteZeroes = len;
+                return Result<Unit, StreamError>.FromOk(Unit.Value);
+            }
         }
 
         [Fact]
