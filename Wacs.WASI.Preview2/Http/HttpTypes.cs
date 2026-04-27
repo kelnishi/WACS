@@ -382,6 +382,22 @@ namespace Wacs.WASI.Preview2.Http
         public virtual OutputStream Write()
             => _stream ??= new OutputStream();
 
+        /// <summary>Mark the body as complete with optional
+        /// trailers. WIT
+        /// <c>finish: static func(this: own&lt;outgoing-body&gt;,
+        ///   trailers: option&lt;own&lt;trailers&gt;&gt;)
+        ///   -&gt; result&lt;_, error-code&gt;</c>.
+        /// At the wire level, an instance method's first
+        /// param IS the resource handle, so this can stay an
+        /// instance method on the C# class — the
+        /// [WasiStaticMethod] attribute just changes the
+        /// import-name prefix from [method] to [static].
+        /// </summary>
+        [WasiErrorResult]
+        [WasiStaticMethod]
+        public virtual void Finish(
+            [WasiOptionalParam] Fields? trailers) { }
+
         public virtual void Dispose() { }
     }
 

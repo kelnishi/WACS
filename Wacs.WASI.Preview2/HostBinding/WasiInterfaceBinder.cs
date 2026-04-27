@@ -714,9 +714,14 @@ namespace Wacs.WASI.Preview2.HostBinding
             // method name can't kebab-case back to the WIT
             // name (e.g. WIT "get-type" can't come from
             // GetType which clashes with Object.GetType).
+            // [WasiStaticMethod] swaps the [method] prefix
+            // for [static] — wire form is otherwise identical.
             var nameAttr = m.GetCustomAttribute<WasiMethodNameAttribute>();
             var rawName = nameAttr?.WitName ?? ToKebabCase(m.Name);
-            var importName = "[method]" + witResourceName + "." + rawName;
+            var prefix = m.GetCustomAttribute<
+                WasiStaticMethodAttribute>() != null
+                ? "[static]" : "[method]";
+            var importName = prefix + witResourceName + "." + rawName;
             var paramInfos = m.GetParameters();
 
             // [WasiStreamResult]-tagged methods canon-lower to
@@ -2430,7 +2435,10 @@ namespace Wacs.WASI.Preview2.HostBinding
             // Each param: primitive / enum (1 wire slot),
             // string (2 wire slots: ptr + len),
             // borrow<resource> (1 wire slot: handle resolved
-            // via ResourceContext), IpSocketAddress (12
+            // via ResourceContext),
+            // option<own<resource>> (2 wire slots: option
+            // disc + handle, tagged [WasiOptionalParam]),
+            // IpSocketAddress (12
             // wire slots — variant flat-lowering: 1 disc +
             // 11 joined-case payload slots, all i32),
             // NewTimestamp (3 wire slots: variant disc +
@@ -2440,6 +2448,10 @@ namespace Wacs.WASI.Preview2.HostBinding
             // byte[][] (2 wire slots: list-ptr + list-len,
             // per-elem 8 bytes ptr+len decoded in body).
             // Aggregates (records, lists) stay deferred.
+            bool IsOptResource(ParameterInfo p)
+                => p.GetCustomAttribute<WasiOptionalParamAttribute>() != null
+                   && p.ParameterType.GetCustomAttribute<
+                       WasiResourceAttribute>() != null;
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)
                     && !p.ParameterType.IsEnum
@@ -2448,6 +2460,7 @@ namespace Wacs.WASI.Preview2.HostBinding
                     && p.ParameterType != typeof(byte[][])
                     && p.ParameterType.GetCustomAttribute<
                         WasiResourceAttribute>() == null
+                    && !IsOptResource(p)
                     && p.ParameterType != typeof(
                         Wacs.WASI.Preview2.Sockets.IpSocketAddress)
                     && p.ParameterType != typeof(
@@ -2465,7 +2478,8 @@ namespace Wacs.WASI.Preview2.HostBinding
             {
                 if (p.ParameterType == typeof(string)
                     || p.ParameterType == typeof(byte[])
-                    || p.ParameterType == typeof(byte[][]))
+                    || p.ParameterType == typeof(byte[][])
+                    || IsOptResource(p))
                     paramSlotCount += 2;
                 else if (p.ParameterType == typeof(
                     Wacs.WASI.Preview2.Sockets.IpSocketAddress))
@@ -2491,6 +2505,11 @@ namespace Wacs.WASI.Preview2.HostBinding
                 {
                     wireParamTypes[wi++] = typeof(int);   // ptr
                     wireParamTypes[wi++] = typeof(int);   // len
+                }
+                else if (IsOptResource(p))
+                {
+                    wireParamTypes[wi++] = typeof(int);   // option disc
+                    wireParamTypes[wi++] = typeof(int);   // handle
                 }
                 else if (p.ParameterType.GetCustomAttribute<
                     WasiResourceAttribute>() != null)
@@ -2557,6 +2576,13 @@ namespace Wacs.WASI.Preview2.HostBinding
                     lambdaParams[wi++] = Expression.Parameter(
                         typeof(int), paramInfos[i].Name + "_len");
                 }
+                else if (IsOptResource(paramInfos[i]))
+                {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_optDisc");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_handle");
+                }
                 else if (paramInfos[i].ParameterType == typeof(
                     Wacs.WASI.Preview2.Sockets.IpSocketAddress))
                 {
@@ -2612,7 +2638,8 @@ namespace Wacs.WASI.Preview2.HostBinding
             // Resource params resolve via the per-component
             // ResourceContext (closure-captured). Without one
             // we can't decode borrow handles, so demand it
-            // upfront.
+            // upfront. option<own<resource>> params also need
+            // the table to resolve the Some-side handle.
             var hasResourceParam = paramInfos.Any(p =>
                 p.ParameterType.GetCustomAttribute<
                     WasiResourceAttribute>() != null);
@@ -2671,6 +2698,29 @@ namespace Wacs.WASI.Preview2.HostBinding
                     argExprs[i] = Expression.Convert(
                         Expression.Call(decodeListMethod,
                             memoryAccess, ptrParam, lenParam),
+                        typeof(object));
+                }
+                else if (IsOptResource(paramInfos[i]))
+                {
+                    // option<own<resource>> param: 2 slots
+                    // (option disc + handle). Resolve via
+                    // table when disc==1, else null.
+                    var optDiscParam = lambdaParams[wi++];
+                    var handleParam = lambdaParams[wi++];
+                    var paramTable = Expression.Call(contextConst,
+                        tableForMethod,
+                        Expression.Constant(paramInfos[i].ParameterType));
+                    var resolved = Expression.Convert(
+                        Expression.Call(paramTable, getResourceMethod,
+                            handleParam),
+                        paramInfos[i].ParameterType);
+                    argExprs[i] = Expression.Convert(
+                        Expression.Condition(
+                            Expression.Equal(optDiscParam,
+                                Expression.Constant(0)),
+                            Expression.Constant(null,
+                                paramInfos[i].ParameterType),
+                            resolved),
                         typeof(object));
                 }
                 else if (paramInfos[i].ParameterType.GetCustomAttribute<
