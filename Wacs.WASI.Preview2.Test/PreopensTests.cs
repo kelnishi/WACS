@@ -33,9 +33,10 @@ namespace Wacs.WASI.Preview2.Test
 
         private sealed class StubPreopens : IPreopens
         {
-            private readonly (Descriptor, string)[] _dirs;
-            public StubPreopens((Descriptor, string)[] dirs) { _dirs = dirs; }
-            public (Descriptor, string)[] GetDirectories() => _dirs;
+            private readonly (IDescriptor, string)[] _dirs;
+            public StubPreopens((IDescriptor, string)[] dirs)
+            { _dirs = dirs; }
+            public (IDescriptor, string)[] GetDirectories() => _dirs;
         }
 
         [Fact]
@@ -47,7 +48,7 @@ namespace Wacs.WASI.Preview2.Test
             var bytes = File.ReadAllBytes(FindFixturePath(
                 "wasi-preopens-component", "po.component.wasm"));
             var resources = new ResourceContext();
-            var stub = new StubPreopens(new[]
+            var stub = new StubPreopens(new (IDescriptor, string)[]
             {
                 (new Descriptor("/"), "/"),
                 (new Descriptor("/tmp"), "/tmp"),
@@ -69,7 +70,8 @@ namespace Wacs.WASI.Preview2.Test
             var bytes = File.ReadAllBytes(FindFixturePath(
                 "wasi-preopens-component", "po.component.wasm"));
             var resources = new ResourceContext();
-            var stub = new StubPreopens(System.Array.Empty<(Descriptor, string)>());
+            var stub = new StubPreopens(
+                System.Array.Empty<(IDescriptor, string)>());
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
                 new FilesystemBindings(resources, preopens: stub)

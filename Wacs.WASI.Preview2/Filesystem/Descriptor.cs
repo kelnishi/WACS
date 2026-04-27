@@ -14,128 +14,22 @@ using Wacs.WASI.Preview2.Io;
 
 namespace Wacs.WASI.Preview2.Filesystem
 {
-    /// <summary>WIT flags
-    /// <c>wasi:filesystem/types.path-flags</c>. Wire form is
-    /// i32 with one bit per flag.</summary>
-    [System.Flags]
-    public enum PathFlags : uint
-    {
-        None = 0,
-        SymlinkFollow = 1 << 0,
-    }
-
-    /// <summary>WIT flags
-    /// <c>wasi:filesystem/types.open-flags</c>.</summary>
-    [System.Flags]
-    public enum OpenFlags : uint
-    {
-        None = 0,
-        Create = 1 << 0,
-        Directory = 1 << 1,
-        Exclusive = 1 << 2,
-        Truncate = 1 << 3,
-    }
-
-    /// <summary>WIT flags
-    /// <c>wasi:filesystem/types.descriptor-flags</c>.</summary>
-    [System.Flags]
-    public enum DescriptorFlags : uint
-    {
-        None = 0,
-        Read = 1 << 0,
-        Write = 1 << 1,
-        FileIntegritySync = 1 << 2,
-        DataIntegritySync = 1 << 3,
-        RequestedWriteSync = 1 << 4,
-        MutateDirectory = 1 << 5,
-    }
-
-    /// <summary>WIT enum
-    /// <c>wasi:filesystem/types.error-code</c>. The full
-    /// v0.2.3 spec has 37 cases, captured here as a byte
-    /// enum with declaration-order values. Used as the
-    /// Some payload of <c>filesystem-error-code()</c>.
-    /// </summary>
-    public enum FilesystemErrorCode : byte
-    {
-        Access = 0,
-        WouldBlock = 1,
-        Already = 2,
-        BadDescriptor = 3,
-        Busy = 4,
-        Deadlock = 5,
-        Quota = 6,
-        Exist = 7,
-        FileTooLarge = 8,
-        IllegalByteSequence = 9,
-        InProgress = 10,
-        Interrupted = 11,
-        Invalid = 12,
-        Io = 13,
-        IsDirectory = 14,
-        Loop = 15,
-        TooManyLinks = 16,
-        MessageSize = 17,
-        NameTooLong = 18,
-        NoDevice = 19,
-        NoEntry = 20,
-        NoLock = 21,
-        InsufficientMemory = 22,
-        InsufficientSpace = 23,
-        NotDirectory = 24,
-        NotEmpty = 25,
-        NotRecoverable = 26,
-        Unsupported = 27,
-        NoTty = 28,
-        NoSuchDevice = 29,
-        Overflow = 30,
-        NotPermitted = 31,
-        Pipe = 32,
-        ReadOnly = 33,
-        InvalidSeek = 34,
-        TextFileBusy = 35,
-        CrossDevice = 36,
-    }
-
-    /// <summary>Host-side surface for the top-level
-    /// <c>wasi:filesystem/types.filesystem-error-code</c>:
-    /// <code>filesystem-error-code: func(err: borrow&lt;error&gt;)
-    ///     -&gt; option&lt;error-code&gt;;</code>
-    /// Returns null when <paramref name="err"/> is not a
-    /// filesystem error; matching <see cref="FilesystemErrorCode"/>
-    /// otherwise.</summary>
-    public interface IFilesystemErrorCode
-    {
-        FilesystemErrorCode? FilesystemErrorCode(
-            Wacs.WASI.Preview2.Io.Error err);
-    }
-
-    /// <summary>Default <see cref="IFilesystemErrorCode"/>
-    /// — returns null regardless of input. Concrete hosts
-    /// override to classify <see cref="Wacs.WASI.Preview2.Io.Error"/>
-    /// instances as filesystem errors.</summary>
-    public sealed class FilesystemErrorCodeSource : IFilesystemErrorCode
-    {
-        public FilesystemErrorCode? FilesystemErrorCode(
-            Wacs.WASI.Preview2.Io.Error err) => null;
-    }
-
-    /// <summary>WIT enum
-    /// <c>wasi:filesystem/types.advice</c> — hint for
-    /// descriptor.advise().</summary>
-    public enum Advice : byte
-    {
-        Normal = 0,
-        Sequential = 1,
-        Random = 2,
-        WillNeed = 3,
-        DontNeed = 4,
-        NoReuse = 5,
-    }
+    // The WIT-derived enums + records (DescriptorType,
+    // DescriptorFlags, PathFlags, OpenFlags, Advice, ErrorCode,
+    // MetadataHashValue, DescriptorStat, DirectoryEntry,
+    // NewTimestamp + nested cases, IDescriptor,
+    // IDirectoryEntryStream, IPreopens, ITypes) are emitted by
+    // the source generator from wit/deps/filesystem/*.wit and
+    // land in this namespace. Hand-written code below adds the
+    // host-side impls + a couple of types that don't appear in
+    // the WIT (AccessType, AccessTypeAccess, etc.).
 
     /// <summary>WIT flags
     /// <c>wasi:filesystem/types.modes</c> — accessibility
-    /// modes used by access-type's access(modes) case.</summary>
+    /// modes used by access-type's access(modes) case. Not
+    /// part of the v0.2.3 WIT itself; retained as a
+    /// host-only extension surface for the
+    /// <see cref="Descriptor.AccessAt"/> helper.</summary>
     [System.Flags]
     public enum AccessModes : uint
     {
@@ -145,8 +39,8 @@ namespace Wacs.WASI.Preview2.Filesystem
         Executable = 1 << 2,
     }
 
-    /// <summary>WIT variant
-    /// <c>wasi:filesystem/types.access-type</c>:
+    /// <summary>Host-only variant approximating WIT
+    /// <c>access-type</c>:
     /// <code>variant access-type {
     ///   access(modes),       // bit-mask of which modes to test
     ///   exists,              // existence-only check
@@ -165,139 +59,23 @@ namespace Wacs.WASI.Preview2.Filesystem
     /// <summary>access-type case "exists" (no payload).</summary>
     public sealed class AccessTypeExists : AccessType { }
 
-    /// <summary>WIT variant
-    /// <c>wasi:filesystem/types.new-timestamp</c>:
-    /// <code>variant new-timestamp {
-    ///   no-change, now, timestamp(datetime),
-    /// }</code>
-    /// Used as a param to <see cref="Descriptor.SetTimes"/>.
-    /// Wire form: variant disc (u8) + datetime payload at
-    /// align-8 offset; flat-lowered as 3 wire slots
-    /// (disc + i64 seconds + i32 nanoseconds).</summary>
-    public abstract class NewTimestamp { }
-
-    /// <summary>"Don't change this timestamp."</summary>
-    public sealed class NewTimestampNoChange : NewTimestamp { }
-
-    /// <summary>"Set this timestamp to now."</summary>
-    public sealed class NewTimestampNow : NewTimestamp { }
-
-    /// <summary>"Set this timestamp to the given
-    /// <see cref="Wacs.WASI.Preview2.Clocks.Datetime"/>."</summary>
-    public sealed class NewTimestampTimestamp : NewTimestamp
-    {
-        public Datetime Value { get; }
-        public NewTimestampTimestamp(Datetime value) { Value = value; }
-    }
-
-    /// <summary>WIT record
-    /// <c>wasi:filesystem/types.metadata-hash-value</c>:
-    /// <code>record metadata-hash-value { lower: u64, upper: u64 }</code>
-    /// </summary>
-    public struct MetadataHashValue
-    {
-        public ulong Lower;
-        public ulong Upper;
-
-        public MetadataHashValue(ulong lower, ulong upper)
-        {
-            Lower = lower;
-            Upper = upper;
-        }
-    }
-
-    /// <summary>WIT record
-    /// <c>wasi:filesystem/types.directory-entry</c>:
-    /// <code>record directory-entry {
-    ///     type: descriptor-type,
-    ///     name: string,
-    /// }</code>
-    /// </summary>
-    public sealed class DirectoryEntry
-    {
-        public DescriptorType Type { get; }
-        public string Name { get; }
-
-        public DirectoryEntry(DescriptorType type, string name)
-        {
-            Type = type;
-            Name = name ?? throw new ArgumentNullException(nameof(name));
-        }
-    }
-
-    /// <summary>WIT record
-    /// <c>wasi:filesystem/types.descriptor-stat</c> — the
-    /// "stat" payload returned by descriptor.stat. Three
-    /// option<datetime> fields cover access / modification /
-    /// status-change timestamps; null on any of them means
-    /// the host doesn't track that timestamp.
-    /// <code>
-    /// record descriptor-stat {
-    ///   type: descriptor-type,
-    ///   link-count: u64,
-    ///   size: u64,
-    ///   data-access-timestamp: option<datetime>,
-    ///   data-modification-timestamp: option<datetime>,
-    ///   status-change-timestamp: option<datetime>,
-    /// }
-    /// </code>
-    /// Wire size 96, align 8. The result wrapper bumps total
-    /// retArea to 104 bytes.</summary>
-    public sealed class DescriptorStat
-    {
-        public DescriptorType Type { get; }
-        public ulong LinkCount { get; }
-        public ulong Size { get; }
-        public Datetime? DataAccessTimestamp { get; }
-        public Datetime? DataModificationTimestamp { get; }
-        public Datetime? StatusChangeTimestamp { get; }
-
-        public DescriptorStat(DescriptorType type, ulong linkCount,
-            ulong size,
-            Datetime? dataAccessTimestamp,
-            Datetime? dataModificationTimestamp,
-            Datetime? statusChangeTimestamp)
-        {
-            Type = type;
-            LinkCount = linkCount;
-            Size = size;
-            DataAccessTimestamp = dataAccessTimestamp;
-            DataModificationTimestamp = dataModificationTimestamp;
-            StatusChangeTimestamp = statusChangeTimestamp;
-        }
-    }
-
-    /// <summary>WIT enum
-    /// <c>wasi:filesystem/types.descriptor-type</c>. The wire
-    /// representation is a 1-byte discriminator; the host
-    /// returns the C# enum and the binder reads its
-    /// underlying byte.</summary>
-    public enum DescriptorType : byte
-    {
-        Unknown = 0,
-        BlockDevice = 1,
-        CharacterDevice = 2,
-        Directory = 3,
-        Fifo = 4,
-        SymbolicLink = 5,
-        RegularFile = 6,
-        Socket = 7,
-    }
-
     /// <summary>
-    /// Host representation of <c>wasi:filesystem/types@0.2.x</c>'s
-    /// <c>descriptor</c> resource. Stands in for an opened file
-    /// or directory.
+    /// Host representation of <c>wasi:filesystem/types@0.2.3</c>'s
+    /// <c>descriptor</c> resource. Implements
+    /// <see cref="IDescriptor"/> directly — every method returns
+    /// the faithful canonical-ABI <c>result&lt;X,
+    /// error-code&gt;</c> shape, surfacing
+    /// <see cref="ErrorCode"/> values rather than thrown
+    /// exceptions on the explicit error path.
     ///
     /// <para>v0 ships the bridge methods (read-via-stream,
     /// write-via-stream, append-via-stream) that turn a
-    /// descriptor into an input/output-stream. The remaining
-    /// ~25 descriptor methods (open-at, stat, get-type,
-    /// readlink-at, etc.) ride incrementally as their wire
-    /// shapes become tractable.</para>
+    /// descriptor into an input/output-stream, plus default
+    /// impls of the major path / metadata operations that
+    /// proxy to <see cref="System.IO"/>.</para>
     /// </summary>
     [WasiResource("descriptor")]
-    public class Descriptor : IDisposable
+    public class Descriptor : IDescriptor, IDisposable
     {
         /// <summary>Underlying filesystem path the descriptor
         /// represents — used by host implementations that
@@ -317,17 +95,21 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// <see cref="DescriptorType.Unknown"/>. Subclasses
         /// override for virtual paths.
         ///
-        /// <para>Method is named <c>GetDescriptorType</c> rather
-        /// than <c>GetType</c> to avoid the
-        /// <see cref="object.GetType"/> clash; the
-        /// <see cref="WasiMethodNameAttribute"/> override
-        /// restores the WIT name <c>get-type</c>.</para></summary>
+        /// <para>Method is implemented as an explicit interface
+        /// member (<see cref="IDescriptor.GetType"/>) to avoid
+        /// the <see cref="object.GetType"/> clash. Host
+        /// subclasses override <see cref="GetDescriptorType"/>;
+        /// the explicit-interface shim wraps the result.</para>
+        /// </summary>
         public virtual DescriptorType GetDescriptorType()
         {
             if (Directory.Exists(Path)) return DescriptorType.Directory;
             if (File.Exists(Path)) return DescriptorType.RegularFile;
             return DescriptorType.Unknown;
         }
+
+        Result<DescriptorType, ErrorCode> IDescriptor.GetType()
+            => Result<DescriptorType, ErrorCode>.FromOk(GetDescriptorType());
 
         /// <summary>Open the file for reading from
         /// <paramref name="offset"/>. Returns an
@@ -343,6 +125,9 @@ namespace Wacs.WASI.Preview2.Filesystem
             return new HostFileInputStream(stream);
         }
 
+        Result<IInputStream, ErrorCode> IDescriptor.ReadViaStream(ulong offset)
+            => Result<IInputStream, ErrorCode>.FromOk(ReadViaStream(offset));
+
         /// <summary>Open the file for writing at
         /// <paramref name="offset"/>. Returns an
         /// <see cref="OutputStream"/> wrapping the underlying
@@ -355,6 +140,9 @@ namespace Wacs.WASI.Preview2.Filesystem
             return new HostFileOutputStream(stream);
         }
 
+        Result<IOutputStream, ErrorCode> IDescriptor.WriteViaStream(ulong offset)
+            => Result<IOutputStream, ErrorCode>.FromOk(WriteViaStream(offset));
+
         /// <summary>Open the file for appending. Returns an
         /// <see cref="OutputStream"/> positioned at EOF.</summary>
         public virtual OutputStream AppendViaStream()
@@ -364,22 +152,28 @@ namespace Wacs.WASI.Preview2.Filesystem
             return new HostFileOutputStream(stream);
         }
 
+        Result<IOutputStream, ErrorCode> IDescriptor.AppendViaStream()
+            => Result<IOutputStream, ErrorCode>.FromOk(AppendViaStream());
+
         /// <summary>Force any buffered modifications to be
         /// flushed to durable storage. Default: no-op (host
         /// streams flush on close anyway).</summary>
-        public virtual void Sync() { }
+        public virtual Result<Unit, ErrorCode> Sync()
+            => Result<Unit, ErrorCode>.FromOk(Unit.Value);
 
         /// <summary>Like <see cref="Sync"/> but only flushes
         /// data, not metadata. Default: no-op.</summary>
-        public virtual void SyncData() { }
+        public virtual Result<Unit, ErrorCode> SyncData()
+            => Result<Unit, ErrorCode>.FromOk(Unit.Value);
 
         /// <summary>Truncate or extend the file to
         /// <paramref name="size"/> bytes.</summary>
-        public virtual void SetSize(ulong size)
+        public virtual Result<Unit, ErrorCode> SetSize(ulong size)
         {
             using var fs = new FileStream(Path, FileMode.Open,
                 FileAccess.Write);
             fs.SetLength((long)size);
+            return Result<Unit, ErrorCode>.FromOk(Unit.Value);
         }
 
         /// <summary>Direct read from the file at
@@ -390,7 +184,8 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// requested bytes). The streams interface goes through
         /// <see cref="ReadViaStream"/>; this is the direct path
         /// for guests that don't want a stream's buffering.</summary>
-        public virtual (byte[], bool) Read(ulong length, ulong offset)
+        public virtual Result<(byte[], bool), ErrorCode> Read(
+            ulong length, ulong offset)
         {
             using var fs = File.OpenRead(Path);
             if (offset > 0)
@@ -399,45 +194,52 @@ namespace Wacs.WASI.Preview2.Filesystem
             var buf = new byte[n];
             int read = fs.Read(buf, 0, n);
             bool atEof = fs.Position >= fs.Length;
-            if (read == n) return (buf, atEof);
-            var slice = new byte[read];
-            System.Array.Copy(buf, 0, slice, 0, read);
-            return (slice, atEof);
+            byte[] data;
+            if (read == n) data = buf;
+            else
+            {
+                data = new byte[read];
+                System.Array.Copy(buf, 0, data, 0, read);
+            }
+            return Result<(byte[], bool), ErrorCode>.FromOk((data, atEof));
         }
 
         /// <summary>Write <paramref name="buffer"/> at
         /// <paramref name="offset"/>. Returns count actually
         /// written.</summary>
-        public virtual ulong Write(byte[] buffer, ulong offset)
+        public virtual Result<ulong, ErrorCode> Write(byte[] buffer, ulong offset)
         {
             using var fs = new FileStream(Path, FileMode.OpenOrCreate,
                 FileAccess.Write);
             if (offset > 0)
                 fs.Seek((long)offset, SeekOrigin.Begin);
             fs.Write(buffer, 0, buffer.Length);
-            return (ulong)buffer.Length;
+            return Result<ulong, ErrorCode>.FromOk((ulong)buffer.Length);
         }
 
         /// <summary>Create a directory at <paramref name="path"/>
         /// relative to this descriptor (treated as a directory).
         /// </summary>
-        public virtual void CreateDirectoryAt(string path)
+        public virtual Result<Unit, ErrorCode> CreateDirectoryAt(string path)
         {
             Directory.CreateDirectory(System.IO.Path.Combine(Path, path));
+            return Result<Unit, ErrorCode>.FromOk(Unit.Value);
         }
 
         /// <summary>Remove the empty directory at
         /// <paramref name="path"/>.</summary>
-        public virtual void RemoveDirectoryAt(string path)
+        public virtual Result<Unit, ErrorCode> RemoveDirectoryAt(string path)
         {
             Directory.Delete(System.IO.Path.Combine(Path, path));
+            return Result<Unit, ErrorCode>.FromOk(Unit.Value);
         }
 
         /// <summary>Unlink (delete) the file at
         /// <paramref name="path"/>.</summary>
-        public virtual void UnlinkFileAt(string path)
+        public virtual Result<Unit, ErrorCode> UnlinkFileAt(string path)
         {
             File.Delete(System.IO.Path.Combine(Path, path));
+            return Result<Unit, ErrorCode>.FromOk(Unit.Value);
         }
 
         /// <summary>Hard-link <paramref name="oldPath"/> under
@@ -445,13 +247,19 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// <paramref name="newDescriptor"/>. Default impl is a
         /// no-op since System.IO has no portable hard-link
         /// API; concrete subclasses override.</summary>
-        public virtual void LinkAt(PathFlags oldPathFlags, string oldPath,
-            Descriptor newDescriptor, string newPath) { }
+        public virtual Result<Unit, ErrorCode> LinkAt(PathFlags oldPathFlags,
+            string oldPath, Descriptor newDescriptor, string newPath)
+            => Result<Unit, ErrorCode>.FromOk(Unit.Value);
+
+        Result<Unit, ErrorCode> IDescriptor.LinkAt(PathFlags oldPathFlags,
+            string oldPath, IDescriptor newDescriptor, string newPath)
+            => LinkAt(oldPathFlags, oldPath,
+                (Descriptor)newDescriptor, newPath);
 
         /// <summary>Rename <paramref name="oldPath"/> under
         /// <c>this</c> to <paramref name="newPath"/> under
         /// <paramref name="newDescriptor"/>.</summary>
-        public virtual void RenameAt(string oldPath,
+        public virtual Result<Unit, ErrorCode> RenameAt(string oldPath,
             Descriptor newDescriptor, string newPath)
         {
             var oldFull = System.IO.Path.Combine(Path, oldPath);
@@ -460,7 +268,12 @@ namespace Wacs.WASI.Preview2.Filesystem
                 File.Move(oldFull, newFull);
             else if (Directory.Exists(oldFull))
                 Directory.Move(oldFull, newFull);
+            return Result<Unit, ErrorCode>.FromOk(Unit.Value);
         }
+
+        Result<Unit, ErrorCode> IDescriptor.RenameAt(string oldPath,
+            IDescriptor newDescriptor, string newPath)
+            => RenameAt(oldPath, (Descriptor)newDescriptor, newPath);
 
         /// <summary>Create a symbolic link at
         /// <paramref name="newPath"/> pointing at
@@ -468,7 +281,9 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// since System.IO has no portable symlink API on
         /// netstandard2.1 — concrete subclasses override.
         /// </summary>
-        public virtual void SymlinkAt(string oldPath, string newPath) { }
+        public virtual Result<Unit, ErrorCode> SymlinkAt(string oldPath,
+            string newPath)
+            => Result<Unit, ErrorCode>.FromOk(Unit.Value);
 
         /// <summary>Open or create a file/directory relative to
         /// this descriptor (treated as a directory) at
@@ -477,8 +292,8 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// Default impl honors <see cref="OpenFlags.Create"/> by
         /// touching the target file; the resulting descriptor's
         /// behavior comes from the base class.</summary>
-        public virtual Descriptor OpenAt(PathFlags pathFlags, string path,
-            OpenFlags openFlags, DescriptorFlags flags)
+        public virtual Result<Descriptor, ErrorCode> OpenAt(PathFlags pathFlags,
+            string path, OpenFlags openFlags, DescriptorFlags flags)
         {
             var fullPath = System.IO.Path.Combine(Path, path);
             if ((openFlags & OpenFlags.Create) != 0
@@ -487,7 +302,16 @@ namespace Wacs.WASI.Preview2.Filesystem
             {
                 File.WriteAllBytes(fullPath, System.Array.Empty<byte>());
             }
-            return new Descriptor(fullPath);
+            return Result<Descriptor, ErrorCode>.FromOk(new Descriptor(fullPath));
+        }
+
+        Result<IDescriptor, ErrorCode> IDescriptor.OpenAt(PathFlags pathFlags,
+            string path, OpenFlags openFlags, DescriptorFlags flags)
+        {
+            var r = OpenAt(pathFlags, path, openFlags, flags);
+            return r.IsOk
+                ? Result<IDescriptor, ErrorCode>.FromOk(r.Ok)
+                : Result<IDescriptor, ErrorCode>.FromErr(r.Err);
         }
 
         /// <summary>Read the target of the symbolic link at
@@ -495,40 +319,48 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// the empty string — concrete subclasses override
         /// (System.IO has no portable readlink in
         /// netstandard2.1).</summary>
-        public virtual string ReadlinkAt(string path) => "";
+        public virtual Result<string, ErrorCode> ReadlinkAt(string path)
+            => Result<string, ErrorCode>.FromOk("");
 
         /// <summary>Inspect file metadata. Returns a
         /// <see cref="DescriptorStat"/> with type / link-count
         /// / size + the three timestamps. Default impl reads
         /// from System.IO.File / Directory; concrete VFS
         /// shims override.</summary>
-        public virtual DescriptorStat Stat()
+        public virtual Result<DescriptorStat, ErrorCode> Stat()
         {
             DescriptorType type = GetDescriptorType();
             ulong linkCount = 1;   // POSIX hardlink count; host-
                                    // only implementations rarely
                                    // know this exactly.
             ulong size = 0;
-            Datetime? mtime = null;
-            Datetime? atime = null;
-            Datetime? ctime = null;
+            Option<Datetime> mtime = Option<Datetime>.None;
+            Option<Datetime> atime = Option<Datetime>.None;
+            Option<Datetime> ctime = Option<Datetime>.None;
             if (type == DescriptorType.RegularFile)
             {
                 var fi = new FileInfo(Path);
                 size = (ulong)fi.Length;
-                atime = ToDatetime(fi.LastAccessTimeUtc);
-                mtime = ToDatetime(fi.LastWriteTimeUtc);
-                ctime = ToDatetime(fi.CreationTimeUtc);
+                atime = Option<Datetime>.Some(ToDatetime(fi.LastAccessTimeUtc));
+                mtime = Option<Datetime>.Some(ToDatetime(fi.LastWriteTimeUtc));
+                ctime = Option<Datetime>.Some(ToDatetime(fi.CreationTimeUtc));
             }
             else if (type == DescriptorType.Directory)
             {
                 var di = new DirectoryInfo(Path);
-                atime = ToDatetime(di.LastAccessTimeUtc);
-                mtime = ToDatetime(di.LastWriteTimeUtc);
-                ctime = ToDatetime(di.CreationTimeUtc);
+                atime = Option<Datetime>.Some(ToDatetime(di.LastAccessTimeUtc));
+                mtime = Option<Datetime>.Some(ToDatetime(di.LastWriteTimeUtc));
+                ctime = Option<Datetime>.Some(ToDatetime(di.CreationTimeUtc));
             }
-            return new DescriptorStat(type, linkCount, size,
-                atime, mtime, ctime);
+            return Result<DescriptorStat, ErrorCode>.FromOk(new DescriptorStat
+            {
+                Type = type,
+                LinkCount = linkCount,
+                Size = size,
+                DataAccessTimestamp = atime,
+                DataModificationTimestamp = mtime,
+                StatusChangeTimestamp = ctime,
+            });
         }
 
         /// <summary>Inspect file metadata at a path relative
@@ -536,8 +368,8 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// shape as <see cref="Stat"/> but takes a relative
         /// path; useful for guests walking trees without
         /// opening every entry.</summary>
-        public virtual DescriptorStat StatAt(PathFlags pathFlags,
-            string path)
+        public virtual Result<DescriptorStat, ErrorCode> StatAt(
+            PathFlags pathFlags, string path)
         {
             var fullPath = System.IO.Path.Combine(Path, path);
             return new Descriptor(fullPath).Stat();
@@ -566,45 +398,59 @@ namespace Wacs.WASI.Preview2.Filesystem
                     System.Array.Empty<DirectoryEntry>());
             var entries = new System.Collections.Generic.List<DirectoryEntry>();
             foreach (var d in Directory.EnumerateDirectories(Path))
-                entries.Add(new DirectoryEntry(DescriptorType.Directory,
-                    System.IO.Path.GetFileName(d) ?? ""));
+                entries.Add(new DirectoryEntry
+                {
+                    Type = DescriptorType.Directory,
+                    Name = System.IO.Path.GetFileName(d) ?? "",
+                });
             foreach (var f in Directory.EnumerateFiles(Path))
-                entries.Add(new DirectoryEntry(DescriptorType.RegularFile,
-                    System.IO.Path.GetFileName(f) ?? ""));
+                entries.Add(new DirectoryEntry
+                {
+                    Type = DescriptorType.RegularFile,
+                    Name = System.IO.Path.GetFileName(f) ?? "",
+                });
             return new DirectoryEntryStream(entries.ToArray());
         }
+
+        Result<IDirectoryEntryStream, ErrorCode> IDescriptor.ReadDirectory()
+            => Result<IDirectoryEntryStream, ErrorCode>.FromOk(ReadDirectory());
 
         /// <summary>Stable hash of the file's identity (inode +
         /// device on POSIX). Two descriptors referring to the
         /// same underlying file return equal values across
         /// <c>get-type</c> changes; default impl hashes
         /// <see cref="Path"/>.</summary>
-        public virtual MetadataHashValue MetadataHash()
+        public virtual Result<MetadataHashValue, ErrorCode> MetadataHash()
         {
             // Cheap deterministic hash from the path; concrete
             // hosts override with stat()-derived inode/device
             // pairs.
             ulong lower = (ulong)Path.GetHashCode();
             ulong upper = lower * 0x9E3779B97F4A7C15UL;
-            return new MetadataHashValue(lower, upper);
+            return Result<MetadataHashValue, ErrorCode>.FromOk(
+                new MetadataHashValue { Lower = lower, Upper = upper });
         }
 
         /// <summary>Read the descriptor's open / mutability
         /// flag set. Default returns Read | Write. Concrete
         /// hosts override based on how the descriptor was
         /// obtained.</summary>
-        public virtual DescriptorFlags GetFlags()
-            => DescriptorFlags.Read | DescriptorFlags.Write;
+        public virtual Result<DescriptorFlags, ErrorCode> GetFlags()
+            => Result<DescriptorFlags, ErrorCode>.FromOk(
+                DescriptorFlags.Read | DescriptorFlags.Write);
 
         /// <summary>Hint at access pattern for the descriptor's
         /// underlying file. Default impl is a no-op — concrete
         /// hosts wire to posix_fadvise on POSIX.</summary>
-        public virtual void Advise(ulong offset, ulong length,
-            Advice advice) { }
+        public virtual Result<Unit, ErrorCode> Advise(ulong offset,
+            ulong length, Advice advice)
+            => Result<Unit, ErrorCode>.FromOk(Unit.Value);
 
         /// <summary>Test existence / accessibility at a path.
         /// Default impl is a no-op stub; concrete hosts
-        /// override.</summary>
+        /// override. NOT part of the v0.2.3 WIT — this is a
+        /// host-only convenience method retained from earlier
+        /// drafts.</summary>
         public virtual void AccessAt(PathFlags pathFlags, string path,
             AccessType type) { }
 
@@ -612,25 +458,29 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// Each arg picks one of three cases (no-change, now,
         /// or a specific datetime) — the host applies the
         /// corresponding utime semantics.</summary>
-        public virtual void SetTimes(NewTimestamp dataAccessTimestamp,
-            NewTimestamp dataModificationTimestamp) { }
+        public virtual Result<Unit, ErrorCode> SetTimes(
+            NewTimestamp dataAccessTimestamp,
+            NewTimestamp dataModificationTimestamp)
+            => Result<Unit, ErrorCode>.FromOk(Unit.Value);
 
         /// <summary>Update timestamps at a relative
         /// path.</summary>
-        public virtual void SetTimesAt(PathFlags pathFlags, string path,
-            NewTimestamp dataAccessTimestamp,
-            NewTimestamp dataModificationTimestamp) { }
+        public virtual Result<Unit, ErrorCode> SetTimesAt(PathFlags pathFlags,
+            string path, NewTimestamp dataAccessTimestamp,
+            NewTimestamp dataModificationTimestamp)
+            => Result<Unit, ErrorCode>.FromOk(Unit.Value);
 
         /// <summary>Hash the file at a relative path. Pairs
         /// with <see cref="MetadataHash"/>; default impl
         /// hashes the full combined path string.</summary>
-        public virtual MetadataHashValue MetadataHashAt(
+        public virtual Result<MetadataHashValue, ErrorCode> MetadataHashAt(
             PathFlags pathFlags, string path)
         {
             var fullPath = System.IO.Path.Combine(Path, path);
             ulong lower = (ulong)fullPath.GetHashCode();
             ulong upper = lower * 0x9E3779B97F4A7C15UL;
-            return new MetadataHashValue(lower, upper);
+            return Result<MetadataHashValue, ErrorCode>.FromOk(
+                new MetadataHashValue { Lower = lower, Upper = upper });
         }
 
         /// <summary>True iff <paramref name="other"/> refers to
@@ -644,6 +494,9 @@ namespace Wacs.WASI.Preview2.Filesystem
             return string.Equals(Path, other.Path, StringComparison.Ordinal);
         }
 
+        bool IDescriptor.IsSameObject(IDescriptor other)
+            => IsSameObject((Descriptor)other);
+
         public virtual void Dispose() { }
     }
 
@@ -654,7 +507,7 @@ namespace Wacs.WASI.Preview2.Filesystem
     /// <see cref="ReadDirectoryEntry"/> for stream sources
     /// that can't fully materialize ahead of time.</summary>
     [WasiResource("directory-entry-stream")]
-    public class DirectoryEntryStream : IDisposable
+    public class DirectoryEntryStream : IDirectoryEntryStream, IDisposable
     {
         private readonly DirectoryEntry[] _entries;
         private int _pos;
@@ -665,12 +518,42 @@ namespace Wacs.WASI.Preview2.Filesystem
                 ?? throw new ArgumentNullException(nameof(entries));
         }
 
-        /// <summary>Pull the next directory entry, or null
-        /// when exhausted.</summary>
-        public virtual DirectoryEntry? ReadDirectoryEntry()
-            => _pos < _entries.Length ? _entries[_pos++] : null;
+        /// <summary>Pull the next directory entry.
+        /// <see cref="Option{T}.None"/> when exhausted.</summary>
+        public virtual Result<Option<DirectoryEntry>, ErrorCode>
+            ReadDirectoryEntry()
+            => Result<Option<DirectoryEntry>, ErrorCode>.FromOk(
+                _pos < _entries.Length
+                    ? Option<DirectoryEntry>.Some(_entries[_pos++])
+                    : Option<DirectoryEntry>.None);
 
         public virtual void Dispose() { }
+    }
+
+    /// <summary>Host-side surface for the top-level
+    /// <c>wasi:filesystem/types.filesystem-error-code</c>:
+    /// <code>filesystem-error-code: func(err: borrow&lt;error&gt;)
+    ///     -&gt; option&lt;error-code&gt;;</code>
+    /// Returns <see cref="Option{T}.None"/> when the error is
+    /// not filesystem-related; matching <see cref="ErrorCode"/>
+    /// otherwise. Implemented as a thin shim around the
+    /// generated <see cref="ITypes"/> interface so concrete
+    /// hosts can implement just this single method without
+    /// providing the rest of the types interface.</summary>
+    public interface IFilesystemErrorCode
+    {
+        Option<ErrorCode> FilesystemErrorCode(
+            Wacs.WASI.Preview2.Io.Error err);
+    }
+
+    /// <summary>Default <see cref="IFilesystemErrorCode"/>
+    /// — returns None regardless of input. Concrete hosts
+    /// override to classify <see cref="Wacs.WASI.Preview2.Io.Error"/>
+    /// instances as filesystem errors.</summary>
+    public sealed class FilesystemErrorCodeSource : IFilesystemErrorCode
+    {
+        public Option<ErrorCode> FilesystemErrorCode(
+            Wacs.WASI.Preview2.Io.Error err) => Option<ErrorCode>.None;
     }
 
     /// <summary>InputStream that wraps a host

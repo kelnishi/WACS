@@ -88,8 +88,16 @@ namespace Wacs.WASI.Preview2.Test
             public int SyncCalls;
             public ulong LastSetSize;
             public TrackingDescriptor() : base("/synthetic") { }
-            public override void Sync() => SyncCalls++;
-            public override void SetSize(ulong size) => LastSetSize = size;
+            public override Result<Unit, ErrorCode> Sync()
+            {
+                SyncCalls++;
+                return Result<Unit, ErrorCode>.FromOk(Unit.Value);
+            }
+            public override Result<Unit, ErrorCode> SetSize(ulong size)
+            {
+                LastSetSize = size;
+                return Result<Unit, ErrorCode>.FromOk(Unit.Value);
+            }
         }
 
         [Fact]
@@ -134,10 +142,11 @@ namespace Wacs.WASI.Preview2.Test
         {
             public string LastPath = "";
             public ReadlinkDescriptor() : base("/synthetic") { }
-            public override string ReadlinkAt(string path)
+            public override Result<string, ErrorCode> ReadlinkAt(string path)
             {
                 LastPath = path;
-                return "/links/target/" + path;
+                return Result<string, ErrorCode>.FromOk(
+                    "/links/target/" + path);
             }
         }
 
@@ -167,24 +176,25 @@ namespace Wacs.WASI.Preview2.Test
             private readonly DescriptorFlags _flags;
             public FlagsDescriptor(DescriptorFlags flags)
                 : base("/synthetic") { _flags = flags; }
-            public override DescriptorFlags GetFlags() => _flags;
+            public override Result<DescriptorFlags, ErrorCode> GetFlags()
+                => Result<DescriptorFlags, ErrorCode>.FromOk(_flags);
         }
 
         private sealed class StubFsErrCode : IFilesystemErrorCode
         {
-            public FilesystemErrorCode? FilesystemErrorCode(
+            public Option<ErrorCode> FilesystemErrorCode(
                 Wacs.WASI.Preview2.Io.Error err)
             {
                 // Classify any Error whose message starts
                 // with "fs:" as a filesystem error keyed by
                 // the byte value after the colon. Otherwise
-                // null = not a filesystem error.
+                // None = not a filesystem error.
                 var msg = err.ToDebugString();
                 if (msg.StartsWith("fs:",
                     System.StringComparison.Ordinal)
                     && byte.TryParse(msg.Substring(3), out var b))
-                    return (FilesystemErrorCode)b;
-                return null;
+                    return Option<ErrorCode>.Some((ErrorCode)b);
+                return Option<ErrorCode>.None;
             }
         }
 
@@ -306,11 +316,12 @@ namespace Wacs.WASI.Preview2.Test
             public NewTimestamp? LastAtime;
             public NewTimestamp? LastMtime;
             public SetTimesDescriptor() : base("/synthetic") { }
-            public override void SetTimes(NewTimestamp atime,
+            public override Result<Unit, ErrorCode> SetTimes(NewTimestamp atime,
                 NewTimestamp mtime)
             {
                 LastAtime = atime;
                 LastMtime = mtime;
+                return Result<Unit, ErrorCode>.FromOk(Unit.Value);
             }
         }
 
@@ -335,9 +346,9 @@ namespace Wacs.WASI.Preview2.Test
 
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-set-times", (uint)handle)!);
-            Assert.IsType<NewTimestampNoChange>(desc.LastAtime);
-            Assert.IsType<NewTimestampTimestamp>(desc.LastMtime);
-            var ts = (NewTimestampTimestamp)desc.LastMtime!;
+            Assert.IsType<NewTimestamp.NewTimestampNoChange>(desc.LastAtime);
+            Assert.IsType<NewTimestamp.NewTimestampTimestamp>(desc.LastMtime);
+            var ts = (NewTimestamp.NewTimestampTimestamp)desc.LastMtime!;
             Assert.Equal(2000UL, ts.Value.Seconds);
             Assert.Equal(0u, ts.Value.Nanoseconds);
         }
@@ -345,16 +356,21 @@ namespace Wacs.WASI.Preview2.Test
         private sealed class StatDescriptor : Descriptor
         {
             public StatDescriptor() : base("/synthetic") { }
-            public override DescriptorStat Stat()
-                => new DescriptorStat(
-                    DescriptorType.RegularFile,
-                    linkCount: 1,
-                    size: 4096,
-                    dataAccessTimestamp: new Wacs.WASI.Preview2.Clocks
-                        .Datetime { Seconds = 1700000000, Nanoseconds = 0 },
-                    dataModificationTimestamp: new Wacs.WASI.Preview2.Clocks
-                        .Datetime { Seconds = 1700100000, Nanoseconds = 500 },
-                    statusChangeTimestamp: null);
+            public override Result<DescriptorStat, ErrorCode> Stat()
+                => Result<DescriptorStat, ErrorCode>.FromOk(new DescriptorStat
+                {
+                    Type = DescriptorType.RegularFile,
+                    LinkCount = 1,
+                    Size = 4096,
+                    DataAccessTimestamp = Option<Wacs.WASI.Preview2.Clocks
+                        .Datetime>.Some(new Wacs.WASI.Preview2.Clocks
+                            .Datetime { Seconds = 1700000000, Nanoseconds = 0 }),
+                    DataModificationTimestamp = Option<Wacs.WASI.Preview2.Clocks
+                        .Datetime>.Some(new Wacs.WASI.Preview2.Clocks
+                            .Datetime { Seconds = 1700100000, Nanoseconds = 500 }),
+                    StatusChangeTimestamp = Option<Wacs.WASI.Preview2.Clocks
+                        .Datetime>.None,
+                });
         }
 
         [Fact]
@@ -390,10 +406,16 @@ namespace Wacs.WASI.Preview2.Test
             public FixedDirDescriptor() : base("/synthetic") { }
             public override DirectoryEntryStream ReadDirectory()
                 => new DirectoryEntryStream(new[] {
-                    new DirectoryEntry(DescriptorType.RegularFile,
-                        "first.txt"),
-                    new DirectoryEntry(DescriptorType.Directory,
-                        "subdir"),
+                    new DirectoryEntry
+                    {
+                        Type = DescriptorType.RegularFile,
+                        Name = "first.txt",
+                    },
+                    new DirectoryEntry
+                    {
+                        Type = DescriptorType.Directory,
+                        Name = "subdir",
+                    },
                 });
         }
 
@@ -431,9 +453,13 @@ namespace Wacs.WASI.Preview2.Test
         private sealed class FixedHashDescriptor : Descriptor
         {
             public FixedHashDescriptor() : base("/synthetic") { }
-            public override MetadataHashValue MetadataHash()
-                => new MetadataHashValue(0x1122334455667788UL,
-                                         0x99AABBCCDDEEFF00UL);
+            public override Result<MetadataHashValue, ErrorCode> MetadataHash()
+                => Result<MetadataHashValue, ErrorCode>.FromOk(
+                    new MetadataHashValue
+                    {
+                        Lower = 0x1122334455667788UL,
+                        Upper = 0x99AABBCCDDEEFF00UL,
+                    });
         }
 
         [Fact]
@@ -466,7 +492,8 @@ namespace Wacs.WASI.Preview2.Test
             private readonly byte[] _content;
             public FixedReadDescriptor(byte[] content)
                 : base("/synthetic") { _content = content; }
-            public override (byte[], bool) Read(ulong length, ulong offset)
+            public override Result<(byte[], bool), ErrorCode> Read(
+                ulong length, ulong offset)
             {
                 int o = (int)System.Math.Min(offset, (ulong)_content.Length);
                 int n = (int)System.Math.Min(
@@ -475,7 +502,7 @@ namespace Wacs.WASI.Preview2.Test
                 var slice = new byte[n];
                 System.Array.Copy(_content, o, slice, 0, n);
                 bool eof = (o + n) >= _content.Length;
-                return (slice, eof);
+                return Result<(byte[], bool), ErrorCode>.FromOk((slice, eof));
             }
         }
 
@@ -507,11 +534,12 @@ namespace Wacs.WASI.Preview2.Test
             public byte[] LastWritten = System.Array.Empty<byte>();
             public ulong LastOffset;
             public CapturingDescriptor() : base("/synthetic") { }
-            public override ulong Write(byte[] buffer, ulong offset)
+            public override Result<ulong, ErrorCode> Write(byte[] buffer,
+                ulong offset)
             {
                 LastWritten = buffer;
                 LastOffset = offset;
-                return (ulong)buffer.Length;
+                return Result<ulong, ErrorCode>.FromOk((ulong)buffer.Length);
             }
         }
 
@@ -571,12 +599,23 @@ namespace Wacs.WASI.Preview2.Test
             public System.Collections.Generic.List<string> Unlinked
                 = new System.Collections.Generic.List<string>();
             public MutatingDescriptor() : base("/synthetic") { }
-            public override void CreateDirectoryAt(string path)
-                => Created.Add(path);
-            public override void RemoveDirectoryAt(string path)
-                => Removed.Add(path);
-            public override void UnlinkFileAt(string path)
-                => Unlinked.Add(path);
+            public override Result<Unit, ErrorCode> CreateDirectoryAt(
+                string path)
+            {
+                Created.Add(path);
+                return Result<Unit, ErrorCode>.FromOk(Unit.Value);
+            }
+            public override Result<Unit, ErrorCode> RemoveDirectoryAt(
+                string path)
+            {
+                Removed.Add(path);
+                return Result<Unit, ErrorCode>.FromOk(Unit.Value);
+            }
+            public override Result<Unit, ErrorCode> UnlinkFileAt(string path)
+            {
+                Unlinked.Add(path);
+                return Result<Unit, ErrorCode>.FromOk(Unit.Value);
+            }
         }
 
         [Fact]
@@ -609,12 +648,13 @@ namespace Wacs.WASI.Preview2.Test
             public string LastNewPath = "";
             public Descriptor? LastNewDescriptor;
             public RenameDescriptor() : base("/synthetic") { }
-            public override void RenameAt(string oldPath,
+            public override Result<Unit, ErrorCode> RenameAt(string oldPath,
                 Descriptor newDescriptor, string newPath)
             {
                 LastOldPath = oldPath;
                 LastNewPath = newPath;
                 LastNewDescriptor = newDescriptor;
+                return Result<Unit, ErrorCode>.FromOk(Unit.Value);
             }
         }
 
@@ -683,10 +723,12 @@ namespace Wacs.WASI.Preview2.Test
             public string LastOldPath = "";
             public string LastNewPath = "";
             public SymlinkDescriptor() : base("/synthetic") { }
-            public override void SymlinkAt(string oldPath, string newPath)
+            public override Result<Unit, ErrorCode> SymlinkAt(string oldPath,
+                string newPath)
             {
                 LastOldPath = oldPath;
                 LastNewPath = newPath;
+                return Result<Unit, ErrorCode>.FromOk(Unit.Value);
             }
         }
 
@@ -716,15 +758,16 @@ namespace Wacs.WASI.Preview2.Test
             public OpenFlags LastOpenFlags;
             public DescriptorFlags LastDescriptorFlags;
             public OpenAtDescriptor() : base("/synthetic") { }
-            public override Descriptor OpenAt(PathFlags pathFlags,
-                string path, OpenFlags openFlags,
+            public override Result<Descriptor, ErrorCode> OpenAt(
+                PathFlags pathFlags, string path, OpenFlags openFlags,
                 DescriptorFlags descriptorFlags)
             {
                 LastPath = path;
                 LastPathFlags = pathFlags;
                 LastOpenFlags = openFlags;
                 LastDescriptorFlags = descriptorFlags;
-                return new Descriptor("/synthetic/" + path);
+                return Result<Descriptor, ErrorCode>.FromOk(
+                    new Descriptor("/synthetic/" + path));
             }
         }
 

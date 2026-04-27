@@ -7,26 +7,11 @@
 
 namespace Wacs.WASI.Preview2.Filesystem
 {
-    /// <summary>
-    /// Host-side surface for
-    /// <c>wasi:filesystem/preopens@0.2.x</c>.
-    /// <code>
-    /// interface preopens {
-    ///     use wasi:filesystem/types@0.2.3.{descriptor};
-    ///     get-directories: func() -&gt; list&lt;tuple&lt;descriptor, string&gt;&gt;;
-    /// }
-    /// </code>
-    ///
-    /// <para>Returns the host-mapped directories the guest is
-    /// allowed to access — each as (descriptor handle,
-    /// host-readable path string) pairs. Capability-based
-    /// security: the guest can only operate on filesystems
-    /// rooted in these descriptors.</para>
-    /// </summary>
-    public interface IPreopens
-    {
-        (Descriptor, string)[] GetDirectories();
-    }
+    // The IPreopens interface is now emitted by the source
+    // generator from wit/deps/filesystem/preopens.wit
+    // (signature: (IDescriptor, string)[] GetDirectories()).
+    // This file retains only the default conservative impl —
+    // the generated interface is authoritative.
 
     /// <summary>Default <see cref="IPreopens"/> impl exposes
     /// nothing — the guest can't see any host filesystems.
@@ -35,7 +20,7 @@ namespace Wacs.WASI.Preview2.Filesystem
     /// substitute their own implementation.</summary>
     public sealed class Preopens : IPreopens
     {
-        public (Descriptor, string)[] GetDirectories() =>
-            System.Array.Empty<(Descriptor, string)>();
+        public (IDescriptor, string)[] GetDirectories() =>
+            System.Array.Empty<(IDescriptor, string)>();
     }
 }

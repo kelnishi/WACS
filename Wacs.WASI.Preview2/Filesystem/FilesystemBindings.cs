@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.Clocks;
 using Wacs.WASI.Preview2.HostBinding;
@@ -31,6 +32,13 @@ namespace Wacs.WASI.Preview2.Filesystem
     /// rooted in the filesystem typically receive descriptor
     /// handles from preopens or open-at and the resource
     /// methods need to be wired regardless.</para>
+    ///
+    /// <para>Every host method returns
+    /// <see cref="Result{TOk,TErr}"/> over
+    /// <see cref="ErrorCode"/>; the bindings encode both
+    /// branches faithfully (Ok writes the payload, Err writes
+    /// outer disc=1 + the ErrorCode value at offset+1, with
+    /// the rest of the Ok-payload area zeroed).</para>
     /// </summary>
     public sealed partial class FilesystemBindings : IBindable
     {
@@ -68,63 +76,117 @@ namespace Wacs.WASI.Preview2.Filesystem
         // error-code is a 37-case u8 enum (no payload), so it
         // contributes align=1 to every result variant. The
         // result.align therefore matches the Ok-side payload's
-        // alignment; Ok offset = max_align.
+        // alignment; Ok-payload offset = max_align. The Err
+        // side writes outer disc=1 at retArea+0, the
+        // ErrorCode byte at retArea+1, and zeroes the rest of
+        // the payload area.
+
+        // Encode the Err side: outer disc=1 at retArea+0,
+        // ErrorCode byte at retArea+1, zero through retArea+totalSize.
+        private static void WriteErrCode(byte[] mem, int retArea,
+            int totalSize, ErrorCode code)
+        {
+            mem[retArea] = 1;
+            mem[retArea + 1] = (byte)code;
+            for (int i = 2; i < totalSize; i++) mem[retArea + i] = 0;
+        }
 
         // result<_, error-code>: 2 bytes (1 disc + 1 byte).
-        private static void WriteOkUnit(byte[] mem, int retArea)
+        private static void WriteResultUnit(byte[] mem, int retArea,
+            Result<Unit, ErrorCode> r)
         {
-            mem[retArea] = 0;
-            mem[retArea + 1] = 0;
+            if (r.IsOk)
+            {
+                mem[retArea] = 0;
+                mem[retArea + 1] = 0;
+                return;
+            }
+            WriteErrCode(mem, retArea, 2, r.Err);
         }
 
-        // result<u8 enum, error-code>: 2 bytes (1 disc + 1 value).
-        private static void WriteOkU8(byte[] mem, int retArea, byte value)
+        // result<descriptor-type, error-code>: 2 bytes — 8-case
+        // enum widens to u8.
+        private static void WriteResultDescriptorType(byte[] mem,
+            int retArea, Result<DescriptorType, ErrorCode> r)
         {
-            mem[retArea] = 0;
-            mem[retArea + 1] = value;
+            if (r.IsOk)
+            {
+                mem[retArea] = 0;
+                mem[retArea + 1] = (byte)(int)r.Ok;
+                return;
+            }
+            WriteErrCode(mem, retArea, 2, r.Err);
         }
 
-        // result<bool, error-code>: 2 bytes.
-        private static void WriteOkBool(byte[] mem, int retArea, bool value)
+        // result<descriptor-flags, error-code>: 2 bytes —
+        // 6-flag bitset packed into a u8.
+        private static void WriteResultDescriptorFlags(byte[] mem,
+            int retArea, Result<DescriptorFlags, ErrorCode> r)
         {
-            mem[retArea] = 0;
-            mem[retArea + 1] = value ? (byte)1 : (byte)0;
+            if (r.IsOk)
+            {
+                mem[retArea] = 0;
+                mem[retArea + 1] = (byte)(uint)r.Ok;
+                return;
+            }
+            WriteErrCode(mem, retArea, 2, r.Err);
         }
 
         // result<u64, error-code>: 16 bytes (1 disc + 7 pad + 8 u64).
-        private static void WriteOkU64(byte[] mem, int retArea, ulong value)
+        private static void WriteResultU64(byte[] mem, int retArea,
+            Result<ulong, ErrorCode> r)
         {
-            mem[retArea] = 0;
-            for (int i = 1; i < 8; i++) mem[retArea + i] = 0;
-            MemoryWriter.WriteU64LE(mem, retArea + 8, value);
+            if (r.IsOk)
+            {
+                mem[retArea] = 0;
+                for (int i = 1; i < 8; i++) mem[retArea + i] = 0;
+                MemoryWriter.WriteU64LE(mem, retArea + 8, r.Ok);
+                return;
+            }
+            WriteErrCode(mem, retArea, 16, r.Err);
         }
 
         // result<own<X>, error-code>: 8 bytes (1 disc + 3 pad + 4 handle).
-        private static void WriteOkHandle(byte[] mem, int retArea, int handle)
+        // Caller supplies a Result<int, ErrorCode> where the Ok-side
+        // handle has already been allocated via the appropriate
+        // resource table (the bindings own resource-table allocation;
+        // the encoder just writes the handle bits).
+        private static void WriteResultHandle(byte[] mem, int retArea,
+            Result<int, ErrorCode> r)
         {
-            mem[retArea] = 0;
-            mem[retArea + 1] = 0;
-            mem[retArea + 2] = 0;
-            mem[retArea + 3] = 0;
-            MemoryWriter.WriteI32LE(mem, retArea + 4, handle);
+            if (r.IsOk)
+            {
+                mem[retArea] = 0;
+                mem[retArea + 1] = 0;
+                mem[retArea + 2] = 0;
+                mem[retArea + 3] = 0;
+                MemoryWriter.WriteI32LE(mem, retArea + 4, r.Ok);
+                return;
+            }
+            WriteErrCode(mem, retArea, 8, r.Err);
         }
 
         // result<string, error-code>: 12 bytes (1 disc + 3 pad +
         // ptr@+4 + len@+8). Takes a getMemory delegate since
         // alloc may grow memory.
-        private static void WriteOkString(Func<byte[]> getMemory,
-            int retArea, string value, Realloc alloc)
+        private static void WriteResultString(Func<byte[]> getMemory,
+            int retArea, Result<string, ErrorCode> r, Realloc alloc)
         {
-            var mem = getMemory();
-            mem[retArea] = 0;
-            mem[retArea + 1] = 0;
-            mem[retArea + 2] = 0;
-            mem[retArea + 3] = 0;
-            var (ptr, len) = MemoryWriter.WriteUtf8StringAllocated(
-                getMemory, value, alloc);
-            mem = getMemory();
-            MemoryWriter.WriteI32LE(mem, retArea + 4, ptr);
-            MemoryWriter.WriteI32LE(mem, retArea + 8, len);
+            if (r.IsOk)
+            {
+                var mem = getMemory();
+                mem[retArea] = 0;
+                mem[retArea + 1] = 0;
+                mem[retArea + 2] = 0;
+                mem[retArea + 3] = 0;
+                var (ptr, len) = MemoryWriter.WriteUtf8StringAllocated(
+                    getMemory, r.Ok, alloc);
+                mem = getMemory();
+                MemoryWriter.WriteI32LE(mem, retArea + 4, ptr);
+                MemoryWriter.WriteI32LE(mem, retArea + 8, len);
+                return;
+            }
+            WriteErrCode(getMemory(), retArea, 12, r.Err);
         }
 
         // result<(list<u8>, bool), error-code>: 16 bytes.
@@ -132,35 +194,46 @@ namespace Wacs.WASI.Preview2.Filesystem
         // bool@+12 + 3 tail pad).
         // Takes a getMemory delegate because alloc.Allocate may
         // grow the underlying byte[] mid-call.
-        private static void WriteOkBytesEofTuple(Func<byte[]> getMemory,
-            int retArea, byte[] data, bool eof, Realloc alloc)
+        private static void WriteResultBytesEofTuple(Func<byte[]> getMemory,
+            int retArea, Result<(byte[], bool), ErrorCode> r, Realloc alloc)
         {
-            int ptr = data.Length == 0 ? 0
-                : alloc.Allocate(1, data.Length);
-            var mem = getMemory();
-            mem[retArea] = 0;
-            mem[retArea + 1] = 0;
-            mem[retArea + 2] = 0;
-            mem[retArea + 3] = 0;
-            if (data.Length > 0)
-                Array.Copy(data, 0, mem, ptr, data.Length);
-            MemoryWriter.WriteI32LE(mem, retArea + 4, ptr);
-            MemoryWriter.WriteI32LE(mem, retArea + 8, data.Length);
-            mem[retArea + 12] = eof ? (byte)1 : (byte)0;
-            mem[retArea + 13] = 0;
-            mem[retArea + 14] = 0;
-            mem[retArea + 15] = 0;
+            if (r.IsOk)
+            {
+                var (data, eof) = r.Ok;
+                int ptr = data.Length == 0 ? 0
+                    : alloc.Allocate(1, data.Length);
+                var mem = getMemory();
+                mem[retArea] = 0;
+                mem[retArea + 1] = 0;
+                mem[retArea + 2] = 0;
+                mem[retArea + 3] = 0;
+                if (data.Length > 0)
+                    Array.Copy(data, 0, mem, ptr, data.Length);
+                MemoryWriter.WriteI32LE(mem, retArea + 4, ptr);
+                MemoryWriter.WriteI32LE(mem, retArea + 8, data.Length);
+                mem[retArea + 12] = eof ? (byte)1 : (byte)0;
+                mem[retArea + 13] = 0;
+                mem[retArea + 14] = 0;
+                mem[retArea + 15] = 0;
+                return;
+            }
+            WriteErrCode(getMemory(), retArea, 16, r.Err);
         }
 
         // result<MetadataHashValue, error-code>: 24 bytes.
         // outer disc=0 + 7 pad + lower@+8 + upper@+16.
-        private static void WriteOkMetadataHash(byte[] mem, int retArea,
-            MetadataHashValue value)
+        private static void WriteResultMetadataHash(byte[] mem, int retArea,
+            Result<MetadataHashValue, ErrorCode> r)
         {
-            mem[retArea] = 0;
-            for (int i = 1; i < 8; i++) mem[retArea + i] = 0;
-            MemoryWriter.WriteU64LE(mem, retArea + 8, value.Lower);
-            MemoryWriter.WriteU64LE(mem, retArea + 16, value.Upper);
+            if (r.IsOk)
+            {
+                mem[retArea] = 0;
+                for (int i = 1; i < 8; i++) mem[retArea + i] = 0;
+                MemoryWriter.WriteU64LE(mem, retArea + 8, r.Ok.Lower);
+                MemoryWriter.WriteU64LE(mem, retArea + 16, r.Ok.Upper);
+                return;
+            }
+            WriteErrCode(mem, retArea, 24, r.Err);
         }
 
         // result<DescriptorStat, error-code>: 104 bytes.
@@ -175,36 +248,44 @@ namespace Wacs.WASI.Preview2.Filesystem
         //   +0: disc (u8) + 7 pad to align 8
         //   +8: seconds (u64)
         //   +16: nanoseconds (u32) + 4 pad
-        private static void WriteOkDescriptorStat(byte[] mem, int retArea,
-            DescriptorStat stat)
+        private static void WriteResultDescriptorStat(byte[] mem, int retArea,
+            Result<DescriptorStat, ErrorCode> r)
         {
-            mem[retArea] = 0;
-            for (int i = 1; i < 8; i++) mem[retArea + i] = 0;
-            mem[retArea + 8] = (byte)stat.Type;
-            for (int i = 9; i < 16; i++) mem[retArea + i] = 0;
-            MemoryWriter.WriteU64LE(mem, retArea + 16, stat.LinkCount);
-            MemoryWriter.WriteU64LE(mem, retArea + 24, stat.Size);
-            WriteOptionDatetime(mem, retArea + 32, stat.DataAccessTimestamp);
-            WriteOptionDatetime(mem, retArea + 56,
-                stat.DataModificationTimestamp);
-            WriteOptionDatetime(mem, retArea + 80,
-                stat.StatusChangeTimestamp);
+            if (r.IsOk)
+            {
+                var stat = r.Ok;
+                mem[retArea] = 0;
+                for (int i = 1; i < 8; i++) mem[retArea + i] = 0;
+                mem[retArea + 8] = (byte)stat.Type;
+                for (int i = 9; i < 16; i++) mem[retArea + i] = 0;
+                MemoryWriter.WriteU64LE(mem, retArea + 16, stat.LinkCount);
+                MemoryWriter.WriteU64LE(mem, retArea + 24, stat.Size);
+                WriteOptionDatetime(mem, retArea + 32,
+                    stat.DataAccessTimestamp);
+                WriteOptionDatetime(mem, retArea + 56,
+                    stat.DataModificationTimestamp);
+                WriteOptionDatetime(mem, retArea + 80,
+                    stat.StatusChangeTimestamp);
+                return;
+            }
+            WriteErrCode(mem, retArea, 104, r.Err);
         }
 
         // option<datetime>: 24 bytes, align 8.
         private static void WriteOptionDatetime(byte[] mem, int offset,
-            Datetime? value)
+            Option<Datetime> value)
         {
-            if (value == null)
+            if (!value.HasValue)
             {
                 mem[offset] = 0;
                 for (int i = 1; i < 24; i++) mem[offset + i] = 0;
                 return;
             }
+            var dt = value.Value;
             mem[offset] = 1;
             for (int i = 1; i < 8; i++) mem[offset + i] = 0;
-            MemoryWriter.WriteU64LE(mem, offset + 8, value.Seconds);
-            MemoryWriter.WriteU32LE(mem, offset + 16, value.Nanoseconds);
+            MemoryWriter.WriteU64LE(mem, offset + 8, dt.Seconds);
+            MemoryWriter.WriteU32LE(mem, offset + 16, dt.Nanoseconds);
             for (int i = 20; i < 24; i++) mem[offset + i] = 0;
         }
 
@@ -227,9 +308,9 @@ namespace Wacs.WASI.Preview2.Filesystem
         private static NewTimestamp DecodeNewTimestamp(
             int disc, long seconds, int nanoseconds)
         {
-            if (disc == 0) return new NewTimestampNoChange();
-            if (disc == 1) return new NewTimestampNow();
-            return new NewTimestampTimestamp(new Datetime
+            if (disc == 0) return new NewTimestamp.NewTimestampNoChange();
+            if (disc == 1) return new NewTimestamp.NewTimestampNow();
+            return new NewTimestamp.NewTimestampTimestamp(new Datetime
             {
                 Seconds = (ulong)seconds,
                 Nanoseconds = (uint)nanoseconds,
