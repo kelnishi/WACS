@@ -1,7 +1,19 @@
 package local:httperrcode;
 world demo {
     import wasi:http/types@0.2.3;
-    /// Calls http-error-code(borrow<error-handle>); returns
-    /// the outer option disc (0=None, 1=Some).
+    /// Returns the outer option disc (0=None, 1=Some).
     export ask-http-error-code: func(err: u32) -> u32;
+    /// Returns the inner error-code variant disc byte.
+    export ask-variant-disc: func(err: u32) -> u32;
+    /// Returns the option<u64> payload value (raw u64).
+    export ask-payload-u64: func(err: u32) -> u64;
+    /// Returns the variant-payload's first byte (the inner
+    /// option's disc for cases that carry option<X>).
+    export ask-payload-option-disc: func(err: u32) -> u32;
+    /// Returns the option<string> ptr at variant-payload+4.
+    export ask-payload-string-ptr: func(err: u32) -> u32;
+    /// Returns the option<string> len at variant-payload+8.
+    export ask-payload-string-len: func(err: u32) -> u32;
+    /// Reads one byte at the given memory address.
+    export read-byte: func(addr: u32) -> u32;
 }
