@@ -1,0 +1,352 @@
+// Copyright 2026 Kelvin Nishikawa
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using Wacs.ComponentModel.Runtime;
+using Wacs.ComponentModel.Types;
+using Wacs.ComponentModel.WIT;
+
+namespace Wacs.ComponentModel.Validation
+{
+    /// <summary>
+    /// A flattened, validation-ready view of a WIT spec — one
+    /// <see cref="ImportEntry"/> per (module, entity) pair the
+    /// guest is expected to import. The
+    /// <see cref="Linker"/> matches its binding manifest
+    /// against this list.
+    ///
+    /// <para>Construct via:
+    /// <list type="bullet">
+    /// <item><see cref="FromText"/> for ad-hoc WIT strings (one
+    /// document; no <c>use</c> resolution across files)</item>
+    /// <item><see cref="FromDirectory"/> for a vendored WIT
+    /// tree like <c>Wacs.WASI.Preview2/wit/</c> — recurses,
+    /// resolves cross-package use chains</item>
+    /// <item><see cref="FromBindingTypes"/> to reflect over
+    /// generated <c>I*</c> interface types decorated with
+    /// <see cref="WitSourceAttribute"/> — re-extracts the WIT
+    /// contract directly from the bindings the host exposes,
+    /// no separate spec needed.</item>
+    /// </list></para>
+    /// </summary>
+    public sealed class WitContract
+    {
+        public IReadOnlyList<ImportEntry> Imports { get; }
+
+        public WitContract(IReadOnlyList<ImportEntry> imports)
+        {
+            Imports = imports ?? Array.Empty<ImportEntry>();
+        }
+
+        // -------- builders --------------------------------------
+
+        public static WitContract FromText(string witText)
+        {
+            if (witText == null) throw new ArgumentNullException(
+                nameof(witText));
+            var doc = WitParser.Parse(witText);
+            var packages = WitToTypes.Convert(doc);
+            WitResolver.Resolve(packages);
+            return BuildFromPackages(packages);
+        }
+
+#if !WACS_SOURCEGEN
+        public static WitContract FromDirectory(string directory)
+        {
+            if (directory == null) throw new ArgumentNullException(
+                nameof(directory));
+            var packages = WitLoader.LoadDirectoryTree(directory);
+            WitResolver.Resolve(packages);
+            return BuildFromPackages(packages);
+        }
+#endif
+
+        public static WitContract FromPackages(
+            IReadOnlyList<CtPackage> packages)
+        {
+            if (packages == null) throw new ArgumentNullException(
+                nameof(packages));
+            return BuildFromPackages(packages);
+        }
+
+        /// <summary>
+        /// Build a contract by reflecting over generated host
+        /// interface types decorated with
+        /// <see cref="WitSourceAttribute"/>. Each interface's
+        /// methods produce one
+        /// <see cref="ImportEntry"/>; resource interfaces and
+        /// free-function interfaces are both walked.
+        ///
+        /// <para>Use this when the bindings are themselves the
+        /// authoritative spec — the generated interfaces carry
+        /// the WIT-text fragments the source generator
+        /// embedded.</para>
+        /// </summary>
+        public static WitContract FromBindingTypes(params Type[] types)
+        {
+            if (types == null) throw new ArgumentNullException(
+                nameof(types));
+            var imports = new List<ImportEntry>();
+            foreach (var t in types)
+                CollectFromType(t, imports);
+            return new WitContract(imports);
+        }
+
+        // -------- core builder ----------------------------------
+
+        private static WitContract BuildFromPackages(
+            IReadOnlyList<CtPackage> packages)
+        {
+            var imports = new List<ImportEntry>();
+            foreach (var pkg in packages)
+            {
+                foreach (var iface in pkg.Interfaces)
+                {
+                    // WASM imports use the WASI-canonical form
+                    // <ns>:<pkg>/<iface>@<ver> (version at the
+                    // end), not the WIT QualifiedName's
+                    // <ns>:<pkg>@<ver>/<iface>. Match the wire
+                    // form so contract module names align with
+                    // bind-side keys.
+                    var pkgName = iface.Package!;
+                    var path = string.Join(":", pkgName.Path);
+                    var module = pkgName.Namespace + ":"
+                        + path + "/" + iface.Name
+                        + (string.IsNullOrEmpty(pkgName.Version)
+                            ? ""
+                            : "@" + pkgName.Version);
+                    foreach (var fn in iface.Functions)
+                    {
+                        imports.Add(BuildEntry(module, fn.Name,
+                            fn.Type));
+                    }
+                    foreach (var t in iface.Types)
+                    {
+                        if (t.Type is CtResourceType res)
+                        {
+                            // [resource-drop] is always bound;
+                            // not a contract entry — bookkeeping
+                            // handled by ResourceTable.Drop.
+                            // Resource methods otherwise are
+                            // [method]X.foo / [static]X.foo /
+                            // [constructor]X.
+                            foreach (var m in res.Methods)
+                            {
+                                var entity = ResourceMethodEntity(
+                                    res.Name, m);
+                                imports.Add(BuildEntry(module,
+                                    entity, m.Function));
+                            }
+                        }
+                    }
+                }
+            }
+            return new WitContract(imports);
+        }
+
+        private static string ResourceMethodEntity(string resName,
+            CtResourceMethod m)
+        {
+            return m.Kind switch
+            {
+                CtResourceMethodKind.Constructor =>
+                    "[constructor]" + resName,
+                CtResourceMethodKind.Static =>
+                    "[static]" + resName + "." + m.Name,
+                _ => "[method]" + resName + "." + m.Name,
+            };
+        }
+
+        // Wire-shape arity is the canon-lowered "flat" form. For
+        // v0 the linker checks param-count + return-count
+        // equality only — exact per-slot ValType matching is a
+        // follow-up. Per-method counts derive from the
+        // CtFunctionType using a coarse-grained estimate that
+        // matches what the WASIp2 bindings actually emit.
+        private static ImportEntry BuildEntry(string module,
+            string name, CtFunctionType fn)
+        {
+            int paramSlots = 0;
+            foreach (var p in fn.Params)
+                paramSlots += FlatSlotCount(p.Type);
+            // Canon-ABI direction: host-imported functions cap
+            // at MAX_FLAT_RESULTS = 1. Anything wider lowers to
+            // a retArea pointer (1 trailing param) + void
+            // return. result<...>, list<X>, tuple<X,Y>,
+            // option<...> with multi-slot inner — all use
+            // retArea.
+            int returnSlots;
+            if (fn.HasNoResult)
+                returnSlots = 0;
+            else
+            {
+                int rawSlots = FlatSlotCount(fn.Result!);
+                if (rawSlots <= 1)
+                    returnSlots = rawSlots;
+                else
+                {
+                    // Hoist to retArea — host receives an extra
+                    // i32 trailing param, returns void.
+                    paramSlots += 1;
+                    returnSlots = 0;
+                }
+            }
+            return new ImportEntry(module, name,
+                paramSlots, returnSlots);
+        }
+
+        private static int FlatSlotCount(CtValType t)
+        {
+            // Coarse: every WIT type lowers to ≥1 flat slot.
+            // Strings, lists, options, results, tuples have
+            // multi-slot expansions per the canon ABI:
+            //   string  → 2 (ptr, len)
+            //   list<T> → 2 (ptr, len)
+            //   option<T> with align ≤ 4 → 1 + flat(T)
+            //   tuple<a,b,...> → sum(flat(elem))
+            //   record → sum of flat fields  (fixed in resolver)
+            //   variant → 1 (disc) + max-payload-flat
+            //   own/borrow/resource ref → 1 (handle)
+            //   primitive → 1
+            // The contract's role is import-presence + arity
+            // sanity, not exact ABI match — exact match needs
+            // the same canon-lowering machinery the runtime
+            // uses; out of scope for v0 validation.
+            return t switch
+            {
+                CtPrimType p when p.Kind == CtPrim.String => 2,
+                CtListType => 2,
+                CtOptionType o => 1 + FlatSlotCount(o.Inner),
+                CtResultType r =>
+                    1 + System.Math.Max(
+                        r.Ok != null ? FlatSlotCount(r.Ok) : 0,
+                        r.Err != null ? FlatSlotCount(r.Err) : 0),
+                CtTupleType tp => tp.Elements.Sum(FlatSlotCount),
+                _ => 1,
+            };
+        }
+
+        // -------- attribute reflection (for FromBindingTypes) ----
+
+        private static void CollectFromType(Type type,
+            List<ImportEntry> imports)
+        {
+            if (type == null) return;
+            // The interface itself carries the (Package,
+            // Interface) header. Its methods carry per-method
+            // [WitSource] with WIT text + Item key.
+            var ifaceAttr = type.GetCustomAttribute<WitSourceAttribute>();
+            if (ifaceAttr == null) return;
+            string module = ifaceAttr.Package != null
+                && ifaceAttr.Interface != null
+                ? ifaceAttr.Package + "/" + ifaceAttr.Interface
+                : (ifaceAttr.Interface ?? "");
+
+            foreach (var m in type.GetMethods(BindingFlags.Public
+                | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            {
+                var ws = m.GetCustomAttribute<WitSourceAttribute>();
+                if (ws == null) continue;
+                var item = ws.Item ?? KebabCase(m.Name);
+
+                // Use C# method arity as a rough proxy for
+                // canon-lowered flat-slot count. Strings, lists
+                // etc. get expanded by the binder; reflect that
+                // by counting method's parameter wire types.
+                int paramSlots = m.GetParameters()
+                    .Sum(p => FlatSlotCountForClrType(p.ParameterType));
+                bool returnsResult =
+                    m.ReturnType.IsGenericType
+                    && m.ReturnType.GetGenericTypeDefinition()
+                        == typeof(Result<,>);
+                int returnSlots;
+                if (m.ReturnType == typeof(void))
+                    returnSlots = 0;
+                else if (returnsResult)
+                {
+                    paramSlots += 1; // retArea
+                    returnSlots = 0;
+                }
+                else
+                    returnSlots = FlatSlotCountForClrType(m.ReturnType);
+
+                imports.Add(new ImportEntry(module, item,
+                    paramSlots, returnSlots));
+            }
+        }
+
+        private static int FlatSlotCountForClrType(Type t)
+        {
+            if (t == typeof(string)) return 2;
+            if (t.IsArray) return 2;
+            if (t.IsGenericType)
+            {
+                var def = t.GetGenericTypeDefinition();
+                if (def == typeof(Option<>))
+                    return 1 + FlatSlotCountForClrType(
+                        t.GetGenericArguments()[0]);
+                if (def == typeof(Result<,>))
+                    return 1 + System.Math.Max(
+                        FlatSlotCountForClrType(t.GetGenericArguments()[0]),
+                        FlatSlotCountForClrType(t.GetGenericArguments()[1]));
+                if (def == typeof(ValueTuple<,>)
+                    || def == typeof(ValueTuple<,,>)
+                    || def == typeof(ValueTuple<,,,>)
+                    || def == typeof(ValueTuple<,,,,>))
+                    return t.GetGenericArguments()
+                        .Sum(FlatSlotCountForClrType);
+            }
+            return 1;
+        }
+
+        private static string KebabCase(string pascal)
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < pascal.Length; i++)
+            {
+                char c = pascal[i];
+                if (char.IsUpper(c) && i > 0)
+                    sb.Append('-');
+                sb.Append(char.ToLowerInvariant(c));
+            }
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>One WIT-declared import the guest expects to be
+    /// bound. <see cref="Module"/> is the WIT-qualified
+    /// interface name (e.g. <c>"wasi:io/streams@0.2.3"</c>);
+    /// <see cref="Entity"/> is the entity name within that
+    /// module (e.g. <c>"[method]input-stream.read"</c> or
+    /// <c>"poll"</c>). Param / return counts are the
+    /// canon-lowered flat-slot estimates the validator
+    /// compares against the runtime's recorded
+    /// <see cref="Wacs.Core.Types.FunctionType"/>.</summary>
+    public sealed class ImportEntry
+    {
+        public string Module { get; }
+        public string Entity { get; }
+        public int ExpectedParamCount { get; }
+        public int ExpectedReturnCount { get; }
+
+        public ImportEntry(string module, string entity,
+            int paramCount, int returnCount)
+        {
+            Module = module ?? throw new ArgumentNullException(nameof(module));
+            Entity = entity ?? throw new ArgumentNullException(nameof(entity));
+            ExpectedParamCount = paramCount;
+            ExpectedReturnCount = returnCount;
+        }
+
+        public override string ToString() =>
+            Module + "/" + Entity + " (params=" + ExpectedParamCount
+            + ", returns=" + ExpectedReturnCount + ")";
+    }
+}
