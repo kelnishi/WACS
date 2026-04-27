@@ -1379,6 +1379,136 @@ namespace Wacs.WASI.Preview2.Test
             }
         }
 
+        // Stub mapper that returns whatever ErrorCode the
+        // test pre-stages. Used to drive the encoder through
+        // the http-error-code retArea path with a real wasm
+        // call. Reflection-walked attributes don't transfer
+        // from the interface to the implementing method, so
+        // the [WasiOptionalReturn] / [WasiMethodName] markers
+        // are repeated on the impl — same pattern as
+        // HttpErrorCodeMapperSource.
+        private sealed class StagedHttpErrorCodeMapper
+            : IHttpErrorCodeMapper
+        {
+            public ErrorCode? Staged;
+
+            [WasiOptionalReturn]
+            [WasiMethodName("http-error-code")]
+            public ErrorCode? HttpErrorCode(
+                Wacs.WASI.Preview2.Io.Error err) => Staged;
+        }
+
+        private static ComponentInstance MakeErrCodeInstance(
+            byte[] bytes, ResourceContext resources,
+            StagedHttpErrorCodeMapper mapper)
+        {
+            return ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiInstance(
+                    "wasi:http/types@0.2.3", mapper, resources);
+                runtime.BindWasiResource<
+                    Wacs.WASI.Preview2.Io.Error>(
+                    "wasi:io/error@0.2.3", resources);
+            });
+        }
+
+        [Fact]
+        public void HttpErrorCode_with_no_payload_writes_disc_only()
+        {
+            // Some(connection-refused) — disc 6, no payload.
+            // The wasm reads the variant disc byte at retArea+8
+            // and the option<u64> payload (used to confirm
+            // it stayed zero).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-error-code-component",
+                "httperrcode.component.wasm"));
+            var resources = new ResourceContext();
+            var ioErr = new Wacs.WASI.Preview2.Io.Error("e");
+            int hErr = resources.TableFor(typeof(
+                Wacs.WASI.Preview2.Io.Error)).Allocate(ioErr);
+            var mapper = new StagedHttpErrorCodeMapper {
+                Staged = new ErrorCodeConnectionRefused() };
+            var ci = MakeErrCodeInstance(bytes, resources, mapper);
+
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-http-error-code", (uint)hErr)!);
+            Assert.Equal(6u, (uint)ci.Invoke(
+                "ask-variant-disc", (uint)hErr)!);
+            // No-payload case leaves the variant payload area
+            // zeroed; option-disc byte at variant-payload+0
+            // (= retArea+16) reads as 0.
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-payload-option-disc", (uint)hErr)!);
+        }
+
+        [Fact]
+        public void HttpErrorCode_with_option_u64_payload()
+        {
+            // Some(HTTP-request-body-size(Some(0xCAFEBABE_DEADBEEF)))
+            // — disc 17, option<u64> payload.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-error-code-component",
+                "httperrcode.component.wasm"));
+            var resources = new ResourceContext();
+            var ioErr = new Wacs.WASI.Preview2.Io.Error("e");
+            int hErr = resources.TableFor(typeof(
+                Wacs.WASI.Preview2.Io.Error)).Allocate(ioErr);
+            var mapper = new StagedHttpErrorCodeMapper {
+                Staged = new ErrorCodeHttpRequestBodySize(
+                    0xCAFEBABEDEADBEEFUL) };
+            var ci = MakeErrCodeInstance(bytes, resources, mapper);
+
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-http-error-code", (uint)hErr)!);
+            Assert.Equal(17u, (uint)ci.Invoke(
+                "ask-variant-disc", (uint)hErr)!);
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-payload-option-disc", (uint)hErr)!);
+            // u64 lives at variant-payload + 8 = retArea + 24
+            Assert.Equal(0xCAFEBABEDEADBEEFUL,
+                (ulong)ci.Invoke(
+                    "ask-payload-u64", (uint)hErr)!);
+        }
+
+        [Fact]
+        public void HttpErrorCode_with_option_string_payload()
+        {
+            // Some(internal-error(Some("oops, host died")))
+            // — disc 38, option<string> payload.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-error-code-component",
+                "httperrcode.component.wasm"));
+            var resources = new ResourceContext();
+            var ioErr = new Wacs.WASI.Preview2.Io.Error("e");
+            int hErr = resources.TableFor(typeof(
+                Wacs.WASI.Preview2.Io.Error)).Allocate(ioErr);
+            const string msg = "oops, host died";
+            var mapper = new StagedHttpErrorCodeMapper {
+                Staged = new ErrorCodeInternalError(msg) };
+            var ci = MakeErrCodeInstance(bytes, resources, mapper);
+
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-http-error-code", (uint)hErr)!);
+            Assert.Equal(38u, (uint)ci.Invoke(
+                "ask-variant-disc", (uint)hErr)!);
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-payload-option-disc", (uint)hErr)!);
+            uint ptr = (uint)ci.Invoke(
+                "ask-payload-string-ptr", (uint)hErr)!;
+            uint len = (uint)ci.Invoke(
+                "ask-payload-string-len", (uint)hErr)!;
+            Assert.Equal((uint)msg.Length, len);
+            Assert.NotEqual(0u, ptr);
+            // Reconstruct the string by reading byte-by-byte
+            // through the read-byte export.
+            var bytesOut = new byte[len];
+            for (uint i = 0; i < len; i++)
+                bytesOut[i] = (byte)(uint)ci.Invoke(
+                    "read-byte", ptr + i)!;
+            Assert.Equal(msg, System.Text.Encoding.UTF8
+                .GetString(bytesOut));
+        }
+
         [Fact]
         public void HttpErrorCode_top_level_returns_option_none_disc()
         {

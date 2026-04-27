@@ -164,13 +164,13 @@ namespace Wacs.WASI.Preview2.HostBinding
 
         /// <summary>Bind <c>wasi:http/types.http-error-code</c>
         /// — top-level function returning option<error-code>.
-        /// v0 always-None semantics: writes 0 to the outer
-        /// option disc byte at the start of the retArea and
-        /// leaves the rest zeroed (the guest's cabi_realloc'd
-        /// buffer arrives zeroed, so the error-code payload
-        /// area is naturally zero). The host method's return
-        /// value is invoked but not encoded — actual error-
-        /// code payload encoding is v1 work.</summary>
+        /// retArea layout (40 bytes, align 8): outer option
+        /// disc (1B) + 7B padding + the 32-byte error-code
+        /// variant slot at offset 8. None writes only the
+        /// outer disc; Some writes the outer disc + dispatches
+        /// to <see cref="Wacs.WASI.Preview2.Http.ErrorCodeEncoder"/>
+        /// which lays out the full variant case + payload.
+        /// </summary>
         private static void BindHttpErrorCodeMethod(
             WasmRuntime runtime, string namespaceName,
             object impl, MethodInfo m, ResourceContext resources)
@@ -180,6 +180,27 @@ namespace Wacs.WASI.Preview2.HostBinding
                 ?? ToKebabCase(m.Name);
             var paramType = m.GetParameters()[0].ParameterType;
             var paramTable = resources.TableFor(paramType);
+
+            // Reuses the lazy-resolved cabi_realloc invoker;
+            // ErrorCode encoder needs allocation for string
+            // payloads (option<string>, DNS rcode, etc.).
+            Wacs.Core.Runtime.Delegates.GenericFuncs? cabiRealloc = null;
+            int Allocate(int align, int size)
+            {
+                if (cabiRealloc == null)
+                {
+                    if (!runtime.TryGetExportedFunction(
+                            "cabi_realloc", out var addr))
+                        throw new InvalidOperationException(
+                            "Component does not export "
+                            + "cabi_realloc — required for "
+                            + "http-error-code with non-null "
+                            + "ErrorCode payload.");
+                    cabiRealloc = runtime.CreateInvoker(
+                        addr, new InvokerOptions());
+                }
+                return cabiRealloc(0, 0, align, size)[0].Data.Int32;
+            }
 
             void Body(ExecContext ctx, int handle, int retAreaPtr)
             {
@@ -191,11 +212,14 @@ namespace Wacs.WASI.Preview2.HostBinding
                     memory[retAreaPtr] = 0;   // None
                     return;
                 }
-                throw new InvalidOperationException(
-                    "[WasiOptionalReturn] http-error-code "
-                    + "returned a non-null ErrorCode — v0 "
-                    + "always-None; the full error-code "
-                    + "variant payload encoder is v1 work.");
+                memory[retAreaPtr] = 1;       // Some
+                // Zero pad bytes between outer disc + payload.
+                for (int p = 1; p < 8; p++)
+                    memory[retAreaPtr + p] = 0;
+                Wacs.WASI.Preview2.Http.ErrorCodeEncoder.Write(
+                    memory, retAreaPtr + 8,
+                    (Wacs.WASI.Preview2.Http.ErrorCode)ret,
+                    Allocate);
             }
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
