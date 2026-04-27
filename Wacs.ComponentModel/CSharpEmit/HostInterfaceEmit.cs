@@ -744,26 +744,38 @@ namespace Wacs.ComponentModel.CSharpEmit
         // ---------- namespace / naming -----------------------------
 
         /// <summary>Compute the C# namespace for an interface.
-        /// Derived from the package name:
-        /// <c>wasi:cli@0.2.3</c> → <c>Wasi.Cli.V0_2_3</c>.
-        /// <see cref="EmitOptions.HostNamespaceOverride"/>, when
-        /// set, replaces the entire path; without it the package
-        /// supplies the namespace.</summary>
+        /// Default convention: <c>{PkgNs}.{PkgPath}.{V_xxx}</c>
+        /// — e.g. <c>wasi:cli@0.2.3</c> → <c>Wasi.Cli.V0_2_3</c>.
+        /// When <see cref="EmitOptions.HostNamespaceOverride"/> is
+        /// set, that string replaces the package's namespace
+        /// component (the leftmost segment) so consumers can
+        /// land generated code under their existing tree —
+        /// <c>HostNamespaceOverride="Wacs.WASI.Preview2"</c> +
+        /// <c>wasi:cli</c> → <c>Wacs.WASI.Preview2.Cli</c>.
+        /// The path + version segments still follow.</summary>
         public static string ResolveNamespace(CtInterfaceType iface,
             EmitOptions options)
         {
-            if (!string.IsNullOrEmpty(options.HostNamespaceOverride))
-                return options.HostNamespaceOverride!;
-
             var pkg = iface.Package;
             if (pkg == null)
-                return "Wasi";   // fallback for packageless WITs
+            {
+                return string.IsNullOrEmpty(options.HostNamespaceOverride)
+                    ? "Wasi"
+                    : options.HostNamespaceOverride!;
+            }
 
             var sb = new StringBuilder();
-            sb.Append(ToPascal(pkg.Namespace));
+            sb.Append(string.IsNullOrEmpty(options.HostNamespaceOverride)
+                ? ToPascal(pkg.Namespace)
+                : options.HostNamespaceOverride!);
             foreach (var seg in pkg.Path)
                 sb.Append('.').Append(ToPascal(seg));
-            if (!string.IsNullOrEmpty(pkg.Version))
+            // Drop the version segment when an override is set —
+            // consumers landing into their own tree already know
+            // which version they're vendoring; multi-version
+            // coexistence is uncommon at this layer.
+            if (string.IsNullOrEmpty(options.HostNamespaceOverride)
+                && !string.IsNullOrEmpty(pkg.Version))
                 sb.Append('.').Append(SanitizeVersion(pkg.Version!));
             return sb.ToString();
         }

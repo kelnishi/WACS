@@ -36,12 +36,38 @@
                           ReferenceOutputAssembly="false" />
     </ItemGroup>
 
-    <!-- WIT files in wit/** are fed to the source generator.
+    <!-- WIT files fed to the source generator.
          WitForHost=true is the metadata flag the SourceGen
-         filters on. -->
+         filters on. Per-subsystem migration (Phase B): only
+         the WIT files for already-migrated packages are
+         flagged WitForHost=true; the rest are kept as plain
+         AdditionalFiles so the WitLoader can still resolve
+         cross-package `use` chains, but no host interface is
+         emitted for them (the hand-written interfaces still
+         own those subsystems' API surface). -->
     <ItemGroup>
-        <AdditionalFiles Include="wit\**\*.wit" WitForHost="true" />
+        <!-- Phase B1: wasi:random is migrated. Generator emits
+             host interfaces for it. -->
+        <AdditionalFiles Include="wit\deps\random\**\*.wit"
+                         WitForHost="true" />
+
+        <!-- Other packages are visible to the WIT resolver
+             (so cross-package `use` works) but not generated. -->
+        <AdditionalFiles Include="wit\**\*.wit"
+                         Exclude="wit\deps\random\**\*.wit"
+                         WitForHost="false" />
+
         <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="WitForHost" />
+        <CompilerVisibleProperty Include="WitHostNamespaceOverride" />
     </ItemGroup>
+
+    <!-- Land generated interfaces under Wacs.WASI.Preview2.{Pkg}
+         to match the hand-written tree — e.g. wasi:cli →
+         Wacs.WASI.Preview2.Cli. Lets the bindings reference
+         generated and hand-written types interchangeably during
+         per-subsystem migration. -->
+    <PropertyGroup>
+        <WitHostNamespaceOverride>Wacs.WASI.Preview2</WitHostNamespaceOverride>
+    </PropertyGroup>
 
 </Project>
